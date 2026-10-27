@@ -1,0 +1,32 @@
+import type { SessionState } from "../hub/types";
+import { markFor } from "../theme/tokens";
+
+const RING: Partial<Record<SessionState, string>> = {
+  working: "ring-working",
+  starting: "ring-working",
+  blocked: "ring-blocked",
+  done: "ring-done",
+};
+
+export const initialsFor = (name: string, engine?: string): string =>
+  engine === "claude" ? "cc" : engine === "codex" ? "cx" : (name[0] ?? "?").toUpperCase();
+
+export function Mark({
+  name,
+  engine,
+  state,
+  size = "md",
+}: {
+  name: string;
+  engine?: string;
+  state?: SessionState;
+  size?: "sm" | "md" | "lg";
+}) {
+  return (
+    <span className={`mark mark-${size} ${state ? (RING[state] ?? "") : ""}`}>
+      <span className="mark-face" style={{ background: engine ? "#E8DDB5" : markFor(name) }}>
+        {initialsFor(name, engine)}
+      </span>
+    </span>
+  );
+}

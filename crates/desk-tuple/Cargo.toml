@@ -1,0 +1,13 @@
+[package]
+name = "desk-tuple"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ask Desk's agents from a Tuple call, and answer on the call"
+
+[dependencies]
+eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

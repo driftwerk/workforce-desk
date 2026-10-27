@@ -1,0 +1,64 @@
+import { describe, expect, it } from "vitest";
+import { emptyConversation, finishedAnswers, reduce, wsUrl, type ConversationState } from "./conversation";
+import type { ServerMessage } from "./types";
+
+const run = (msgs: ServerMessage[], from: ConversationState = emptyConversation()) => msgs.reduce(reduce, from);
+
+describe("conversation", () => {
+  it("assembles a streamed answer and closes it", () => {
+    const s = run([
+      { type: "connected", session_id: "s1" },
+      { type: "typing" },
+      { type: "stream_start" },
+      { type: "stream_delta", content: "Three items " },
+      { type: "stream_delta", content: "are open." },
+      { type: "stream_end" },
+    ]);
+    expect(s.sessionId).toBe("s1");
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0]).toMatchObject({ role: "assistant", content: "Three items are open.", status: "complete" });
+    expect(s.streaming).toBe(false);
+  });
+
+  it("does not repeat a streamed answer the hub also sends whole", () => {
+    const s = run([{ type: "stream_start" }, { type: "stream_delta", content: "Done." }, { type: "stream_end" }, { type: "message", content: "Done." }]);
+    expect(s.messages).toHaveLength(1);
+  });
+
+  it("drops a discarded stream and tracks tools on the answer", () => {
+    const s = run([
+      { type: "stream_start" },
+      { type: "stream_delta", content: "wrong" },
+      { type: "stream_discard" },
+      { type: "tool_start", content: "memory.recall" },
+      { type: "tool_end" },
+      { type: "message", content: "Right." },
+    ]);
+    expect(s.messages.map((m) => m.content)).toEqual(["Right."]);
+    expect(s.messages[0]!.tools).toEqual([{ name: "memory.recall", done: true }]);
+  });
+
+  it("shows errors as system messages", () => {
+    const s = run([{ type: "error", error: "Unknown agent: x" }]);
+    expect(s.messages[0]).toMatchObject({ role: "system", status: "error", content: "Unknown agent: x" });
+  });
+
+  it("reports an answer once, when it completes", () => {
+    const streaming = run([{ type: "stream_start" }, { type: "stream_delta", content: "Done." }]);
+    expect(finishedAnswers(emptyConversation(), streaming)).toEqual([]);
+    const done = reduce(streaming, { type: "stream_end" });
+    expect(finishedAnswers(streaming, done).map((m) => m.content)).toEqual(["Done."]);
+    expect(finishedAnswers(done, reduce(done, { type: "message", content: "Done." }))).toEqual([]);
+  });
+
+  it("connects on the desk channel", () => {
+    const url = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan"));
+    expect(url.protocol).toBe("ws:");
+    expect(url.pathname).toBe("/ws");
+    expect(url.searchParams.get("channel")).toBe("desk");
+    expect(url.searchParams.get("agent_id")).toBe("allan");
+    expect(url.searchParams.get("rich")).toBe("tables,charts,forms,maps,diagrams,images");
+    const room = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan", "desk:release"));
+    expect(room.searchParams.get("channel")).toBe("desk:release");
+  });
+});

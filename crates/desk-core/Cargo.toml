@@ -1,0 +1,18 @@
+[package]
+name = "desk-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What the Desk app and its hub supervisor share: where things live and the keychain"
+
+[dependencies]
+base64 = { workspace = true }
+dirs = { workspace = true }
+eyre = { workspace = true }
+keyring = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
