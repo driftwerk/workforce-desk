@@ -84,4 +84,23 @@ export const onTupleRequest = (f: (r: TupleRequest) => void): Promise<() => void
 export const onTupleStatus = (f: (s: TupleStatus) => void): Promise<() => void> =>
   listen<TupleStatus>("tuple-state", (e) => f(e.payload));
 
-export const codexLogin = (): Promise<string> => invoke("codex_login");
+export type PlanName = "claude" | "chatgpt";
+
+export type LoginProgress =
+  | { state: "starting" }
+  | { state: "browser"; url: string }
+  | { state: "needs-code" }
+  | { state: "saving" }
+  | { state: "done" }
+  | { state: "failed"; message: string };
+
+/** Connects a plan through its own sign-in (the real `claude` / `codex`
+ *  CLI); progress arrives through `onLoginProgress`. */
+export const startLogin = (plan: PlanName): Promise<void> => invoke("login_start", { plan });
+export const sendLoginCode = (plan: PlanName, code: string): Promise<void> => invoke("login_code", { plan, code });
+export const cancelLogin = (plan: PlanName): Promise<void> => invoke("login_cancel", { plan });
+export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): Promise<() => void> =>
+  listen<{ plan: PlanName } & LoginProgress>("login-progress", (e) => {
+    const { plan, ...progress } = e.payload;
+    f(plan, progress as LoginProgress);
+  });

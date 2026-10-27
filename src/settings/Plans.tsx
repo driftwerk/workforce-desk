@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { applyPlan, pickPlan, PLAN_LOGIN, type Plan } from "../crew/local";
 import { useDesk } from "../hub/store";
-import { codexLogin } from "../platform";
+import { PlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
 
 const VOICE_KEYS = [
@@ -17,7 +17,6 @@ export function Plans() {
   const chosen = useSettings((s) => s.plan) as Plan | null;
   const setSettings = useSettings((s) => s.set);
   const [have, setHave] = useState<string[]>([]);
-  const [token, setToken] = useState("");
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [note, setNote] = useState<string | null>(null);
 
@@ -51,18 +50,10 @@ export function Plans() {
     }
   };
 
-  const connectClaude = async () => {
-    await save(PLAN_LOGIN.claude, token, "Claude is connected.");
-    setToken("");
-    if (!chosen) await use("claude");
-  };
-  const connectChatGpt = async () => {
-    try {
-      await save(PLAN_LOGIN.chatgpt, await codexLogin(), "ChatGPT is connected.");
-      if (!chosen && !have.includes(PLAN_LOGIN.claude)) await use("chatgpt");
-    } catch (e) {
-      fail(e);
-    }
+  const connected = async (p: Plan) => {
+    const paths = (await hub?.vaultPaths()) ?? [];
+    setHave(paths);
+    if (!chosen && pickPlan(null, paths) === p) await use(p);
   };
 
   return (
@@ -81,32 +72,8 @@ export function Plans() {
         </div>
       </div>
 
-      <div className="hub-row plan-row">
-        <span className="hub-name">
-          <b className="display">Claude</b>
-          <span className="small muted">
-            {have.includes(PLAN_LOGIN.claude) ? "Connected" : "In Terminal, run claude setup-token and paste what it prints here."}
-          </span>
-        </span>
-        <span className="field-row plan-field">
-          <input type="password" value={token} placeholder="sk-ant-oat…" autoComplete="off" onChange={(e) => setToken(e.target.value)} />
-          <button type="button" className="btn btn-signal" disabled={!token.trim()} onClick={() => void connectClaude()}>
-            {have.includes(PLAN_LOGIN.claude) ? "Replace" : "Connect"}
-          </button>
-        </span>
-      </div>
-
-      <div className="hub-row plan-row">
-        <span className="hub-name">
-          <b className="display">ChatGPT</b>
-          <span className="small muted">
-            {have.includes(PLAN_LOGIN.chatgpt) ? "Connected" : "Uses the ChatGPT login of the codex command on this Mac."}
-          </span>
-        </span>
-        <button type="button" className="btn btn-signal" onClick={() => void connectChatGpt()}>
-          {have.includes(PLAN_LOGIN.chatgpt) ? "Refresh" : "Use this Mac’s login"}
-        </button>
-      </div>
+      <PlanLogin plan="claude" connected={have.includes(PLAN_LOGIN.claude)} onConnected={() => void connected("claude")} />
+      <PlanLogin plan="chatgpt" connected={have.includes(PLAN_LOGIN.chatgpt)} onConnected={() => void connected("chatgpt")} />
 
       <h2 className="display-md">Voice keys</h2>
       <p className="muted small">Only needed for the cloud voice engines under Calls and voice.</p>

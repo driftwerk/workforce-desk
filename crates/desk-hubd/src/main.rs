@@ -18,7 +18,6 @@ use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
-const MARKER: &str = "__DESK_ENV__";
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
@@ -41,39 +40,6 @@ fn ports(paths: &Paths) -> Result<HubPorts> {
         write_ports(&paths.hub_state(), &ports)?;
     }
     Ok(ports)
-}
-
-/// The environment a terminal would have (PATH from `.zshrc`, nvm, etc.):
-/// launchd starts us with almost none of it.
-async fn login_env() -> BTreeMap<String, String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let script = format!("printf '\\0{MARKER}\\0'; env -0");
-    let out = Command::new(&shell)
-        .args(["-l", "-i", "-c", &script])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-    let captured = match tokio::time::timeout(Duration::from_secs(20), out).await {
-        Ok(Ok(o)) => parse_env(&o.stdout),
-        _ => None,
-    };
-    captured.unwrap_or_else(|| {
-        tracing::warn!(%shell, "could not read the login environment; using launchd's");
-        std::env::vars().collect()
-    })
-}
-
-fn parse_env(raw: &[u8]) -> Option<BTreeMap<String, String>> {
-    let text = String::from_utf8_lossy(raw);
-    let (_, after) = text.split_once(&format!("\0{MARKER}\0"))?;
-    Some(
-        after
-            .split('\0')
-            .filter_map(|kv| kv.split_once('='))
-            .filter(|(k, _)| !k.is_empty())
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-    )
 }
 
 /// Environment for `workforce serve`: login env, minus anything a parent
@@ -181,7 +147,7 @@ async fn main() -> Result<()> {
     let ports = ports(&paths)?;
     desk_core::write_private(&paths.hub_config(), &config::render(&paths, &ports))?;
     config::ensure_rich(&paths.hub_data().join("agents").join(config::DESK_AGENT))?;
-    let env = hub_env(&login_env().await, &Secrets::for_paths(&paths))?;
+    let env = hub_env(&desk_core::shell::login_env(), &Secrets::for_paths(&paths))?;
     let pg = start_postgres(
         &paths,
         ports.postgres,
@@ -237,17 +203,6 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
-
-    #[test]
-    fn login_env_is_read_after_the_marker_so_shell_noise_is_ignored() {
-        let raw =
-            b"Welcome!\n\0__DESK_ENV__\0PATH=/opt/homebrew/bin:/usr/bin\0HOME=/Users/k\0EQ=a=b\0";
-        let env = parse_env(raw).unwrap();
-        assert_eq!(env["PATH"], "/opt/homebrew/bin:/usr/bin");
-        assert_eq!(env["EQ"], "a=b");
-        assert_eq!(env.len(), 3);
-        assert!(parse_env(b"no marker").is_none());
-    }
 
     #[derive(Default)]
     struct Memory(RefCell<HashMap<Secret, String>>);

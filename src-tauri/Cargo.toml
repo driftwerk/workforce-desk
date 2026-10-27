@@ -19,6 +19,9 @@ desk-voice = { path = "../crates/desk-voice" }
 tokio = { workspace = true }
 eyre = { workspace = true }
 notify = "8.2.1"
+portable-pty = "0.9.0"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "blocking"] }
 plist = "1.10.3"
 serde = { workspace = true }
 serde_json = { workspace = true }

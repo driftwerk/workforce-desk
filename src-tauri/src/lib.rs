@@ -1,6 +1,7 @@
 mod files;
 mod hubs;
 mod launch_agent;
+mod logins;
 mod tuple;
 mod voice;
 
@@ -128,13 +129,28 @@ async fn tuple_reply(agent: String, answer: String) -> CommandResult<()> {
         .map_err(text)
 }
 
-/// This Mac's Codex login (`~/.codex/auth.json`), to give the local hub's
-/// agents the same ChatGPT plan.
 #[tauri::command]
-fn codex_login() -> CommandResult<String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
-    std::fs::read_to_string(PathBuf::from(home).join(".codex/auth.json"))
-        .map_err(|e| format!("no Codex login on this Mac ({e}) — run `codex login` first"))
+async fn login_start(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+    let paths = app.state::<App>().paths.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<logins::Logins>().start(&app, paths, plan)
+    })
+    .await
+    .map_err(text)?
+}
+
+#[tauri::command]
+fn login_code(
+    logins: State<'_, logins::Logins>,
+    plan: logins::Plan,
+    code: String,
+) -> CommandResult<()> {
+    logins.code(plan, &code)
+}
+
+#[tauri::command]
+fn login_cancel(logins: State<'_, logins::Logins>, plan: logins::Plan) {
+    logins.cancel(plan);
 }
 
 /// Binaries shipped beside the app executable (Tauri sidecars).
@@ -152,6 +168,9 @@ fn sidecar(name: &str) -> eyre::Result<PathBuf> {
 }
 
 pub fn run() {
+    // A workspace build can give reqwest rustls without a crypto provider
+    // (postgresql_embedded asks for that); every client shares this one.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -164,6 +183,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(tuple::Tuple::default())
+        .manage(logins::Logins::default())
         .setup(|app| {
             let paths = Paths::new()?;
             // A development run (`DESK_HOME`) talks to a supervisor started by
@@ -192,7 +212,9 @@ pub fn run() {
             tuple_enable,
             tuple_disable,
             tuple_reply,
-            codex_login,
+            login_start,
+            login_code,
+            login_cancel,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_names,

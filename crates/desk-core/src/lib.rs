@@ -1,6 +1,8 @@
 //! What the Desk app and `desk-hubd` share: where Desk keeps its files, the
 //! local hub's ports, and its secrets in the macOS keychain.
 
+pub mod shell;
+
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
