@@ -1,7 +1,8 @@
-//! The local cascade engine: VAD → keyword spotting → ASR in, Kokoro out,
-//! on two threads. The listener thread owns the models and the conversation;
-//! the speaker thread synthesises sentence by sentence so long answers start
-//! playing quickly, and stops the moment the user talks over it.
+//! The local cascade engine: VAD → keyword spotting → ASR in; speech out in
+//! the agent's voice (Kokoro on this Mac, or a cloud voice through the
+//! hub), on two threads. The listener thread owns the models and the
+//! conversation; the speaker thread synthesises sentence by sentence so long
+//! answers start playing quickly, and stops the moment the user talks over it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -12,24 +13,39 @@ use std::time::{Duration, Instant};
 use eyre::Result;
 
 use crate::conversation::Timing;
+use crate::decode::Audio;
+use crate::hub::CloudSpeech;
 use crate::resample::{Resampler, SPEECH_RATE};
 use crate::speech::{Heard, Listener, Speaker, sentences};
+use crate::voices::{Member, VoiceSpec};
 use crate::{AudioIn, Models, SharedAudioOut, VoiceEngine, VoiceEvents, VoiceState};
 
 enum Input {
     Audio(Vec<f32>, u32),
     Names(Vec<String>),
     PushToTalk(bool),
-    Speak { text: String, more: bool },
+    Speak(Speech, bool),
     StopSpeaking,
     Spoken { generation: u64, more: bool },
     Shutdown,
 }
 
+/// What to say: text in a voice, or audio already made.
+enum Speech {
+    Text(String, Option<VoiceSpec>),
+    Audio(Audio),
+}
+
 struct Job {
-    text: String,
+    speech: Speech,
     more: bool,
     generation: u64,
+}
+
+/// How the cascade speaks: Kokoro here, cloud voices through the hub.
+pub struct Voices {
+    pub kokoro: Arc<Speaker>,
+    pub cloud: Option<Arc<dyn CloudSpeech>>,
 }
 
 pub struct Cascade {
@@ -41,15 +57,15 @@ pub struct Cascade {
 const TICK: Duration = Duration::from_millis(100);
 
 impl Cascade {
-    /// Loads the models, then opens audio with `open`, which is handed the
-    /// callback microphone samples go to.
+    /// Loads the listening models, then opens audio with `open`, which is
+    /// handed the callback microphone samples go to.
     pub fn start(
         models: &Models,
+        voices: Voices,
         events: Arc<dyn VoiceEvents>,
         open: impl FnOnce(AudioIn) -> Result<SharedAudioOut>,
     ) -> Result<Self> {
         let listener = Listener::new(models, Timing::default(), Instant::now())?;
-        let speaker = Speaker::new(models)?;
         let (tx, rx) = channel();
         let audio_tx = tx.clone();
         let out = open(Box::new(move |samples, rate| {
@@ -61,10 +77,16 @@ impl Cascade {
         events.state(&VoiceState::Listening { conversation: None });
 
         let speaking = {
-            let (out, generation, tx) = (out.clone(), generation.clone(), tx.clone());
+            let mouth = Mouth {
+                voices,
+                out: out.clone(),
+                generation: generation.clone(),
+                tx: tx.clone(),
+                events: events.clone(),
+            };
             std::thread::Builder::new()
                 .name("voice-speaker".into())
-                .spawn(move || speak(&speaker, &out, &generation, &tx, &jobs_rx))?
+                .spawn(move || mouth.run(&jobs_rx))?
         };
         let listening = {
             let worker = Worker {
@@ -94,16 +116,20 @@ impl Cascade {
 }
 
 impl VoiceEngine for Cascade {
-    fn set_names(&self, names: Vec<String>) {
-        self.send(Input::Names(names));
+    fn set_roster(&self, roster: Vec<Member>) {
+        self.send(Input::Names(roster.into_iter().map(|m| m.name).collect()));
     }
 
     fn push_to_talk(&self, pressed: bool) {
         self.send(Input::PushToTalk(pressed));
     }
 
-    fn speak(&self, text: String, more: bool) {
-        self.send(Input::Speak { text, more });
+    fn speak(&self, text: String, more: bool, voice: Option<VoiceSpec>) {
+        self.send(Input::Speak(Speech::Text(text, voice), more));
+    }
+
+    fn play(&self, audio: Audio) {
+        self.send(Input::Speak(Speech::Audio(audio), false));
     }
 
     fn stop_speaking(&self) {
@@ -180,12 +206,12 @@ impl Worker {
                 }
             }
             Input::PushToTalk(false) => self.listen(|l, out| l.finish_push_to_talk(now, out)),
-            Input::Speak { text, more } => {
+            Input::Speak(speech, more) => {
                 self.pending += 1;
                 self.listener.speaking();
                 let generation = self.generation.load(Ordering::SeqCst);
                 let _ = self.jobs.send(Job {
-                    text,
+                    speech,
                     more,
                     generation,
                 });
@@ -251,44 +277,93 @@ fn set_state(current: &Mutex<VoiceState>, events: &dyn VoiceEvents, state: Voice
     }
 }
 
-fn speak(
-    speaker: &Speaker,
-    out: &SharedAudioOut,
-    generation: &AtomicU64,
-    tx: &Sender<Input>,
-    jobs: &Receiver<Job>,
-) {
-    let rate = speaker.sample_rate();
-    while let Ok(job) = jobs.recv() {
-        let current = || generation.load(Ordering::SeqCst) == job.generation;
-        let parts = sentences(&job.text);
+/// The speaker thread.
+struct Mouth {
+    voices: Voices,
+    out: SharedAudioOut,
+    generation: Arc<AtomicU64>,
+    tx: Sender<Input>,
+    events: Arc<dyn VoiceEvents>,
+}
+
+impl Mouth {
+    fn run(&self, jobs: &Receiver<Job>) {
+        while let Ok(Job {
+            speech,
+            more,
+            generation,
+        }) = jobs.recv()
+        {
+            let parts = match speech {
+                Speech::Audio(audio) => vec![Part::Audio(audio)],
+                Speech::Text(text, voice) => sentences(&text)
+                    .into_iter()
+                    .map(|s| Part::Text(s, voice.clone()))
+                    .collect(),
+            };
+            self.say(parts, generation, more);
+        }
+    }
+
+    fn say(&self, parts: Vec<Part>, generation: u64, more: bool) {
+        let current = || self.generation.load(Ordering::SeqCst) == generation;
+        let mut cloud_failed = false;
         let mut scheduled = false;
-        for (i, part) in parts.iter().enumerate() {
+        let count = parts.len();
+        for (i, part) in parts.into_iter().enumerate() {
             if !current() {
                 break;
             }
-            let Some(samples) = speaker.synthesize(part) else {
+            let Some(audio) = self.render(part, &mut cloud_failed) else {
                 continue;
             };
             if !current() {
                 break;
             }
-            let done: Box<dyn FnOnce() + Send> = if i + 1 == parts.len() {
-                let (tx, generation, more) = (tx.clone(), job.generation, job.more);
+            let last = i + 1 == count;
+            let done: Box<dyn FnOnce() + Send> = if last {
+                let tx = self.tx.clone();
                 Box::new(move || {
                     let _ = tx.send(Input::Spoken { generation, more });
                 })
             } else {
                 Box::new(|| {})
             };
-            out.play(&samples, rate, done);
-            scheduled = i + 1 == parts.len();
+            self.out.play(&audio.samples, audio.rate, done);
+            scheduled = last;
         }
         if !scheduled {
-            let _ = tx.send(Input::Spoken {
-                generation: job.generation,
-                more: job.more,
-            });
+            let _ = self.tx.send(Input::Spoken { generation, more });
         }
     }
+
+    /// A sentence as audio, in its voice. A cloud voice that can't speak is
+    /// reported once, and Kokoro says the rest.
+    fn render(&self, part: Part, cloud_failed: &mut bool) -> Option<Audio> {
+        let (text, voice) = match part {
+            Part::Audio(audio) => return Some(audio),
+            Part::Text(text, voice) => (text, voice),
+        };
+        if let (Some(spec), Some(cloud), false) = (&voice, &self.voices.cloud, *cloud_failed)
+            && spec.provider.is_cloud_speech()
+        {
+            match cloud.speak(spec, &text) {
+                Ok(audio) => return Some(audio),
+                Err(e) => {
+                    *cloud_failed = true;
+                    self.events.error(&e.to_string());
+                }
+            }
+        }
+        let kokoro = voice
+            .as_ref()
+            .filter(|v| v.provider == crate::voices::Provider::Kokoro)
+            .and_then(|v| v.voice.as_deref());
+        self.voices.kokoro.synthesize(&text, kokoro)
+    }
+}
+
+enum Part {
+    Text(String, Option<VoiceSpec>),
+    Audio(Audio),
 }

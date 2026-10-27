@@ -1,4 +1,4 @@
-import { invoke, listen } from "../platform";
+import { invoke, listen, type VoiceSpec } from "../platform";
 
 /** What the voice engine is doing (`voice-state`). */
 export type VoiceStatus =
@@ -24,12 +24,20 @@ export const enableVoice = (engine: string): Promise<void> => invoke("voice_enab
 
 export const disableVoice = (): Promise<void> => invoke("voice_disable");
 
-export const setVoiceNames = (names: string[]): Promise<void> => invoke("voice_set_names", { names });
+/** Someone to wake on, and the voice a live engine opens their session in. */
+export interface RosterMember {
+  name: string;
+  voice?: VoiceSpec;
+}
+
+export const setVoiceRoster = (roster: RosterMember[]): Promise<void> => invoke("voice_set_roster", { roster });
 
 export const pushToTalk = (pressed: boolean): Promise<void> => invoke("voice_push_to_talk", { pressed });
 
-/** `more`: an acknowledgement, with the answer still to come. */
-export const speak = (text: string, more = false): Promise<void> => invoke("voice_speak", { text, more });
+/** `more`: an acknowledgement, with the answer still to come. `voice`: the
+ *  agent's own; the engine's default without one. */
+export const speak = (text: string, more = false, voice?: VoiceSpec): Promise<void> =>
+  invoke("voice_speak", { text, more, voice });
 
 export const stopSpeaking = (): Promise<void> => invoke("voice_stop_speaking");
 
@@ -46,3 +54,23 @@ export const onUtterance = (f: (u: Utterance) => void): Promise<() => void> =>
 
 export const onVoiceError = (f: (message: string) => void): Promise<() => void> =>
   listen<string>("voice-error", (e) => f(e.payload));
+
+/** One voice to choose from. */
+export interface VoiceOption {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/** Plays `text` in `voice`, even with voice off; resolves with what went
+ *  wrong (e.g. the hub has no key for that provider), or null. */
+export const tryVoice = (voice: VoiceSpec, text: string): Promise<string | null> =>
+  invoke<void>("voice_try", { voice, text }).then(
+    () => null,
+    (e: unknown) => String(e),
+  );
+
+export const kokoroVoices = (): Promise<VoiceOption[]> => invoke("voice_kokoro_voices");
+
+/** The voices "kokoro", "gpt-live" or "gemini-live" offer. */
+export const engineVoices = (engine: string): Promise<VoiceOption[]> => invoke("voice_engine_voices", { engine });

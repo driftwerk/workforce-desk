@@ -26,14 +26,24 @@ impl Protocol for GeminiLive {
         OUTPUT_RATE
     }
 
-    fn start(&self, model: &str, names: &[String], opened_by: Option<&str>) -> Vec<String> {
+    fn provider(&self) -> crate::voices::Provider {
+        crate::voices::Provider::GeminiLive
+    }
+
+    fn start(
+        &self,
+        model: &str,
+        names: &[String],
+        opened_by: Option<&str>,
+        voice: Option<&str>,
+    ) -> Vec<String> {
         vec![
             json!({
                 "setup": {
                     "model": format!("models/{model}"),
                     "generationConfig": {
                         "responseModalities": ["AUDIO"],
-                        "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": VOICE } } },
+                        "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": voice.unwrap_or(VOICE) } } },
                     },
                     "systemInstruction": { "parts": [{ "text": instructions(names, opened_by, HandOff::Tool) }] },
                     "tools": [{
@@ -158,8 +168,13 @@ mod tests {
     #[test]
     fn sets_up_audio_with_an_async_ask_agent() {
         let setup =
-            &json(&GeminiLive.start("gemini-3.8-live", &["Atlas".into()], None)[0])["setup"];
+            &json(&GeminiLive.start("gemini-3.8-live", &["Atlas".into()], None, Some("Puck"))[0])
+                ["setup"];
         assert_eq!(setup["model"], "models/gemini-3.8-live");
+        assert_eq!(
+            setup["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+            "Puck"
+        );
         assert_eq!(
             setup["generationConfig"]["responseModalities"],
             json!(["AUDIO"])

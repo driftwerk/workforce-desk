@@ -11,15 +11,17 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use desk_voice::hub::{Grant, Sessions};
 use desk_voice::models::{self, Models};
 use desk_voice::realtime::gemini_live::GeminiLive;
 use desk_voice::realtime::gpt_live::GptLive;
-use desk_voice::realtime::hub::{Grant, Sessions};
 use desk_voice::realtime::pcm;
 use desk_voice::realtime::protocol::Protocol;
 use desk_voice::resample::{Resampler, SPEECH_RATE};
 use desk_voice::speech::Speaker;
-use desk_voice::{AudioIn, AudioOut, Realtime, Utterance, VoiceEngine, VoiceEvents, VoiceState};
+use desk_voice::{
+    AudioIn, AudioOut, Member, Realtime, Utterance, VoiceEngine, VoiceEvents, VoiceSpec, VoiceState,
+};
 use serde_json::{Value, json};
 use tungstenite::Message;
 
@@ -37,7 +39,8 @@ fn models() -> &'static Models {
 fn spoken(text: &str) -> Vec<f32> {
     static SPEAKER: OnceLock<Speaker> = OnceLock::new();
     let speaker = SPEAKER.get_or_init(|| Speaker::new(models()).unwrap());
-    Resampler::new(speaker.sample_rate(), SPEECH_RATE).process(&speaker.synthesize(text).unwrap())
+    let audio = speaker.synthesize(text, None).unwrap();
+    Resampler::new(audio.rate, SPEECH_RATE).process(&audio.samples)
 }
 
 fn silence(seconds: f32) -> Vec<f32> {
@@ -216,7 +219,20 @@ impl Rig {
             )
             .unwrap()
         };
-        engine.set_names(vec!["Atlas".into(), "Allan".into()]);
+        engine.set_roster(vec![
+            Member {
+                name: "Atlas".into(),
+                voice: Some(VoiceSpec {
+                    provider: desk_voice::voices::Provider::GeminiLive,
+                    model: None,
+                    voice: Some("Puck".into()),
+                }),
+            },
+            Member {
+                name: "Allan".into(),
+                voice: None,
+            },
+        ]);
         Self {
             engine,
             provider,
@@ -272,6 +288,11 @@ fn gemini_live_wakes_on_a_name_routes_the_call_and_ends_at_thanks() {
     });
     let setup = &rig.provider.received(|m| m.get("setup").is_some())[0]["setup"];
     assert_eq!(setup["model"], "models/gemini-3.8-live");
+    assert_eq!(
+        setup["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
+        "Puck",
+        "the session speaks in the woken agent's own voice"
+    );
     let declared = &setup["tools"][0]["functionDeclarations"][0];
     assert_eq!(
         declared["parameters"]["properties"]["agent"]["enum"],

@@ -1,6 +1,8 @@
 import type { ConversationState } from "../chat/conversation";
 import { finishedAnswers } from "../chat/conversation";
 import { agentKey, type Agent } from "../chat/types";
+import type { VoiceSpec } from "../platform";
+import type { RosterMember } from "./api";
 import { speakable } from "./speakable";
 
 /** The roster names to wake on, each once. */
@@ -46,3 +48,24 @@ export const missingAgent = (named: string | null, roster: string[]): string =>
   named
     ? `There's no agent called ${named}.${roster.length ? ` The agents are ${roster.join(", ")}.` : ""}`
     : "I'm not sure who that's for.";
+
+/** Providers the cascade speaks answers with; the live engines' voices are
+ *  only heard in their own sessions. */
+const SPOKEN = new Set(["kokoro", "fish_audio", "elevenlabs", "openai"]);
+const LIVE = new Set(["gpt-live", "gemini-live"]);
+
+/** The voice an agent's answer is read in: its own, else Desk's default. */
+export const voiceFor = (agent: Agent, agentVoices: Record<string, VoiceSpec>, defaultVoice: VoiceSpec): VoiceSpec => {
+  const own = agentVoices[agentKey(agent)];
+  return own && SPOKEN.has(own.provider) ? own : defaultVoice;
+};
+
+/** Who to wake on, each name once, with the live voice its agent has. */
+export const voiceRoster = (roster: Agent[], agentVoices: Record<string, VoiceSpec>): RosterMember[] =>
+  wakeNames(roster).map((name) => {
+    const voice = roster
+      .filter((a) => a.name === name)
+      .map((a) => agentVoices[agentKey(a)])
+      .find((v) => v && LIVE.has(v.provider));
+    return voice ? { name, voice } : { name };
+  });

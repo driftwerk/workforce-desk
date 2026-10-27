@@ -12,8 +12,8 @@ use eyre::Result;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
-use super::hub::Sessions;
 use super::protocol::{Live, Protocol};
+use crate::hub::Sessions;
 
 /// How long a read waits before the thread looks for something to send.
 const POLL: Duration = Duration::from_millis(10);
@@ -28,6 +28,7 @@ pub struct Opening {
     pub protocol: Arc<dyn Protocol>,
     pub names: Vec<String>,
     pub opened_by: Option<String>,
+    pub voice: Option<String>,
 }
 
 /// Starts the session; what it reports goes to `report`, ending with
@@ -50,10 +51,12 @@ fn run(opening: &Opening, rx: &Receiver<Outgoing>, report: &dyn Fn(Live)) -> Res
     let (mut ws, _) = tungstenite::connect(grant.url.as_str())
         .map_err(|e| eyre::eyre!("couldn't connect the voice session: {e}"))?;
     set_poll(&ws)?;
-    for m in opening
-        .protocol
-        .start(&grant.model, &opening.names, opening.opened_by.as_deref())
-    {
+    for m in opening.protocol.start(
+        &grant.model,
+        &opening.names,
+        opening.opened_by.as_deref(),
+        opening.voice.as_deref(),
+    ) {
         ws.send(Message::text(m))?;
     }
     loop {

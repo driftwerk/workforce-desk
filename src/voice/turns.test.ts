@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { emptyConversation, type ConversationState } from "../chat/conversation";
 import { useChat } from "../chat/store";
+import { useSettings } from "../settings/store";
 import type { Agent, ChatMessage } from "../chat/types";
 import { Turns } from "./useVoice";
 
@@ -33,6 +34,9 @@ beforeEach(() => {
 
 afterEach(() => vi.useRealTimers());
 
+const fish = { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" };
+const heart = { provider: "kokoro", voice: "af_heart" };
+
 describe("spoken turns", () => {
   it("hands a cloud model's request to the agent and its answer back as a tool result", () => {
     const turns = new Turns();
@@ -49,9 +53,9 @@ describe("spoken turns", () => {
     const turns = new Turns();
     turns.heard({ agent: "Atlas", text: "what failed overnight?" });
     vi.advanceTimersByTime(2_100);
-    expect(calls("voice_speak")).toEqual([["voice_speak", { text: "On it.", more: true }]]);
+    expect(calls("voice_speak")).toEqual([["voice_speak", { text: "On it.", more: true, voice: fish }]]);
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("Two tests failed.") } }));
-    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "Two tests failed.", more: false }]);
+    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "Two tests failed.", more: false, voice: fish }]);
     expect(calls("voice_tool_result")).toHaveLength(0);
   });
 
@@ -61,5 +65,12 @@ describe("spoken turns", () => {
       ["voice_tool_result", { callId: "fc-2", text: "There's no agent called Scout. The agents are Atlas." }],
     ]);
     expect(useChat.getState().send).not.toHaveBeenCalled();
+  });
+
+  it("reads an agent's answer in its own voice", () => {
+    useSettings.setState({ agentVoices: { [key]: heart } });
+    new Turns().heard({ agent: "Atlas", text: "status?" });
+    useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("All green.") } }));
+    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "All green.", more: false, voice: heart }]);
   });
 });

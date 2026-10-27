@@ -7,7 +7,6 @@
 
 pub mod gemini_live;
 pub mod gpt_live;
-pub mod hub;
 pub mod lifetime;
 pub mod pcm;
 pub mod protocol;
@@ -21,13 +20,15 @@ use std::time::{Duration, Instant};
 
 use eyre::Result;
 
-use self::hub::Sessions;
 use self::lifetime::Lifetime;
 use self::protocol::{Call, Live, Protocol};
 use self::socket::{Opening, Outgoing};
 use crate::conversation::Timing;
+use crate::decode::Audio;
+use crate::hub::Sessions;
 use crate::resample::{Resampler, SPEECH_RATE};
 use crate::speech::{Sound, Wake};
+use crate::voices::{Member, VoiceSpec, live_voice};
 use crate::{AudioIn, Models, SharedAudioOut, Utterance, VoiceEngine, VoiceEvents, VoiceState};
 
 /// The most of what came before a wake the cloud may hear: enough for the
@@ -48,7 +49,8 @@ pub fn utterance(call: &Call) -> Utterance {
 
 enum Input {
     Audio(Vec<f32>, u32),
-    Names(Vec<String>),
+    Roster(Vec<Member>),
+    Play(Audio),
     PushToTalk(bool),
     Say(String),
     ToolResult { id: String, text: String },
@@ -94,7 +96,7 @@ impl Realtime {
             next_session: 0,
             playing: 0,
             decoder: pcm::Decoder::default(),
-            names: Vec::new(),
+            roster: Vec::new(),
         };
         let thread = std::thread::Builder::new()
             .name("voice-realtime".into())
@@ -112,17 +114,21 @@ impl Realtime {
 }
 
 impl VoiceEngine for Realtime {
-    fn set_names(&self, names: Vec<String>) {
-        self.send(Input::Names(names));
+    fn set_roster(&self, roster: Vec<Member>) {
+        self.send(Input::Roster(roster));
     }
 
     fn push_to_talk(&self, pressed: bool) {
         self.send(Input::PushToTalk(pressed));
     }
 
-    /// The model says it, in its own words, in the open session.
-    fn speak(&self, text: String, _more: bool) {
+    /// The model says it, in its own words and the session's voice.
+    fn speak(&self, text: String, _more: bool, _voice: Option<VoiceSpec>) {
         self.send(Input::Say(text));
+    }
+
+    fn play(&self, audio: Audio) {
+        self.send(Input::Play(audio));
     }
 
     fn stop_speaking(&self) {
@@ -194,7 +200,7 @@ struct Worker {
     next_session: u64,
     playing: usize,
     decoder: pcm::Decoder,
-    names: Vec<String>,
+    roster: Vec<Member>,
 }
 
 impl Worker {
@@ -214,12 +220,14 @@ impl Worker {
     fn handle(&mut self, input: Input, now: Instant) {
         match input {
             Input::Audio(samples, rate) => self.audio(&samples, rate, now),
-            Input::Names(names) => {
+            Input::Roster(roster) => {
+                let names: Vec<String> = roster.iter().map(|m| m.name.clone()).collect();
                 if let Err(e) = self.wake.set_names(&names) {
                     tracing::warn!("voice: {e:#}");
                 }
-                self.names = names;
+                self.roster = roster;
             }
+            Input::Play(audio) => self.play(&audio.samples, audio.rate, now),
             Input::PushToTalk(pressed) => self.push_to_talk(pressed, now),
             Input::Say(text) => match &self.session {
                 Some(s) if s.ready => s.send(self.protocol.say(&text)),
@@ -313,11 +321,18 @@ impl Worker {
         self.next_session += 1;
         let id = self.next_session;
         let tx = self.tx.clone();
+        let engine = self.protocol.provider();
+        let voice = opened_by
+            .as_deref()
+            .and_then(|name| self.roster.iter().find(|m| m.name == name))
+            .and_then(|m| live_voice(m, engine))
+            .map(String::from);
         let opening = Opening {
             sessions: Arc::clone(&self.sessions),
             protocol: Arc::clone(&self.protocol),
-            names: self.names.clone(),
+            names: self.roster.iter().map(|m| m.name.clone()).collect(),
             opened_by: opened_by.clone(),
+            voice,
         };
         match socket::open(opening, move |event| {
             let _ = tx.send(Input::Live { session: id, event });
@@ -351,19 +366,7 @@ impl Worker {
             }
             Live::Audio(bytes) => {
                 let samples = self.decoder.decode(&bytes);
-                if samples.is_empty() {
-                    return;
-                }
-                self.playing += 1;
-                s.lifetime.playing(true, now);
-                let tx = self.tx.clone();
-                self.out.play(
-                    &samples,
-                    self.protocol.output_rate(),
-                    Box::new(move || {
-                        let _ = tx.send(Input::Played);
-                    }),
-                );
+                self.play(&samples, self.protocol.output_rate(), now);
             }
             Live::Interrupted => {
                 if self.playing > 0 {
@@ -393,6 +396,24 @@ impl Worker {
             }
             Live::Closed => self.ended(),
         }
+    }
+
+    fn play(&mut self, samples: &[f32], rate: u32, now: Instant) {
+        if samples.is_empty() {
+            return;
+        }
+        self.playing += 1;
+        if let Some(s) = &mut self.session {
+            s.lifetime.playing(true, now);
+        }
+        let tx = self.tx.clone();
+        self.out.play(
+            samples,
+            rate,
+            Box::new(move || {
+                let _ = tx.send(Input::Played);
+            }),
+        );
     }
 
     fn tick(&mut self, now: Instant) {

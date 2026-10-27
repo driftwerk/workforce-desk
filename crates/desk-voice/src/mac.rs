@@ -50,6 +50,11 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
     Ok(Arc::new(build(Some(input))?))
 }
 
+/// Just the speaker side: for playing a sample while voice is off.
+pub fn output() -> Result<SharedAudioOut> {
+    Ok(Arc::new(build(None)?))
+}
+
 fn build(input: Option<AudioIn>) -> Result<MacAudio> {
     unsafe {
         let engine = AVAudioEngine::new();

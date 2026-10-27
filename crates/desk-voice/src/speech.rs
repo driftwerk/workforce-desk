@@ -14,9 +14,11 @@ use sherpa_onnx::{
 };
 
 use crate::conversation::{Conversation, Phase, Timing};
+use crate::decode::Audio;
 use crate::keywords::{Keywords, SentencePiece, vocabulary};
 use crate::models::{ASR, KWS, Models, TTS, VAD};
 use crate::resample::SPEECH_RATE;
+use crate::voices::kokoro_speaker;
 use crate::{Utterance, VoiceState};
 
 const VAD_WINDOW: usize = 512;
@@ -443,11 +445,10 @@ impl Recent {
     }
 }
 
-/// Kokoro's American English voice "af_bella".
-const VOICE: i32 = 1;
-
+/// Kokoro v1.0 on this Mac, in any of its English voices.
 pub struct Speaker {
-    tts: OfflineTts,
+    tts: std::sync::Mutex<OfflineTts>,
+    rate: u32,
 }
 
 impl Speaker {
@@ -469,22 +470,30 @@ impl Speaker {
         };
         let tts =
             OfflineTts::create(&config).ok_or_else(|| eyre!("couldn't load the speech model"))?;
-        Ok(Self { tts })
+        let rate = tts.sample_rate().max(0) as u32;
+        Ok(Self {
+            tts: std::sync::Mutex::new(tts),
+            rate,
+        })
     }
 
     pub fn sample_rate(&self) -> u32 {
-        self.tts.sample_rate().max(0) as u32
+        self.rate
     }
 
-    pub fn synthesize(&self, text: &str) -> Option<Vec<f32>> {
+    /// `text` in the Kokoro voice `voice` (an id like `af_heart`; the
+    /// default for none or an unknown one).
+    pub fn synthesize(&self, text: &str, voice: Option<&str>) -> Option<Audio> {
         let config = GenerationConfig {
-            sid: VOICE,
+            sid: kokoro_speaker(voice),
             ..Default::default()
         };
-        let audio =
-            self.tts
-                .generate_with_config(text, &config, None::<fn(&[f32], f32) -> bool>)?;
-        Some(audio.samples().to_vec())
+        let tts = self.tts.lock().ok()?;
+        let audio = tts.generate_with_config(text, &config, None::<fn(&[f32], f32) -> bool>)?;
+        Some(Audio {
+            samples: audio.samples().to_vec(),
+            rate: self.rate,
+        })
     }
 }
 

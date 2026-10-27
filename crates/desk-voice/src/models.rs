@@ -71,14 +71,16 @@ pub const ASR: Model = Model {
 };
 
 pub const TTS: Model = Model {
-    id: "kokoro-int8-en-v0_19",
+    id: "kokoro-int8-multi-lang-v1_0",
     sources: &[
         Source {
-            url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2",
-            sha256: "c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd",
-            size: 103_248_205,
+            url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+            sha256: "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653",
+            size: 132_353_410,
             files: Files::Archive(&["model.int8.onnx", "voices.bin", "tokens.txt"]),
         },
+        // The archive's own English lexicon lacks names and contractions
+        // ("what's", "Allan"), which Kokoro then skips; this one has them.
         Source {
             url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt",
             sha256: "8b67ae549a465eee78f92ecb74644ad90c3c58ce65f19c68baf85878a10ef73a",

@@ -6,6 +6,8 @@
 pub mod address;
 pub mod cascade;
 pub mod conversation;
+pub mod decode;
+pub mod hub;
 pub mod keywords;
 #[cfg(target_os = "macos")]
 pub mod mac;
@@ -13,14 +15,17 @@ pub mod models;
 pub mod realtime;
 pub mod resample;
 pub mod speech;
+pub mod voices;
 
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 pub use cascade::Cascade;
+pub use decode::Audio;
 pub use models::Models;
 pub use realtime::Realtime;
+pub use voices::{Member, VoiceSpec};
 
 /// The ways of listening and speaking Desk can run. Settings name them as
 /// strings, so an engine a later Desk adds reads here as the default.
@@ -107,12 +112,15 @@ pub trait VoiceEvents: Send + Sync + 'static {
 
 /// A way of listening and speaking. Dropping it stops it.
 pub trait VoiceEngine: Send + Sync {
-    /// The names to wake on: the roster, as plain text.
-    fn set_names(&self, names: Vec<String>);
+    /// Who to wake on (the roster names, as plain text) and their voices.
+    fn set_roster(&self, roster: Vec<Member>);
     fn push_to_talk(&self, pressed: bool);
-    /// Say `text`. `more` when this is an acknowledgement and the answer is
-    /// still coming, so the conversation stays open for it.
-    fn speak(&self, text: String, more: bool);
+    /// Say `text` in `voice` (the engine's default when `None`). `more` when
+    /// this is an acknowledgement and the answer is still coming, so the
+    /// conversation stays open for it.
+    fn speak(&self, text: String, more: bool, voice: Option<VoiceSpec>);
+    /// Play speech that is already synthesised, as if spoken.
+    fn play(&self, audio: Audio);
     fn stop_speaking(&self);
     /// The answer to an utterance that carried a `call_id`.
     fn tool_result(&self, call_id: String, text: String);

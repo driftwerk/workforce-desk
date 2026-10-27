@@ -10,7 +10,7 @@ import {
   onVoiceError,
   onVoiceState,
   pushToTalk,
-  setVoiceNames,
+  setVoiceRoster,
   speak,
   toolResult,
   voiceStatus,
@@ -18,7 +18,8 @@ import {
   type VoiceStatus,
 } from "./api";
 import { voiceEngine } from "./engines";
-import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, wakeNames } from "./route";
+import type { VoiceSpec } from "../platform";
+import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
 import { DETAILS_IN_DESK, speakable } from "./speakable";
 import { useVoiceStore } from "./store";
 
@@ -40,9 +41,16 @@ interface Reply {
   ack?: (text: string) => void;
 }
 
-const aloud: Reply = {
-  answer: (text) => void speak(text).catch(failed),
-  ack: (text) => void speak(text, true).catch(failed),
+/** Read aloud in `voice`, the agent's own. */
+const aloud = (voice?: VoiceSpec): Reply => ({
+  answer: (text) => void speak(text, false, voice).catch(failed),
+  ack: (text) => void speak(text, true, voice).catch(failed),
+});
+
+/** The voice an agent's answers are read in, from Desk's settings. */
+const voiceOf = (agent: Agent): VoiceSpec => {
+  const { agentVoices, defaultVoice } = useSettings.getState();
+  return voiceFor(agent, agentVoices, defaultVoice);
 };
 
 const toModel = (callId: string): Reply => ({
@@ -63,7 +71,7 @@ export class Turns {
   heard(u: Utterance) {
     const chat = useChat.getState();
     const agent = resolveAgent(u.agent, chat.roster, this.current, chat.activeAgent);
-    const reply = u.callId ? toModel(u.callId) : aloud;
+    const reply = u.callId ? toModel(u.callId) : aloud(agent ? voiceOf(agent) : undefined);
     useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null });
     if (!agent) {
       reply.answer(missingAgent(u.agent, wakeNames(chat.roster)));
@@ -123,8 +131,9 @@ export class Turns {
 export function useVoice(enabled: boolean) {
   const engine = voiceEngine(useSettings((s) => s.voiceEngine)).id;
   const roster = useChat((s) => s.roster);
-  const names = wakeNames(roster);
-  const namesKey = names.join("\u0000");
+  const agentVoices = useSettings((s) => s.agentVoices);
+  const members = voiceRoster(roster, agentVoices);
+  const membersKey = JSON.stringify(members);
 
   useEffect(() => {
     if (enabled) {
@@ -134,9 +143,9 @@ export function useVoice(enabled: boolean) {
   }, [enabled, engine]);
 
   useEffect(() => {
-    setVoiceNames(names).catch(failed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- names are tracked through `namesKey`
-  }, [namesKey]);
+    setVoiceRoster(members).catch(failed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the roster is tracked through `membersKey`
+  }, [membersKey]);
 
   useEffect(() => {
     const turns = new Turns();

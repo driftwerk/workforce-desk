@@ -217,11 +217,14 @@ pub fn run() {
             login_cancel,
             voice::voice_enable,
             voice::voice_disable,
-            voice::voice_set_names,
+            voice::voice_set_roster,
             voice::voice_push_to_talk,
             voice::voice_speak,
             voice::voice_stop_speaking,
             voice::voice_tool_result,
+            voice::voice_try,
+            voice::voice_kokoro_voices,
+            voice::voice_engine_voices,
             voice::voice_status
         ])
         .run(tauri::generate_context!())

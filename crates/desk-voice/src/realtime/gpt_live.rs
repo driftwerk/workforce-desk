@@ -44,7 +44,17 @@ impl Protocol for GptLive {
         SPEECH_RATE
     }
 
-    fn start(&self, model: &str, names: &[String], opened_by: Option<&str>) -> Vec<String> {
+    fn provider(&self) -> crate::voices::Provider {
+        crate::voices::Provider::GptLive
+    }
+
+    fn start(
+        &self,
+        model: &str,
+        names: &[String],
+        opened_by: Option<&str>,
+        voice: Option<&str>,
+    ) -> Vec<String> {
         vec![
             json!({
                 "type": "session.start",
@@ -54,7 +64,7 @@ impl Protocol for GptLive {
                     "instructions": instructions(names, opened_by, HandOff::Delegate),
                     "audio": {
                         "format": { "type": "audio/pcm", "rate": SPEECH_RATE },
-                        "output": { "voice": VOICE },
+                        "output": { "voice": voice.unwrap_or(VOICE) },
                     },
                     "delegation": {
                         "type": "responses",
@@ -176,10 +186,13 @@ mod tests {
 
     #[test]
     fn starts_a_responses_delegated_session_with_one_tool() {
-        let start = json(&GptLive.start("gpt-live-1", &names(), Some("Atlas"))[0]);
+        let start = json(&GptLive.start("gpt-live-1", &names(), Some("Atlas"), Some("cedar"))[0]);
         assert_eq!(start["type"], "session.start");
         let session = &start["session"];
         assert_eq!(session["model"], "gpt-live-1");
+        assert_eq!(session["audio"]["output"]["voice"], "cedar");
+        let default = json(&GptLive.start("gpt-live-1", &names(), None, None)[0]);
+        assert_eq!(default["session"]["audio"]["output"]["voice"], VOICE);
         assert_eq!(
             session["audio"]["format"],
             json(r#"{"type":"audio/pcm","rate":16000}"#)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyConversation, type ConversationState } from "../chat/conversation";
 import type { Agent, ChatMessage } from "../chat/types";
-import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, wakeNames } from "./route";
+import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
 
 const roster: Agent[] = [
   { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
@@ -62,5 +62,23 @@ describe("voice routing", () => {
   it("gives a voice model the answer without the markdown", () => {
     expect(forModel("**Two** tests failed:\n\n```\nlog\n```")).toBe("Two tests failed: I've put the details in Desk.");
     expect(forModel("word ".repeat(400)).length).toBeLessThan(1_600);
+  });
+
+  it("reads answers in the agent's own voice, else the default", () => {
+    const fish = { provider: "fish_audio", voice: "802e" };
+    const heart = { provider: "kokoro", voice: "af_heart" };
+    const cedar = { provider: "gpt-live", voice: "cedar" };
+    expect(voiceFor(roster[0]!, { "acme/atlas": heart }, fish)).toEqual(heart);
+    expect(voiceFor(roster[2]!, { "acme/atlas": heart }, fish)).toEqual(fish);
+    expect(voiceFor(roster[0]!, { "acme/atlas": cedar }, fish)).toEqual(fish);
+  });
+
+  it("gives the live engines each agent's live voice", () => {
+    const cedar = { provider: "gpt-live", voice: "cedar" };
+    const heart = { provider: "kokoro", voice: "af_heart" };
+    expect(voiceRoster(roster, { "local/atlas-l": cedar, "dw/allan": heart })).toEqual([
+      { name: "Atlas", voice: cedar },
+      { name: "allan" },
+    ]);
   });
 });

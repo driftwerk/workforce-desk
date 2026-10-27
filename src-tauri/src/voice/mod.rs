@@ -1,19 +1,24 @@
 //! Voice lives in the app process, because the microphone permission belongs
 //! to the app bundle. Rust does audio only: what it hears goes to the
 //! frontend as `voice-utterance` events, and the frontend asks it to speak
-//! (the cascade) or hands the agent's answer back (`voice_tool_result`, the
-//! cloud engines).
+//! (the cascade, in the agent's voice) or hands the agent's answer back
+//! (`voice_tool_result`, the cloud engines). Cloud voices are spoken by the
+//! local hub, which holds the keys; the gateway token never reaches JS.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use desk_core::{Keychain, Paths, Secret, SecretStore};
-use desk_voice::models::{Progress, default_dir};
+use desk_core::{Paths, Secret, SecretStore, Secrets};
+use desk_voice::cascade::Voices;
+use desk_voice::hub::{CloudSpeech, Grant, Hub, Sessions, SpeechError};
+use desk_voice::models::{Progress, TTS, default_dir};
 use desk_voice::realtime::gemini_live::GeminiLive;
 use desk_voice::realtime::gpt_live::GptLive;
-use desk_voice::realtime::hub::{HubSessions, Sessions};
+use desk_voice::speech::Speaker;
+use desk_voice::voices::{Provider, VoiceInfo, engine_voices, kokoro_voices};
 use desk_voice::{
-    Cascade, EngineKind, Models, Realtime, Utterance, VoiceEngine, VoiceEvents, VoiceState,
+    Audio, Cascade, EngineKind, Member, Models, Realtime, SharedAudioOut, Utterance, VoiceEngine,
+    VoiceEvents, VoiceSpec, VoiceState,
 };
 use eyre::eyre;
 use tauri::{AppHandle, Emitter, State};
@@ -23,12 +28,15 @@ type CommandResult<T> = Result<T, String>;
 type Running = (EngineKind, Box<dyn VoiceEngine>);
 
 pub struct Voice {
-    paths: Paths,
     models: Models,
     engine: Mutex<Option<Running>>,
     wanted: Mutex<EngineKind>,
-    names: Mutex<Vec<String>>,
+    roster: Mutex<Vec<Member>>,
     state: Arc<Mutex<VoiceState>>,
+    hub: Arc<LocalHub>,
+    kokoro: Arc<Mutex<Option<Arc<Speaker>>>>,
+    /// The speaker-only output samples play through while voice is off.
+    trial: Mutex<Option<SharedAudioOut>>,
     /// Whether voice is wanted off; a download or start in flight checks it.
     off: Arc<AtomicBool>,
     enabling: AtomicBool,
@@ -37,12 +45,17 @@ pub struct Voice {
 impl Voice {
     pub fn new(paths: &Paths) -> Self {
         Self {
-            paths: paths.clone(),
             models: Models::new(default_dir(paths)),
             engine: Mutex::new(None),
             wanted: Mutex::new(EngineKind::default()),
-            names: Mutex::new(Vec::new()),
+            roster: Mutex::new(Vec::new()),
             state: Arc::new(Mutex::new(VoiceState::Off)),
+            hub: Arc::new(LocalHub {
+                paths: paths.clone(),
+                hub: Mutex::new(None),
+            }),
+            kokoro: Arc::new(Mutex::new(None)),
+            trial: Mutex::new(None),
             off: Arc::new(AtomicBool::new(true)),
             enabling: AtomicBool::new(false),
         }
@@ -56,6 +69,13 @@ impl Voice {
 
     fn wanted(&self) -> EngineKind {
         *lock(&self.wanted)
+    }
+
+    fn shared(&self) -> Shared {
+        Shared {
+            hub: self.hub.clone(),
+            kokoro: self.kokoro.clone(),
+        }
     }
 }
 
@@ -98,14 +118,56 @@ fn downloading(events: &Events) -> impl FnMut(Progress) + '_ {
     }
 }
 
-/// The local hub, which holds the provider keys for the cloud engines.
-fn hub(paths: &Paths) -> eyre::Result<Arc<dyn Sessions>> {
-    let ports = desk_core::read_ports(&paths.hub_state())?
-        .ok_or_else(|| eyre!("the local hub hasn't started"))?;
-    let token = Keychain
-        .get(Secret::GatewayToken)?
-        .ok_or_else(|| eyre!("the local hub has no token yet"))?;
-    Ok(Arc::new(HubSessions::new(ports.gateway_url(), token)))
+/// The local hub, which holds the provider keys: found when first needed,
+/// since it may start after Desk.
+struct LocalHub {
+    paths: Paths,
+    hub: Mutex<Option<Arc<Hub>>>,
+}
+
+impl LocalHub {
+    fn get(&self) -> eyre::Result<Arc<Hub>> {
+        let mut hub = lock(&self.hub);
+        if let Some(h) = hub.as_ref() {
+            return Ok(h.clone());
+        }
+        let ports = desk_core::read_ports(&self.paths.hub_state())?
+            .ok_or_else(|| eyre!("Desk is still starting"))?;
+        let token = Secrets::for_paths(&self.paths)
+            .get(Secret::GatewayToken)?
+            .ok_or_else(|| eyre!("Desk is still starting"))?;
+        Ok(hub
+            .insert(Arc::new(Hub::new(ports.gateway_url(), token)))
+            .clone())
+    }
+}
+
+impl Sessions for LocalHub {
+    fn grant(&self, engine: &str) -> eyre::Result<Grant> {
+        self.get()?.grant(engine)
+    }
+}
+
+impl CloudSpeech for LocalHub {
+    fn speak(&self, voice: &VoiceSpec, text: &str) -> Result<Audio, SpeechError> {
+        self.get()
+            .map_err(|e| SpeechError::Hub(e.to_string()))?
+            .speak(voice, text)
+    }
+}
+
+/// Kokoro, loaded once and shared by the cascade and voice samples.
+fn kokoro(slot: &Mutex<Option<Arc<Speaker>>>, models: &Models) -> eyre::Result<Arc<Speaker>> {
+    let mut slot = lock(slot);
+    if let Some(s) = slot.as_ref() {
+        return Ok(s.clone());
+    }
+    Ok(slot.insert(Arc::new(Speaker::new(models)?)).clone())
+}
+
+struct Shared {
+    hub: Arc<LocalHub>,
+    kokoro: Arc<Mutex<Option<Arc<Speaker>>>>,
 }
 
 /// Fetches what `kind` runs on and starts it; `None` when voice was turned
@@ -113,7 +175,7 @@ fn hub(paths: &Paths) -> eyre::Result<Arc<dyn Sessions>> {
 fn start(
     kind: EngineKind,
     models: &Models,
-    paths: &Paths,
+    shared: &Shared,
     events: Arc<Events>,
     off: &AtomicBool,
 ) -> eyre::Result<Option<Box<dyn VoiceEngine>>> {
@@ -129,18 +191,24 @@ fn start(
     }
     let open = desk_voice::mac::open;
     Ok(Some(match kind {
-        EngineKind::Cascade => Box::new(Cascade::start(models, events, open)?),
+        EngineKind::Cascade => {
+            let voices = Voices {
+                kokoro: kokoro(&shared.kokoro, models)?,
+                cloud: Some(shared.hub.clone()),
+            };
+            Box::new(Cascade::start(models, voices, events, open)?)
+        }
         EngineKind::GptLive => Box::new(Realtime::start(
             models,
             Arc::new(GptLive),
-            hub(paths)?,
+            shared.hub.clone(),
             events,
             open,
         )?),
         EngineKind::GeminiLive => Box::new(Realtime::start(
             models,
             Arc::new(GeminiLive),
-            hub(paths)?,
+            shared.hub.clone(),
             events,
             open,
         )?),
@@ -170,7 +238,8 @@ pub async fn voice_enable(
             None => None,
         }
     };
-    tauri::async_runtime::spawn_blocking(move || drop(replaced))
+    let trial = lock(&voice.trial).take();
+    tauri::async_runtime::spawn_blocking(move || drop((replaced, trial)))
         .await
         .map_err(|e| e.to_string())?;
     if voice.enabling.swap(true, Ordering::SeqCst) {
@@ -182,14 +251,14 @@ pub async fn voice_enable(
     });
     let started = loop {
         let kind = voice.wanted();
-        let (models, paths, events, off) = (
+        let (models, shared, events, off) = (
             voice.models.clone(),
-            voice.paths.clone(),
+            voice.shared(),
             events.clone(),
             voice.off.clone(),
         );
         let attempt = tauri::async_runtime::spawn_blocking(move || {
-            start(kind, &models, &paths, events, &off)
+            start(kind, &models, &shared, events, &off)
         })
         .await
         .map_err(|e| e.to_string())
@@ -205,7 +274,7 @@ pub async fn voice_enable(
     voice.enabling.store(false, Ordering::SeqCst);
     match started {
         Ok(Some((kind, engine))) => {
-            engine.set_names(lock(&voice.names).clone());
+            engine.set_roster(lock(&voice.roster).clone());
             *lock(&voice.engine) = Some((kind, engine));
             Ok(())
         }
@@ -235,11 +304,12 @@ pub async fn voice_disable(app: AppHandle, voice: State<'_, Voice>) -> CommandRe
     Ok(())
 }
 
-/// The roster names to wake on, as plain text.
+/// The roster: the names to wake on (plain text) and each agent's voice,
+/// which the live engines open their sessions with.
 #[tauri::command]
-pub fn voice_set_names(voice: State<'_, Voice>, names: Vec<String>) {
-    *lock(&voice.names) = names.clone();
-    voice.with_engine(|e| e.set_names(names));
+pub fn voice_set_roster(voice: State<'_, Voice>, roster: Vec<Member>) {
+    *lock(&voice.roster) = roster.clone();
+    voice.with_engine(|e| e.set_roster(roster));
 }
 
 #[tauri::command]
@@ -247,16 +317,99 @@ pub fn voice_push_to_talk(voice: State<'_, Voice>, pressed: bool) {
     voice.with_engine(|e| e.push_to_talk(pressed));
 }
 
-/// Speaks `text`. `more` marks an acknowledgement with the answer still to
-/// come, which keeps the conversation open while the agent works.
+/// Speaks `text` in `voice` (the agent's; the engine's default when
+/// absent). `more` marks an acknowledgement with the answer still to come,
+/// which keeps the conversation open while the agent works.
 #[tauri::command]
-pub fn voice_speak(voice: State<'_, Voice>, text: String, more: Option<bool>) {
-    voice.with_engine(|e| e.speak(text, more.unwrap_or(false)));
+pub fn voice_speak(
+    desk: State<'_, Voice>,
+    text: String,
+    more: Option<bool>,
+    voice: Option<VoiceSpec>,
+) {
+    desk.with_engine(|e| e.speak(text, more.unwrap_or(false), voice));
 }
 
 #[tauri::command]
 pub fn voice_stop_speaking(voice: State<'_, Voice>) {
     voice.with_engine(|e| e.stop_speaking());
+    if let Some(out) = lock(&voice.trial).as_ref() {
+        out.stop();
+    }
+}
+
+/// `text` in `voice`, made here (Kokoro) or by the hub (cloud voices).
+fn sample(
+    spec: &VoiceSpec,
+    text: &str,
+    models: &Models,
+    shared: &Shared,
+    events: &Events,
+) -> Result<Audio, String> {
+    match spec.provider {
+        Provider::Kokoro => {
+            let before = lock(&events.state).clone();
+            let fetched = models.ensure(&[&TTS], &AtomicBool::new(false), &mut downloading(events));
+            events.state(&before);
+            fetched.map_err(|e| format!("couldn't fetch Kokoro: {e:#}"))?;
+            kokoro(&shared.kokoro, models)
+                .map_err(|e| format!("{e:#}"))?
+                .synthesize(text, spec.voice.as_deref())
+                .ok_or_else(|| "Kokoro couldn't say that".to_string())
+        }
+        p if p.is_cloud_speech() => shared.hub.speak(spec, text).map_err(|e| e.to_string()),
+        _ => Err(
+            "GPT-Live and Gemini Live voices are heard in a live conversation: turn \
+                  voice on with that engine to hear one."
+                .into(),
+        ),
+    }
+}
+
+/// Plays `text` in `voice`, even with voice off; `voice_stop_speaking`
+/// stops it. The error is worded for the person (a missing key, say).
+#[tauri::command]
+pub async fn voice_try(
+    app: AppHandle,
+    desk: State<'_, Voice>,
+    voice: VoiceSpec,
+    text: String,
+) -> CommandResult<()> {
+    let (models, shared) = (desk.models.clone(), desk.shared());
+    let events = Events {
+        app,
+        state: desk.state.clone(),
+    };
+    let audio = tauri::async_runtime::spawn_blocking(move || {
+        sample(&voice, &text, &models, &shared, &events)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if let Some((_, engine)) = lock(&desk.engine).as_ref() {
+        engine.play(audio);
+        return Ok(());
+    }
+    let mut trial = lock(&desk.trial);
+    let out = match trial.as_ref() {
+        Some(out) => out.clone(),
+        None => trial
+            .insert(desk_voice::mac::output().map_err(|e| format!("{e:#}"))?)
+            .clone(),
+    };
+    out.play(&audio.samples, audio.rate, Box::new(|| {}));
+    Ok(())
+}
+
+/// Kokoro's voices, as `{id, name, description}`.
+#[tauri::command]
+pub fn voice_kokoro_voices() -> Vec<VoiceInfo> {
+    kokoro_voices()
+}
+
+/// The voices a live engine ("gpt-live", "gemini-live") or Kokoro offers.
+#[tauri::command]
+pub fn voice_engine_voices(engine: Provider) -> Vec<VoiceInfo> {
+    engine_voices(engine)
 }
 
 /// An agent's answer to a request a cloud voice model made (an utterance

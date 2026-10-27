@@ -41,8 +41,17 @@ pub trait Protocol: Send + Sync + 'static {
     fn engine(&self) -> &'static str;
     /// The rate of the audio the model sends back.
     fn output_rate(&self) -> u32;
-    /// What to send first, before any audio.
-    fn start(&self, model: &str, names: &[String], opened_by: Option<&str>) -> Vec<String>;
+    /// Which `Provider` this is, for the roster's per-agent voices.
+    fn provider(&self) -> crate::voices::Provider;
+    /// What to send first, before any audio; `voice` is the agent's own
+    /// (the provider's default when `None`).
+    fn start(
+        &self,
+        model: &str,
+        names: &[String],
+        opened_by: Option<&str>,
+        voice: Option<&str>,
+    ) -> Vec<String>;
     /// 16 kHz microphone audio.
     fn audio(&self, samples: &[f32]) -> String;
     /// The microphone stopped (push-to-talk released).
