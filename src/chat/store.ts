@@ -18,14 +18,21 @@ interface ChatStore {
 const live = new Map<string, Conversation>();
 
 interface AgentsResponse {
-  agents: { id: string; name?: string | null; model?: string | null }[];
+  agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean }[];
 }
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   const res = await fetch(new URL("/api/agents", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
   if (!res.ok) throw new Error(`${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
   const body = (await res.json()) as AgentsResponse;
-  return body.agents.map((a) => ({ hubId: hub.id, id: a.id, name: a.name || a.id, model: a.model ?? null }));
+  return body.agents.map((a) => ({
+    hubId: hub.id,
+    id: a.id,
+    name: a.name || a.id,
+    model: a.model ?? null,
+    provider: a.provider ?? null,
+    isDefault: a.default ?? false,
+  }));
 };
 
 export const useChat = create<ChatStore>((set, get) => ({

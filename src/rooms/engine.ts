@@ -27,7 +27,13 @@ const conversationFor = (room: Room, m: RoomMemberRef): Conversation | null => {
   if (existing) return existing;
   const hub = useChat.getState().hubs.find((h) => h.id === m.hub);
   if (!hub) return null;
-  const c = new Conversation(hub, m.agent, () => {}, `desk:${room.slug}`, (content) => void answered(room.id, m, content));
+  const c = new Conversation(
+    hub,
+    m.agent,
+    (state) => useDesk.getState().setRoomWorking(room.id, memberKey(m), state.working),
+    `desk:${room.slug}`,
+    (content) => void answered(room.id, m, content),
+  );
   conversations.set(key, c);
   return c;
 };

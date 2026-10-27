@@ -1,11 +1,19 @@
 import type { ChatMessage, HubAccount, ServerMessage } from "./types";
 
+/** A turn in progress: from the moment you send until the answer is in. */
+export interface Working {
+  since: number;
+  /** What the agent is doing right now, in plain words. */
+  step: string;
+}
+
 export interface ConversationState {
   connected: boolean;
   sessionId: string | null;
   messages: ChatMessage[];
   typing: boolean;
   streaming: boolean;
+  working: Working | null;
 }
 
 export const emptyConversation = (): ConversationState => ({
@@ -14,7 +22,18 @@ export const emptyConversation = (): ConversationState => ({
   messages: [],
   typing: false,
   streaming: false,
+  working: null,
 });
+
+/** `memory.recall: token refresh` → `memory.recall — token refresh`. */
+export const toolStep = (raw: string): string => {
+  const [name, ...rest] = raw.split(": ");
+  const detail = rest.join(": ").trim();
+  return detail ? `${name} — ${detail.length > 80 ? `${detail.slice(0, 80)}…` : detail}` : (name ?? raw);
+};
+
+const step = (s: ConversationState, text: string): Working | null =>
+  s.working ? { ...s.working, step: text } : { since: Date.now(), step: text };
 
 let counter = 0;
 const nextId = () => `m-${Date.now()}-${++counter}`;
@@ -47,15 +66,24 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
     case "connected":
       return { ...s, sessionId };
     case "typing":
-      return { ...s, typing: true };
-    case "stream_start":
+      return { ...s, typing: true, working: step(s, "Thinking") };
+    case "compact_start":
+      return { ...s, working: step(s, "Tidying up its context") };
+    case "compact_end":
+      return { ...s, working: s.working && step(s, "Thinking") };
+    case "stream_start": {
+      const last = s.messages.at(-1);
+      // Tools ran ahead of the answer: it streams into that same message.
+      const toolsOnly = last?.role === "assistant" && last.status === "streaming" && last.content === "";
       return {
         ...s,
         sessionId,
         typing: false,
         streaming: true,
-        messages: [...closeStreaming(s.messages), message("assistant", "", "streaming")],
+        working: step(s, "Writing"),
+        messages: toolsOnly ? s.messages : [...closeStreaming(s.messages), message("assistant", "", "streaming")],
       };
+    }
     case "stream_delta": {
       const last = s.messages.at(-1);
       if (!last || last.status !== "streaming") return s;
@@ -64,12 +92,13 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
     case "stream_discard":
       return { ...s, streaming: false, typing: true, messages: s.messages.filter((m) => m.status !== "streaming") };
     case "stream_end":
-      return { ...s, streaming: false, messages: closeStreaming(s.messages) };
+      return { ...s, streaming: false, working: null, messages: closeStreaming(s.messages) };
     case "message": {
       const content = msg.content ?? "";
       const last = s.messages.at(-1);
       // A non-streamed answer that repeats what just streamed is the same answer.
-      if (last?.role === "assistant" && last.content === content) return { ...s, typing: false, streaming: false };
+      if (last?.role === "assistant" && last.content === content)
+        return { ...s, typing: false, streaming: false, working: null };
       // Tools ran ahead of the answer: the answer belongs to that message.
       if (last?.role === "assistant" && last.status === "streaming" && last.content === "")
         return {
@@ -77,6 +106,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
           sessionId,
           typing: false,
           streaming: false,
+          working: null,
           messages: [...s.messages.slice(0, -1), { ...last, content, status: "complete" }],
         };
       return {
@@ -84,6 +114,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
         sessionId,
         typing: false,
         streaming: false,
+        working: null,
         messages: [...closeStreaming(s.messages), message("assistant", content)],
       };
     }
@@ -93,11 +124,12 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
       const messages = hasAnswer
         ? updateLast(s.messages, (m) => ({ ...m, tools: [...m.tools, tool] }))
         : [...s.messages, { ...message("assistant", "", "streaming"), tools: [tool] }];
-      return { ...s, messages };
+      return { ...s, messages, working: step(s, toolStep(msg.content ?? "tool")) };
     }
     case "tool_end":
       return {
         ...s,
+        working: s.working && step(s, "Thinking"),
         messages: updateLast(s.messages, (m) => {
           const i = m.tools.findIndex((t) => !t.done);
           return i < 0 ? m : { ...m, tools: m.tools.map((t, j) => (j === i ? { ...t, done: true } : t)) };
@@ -108,6 +140,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
         ...s,
         typing: false,
         streaming: false,
+        working: null,
         messages: [...closeStreaming(s.messages), message("system", msg.error ?? msg.content ?? "Something went wrong", "error")],
       };
     default:
@@ -185,7 +218,7 @@ export class Conversation {
     };
     ws.onclose = () => {
       clearInterval(this.ping);
-      this.set({ ...this.state, connected: false, typing: false, streaming: false });
+      this.set({ ...this.state, connected: false, typing: false, streaming: false, working: null });
       if (!this.closed) this.timer = setTimeout(() => this.open(), Math.min(30_000, 1000 * 2 ** this.retry++));
     };
   }
@@ -195,14 +228,18 @@ export class Conversation {
     this.ws.send(
       JSON.stringify({ type: "chat", content, session_id: this.state.sessionId, channel: this.channel, agent_id: this.agentId }),
     );
-    this.set({ ...this.state, messages: [...this.state.messages, message("user", content)] });
+    this.set({
+      ...this.state,
+      messages: [...this.state.messages, message("user", content)],
+      working: { since: Date.now(), step: "Sending" },
+    });
     return true;
   }
 
   cancel() {
     if (this.ws?.readyState === WebSocket.OPEN && this.state.sessionId)
       this.ws.send(JSON.stringify({ type: "cancel", session_id: this.state.sessionId }));
-    this.set({ ...this.state, typing: false, streaming: false, messages: closeStreaming(this.state.messages) });
+    this.set({ ...this.state, typing: false, streaming: false, working: null, messages: closeStreaming(this.state.messages) });
   }
 
   close() {

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { notificationFor, notify } from "../shell/notify";
+import type { Working } from "../chat/conversation";
 import { DeskHub, type HubConnection } from "./client";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
@@ -14,6 +15,9 @@ interface DeskState {
   activeRoom: string | null;
   /** Agent messages in rooms you aren't looking at. */
   unread: Record<string, number>;
+  /** Members answering in each room right now, by member key. */
+  roomWorking: Record<string, Record<string, Working>>;
+  setRoomWorking: (roomId: string, member: string, working: Working | null) => void;
   openId: string | null;
   view: "rooms" | "floor";
   error: string | null;
@@ -72,6 +76,12 @@ export const useDesk = create<DeskState>((set, get) => ({
   timelines: {},
   activeRoom: null,
   unread: {},
+  roomWorking: {},
+  setRoomWorking: (roomId, member, working) =>
+    set((s) => {
+      const { [member]: _was, ...others } = s.roomWorking[roomId] ?? {};
+      return { roomWorking: { ...s.roomWorking, [roomId]: working ? { ...others, [member]: working } : others } };
+    }),
   openId: null,
   view: "floor",
   error: null,

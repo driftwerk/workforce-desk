@@ -3,9 +3,9 @@ import type { Agent } from "../chat/types";
 import { parseAsk } from "./QuickAsk";
 
 const roster: Agent[] = [
-  { hubId: "dw", id: "allan", name: "allan", model: null },
-  { hubId: "acme", id: "atlas", name: "atlas", model: null },
-  { hubId: "dw", id: "lara", name: "lara", model: null },
+  { hubId: "dw", id: "allan", name: "allan", model: null, provider: null, isDefault: false },
+  { hubId: "acme", id: "atlas", name: "atlas", model: null, provider: null, isDefault: false },
+  { hubId: "dw", id: "lara", name: "lara", model: null, provider: null, isDefault: false },
 ];
 
 describe("parseAsk", () => {

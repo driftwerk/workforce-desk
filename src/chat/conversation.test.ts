@@ -38,6 +38,32 @@ describe("conversation", () => {
     expect(s.messages[0]!.tools).toEqual([{ name: "memory.recall", done: true }]);
   });
 
+  it("says what the agent is doing until the answer is in", () => {
+    const steps = [
+      { type: "typing" },
+      { type: "tool_start", content: "memory.recall: token refresh" },
+      { type: "tool_end" },
+      { type: "stream_start" },
+    ].reduce<ConversationState[]>((acc, m) => [...acc, reduce(acc.at(-1)!, m)], [emptyConversation()]);
+    expect(steps.slice(1).map((s) => s.working?.step)).toEqual(["Thinking", "memory.recall — token refresh", "Thinking", "Writing"]);
+    const since = steps[1]!.working!.since;
+    expect(steps.slice(1).every((s) => s.working?.since === since)).toBe(true);
+    expect(reduce(steps.at(-1)!, { type: "stream_end" }).working).toBeNull();
+    expect(reduce(steps[1]!, { type: "error", error: "x" }).working).toBeNull();
+  });
+
+  it("streams an answer into the message its tools ran in", () => {
+    const s = run([
+      { type: "tool_start", content: "memory: releases" },
+      { type: "tool_end" },
+      { type: "stream_start" },
+      { type: "stream_delta", content: "Nothing saved." },
+      { type: "stream_end" },
+    ]);
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0]).toMatchObject({ content: "Nothing saved.", status: "complete", tools: [{ name: "memory: releases", done: true }] });
+  });
+
   it("shows errors as system messages", () => {
     const s = run([{ type: "error", error: "Unknown agent: x" }]);
     expect(s.messages[0]).toMatchObject({ role: "system", status: "error", content: "Unknown agent: x" });

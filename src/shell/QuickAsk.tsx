@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
-import { agentKey, type Agent } from "../chat/types";
+import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
 import { Mark } from "../ui/Mark";
 
@@ -16,7 +16,7 @@ export const parseAsk = (input: string, roster: Agent[]): { agent: Agent | null;
 };
 
 export function QuickAsk({ onClose }: { onClose: () => void }) {
-  const { roster, openDm, send } = useChat();
+  const { roster, hubs, openDm, send } = useChat();
   const setView = useDesk((s) => s.setView);
   const [input, setInput] = useState("");
   const ref = useRef<HTMLInputElement>(null);
@@ -60,7 +60,7 @@ export function QuickAsk({ onClose }: { onClose: () => void }) {
             <button key={agentKey(a)} type="button" className={`side-row ${parsed.agent === a ? "on" : ""}`} onClick={() => go(a)}>
               <Mark name={a.name} size="sm" />
               <span className="display crew-name">{a.name}</span>
-              <span className="faint small">{a.hubId}</span>
+              <span className="faint small">{describeAgent(a, hubs.find((h) => h.id === a.hubId)?.label ?? a.hubId)}</span>
             </button>
           ))}
         </div>

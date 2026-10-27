@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
-import { agentKey } from "../chat/types";
+import { AgentAbout } from "../chat/AgentAbout";
+import { agentKey, describeAgent } from "../chat/types";
 import { Mark } from "../ui/Mark";
+import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 
 export function Rooms() {
@@ -17,11 +19,12 @@ function DirectMessage() {
   const convo = activeAgent ? conversations[activeAgent] : undefined;
   const hub = hubs.find((h) => h.id === agent?.hubId);
   const [draft, setDraft] = useState("");
+  const [about, setAbout] = useState(false);
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [convo?.messages]);
+  }, [convo?.messages, convo?.working?.step]);
 
   const submitForm = useCallback(
     (summary: string, values: Record<string, unknown>) =>
@@ -45,7 +48,13 @@ function DirectMessage() {
     e.preventDefault();
     if (send(activeAgent, draft)) setDraft("");
   };
-  const busy = convo.typing || convo.streaming;
+  const busy = convo.working !== null;
+  const last = convo.messages.at(-1);
+  // Until any answer text arrives, the reply is the working row (with the
+  // tools it has run), not an empty message.
+  const pending = last?.role === "assistant" && last.status === "streaming" && !last.content ? last : undefined;
+  const answering = last?.role === "assistant" && last.status === "streaming" && !!last.content;
+  const shown = pending ? convo.messages.slice(0, -1) : convo.messages;
 
   return (
     <main className="room" aria-label={`Conversation with ${agent.name}`}>
@@ -54,17 +63,20 @@ function DirectMessage() {
         <span className="room-title">
           <h1 className="display-lg">{agent.name}</h1>
           <span className="faint small">
-            {hub?.label ?? agent.hubId}
-            {agent.model ? ` · ${agent.model}` : ""}
+            {describeAgent(agent, hub?.label ?? agent.hubId)}
             {convo.connected ? "" : " · reconnecting…"}
           </span>
         </span>
+        <button type="button" className="link small room-about" onClick={() => setAbout((a) => !a)}>
+          About
+        </button>
+        {about && <AgentAbout agent={agent} hub={hub} onClose={() => setAbout(false)} />}
       </header>
       <div className="room-scroll">
-        {convo.messages.map((m) => (
+        {shown.map((m) => (
           <Message key={m.id} message={m} author={agent.name} home={hub?.label} onSubmitForm={submitForm} />
         ))}
-        {convo.typing && <p className="faint small typing">{agent.name} is thinking…</p>}
+        {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={submit}>

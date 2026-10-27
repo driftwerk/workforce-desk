@@ -3,8 +3,8 @@ import type { Agent } from "../chat/types";
 import { callPrompt, pickAgent } from "./route";
 
 const roster: Agent[] = [
-  { hubId: "acme", id: "atlas", name: "Atlas", model: null },
-  { hubId: "local", id: "scout", name: "scout", model: null },
+  { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
+  { hubId: "local", id: "scout", name: "scout", model: null, provider: null, isDefault: false },
 ];
 
 describe("tuple routing", () => {

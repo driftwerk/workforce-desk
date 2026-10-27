@@ -8,7 +8,7 @@ import { Turns } from "./useVoice";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
 
-const atlas: Agent = { hubId: "local", id: "atlas", name: "Atlas", model: null };
+const atlas: Agent = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false };
 const key = "local/atlas";
 
 const answer = (content: string): ConversationState => ({

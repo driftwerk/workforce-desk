@@ -52,8 +52,8 @@ beforeEach(() => {
       { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, token: "t" },
     ],
     roster: [
-      { hubId: "dw", id: "allan", name: "allan", model: null },
-      { hubId: "local", id: "scout", name: "scout", model: null },
+      { hubId: "dw", id: "allan", name: "allan", model: null, provider: null, isDefault: false },
+      { hubId: "local", id: "scout", name: "scout", model: null, provider: null, isDefault: false },
     ],
   });
   useDesk.setState({

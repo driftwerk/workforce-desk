@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
 import { Mark } from "../ui/Mark";
+import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { say } from "./engine";
 import { memberKey } from "./routing";
@@ -48,6 +49,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
 
 export function RoomView({ room }: { room: Room }) {
   const { timelines, openThread } = useDesk();
+  const working = useDesk((s) => s.roomWorking[room.id]) ?? {};
   const { roster, hubs } = useChat();
   const [thread, setThread] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -61,7 +63,7 @@ export function RoomView({ room }: { room: Room }) {
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [main.length]);
+  }, [main.length, Object.keys(working).length]);
   useEffect(() => {
     setThread(null);
   }, [room.id]);
@@ -115,6 +117,9 @@ export function RoomView({ room }: { room: Room }) {
               </div>
             );
           })}
+          {Object.entries(working).map(([key, w]) => (
+            <WorkingRow key={key} name={author(key).name} working={w} />
+          ))}
           <div ref={end} />
         </div>
         <Composer room={room} threadId={null} placeholder={`Message ${room.name} — @ to bring someone in`} />

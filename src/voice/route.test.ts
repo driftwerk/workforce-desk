@@ -4,9 +4,9 @@ import type { Agent, ChatMessage } from "../chat/types";
 import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, wakeNames } from "./route";
 
 const roster: Agent[] = [
-  { hubId: "acme", id: "atlas", name: "Atlas", model: null },
-  { hubId: "local", id: "atlas-l", name: "Atlas", model: null },
-  { hubId: "dw", id: "allan", name: "allan", model: null },
+  { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
+  { hubId: "local", id: "atlas-l", name: "Atlas", model: null, provider: null, isDefault: false },
+  { hubId: "dw", id: "allan", name: "allan", model: null, provider: null, isDefault: false },
 ];
 
 const msg = (id: string, role: ChatMessage["role"], content: string, status: ChatMessage["status"] = "complete"): ChatMessage => ({

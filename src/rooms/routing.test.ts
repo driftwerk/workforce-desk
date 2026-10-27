@@ -8,9 +8,9 @@ const members = [
   { hub: "local", agent: "scout" },
 ];
 const roster: Agent[] = [
-  { hubId: "dw", id: "allan", name: "allan", model: null },
-  { hubId: "acme", id: "atlas", name: "Atlas", model: null },
-  { hubId: "local", id: "scout", name: "scout", model: null },
+  { hubId: "dw", id: "allan", name: "allan", model: null, provider: null, isDefault: false },
+  { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
+  { hubId: "local", id: "scout", name: "scout", model: null, provider: null, isDefault: false },
 ];
 
 describe("room routing", () => {

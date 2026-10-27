@@ -1,5 +1,5 @@
 import { useChat } from "../chat/store";
-import { agentKey } from "../chat/types";
+import { agentKey, describeAgent } from "../chat/types";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { logoDot } from "../theme/builtin";
@@ -77,6 +77,7 @@ export function Sidebar({
             key={agentKey(a)}
             type="button"
             className={`side-row crew-row ${view === "rooms" && !activeRoom && activeAgent === agentKey(a) ? "on" : ""}`}
+            title={describeAgent(a, hubLabel(a.hubId))}
             onClick={() => {
               void openRoom(null);
               openDm(agentKey(a));
