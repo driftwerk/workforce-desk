@@ -17,6 +17,10 @@ pub struct Settings {
     /// Agents can be asked from Tuple calls.
     #[serde(default)]
     pub tuple: bool,
+    /// The plan agents on this Mac run on: `claude` or `chatgpt`; unset
+    /// means whichever is connected.
+    #[serde(default)]
+    pub plan: Option<String>,
     /// Wake-by-name and push-to-talk.
     #[serde(default)]
     pub voice: bool,
@@ -39,6 +43,7 @@ impl Default for Settings {
         Self {
             theme: default_theme(),
             tuple: false,
+            plan: None,
             voice: false,
             voice_engine: default_voice_engine(),
         }

@@ -27,7 +27,7 @@ export function PairHub({ onClose }: { onClose: () => void }) {
         } else if (s.status === "pending") {
           setTimeout(poll, 2000);
         } else {
-          setError(s.status === "rejected" ? "The hub turned the pairing down." : "The code expired. Ask for a new one.");
+          setError(s.status === "rejected" ? "The workspace turned the request down." : "The code expired. Ask for a new one.");
           setStep({ kind: "form" });
         }
       } catch (e) {
@@ -54,12 +54,12 @@ export function PairHub({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="sheet" onSubmit={start} aria-label="Pair a hub">
-        <h2 className="display-md">Pair a hub</h2>
+      <form className="sheet" onSubmit={start} aria-label="Connect a workspace">
+        <h2 className="display-md">Connect a workspace</h2>
         {step.kind === "form" && (
           <>
             <label className="field">
-              <span>Hub address</span>
+              <span>Workspace address</span>
               <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="workforce.example.com" required />
             </label>
             <label className="field">
@@ -67,7 +67,7 @@ export function PairHub({ onClose }: { onClose: () => void }) {
               <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Driftwerk" />
             </label>
             <label className="field">
-              <span>Your email on that hub</span>
+              <span>Your email there</span>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             </label>
             {error && <p className="state-blocked small">{error}</p>}
@@ -83,7 +83,10 @@ export function PairHub({ onClose }: { onClose: () => void }) {
         )}
         {step.kind === "waiting" && (
           <>
-            <p className="muted">Approve this code on {step.url.replace(/^https?:\/\//, "")} (its web app’s pairing requests, or ask its admin):</p>
+            <p className="muted">
+              Approve this code in {step.url.replace(/^https?:\/\//, "")} — its pairing requests, the same place you approved your
+              phone — or ask its admin:
+            </p>
             <p className="pair-code mono">{step.code}</p>
             <p className="faint small">Waiting for approval…</p>
             {error && <p className="state-blocked small">{error}</p>}
@@ -96,7 +99,7 @@ export function PairHub({ onClose }: { onClose: () => void }) {
         )}
         {step.kind === "done" && (
           <>
-            <p className="muted">Paired with {step.label}. Its agents are in Crew now.</p>
+            <p className="muted">Connected to {step.label}. Its agents are in your Crew now.</p>
             <footer className="sheet-foot">
               <button type="button" className="btn btn-signal" onClick={onClose}>
                 Done

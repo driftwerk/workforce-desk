@@ -24,7 +24,7 @@ const need = (k: keyof typeof params): string => {
   return v;
 };
 
-let settings = { theme: "system", tuple: false, voice: false, voiceEngine: "cascade" };
+let settings = { theme: "system", tuple: false, plan: null as string | null, voice: false, voiceEngine: "cascade" };
 
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const answer = (v: unknown) => v as T;
@@ -32,7 +32,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     case "hub_connection":
       return answer({ url: need("hub"), token: need("admin") });
     case "hubs_list":
-      return answer([{ id: "local", label: "Local", url: need("hub"), local: true, token: need("device") }]);
+      return answer([{ id: "local", label: "This Mac", url: need("hub"), local: true, token: need("device") }]);
     case "settings_load":
       return answer(settings);
     case "settings_save":

@@ -25,6 +25,8 @@ export const listen = <T>(event: string, f: EventCallback<T>): Promise<UnlistenF
 export interface Settings {
   theme: string;
   tuple: boolean;
+  /** "claude" | "chatgpt", or null for whichever is connected. */
+  plan: string | null;
   voice: boolean;
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;

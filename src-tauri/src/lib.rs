@@ -49,7 +49,7 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
             }
             if Instant::now() > deadline {
                 return Err(
-                    "the local hub has not started — see ~/Library/Application Support/Desk/logs"
+                    "Desk’s background service hasn’t started — see ~/Library/Application Support/Desk/logs"
                         .into(),
                 );
             }

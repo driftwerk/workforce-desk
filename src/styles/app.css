@@ -942,3 +942,15 @@ button {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
 }
+
+.field-text {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+  resize: vertical;
+}
+.field-text:focus {
+  border-color: var(--signal);
+}

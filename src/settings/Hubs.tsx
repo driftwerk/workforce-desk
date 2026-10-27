@@ -4,10 +4,12 @@ import { PairHub } from "../hubs/PairHub";
 import { useDesk } from "../hub/store";
 import { hubAccounts, removeHub } from "../platform";
 
+/** Other Workforce workspaces (Driftwerk, a client's) Desk is connected to. */
 export function Hubs() {
   const { hubs, roster, rosterErrors, setHubs } = useChat();
   const fail = useDesk((s) => s.fail);
-  const [pairing, setPairing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const remote = hubs.filter((h) => !h.local);
   const remove = async (id: string) => {
     try {
       await removeHub(id);
@@ -17,34 +19,34 @@ export function Hubs() {
     }
   };
   return (
-    <section className="settings-pane" aria-label="Hubs">
-      <h1 className="display-lg">Hubs</h1>
+    <section className="settings-pane" aria-label="Workspaces">
+      <h1 className="display-lg">Workspaces</h1>
       <p className="muted">
-        Desk talks to your local hub and to any hub it is paired with, the way your phone is. Each hub keeps its own agents,
-        memory and history.
+        Connect a Workforce workspace you belong to — your company’s or a client’s — and its agents join your Crew, the way they
+        are on your phone.
       </p>
-      <div className="hub-list">
-        {hubs.map((h) => (
-          <div key={h.id} className="hub-row">
-            <span className="hub-name">
-              <b className="display">{h.label}</b>
-              <span className="faint small mono">{h.url}</span>
-            </span>
-            <span className="small muted">
-              {rosterErrors[h.id] ?? `${roster.filter((a) => a.hubId === h.id).length} agents`}
-            </span>
-            {!h.local && (
+      {remote.length > 0 && (
+        <div className="hub-list">
+          {remote.map((h) => (
+            <div key={h.id} className="hub-row">
+              <span className="hub-name">
+                <b className="display">{h.label}</b>
+                <span className="faint small mono">{h.url.replace(/^https?:\/\//, "")}</span>
+              </span>
+              <span className="small muted">
+                {rosterErrors[h.id] ?? `${roster.filter((a) => a.hubId === h.id).length} agents`}
+              </span>
               <button type="button" className="btn" onClick={() => void remove(h.id)}>
-                Unpair
+                Disconnect
               </button>
-            )}
-          </div>
-        ))}
-      </div>
-      <button type="button" className="btn btn-signal" onClick={() => setPairing(true)}>
-        Pair a hub
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" className="btn btn-signal" onClick={() => setConnecting(true)}>
+        Connect a workspace
       </button>
-      {pairing && <PairHub onClose={() => setPairing(false)} />}
+      {connecting && <PairHub onClose={() => setConnecting(false)} />}
     </section>
   );
 }

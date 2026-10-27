@@ -22,6 +22,35 @@ const POSTGRES_STORES: &[&str] = &[
 ];
 
 pub const DATABASE: &str = "workforce";
+
+/// The local agent Desk's hub always has.
+pub const DESK_AGENT: &str = "desk";
+
+const RICH_KINDS: [&str; 6] = ["tables", "charts", "forms", "maps", "diagrams", "images"];
+
+/// Turns on every rich block for an agent whose `config.toml` says nothing
+/// about them — Desk renders them all. An agent's own `[rich]` choices, and
+/// the rest of its file, are left exactly as they are.
+pub fn ensure_rich(workspace: &std::path::Path) -> eyre::Result<()> {
+    let path = workspace.join("config.toml");
+    let source = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let mut doc: toml_edit::DocumentMut = source.parse()?;
+    if doc.contains_key("rich") {
+        return Ok(());
+    }
+    let mut rich = toml_edit::Table::new();
+    for kind in RICH_KINDS {
+        rich.insert(kind, toml_edit::value(true));
+    }
+    doc.insert("rich", toml_edit::Item::Table(rich));
+    std::fs::create_dir_all(workspace)?;
+    std::fs::write(&path, doc.to_string())?;
+    Ok(())
+}
 pub const DATABASE_USER: &str = "postgres";
 
 fn table(entries: &[(&str, Value)]) -> Value {
@@ -92,7 +121,7 @@ pub fn render(paths: &Paths, ports: &HubPorts) -> String {
         "llm".into(),
         table(&[
             ("provider", s("claude-code")),
-            ("default_model", s("claude-sonnet-5-5")),
+            ("default_model", s("standard")),
         ]),
     );
     doc.insert("desk".into(), table(&[("enabled", Value::Boolean(true))]));
@@ -120,6 +149,38 @@ pub fn render(paths: &Paths, ports: &HubPorts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rich_blocks_are_turned_on_once_and_an_agents_own_choice_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        ensure_rich(dir.path()).unwrap();
+        let fresh: Table =
+            toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap())
+                .unwrap();
+        assert!(
+            RICH_KINDS
+                .iter()
+                .all(|k| fresh["rich"][*k].as_bool() == Some(true))
+        );
+
+        let mine = "# my agent\n[llm]\nprovider = \"chatgpt\"\n\n[rich]\ncharts = false\n";
+        std::fs::write(dir.path().join("config.toml"), mine).unwrap();
+        ensure_rich(dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+            mine
+        );
+
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "# keep me\n[llm]\nprovider = \"chatgpt\"\n",
+        )
+        .unwrap();
+        ensure_rich(dir.path()).unwrap();
+        let kept = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(kept.starts_with("# keep me\n[llm]\nprovider = \"chatgpt\"\n"));
+        assert!(kept.contains("[rich]\ntables = true"));
+    }
 
     #[test]
     fn the_hub_listens_on_loopback_and_keeps_everything_in_postgres() {

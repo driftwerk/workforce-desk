@@ -20,11 +20,13 @@ export function Sidebar({
   onAsk,
   onNewSession,
   onNewRoom,
+  onNewCrew,
   onSettings,
 }: {
   onAsk: () => void;
   onNewSession: () => void;
   onNewRoom: () => void;
+  onNewCrew: () => void;
   onSettings: () => void;
 }) {
   const { sessions, openId, open, view, setView, connected, activeRoom, openRoom, unread } = useDesk();
@@ -71,7 +73,12 @@ export function Sidebar({
         ))}
       </div>
       <div className="side-section">
-        <span className="side-label">Crew</span>
+        <span className="side-label side-label-action">
+          Crew
+          <button type="button" className="link small" onClick={onNewCrew}>
+            New
+          </button>
+        </span>
         {roster.map((a) => (
           <button
             key={agentKey(a)}
@@ -107,7 +114,7 @@ export function Sidebar({
       <div className="side-foot">
         <VoicePill />
         <span className="faint small">
-          {connected ? hubs.map((h) => h.label).join(" · ") || "Local hub" : "Connecting to local hub…"}
+          {connected ? hubs.map((h) => h.label).join(" · ") || "This Mac" : "Starting…"}
         </span>
         <div className="seg" role="radiogroup" aria-label="Theme">
           {themes.map((t) => (

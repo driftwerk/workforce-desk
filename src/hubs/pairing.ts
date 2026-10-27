@@ -20,19 +20,19 @@ export const requestPairing = async (url: string, deviceName: string, email: str
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ device_name: deviceName, identity_hint: email || undefined, device_kind: "desk" }),
   });
-  if (res.status === 404) throw new Error("That hub doesn't accept device pairing.");
+  if (res.status === 404) throw new Error("That workspace doesn't accept new devices.");
   if (res.status === 429) throw new Error("Too many pairing attempts — wait a minute and try again.");
-  if (!res.ok) throw new Error(`The hub refused the pairing request (${res.status}).`);
+  if (!res.ok) throw new Error(`The workspace refused the request (${res.status}).`);
   return ((await res.json()) as { code: string }).code;
 };
 
 export const pairingStatus = async (url: string, code: string): Promise<PairStatus> => {
   const res = await fetch(`${url}/api/pair/device/status/${encodeURIComponent(code)}`);
   if (res.status === 404) return { status: "expired" };
-  if (!res.ok) throw new Error(`The hub could not report the pairing (${res.status}).`);
+  if (!res.ok) throw new Error(`The workspace could not say how the request went (${res.status}).`);
   const body = (await res.json()) as { status: string; token?: string };
   if (body.status === "approved") {
-    if (!body.token) throw new Error("Approved, but the hub already handed this token out. Pair again.");
+    if (!body.token) throw new Error("Approved, but that code was already used. Try connecting again.");
     return { status: "approved", token: body.token };
   }
   return body.status === "rejected" ? { status: "rejected" } : { status: "pending" };

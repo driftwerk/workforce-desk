@@ -63,6 +63,44 @@ export class DeskHub {
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;
   saveVault = (path: string, value: string): Promise<void> => this.call("POST", `/api/vault/${path}`, { value });
 
+  /** The local agents themselves, created and configured on the person's behalf. */
+  createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>
+    this.call("POST", "/api/agents", agent);
+  deleteAgent = (id: string): Promise<unknown> => this.call("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+  /** An agent's identity file (SOUL.md, IDENTITY.md, …), as text. */
+  identityFile = async (id: string, file: string): Promise<string> => {
+    const res = await fetch(new URL(`/api/agents/${encodeURIComponent(id)}/identity/${file}`, this.conn.url), {
+      headers: { authorization: `Bearer ${this.conn.token}` },
+    });
+    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+    return res.text();
+  };
+  saveIdentityFile = async (id: string, file: string, text: string): Promise<void> => {
+    const res = await fetch(new URL(`/api/agents/${encodeURIComponent(id)}/identity/${file}`, this.conn.url), {
+      method: "PUT",
+      headers: { authorization: `Bearer ${this.conn.token}`, "content-type": "text/plain" },
+      body: text,
+    });
+    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+  };
+
+  /** An agent's own `config.toml`, as text. */
+  agentConfig = async (id: string): Promise<string> => {
+    const res = await fetch(new URL(`/api/agents/${encodeURIComponent(id)}/config`, this.conn.url), {
+      headers: { authorization: `Bearer ${this.conn.token}` },
+    });
+    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+    return res.text();
+  };
+  saveAgentConfig = async (id: string, toml: string): Promise<void> => {
+    const res = await fetch(new URL(`/api/agents/${encodeURIComponent(id)}/config`, this.conn.url), {
+      method: "PUT",
+      headers: { authorization: `Bearer ${this.conn.token}`, "content-type": "text/plain" },
+      body: toml,
+    });
+    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+  };
+
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
   createRoom = (name: string, members: RoomMemberRef[], defaultMember?: string): Promise<Room> =>
     this.call("POST", "/api/desk/rooms", { name, members, defaultMember });

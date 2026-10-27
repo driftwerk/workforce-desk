@@ -9,6 +9,7 @@ import { useSettings } from "../settings/store";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { prune } from "../rooms/engine";
+import { NewCrew } from "../crew/NewCrew";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { NewSession } from "../session/NewSession";
@@ -39,6 +40,7 @@ export function App() {
   const [newSession, setNewSession] = useState(false);
   const [asking, setAsking] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
+  const [newCrew, setNewCrew] = useState(false);
   const rooms = useDesk((s) => s.rooms);
   useEffect(() => {
     prune(rooms);
@@ -123,6 +125,7 @@ export function App() {
               onAsk={() => setAsking(true)}
               onNewSession={() => setNewSession(true)}
               onNewRoom={() => setNewRoom(true)}
+              onNewCrew={() => setNewCrew(true)}
               onSettings={() => setSettings(true)}
             />
           </ErrorBoundary>
@@ -137,6 +140,7 @@ export function App() {
       {newSession && <NewSession onClose={() => setNewSession(false)} />}
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
+      {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       {error && (
         <div className="toast" role="alert">
           <span>{error}</span>

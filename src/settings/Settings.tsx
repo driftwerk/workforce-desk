@@ -6,7 +6,7 @@ import { Hubs } from "./Hubs";
 import { Plans } from "./Plans";
 import { dragWindow } from "../ui/drag";
 
-const SECTIONS = { appearance: "Appearance", hubs: "Hubs", plans: "Plans", calls: "Calls and voice" } as const;
+const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", plans: "Plans", calls: "Calls and voice" } as const;
 type Section = keyof typeof SECTIONS;
 
 export function Settings({ onClose }: { onClose: () => void }) {

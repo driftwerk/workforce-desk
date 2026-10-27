@@ -3,9 +3,9 @@ import { providerLabel, type Agent, type HubAccount } from "./types";
 /** Where an agent lives and what it runs on, as its hub reports it. */
 export function AgentAbout({ agent, hub, onClose }: { agent: Agent; hub: HubAccount | undefined; onClose: () => void }) {
   const rows: [string, string][] = [
-    ["Lives on", hub ? `${hub.label} — ${hub.url.replace(/^https?:\/\//, "")}` : agent.hubId],
-    ["Runs on", providerLabel(agent.provider) ?? "Not reported by its hub"],
-    ["Model", agent.model ?? "Not reported by its hub"],
+    ["Lives on", !hub ? agent.hubId : hub.local ? "This Mac" : `${hub.label} — ${hub.url.replace(/^https?:\/\//, "")}`],
+    ["Runs on", providerLabel(agent.provider) ?? "Unknown"],
+    ["Model", agent.model ?? "Unknown"],
   ];
   return (
     <div className="about" role="dialog" aria-label={`About ${agent.name}`}>

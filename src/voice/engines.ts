@@ -20,14 +20,14 @@ export const VOICE_ENGINES: readonly VoiceEngineInfo[] = [
     id: "gpt-live",
     label: "OpenAI GPT-Live",
     privacy:
-      "Names are heard on this Mac (an 18 MB download); from the name, or while you hold the key, your voice goes to OpenAI through your hub until you say “thanks” or go quiet. Uses the OpenAI key in your hub’s vault.",
+      "Names are heard on this Mac (an 18 MB download); from the name, or while you hold the key, your voice goes to OpenAI until you say “thanks” or go quiet. Uses the OpenAI key under Plans.",
     cloud: true,
   },
   {
     id: "gemini-live",
     label: "Gemini Live",
     privacy:
-      "Names are heard on this Mac (an 18 MB download); from the name, or while you hold the key, your voice goes to Google until you say “thanks” or go quiet. Uses the Gemini key in your hub’s vault.",
+      "Names are heard on this Mac (an 18 MB download); from the name, or while you hold the key, your voice goes to Google until you say “thanks” or go quiet. Uses the Gemini key under Plans.",
     cloud: true,
   },
 ];
