@@ -527,3 +527,29 @@ legend.set-label {
 .plan-field {
   flex: 1 1 280px;
 }
+
+.voices {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.voices-providers {
+  flex: 0 0 200px;
+  padding: 34px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+}
+.voices-detail {
+  max-width: 720px;
+}
+.voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+}
+.voice-row .btn {
+  min-height: 34px;
+}

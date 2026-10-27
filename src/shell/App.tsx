@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { useDesk } from "../hub/store";
-import { hubAccounts, hubConnection, inApp, onThemesChanged, themeFiles } from "../platform";
+import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe, themeFiles } from "../platform";
 import { useSettings } from "../settings/store";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
@@ -65,11 +65,10 @@ export function App() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
-    let unlisten: (() => void) | undefined;
     const refresh = () => loadCustomThemes().then(setCustom).catch(fail);
     loadSettings().catch(fail);
     refresh();
-    onThemesChanged(refresh).then((u) => (unlisten = u));
+    const unlisten = subscribe(onThemesChanged(refresh));
     hubConnection()
       .then((c) => (stop = connect(c)))
       .then(() => hubAccounts())
@@ -77,7 +76,7 @@ export function App() {
       .catch(fail);
     return () => {
       stop?.();
-      unlisten?.();
+      unlisten();
     };
   }, [connect, fail, loadSettings, setCustom, setHubs]);
 

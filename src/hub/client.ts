@@ -67,6 +67,10 @@ export class DeskHub {
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>
     this.call("POST", "/api/agents", agent);
   deleteAgent = (id: string): Promise<unknown> => this.call("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+  /** Models each plan offers an agent on this Mac, most capable first. */
+  models = (): Promise<{ providers: { id: string; models: { tier: string; model: string }[] }[] }> =>
+    this.call("GET", "/api/desk/models");
+
   /** An agent's identity file (SOUL.md, IDENTITY.md, …), as text. */
   identityFile = async (id: string, file: string): Promise<string> => {
     const res = await fetch(new URL(`/api/agents/${encodeURIComponent(id)}/identity/${file}`, this.conn.url), {

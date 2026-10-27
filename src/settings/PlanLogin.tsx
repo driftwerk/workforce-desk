@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
-import { cancelLogin, onLoginProgress, openUrl, sendLoginCode, startLogin, type LoginProgress, type PlanName } from "../platform";
+import { cancelLogin, onLoginProgress, openUrl, sendLoginCode, startLogin, subscribe, type LoginProgress, type PlanName } from "../platform";
 
 const LABEL: Record<PlanName, string> = { claude: "Claude", chatgpt: "ChatGPT" };
 
@@ -13,15 +13,17 @@ export function PlanLogin({ plan, connected, onConnected }: { plan: PlanName; co
   const connectedRef = useRef(onConnected);
   connectedRef.current = onConnected;
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    onLoginProgress((p, next) => {
-      if (p !== plan) return;
-      setProgress(next);
-      if (next.state === "done") connectedRef.current();
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
-  }, [plan]);
+  useEffect(
+    () =>
+      subscribe(
+        onLoginProgress((p, next) => {
+          if (p !== plan) return;
+          setProgress(next);
+          if (next.state === "done") connectedRef.current();
+        }),
+      ),
+    [plan],
+  );
 
   const busy = progress !== null && !["done", "failed"].includes(progress.state);
   const status = (() => {

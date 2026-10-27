@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useChat } from "../chat/store";
-import { applyPlan, pickPlan, PLAN_LOGIN, type Plan } from "../crew/local";
+import { pickPlan, PLAN_LOGIN, type Plan } from "../crew/local";
 import { useDesk } from "../hub/store";
 import { PlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
@@ -13,7 +12,6 @@ const VOICE_KEYS = [
 /** The plans your agents on this Mac run on, and the keys voice needs. */
 export function Plans() {
   const { hub, fail } = useDesk();
-  const roster = useChat((s) => s.roster);
   const chosen = useSettings((s) => s.plan) as Plan | null;
   const setSettings = useSettings((s) => s.set);
   const [have, setHave] = useState<string[]>([]);
@@ -26,17 +24,12 @@ export function Plans() {
   }, [hub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const plan = pickPlan(chosen, have);
-  const localAgents = roster.filter((a) => a.hubId === "local").map((a) => a.id);
 
-  const use = async (next: Plan) => {
-    if (!hub) return;
+  /** Only where new agents start: each agent keeps the model chosen in its
+   *  own settings. */
+  const use = (next: Plan) => {
     setSettings({ plan: next });
-    try {
-      await applyPlan(hub, localAgents, next);
-      setNote(`Your agents now use your ${next === "claude" ? "Claude" : "ChatGPT"} plan.`);
-    } catch (e) {
-      fail(e);
-    }
+    setNote(`New agents start on your ${next === "claude" ? "Claude" : "ChatGPT"} plan. Change any agent's model in its settings.`);
   };
 
   const save = async (path: string, value: string, done: string) => {
@@ -53,19 +46,19 @@ export function Plans() {
   const connected = async (p: Plan) => {
     const paths = (await hub?.vaultPaths()) ?? [];
     setHave(paths);
-    if (!chosen && pickPlan(null, paths) === p) await use(p);
+    if (!chosen && pickPlan(null, paths) === p) use(p);
   };
 
   return (
     <section className="settings-pane" aria-label="Plans">
       <h1 className="display-lg">Plans</h1>
-      <p className="muted">Your agents on this Mac work on your own Claude or ChatGPT plan. Connect one, or both and choose.</p>
+      <p className="muted">Your agents on this Mac work on your own Claude or ChatGPT plan. Connect one or both — each agent can use either.</p>
 
       <div className="field">
-        <span>Your agents use</span>
+        <span>New agents start on</span>
         <div className="seg" role="radiogroup" aria-label="Plan">
           {(["claude", "chatgpt"] as const).map((p) => (
-            <button key={p} type="button" role="radio" aria-checked={plan === p} onClick={() => void use(p)}>
+            <button key={p} type="button" role="radio" aria-checked={plan === p} onClick={() => use(p)}>
               {p === "claude" ? "Claude plan" : "ChatGPT plan"}
             </button>
           ))}

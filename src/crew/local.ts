@@ -58,15 +58,44 @@ export const pickPlan = (chosen: Plan | null, connected: readonly string[]): Pla
   return connected.includes(PLAN_LOGIN.chatgpt) && !connected.includes(PLAN_LOGIN.claude) ? "chatgpt" : "claude";
 };
 
-/** An agent's config with Desk's settings in it: the plan, the standard
- *  model of that plan, and every rich block on. Anything else in the file
- *  stays. */
-export const withDeskSettings = (source: string, plan: Plan): string => {
-  const doc = (source.trim() ? parse(source) : {}) as Record<string, unknown>;
-  const llm = (doc.llm ?? {}) as Record<string, unknown>;
-  doc.llm = { ...llm, provider: PLAN_PROVIDER[plan], default_model: "standard" };
+type Doc = Record<string, unknown>;
+
+const parseDoc = (source: string): Doc => (source.trim() ? (parse(source) as Doc) : {});
+
+/** An agent's config with Desk's settings in it: the plan, a model of that
+ *  plan (its standard tier unless named), and every rich block on. Anything
+ *  else in the file stays. */
+export const withDeskSettings = (source: string, plan: Plan, model = "standard"): string => {
+  const doc = parseDoc(source);
+  const llm = (doc.llm ?? {}) as Doc;
+  doc.llm = { ...llm, provider: PLAN_PROVIDER[plan], default_model: model };
   doc.rich = { ...RICH, ...((doc.rich as object | undefined) ?? {}) };
   return stringify(doc) + "\n";
+};
+
+/** Voice providers the hub speaks with too (voice notes, clips). */
+const HUB_SPEECH = new Set(["fish_audio", "elevenlabs", "openai"]);
+
+/** An agent's config speaking with `voice` wherever the hub speaks for it;
+ *  a voice the hub can't use (Kokoro, the live engines) leaves it on the
+ *  hub's default. */
+export const withVoice = (source: string, voice: { provider: string; model?: string; voice?: string }): string => {
+  const doc = parseDoc(source);
+  const llm = { ...((doc.llm ?? {}) as Doc) };
+  if (HUB_SPEECH.has(voice.provider)) {
+    llm.speech = Object.fromEntries(
+      Object.entries({ provider: voice.provider, model: voice.model, voice: voice.voice }).filter(([, v]) => v !== undefined),
+    );
+  } else delete llm.speech;
+  doc.llm = llm;
+  return stringify(doc) + "\n";
+};
+
+/** The plan and model an agent's config is on. */
+export const planOf = (source: string): { plan: Plan | null; model: string | null } => {
+  const llm = (parseDoc(source).llm ?? {}) as Doc;
+  const plan = (Object.keys(PLAN_PROVIDER) as Plan[]).find((p) => PLAN_PROVIDER[p] === llm.provider) ?? null;
+  return { plan, model: typeof llm.default_model === "string" ? llm.default_model : null };
 };
 
 export async function createLocalAgent(
@@ -84,7 +113,10 @@ export async function createLocalAgent(
   return id;
 }
 
-/** Points every agent on this Mac at a plan, taking effect on its next turn. */
-export async function applyPlan(hub: DeskHub, agentIds: readonly string[], plan: Plan): Promise<void> {
-  for (const id of agentIds) await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), plan));
+export async function setAgentModel(hub: DeskHub, id: string, plan: Plan, model: string): Promise<void> {
+  await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), plan, model));
+}
+
+export async function setAgentVoice(hub: DeskHub, id: string, voice: { provider: string; model?: string; voice?: string }): Promise<void> {
+  await hub.saveAgentConfig(id, withVoice(await hub.agentConfig(id), voice));
 }

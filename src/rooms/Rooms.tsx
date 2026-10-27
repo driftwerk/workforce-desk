@@ -68,7 +68,7 @@ function DirectMessage() {
           </span>
         </span>
         <button type="button" className="link small room-about" onClick={() => setAbout((a) => !a)}>
-          About
+          Settings
         </button>
         {about && <AgentAbout agent={agent} hub={hub} onClose={() => setAbout(false)} />}
       </header>

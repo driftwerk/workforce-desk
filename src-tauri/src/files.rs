@@ -9,6 +9,24 @@ use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
+/// A voice from any provider Desk speaks with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoiceSpec {
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<String>,
+}
+
+fn default_voice() -> VoiceSpec {
+    VoiceSpec {
+        provider: "fish_audio".into(),
+        model: None,
+        voice: Some("802e3bc2b27e49c2995d23ef70e6ac89".into()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -21,6 +39,12 @@ pub struct Settings {
     /// means whichever is connected.
     #[serde(default)]
     pub plan: Option<String>,
+    /// The voice agents speak with unless they have their own.
+    #[serde(default = "default_voice")]
+    pub default_voice: VoiceSpec,
+    /// Agents' own voices, by agent key (`hub/agent`).
+    #[serde(default)]
+    pub agent_voices: std::collections::BTreeMap<String, VoiceSpec>,
     /// Wake-by-name and push-to-talk.
     #[serde(default)]
     pub voice: bool,
@@ -44,6 +68,8 @@ impl Default for Settings {
             theme: default_theme(),
             tuple: false,
             plan: None,
+            default_voice: default_voice(),
+            agent_voices: Default::default(),
             voice: false,
             voice_engine: default_voice_engine(),
         }

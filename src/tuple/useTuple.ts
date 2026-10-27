@@ -3,7 +3,7 @@ import { Conversation } from "../chat/conversation";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
-import { disableTuple, enableTuple, onTupleRequest, replyOnTuple } from "../platform";
+import { disableTuple, enableTuple, onTupleRequest, replyOnTuple, subscribe } from "../platform";
 import { callPrompt, pickAgent } from "./route";
 
 /** While enabled, follows Tuple calls: requests go to the named agent on a
@@ -28,8 +28,7 @@ export function useTuple(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) return;
-    let unlisten: (() => void) | undefined;
-    onTupleRequest((r) => {
+    const pending = onTupleRequest((r) => {
       const agent = pickAgent(r.agent, useChat.getState().roster, last.current);
       if (!agent) return;
       last.current = agent;
@@ -48,8 +47,8 @@ export function useTuple(enabled: boolean) {
         if (!c.send(prompt) && n < 60) setTimeout(() => attempt(n + 1), 250);
       };
       attempt(0);
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    });
+    return subscribe(pending);
   }, [enabled, fail]);
 
   useEffect(

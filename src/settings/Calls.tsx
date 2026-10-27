@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { onTupleStatus, type TupleStatus } from "../platform";
+import { onTupleStatus, subscribe, type TupleStatus } from "../platform";
 import { VOICE_ENGINES, voiceEngine } from "../voice/engines";
 import { useSettings } from "./store";
 
@@ -7,11 +7,7 @@ export function Calls() {
   const { tuple, voice, voiceEngine: engineId, set } = useSettings();
   const engine = voiceEngine(engineId);
   const [status, setStatus] = useState<TupleStatus>({ state: "off" });
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    onTupleStatus(setStatus).then((u) => (unlisten = u));
-    return () => unlisten?.();
-  }, []);
+  useEffect(() => subscribe(onTupleStatus(setStatus)), []);
   return (
     <section className="settings-pane" aria-label="Calls">
       <h1 className="display-lg">Calls and voice</h1>

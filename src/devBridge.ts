@@ -24,7 +24,15 @@ const need = (k: keyof typeof params): string => {
   return v;
 };
 
-let settings = { theme: "system", tuple: false, plan: null as string | null, voice: false, voiceEngine: "cascade" };
+let settings = {
+  theme: "system",
+  tuple: false,
+  plan: null as string | null,
+  defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },
+  agentVoices: {},
+  voice: false,
+  voiceEngine: "cascade",
+};
 
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const answer = (v: unknown) => v as T;

@@ -1,6 +1,6 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { agentId, instructions, pickPlan, withDeskSettings, withName, withPurpose } from "./local";
+import { agentId, instructions, pickPlan, planOf, withDeskSettings, withName, withPurpose, withVoice } from "./local";
 
 describe("local crew", () => {
   it("makes a unique id from a name", () => {
@@ -23,6 +23,22 @@ describe("local crew", () => {
     expect(again.match(/## What You're For/g)).toHaveLength(1);
     expect(again).toContain("> Watch deploys.");
     expect(again).not.toContain("Watch CI.");
+  });
+
+  it("sets an agent's own model and reads it back", () => {
+    const cfg = withDeskSettings("", "claude", "opus");
+    expect(planOf(cfg)).toEqual({ plan: "claude", model: "opus" });
+    expect(planOf("")).toEqual({ plan: null, model: null });
+  });
+
+  it("gives the hub an agent's voice when the hub can speak with it", () => {
+    const fish = parse(withVoice("[llm]\nprovider = \"chatgpt\"\n", { provider: "fish_audio", voice: "abc" })) as Record<string, Record<string, unknown>>;
+    expect(fish.llm).toEqual({ provider: "chatgpt", speech: { provider: "fish_audio", voice: "abc" } });
+    const local = parse(withVoice(withVoice("", { provider: "fish_audio", voice: "abc" }), { provider: "kokoro", voice: "af_heart" })) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(local.llm!.speech).toBeUndefined();
   });
 
   it("names the agent in its identity", () => {

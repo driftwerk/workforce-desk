@@ -22,11 +22,36 @@ export const invoke = async <T>(cmd: string, args?: Record<string, unknown>): Pr
 export const listen = <T>(event: string, f: EventCallback<T>): Promise<UnlistenFn> =>
   preview ? Promise.resolve(() => {}) : tauriListen<T>(event, f);
 
+/** A listener as an effect cleanup. `listen` resolves later, so a cleanup
+ *  that runs first — React mounts effects twice in development — would
+ *  otherwise leave the listener behind and every event would fire twice. */
+export function subscribe(pending: Promise<UnlistenFn>): () => void {
+  let gone = false;
+  let unlisten: UnlistenFn | undefined;
+  void pending.then((u) => (gone ? u() : (unlisten = u)));
+  return () => {
+    gone = true;
+    unlisten?.();
+  };
+}
+
+/** A voice from any provider: on-device Kokoro, Fish Audio, ElevenLabs,
+ *  OpenAI, or a cloud conversation engine's own voices. */
+export interface VoiceSpec {
+  provider: string;
+  model?: string;
+  voice?: string;
+}
+
 export interface Settings {
   theme: string;
   tuple: boolean;
-  /** "claude" | "chatgpt", or null for whichever is connected. */
+  /** The plan new agents start on: "claude" | "chatgpt", or null for
+   *  whichever is connected. */
   plan: string | null;
+  defaultVoice: VoiceSpec;
+  /** Agents' own voices, by agent key. */
+  agentVoices: Record<string, VoiceSpec>;
   voice: boolean;
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;
