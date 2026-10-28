@@ -267,6 +267,18 @@ pub fn run() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     if let Ok(paths) = Paths::new() {
         init_logging(&paths);
+        // `Desk --unregister-helper`: takes Desk Helper out of Login Items
+        // and stops it, for uninstall scripts and for testing a build.
+        if std::env::args().any(|a| a == "--unregister-helper") {
+            let code = match helper::unregister(&paths) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("Couldn't remove Desk Helper: {e}");
+                    1
+                }
+            };
+            std::process::exit(code);
+        }
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())

@@ -123,9 +123,17 @@ DESK_HOME=/tmp/desk-try DESK_REGISTER_HELPER=1 Desk.app/Contents/MacOS/desk
 ```
 
 With `DESK_HOME` set, secrets go to a file in that folder, not the keychain.
-`DESK_REGISTER_HELPER=1` registers the bundled helper anyway. Afterwards,
-unregister it with **Settings → Help → Remove Desk's data…** from that copy, or
-with `sfltool`, and check `sfltool dumpbtm | grep -i desk` to confirm it's gone.
+`DESK_REGISTER_HELPER=1` registers the bundled helper anyway. Afterwards, stop
+and unregister it from the same copy:
+
+```sh
+DESK_HOME=/tmp/desk-try DESK_REGISTER_HELPER=1 Desk.app/Contents/MacOS/desk --unregister-helper
+sfltool dumpbtm | grep -i -A3 "xyz.driftwerk.desk.helper"   # read-only check: nothing left
+```
+
+`Desk --unregister-helper` (no `DESK_HOME`) is also how an uninstall script
+removes the installed helper. Settings → Help → **Remove Desk's data…** does
+the same and can delete the data.
 
 ## Development
 

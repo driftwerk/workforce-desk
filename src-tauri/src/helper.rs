@@ -117,7 +117,8 @@ pub fn ensure(paths: &Paths) -> Status {
     let changed = plist.is_some() && std::fs::read(&seen).ok() != plist;
     let result = (|| -> Result<Status> {
         let mut status = sm::status()?;
-        if changed && status != Status::NotRegistered {
+        let registered = matches!(status, Status::Running | Status::NeedsApproval);
+        if changed && registered {
             tracing::info!("Desk Helper's definition changed; registering it again");
             sm::unregister()?;
             status = Status::NotRegistered;
@@ -163,7 +164,7 @@ pub fn unregister(paths: &Paths) -> Result<()> {
     if !managed(&exe) {
         return Ok(());
     }
-    if sm::status()? != Status::NotRegistered {
+    if matches!(sm::status()?, Status::Running | Status::NeedsApproval) {
         sm::unregister()?;
     }
     let _ = std::fs::remove_file(paths.root.join("helper.plist"));
@@ -197,10 +198,9 @@ mod sm {
         Ok(match s {
             SMAppServiceStatus::Enabled => Status::Running,
             SMAppServiceStatus::RequiresApproval => Status::NeedsApproval,
-            SMAppServiceStatus::NotRegistered => Status::NotRegistered,
-            _ => Status::Failed {
-                message: "Desk Helper is missing from this copy of Desk".into(),
-            },
+            // `NotFound` until the first registration as well as when the
+            // plist is missing; registering says which.
+            _ => Status::NotRegistered,
         })
     }
 

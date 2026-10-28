@@ -23,6 +23,7 @@ use tokio::signal::unix::{SignalKind, signal};
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
+const POSTGRES_TIMEOUT: Duration = Duration::from_secs(180);
 
 fn free_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
@@ -76,11 +77,29 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
         username: config::DATABASE_USER.into(),
         password,
         temporary: false,
+        // The first start unpacks Postgres and runs initdb, which takes
+        // longer than the default 5 s on a busy or older Mac.
+        timeout: Some(POSTGRES_TIMEOUT),
         ..Settings::default()
     };
+    // A first initdb that didn't finish leaves a data directory that looks
+    // made but isn't; the marker says to start it over.
+    let first_run = paths.hub().join("postgres.initializing");
+    if first_run.exists() {
+        tracing::warn!("the last first start of Postgres didn't finish; starting it over");
+        match std::fs::remove_dir_all(paths.postgres_data()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).context("clearing an unfinished Postgres"),
+        }
+    }
+    if !paths.postgres_data().join("postgresql.conf").exists() {
+        std::fs::write(&first_run, "")?;
+    }
     let mut pg = PostgreSQL::new(settings);
     pg.setup().await.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
+    let _ = std::fs::remove_file(&first_run);
     if !pg.database_exists(config::DATABASE).await? {
         pg.create_database(config::DATABASE).await?;
     }
