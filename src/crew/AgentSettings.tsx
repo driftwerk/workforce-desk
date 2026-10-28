@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { purposeOf, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -36,10 +36,22 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
 function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefined; local: boolean }) {
   const desk = useDesk((s) => s.hub);
   const refreshDrafts = useDrafts((s) => s.refresh);
+  const { rename, refreshRoster } = useChat();
   const [saved, setSaved] = useState<string | null>(null);
   const [purpose, setPurpose] = useState("");
+  // The name as saved, kept while a rename is in flight so it can go back.
+  const [savedName, setSavedName] = useState(agent.name);
+  const [name, setName] = useState(agent.name);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSavedName(agent.name);
+    setName(agent.name);
+    setState("idle");
+    setProblem(null);
+    // A new agent, not a new name: the roster renames during a save.
+  }, [agent.hubId, agent.id]);
 
   useEffect(() => {
     if (!local || !desk) return;
@@ -57,29 +69,69 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
     };
   }, [desk, agent.id, local]);
 
+  const key = agentKey(agent);
+  const nextName = name.trim();
+  const renaming = local && nextName !== "" && nextName !== savedName;
+  const changed = (saved !== null && purpose.trim() !== saved) || renaming;
+  const valid = !!nextName && (saved === null || !!purpose.trim() || purpose.trim() === saved);
+
   const save = async () => {
-    if (!desk || !purpose.trim()) return;
+    if (!desk || !valid) return;
+    const purposeChanged = saved !== null && purpose.trim() !== saved;
     setState("saving");
     setProblem(null);
     try {
-      await setAgentPurpose(desk, agent.id, agent.name, purpose);
-      refreshDrafts(agentKey(agent));
-      setSaved(purpose.trim());
-      setPurpose(purpose.trim());
+      if (renaming) {
+        // Everywhere at once; put back if the rename doesn't take.
+        rename(key, nextName);
+        try {
+          await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
+        } catch (e) {
+          rename(key, savedName);
+          throw e;
+        }
+        setSavedName(nextName);
+        setName(nextName);
+      } else if (purposeChanged) {
+        await setAgentPurpose(desk, agent.id, agent.name, purpose);
+      }
+      refreshDrafts(key);
+      if (purposeChanged) {
+        setSaved(purpose.trim());
+        setPurpose(purpose.trim());
+      }
       setState("saved");
+      if (renaming) void refreshRoster();
     } catch (e) {
       setProblem(plainError(e));
       setState("idle");
     }
   };
 
-  const changed = saved !== null && purpose.trim() !== saved;
+  const discard = () => {
+    setPurpose(saved ?? "");
+    setName(savedName);
+    setProblem(null);
+  };
+
   return (
     <section className="agent-section" aria-labelledby="about-head">
       <h2 id="about-head">About</h2>
       <label className="field-stack">
         <span className="field-label">Name</span>
-        <input value={agent.name} readOnly aria-readonly="true" />
+        {local ? (
+          <input
+            value={name}
+            maxLength={60}
+            disabled={state === "saving"}
+            onChange={(e) => {
+              setName(e.target.value);
+              setState("idle");
+            }}
+          />
+        ) : (
+          <input value={agent.name} readOnly aria-readonly="true" />
+        )}
       </label>
       {local ? (
         <label className="field-stack">
@@ -88,7 +140,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
             rows={2}
             value={purpose}
             disabled={saved === null}
-            placeholder={saved === null ? "…" : `Say what ${agent.name} is for, and Desk writes it into their files.`}
+            placeholder={saved === null ? "…" : `Say what ${nextName || agent.name} is for, and Desk writes it into their files.`}
             onChange={(e) => {
               setPurpose(e.target.value);
               setState("idle");
@@ -108,15 +160,15 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
         <div className="agent-section-actions">
           {changed && (
             <>
-              <button type="button" className="btn btn-signal" disabled={state === "saving" || !purpose.trim()} onClick={() => void save()}>
+              <button type="button" className="btn btn-signal" disabled={state === "saving" || !valid} onClick={() => void save()}>
                 {state === "saving" ? "Saving…" : "Save"}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setPurpose(saved ?? "")}>
+              <button type="button" className="btn btn-ghost" disabled={state === "saving"} onClick={discard}>
                 Discard
               </button>
             </>
           )}
-          {!changed && state === "saved" && <span className="small state-done">Saved into their Soul, Agents and Welcome files.</span>}
+          {!changed && state === "saved" && <span className="small state-done">Saved into their files.</span>}
           {problem && <span className="small state-blocked">{problem}</span>}
         </div>
       )}

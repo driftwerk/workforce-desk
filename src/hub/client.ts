@@ -113,6 +113,8 @@ export class DeskHub {
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>
     this.call("POST", "/api/agents", agent);
   deleteAgent = (id: string): Promise<unknown> => this.call("DELETE", `/api/agents/${encodeURIComponent(id)}`);
+  renameAgent = (id: string, name: string): Promise<unknown> =>
+    this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, { name });
   /** What agents on this Mac can think with, connected or not. */
   providers = async (): Promise<Provider[]> =>
     (await this.desk<{ providers: Provider[] }>("GET", "/api/desk/providers")).providers;

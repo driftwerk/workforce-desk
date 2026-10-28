@@ -13,6 +13,8 @@ interface ChatStore {
   openDm: (key: string) => void;
   send: (key: string, content: string) => boolean;
   cancel: (key: string) => void;
+  /** Shows an agent under a new name at once (until the roster is read again). */
+  rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
   forget: (key: string) => void;
 }
@@ -79,6 +81,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   send: (key, content) => live.get(key)?.send(content) ?? false,
   cancel: (key) => live.get(key)?.cancel(),
+  rename: (key, name) => set((s) => ({ roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)) })),
   forget: (key) => {
     live.get(key)?.close();
     live.delete(key);

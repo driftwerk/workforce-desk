@@ -1,6 +1,17 @@
 import { parse } from "smol-toml";
-import { describe, expect, it } from "vitest";
-import { agentId, instructions, purposeOf, withJob, withName, withPurpose, withWelcome } from "./local";
+import { describe, expect, it, vi } from "vitest";
+import { HubError, type DeskHub } from "../hub/client";
+import {
+  agentId,
+  instructions,
+  purposeOf,
+  RENAME_UNAVAILABLE,
+  renameLocalAgent,
+  withJob,
+  withName,
+  withPurpose,
+  withWelcome,
+} from "./local";
 import { withVoice } from "./voice";
 
 describe("local crew", () => {
@@ -65,5 +76,53 @@ describe("local crew", () => {
     const again = withWelcome(once, "Ledger", "Watch deploys.");
     expect(again.match(/Greet them as/g)).toHaveLength(1);
     expect(again).toContain("Watch deploys.");
+  });
+});
+
+/** A hub keeping identity files in memory. */
+const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> = () => Promise.resolve({})) => {
+  const hub = {
+    renameAgent: vi.fn(rename),
+    identityFile: vi.fn(async (_id: string, f: string) => files[f] ?? ""),
+    saveIdentityFile: vi.fn(async (_id: string, f: string, t: string) => void (files[f] = t)),
+  };
+  return hub as typeof hub & DeskHub;
+};
+
+describe("renaming an agent", () => {
+  it("renames it, then puts the new name in its identity and the sections written from what it's for", async () => {
+    const files: Record<string, string> = {
+      "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
+      "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
+      "AGENTS.md": withJob("# Guidelines\n", "Ledger", "Watch the bill."),
+      "WELCOME.md": withWelcome("Keep it short.\n", "Ledger", "Watch the bill."),
+    };
+    const hub = filesHub(files);
+    await renameLocalAgent(hub, "ledger", "  Penny ");
+    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny");
+    expect(files["IDENTITY.md"]).toBe("# Identity\n- **Name:** Penny\n- **Vibe:** calm\n");
+    expect(files["SOUL.md"]).toContain("You are Penny.");
+    expect(files["SOUL.md"]).not.toContain("Ledger");
+    expect(files["AGENTS.md"]).toContain("As Penny,");
+    expect(files["WELCOME.md"]).toMatch(/^Greet them as Penny, .*Watch the bill\./);
+    expect(purposeOf(files["SOUL.md"]!)).toBe("Watch the bill.");
+  });
+
+  it("writes a new purpose along with the new name", async () => {
+    const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill."), "AGENTS.md": "# G\n" };
+    await renameLocalAgent(filesHub(files), "ledger", "Penny", "Watch deploys.");
+    expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
+    expect(files["SOUL.md"]).toContain("You are Penny.");
+  });
+
+  it("leaves the files alone and says so plainly when the hub can't rename yet", async () => {
+    for (const status of [404, 405]) {
+      const files: Record<string, string> = { "IDENTITY.md": "- **Name:** Ledger\n" };
+      const hub = filesHub(files, () => Promise.reject(new HubError(status, "not found")));
+      await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow(RENAME_UNAVAILABLE);
+      expect(hub.saveIdentityFile).not.toHaveBeenCalled();
+      expect(files["IDENTITY.md"]).toBe("- **Name:** Ledger\n");
+    }
+    expect(RENAME_UNAVAILABLE).not.toMatch(/hub|api|http|40\d/i);
   });
 });

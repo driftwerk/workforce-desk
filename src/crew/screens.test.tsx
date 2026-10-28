@@ -6,7 +6,9 @@ import type { Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import { BrainDialog } from "../providers/BrainDialog";
 import { useProviders } from "../providers/store";
+import { useChat } from "../chat/store";
 import { AgentFiles } from "./AgentFiles";
+import { AgentSettings } from "./AgentSettings";
 import { useDrafts } from "./files";
 
 vi.mock("../platform", async (original) => ({
@@ -179,5 +181,44 @@ describe("Files", () => {
     await screen.findByDisplayValue("# Soul");
     fireEvent.click(screen.getByRole("button", { name: "History" }));
     expect(await screen.findByText(/Earlier versions aren’t kept on this Mac yet/)).toBeTruthy();
+  });
+});
+
+describe("Renaming in Settings", () => {
+  const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
+  const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+
+  const renderSettings = (hub: DeskHub) => {
+    useDesk.setState({ hub });
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
+    const view = () => render(<AgentSettings agent={useChat.getState().roster[0]!} hub={local} onOpenFiles={() => {}} />);
+    return view();
+  };
+
+  it("renames at once everywhere the roster shows it", async () => {
+    let finish: () => void = () => {};
+    const hub = fakeHub({ renameAgent: vi.fn(() => new Promise<void>((r) => (finish = r))) } as Partial<DeskHub>);
+    renderSettings(hub);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(useChat.getState().roster[0]!.name).toBe("Penny");
+    await act(async () => finish());
+    await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy());
+    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny");
+    expect(useChat.getState().roster[0]!.name).toBe("Penny");
+  });
+
+  it("puts the name back and says why when the hub can't rename yet", async () => {
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.reject(new HubError(405, "Method Not Allowed"))) } as Partial<DeskHub>);
+    renderSettings(hub);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText(/Renaming isn’t available yet/)).toBeTruthy();
+    expect(useChat.getState().roster[0]!.name).toBe("Ledger");
+    expect(hub.saveIdentityFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(name.value).toBe("Ledger");
   });
 });
