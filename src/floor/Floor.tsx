@@ -1,64 +1,12 @@
 import { useEffect } from "react";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
-import { Approval } from "../session/Approval";
-import { Mark } from "../ui/Mark";
-import { plain } from "../ui/plain";
 import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
 import { RestoreBanner } from "./RestoreBanner";
+import { GROUPS, Tile } from "./SessionTile";
 
-const LABEL: Record<Session["state"], string> = {
-  starting: "starting",
-  working: "working",
-  blocked: "needs you",
-  done: "done",
-  idle: "idle",
-  interrupted: "interrupted",
-  stopped: "stopped",
-  closed: "closed",
-};
-
-interface Group {
-  title: string;
-  match: (s: Session) => boolean;
-}
-
-const GROUPS: Group[] = [
-  { title: "Needs you", match: (s) => s.state === "blocked" },
-  { title: "Working", match: (s) => s.state === "working" || s.state === "starting" },
-  { title: "Recently done and idle", match: (s) => (s.state === "done" || s.state === "idle") && s.live },
-  { title: "In other terminals", match: (s) => s.origin === "external" && s.live === false && s.state !== "closed" },
-  { title: "Not running", match: (s) => !s.live && s.origin === "desk" },
-];
-
-const home = (s: Session): string => (s.origin === "external" ? "other terminal" : "local");
-
-const task = (s: Session): string => s.goal || (s.lastPrompt && plain(s.lastPrompt)) || "No goal yet";
-
-const log = (s: Session): string | null =>
-  s.currentTool ? `● ${s.currentTool}` : s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
-
-export function Tile({ session }: { session: Session }) {
-  const open = useDesk((s) => s.open);
-  const text = log(session);
-  return (
-    <article className={`tile tile-${session.state}`}>
-      <button type="button" className="tile-open" onClick={() => open(session.id)}>
-        <Mark name={session.name} engine={session.engine} state={session.state} size="lg" />
-        <span className="tile-name">
-          <span className="mono tile-title">{session.name}</span>
-          <span className={`tile-state state-${session.state}`}>
-            {LABEL[session.state]} · {home(session)}
-          </span>
-        </span>
-      </button>
-      <span className="tile-task">{task(session)}</span>
-      {text && <pre className="tile-log">{text}</pre>}
-      {session.pending && <Approval session={session} compact />}
-    </article>
-  );
-}
+export { Tile } from "./SessionTile";
 
 const summary = (sessions: Session[]): string => {
   const n = (f: (s: Session) => boolean) => sessions.filter(f).length;

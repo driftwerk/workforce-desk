@@ -2,19 +2,57 @@ import { RichMarkdown } from "@workforce/rich";
 import { useState } from "react";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { setAgentOversight } from "../crew/oversight";
-import { useDesk } from "../hub/store";
-import type { Brief, Overview } from "../hub/types";
+import { sortedSessions, useDesk } from "../hub/store";
+import type { Brief, Overview, OverviewItem, Session } from "../hub/types";
 import { RestoreBanner } from "../floor/RestoreBanner";
+import { GROUPS, Tile } from "../floor/SessionTile";
 import { Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { ActivityRail } from "./ActivityRail";
 import { ItemTile } from "./ItemTile";
-import { clock, group } from "./overview";
+import { clock } from "./overview";
 import { localKey, openLocalDm, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 
+/** Where an agent goes on the Floor, by what the overview says it's doing. */
+const AGENT_GROUP: Record<OverviewItem["state"], string> = {
+  needs_you: "Needs you",
+  working: "Working",
+  quiet: "Working",
+  done: "Done today",
+  idle: "Recently done and idle",
+  failed: "Recently done and idle",
+  stopped: "Recently done and idle",
+};
+
+const ORDER = ["Needs you", "Working", "Done today", "Recently done and idle", "In other terminals", "Not running"];
+
+interface FloorGroup {
+  title: string;
+  agents: OverviewItem[];
+  sessions: Session[];
+}
+
+/** Every session Desk knows, grouped as the Floor always has, with the crew's
+ *  agents beside them in the matching group. */
+export const floorGroups = (overview: Overview, all: Session[]): FloorGroup[] => {
+  const groups = new Map<string, FloorGroup>(ORDER.map((title) => [title, { title, agents: [], sessions: [] }]));
+  const seen = new Set<string>();
+  for (const g of GROUPS) {
+    for (const s of all) {
+      if (seen.has(s.id) || !g.match(s)) continue;
+      seen.add(s.id);
+      groups.get(g.title)?.sessions.push(s);
+    }
+  }
+  for (const item of overview.items) {
+    if (item.kind === "agent") groups.get(AGENT_GROUP[item.state] ?? "Recently done and idle")?.agents.push(item);
+  }
+  return [...groups.values()].filter((g) => g.agents.length + g.sessions.length > 0);
+};
+
 /** The Floor as the crew's overview: the overseer's brief, then who needs
- *  you, who's working and what's done today, beside what's happening. */
+ *  you, who's working and what's done, beside what's happening. */
 export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
   const sessions = useDesk((s) => s.sessions);
   const activitySupport = useOverview((s) => s.activitySupport);
@@ -22,19 +60,24 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const managerAgent = useLocalAgent(manager?.agentId);
   const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
   const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
-  const g = group(overview.items, sessions);
-  const nothing = g.needsYou.length + g.working.length + g.done.length === 0;
+  const groups = floorGroups(overview, sortedSessions(sessions));
+  const count = (title: string) => {
+    const g = groups.find((x) => x.title === title);
+    return (g?.agents.length ?? 0) + (g?.sessions.length ?? 0);
+  };
+  const working = count("Working");
+  const needsYou = count("Needs you");
 
   return (
     <main className="crew-floor" aria-label="Floor">
       <header className="crew-floor-head">
         <h1 className="display">Floor</h1>
         <span className="crew-floor-counts">
-          {g.working.length} working ·{" "}
-          <span className={g.needsYou.length ? "state-blocked strong" : undefined}>
-            {g.needsYou.length} need{g.needsYou.length === 1 ? "s" : ""} you
+          {working} working ·{" "}
+          <span className={needsYou ? "state-blocked strong" : undefined}>
+            {needsYou} need{needsYou === 1 ? "s" : ""} you
           </span>{" "}
-          · {g.done.length} done today
+          · {overview.counts.doneToday} done today
         </span>
         <button type="button" className="btn btn-signal" onClick={onNewSession}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -51,14 +94,14 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
           ) : (
             paused && <PausedNote who={paused} onResumed={() => setPaused(null)} />
           )}
-          {nothing && (
+          {groups.length === 0 && (
             <p className="empty muted">
               Nothing’s happening on the crew right now. Start a session, or message someone from Crew, and it shows here.
             </p>
           )}
-          <Group title="Needs you" tone="blocked" items={g.needsYou} wide />
-          <Group title="Working" tone="working" items={g.working} />
-          <Group title="Done today" tone="done" items={g.done} />
+          {groups.map((g) => (
+            <Group key={g.title} group={g} />
+          ))}
         </div>
         {activitySupport !== "no" && <ActivityRail managerName={managerName} />}
       </div>
@@ -66,14 +109,19 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   );
 }
 
-function Group({ title, tone, items, wide = false }: { title: string; tone: string; items: Overview["items"]; wide?: boolean }) {
-  if (!items.length) return null;
+const TONE: Record<string, string> = { "Needs you": "blocked", Working: "working", "Done today": "done" };
+
+function Group({ group }: { group: FloorGroup }) {
+  const tone = TONE[group.title] ?? "idle";
   return (
-    <section className="floor-group" aria-label={title}>
-      <h2 className={`ov-label state-${tone}`}>{title}</h2>
-      <div className={wide ? "ov-tiles ov-tiles-wide" : "ov-tiles"}>
-        {items.map((i) => (
-          <ItemTile key={`${i.kind}:${i.id}`} item={i} />
+    <section className="floor-group" aria-label={group.title}>
+      <h2 className={`ov-label state-${tone}`}>{group.title}</h2>
+      <div className={group.title === "Needs you" ? "ov-tiles ov-tiles-wide" : "ov-tiles"}>
+        {group.agents.map((i) => (
+          <ItemTile key={`agent:${i.id}`} item={i} />
+        ))}
+        {group.sessions.map((s) => (
+          <Tile key={s.id} session={s} />
         ))}
       </div>
     </section>

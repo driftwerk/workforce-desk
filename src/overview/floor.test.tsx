@@ -137,18 +137,27 @@ describe("the Floor", () => {
   });
 
   it("shows the brief, who needs you, who's working and what's done today, beside the activity", async () => {
-    useDesk.setState({ hub: hubWith({}) });
+    useDesk.setState({
+      hub: hubWith({}),
+      sessions: {
+        "s-web": session("s-web", { name: "acme-web", goal: "Upgrading the date picker" }),
+        "s-e7": session("s-e7", { name: "workforce-e7", state: "working", pending: null, currentTool: "Bash cargo test" }),
+        "s-pr": session("s-pr", { name: "dw-676-read-shadow", state: "idle", pending: null, lastReply: "Merged. Session closed." }),
+        "s-old": session("s-old", { name: "monorepo-b3", origin: "external", state: "idle", live: false, pending: null }),
+      },
+    });
     render(<Floor onNewSession={() => {}} />);
     expect(await screen.findByRole("region", { name: "Desk’s brief" })).toBeTruthy();
     expect(screen.getByText("Two things need you.")).toBeTruthy();
     const needs = screen.getByRole("region", { name: "Needs you" });
     expect(within(needs).getByText("acme-web")).toBeTruthy();
-    expect(within(needs).getByText(/needs you · Claude Code · 6 min/)).toBeTruthy();
+    expect(within(needs).getByText("Upgrading the date picker")).toBeTruthy();
     expect(within(needs).getByText(/asked you a question · 3 min/)).toBeTruthy();
     const working = screen.getByRole("region", { name: "Working" });
-    expect(within(working).getByText("working · quiet 40 min")).toBeTruthy();
+    expect(within(working).getByText("● Bash cargo test")).toBeTruthy();
     expect(within(working).getByText("● aws.cost_explorer")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Done today" })).getByText("Merged. Session closed.")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Recently done and idle" })).getByText("Merged. Session closed.")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "In other terminals" })).getByText("monorepo-b3")).toBeTruthy();
     expect(screen.getByText(/2 working ·/).textContent).toBe("2 working · 2 need you · 1 done today");
     const rail = screen.getByRole("complementary", { name: "Activity" });
     expect(await within(rail).findByText("Quiet for 40 min while working.")).toBeTruthy();
@@ -169,19 +178,15 @@ describe("the Floor", () => {
     useDesk.setState({ hub, sessions: { "s-web": session("s-web", { name: "acme-web" }) } });
     render(<Floor onNewSession={() => {}} />);
     const needs = await screen.findByRole("region", { name: "Needs you" });
-    expect(within(needs).getByText("Run npm install @acme/ds@4.2.0?")).toBeTruthy();
-    await act(async () => fireEvent.click(within(needs).getByRole("button", { name: "Allow" })));
+    await act(async () => fireEvent.click(within(needs).getByRole("button", { name: "Allow once" })));
     expect(hub.decide).toHaveBeenCalledWith("s-web", "ap-1", "allow");
   });
 
-  it("offers to open only the sessions Desk lists", async () => {
+  it("shows the sessions Desk lists, each opening its card", async () => {
     useDesk.setState({ hub: hubWith({}), sessions: { "s-e7": session("s-e7", { name: "workforce-e7", state: "working", pending: null }) } });
     render(<Floor onNewSession={() => {}} />);
     const needs = await screen.findByRole("region", { name: "Needs you" });
-    expect(within(needs).queryByRole("button", { name: "Open" })).toBeNull();
-    expect(within(needs).queryByRole("button", { name: /acme-web/ })).toBeNull();
-    expect(within(needs).getByRole("button", { name: "Allow" })).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Done today" })).queryByRole("button")).toBeNull();
+    expect(within(needs).queryByText("acme-web")).toBeNull();
     fireEvent.click(within(screen.getByRole("region", { name: "Working" })).getByRole("button", { name: /workforce-e7/ }));
     expect(useDesk.getState().openId).toBe("s-e7");
   });
