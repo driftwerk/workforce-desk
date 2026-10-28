@@ -41,6 +41,24 @@ export class HubError extends Error {
   }
 }
 
+/** What a hub said when it refused: its JSON `error` when it gives one,
+ *  else a plain-text body as written (never JSON or a web page), else the
+ *  status line. */
+const refusal = async (res: Response): Promise<HubError> => {
+  const text = (await res.text().catch(() => "")).trim();
+  let message = text.startsWith("<") ? "" : text;
+  try {
+    const body: unknown = JSON.parse(text);
+    if (body && typeof body === "object") {
+      const error = (body as { error?: unknown }).error;
+      message = typeof error === "string" && error.trim() ? error : "";
+    }
+  } catch {
+    /* a plain-text body */
+  }
+  return new HubError(res.status, message || res.statusText || "The hub refused that.");
+};
+
 const wsUrl = (base: string, path: string, token: string): string => {
   const u = new URL(path, base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
@@ -60,16 +78,7 @@ export class DeskHub {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      let message = text || res.statusText;
-      try {
-        message = (JSON.parse(text) as { error?: string }).error ?? message;
-      } catch {
-        /* plain-text error body */
-      }
-      throw new HubError(res.status, message);
-    }
+    if (!res.ok) throw await refusal(res);
     if (res.status === 204) return undefined as T;
     // A hub without this route answers with its web page, not a 404.
     if (!(res.headers.get("content-type") ?? "").includes("json")) {
@@ -92,7 +101,7 @@ export class DeskHub {
 
   private async text(path: string): Promise<string> {
     const res = await fetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });
-    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+    if (!res.ok) throw await refusal(res);
     return res.text();
   }
 
@@ -102,7 +111,7 @@ export class DeskHub {
       headers: { authorization: `Bearer ${this.conn.token}`, "content-type": "text/plain" },
       body: text,
     });
-    if (!res.ok) throw new HubError(res.status, (await res.text()) || res.statusText);
+    if (!res.ok) throw await refusal(res);
   }
 
   sessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions");
