@@ -67,6 +67,10 @@ jobs:
           path: workforce-public-desk
           token: ${{ secrets.HUB_REPO_TOKEN }}
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
       - name: Set the version
         working-directory: desk
         env:
@@ -77,6 +81,9 @@ jobs:
           # The workspace version every crate inherits.
           sed -i '' "/^\[workspace.package\]/,/^\[/ s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
           grep -A2 '^\[workspace.package\]' Cargo.toml
+          # Only the workspace's own entries in Cargo.lock change, so the
+          # --locked builds still pin every dependency.
+          cargo update --workspace
 
       - uses: actions/setup-node@v7
         with:
@@ -85,10 +92,6 @@ jobs:
           cache-dependency-path: |
             desk/package-lock.json
             workforce-public-desk/packages/rich/package-lock.json
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       # The hub is a large build: keep both workspaces' release builds,
       # keyed by the hub commit so a bump starts from the last cache.
@@ -113,6 +116,9 @@ jobs:
         env:
           HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
           MIN_FREE_GB: "12"
+          # postgresql_embedded asks GitHub which Postgres builds exist; a
+          # token keeps it under the API's rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: scripts/build-sidecars.sh
 
       - name: Build Desk.app (universal)

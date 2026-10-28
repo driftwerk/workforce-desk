@@ -246,9 +246,24 @@ fn init_logging(paths: &Paths) {
     }
 }
 
+/// `--forget-secrets`: deletes the keychain items this binary made — the
+/// local hub's secrets and Desk's token for it — for "Remove Desk's data".
+/// The keychain lets the binary that made an item delete it without asking,
+/// so the app runs this rather than deleting them itself.
+fn forget_secrets(paths: &Paths) -> Result<()> {
+    let secrets = Secrets::for_paths(paths);
+    for s in Secret::ALL {
+        secrets.delete_account(s.account())?;
+    }
+    secrets.delete_account(&desk_core::device_token_account(desk_core::LOCAL_HUB_ID))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let paths = Paths::new()?;
+    if std::env::args().any(|a| a == "--forget-secrets") {
+        return forget_secrets(&paths);
+    }
     init_logging(&paths);
     // postgresql_embedded builds reqwest with rustls but no crypto provider;
     // every HTTP client in this process shares the one installed here.

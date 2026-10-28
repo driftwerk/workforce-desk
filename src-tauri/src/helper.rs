@@ -35,6 +35,22 @@ pub enum Status {
     },
 }
 
+impl Status {
+    /// Why the helper can't run, in the person's words, when it can't.
+    pub fn blocked(&self) -> Option<String> {
+        match self {
+            Status::MoveToApplications => Some(
+                "Move Desk to your Applications folder, then open it from there.".into(),
+            ),
+            Status::NeedsApproval => Some(
+                "Desk Helper is turned off. Turn Desk on in System Settings → General → Login Items, then open Desk again.".into(),
+            ),
+            Status::Failed { message } => Some(format!("Desk Helper couldn't start: {message}")),
+            Status::Running | Status::NotRegistered | Status::Development => None,
+        }
+    }
+}
+
 fn plist_name() -> String {
     format!("{LAUNCH_AGENT_LABEL}.plist")
 }
@@ -284,6 +300,24 @@ mod tests {
         assert!(!translocated(Path::new(
             "/Applications/Desk.app/Contents/MacOS/desk"
         )));
+    }
+
+    #[test]
+    fn only_a_helper_that_cannot_run_stops_the_wait_for_the_hub() {
+        assert!(Status::Running.blocked().is_none());
+        assert!(Status::Development.blocked().is_none());
+        assert!(Status::NotRegistered.blocked().is_none());
+        let why = Status::MoveToApplications.blocked().unwrap();
+        assert!(why.contains("Applications"));
+        assert!(
+            Status::NeedsApproval
+                .blocked()
+                .unwrap()
+                .contains("Login Items")
+        );
+        for s in [Status::MoveToApplications, Status::NeedsApproval] {
+            assert!(!s.blocked().unwrap().to_lowercase().contains("workforce"));
+        }
     }
 
     #[test]

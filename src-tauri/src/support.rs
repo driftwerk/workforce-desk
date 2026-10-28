@@ -20,24 +20,65 @@ const LOGS: [&str; 6] = [
 ];
 const TAIL: u64 = 4 * 1024 * 1024;
 
-/// Every keychain account Desk may hold: the local hub's secrets and one
-/// device token per hub.
-fn accounts(paths: &Paths) -> Vec<String> {
-    let mut out: Vec<String> = Secret::ALL.iter().map(|s| s.account().into()).collect();
-    out.push(device_token_account(LOCAL_HUB_ID));
-    for r in crate::hubs::read_records(paths).unwrap_or_default() {
-        out.push(device_token_account(&r.id));
-    }
-    out
+/// The device tokens for remote hubs: keychain items the app made itself.
+fn remote_accounts(paths: &Paths) -> Vec<String> {
+    crate::hubs::read_records(paths)
+        .unwrap_or_default()
+        .iter()
+        .map(|r| device_token_account(&r.id))
+        .collect()
 }
 
-/// The values a log could contain verbatim, to blank exactly.
+/// The values a log could contain verbatim, to blank exactly: the ones the
+/// app reads anyway (the hub's gateway token and Desk's device tokens).
+/// Desk Helper's other secrets stay unread so the keychain doesn't ask;
+/// the patterns catch them by shape and by name.
 pub fn known_secrets(paths: &Paths) -> Vec<String> {
     let secrets = Secrets::for_paths(paths);
-    accounts(paths)
+    let mut accounts = vec![
+        Secret::GatewayToken.account().to_string(),
+        device_token_account(LOCAL_HUB_ID),
+    ];
+    accounts.extend(remote_accounts(paths));
+    accounts
         .iter()
         .filter_map(|a| secrets.get_account(a).ok().flatten())
         .collect()
+}
+
+/// Deletes Desk Helper's keychain items by running it with
+/// `--forget-secrets` (the keychain lets the binary that made them delete
+/// them without asking), then the app's own.
+fn forget_secrets(paths: &Paths) -> Result<()> {
+    let helper = std::env::current_exe()?
+        .parent()
+        .map(|d| d.join(desk_core::HELPER_EXECUTABLE))
+        .filter(|p| p.is_file());
+    let secrets = Secrets::for_paths(paths);
+    match helper {
+        Some(helper) => {
+            let out = std::process::Command::new(helper)
+                .arg("--forget-secrets")
+                .output()?;
+            if !out.status.success() {
+                eyre::bail!(
+                    "Desk Helper couldn't remove its keychain items: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+        }
+        // A development run: the same secrets, in a file or the keychain.
+        None => {
+            for s in Secret::ALL {
+                secrets.delete_account(s.account())?;
+            }
+            secrets.delete_account(&device_token_account(LOCAL_HUB_ID))?;
+        }
+    }
+    for a in remote_accounts(paths) {
+        secrets.delete_account(&a)?;
+    }
+    Ok(())
 }
 
 /// The last `max` bytes of a file, from the start of a line.
@@ -105,10 +146,7 @@ pub fn remove(paths: &Paths, everything: bool) -> Result<()> {
         return Ok(());
     }
     wait_stopped(paths, Duration::from_secs(40))?;
-    let secrets = Secrets::for_paths(paths);
-    for a in accounts(paths) {
-        secrets.delete_account(&a)?;
-    }
+    forget_secrets(paths)?;
     match std::fs::remove_dir_all(&paths.root) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

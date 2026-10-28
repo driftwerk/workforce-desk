@@ -51,6 +51,10 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
                     token,
                 });
             }
+            // Say at once when Desk Helper can't start, rather than wait.
+            if let Some(why) = helper::status().blocked() {
+                return Err(why);
+            }
             if Instant::now() > deadline {
                 return Err(
                     "Desk Helper hasn’t started. Settings → Help says why, and can save a report."
@@ -173,18 +177,21 @@ fn helper_open_login_items() {
     helper::open_login_items();
 }
 
+/// Off the main thread: finding the CLI reads the login shell's PATH.
 #[tauri::command]
-fn cli_installed(plan: logins::Plan) -> bool {
-    logins::install::installed(plan)
+async fn cli_installed(plan: logins::Plan) -> CommandResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || logins::install::installed(plan))
+        .await
+        .map_err(text)
 }
 
 #[tauri::command]
-fn cli_install(
-    app: tauri::AppHandle,
-    installs: State<'_, logins::install::Installs>,
-    plan: logins::Plan,
-) -> CommandResult<()> {
-    installs.start(&app, plan)
+async fn cli_install(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<logins::install::Installs>().start(&app, plan)
+    })
+    .await
+    .map_err(text)?
 }
 
 /// Saves a zip of recent logs, every secret taken out, at `path`.
