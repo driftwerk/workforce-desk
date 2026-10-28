@@ -17,21 +17,26 @@ export function useVoices(provider: string): { voices: VoiceChoice[]; problem: s
     const v = providerById(id)?.voices;
     return Array.isArray(v) ? v : [];
   };
-  const [state, setState] = useState<{ voices: VoiceChoice[]; problem: string | null }>({ voices: fixed(provider), problem: null });
+  const [state, setState] = useState<{ of: string; voices: VoiceChoice[]; problem: string | null }>({
+    of: provider,
+    voices: fixed(provider),
+    problem: null,
+  });
   useEffect(() => {
     const p = providerById(provider);
     if (!p) return;
     let live = true;
-    setState({ voices: fixed(provider), problem: null });
+    setState({ of: provider, voices: fixed(provider), problem: null });
     voicesOf(p).then(
-      (voices) => live && setState({ voices, problem: null }),
-      () => live && setState({ voices: [], problem: `Desk couldn’t list ${p.name}’s voices.` }),
+      (voices) => live && setState({ of: provider, voices, problem: null }),
+      () => live && setState({ of: provider, voices: [], problem: `Desk couldn’t list ${p.name}’s voices.` }),
     );
     return () => {
       live = false;
     };
   }, [provider]);
-  return state;
+  // Never another provider's voices: picking one would save it under this one.
+  return state.of === provider ? { voices: state.voices, problem: state.problem } : { voices: fixed(provider), problem: null };
 }
 
 const sameVoice = (a: VoiceSpec, b: VoiceSpec): boolean =>
