@@ -2,7 +2,8 @@
 name = "desk"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Desk — every agent you work with, in one window"
 
 [lib]

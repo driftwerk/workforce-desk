@@ -2,7 +2,8 @@
 name = "desk-hubd"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Keeps Desk's local workforce hub running: Postgres, config, secrets, restarts"
 
 [dependencies]

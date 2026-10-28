@@ -2,7 +2,8 @@
 name = "desk-tuple"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Ask Desk's agents from a Tuple call, and answer on the call"
 
 [dependencies]

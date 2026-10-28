@@ -2,7 +2,8 @@
 name = "desk-voice"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Desk's voice: wake by name, push-to-talk, on-device speech in and out"
 
 [dependencies]

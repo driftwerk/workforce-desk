@@ -5,7 +5,8 @@ members = ["src-tauri", "crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "PolyForm-Shield-1.0.0"
+license-file = "LICENSE"
+publish = false
 
 [workspace.dependencies]
 base64 = "0.23.1"
