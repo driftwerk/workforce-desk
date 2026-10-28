@@ -85,7 +85,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
       const was = savedName;
       rename(key, nextName);
       try {
-        await renameLocalAgent(desk, agent.id, nextName);
+        await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
       } catch (e) {
         rename(key, was);
         setProblem(plainError(e));

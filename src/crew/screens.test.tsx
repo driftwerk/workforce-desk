@@ -203,9 +203,10 @@ describe("Renaming in Settings", () => {
     fireEvent.change(name, { target: { value: "Penny" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
+    await waitFor(() => expect(hub.renameAgent).toHaveBeenCalled());
     await act(async () => finish());
     await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy());
-    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny");
+    expect(vi.mocked(hub.renameAgent).mock.calls[0]?.slice(0, 2)).toEqual(["ledger", "Penny"]);
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
   });
 

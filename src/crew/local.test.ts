@@ -8,6 +8,7 @@ import {
   RENAME_UNAVAILABLE,
   renameAgentFiles,
   renameLocalAgent,
+  setAgentPurpose,
   withJob,
   withName,
   withPurpose,
@@ -101,7 +102,7 @@ describe("renaming an agent", () => {
     const hub = filesHub(files);
     await renameLocalAgent(hub, "ledger", "  Penny ");
     await renameAgentFiles(hub, "ledger", "  Penny ");
-    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny");
+    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny", instructions("Penny", "Watch the bill."));
     expect(files["IDENTITY.md"]).toBe("# Identity\n- **Name:** Penny\n- **Vibe:** calm\n");
     expect(files["SOUL.md"]).toContain("You are Penny.");
     expect(files["SOUL.md"]).not.toContain("Ledger");
@@ -115,6 +116,18 @@ describe("renaming an agent", () => {
     await renameAgentFiles(filesHub(files), "ledger", "Penny", "Watch deploys.");
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
     expect(files["SOUL.md"]).toContain("You are Penny.");
+  });
+
+  it("tells the hub the agent's new instructions along with a new purpose, and copes with a hub that can't", async () => {
+    const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill.") };
+    const hub = filesHub(files);
+    await setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.");
+    expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Ledger", instructions("Ledger", "Watch deploys."));
+    expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
+
+    const old = filesHub(files, () => Promise.reject(new HubError(405, "Method Not Allowed")));
+    await setAgentPurpose(old, "ledger", "Ledger", "Watch costs.");
+    expect(purposeOf(files["SOUL.md"]!)).toBe("Watch costs.");
   });
 
   it("leaves the files alone and says so plainly when the hub can't rename yet", async () => {

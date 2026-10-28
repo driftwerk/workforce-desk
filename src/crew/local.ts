@@ -112,8 +112,14 @@ export async function createLocalAgent(
   return id;
 }
 
-/** A new description of what an agent is for, in every file that says it. */
+/** A new description of what an agent is for, in every file that says it
+ *  and in its instructions (a hub that can't update those keeps the old). */
 export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string): Promise<void> {
+  try {
+    await hub.renameAgent(id, name.trim(), instructions(name.trim(), purpose));
+  } catch (e) {
+    if (!(e instanceof HubError && (e.status === 404 || e.status === 405))) throw e;
+  }
   await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, name, purpose));
   await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, name, purpose));
   await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(t, name, purpose));
@@ -122,10 +128,13 @@ export async function setAgentPurpose(hub: DeskHub, id: string, name: string, pu
 /** Said when the hub can't rename agents yet. */
 export const RENAME_UNAVAILABLE = "Renaming isn’t available yet: Desk needs an update first. Their name is unchanged.";
 
-/** Renames an agent on the hub. */
-export async function renameLocalAgent(hub: DeskHub, id: string, name: string): Promise<void> {
+/** Renames an agent on the hub, its instructions included when Desk knows
+ *  what it's for (`purpose`, or what SOUL.md says). */
+export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string): Promise<void> {
+  const who = name.trim();
+  const job = purpose?.trim() || purposeOf(await hub.identityFile(id, "SOUL.md").catch(() => ""));
   try {
-    await hub.renameAgent(id, name.trim());
+    await hub.renameAgent(id, who, job ? instructions(who, job) : undefined);
   } catch (e) {
     if (e instanceof HubError && (e.status === 404 || e.status === 405)) throw new Error(RENAME_UNAVAILABLE);
     throw e;
