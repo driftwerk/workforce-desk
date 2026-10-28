@@ -62,7 +62,7 @@ you can add the same values here.
 | `APPLE_TEAM_ID` | your Apple Developer Team ID |
 | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `~/.tauri/desk-updater.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the contents of `~/.tauri/desk-updater.key.password` |
-| `HUB_REPO_TOKEN` | a token that can read `driftwerk/workforce` (fine-grained, Contents: read) |
+| `HUB_REPO_TOKEN` | optional: only if `driftwerk/workforce` is ever private — a token that can read it (fine-grained, Contents: read) |
 | `RELEASES_TOKEN` | *(optional)* a token that can write releases to `RELEASES_REPO` when it isn't this repo |
 
 | Variable | What |

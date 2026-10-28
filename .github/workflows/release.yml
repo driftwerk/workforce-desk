@@ -65,7 +65,8 @@ jobs:
           repository: driftwerk/workforce
           ref: ${{ steps.hub.outputs.ref }}
           path: workforce-public-desk
-          token: ${{ secrets.HUB_REPO_TOKEN }}
+          # The hub repo is public; a token is only needed if it ever isn't.
+          token: ${{ secrets.HUB_REPO_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
