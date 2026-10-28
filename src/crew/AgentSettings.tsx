@@ -5,6 +5,7 @@ import { effortName } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import type { VoiceSpec } from "../platform";
 import { BrainDialog } from "../providers/BrainDialog";
+import { useProviders } from "../providers/store";
 import { useSettings } from "../settings/store";
 import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
@@ -128,6 +129,7 @@ function Thinking({ agent }: { agent: Agent }) {
   const refreshRoster = useChat((s) => s.refreshRoster);
   const putConfig = useAgentConfigs((s) => s.put);
   const { brain, provider } = useAgentBrain(agent, true);
+  const fallback = useProviders((s) => s.fallback);
   const [choosing, setChoosing] = useState(false);
   const model = brain ? modelOf(provider, brain.model) : undefined;
 
@@ -150,8 +152,8 @@ function Thinking({ agent }: { agent: Agent }) {
         <div className="think-row">
           <span>Model</span>
           <b>
-            {!brain ? "…" : provider ? modelName(provider, brain.model) : (agent.model ?? brain.model)}{" "}
-            {model && <span>· {lower(model.description)}</span>}
+            {!brain ? "…" : provider && !fallback ? modelName(provider, brain.model) : (agent.model ?? modelName(provider, brain.model))}{" "}
+            {model && !fallback && <span>· {lower(model.description)}</span>}
           </b>
           {brain && isDefaultModel(provider, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
         </div>

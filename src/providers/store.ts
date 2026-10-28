@@ -5,8 +5,26 @@ import type { Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import { plainError } from "../ui/plainError";
 
+/** Until the hub lists providers: the two plans, connected when their
+ *  login is saved, each on its default model. */
+export const fallbackProviders = (vaultPaths: readonly string[]): Provider[] =>
+  [
+    { id: "claude-code", name: "Claude plan", description: "Your Pro or Max subscription", login: "claude_code/oauth_token" },
+    { id: "chatgpt", name: "ChatGPT plan", description: "Your Plus or Pro subscription", login: "codex/auth_json" },
+  ].map(({ login, ...p }) => ({
+    ...p,
+    group: "plan",
+    connected: vaultPaths.includes(login),
+    connect: { kind: "login", fields: [] },
+    models: [{ id: "standard", name: "Default model", description: "The plan’s everyday model", default: true }],
+    efforts: [],
+    defaultEffort: null,
+  }));
+
 interface ProvidersState {
   providers: Provider[];
+  /** The hub can't list providers yet: only the plans, from their logins. */
+  fallback: boolean;
   /** False until the first answer (or failure). */
   loaded: boolean;
   loading: boolean;
@@ -22,20 +40,19 @@ interface ProvidersState {
  *  shows it. */
 export const useProviders = create<ProvidersState>((set, get) => ({
   providers: [],
+  fallback: false,
   loaded: false,
   loading: false,
   problem: null,
   load: async (hub) => {
     set({ loading: true });
     try {
-      set({ providers: await hub.providers(), problem: null });
+      set({ providers: await hub.providers(), fallback: false, problem: null });
     } catch (e) {
-      set({
-        problem:
-          e instanceof HubError && e.status === 404
-            ? "Desk can’t list providers on this Mac yet. Your agents keep running on what they use now."
-            : `Desk couldn’t list your providers. ${plainError(e)}`,
-      });
+      if (e instanceof HubError && e.status === 404) {
+        const paths = await hub.vaultPaths().catch(() => [] as string[]);
+        set({ providers: fallbackProviders(paths), fallback: true, problem: null });
+      } else set({ problem: `Desk couldn’t list your providers. ${plainError(e)}` });
     } finally {
       set({ loaded: true, loading: false });
     }

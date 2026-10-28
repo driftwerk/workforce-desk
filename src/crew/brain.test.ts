@@ -1,6 +1,7 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import type { Provider } from "../hub/providers";
+import { fallbackProviders } from "../providers/store";
 import { brainOf, brainSummary, isDefaultEffort, isDefaultModel, newAgentBrain, resolveBrain, withBrain, withDeskSettings } from "./brain";
 
 const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
@@ -101,6 +102,12 @@ describe("where new agents start", () => {
     expect(newAgentBrain(null, [{ ...CLAUDE, connected: false }, { ...CHATGPT, connected: true }, ROUTER]).provider).toBe("chatgpt");
     expect(newAgentBrain(null, [{ ...CLAUDE, connected: false }, CHATGPT, ROUTER]).provider).toBe("openrouter");
     expect(newAgentBrain(null, [])).toEqual({ provider: "claude-code", model: "standard" });
+  });
+
+  it("starts on the connected plan when only the plans' logins are known", () => {
+    expect(newAgentBrain(null, fallbackProviders(["codex/auth_json"]))).toEqual({ provider: "chatgpt", model: "standard" });
+    expect(newAgentBrain(null, fallbackProviders(["codex/auth_json", "claude_code/oauth_token"])).provider).toBe("claude-code");
+    expect(newAgentBrain(null, fallbackProviders([]))).toEqual({ provider: "claude-code", model: "standard" });
   });
 
   it("says it in a sentence", () => {

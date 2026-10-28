@@ -8,6 +8,7 @@ import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
 import { AgentSettings } from "../crew/AgentSettings";
 import { brainLine } from "../crew/brain";
 import { dirtyFiles, useDrafts } from "../crew/files";
+import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { Mark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
@@ -35,6 +36,7 @@ function DirectMessage() {
   const desk = useDesk((s) => s.hub);
   const drafts = useDrafts((s) => s.drafts);
   const { brain, provider } = useAgentBrain(agent, local);
+  const fallback = useProviders((s) => s.fallback);
   const [draft, setDraft] = useState("");
   // Each agent's tab, kept while you visit others.
   const [tabs, setTabs] = useState<Record<string, Tab>>({});
@@ -74,7 +76,7 @@ function DirectMessage() {
   const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files");
   // What the hub reports stands in until the providers list says more.
   const subtitle =
-    local && brain && provider
+    local && brain && provider && !fallback
       ? [hub?.label ?? "This Mac", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const busy = convo.working !== null;

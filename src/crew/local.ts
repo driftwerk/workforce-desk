@@ -84,8 +84,13 @@ export const withWelcome = (welcome: string, name: string, purpose: string): str
 export const withName = (identity: string, name: string): string =>
   /\*\*Name:\*\*/.test(identity) ? identity.replace(/(\*\*Name:\*\*)[^\n]*/, `$1 ${name}`) : `- **Name:** ${name}\n${identity}`;
 
-const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: string) => string): Promise<void> =>
-  hub.saveIdentityFile(id, file, change(await hub.identityFile(id, file)));
+const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: string) => string): Promise<void> => {
+  const text = await hub.identityFile(id, file);
+  // A missing AGENTS.md means the hub's own guidelines apply; writing only
+  // the job would replace them.
+  if (file === "AGENTS.md" && !text.trim()) return;
+  await hub.saveIdentityFile(id, file, change(text));
+};
 
 /** A new agent on this Mac, thinking with `brain`, with its files written
  *  from its name and what it's for. */

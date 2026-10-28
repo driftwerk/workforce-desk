@@ -95,7 +95,7 @@ export function Providers() {
 
 function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[] }) {
   const hub = useDesk((s) => s.hub);
-  const { load, connect, disconnect } = useProviders();
+  const { load, connect, disconnect, fallback } = useProviders();
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -136,6 +136,9 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
 
   const action = (() => {
     if (provider.connected) {
+      // Plans connected before this Mac could list providers sign in again
+      // rather than disconnect.
+      if (fallback) return <PlanLoginAction login={login} label="Reconnect" signal={false} />;
       if (confirming) {
         return (
           <span className="prov-actions">
