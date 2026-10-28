@@ -21,7 +21,8 @@ export const useAgentConfigs = create<ConfigsState>((set) => ({
       const toml = await hub.agentConfig(agent.id);
       set((s) => ({ configs: { ...s.configs, [agentKey(agent)]: toml } }));
     } catch {
-      // The roster's provider and model stand in.
+      // Unread: the roster's provider and model stand in.
+      set((s) => ({ configs: { ...s.configs, [agentKey(agent)]: s.configs[agentKey(agent)] ?? "" } }));
     }
   },
   put: (key, toml) => set((s) => ({ configs: { ...s.configs, [key]: toml } })),
@@ -36,7 +37,7 @@ export function useAgentBrain(agent: Agent | undefined, local: boolean): { brain
   const config = useAgentConfigs((s) => s.configs[key]);
   useEffect(() => {
     if (hub && agent && local) void useAgentConfigs.getState().load(hub, agent);
-  }, [hub, agent?.id, local]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hub, agent?.id, local]);
   if (!agent || !local || config === undefined) return { brain: null, provider: undefined };
   const brain = brainOf(config, providers, { provider: agent.provider, model: agent.model });
   return { brain, provider: providers.find((p) => p.id === brain.provider) };

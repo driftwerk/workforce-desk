@@ -72,9 +72,11 @@ function DirectMessage() {
   const go = (next: Tab) => setTabs((t) => ({ ...t, [activeAgent]: next }));
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
   const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files");
-  const subtitle = local
-    ? [hub?.label ?? "This Mac", brain ? brainLine(brain, provider) : null].filter(Boolean).join(" · ")
-    : describeAgent(agent, hub?.label ?? agent.hubId);
+  // What the hub reports stands in until the providers list says more.
+  const subtitle =
+    local && brain && provider
+      ? [hub?.label ?? "This Mac", brainLine(brain, provider)].join(" · ")
+      : describeAgent(agent, hub?.label ?? agent.hubId);
   const busy = convo.working !== null;
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the

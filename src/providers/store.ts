@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { DeskHub } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import type { Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import { plainError } from "../ui/plainError";
@@ -30,7 +30,12 @@ export const useProviders = create<ProvidersState>((set, get) => ({
     try {
       set({ providers: await hub.providers(), problem: null });
     } catch (e) {
-      set({ problem: `Desk couldn’t list your providers. ${plainError(e)}` });
+      set({
+        problem:
+          e instanceof HubError && e.status === 404
+            ? "Desk can’t list providers on this Mac yet. Your agents keep running on what they use now."
+            : `Desk couldn’t list your providers. ${plainError(e)}`,
+      });
     } finally {
       set({ loaded: true, loading: false });
     }

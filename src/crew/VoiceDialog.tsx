@@ -13,11 +13,16 @@ const PlayIcon = () => (
 /** The voices `provider` offers, loaded from the voice engine where it
  *  keeps them. */
 export function useVoices(provider: string): { voices: VoiceChoice[]; problem: string | null } {
-  const [state, setState] = useState<{ voices: VoiceChoice[]; problem: string | null }>({ voices: [], problem: null });
+  const fixed = (id: string): VoiceChoice[] => {
+    const v = providerById(id)?.voices;
+    return Array.isArray(v) ? v : [];
+  };
+  const [state, setState] = useState<{ voices: VoiceChoice[]; problem: string | null }>({ voices: fixed(provider), problem: null });
   useEffect(() => {
     const p = providerById(provider);
     if (!p) return;
     let live = true;
+    setState({ voices: fixed(provider), problem: null });
     voicesOf(p).then(
       (voices) => live && setState({ voices, problem: null }),
       () => live && setState({ voices: [], problem: `Desk couldn’t list ${p.name}’s voices.` }),
@@ -58,12 +63,26 @@ export function PlayButton({ spec, who, onProblem }: { spec: VoiceSpec; who: str
 }
 
 /** "How they sound": the voice, a sample, and Change. */
-export function VoiceCard({ who, spec, isDefault, onChange }: { who: string; spec: VoiceSpec; isDefault: boolean; onChange: () => void }) {
+export function VoiceCard({
+  who,
+  spec,
+  isDefault,
+  onChange,
+  withModel = false,
+}: {
+  who: string;
+  spec: VoiceSpec;
+  isDefault: boolean;
+  onChange: () => void;
+  /** Name the voice model too, even where the provider has only one. */
+  withModel?: boolean;
+}) {
   const { voices } = useVoices(spec.provider);
   const [problem, setProblem] = useState<string | null>(null);
   const p = providerById(spec.provider);
   const v = voices.find((x) => x.id === spec.voice);
-  const model = p && p.models.length > 1 ? p.models.find((m) => m.id === spec.model)?.name : undefined;
+  const model =
+    p && (withModel || p.models.length > 1) ? (p.models.find((m) => m.id === spec.model) ?? p.models[0])?.name : undefined;
   return (
     <div className="field-stack">
       <div className="setting-card">

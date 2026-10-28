@@ -1,6 +1,6 @@
+import { providerLabel } from "../chat/types";
+import { effortName, type Provider } from "../hub/providers";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, type Brain } from "./brain";
-import type { Provider } from "../hub/providers";
-import { effortName } from "../hub/providers";
 
 /** "How they think": the model on its provider, the effort, and Change. */
 export function BrainCard({ brain, provider, onChange }: { brain: Brain | null; provider: Provider | undefined; onChange: () => void }) {
@@ -15,10 +15,15 @@ export function BrainCard({ brain, provider, onChange }: { brain: Brain | null; 
         </svg>
       </span>
       <span className="card-text">
-        {brain ? (
+        {brain && !provider ? (
+          <>
+            <b>{providerLabel(brain.provider)}</b>
+            <span>Its default model and effort</span>
+          </>
+        ) : brain ? (
           <>
             <b>
-              {modelName(provider, brain.model)} <span>on your {provider?.name ?? "plan"}</span>
+              {modelName(provider, brain.model)} <span>on your {provider?.name}</span>
             </b>
             <span>
               {brain.effort ? `${effortName(brain.effort)} effort · ${effortShort(brain.effort)}` : (provider?.description ?? "")}

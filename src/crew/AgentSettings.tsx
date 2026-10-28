@@ -150,7 +150,8 @@ function Thinking({ agent }: { agent: Agent }) {
         <div className="think-row">
           <span>Model</span>
           <b>
-            {brain ? modelName(provider, brain.model) : "…"} {model && <span>· {lower(model.description)}</span>}
+            {!brain ? "…" : provider ? modelName(provider, brain.model) : (agent.model ?? brain.model)}{" "}
+            {model && <span>· {lower(model.description)}</span>}
           </b>
           {brain && isDefaultModel(provider, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
         </div>
@@ -232,7 +233,7 @@ function Sound({ agent, local }: { agent: Agent; local: boolean }) {
   return (
     <section className="agent-section" aria-labelledby="sound-head">
       <h2 id="sound-head">How they sound</h2>
-      <VoiceCard who={agent.name} spec={own ?? defaultVoice} isDefault={!own} onChange={() => setChoosing(true)} />
+      <VoiceCard who={agent.name} spec={own ?? defaultVoice} isDefault={!own} withModel onChange={() => setChoosing(true)} />
       {choosing && (
         <VoiceDialog
           title={`How ${agent.name} sounds`}

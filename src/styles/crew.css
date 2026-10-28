@@ -453,6 +453,12 @@ button.card-icon:hover:not(:disabled) {
   font-size: 13px;
   color: var(--faint);
 }
+.think-row b span.state-on {
+  color: var(--done);
+}
+.think-row b span.state-blocked {
+  color: var(--blocked);
+}
 .agent-remove {
   display: flex;
   align-items: center;
@@ -714,4 +720,19 @@ button.card-icon:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border);
+}
+.prov-row-open .prov-text {
+  flex: none;
+}
+.prov-row-open .connect-form {
+  max-width: none;
+}
+.prov-row-open .connect-actions {
+  justify-content: flex-end;
+}
+.prov-text span.state-on {
+  color: var(--done);
+}
+.prov-text span.state-blocked {
+  color: var(--blocked);
 }
