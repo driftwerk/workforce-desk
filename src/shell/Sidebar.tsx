@@ -100,9 +100,11 @@ export function Sidebar({
                 <span className="faint small">Overseeing the crew</span>
               </span>
             ) : (
-              <span className="display crew-name">{a.name}</span>
+              <>
+                <span className="display crew-name">{a.name}</span>
+                <span className="faint small">{hubLabel(a.hubId)}</span>
+              </>
             )}
-            <span className="faint small">{hubLabel(a.hubId)}</span>
           </button>
         ))}
       </div>
