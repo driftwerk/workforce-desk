@@ -353,6 +353,18 @@ mod tests {
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
+    /// Whether this Mac starts Apple's echo canceller right now (prints the
+    /// error when it won't).
+    #[test]
+    #[ignore = "uses the microphone"]
+    fn voice_processing_starts() {
+        let input: SharedIn = Arc::new(|_: &[f32], _: u32| {});
+        match build(Some((input, true))) {
+            Ok(_) => eprintln!("voice processing: started"),
+            Err(e) => panic!("voice processing: {e:#}"),
+        }
+    }
+
     /// The microphone keeps delivering, second after second, once open.
     #[test]
     #[ignore = "uses the microphone"]
