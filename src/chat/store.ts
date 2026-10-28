@@ -88,7 +88,8 @@ const ensure = (key: string): boolean => {
     new Conversation(hub, agent.id, (c) => {
       const was = useChat.getState().conversations[key];
       useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
-      if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+      // The overseer only asks crew on this Mac.
+      if (hub.local && was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
     }),
   );
   return true;
