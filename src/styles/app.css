@@ -818,6 +818,11 @@ button {
   flex-direction: column;
   gap: 4px;
 }
+.history-note {
+  align-self: center;
+  text-align: center;
+  padding: 6px 0;
+}
 .thread-link {
   align-self: flex-start;
   margin-left: 46px;

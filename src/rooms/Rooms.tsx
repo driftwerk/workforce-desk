@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
@@ -28,9 +29,10 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 function DirectMessage() {
-  const { activeAgent, roster, hubs, conversations, send, cancel } = useChat();
+  const { activeAgent, roster, hubs, conversations, histories, send, cancel, loadHistory, loadEarlier } = useChat();
   const agent = roster.find((a) => agentKey(a) === activeAgent);
   const convo = activeAgent ? conversations[activeAgent] : undefined;
+  const history = activeAgent ? histories[activeAgent] : undefined;
   const hub = hubs.find((h) => h.id === agent?.hubId);
   const local = hub?.local ?? false;
   const desk = useDesk((s) => s.hub);
@@ -42,11 +44,30 @@ function DirectMessage() {
   const [tabs, setTabs] = useState<Record<string, Tab>>({});
   const [leaving, setLeaving] = useState<Tab | null>(null);
   const end = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  // Distance from the bottom when an earlier page was asked for, so the
+  // messages you were reading stay put as it lands above them.
+  const anchor = useRef<number | null>(null);
   const tab: Tab = (activeAgent && tabs[activeAgent]) || "chat";
 
   useEffect(() => {
     if (tab === "chat") end.current?.scrollIntoView({ block: "end" });
   }, [convo?.messages, convo?.working?.step, tab]);
+
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || tab !== "chat") return;
+    if (anchor.current !== null) el.scrollTop = el.scrollHeight - anchor.current;
+    else end.current?.scrollIntoView({ block: "end" });
+    anchor.current = null;
+  }, [history?.messages, tab]);
+
+  const earlier = useCallback(() => {
+    if (!activeAgent || !history?.more || history.earlier === "loading") return;
+    const el = scroller.current;
+    if (el) anchor.current = el.scrollHeight - el.scrollTop;
+    void loadEarlier(activeAgent);
+  }, [activeAgent, history?.more, history?.earlier, loadEarlier]);
 
   const submitForm = useCallback(
     (summary: string, values: Record<string, unknown>) =>
@@ -85,7 +106,9 @@ function DirectMessage() {
   // tools it has run), not an empty message.
   const pending = last?.role === "assistant" && last.status === "streaming" && !last.content ? last : undefined;
   const answering = last?.role === "assistant" && last.status === "streaming" && !!last.content;
-  const shown = pending ? convo.messages.slice(0, -1) : convo.messages;
+  const liveShown = pending ? convo.messages.slice(0, -1) : convo.messages;
+  const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
+  const settled = !history || history.state === "ready" || history.state === "absent";
 
   return (
     <main className="room" aria-label={`Conversation with ${agent.name}`}>
@@ -124,7 +147,52 @@ function DirectMessage() {
         </div>
       ) : (
         <>
-          <div className="room-scroll" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-chat">
+          <div
+            ref={scroller}
+            className="room-scroll"
+            role="tabpanel"
+            id="agent-tab-panel"
+            aria-labelledby="agent-tab-chat"
+            onScroll={(e) => {
+              if (e.currentTarget.scrollTop < 80 && history?.earlier === "idle") earlier();
+            }}
+          >
+            {history?.more && (
+              <div className="history-note">
+                {history.earlier === "failed" ? (
+                  <span className="faint small">
+                    Couldn’t load earlier messages.{" "}
+                    <button type="button" className="link small" onClick={earlier}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="link small" disabled={history.earlier === "loading"} onClick={earlier}>
+                    {history.earlier === "loading" ? "Loading earlier messages…" : "Load earlier messages"}
+                  </button>
+                )}
+              </div>
+            )}
+            {history?.state === "failed" && (
+              <div className="history-note">
+                <span className="faint small">
+                  Couldn’t load your earlier conversation.{" "}
+                  <button type="button" className="link small" onClick={() => void loadHistory(activeAgent)}>
+                    Try again
+                  </button>
+                </span>
+              </div>
+            )}
+            {history?.state === "loading" && shown.length === 0 && (
+              <div className="history-note">
+                <span className="faint small">Loading your conversation…</span>
+              </div>
+            )}
+            {settled && shown.length === 0 && !convo.working && (
+              <div className="history-note">
+                <span className="faint small">This is the start of your conversation with {agent.name}.</span>
+              </div>
+            )}
             {shown.map((m) => (
               <Message key={m.id} message={m} author={agent.name} home={hub?.label} onSubmitForm={submitForm} />
             ))}
