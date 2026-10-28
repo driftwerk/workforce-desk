@@ -94,3 +94,40 @@ export const withHistory = (history: ChatMessage[], live: ChatMessage[], loadedA
   }
   return [...history, ...live];
 };
+
+/** How far back in what the hub kept a live message is looked for. */
+const LOOK_BACK = 50;
+
+/** How much earlier than a live message the hub's copy of it may say it
+ *  was (the hub's clock and this Mac's need not agree). */
+const SKEW_MS = 2 * 60_000;
+
+/** Whether the hub's `k` could be the live `m`: it says the same, and isn't
+ *  from well before `m` was. */
+const copyOf = (k: ChatMessage, m: ChatMessage): boolean => {
+  if (!same(k, m)) return false;
+  const kt = Date.parse(k.at);
+  const mt = Date.parse(m.at);
+  return Number.isNaN(kt) || Number.isNaN(mt) || kt >= mt - SKEW_MS;
+};
+
+/** The live messages, finished by `before`, that `kept` (the hub's latest
+ *  page, oldest first) now shows: matched in order from the end, so a reply
+ *  the hub hasn't kept yet stays live, and an older one that says the same
+ *  thing doesn't stand in for it. */
+export const covered = (kept: ChatMessage[], live: ChatMessage[], before: string): Set<string> => {
+  const ids = new Set<string>();
+  let j = kept.length - 1;
+  for (let i = live.length - 1; i >= 0 && j >= 0; i--) {
+    const m = live[i]!;
+    if (m.status !== "complete" || m.at > before || m.role === "system") continue;
+    for (let k = j; k >= Math.max(0, j - LOOK_BACK); k--) {
+      if (copyOf(kept[k]!, m)) {
+        ids.add(m.id);
+        j = k - 1;
+        break;
+      }
+    }
+  }
+  return ids;
+};

@@ -1,13 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchHistory, prepend, withHistory } from "./history";
+import { emptyConversation, type ConversationState } from "./conversation";
+import { covered, fetchHistory, prepend, withHistory } from "./history";
 import { useChat } from "./store";
 import type { ChatMessage, HubAccount } from "./types";
+
+/** The DMs opened, to tell what they hear and see what they're told. */
+const opened = vi.hoisted(() => [] as { change: (s: ConversationState) => void; dropped: Set<string>[] }[]);
 
 vi.mock("./conversation", async (original) => ({
   ...(await original<typeof import("./conversation")>()),
   Conversation: class {
+    dropped: Set<string>[] = [];
+    constructor(_hub: unknown, _agent: unknown, readonly change: (s: ConversationState) => void) {
+      opened.push(this);
+    }
     send() {
       return true;
+    }
+    drop(ids: Set<string>) {
+      this.dropped.push(ids);
     }
     cancel() {}
     close() {}
@@ -120,6 +131,34 @@ describe("history and live messages together", () => {
   });
 });
 
+describe("the live messages the hub's copy now shows", () => {
+  const before = "2026-10-28T10:00:00.000Z";
+  const at = "2026-10-28T09:59:00.000Z";
+
+  it("are the ones it has, matched in order from the end", () => {
+    const kept = [
+      msg("h1", "user", "hi", at),
+      msg("h2", "assistant", "Hello.", at),
+      msg("h3", "user", "Atlas asks: how is staging?", at),
+      msg("h4", "assistant", "Green.", "2026-10-28T09:59:08.000Z"),
+    ];
+    const live = [msg("m-1", "user", "hi", at), msg("m-2", "assistant", "Hello.", at), msg("m-3", "assistant", "Green.", at)];
+    expect([...covered(kept, live, before)].sort()).toEqual(["m-1", "m-2", "m-3"]);
+  });
+
+  it("leave a reply it hasn't kept yet live, even when an older one says the same", () => {
+    const kept = [msg("h1", "assistant", "Done.", "2026-10-28T08:00:00.000Z"), msg("h2", "user", "Atlas asks: and the docs?", at)];
+    expect(covered(kept, [msg("m-1", "assistant", "Done.", at)], before).size).toBe(0);
+  });
+
+  it("leave errors, unfinished answers and anything after the read alone", () => {
+    const kept = [msg("h1", "assistant", "Green.", at)];
+    expect(covered(kept, [{ ...msg("m-1", "assistant", "Green.", at), status: "streaming" }], before).size).toBe(0);
+    expect(covered(kept, [msg("m-1", "assistant", "Green.", "2026-10-28T10:00:01.000Z")], before).size).toBe(0);
+    expect(covered([msg("h1", "system", "x", at)], [msg("m-1", "system", "x", at)], before).size).toBe(0);
+  });
+});
+
 describe("a DM's history in the store", () => {
   const agent = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
 
@@ -159,6 +198,43 @@ describe("a DM's history in the store", () => {
     answer(() => json({ messages: [{ id: "h1", from: "agent", text: "hi" }], more: false }));
     useChat.getState().openDm("local/scout");
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+  });
+
+  it("reads it again after a turn you didn't start, so what the overseer asked shows, and the live copies give way", async () => {
+    answer(() => json({ messages: [{ id: "h1", from: "user", text: "hi" }, { id: "h2", from: "agent", text: "Hello." }], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const answerLive = msg("m-1", "assistant", "Staging is green.", "2026-10-28T09:00:00.000Z");
+    const live: ConversationState = { ...emptyConversation(), connected: true, messages: [answerLive] };
+    answer(() =>
+      json({
+        messages: [
+          { id: "h1", from: "user", text: "hi" },
+          { id: "h2", from: "agent", text: "Hello." },
+          { id: "h3", from: "user", text: "Atlas asks: how is staging?" },
+          { id: "h4", from: "agent", text: "Staging is green." },
+        ],
+        more: false,
+      }),
+    );
+    dm.change({ ...live, working: { since: 0, step: "Writing" }, unprompted: true });
+    expect(fetched).toHaveLength(1);
+    dm.change(live);
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]!.messages.map((m) => m.id)).toEqual(["h1", "h2", "h3", "h4"]));
+    expect(dm.dropped).toEqual([new Set(["m-1"])]);
+  });
+
+  it("isn't read again after a turn you started", async () => {
+    answer(() => json({ messages: [], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const live: ConversationState = { ...emptyConversation(), connected: true };
+    dm.change({ ...live, working: { since: 0, step: "Sending" } });
+    dm.change(live);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetched).toHaveLength(1);
   });
 
   it("keeps what an overseer's messages offer to act on, even with no text", async () => {

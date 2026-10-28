@@ -1,6 +1,7 @@
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { useMemo } from "react";
 import { openUrl } from "../platform";
+import type { Relayed } from "../chat/relayed";
 import type { ChatMessage } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
 import { Mark } from "../ui/Mark";
@@ -14,11 +15,15 @@ export function Message({
   message,
   author,
   home,
+  relayed,
   onSubmitForm,
 }: {
   message: ChatMessage;
   author: string;
   home?: string;
+  /** A turn the overseer sent on, shown as from it (or from you, saying yes
+   *  to it), not as something you typed. */
+  relayed?: Relayed | null;
   onSubmitForm: (summary: string, values: Record<string, unknown>) => boolean;
 }) {
   const host = useMemo<RichHost>(
@@ -28,13 +33,22 @@ export function Message({
     }),
     [onSubmitForm],
   );
-  const you = message.role === "user";
+  const fromOverseer = relayed?.by === "overseer";
+  const you = message.role === "user" && !fromOverseer;
+  const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
   return (
-    <article className={`msg msg-${message.role}`}>
-      {you ? <span className="msg-avatar">K</span> : <Mark name={author} />}
+    <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`}>
+      {you ? <span className="msg-avatar">K</span> : <Mark name={fromOverseer ? relayed.overseer : author} />}
       <div className="msg-body">
         <span className="msg-head">
-          <b className="display">{you ? "You" : message.role === "system" ? "Desk" : author}</b>{" "}
+          <b className="display">{name}</b>{" "}
+          {relayed && (
+            <>
+              <span className="msg-via small">
+                {relayed.task ? "task " : ""}via {relayed.overseer}
+              </span>{" "}
+            </>
+          )}
           <span className="faint small">
             {home ? `${home} · ` : ""}
             {time(message.at)}
@@ -49,8 +63,8 @@ export function Message({
             ))}
           </span>
         )}
-        {you || message.role === "system" ? (
-          <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>{message.content}</p>
+        {message.role !== "assistant" ? (
+          <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>{relayed?.text ?? message.content}</p>
         ) : (
           <RichHostProvider host={host}>
             <div className="msg-text rich">

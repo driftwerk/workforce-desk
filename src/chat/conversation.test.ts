@@ -99,4 +99,14 @@ describe("conversation", () => {
     expect(onEnd.messages[0]!.desk).toEqual(desk);
     expect(run([{ type: "message", content: "Plain." }]).messages[0]!.desk).toBeUndefined();
   });
+
+  it("knows a turn you didn't start from one you did", () => {
+    const theirs = run([{ type: "typing" }]);
+    expect(theirs.unprompted).toBe(true);
+    expect(run([{ type: "stream_start" }, { type: "stream_delta", content: "Green." }], theirs).unprompted).toBe(true);
+    expect(run([{ type: "message", content: "Green." }], theirs)).toMatchObject({ unprompted: false, working: null });
+    const yours = run([{ type: "typing" }], { ...emptyConversation(), working: { since: 0, step: "Sending" } });
+    expect(yours.unprompted).toBe(false);
+    expect(run([{ type: "message", content: "An answer the socket repeats" }]).unprompted).toBe(false);
+  });
 });

@@ -14,6 +14,9 @@ export interface ConversationState {
   typing: boolean;
   streaming: boolean;
   working: Working | null;
+  /** A turn the person didn't start (one the overseer asked for, a
+   *  schedule's) is running; its prompt isn't sent live, only kept. */
+  unprompted: boolean;
 }
 
 export const emptyConversation = (): ConversationState => ({
@@ -23,6 +26,7 @@ export const emptyConversation = (): ConversationState => ({
   typing: false,
   streaming: false,
   working: null,
+  unprompted: false,
 });
 
 /** `memory.recall: token refresh` → `memory.recall — token refresh`. */
@@ -61,6 +65,13 @@ const updateLast = (msgs: ChatMessage[], f: (m: ChatMessage) => ChatMessage): Ch
 /** Folds one server message into the conversation. Pure, so it is tested
  *  without a socket. */
 export const reduce = (s: ConversationState, msg: ServerMessage): ConversationState => {
+  const next = fold(s, msg);
+  // A turn that starts while nothing was sent isn't the person's.
+  const unprompted = next.working ? (s.working ? s.unprompted : true) : false;
+  return next.unprompted === unprompted ? next : { ...next, unprompted };
+};
+
+const fold = (s: ConversationState, msg: ServerMessage): ConversationState => {
   const sessionId = msg.session_id ?? s.sessionId;
   switch (msg.type) {
     case "connected":
@@ -228,7 +239,7 @@ export class Conversation {
     };
     ws.onclose = () => {
       clearInterval(this.ping);
-      this.set({ ...this.state, connected: false, typing: false, streaming: false, working: null });
+      this.set({ ...this.state, connected: false, typing: false, streaming: false, working: null, unprompted: false });
       if (!this.closed) this.timer = setTimeout(() => this.open(), Math.min(30_000, 1000 * 2 ** this.retry++));
     };
   }
@@ -249,7 +260,20 @@ export class Conversation {
   cancel() {
     if (this.ws?.readyState === WebSocket.OPEN && this.state.sessionId)
       this.ws.send(JSON.stringify({ type: "cancel", session_id: this.state.sessionId }));
-    this.set({ ...this.state, typing: false, streaming: false, working: null, messages: closeStreaming(this.state.messages) });
+    this.set({
+      ...this.state,
+      typing: false,
+      streaming: false,
+      working: null,
+      unprompted: false,
+      messages: closeStreaming(this.state.messages),
+    });
+  }
+
+  /** Forgets live messages the hub's kept copy now shows. */
+  drop(ids: ReadonlySet<string>) {
+    if (ids.size === 0) return;
+    this.set({ ...this.state, messages: this.state.messages.filter((m) => !ids.has(m.id)) });
   }
 
   close() {

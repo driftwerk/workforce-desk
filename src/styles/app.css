@@ -563,6 +563,13 @@ button {
 .msg-text.rich > :last-child {
   margin-bottom: 0;
 }
+.msg-via {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
 .msg-tools {
   display: flex;
   flex-wrap: wrap;

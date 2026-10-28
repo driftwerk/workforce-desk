@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
-import { fetchHistory, prepend } from "./history";
+import { covered, fetchHistory, prepend } from "./history";
 import { agentKey, type Agent, type ChatMessage, type HubAccount } from "./types";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -33,6 +33,10 @@ interface ChatStore {
   loadHistory: (key: string) => Promise<void>;
   /** Reads the page before the earliest message shown. */
   loadEarlier: (key: string) => Promise<void>;
+  /** Reads a DM's latest messages again after a turn the person didn't
+   *  start (the overseer's), whose prompt only the hub's copy has; the
+   *  live messages that copy shows give way to it. */
+  refreshHistory: (key: string) => Promise<void>;
   send: (key: string, content: string) => boolean;
   /** Says `content` to an agent without opening their DM (connecting first
    *  if need be); false if it couldn't be sent. */
@@ -79,7 +83,14 @@ const ensure = (key: string): boolean => {
   const hub = agent && hubs.find((h) => h.id === agent.hubId);
   if (!agent || !hub) return false;
   useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
-  live.set(key, new Conversation(hub, agent.id, (c) => useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }))));
+  live.set(
+    key,
+    new Conversation(hub, agent.id, (c) => {
+      const was = useChat.getState().conversations[key];
+      useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
+      if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+    }),
+  );
   return true;
 };
 
@@ -155,6 +166,35 @@ export const useChat = create<ChatStore>((set, get) => ({
     } catch {
       put(() => ({ earlier: "failed" }));
     }
+  },
+  refreshHistory: async (key) => {
+    const target = whereIs(get(), key);
+    if (!target || get().histories[key]?.state !== "ready") return;
+    const started = new Date().toISOString();
+    let page;
+    try {
+      page = await fetchHistory(target.hub, target.agent.id);
+    } catch {
+      return; // What's shown stays; the next open reads it again.
+    }
+    const was = get().histories[key];
+    if (!page || was?.state !== "ready") return;
+    const first = was.messages[0];
+    // Earlier pages already read stay above it.
+    const reachesBack = !first || page.messages.some((m) => m.id === first.id);
+    set((s) => ({
+      histories: {
+        ...s.histories,
+        [key]: {
+          ...was,
+          messages: prepend(was.messages, page.messages),
+          more: reachesBack ? page.more : was.more,
+          loadedAt: new Date().toISOString(),
+        },
+      },
+    }));
+    const convo = get().conversations[key];
+    if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started));
   },
   send: (key, content) => live.get(key)?.send(content) ?? false,
   sendTo: (key, content) =>

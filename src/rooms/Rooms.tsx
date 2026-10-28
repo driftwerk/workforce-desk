@@ -14,6 +14,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Mark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
+import { relayedTurn } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
@@ -136,6 +137,9 @@ function DirectMessage() {
   const liveShown = pending ? convo.messages.slice(0, -1) : convo.messages;
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
+  // The overseer sends on only to crew on this Mac, under the name it had then.
+  const crewNames = local ? roster.filter((a) => a.hubId === agent.hubId).flatMap((a) => [a.name, a.id]) : [];
+  const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;
 
   return (
     <main className="room" aria-label={`Conversation with ${agent.name}`}>
@@ -221,7 +225,14 @@ function DirectMessage() {
               </div>
             )}
             {shown.map((m) => (
-              <Message key={m.id} message={m} author={agent.name} home={hub?.label} onSubmitForm={submitForm} />
+              <Message
+                key={m.id}
+                message={m}
+                author={agent.name}
+                home={hub?.label}
+                relayed={local && m.role === "user" ? relayedTurn(m.content, crewNames, overseerName) : null}
+                onSubmitForm={submitForm}
+              />
             ))}
             {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />
