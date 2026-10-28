@@ -12,6 +12,7 @@ import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
 import { purposeOf, renameAgentFiles, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { OverseesTheCrew } from "./OverseesTheCrew";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -26,6 +27,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         <About agent={agent} hub={hub} local={local} />
         {local ? <Thinking agent={agent} /> : <ThinkingElsewhere agent={agent} hub={hub} />}
         <Sound agent={agent} local={local} />
+        {local && <OverseesTheCrew agent={agent} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}
         {local && !agent.isDefault && <Remove agent={agent} />}
       </div>
