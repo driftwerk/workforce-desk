@@ -77,7 +77,8 @@ unsafe impl Send for Engine {}
 type Tap = RcBlock<dyn Fn(NonNull<AVAudioPCMBuffer>, NonNull<AVAudioTime>)>;
 
 pub struct MacAudio {
-    engine: Mutex<Engine>,
+    engine: Arc<Mutex<Engine>>,
+    alive: Arc<std::sync::atomic::AtomicBool>,
     format: Retained<AVAudioFormat>,
     resampler: Mutex<Option<Resampler>>,
     speaking: Arc<Speaking>,
@@ -162,8 +163,12 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
                 e.code()
             ));
         }
+        let engine = Arc::new(Mutex::new(Engine { engine, player }));
+        let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        keep_running(engine.clone(), alive.clone());
         Ok(MacAudio {
-            engine: Mutex::new(Engine { engine, player }),
+            engine,
+            alive,
             format,
             resampler: Mutex::new(None),
             speaking,
@@ -192,8 +197,7 @@ unsafe fn listen(
                 )
             })?;
         let format = mic.outputFormatForBus(0);
-        let rate = format.sampleRate() as u32;
-        if rate == 0 || format.channelCount() == 0 {
+        if format.sampleRate() == 0.0 || format.channelCount() == 0 {
             return Err(eyre!("no microphone input"));
         }
         let tap: Tap = RcBlock::new(
@@ -204,6 +208,8 @@ unsafe fn listen(
                     return;
                 }
                 let frames = buffer.frameLength() as usize;
+                // The buffer's own rate: a device can change it under a running tap.
+                let rate = buffer.format().sampleRate() as u32;
                 // With voice processing on, the first channel is the processed
                 // voice; any others are the unprocessed microphones.
                 let voice = std::slice::from_raw_parts((*data).as_ptr(), frames);
@@ -273,8 +279,44 @@ impl AudioOut for MacAudio {
     }
 }
 
+/// macOS stops an engine whenever the audio device's configuration changes
+/// (another app, a device switch, a voice-processing unit winding down) and
+/// leaves restarting it to the app: this does, until the engine is dropped.
+fn keep_running(engine: Arc<Mutex<Engine>>, alive: Arc<std::sync::atomic::AtomicBool>) {
+    std::thread::spawn(move || {
+        let mut failures = 0u32;
+        while alive.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let Ok(e) = engine.lock() else { break };
+            if !alive.load(Ordering::SeqCst) || unsafe { e.engine.isRunning() } {
+                failures = 0;
+                continue;
+            }
+            match unsafe {
+                e.engine.prepare();
+                e.engine.startAndReturnError()
+            } {
+                Ok(()) => {
+                    tracing::info!("voice: the audio device changed; audio restarted");
+                    failures = 0;
+                }
+                Err(err) => {
+                    failures += 1;
+                    if failures == 1 || failures.is_multiple_of(40) {
+                        tracing::warn!(
+                            "voice: audio stopped and won't restart yet: {}",
+                            err.localizedDescription()
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
 impl Drop for MacAudio {
     fn drop(&mut self) {
+        self.alive.store(false, Ordering::SeqCst);
         if let Ok(engine) = self.engine.lock() {
             unsafe {
                 engine.player.stop();
@@ -310,6 +352,31 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
     use std::time::Duration;
+
+    /// The microphone keeps delivering, second after second, once open.
+    #[test]
+    #[ignore = "uses the microphone"]
+    fn keeps_hearing_the_microphone() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let c = count.clone();
+        let input: AudioIn = Box::new(move |samples: &[f32], _rate: u32| {
+            c.fetch_add(samples.len(), Ordering::SeqCst);
+        });
+        let _audio = open(input).unwrap();
+        let mut per_second = Vec::new();
+        let mut last = 0;
+        for _ in 0..8 {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = count.load(Ordering::SeqCst);
+            per_second.push(now - last);
+            last = now;
+        }
+        eprintln!("samples per second: {per_second:?}");
+        assert!(
+            per_second.iter().skip(1).all(|n| *n > 10_000),
+            "{per_second:?}"
+        );
+    }
 
     #[test]
     fn the_microphone_is_quiet_while_desk_speaks_and_just_after() {
