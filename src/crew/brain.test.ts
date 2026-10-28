@@ -27,6 +27,27 @@ const ALL = [CLAUDE, CHATGPT, ROUTER];
 
 const llmOf = (toml: string) => (parse(toml) as Record<string, Record<string, unknown>>).llm;
 
+const BEDROCK = provider("bedrock", {
+  group: "key",
+  models: [
+    { id: "claude-opus", name: "Opus", description: "", default: true, provider: "bedrock:anthropic" },
+    { id: "deepseek", name: "DeepSeek", description: "", default: false, provider: "bedrock:deepseek" },
+  ],
+});
+
+describe("a provider whose models run under another name", () => {
+  it("writes the model's own provider and reads it back as the entry", () => {
+    const brain = resolveBrain({ provider: "bedrock", model: "deepseek", effort: "high" }, BEDROCK);
+    const toml = withBrain("", brain);
+    expect(llmOf(toml)).toMatchObject({ provider: "bedrock:deepseek", default_model: "deepseek", effort: "high" });
+    expect(brainOf(toml, [CLAUDE, BEDROCK])).toEqual(brain);
+  });
+
+  it("keeps the entry id where the model runs on it", () => {
+    expect(llmOf(withBrain("", resolveBrain({ provider: "claude-code" }, CLAUDE)))?.provider).toBe("claude-code");
+  });
+});
+
 describe("an agent's brain in its config", () => {
   it("writes the provider, model and effort and keeps everything else", () => {
     const out = withBrain('[llm]\nmax_rounds = 20\n\n[memory]\nbackend = "sqlite"\n', {

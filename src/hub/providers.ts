@@ -8,6 +8,9 @@ export interface ProviderField {
   label: string;
   secret: boolean;
   placeholder?: string;
+  required?: boolean;
+  /** A whole file's worth, like a service-account key. */
+  multiline?: boolean;
 }
 
 export interface ProviderConnect {
@@ -23,6 +26,9 @@ export interface ProviderModel {
   name: string;
   description: string;
   default: boolean;
+  /** What the agent's config names as its provider to run this model
+   *  (`bedrock:anthropic`); the entry's id when absent. */
+  provider?: string;
 }
 
 export interface Provider {

@@ -4,9 +4,13 @@ import { defaultEffort, defaultModel, effortName, EFFORTS, type Provider } from 
 /** How an agent thinks: its provider, a model of that provider and, where
  *  the provider has one, an effort. */
 export interface Brain {
+  /** The provider's entry in the hub's list. */
   provider: string;
   model: string;
   effort?: string;
+  /** What the config names to run `model`, when that isn't `provider`
+   *  (Bedrock's `bedrock:anthropic`). */
+  runsOn?: string;
 }
 
 /** Desk's saved default for new agents: unset parts mean that provider's
@@ -28,6 +32,20 @@ const parseDoc = (source: string): Doc => (source.trim() ? (parse(source) as Doc
 
 const byId = (providers: readonly Provider[], id: string): Provider | undefined => providers.find((p) => p.id === id);
 
+const runsOn = (p: Provider, model: string): string => p.models.find((m) => m.id === model)?.provider ?? p.id;
+
+/** The entry a config's `provider` belongs to: its id, or the entry with a
+ *  model run on it (`bedrock:anthropic` is Bedrock's). */
+const entryOf = (providers: readonly Provider[], configured: string, model: string | null): Provider | undefined =>
+  byId(providers, configured) ??
+  providers.find((p) => p.models.some((m) => m.provider === configured && m.id === model)) ??
+  providers.find((p) => p.models.some((m) => m.provider === configured));
+
+const withRunsOn = (brain: Brain, p: Provider): Brain => {
+  const on = runsOn(p, brain.model);
+  return on === p.id ? brain : { ...brain, runsOn: on };
+};
+
 /** `choice` made whole against its provider: a model or effort the provider
  *  doesn't offer becomes its default; no effort where it has none. Without
  *  the provider's list, the choice as given (a tier name for the model). */
@@ -35,7 +53,7 @@ export const resolveBrain = (choice: BrainChoice, provider: Provider | undefined
   if (!provider) return { provider: choice.provider, model: choice.model ?? "standard", effort: choice.effort };
   const model = provider.models.some((m) => m.id === choice.model) ? choice.model! : (defaultModel(provider)?.id ?? choice.model ?? "standard");
   const effort = choice.effort && provider.efforts.includes(choice.effort) ? choice.effort : defaultEffort(provider);
-  return effort ? { provider: provider.id, model, effort } : { provider: provider.id, model };
+  return withRunsOn(effort ? { provider: provider.id, model, effort } : { provider: provider.id, model }, provider);
 };
 
 /** Where new agents start: the saved default, else the first connected
@@ -58,9 +76,10 @@ export const brainOf = (
   fallback: { provider?: string | null; model?: string | null } = {},
 ): Brain => {
   const llm = (parseDoc(source).llm ?? {}) as Doc;
-  const providerId = typeof llm.provider === "string" ? llm.provider : (fallback.provider ?? "claude-code");
-  const provider = byId(providers, providerId);
+  const configured = typeof llm.provider === "string" ? llm.provider : (fallback.provider ?? "claude-code");
   const named = typeof llm.default_model === "string" ? llm.default_model : null;
+  const provider = entryOf(providers, configured, named);
+  const providerId = provider?.id ?? configured;
   const model =
     named && !TIERS.has(named)
       ? named
@@ -74,14 +93,15 @@ export const brainOf = (
       : typeof llm.effort === "string"
         ? llm.effort
         : defaultEffort(provider);
-  return effort ? { provider: providerId, model, effort } : { provider: providerId, model };
+  const brain: Brain = effort ? { provider: providerId, model, effort } : { provider: providerId, model };
+  return provider ? withRunsOn(brain, provider) : brain;
 };
 
 /** An agent's config thinking with `brain`; an effort is dropped where the
  *  brain has none. Anything else in the file stays. */
 export const withBrain = (source: string, brain: Brain): string => {
   const doc = parseDoc(source);
-  const llm: Doc = { ...((doc.llm ?? {}) as Doc), provider: brain.provider, default_model: brain.model };
+  const llm: Doc = { ...((doc.llm ?? {}) as Doc), provider: brain.runsOn ?? brain.provider, default_model: brain.model };
   if (brain.effort) llm.effort = brain.effort;
   else delete llm.effort;
   doc.llm = llm;

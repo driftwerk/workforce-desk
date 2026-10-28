@@ -736,3 +736,8 @@ button.card-icon:hover:not(:disabled) {
 .prov-text span.state-blocked {
   color: var(--blocked);
 }
+
+.connect-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

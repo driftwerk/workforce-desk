@@ -75,7 +75,7 @@ function FieldsConnect({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const probe = provider.connect.kind === "probe";
-  const required = provider.connect.fields.filter((f) => !/optional/i.test(f.label));
+  const required = provider.connect.fields.filter((f) => f.required ?? !/optional/i.test(f.label));
   const ready = probe || required.every((f) => values[f.name]?.trim());
 
   const submit = async (e: React.FormEvent) => {
@@ -100,15 +100,28 @@ function FieldsConnect({
       {provider.connect.fields.map((f, i) => (
         <label key={f.name} className="field-stack">
           <span className="field-label">{f.label}</span>
-          <input
-            type={f.secret ? "password" : "text"}
-            autoComplete="off"
-            spellCheck={false}
-            data-autofocus={i === 0 ? true : undefined}
-            placeholder={f.placeholder}
-            value={values[f.name] ?? ""}
-            onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
-          />
+          {f.multiline ? (
+            <textarea
+              className="connect-file"
+              rows={6}
+              autoComplete="off"
+              spellCheck={false}
+              data-autofocus={i === 0 ? true : undefined}
+              placeholder={f.placeholder}
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            />
+          ) : (
+            <input
+              type={f.secret ? "password" : "text"}
+              autoComplete="off"
+              spellCheck={false}
+              data-autofocus={i === 0 ? true : undefined}
+              placeholder={f.placeholder}
+              value={values[f.name] ?? ""}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            />
+          )}
         </label>
       ))}
       {problem && (

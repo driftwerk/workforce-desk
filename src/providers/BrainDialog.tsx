@@ -42,7 +42,7 @@ export function BrainDialog({
     setSaving(true);
     setFailure(null);
     try {
-      await onUse(brain);
+      await onUse(resolveBrain(brain, provider));
       onClose();
     } catch (e) {
       setFailure(e instanceof Error ? e.message : String(e));
