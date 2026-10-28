@@ -1,5 +1,5 @@
 import { parse, stringify } from "smol-toml";
-import { defaultEffort, defaultModel, effortName, EFFORTS, type Provider } from "../hub/providers";
+import { defaultEffort, defaultModel, effortName, EFFORTS, effortsFor, type Provider } from "../hub/providers";
 
 /** How an agent thinks: its provider, a model of that provider and, where
  *  the provider has one, an effort. */
@@ -46,13 +46,14 @@ const withRunsOn = (brain: Brain, p: Provider): Brain => {
   return on === p.id ? brain : { ...brain, runsOn: on };
 };
 
-/** `choice` made whole against its provider: a model or effort the provider
- *  doesn't offer becomes its default; no effort where it has none. Without
+/** `choice` made whole against its provider: a model the provider doesn't
+ *  offer becomes its default, an effort the model doesn't offer the model's
+ *  default; no effort where the model has none. Without
  *  the provider's list, the choice as given (a tier name for the model). */
 export const resolveBrain = (choice: BrainChoice, provider: Provider | undefined): Brain => {
   if (!provider) return { provider: choice.provider, model: choice.model ?? "standard", effort: choice.effort };
   const model = provider.models.some((m) => m.id === choice.model) ? choice.model! : (defaultModel(provider)?.id ?? choice.model ?? "standard");
-  const effort = choice.effort && provider.efforts.includes(choice.effort) ? choice.effort : defaultEffort(provider);
+  const effort = choice.effort && effortsFor(provider, model).includes(choice.effort) ? choice.effort : defaultEffort(provider, model);
   return withRunsOn(effort ? { provider: provider.id, model, effort } : { provider: provider.id, model }, provider);
 };
 
@@ -68,7 +69,8 @@ export const newAgentBrain = (saved: BrainChoice | null, providers: readonly Pro
 };
 
 /** The brain an agent's config is on, as it would run: a tier name or no
- *  model is its provider's default model, no effort its default effort.
+ *  model is its provider's default model, no effort the model's default
+ *  effort, and no effort at all for a model without one.
  *  `fallback` (what the hub reports) fills in what the file doesn't say. */
 export const brainOf = (
   source: string,
@@ -88,11 +90,11 @@ export const brainOf = (
     ? typeof llm.effort === "string"
       ? llm.effort
       : undefined
-    : provider.efforts.length === 0
+    : effortsFor(provider, model).length === 0
       ? undefined
       : typeof llm.effort === "string"
         ? llm.effort
-        : defaultEffort(provider);
+        : defaultEffort(provider, model);
   const brain: Brain = effort ? { provider: providerId, model, effort } : { provider: providerId, model };
   return provider ? withRunsOn(brain, provider) : brain;
 };
@@ -118,8 +120,14 @@ export const withDeskSettings = (source: string, brain: Brain): string => {
 
 export const isDefaultModel = (p: Provider | undefined, model: string): boolean => !!p && defaultModel(p)?.id === model;
 
-export const isDefaultEffort = (p: Provider | undefined, effort: string | undefined): boolean =>
-  !!p && effort !== undefined && defaultEffort(p) === effort;
+/** Whether `effort` is what `model` runs at by default. */
+export const isDefaultEffort = (p: Provider | undefined, effort: string | undefined, model?: string): boolean =>
+  !!p && effort !== undefined && defaultEffort(p, model) === effort;
+
+/** Whether the brain is on its provider's defaults: the default model, at
+ *  that model's default effort (or a model with no effort). */
+export const isDefaultBrain = (p: Provider | undefined, brain: Brain): boolean =>
+  !!p && isDefaultModel(p, brain.model) && (effortsFor(p, brain.model).length === 0 || isDefaultEffort(p, brain.effort, brain.model));
 
 export const modelOf = (p: Provider | undefined, model: string) => p?.models.find((m) => m.id === model);
 

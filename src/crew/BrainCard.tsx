@@ -1,11 +1,10 @@
 import { providerLabel } from "../chat/types";
 import { effortName, type Provider } from "../hub/providers";
-import { effortShort, isDefaultEffort, isDefaultModel, modelName, type Brain } from "./brain";
+import { effortShort, isDefaultBrain, modelName, type Brain } from "./brain";
 
 /** "How they think": the model on its provider, the effort, and Change. */
 export function BrainCard({ brain, provider, onChange }: { brain: Brain | null; provider: Provider | undefined; onChange: () => void }) {
-  const isDefault =
-    !!brain && isDefaultModel(provider, brain.model) && (provider?.efforts.length === 0 || isDefaultEffort(provider, brain.effort));
+  const isDefault = !!brain && isDefaultBrain(provider, brain);
   return (
     <div className="setting-card">
       <span className="card-icon" aria-hidden="true">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { brainSummary, isDefaultModel, resolveBrain, type Brain } from "../crew/brain";
-import { defaultEffort, effortLine, effortName, GROUPS, type Provider } from "../hub/providers";
+import { defaultEffort, effortLine, effortName, effortsFor, GROUPS, type Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { ConnectForm } from "./ConnectForm";
@@ -35,7 +35,10 @@ export function BrainDialog({
   const provider = providers.find((p) => p.id === selected);
   const brain: Brain | null = provider ? (picks[provider.id] ?? resolveBrain({ provider: provider.id }, provider)) : null;
   const ready = !!provider?.connected && !!brain && provider.models.length > 0;
-  const pick = (patch: Partial<Brain>) => brain && setPicks((all) => ({ ...all, [brain.provider]: { ...brain, ...patch } }));
+  // A new model re-checks the effort: one it doesn't offer becomes its
+  // default, and a model without efforts has none.
+  const pick = (patch: Partial<Brain>) =>
+    brain && provider && setPicks((all) => ({ ...all, [brain.provider]: resolveBrain({ ...brain, ...patch }, provider) }));
 
   const use = async () => {
     if (!brain || !ready) return;
@@ -166,8 +169,9 @@ export function BrainDialog({
 
 function Choices({ provider, brain, pick }: { provider: Provider; brain: Brain; pick: (patch: Partial<Brain>) => void }) {
   const modelIndex = provider.models.findIndex((m) => m.id === brain.model);
-  const effort = brain.effort ?? defaultEffort(provider);
-  const effortIndex = effort ? provider.efforts.indexOf(effort) : -1;
+  const efforts = effortsFor(provider, brain.model);
+  const effort = brain.effort && efforts.includes(brain.effort) ? brain.effort : defaultEffort(provider, brain.model);
+  const effortIndex = effort ? efforts.indexOf(effort) : -1;
   return (
     <>
       <div className="field-stack">
@@ -196,13 +200,13 @@ function Choices({ provider, brain, pick }: { provider: Provider; brain: Brain; 
           ))}
         </div>
       </div>
-      {provider.efforts.length > 0 && effort && (
+      {efforts.length > 0 && effort && (
         <div className="field-stack">
           <span className="field-label" id="brain-effort">
             Effort
           </span>
           <div className="effort-seg" role="radiogroup" aria-labelledby="brain-effort">
-            {provider.efforts.map((e, i) => (
+            {efforts.map((e, i) => (
               <button
                 key={e}
                 type="button"
@@ -210,13 +214,13 @@ function Choices({ provider, brain, pick }: { provider: Provider; brain: Brain; 
                 aria-checked={e === effort}
                 tabIndex={i === Math.max(effortIndex, 0) ? 0 : -1}
                 onClick={() => pick({ effort: e })}
-                onKeyDown={(ev) => radioKeys(ev, provider.efforts, effortIndex, (next) => pick({ effort: next }))}
+                onKeyDown={(ev) => radioKeys(ev, efforts, effortIndex, (next) => pick({ effort: next }))}
               >
                 {effortName(e)}
               </button>
             ))}
           </div>
-          <span className="muted">{effortLine(provider, effort)}</span>
+          <span className="muted">{effortLine(provider, effort, brain.model)}</span>
         </div>
       )}
     </>

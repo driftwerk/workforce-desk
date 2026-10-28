@@ -29,6 +29,10 @@ export interface ProviderModel {
   /** What the agent's config names as its provider to run this model
    *  (`bedrock:anthropic`); the entry's id when absent. */
   provider?: string;
+  /** This model's own efforts, over the provider's; empty: it has none. */
+  efforts?: string[];
+  /** This model's own default effort, over the provider's. */
+  defaultEffort?: string | null;
 }
 
 export interface Provider {
@@ -65,14 +69,26 @@ export const EFFORTS: Record<string, { name: string; short: string; long: string
 export const effortName = (e: string): string => EFFORTS[e]?.name ?? e;
 
 /** The one-liner under the effort control, saying so when it's the
- *  provider's default. */
-export const effortLine = (p: Provider, e: string): string =>
-  `${EFFORTS[e]?.long ?? ""}${e === defaultEffort(p) ? " The default." : ""}`.trim();
+ *  default for that model. */
+export const effortLine = (p: Provider, e: string, model?: string): string =>
+  `${EFFORTS[e]?.long ?? ""}${e === defaultEffort(p, model) ? " The default." : ""}`.trim();
 
 /** The plan sign-in each plan provider uses (`src-tauri/src/logins`). */
 export const PLAN_OF: Record<string, "claude" | "chatgpt"> = { "claude-code": "claude", chatgpt: "chatgpt" };
 
 export const defaultModel = (p: Provider): ProviderModel | undefined => p.models.find((m) => m.default) ?? p.models[0];
 
-export const defaultEffort = (p: Provider): string | undefined =>
-  p.efforts.length === 0 ? undefined : p.defaultEffort && p.efforts.includes(p.defaultEffort) ? p.defaultEffort : p.efforts[0];
+const modelEntry = (p: Provider, model: string | undefined): ProviderModel | undefined =>
+  model === undefined ? undefined : p.models.find((m) => m.id === model);
+
+/** The efforts `model` offers: its own where it says, else the provider's.
+ *  Empty: no effort setting. */
+export const effortsFor = (p: Provider, model?: string): string[] => modelEntry(p, model)?.efforts ?? p.efforts;
+
+/** The effort `model` runs at when none is chosen: its own default, else
+ *  the provider's, else its first; none where it has no efforts. */
+export const defaultEffort = (p: Provider, model?: string): string | undefined => {
+  const efforts = effortsFor(p, model);
+  const own = modelEntry(p, model)?.defaultEffort;
+  return [own, p.defaultEffort].find((e): e is string => !!e && efforts.includes(e)) ?? efforts[0];
+};

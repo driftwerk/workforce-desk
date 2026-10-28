@@ -2,7 +2,18 @@ import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import type { Provider } from "../hub/providers";
 import { fallbackProviders } from "../providers/store";
-import { brainOf, brainSummary, isDefaultEffort, isDefaultModel, newAgentBrain, resolveBrain, withBrain, withDeskSettings } from "./brain";
+import { defaultEffort, effortLine, effortsFor } from "../hub/providers";
+import {
+  brainOf,
+  brainSummary,
+  isDefaultBrain,
+  isDefaultEffort,
+  isDefaultModel,
+  newAgentBrain,
+  resolveBrain,
+  withBrain,
+  withDeskSettings,
+} from "./brain";
 
 const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
   id,
@@ -138,5 +149,79 @@ describe("where new agents start", () => {
     expect(brainSummary("Ledger", { provider: "openrouter", model: "openrouter-big" }, ROUTER)).toBe(
       "Ledger will use Big on your openrouter",
     );
+  });
+});
+
+/** A provider whose models think differently: one with efforts of its own
+ *  and its own default, one with none, one that follows the provider. */
+const MIXED = provider("chatgpt", {
+  models: [
+    { id: "deep", name: "Deep", description: "", default: false, efforts: ["medium", "high", "xhigh"], defaultEffort: "high" },
+    { id: "fast", name: "Fast", description: "", default: false, efforts: [] },
+    { id: "plain", name: "Plain", description: "", default: true },
+  ],
+});
+
+describe("effort per model", () => {
+  it("takes a model's own efforts and default over the provider's", () => {
+    expect(effortsFor(MIXED, "deep")).toEqual(["medium", "high", "xhigh"]);
+    expect(defaultEffort(MIXED, "deep")).toBe("high");
+    expect(effortsFor(MIXED, "fast")).toEqual([]);
+    expect(defaultEffort(MIXED, "fast")).toBeUndefined();
+    expect(effortsFor(MIXED, "plain")).toEqual(["low", "medium", "high"]);
+    expect(defaultEffort(MIXED, "plain")).toBe("medium");
+    expect(defaultEffort(MIXED, "not-listed")).toBe("medium");
+  });
+
+  it("falls back to the provider's default, then the first, when the model's own isn't one it offers", () => {
+    const p = provider("p", {
+      models: [
+        { id: "a", name: "A", description: "", default: true, efforts: ["low", "medium"] },
+        { id: "b", name: "B", description: "", default: false, efforts: ["high", "max"], defaultEffort: "low" },
+      ],
+    });
+    expect(defaultEffort(p, "a")).toBe("medium");
+    expect(defaultEffort(p, "b")).toBe("high");
+  });
+
+  it("resolves an effort the model doesn't offer to the model's default, and drops it where the model has none", () => {
+    expect(resolveBrain({ provider: "chatgpt", model: "deep", effort: "low" }, MIXED)).toEqual({
+      provider: "chatgpt",
+      model: "deep",
+      effort: "high",
+    });
+    expect(resolveBrain({ provider: "chatgpt", model: "deep", effort: "xhigh" }, MIXED).effort).toBe("xhigh");
+    expect(resolveBrain({ provider: "chatgpt", model: "fast", effort: "high" }, MIXED)).toEqual({ provider: "chatgpt", model: "fast" });
+    expect(resolveBrain({ provider: "chatgpt", model: "plain", effort: "xhigh" }, MIXED).effort).toBe("medium");
+  });
+
+  it("writes no effort for a model without one, and reads none back", () => {
+    const before = withBrain("", { provider: "chatgpt", model: "deep", effort: "xhigh" });
+    const after = withBrain(before, resolveBrain({ provider: "chatgpt", model: "fast", effort: "xhigh" }, MIXED));
+    expect(llmOf(after)).toEqual({ provider: "chatgpt", default_model: "fast" });
+    expect(brainOf('[llm]\nprovider = "chatgpt"\ndefault_model = "fast"\neffort = "high"\n', [MIXED])).toEqual({
+      provider: "chatgpt",
+      model: "fast",
+    });
+  });
+
+  it("reads a config without an effort at the model's own default", () => {
+    expect(brainOf('[llm]\nprovider = "chatgpt"\ndefault_model = "deep"\n', [MIXED])).toEqual({
+      provider: "chatgpt",
+      model: "deep",
+      effort: "high",
+    });
+  });
+
+  it("marks Default against the model's default effort", () => {
+    expect(isDefaultEffort(MIXED, "high", "deep")).toBe(true);
+    expect(isDefaultEffort(MIXED, "medium", "deep")).toBe(false);
+    expect(isDefaultEffort(MIXED, "medium", "plain")).toBe(true);
+    expect(effortLine(MIXED, "high", "deep")).toMatch(/The default\.$/);
+    expect(effortLine(MIXED, "medium", "deep")).not.toMatch(/The default/);
+    expect(isDefaultBrain(MIXED, { provider: "chatgpt", model: "plain", effort: "medium" })).toBe(true);
+    expect(isDefaultBrain(MIXED, { provider: "chatgpt", model: "plain", effort: "high" })).toBe(false);
+    const fastDefault = { ...MIXED, models: MIXED.models.map((m) => ({ ...m, default: m.id === "fast" })) };
+    expect(isDefaultBrain(fastDefault, { provider: "chatgpt", model: "fast" })).toBe(true);
   });
 });

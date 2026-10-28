@@ -163,7 +163,7 @@ function Thinking({ agent }: { agent: Agent }) {
             <b>
               {effortName(brain.effort)} <span>· {effortShort(brain.effort)}</span>
             </b>
-            {isDefaultEffort(provider, brain.effort) ? <span className="chip chip-default">Default</span> : <span />}
+            {isDefaultEffort(provider, brain.effort, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
           </div>
         )}
       </div>

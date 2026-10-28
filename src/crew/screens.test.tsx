@@ -94,6 +94,36 @@ describe("How they think", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("hides the effort for a model without one, and re-checks it when the model changes", async () => {
+    useDesk.setState({ hub: fakeHub() });
+    const claude = plan("claude-code", "Claude plan", true);
+    useProviders.setState({
+      providers: [
+        {
+          ...claude,
+          models: [
+            { id: "deep", name: "Deep", description: "", default: true, efforts: ["high", "max"], defaultEffort: "high" },
+            { id: "quick", name: "Quick", description: "", default: false, efforts: [] },
+          ],
+        },
+      ],
+    });
+    const onUse = vi.fn();
+    render(
+      <BrainDialog title="How Ledger thinks" who="Ledger" initial={{ provider: "claude-code", model: "deep", effort: "max" }} onUse={onUse} onClose={() => {}} />,
+    );
+    expect(screen.getByRole("radio", { name: "Max" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("radio", { name: "Low" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Quick/ }));
+    expect(screen.queryByRole("radiogroup", { name: "Effort" })).toBeNull();
+    expect(screen.getByText("Ledger will use Quick on your Claude plan")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Deep/ }));
+    expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("radio", { name: /Quick/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this" })));
+    expect(onUse).toHaveBeenCalledWith({ provider: "claude-code", model: "quick" });
+  });
+
   it("closes on Escape without the key reaching anything underneath", () => {
     useDesk.setState({ hub: fakeHub() });
     const onClose = vi.fn();
