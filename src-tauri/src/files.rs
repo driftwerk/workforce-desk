@@ -248,13 +248,13 @@ mod tests {
         assert_eq!(loaded.ask_shortcut, "Alt+Space");
         let chosen = Settings {
             push_to_talk_shortcut: "Control+Alt+K".into(),
-            ask_shortcut: "Control+Alt+Space".into(),
+            ask_shortcut: "Control+Alt+J".into(),
             ..Settings::default()
         };
         save_settings(&paths, &chosen).unwrap();
         let written = std::fs::read_to_string(paths.settings()).unwrap();
         assert!(written.contains(r#""pushToTalkShortcut": "Control+Alt+K""#));
-        assert!(written.contains(r#""askShortcut": "Control+Alt+Space""#));
+        assert!(written.contains(r#""askShortcut": "Control+Alt+J""#));
         assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 
