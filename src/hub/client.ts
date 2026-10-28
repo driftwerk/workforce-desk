@@ -57,7 +57,12 @@ export class DeskHub {
       }
       throw new HubError(res.status, message);
     }
-    return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+    if (res.status === 204) return undefined as T;
+    // A hub without this route answers with its web page, not a 404.
+    if (!(res.headers.get("content-type") ?? "").includes("json")) {
+      throw new HubError(404, "This hub doesn’t have that yet.");
+    }
+    return (await res.json()) as T;
   }
 
   /** A Desk route; in the browser preview, the dev bridge answers the ones
