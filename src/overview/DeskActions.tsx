@@ -3,7 +3,7 @@ import { useDesk } from "../hub/store";
 import type { DeskExtras, Engine } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { since } from "./overview";
-import { openLocalDm } from "./people";
+import { openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 
 const ENGINE: Record<Engine, string> = { claude: "Claude Code", codex: "Codex" };
@@ -99,6 +99,9 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
   useEffect(() => wantSuggestions(), [wantSuggestions]);
   const state = live?.state ?? mentioned.state;
   const subject = live?.subject;
+  const knownSession = useKnownSession(subject?.kind === "session" ? subject.id : null);
+  const knownAgent = useLocalAgent(subject?.kind === "agent" ? subject.id : null);
+  const opens = subject?.kind === "session" ? knownSession : !!knownAgent;
   const text = live?.text || mentioned.text;
 
   const act = async (what: "accept" | "dismiss") => {
@@ -113,7 +116,7 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
   };
   const open = () => {
     if (!subject) return;
-    if (subject.kind === "session") useDesk.getState().open(subject.id);
+    if (subject.kind === "session") openSession(subject.id);
     else openLocalDm(subject.id);
   };
 
@@ -126,7 +129,7 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
           <button type="button" className="btn btn-signal" disabled={busy !== null} onClick={() => void act("accept")}>
             {busy === "accept" ? "Doing it…" : "Do it"}
           </button>
-          {subject && (subject.kind === "session" || subject.kind === "agent") && (
+          {subject && opens && (
             <button type="button" className="btn" onClick={open}>
               {subject.kind === "session" ? "Open session" : `Open ${subject.name}`}
             </button>

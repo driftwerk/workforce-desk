@@ -21,3 +21,11 @@ export const openLocalDm = (id: string): void => {
   void useDesk.getState().openRoom(null);
   useChat.getState().openDm(key);
 };
+
+/** Whether Desk lists the session, so its card can open. */
+export const useKnownSession = (id: string | null | undefined): boolean => useDesk((s) => !!id && !!s.sessions[id]);
+
+/** Opens a session's card, if Desk lists it (else it would open nothing). */
+export const openSession = (id: string): void => {
+  if (useDesk.getState().sessions[id]) useDesk.getState().open(id);
+};

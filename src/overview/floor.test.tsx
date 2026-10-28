@@ -174,6 +174,18 @@ describe("the Floor", () => {
     expect(hub.decide).toHaveBeenCalledWith("s-web", "ap-1", "allow");
   });
 
+  it("offers to open only the sessions Desk lists", async () => {
+    useDesk.setState({ hub: hubWith({}), sessions: { "s-e7": session("s-e7", { name: "workforce-e7", state: "working", pending: null }) } });
+    render(<Floor onNewSession={() => {}} />);
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    expect(within(needs).queryByRole("button", { name: "Open" })).toBeNull();
+    expect(within(needs).queryByRole("button", { name: /acme-web/ })).toBeNull();
+    expect(within(needs).getByRole("button", { name: "Allow" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Done today" })).queryByRole("button")).toBeNull();
+    fireEvent.click(within(screen.getByRole("region", { name: "Working" })).getByRole("button", { name: /workforce-e7/ }));
+    expect(useDesk.getState().openId).toBe("s-e7");
+  });
+
   it("has no brief card without an overseer, and the rest still works", async () => {
     useDesk.setState({
       hub: hubWith({ overview: vi.fn(() => Promise.resolve(overview({ brief: null }))), manager: vi.fn(() => Promise.resolve({ agentId: null, level: null })) }),

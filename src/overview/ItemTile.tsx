@@ -5,7 +5,7 @@ import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/t
 import { Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { since } from "./overview";
-import { localKey, openLocalDm } from "./people";
+import { localKey, openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 
 const ENGINE: Record<Engine, string> = { claude: "Claude Code", codex: "Codex" };
@@ -35,37 +35,41 @@ export const stateLine = (item: OverviewItem, now = Date.now()): string => {
 };
 
 /** Opens what an item is about: a session's card, or your DM with an agent. */
-const openItem = (item: OverviewItem) => (item.kind === "session" ? useDesk.getState().open(item.id) : openLocalDm(item.id));
+const openItem = (item: OverviewItem) => (item.kind === "session" ? openSession(item.id) : openLocalDm(item.id));
+
+/** Whether the item opens: a session Desk lists, an agent in the roster. */
+const useOpens = (item: OverviewItem): boolean => {
+  const session = useKnownSession(item.kind === "session" ? item.id : null);
+  const agent = useLocalAgent(item.kind === "agent" ? item.id : null);
+  return item.kind === "session" ? session : !!agent;
+};
 
 /** An agent or a session on the Floor: who, what they're doing, and what
  *  they need from you, answered in place. */
 export function ItemTile({ item }: { item: OverviewItem }) {
   const session = useDesk((s) => (item.kind === "session" ? s.sessions[item.id] : undefined));
   const tone = item.state === "quiet" ? "working" : item.state;
-  if (item.state === "done") return <DoneTile item={item} />;
+  const opens = useOpens(item);
+  if (item.state === "done") return <DoneTile item={item} opens={opens} />;
   return (
     <article className={`tile ov-tile ov-tile-${tone}`}>
-      <button type="button" className="tile-open" onClick={() => openItem(item)}>
-        <Mark name={item.name} engine={item.kind === "session" ? (item.engine ?? undefined) : undefined} state={RING[item.state]} />
-        <span className="tile-name">
-          <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{item.name}</span>
-          <span className={`tile-state ov-state-${tone}`}>{stateLine(item)}</span>
-        </span>
-      </button>
+      <TileHead item={item} tone={tone} opens={opens} />
       {item.task && <span className="ov-task">{item.task}</span>}
       {item.state !== "needs_you" && item.detail && <span className="mono ov-detail">{item.detail}</span>}
       {item.state === "needs_you" &&
         (item.kind === "session" ? (
-          <SessionAsk item={item} pending={session?.pending ?? null} />
+          <SessionAsk item={item} pending={session?.pending ?? null} opens={opens} />
         ) : item.question ? (
           <QuestionAsk item={item} question={item.question} />
         ) : (
           <div className="ov-ask">
             <span className="ov-ask-text">{item.detail ?? `${item.name} is waiting on you.`}</span>
             <span className="ov-ask-actions">
-              <button type="button" className="btn btn-ghost" onClick={() => openItem(item)}>
-                Reply…
-              </button>
+              {opens && (
+                <button type="button" className="btn btn-ghost" onClick={() => openItem(item)}>
+                  Reply…
+                </button>
+              )}
             </span>
           </div>
         ))}
@@ -73,38 +77,76 @@ export function ItemTile({ item }: { item: OverviewItem }) {
   );
 }
 
-function DoneTile({ item }: { item: OverviewItem }) {
+function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; opens: boolean }) {
+  const inner = (
+    <>
+      <Mark name={item.name} engine={item.kind === "session" ? (item.engine ?? undefined) : undefined} state={RING[item.state]} />
+      <span className="tile-name">
+        <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{item.name}</span>
+        <span className={`tile-state ov-state-${tone}`}>{stateLine(item)}</span>
+      </span>
+    </>
+  );
+  return opens ? (
+    <button type="button" className="tile-open" onClick={() => openItem(item)}>
+      {inner}
+    </button>
+  ) : (
+    <div className="tile-open">{inner}</div>
+  );
+}
+
+function DoneTile({ item, opens }: { item: OverviewItem; opens: boolean }) {
   const title = item.kind === "agent" && item.task ? `${item.name} · ${item.task}` : item.name;
   const text = item.detail ?? (item.kind === "session" ? item.task : null);
+  const inner = (
+    <>
+      <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{title}</span>
+      {text && <span className="ov-task">{text}</span>}
+    </>
+  );
   return (
     <article className="tile ov-tile ov-tile-done">
-      <button type="button" className="ov-done-open" onClick={() => openItem(item)}>
-        <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{title}</span>
-        {text && <span className="ov-task">{text}</span>}
-      </button>
+      {opens ? (
+        <button type="button" className="ov-done-open" onClick={() => openItem(item)}>
+          {inner}
+        </button>
+      ) : (
+        <div className="ov-done-open">{inner}</div>
+      )}
     </article>
   );
 }
 
 /** A session's tool request: Allow, Deny, or open it to see more. */
-function SessionAsk({ item, pending }: { item: OverviewItem; pending: { id: string; tool: string; detail: string; answerable: boolean } | null }) {
+function SessionAsk({
+  item,
+  pending,
+  opens,
+}: {
+  item: OverviewItem;
+  pending: { id: string; tool: string; detail: string; answerable: boolean } | null;
+  opens: boolean;
+}) {
   const decide = useOverview((s) => s.decide);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const approvalId = pending?.id ?? item.approval?.id;
   const summary = item.approval?.summary ?? (pending ? [pending.tool, pending.detail].filter(Boolean).join(" ") : "Waiting on you");
-  const open = () => useDesk.getState().open(item.id);
+  const open = () => openSession(item.id);
   if (pending && !pending.answerable) {
     return (
       <div className="ov-ask">
         <span className="ov-ask-text">
           <b>Needs you in the terminal</b> · {summary}
         </span>
-        <span className="ov-ask-actions">
-          <button type="button" className="btn btn-ghost" onClick={open}>
-            Open
-          </button>
-        </span>
+        {opens && (
+          <span className="ov-ask-actions">
+            <button type="button" className="btn btn-ghost" onClick={open}>
+              Open
+            </button>
+          </span>
+        )}
       </div>
     );
   }
@@ -133,9 +175,11 @@ function SessionAsk({ item, pending }: { item: OverviewItem; pending: { id: stri
             </button>
           </>
         )}
-        <button type="button" className="btn btn-ghost" onClick={open}>
-          Open
-        </button>
+        {opens && (
+          <button type="button" className="btn btn-ghost" onClick={open}>
+            Open
+          </button>
+        )}
       </span>
       {problem && <span className="small state-blocked">{problem}</span>}
     </div>
