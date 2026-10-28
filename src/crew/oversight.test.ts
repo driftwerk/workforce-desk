@@ -74,6 +74,13 @@ wake = { waiting_minutes = 2.5 }
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
   });
 
+  it("writes minutes of 0 for off, as the hub takes them, and reads them back as 0", () => {
+    const off = { ...DEFAULT_OVERSIGHT, enabled: true, wake: { ...DEFAULT_OVERSIGHT.wake, waitingMinutes: 0, quietMinutes: 0 } };
+    const toml = withOversight(CONFIG, off);
+    expect((parse(toml) as { oversight: { wake: unknown } }).oversight.wake).toMatchObject({ waiting_minutes: 0, quiet_minutes: 0 });
+    expect(oversightOf(toml).wake).toMatchObject({ waitingMinutes: 0, quietMinutes: 0 });
+  });
+
   it("won't take a file it can't read", () => {
     expect(readable(CONFIG)).toBe(true);
     expect(readable("[llm\nprovider =")).toBe(false);

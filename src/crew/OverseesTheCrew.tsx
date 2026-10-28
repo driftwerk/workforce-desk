@@ -25,11 +25,17 @@ interface Typed {
 
 const typed = (text: string): Typed => ({ text, problem: null });
 
+/** What an off minutes field turns back on with: the last minutes it had
+ *  when they can be used, else `fallback`. */
+const lastMinutes = (was: Typed | undefined, fallback: string): string =>
+  was && "value" in parseMinutes(was.text) ? was.text.trim() : fallback;
+
 /** The text fields as the config says them; an off one shows what it would
- *  be when turned back on. */
+ *  be when turned back on. (Minutes of 0 are off: the hub doesn't speak up
+ *  for that.) */
 const fieldsOf = (o: Oversight, was?: Record<Field, Typed>): Record<Field, Typed> => ({
-  waiting: typed(o.wake.waitingMinutes ? String(o.wake.waitingMinutes) : (was?.waiting.text ?? "5")),
-  quiet: typed(o.wake.quietMinutes ? String(o.wake.quietMinutes) : (was?.quiet.text ?? "30")),
+  waiting: typed(o.wake.waitingMinutes ? String(o.wake.waitingMinutes) : lastMinutes(was?.waiting, "5")),
+  quiet: typed(o.wake.quietMinutes ? String(o.wake.quietMinutes) : lastMinutes(was?.quiet, "30")),
   morning: typed(o.summaries.morning || (was?.morning.text ?? "09:00")),
   evening: typed(o.summaries.evening || (was?.evening.text ?? "18:00")),
   checkins: typed(String(o.maxCheckinsPerDay)),

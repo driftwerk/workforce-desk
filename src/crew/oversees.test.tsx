@@ -104,6 +104,55 @@ describe("Oversees the crew", () => {
     expect((screen.getByRole("textbox", { name: "Minutes waiting" }) as HTMLInputElement).value).toBe("12");
   });
 
+  it("reads minutes of 0 as off, and turns them back on with the last minutes, else 5 and 30", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "watch" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nwake = { waiting_minutes = 0, quiet_minutes = 0 }\n`);
+    const waitingBox = () => screen.getByRole("checkbox", { name: "Something has waited on you for" }) as HTMLInputElement;
+    const quietBox = () => screen.getByRole("checkbox", { name: "Work has gone quiet while working for" }) as HTMLInputElement;
+    const quiet = () => screen.getByRole("textbox", { name: "Minutes quiet" }) as HTMLInputElement;
+    expect(waitingBox().checked).toBe(false);
+    expect(quietBox().checked).toBe(false);
+    expect((screen.getByRole("textbox", { name: "Minutes waiting" }) as HTMLInputElement).value).toBe("5");
+    expect(quiet().value).toBe("30");
+    expect(quiet().disabled).toBe(true);
+
+    await act(async () => fireEvent.click(quietBox()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { quiet_minutes: 30, waiting_minutes: 0 } }));
+    expect(quietBox().checked).toBe(true);
+
+    fireEvent.change(quiet(), { target: { value: "45" } });
+    await act(async () => fireEvent.keyDown(quiet(), { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { quiet_minutes: 45 } }));
+    await act(async () => fireEvent.click(quietBox()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { quiet_minutes: 0 } }));
+    expect(quietBox().checked).toBe(false);
+    expect(quiet().value).toBe("45");
+    await act(async () => fireEvent.click(quietBox()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { quiet_minutes: 45 } }));
+
+    await act(async () => fireEvent.click(waitingBox()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 5, quiet_minutes: 45 } }));
+  });
+
+  it("turns minutes back on with what they were, not something typed that can't be used", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "watch" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nwake = { waiting_minutes = 0 }\n`);
+    const box = () => screen.getByRole("checkbox", { name: "Something has waited on you for" }) as HTMLInputElement;
+    const field = () => screen.getByRole("textbox", { name: "Minutes waiting" }) as HTMLInputElement;
+    await act(async () => fireEvent.click(box()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 5 } }));
+    fireEvent.change(field(), { target: { value: "lots" } });
+    fireEvent.blur(field());
+    expect(screen.getByRole("alert").textContent).toBe("Use a whole number of minutes.");
+    await act(async () => fireEvent.click(box()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 0 } }));
+    await waitFor(() => expect(field().value).toBe("5"));
+    await act(async () => fireEvent.click(box()));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 5 } }));
+  });
+
   it("isn't offered by a hub that has no overseer", () => {
     useOverview.setState({ managerSupport: "no", manager: null });
     show(fakeHub());
