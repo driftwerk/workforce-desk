@@ -188,6 +188,7 @@ impl Worker {
         let now = Instant::now();
         match input {
             Input::Audio(samples, rate) => {
+                level(&samples, rate);
                 let resampler = match &mut self.resampler {
                     Some(r) if r.from_rate() == rate => r,
                     slot => slot.insert(Resampler::new(rate, SPEECH_RATE)),
@@ -262,6 +263,28 @@ impl Worker {
 }
 
 /// Stops playback and drops whatever was still to be said.
+/// Every thirty seconds of microphone audio, how loud it was: proof the
+/// microphone is live (zero means muted or gated).
+fn level(samples: &[f32], rate: u32) {
+    use std::sync::Mutex as M;
+    static ACC: M<(f64, f32, u64)> = M::new((0.0, 0.0, 0));
+    let Ok(mut acc) = ACC.lock() else { return };
+    for &x in samples {
+        acc.0 += f64::from(x * x);
+        acc.1 = acc.1.max(x.abs());
+    }
+    acc.2 += samples.len() as u64;
+    if acc.2 >= u64::from(rate) * 30 {
+        let rms = (acc.0 / acc.2 as f64).sqrt();
+        tracing::info!(
+            rms = format!("{rms:.4}"),
+            peak = format!("{:.3}", acc.1),
+            "voice: microphone level"
+        );
+        *acc = (0.0, 0.0, 0);
+    }
+}
+
 fn stop(out: &SharedAudioOut, generation: &AtomicU64) {
     generation.fetch_add(1, Ordering::SeqCst);
     out.stop();

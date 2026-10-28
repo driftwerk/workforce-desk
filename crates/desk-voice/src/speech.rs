@@ -277,6 +277,7 @@ impl Listener {
 
     /// Listens for these names from now on. With none, only push-to-talk works.
     pub fn set_names(&mut self, names: &[String]) -> Result<()> {
+        tracing::info!(?names, "voice: listening for names");
         self.wake.set_names(names)
     }
 
@@ -325,15 +326,21 @@ impl Listener {
             match sound {
                 Sound::Name(name) => {
                     let accepted = self.conversation.keyword(&name, now);
-                    tracing::debug!(name, accepted, "wake");
+                    tracing::info!(name, accepted, "voice: heard a name");
                 }
                 Sound::SpeechStarted => {
+                    tracing::info!("voice: speech started");
                     if self.conversation.speech_started(now) {
                         out(Heard::BargeIn);
                     }
                 }
                 Sound::Segment(samples) => {
                     self.conversation.speech_ended(now);
+                    tracing::info!(
+                        seconds = samples.len() as f32 / RATE as f32,
+                        transcribe = self.conversation.wants_transcript(),
+                        "voice: speech ended"
+                    );
                     if self.conversation.wants_transcript() {
                         let text = self.transcribe(&samples, out);
                         if let Some(u) = self.conversation.transcript(&text, now) {
@@ -356,7 +363,7 @@ impl Listener {
             .get_result()
             .map(|r| r.text.trim().to_string())
             .unwrap_or_default();
-        tracing::debug!(text, "transcribed");
+        tracing::info!(text, "voice: transcribed");
         text
     }
 
