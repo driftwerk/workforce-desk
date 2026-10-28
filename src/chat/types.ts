@@ -50,6 +50,15 @@ export interface ToolCall {
   done: boolean;
 }
 
+/** Who said a DM message, as a hub that says so tells it: you (typed, or
+ *  a suggestion you said yes to), the overseer (a nudge or task it sent
+ *  on), or the agent. */
+export interface Author {
+  kind: "you" | "overseer" | "agent";
+  id: string;
+  name: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -59,6 +68,11 @@ export interface ChatMessage {
   tools: ToolCall[];
   /** What an overseer's message mentions to act on in place. */
   desk?: DeskExtras;
+  /** Who said it, where the hub says. */
+  author?: Author;
+  /** A message of yours you didn't type here: sent on by the overseer,
+   *  as the hub delivered it live. */
+  sentOn?: boolean;
 }
 
 /** What the hub's `/ws` sends (the subset Desk renders). */
@@ -68,4 +82,9 @@ export interface ServerMessage {
   error?: string;
   session_id?: string;
   desk?: DeskExtras;
+  /** A `user_message`'s id, as the DM's history gives it. */
+  id?: string;
+  /** Who said a `user_message`. */
+  author?: Author;
+  speakable?: boolean;
 }

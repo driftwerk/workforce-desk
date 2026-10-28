@@ -1,3 +1,4 @@
+import { authorOf } from "./history";
 import type { ChatMessage, HubAccount, ServerMessage } from "./types";
 
 /** A turn in progress: from the moment you send until the answer is in. */
@@ -14,8 +15,9 @@ export interface ConversationState {
   typing: boolean;
   streaming: boolean;
   working: Working | null;
-  /** A turn the person didn't start (one the overseer asked for, a
-   *  schedule's) is running; its prompt isn't sent live, only kept. */
+  /** A turn the person didn't start (a schedule's, or one the overseer
+   *  asked for on a hub that doesn't send it live) is running; its prompt
+   *  isn't sent live, only kept. */
   unprompted: boolean;
 }
 
@@ -66,14 +68,39 @@ const updateLast = (msgs: ChatMessage[], f: (m: ChatMessage) => ChatMessage): Ch
  *  without a socket. */
 export const reduce = (s: ConversationState, msg: ServerMessage): ConversationState => {
   const next = fold(s, msg);
-  // A turn that starts while nothing was sent isn't the person's.
-  const unprompted = next.working ? (s.working ? s.unprompted : true) : false;
+  // A turn that starts while nothing was sent isn't the person's, and its
+  // prompt is only kept, unless the hub sends it on live.
+  const unprompted = !next.working || msg.type === USER_MESSAGE ? false : s.working ? s.unprompted : true;
   return next.unprompted === unprompted ? next : { ...next, unprompted };
 };
+
+/** The frame a message of the DM you didn't type here comes as: the
+ *  overseer's nudge or task, or a suggestion of its you said yes to. */
+export const USER_MESSAGE = "user_message";
 
 const fold = (s: ConversationState, msg: ServerMessage): ConversationState => {
   const sessionId = msg.session_id ?? s.sessionId;
   switch (msg.type) {
+    case USER_MESSAGE: {
+      const content = msg.content ?? "";
+      // Its answer follows: the turn is under way.
+      const working = s.working ?? { since: Date.now(), step: "Thinking" };
+      if (!content.trim() || (msg.id && s.messages.some((m) => m.id === msg.id))) return { ...s, working };
+      const author = authorOf(msg.author);
+      const said: ChatMessage = {
+        ...message("user", content),
+        ...(msg.id ? { id: msg.id } : {}),
+        ...(author ? { author } : {}),
+        sentOn: true,
+      };
+      // Before an answer that started without it.
+      const last = s.messages.at(-1);
+      const messages =
+        last?.role === "assistant" && last.status === "streaming"
+          ? [...s.messages.slice(0, -1), said, last]
+          : [...s.messages, said];
+      return { ...s, working, messages };
+    }
     case "connected":
       return { ...s, sessionId };
     case "typing":

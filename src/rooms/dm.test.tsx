@@ -85,13 +85,14 @@ describe("a DM turn the overseer sent on", () => {
   const atlas = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: true };
   const scout = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
 
-  const showLocal = (messages: ChatMessage[]) => {
+  const showLocal = (messages: ChatMessage[], live: ChatMessage[] = [], people: Record<string, string> = {}) => {
     useOverview.setState({ manager: { agentId: "atlas", level: "act" } });
     useChat.setState({
       hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
       roster: [atlas, scout],
+      people,
       activeAgent: "local/scout",
-      conversations: { "local/scout": { ...emptyConversation(), connected: true } },
+      conversations: { "local/scout": { ...emptyConversation(), connected: true, messages: live } },
       histories: { "local/scout": history({ messages }) },
     });
     render(<Rooms />);
@@ -117,6 +118,44 @@ describe("a DM turn the overseer sent on", () => {
     expect(heads()).toEqual(["You"]);
     expect(texts()).toEqual(["Restart the stuck build."]);
     expect(screen.getByText("via Atlas")).toBeTruthy();
+  });
+
+  const byAtlas = { kind: "overseer" as const, id: "atlas", name: "Atlas" };
+  const byYou = { kind: "you" as const, id: "you", name: "You" };
+
+  it("shows as from the overseer the hub names, on any hub", () => {
+    show(
+      history({
+        messages: [{ ...msg("h1", "user", "Atlas has a task for you: Update the notes.", "2026-10-28T09:00:00Z"), author: byAtlas }],
+      }),
+    );
+    expect(heads()).toEqual(["Atlas"]);
+    expect(texts()).toEqual(["Update the notes."]);
+    expect(screen.getByText("task via Atlas")).toBeTruthy();
+  });
+
+  it("shows a suggestion you said yes to, worded with your name, as yours through the overseer", () => {
+    showLocal([{ ...msg("h1", "user", "Sam asks: Restart the stuck build.", "2026-10-28T09:00:00Z"), author: byYou }], [], { local: "Sam" });
+    expect(heads()).toEqual(["You"]);
+    expect(texts()).toEqual(["Restart the stuck build."]);
+    expect(screen.getByText("via Atlas")).toBeTruthy();
+  });
+
+  it("shows what the overseer sends on as it arrives in an open DM, and once when the hub has kept it", () => {
+    const sent = { ...msg("h2", "user", "Atlas asks: How is staging?", "2026-10-28T10:05:00Z"), author: byAtlas, sentOn: true };
+    showLocal([msg("h1", "assistant", "Hello.", "2026-10-28T09:00:00Z")], [sent]);
+    expect(heads()).toEqual(["Scout", "Atlas"]);
+    expect(texts()).toEqual(["Hello.", "How is staging?"]);
+    cleanup();
+    showLocal([msg("h1", "assistant", "Hello.", "2026-10-28T09:00:00Z"), { ...sent, sentOn: undefined }], [sent]);
+    expect(texts()).toEqual(["Hello.", "How is staging?"]);
+  });
+
+  it("leaves what you typed as you typed it, though it reads like the overseer's wording", () => {
+    showLocal([{ ...msg("h1", "user", "Sam asks: can you check staging?", "2026-10-28T09:00:00Z"), author: byYou }]);
+    expect(heads()).toEqual(["You"]);
+    expect(texts()).toEqual(["Sam asks: can you check staging?"]);
+    expect(document.querySelectorAll(".msg-via")).toHaveLength(0);
   });
 
   it("is only looked for on this Mac, where the overseer is", () => {

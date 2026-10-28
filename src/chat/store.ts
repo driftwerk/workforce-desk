@@ -22,6 +22,9 @@ interface ChatStore {
   hubs: HubAccount[];
   roster: Agent[];
   rosterErrors: Record<string, string>;
+  /** Your name on each hub that says it (this Mac's), by hub id: how the
+   *  hub words a suggestion you said yes to. */
+  people: Record<string, string>;
   conversations: Record<string, ConversationState>;
   /** Each open DM's earlier messages, by agent key. */
   histories: Record<string, History>;
@@ -34,8 +37,9 @@ interface ChatStore {
   /** Reads the page before the earliest message shown. */
   loadEarlier: (key: string) => Promise<void>;
   /** Reads a DM's latest messages again after a turn the person didn't
-   *  start (the overseer's), whose prompt only the hub's copy has; the
-   *  live messages that copy shows give way to it. */
+   *  start whose prompt only the hub's copy has (a schedule's, or the
+   *  overseer's on a hub that doesn't send it live); the live messages that
+   *  copy shows give way to it. */
   refreshHistory: (key: string) => Promise<void>;
   send: (key: string, content: string) => boolean;
   /** Says `content` to an agent without opening their DM (connecting first
@@ -68,6 +72,18 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   }));
 };
 
+/** Your name on `hub`, if it says. */
+const fetchPerson = async (hub: HubAccount): Promise<string | null> => {
+  try {
+    const res = await fetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
+    const body = (await res.json()) as { display_name?: unknown };
+    return typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
 const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: Agent; hub: HubAccount } | null => {
   const agent = s.roster.find((a) => agentKey(a) === key);
   const hub = agent && s.hubs.find((h) => h.id === agent.hubId);
@@ -88,8 +104,8 @@ const ensure = (key: string): boolean => {
     new Conversation(hub, agent.id, (c) => {
       const was = useChat.getState().conversations[key];
       useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
-      // The overseer only asks crew on this Mac.
-      if (hub.local && was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+      // A turn whose prompt never came live: only the hub's copy has it.
+      if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
     }),
   );
   return true;
@@ -99,6 +115,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
   rosterErrors: {},
+  people: {},
   conversations: {},
   histories: {},
   activeAgent: null,
@@ -114,6 +131,11 @@ export const useChat = create<ChatStore>((set, get) => ({
       histories: Object.fromEntries(Object.entries(s.histories).filter(([key]) => hubs.some((h) => key.startsWith(`${h.id}/`)))),
     }));
     void get().refreshRoster();
+    // The overseer, and so its suggestions, are on this Mac.
+    for (const hub of hubs.filter((h) => h.local && !(h.id in get().people)))
+      void fetchPerson(hub).then((name) => {
+        if (name && get().hubs.some((h) => h.id === hub.id)) set((s) => ({ people: { ...s.people, [hub.id]: name } }));
+      });
   },
   refreshRoster: async () => {
     const results = await Promise.allSettled(get().hubs.map(fetchAgents));

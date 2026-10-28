@@ -1,6 +1,6 @@
 import type { DeskExtras } from "../hub/types";
 import { preview } from "../preview";
-import type { ChatMessage, HubAccount } from "./types";
+import type { Author, ChatMessage, HubAccount } from "./types";
 
 /** One message of a DM as the hub keeps it. */
 interface HubMessage {
@@ -12,6 +12,8 @@ interface HubMessage {
   at?: string;
   /** What an overseer's message mentions to act on in place. */
   desk?: DeskExtras;
+  /** Who said it; an older hub doesn't say. */
+  author?: Partial<Author> | null;
 }
 
 export interface HistoryPage {
@@ -23,15 +25,27 @@ export interface HistoryPage {
 
 export const PAGE = 200;
 
-const fromHub = (m: HubMessage): ChatMessage => ({
-  id: m.id,
-  role: m.from === "user" ? "user" : "assistant",
-  content: m.text ?? m.content ?? "",
-  at: m.at ?? "",
-  status: "complete",
-  tools: [],
-  ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
-});
+const KINDS: readonly string[] = ["you", "overseer", "agent"];
+
+/** `a` as an author Desk can show, if it is one. */
+export const authorOf = (a: Partial<Author> | null | undefined): Author | null =>
+  a && typeof a.kind === "string" && KINDS.includes(a.kind)
+    ? { kind: a.kind, id: typeof a.id === "string" ? a.id : "", name: typeof a.name === "string" ? a.name : "" }
+    : null;
+
+const fromHub = (m: HubMessage): ChatMessage => {
+  const author = authorOf(m.author);
+  return {
+    id: m.id,
+    role: m.from === "user" ? "user" : "assistant",
+    content: m.text ?? m.content ?? "",
+    at: m.at ?? "",
+    status: "complete",
+    tools: [],
+    ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
+    ...(author ? { author } : {}),
+  };
+};
 
 const actionable = (m: ChatMessage): boolean => !!(m.desk?.approvals?.length || m.desk?.suggestions?.length);
 
@@ -78,8 +92,11 @@ const same = (a: ChatMessage, b: ChatMessage) => a.role === b.role && a.content.
  *  ones that existed when the history was read (`loadedAt`), or answers the
  *  socket repeats before you've said anything; they're the start of the
  *  live list and the end of the history. */
-export const withHistory = (history: ChatMessage[], live: ChatMessage[], loadedAt: string | null): ChatMessage[] => {
-  if (history.length === 0) return live;
+export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt: string | null): ChatMessage[] => {
+  if (history.length === 0) return all;
+  // A message the hub sent live by its id (the overseer's) is the kept one.
+  const kept = new Set(history.map((m) => m.id));
+  const live = all.some((m) => kept.has(m.id)) ? all.filter((m) => !kept.has(m.id)) : all;
   let candidates = 0;
   while (candidates < live.length) {
     const m = live[candidates]!;
@@ -115,8 +132,11 @@ const copyOf = (k: ChatMessage, m: ChatMessage): boolean => {
  *  page, oldest first) now shows: matched in order from the end, so a reply
  *  the hub hasn't kept yet stays live, and an older one that says the same
  *  thing doesn't stand in for it. */
-export const covered = (kept: ChatMessage[], live: ChatMessage[], before: string): Set<string> => {
-  const ids = new Set<string>();
+export const covered = (kept: ChatMessage[], all: ChatMessage[], before: string): Set<string> => {
+  // Those the hub sent live by their id are known by it.
+  const keptIds = new Set(kept.map((m) => m.id));
+  const ids = new Set(all.filter((m) => keptIds.has(m.id)).map((m) => m.id));
+  const live = all.filter((m) => !ids.has(m.id));
   let j = kept.length - 1;
   for (let i = live.length - 1; i >= 0 && j >= 0; i--) {
     const m = live[i]!;

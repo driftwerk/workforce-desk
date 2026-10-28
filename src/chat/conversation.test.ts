@@ -109,4 +109,36 @@ describe("conversation", () => {
     expect(yours.unprompted).toBe(false);
     expect(run([{ type: "message", content: "An answer the socket repeats" }]).unprompted).toBe(false);
   });
+
+  it("shows a message the overseer sent on as it arrives, before its answer, once", () => {
+    const author = { kind: "overseer" as const, id: "atlas", name: "Atlas" };
+    const frame: ServerMessage = { type: "user_message", content: "Atlas asks: How is staging?", session_id: "s1", speakable: false, id: "h7", author };
+    const s = run([{ type: "typing" }, frame, frame, { type: "stream_start" }, { type: "stream_delta", content: "Green." }, { type: "stream_end" }]);
+    expect(s.messages.map((m) => [m.id, m.role, m.content])).toEqual([
+      ["h7", "user", "Atlas asks: How is staging?"],
+      [s.messages[1]!.id, "assistant", "Green."],
+    ]);
+    expect(s.messages[0]).toMatchObject({ author, sentOn: true, status: "complete" });
+    expect(finishedAnswers(emptyConversation(), s).map((m) => m.content)).toEqual(["Green."]);
+  });
+
+  it("knows a turn whose prompt came live isn't one only the hub's copy shows", () => {
+    const frame: ServerMessage = { type: "user_message", content: "Sam asks: Restart it.", id: "h8", author: { kind: "you", id: "you", name: "You" } };
+    const told = run([{ type: "typing" }, frame]);
+    expect(told).toMatchObject({ unprompted: false, working: { step: "Thinking" } });
+    expect(run([{ type: "stream_start" }], told).unprompted).toBe(false);
+    // Before the turn is said to start, it starts it.
+    const early = run([frame, { type: "typing" }]);
+    expect(early.unprompted).toBe(false);
+    expect(early.working).not.toBeNull();
+  });
+
+  it("puts a message sent on before an answer that started without it, and ignores one with nothing to say", () => {
+    const s = run([{ type: "stream_start" }, { type: "stream_delta", content: "On it" }, { type: "user_message", content: "Atlas asks: go", id: "h9" }]);
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(s.messages[1]).toMatchObject({ status: "streaming", content: "On it" });
+    expect(run([{ type: "user_message", content: "  ", id: "h1" }]).messages).toEqual([]);
+    // A hub that sends no id or author still shows it.
+    expect(run([{ type: "user_message", content: "Atlas asks: go" }]).messages[0]).toMatchObject({ role: "user", sentOn: true });
+  });
 });

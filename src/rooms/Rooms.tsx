@@ -14,7 +14,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Mark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
-import { relayedTurn } from "../chat/relayed";
+import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
@@ -52,7 +52,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 function DirectMessage() {
-  const { activeAgent, roster, hubs, conversations, histories, send, cancel, loadHistory, loadEarlier } = useChat();
+  const { activeAgent, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier } = useChat();
   const agent = roster.find((a) => agentKey(a) === activeAgent);
   const convo = activeAgent ? conversations[activeAgent] : undefined;
   const history = activeAgent ? histories[activeAgent] : undefined;
@@ -137,9 +137,12 @@ function DirectMessage() {
   const liveShown = pending ? convo.messages.slice(0, -1) : convo.messages;
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
-  // The overseer sends on only to crew on this Mac, under the name it had then.
+  // Who sent a message on is the hub's to say; where it doesn't, its
+  // wording tells, on this Mac, where the overseer is (under the name it
+  // had then).
   const crewNames = local ? roster.filter((a) => a.hubId === agent.hubId).flatMap((a) => [a.name, a.id]) : [];
   const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;
+  const sentOn = { local, crew: crewNames, overseer: overseerName, person: people[agent.hubId] ?? null };
 
   return (
     <main className="room" aria-label={`Conversation with ${agent.name}`}>
@@ -230,7 +233,7 @@ function DirectMessage() {
                 message={m}
                 author={agent.name}
                 home={hub?.label}
-                relayed={local && m.role === "user" ? relayedTurn(m.content, crewNames, overseerName) : null}
+                relayed={relayedOf(m, sentOn)}
                 onSubmitForm={submitForm}
               />
             ))}

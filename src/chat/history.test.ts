@@ -79,6 +79,28 @@ describe("reading a DM's history", () => {
     });
   });
 
+  it("says who said each message, where the hub does", async () => {
+    answer(() =>
+      json({
+        messages: [
+          { id: "h1", from: "user", author: { kind: "overseer", id: "atlas", name: "Atlas" }, text: "Atlas asks: and staging?" },
+          { id: "h2", from: "agent", author: { kind: "agent", id: "scout", name: "Scout" }, text: "Green." },
+          { id: "h3", from: "user", author: { kind: "someone", id: "x", name: "X" }, text: "hi" },
+          { id: "h4", from: "user", text: "older" },
+        ],
+        more: false,
+      }),
+    );
+    const page = await fetchHistory(hub, "scout");
+    expect(page!.messages.map((m) => m.author)).toEqual([
+      { kind: "overseer", id: "atlas", name: "Atlas" },
+      { kind: "agent", id: "scout", name: "Scout" },
+      undefined,
+      undefined,
+    ]);
+    expect("author" in page!.messages[3]!).toBe(false);
+  });
+
   it("asks for the page before a message", async () => {
     answer(() => json({ messages: [], more: false }));
     await fetchHistory(hub, "scout", "h1");
@@ -123,6 +145,19 @@ describe("history and live messages together", () => {
   it("drops an answer the socket repeats before you've said anything", () => {
     const echo = [msg("m-1", "assistant", "Hello.", "2026-10-28T10:05:00.000Z")];
     expect(withHistory(history, echo, loadedAt).map((m) => m.id)).toEqual(["h1", "h2"]);
+  });
+
+  it("shows a message the hub sent live by its id once, kept or not", () => {
+    const sent = { ...msg("h3", "user", "Atlas asks: and staging?", "2026-10-28T10:05:00.000Z"), sentOn: true };
+    const answer = msg("m-1", "assistant", "Green.", "2026-10-28T10:05:09.000Z");
+    expect(withHistory(history, [sent, answer], loadedAt).map((m) => m.id)).toEqual(["h1", "h2", "h3", "m-1"]);
+    const reread = [
+      ...history,
+      msg("h3", "user", "Atlas asks: and staging?", "2026-10-28T10:05:00.000Z"),
+      msg("h4", "assistant", "Green.", "2026-10-28T10:05:09.000Z"),
+    ];
+    expect(withHistory(reread, [sent, answer], "2026-10-28T10:06:00.000Z").map((m) => m.id)).toEqual(["h1", "h2", "h3", "h4"]);
+    expect([...covered(reread, [sent, answer], "2026-10-28T10:06:00.000Z")].sort()).toEqual(["h3", "m-1"]);
   });
 
   it("keeps the same words said again after the history was read", () => {
@@ -223,6 +258,52 @@ describe("a DM's history in the store", () => {
     dm.change(live);
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]!.messages.map((m) => m.id)).toEqual(["h1", "h2", "h3", "h4"]));
     expect(dm.dropped).toEqual([new Set(["m-1"])]);
+  });
+
+  it("isn't read again after a turn whose prompt came live", async () => {
+    answer(() => json({ messages: [], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const live: ConversationState = { ...emptyConversation(), connected: true };
+    dm.change({ ...live, working: { since: 0, step: "Thinking" }, unprompted: true });
+    dm.change({ ...live, working: { since: 0, step: "Thinking" }, unprompted: false });
+    dm.change(live);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetched).toHaveLength(1);
+  });
+
+  it("is read again after a turn you didn't start on a paired hub too, which may not send its prompt live", async () => {
+    const remote: HubAccount = { ...hub, id: "dw", local: false };
+    useChat.setState({ hubs: [remote], roster: [{ ...agent, hubId: "dw" }] });
+    answer(() => json({ messages: [], more: false }));
+    useChat.getState().openDm("dw/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["dw/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const live: ConversationState = { ...emptyConversation(), connected: true };
+    dm.change({ ...live, working: { since: 0, step: "Writing" }, unprompted: true });
+    dm.change(live);
+    await vi.waitFor(() => expect(fetched).toHaveLength(2));
+    useChat.getState().forget("dw/scout");
+  });
+
+  it("knows your name on this Mac's hub, to know a suggestion you said yes to", async () => {
+    answer((u) =>
+      u.pathname === "/api/me" ? json({ display_name: " Sam " }) : json({ agents: [{ id: "scout", name: "Scout" }] }),
+    );
+    useChat.setState({ people: {} });
+    useChat.getState().setHubs([hub, { ...hub, id: "dw", url: "https://dw.example", local: false }]);
+    await vi.waitFor(() => expect(useChat.getState().people).toEqual({ local: "Sam" }));
+    expect(fetched.filter((u) => u.pathname === "/api/me").map((u) => u.host)).toEqual(["127.0.0.1:4100"]);
+  });
+
+  it("does without your name where the hub won't say it", async () => {
+    answer((u) => (u.pathname === "/api/me" ? json({ error: "no" }, 404) : json({ agents: [] })));
+    useChat.setState({ people: {} });
+    useChat.getState().setHubs([hub]);
+    await vi.waitFor(() => expect(fetched.some((u) => u.pathname === "/api/me")).toBe(true));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useChat.getState().people).toEqual({});
   });
 
   it("isn't read again after a turn you started", async () => {
