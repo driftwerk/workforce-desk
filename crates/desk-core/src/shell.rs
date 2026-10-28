@@ -73,6 +73,36 @@ pub fn which(program: &str, env: &BTreeMap<String, String>) -> Option<std::path:
         .find(|p| p.is_file())
 }
 
+/// Where the official Claude Code and Codex installers put their
+/// launchers: `~/.local/bin`, which a login shell may not have on PATH until
+/// a new terminal opens.
+pub fn local_bin(env: &BTreeMap<String, String>) -> Option<std::path::PathBuf> {
+    Some(std::path::Path::new(env.get("HOME")?).join(".local/bin"))
+}
+
+/// `env` with `~/.local/bin` at the end of PATH when it isn't there, so a
+/// CLI installed while Desk runs is found without a restart.
+pub fn with_local_bin(mut env: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    if let Some(dir) = local_bin(&env) {
+        let dir = dir.to_string_lossy().into_owned();
+        let path = env.get("PATH").cloned().unwrap_or_default();
+        if !path.split(':').any(|d| d == dir) {
+            let joined = if path.is_empty() {
+                dir
+            } else {
+                format!("{path}:{dir}")
+            };
+            env.insert("PATH".into(), joined);
+        }
+    }
+    env
+}
+
+/// A program on `env`'s PATH or in `~/.local/bin`.
+pub fn find_program(program: &str, env: &BTreeMap<String, String>) -> Option<std::path::PathBuf> {
+    which(program, &with_local_bin(env.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +134,31 @@ mod tests {
                 .keys()
                 .any(|k| k.starts_with("CLAUDE"))
         );
+    }
+
+    #[test]
+    fn a_cli_in_local_bin_is_found_off_path() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("codex"), "").unwrap();
+        let env = BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            (
+                "HOME".to_string(),
+                home.path().to_string_lossy().into_owned(),
+            ),
+        ]);
+        assert_eq!(find_program("codex", &env), Some(bin.join("codex")));
+        let path = with_local_bin(env)["PATH"].clone();
+        assert_eq!(path, format!("/usr/bin:{}", bin.display()));
+        let again = with_local_bin(BTreeMap::from([
+            ("PATH".to_string(), path.clone()),
+            (
+                "HOME".to_string(),
+                home.path().to_string_lossy().into_owned(),
+            ),
+        ]));
+        assert_eq!(again["PATH"], path);
     }
 }

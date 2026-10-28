@@ -1,6 +1,7 @@
 //! What the Desk app and `desk-hubd` share: where Desk keeps its files, the
 //! local hub's ports, and its secrets in the macOS keychain.
 
+pub mod redact;
 pub mod shell;
 
 use std::path::{Path, PathBuf};
@@ -10,8 +11,21 @@ use eyre::{Context, Result};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
+/// Desk.app's bundle identifier.
+pub const BUNDLE_ID: &str = "xyz.driftwerk.desk";
 pub const KEYCHAIN_SERVICE: &str = "xyz.driftwerk.desk";
-pub const LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.hub";
+/// The login item that keeps Desk's helper running: registered with
+/// `SMAppService` from the plist inside the app bundle.
+pub const LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.helper";
+/// The LaunchAgent earlier builds wrote to `~/Library/LaunchAgents` by hand;
+/// moved to [`LAUNCH_AGENT_LABEL`] once.
+pub const LEGACY_LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.hub";
+
+/// The supervisor's executable in `Desk.app/Contents/MacOS` — the name
+/// Activity Monitor shows.
+pub const HELPER_EXECUTABLE: &str = "Desk Helper";
+/// The local hub's executable beside it.
+pub const HUB_EXECUTABLE: &str = "Desk Agents";
 
 /// `~/Library/Application Support/Desk` and what lives under it.
 #[derive(Debug, Clone)]
@@ -128,7 +142,8 @@ impl Secret {
         Secret::PostgresPassword,
     ];
 
-    fn account(self) -> &'static str {
+    /// Its keychain account.
+    pub fn account(self) -> &'static str {
         match self {
             Secret::GatewayToken => "hub-gateway-token",
             Secret::JwtSecret => "hub-jwt-secret",

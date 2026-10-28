@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
+import { Help } from "./Help";
 import { Hubs } from "./Hubs";
 import { Providers } from "./Providers";
 import { Voices } from "./Voices";
 import { dragWindow } from "../ui/drag";
 
-const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", providers: "Providers", voices: "Voices", calls: "Calls and voice" } as const;
+const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", providers: "Providers", voices: "Voices", calls: "Calls and voice", help: "Help" } as const;
 type Section = keyof typeof SECTIONS;
 
 export function Settings({ onClose }: { onClose: () => void }) {
@@ -47,6 +48,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "providers" && <Providers />}
       {section === "voices" && <Voices />}
       {section === "calls" && <Calls />}
+      {section === "help" && <Help />}
     </div>
   );
 }

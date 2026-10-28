@@ -128,3 +128,39 @@ export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): 
     const { plan, ...progress } = e.payload;
     f(plan, progress as LoginProgress);
   });
+
+/** Desk Helper — what keeps the agents and sessions on this Mac running —
+ *  as a login item. */
+export type HelperStatus =
+  | { state: "running" }
+  | { state: "needs-approval" }
+  | { state: "not-registered" }
+  | { state: "move-to-applications" }
+  | { state: "development" }
+  | { state: "failed"; message: string };
+
+export const helperStatus = (): Promise<HelperStatus> => invoke("helper_status");
+export const openLoginItems = (): Promise<void> => invoke("helper_open_login_items");
+
+export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
+
+/** Whether the CLI a plan signs in with (`claude`, `codex`) is on this Mac. */
+export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
+/** Runs its official installer; progress arrives through `onInstallProgress`. */
+export const installCli = (plan: PlanName): Promise<void> => invoke("cli_install", { plan });
+export const onInstallProgress = (f: (plan: PlanName, p: InstallProgress) => void): Promise<() => void> =>
+  listen<{ plan: PlanName } & InstallProgress>("cli-install", (e) => {
+    const { plan, ...progress } = e.payload;
+    f(plan, progress as InstallProgress);
+  });
+
+/** Saves a zip of recent logs, secrets taken out, where the person chose. */
+export const saveReport = (path: string, about: string): Promise<void> => invoke("report_save", { path, about });
+
+/** Stops Desk Helper and takes it out of Login Items; with `everything`,
+ *  also deletes Desk's folder and keychain items. */
+export const removeDeskData = (everything: boolean): Promise<void> => invoke("data_remove", { everything });
+
+/** Sessions to resume once Desk has restarted into an update. */
+export const resumeLater = (ids: string[]): Promise<void> => invoke("resume_later", { ids });
+export const takeResume = (): Promise<string[]> => invoke("resume_take");

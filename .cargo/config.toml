@@ -1,0 +1,5 @@
+[env]
+# The Postgres that postgresql_embedded bundles into desk-hubd, so a first
+# launch installs it from the binary with no network. Keep it on major 18:
+# a different major can't open the data directories Desk already made.
+POSTGRESQL_VERSION = "=18.6.1"

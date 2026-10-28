@@ -6,7 +6,7 @@ import { useDesk } from "../hub/store";
 import { BrainDialog } from "../providers/BrainDialog";
 import { ConnectForm } from "../providers/ConnectForm";
 import { useProviderList, useProviders } from "../providers/store";
-import { PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
+import { CLI_NAME, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
 
 const SECTIONS: { group: ProviderGroup; label: string }[] = [
@@ -128,6 +128,9 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
 
   const status = (() => {
     if (provider.connect.kind === "login" && login.status) return login.status;
+    if (login.installed === false && login.plan && !provider.connected) {
+      return `Signing in needs ${CLI_NAME[login.plan]}, which isn’t on this Mac yet. Desk can install it.`;
+    }
     if (provider.connected) {
       return confirming ? `${names(usedBy)} ${usedBy.length === 1 ? "uses" : "use"} it. Disconnect anyway?` : null;
     }

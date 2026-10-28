@@ -22,6 +22,8 @@ import type { ThemeSpec } from "../theme/tokens";
 import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { dragWindow } from "../ui/drag";
+import { resumeAfterUpdate } from "../updates/store";
+import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
 
 const loadCustomThemes = async (): Promise<ThemeSpec[]> =>
   (await themeFiles()).flatMap((f) => {
@@ -51,6 +53,7 @@ export function App() {
   const tupleOn = useSettings((s) => s.tuple);
   useTuple(tupleOn);
   useVoice(useSettings((s) => s.voice));
+  useUpdateChecks();
 
   useEffect(() => {
     applyTheme(theme);
@@ -71,6 +74,7 @@ export function App() {
     const unlisten = subscribe(onThemesChanged(refresh));
     hubConnection()
       .then((c) => (stop = connect(c)))
+      .then(() => (inApp ? resumeAfterUpdate() : undefined))
       .then(() => hubAccounts())
       .then(setHubs)
       .catch(fail);
@@ -140,6 +144,7 @@ export function App() {
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
+      <UpdateNotice />
       {error && (
         <div className="toast" role="alert">
           <span>{error}</span>

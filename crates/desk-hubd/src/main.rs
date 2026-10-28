@@ -1,7 +1,8 @@
-//! `desk-hubd` — run by launchd at login. Starts the local Postgres, writes
-//! the hub's config, and keeps `workforce serve` running with the user's
-//! login environment and its secrets from the keychain. Stops both on
-//! SIGTERM.
+//! `desk-hubd` — "Desk Helper" in the app bundle, run by launchd at login
+//! as Desk's login item. Starts the local Postgres, writes the hub's config,
+//! and keeps the hub running with the user's login environment and its
+//! secrets from the keychain. Stops both on SIGTERM, and when an update
+//! replaces the app bundle under it, so launchd starts the new one.
 
 mod bootstrap;
 mod config;
@@ -12,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use desk_core::{HubPorts, Paths, Secret, SecretStore, Secrets, read_ports, write_ports};
+use desk_core::{
+    HUB_EXECUTABLE, HubPorts, Paths, Secret, SecretStore, Secrets, read_ports, write_ports,
+};
 use eyre::{Context, Result};
 use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
@@ -48,11 +51,15 @@ fn hub_env(
     login: &BTreeMap<String, String>,
     secrets: &impl SecretStore,
 ) -> Result<BTreeMap<String, String>> {
-    let mut env: BTreeMap<String, String> = login
-        .iter()
-        .filter(|(k, _)| !k.starts_with("CLAUDE"))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    // `~/.local/bin` too, where Claude Code's and Codex's installers put
+    // them, so one installed from Desk's settings is found without a restart.
+    let mut env = desk_core::shell::with_local_bin(
+        login
+            .iter()
+            .filter(|(k, _)| !k.starts_with("CLAUDE"))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    );
     for s in Secret::ALL {
         env.insert(s.env().into(), secrets.get_or_create(s)?);
     }
@@ -80,11 +87,22 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
     Ok(pg)
 }
 
-fn spawn_hub(workforce: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result<Child> {
-    let log = std::fs::OpenOptions::new()
+/// A log file to append to, moved aside to `<name>.1` first once it is
+/// over `limit` bytes so logs can't fill the disk.
+fn append_log(path: &Path, limit: u64) -> Result<std::fs::File> {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > limit) {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
+    Ok(std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(paths.logs().join("hub.log"))?;
+        .open(path)?)
+}
+
+const LOG_LIMIT: u64 = 20 * 1024 * 1024;
+
+fn spawn_hub(workforce: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result<Child> {
+    let log = append_log(&paths.logs().join("hub.log"), LOG_LIMIT)?;
     Command::new(workforce)
         .args(["serve", "-c"])
         .arg(paths.hub_config())
@@ -113,6 +131,9 @@ async fn stop(child: &mut Child, grace: Duration) {
     let _ = child.kill().await;
 }
 
+/// The hub: `--workforce <path>`, else the one beside this binary — "Desk
+/// Agents" in the app bundle, `workforce` in a development build — else
+/// `workforce` on PATH.
 fn workforce_binary() -> PathBuf {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -122,28 +143,112 @@ fn workforce_binary() -> PathBuf {
             return p.into();
         }
     }
-    std::env::current_exe()
+    let dir = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join("workforce")))
-        .filter(|p| p.is_file())
-        .unwrap_or_else(|| "workforce".into())
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    dir.and_then(|d| {
+        [HUB_EXECUTABLE, "workforce"]
+            .into_iter()
+            .map(|n| d.join(n))
+            .find(|p| p.is_file())
+    })
+    .unwrap_or_else(|| "workforce".into())
+}
+
+/// Whether this binary runs from inside an app bundle — the installed
+/// helper, as opposed to a development build.
+fn in_bundle(exe: &Path) -> bool {
+    exe.to_string_lossy().contains(".app/Contents/MacOS/")
+}
+
+/// What a file is on disk: an update that replaces the app bundle gives
+/// both binaries new inodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileId {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: i64,
+}
+
+fn file_id(path: &Path) -> Option<FileId> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path).ok()?;
+    Some(FileId {
+        dev: m.dev(),
+        ino: m.ino(),
+        len: m.len(),
+        mtime: m.mtime(),
+    })
+}
+
+/// Resolves once any of `files` is no longer the file it was when this
+/// started and its replacement has stopped changing — the app was updated
+/// in place. Never resolves when `files` is empty.
+async fn replaced(files: Vec<PathBuf>, every: Duration) {
+    if files.is_empty() {
+        return std::future::pending().await;
+    }
+    let start: Vec<_> = files.iter().map(|f| file_id(f)).collect();
+    loop {
+        tokio::time::sleep(every).await;
+        let now: Vec<_> = files.iter().map(|f| file_id(f)).collect();
+        if now == start {
+            continue;
+        }
+        // Wait out the copy: the new files must exist and hold still.
+        tokio::time::sleep(every).await;
+        let settled: Vec<_> = files.iter().map(|f| file_id(f)).collect();
+        if settled == now && settled.iter().all(Option::is_some) {
+            return;
+        }
+    }
+}
+
+/// Logs to `logs/desk-hubd.log` when launchd started this (no terminal to
+/// print to), to the terminal otherwise.
+fn init_logging(paths: &Paths) {
+    use std::io::IsTerminal;
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let file = (!std::io::stderr().is_terminal())
+        .then(|| {
+            std::fs::create_dir_all(paths.logs()).ok()?;
+            append_log(&paths.logs().join("desk-hubd.log"), LOG_LIMIT).ok()
+        })
+        .flatten();
+    match file {
+        Some(f) => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(std::sync::Mutex::new(f))
+            .init(),
+        None => tracing_subscriber::fmt().with_env_filter(filter).init(),
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    let paths = Paths::new()?;
+    init_logging(&paths);
     // postgresql_embedded builds reqwest with rustls but no crypto provider;
     // every HTTP client in this process shares the one installed here.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let paths = Paths::new()?;
     for dir in [paths.hub(), paths.hub_data(), paths.logs()] {
         std::fs::create_dir_all(&dir)?;
     }
     let workforce = workforce_binary();
+    // The installed helper hands over to an updated bundle: it stops when
+    // its own binary or the hub's is replaced, and launchd starts the new
+    // ones. A development build is left running whatever is rebuilt.
+    let exe = std::env::current_exe()?;
+    let watched = if in_bundle(&exe) {
+        vec![exe, workforce.clone()]
+    } else {
+        Vec::new()
+    };
+    let updated = replaced(watched, Duration::from_secs(10));
+    tokio::pin!(updated);
     let ports = ports(&paths)?;
     desk_core::write_private(&paths.hub_config(), &config::render(&paths, &ports))?;
     let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
@@ -180,6 +285,11 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break Ok(()) }
             _ = int.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break Ok(()) }
+            _ = &mut updated => {
+                tracing::info!("Desk was updated; handing over to the new helper");
+                stop(&mut hub, Duration::from_secs(20)).await;
+                break Ok(())
+            }
             status = hub.wait() => {
                 if started.elapsed() > HEALTHY_AFTER {
                     backoff = Duration::from_secs(1);
@@ -188,6 +298,7 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     _ = term.recv() => break Ok(()),
                     _ = int.recv() => break Ok(()),
+                    _ = &mut updated => break Ok(()),
                     _ = tokio::time::sleep(backoff) => {}
                 }
                 backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -231,6 +342,52 @@ mod tests {
         for s in Secret::ALL {
             assert!(!env[s.env()].is_empty());
         }
+    }
+
+    #[test]
+    fn the_hub_finds_clis_in_local_bin() {
+        let login = BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("HOME".to_string(), "/Users/k".to_string()),
+        ]);
+        let env = hub_env(&login, &Memory::default()).unwrap();
+        assert_eq!(env["PATH"], "/usr/bin:/Users/k/.local/bin");
+    }
+
+    #[test]
+    fn only_the_bundled_helper_hands_over_on_update() {
+        assert!(in_bundle(Path::new(
+            "/Applications/Desk.app/Contents/MacOS/Desk Helper"
+        )));
+        assert!(!in_bundle(Path::new("/src/desk/target/debug/desk-hubd")));
+    }
+
+    #[tokio::test]
+    async fn a_replaced_binary_is_noticed_once_it_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("Desk Agents");
+        std::fs::write(&bin, "old").unwrap();
+        let every = Duration::from_millis(20);
+        let watch = tokio::spawn(replaced(vec![bin.clone()], every));
+        tokio::time::sleep(every * 3).await;
+        assert!(!watch.is_finished());
+        let new = dir.path().join("new");
+        std::fs::write(&new, "new build").unwrap();
+        std::fs::rename(&new, &bin).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), watch)
+            .await
+            .expect("noticed")
+            .unwrap();
+    }
+
+    #[test]
+    fn logs_over_their_limit_are_moved_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("hub.log");
+        std::fs::write(&log, "x".repeat(100)).unwrap();
+        append_log(&log, 10).unwrap();
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        assert!(dir.path().join("hub.log.1").is_file());
     }
 
     #[test]

@@ -1,8 +1,10 @@
 mod files;
+mod helper;
 mod hubs;
-mod launch_agent;
 mod logins;
+mod support;
 mod tuple;
+mod updates;
 mod voice;
 
 use std::path::PathBuf;
@@ -15,6 +17,7 @@ use tauri::{Manager, State};
 
 struct App {
     paths: Paths,
+    helper: Mutex<helper::Status>,
     _themes: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
@@ -50,7 +53,7 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
             }
             if Instant::now() > deadline {
                 return Err(
-                    "Desk’s background service hasn’t started — see ~/Library/Application Support/Desk/logs"
+                    "Desk Helper hasn’t started. Settings → Help says why, and can save a report."
                         .into(),
                 );
             }
@@ -153,17 +156,108 @@ fn login_cancel(logins: State<'_, logins::Logins>, plan: logins::Plan) {
     logins.cancel(plan);
 }
 
-/// Binaries shipped beside the app executable (Tauri sidecars).
-fn sidecar(name: &str) -> eyre::Result<PathBuf> {
-    let exe = std::env::current_exe()?;
-    let path = exe
-        .parent()
-        .ok_or_else(|| eyre::eyre!("app has no folder"))?
-        .join(name);
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(eyre::eyre!("{} is missing", path.display()))
+/// Where Desk Helper stands, as Settings → Help shows it. Registers it
+/// again first if it was found unregistered (the person may have removed it).
+#[tauri::command]
+fn helper_status(app: State<'_, App>) -> helper::Status {
+    let mut status = helper::status();
+    if status == helper::Status::NotRegistered {
+        status = helper::ensure(&app.paths);
+    }
+    *app.helper.lock().expect("helper") = status.clone();
+    status
+}
+
+#[tauri::command]
+fn helper_open_login_items() {
+    helper::open_login_items();
+}
+
+#[tauri::command]
+fn cli_installed(plan: logins::Plan) -> bool {
+    logins::install::installed(plan)
+}
+
+#[tauri::command]
+fn cli_install(
+    app: tauri::AppHandle,
+    installs: State<'_, logins::install::Installs>,
+    plan: logins::Plan,
+) -> CommandResult<()> {
+    installs.start(&app, plan)
+}
+
+/// Saves a zip of recent logs, every secret taken out, at `path`.
+#[tauri::command]
+async fn report_save(app: State<'_, App>, path: PathBuf, about: String) -> CommandResult<()> {
+    let paths = app.paths.clone();
+    let helper = format!("{:?}", *app.helper.lock().expect("helper"));
+    tauri::async_runtime::spawn_blocking(move || {
+        let about = format!("{about}\nmacOS {}\nDesk Helper: {helper}\n", os_version());
+        let known = support::known_secrets(&paths);
+        support::write_report(&paths, &known, &about, &path)
+    })
+    .await
+    .map_err(text)?
+    .map_err(text)
+}
+
+fn os_version() -> String {
+    std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Stops Desk Helper and removes it from Login Items; with `everything`,
+/// deletes Desk's folder and keychain items too.
+#[tauri::command]
+async fn data_remove(app: State<'_, App>, everything: bool) -> CommandResult<()> {
+    let paths = app.paths.clone();
+    tauri::async_runtime::spawn_blocking(move || support::remove(&paths, everything))
+        .await
+        .map_err(text)?
+        .map_err(text)
+}
+
+#[tauri::command]
+fn resume_later(app: State<'_, App>, ids: Vec<String>) -> CommandResult<()> {
+    updates::resume_later(&app.paths, &ids).map_err(text)
+}
+
+#[tauri::command]
+fn resume_take(app: State<'_, App>) -> CommandResult<Vec<String>> {
+    updates::resume_take(&app.paths).map_err(text)
+}
+
+/// Logs to `logs/desk.log` when Finder or launchd started Desk (nothing
+/// reads its terminal), to the terminal in development.
+fn init_logging(paths: &Paths) {
+    use std::io::IsTerminal;
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let log = paths.logs().join("desk.log");
+    let file = (!std::io::stderr().is_terminal())
+        .then(|| {
+            std::fs::create_dir_all(paths.logs()).ok()?;
+            if std::fs::metadata(&log).is_ok_and(|m| m.len() > 20 * 1024 * 1024) {
+                let _ = std::fs::rename(&log, log.with_extension("log.1"));
+            }
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log)
+                .ok()
+        })
+        .flatten();
+    match file {
+        Some(f) => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(Mutex::new(f))
+            .init(),
+        None => tracing_subscriber::fmt().with_env_filter(filter).init(),
     }
 }
 
@@ -171,12 +265,12 @@ pub fn run() {
     // A workspace build can give reqwest rustls without a crypto provider
     // (postgresql_embedded asks for that); every client shares this one.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    if let Ok(paths) = Paths::new() {
+        init_logging(&paths);
+    }
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
@@ -184,17 +278,18 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(tuple::Tuple::default())
         .manage(logins::Logins::default())
+        .manage(logins::install::Installs::default())
         .setup(|app| {
             let paths = Paths::new()?;
-            // A development run (`DESK_HOME`) talks to a supervisor started by
-            // hand; only the real app installs the LaunchAgent.
-            if std::env::var_os("DESK_HOME").is_none() {
-                launch_agent::ensure(&sidecar("desk-hubd")?, &sidecar("workforce")?, &paths)?;
-            }
+            // The installed app makes Desk Helper its login item; a
+            // development run talks to a supervisor started by hand.
+            let helper = helper::ensure(&paths);
+            tracing::info!(?helper, version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths));
             app.manage(App {
                 paths,
+                helper: Mutex::new(helper),
                 _themes: Mutex::new(Some(watcher)),
             });
             Ok(())
@@ -215,6 +310,14 @@ pub fn run() {
             login_start,
             login_code,
             login_cancel,
+            helper_status,
+            helper_open_login_items,
+            cli_installed,
+            cli_install,
+            report_save,
+            data_remove,
+            resume_later,
+            resume_take,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_roster,

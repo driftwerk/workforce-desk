@@ -955,3 +955,37 @@ button {
 .field-text:focus {
   border-color: var(--signal);
 }
+
+/* ── Updates ────────────────────────────────────────────────────────────── */
+
+.update-notice {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  max-width: 420px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px 10px 16px;
+  border-radius: 14px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  z-index: 20;
+}
+.update-notice > span {
+  flex: 1;
+  min-width: 0;
+}
+.update-sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.update-sessions li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

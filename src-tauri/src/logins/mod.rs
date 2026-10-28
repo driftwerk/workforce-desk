@@ -3,6 +3,7 @@
 //! home so it never touches their own `codex` login — and saves the result
 //! where their agents on this Mac read it. The token never reaches the page.
 
+pub mod install;
 mod scan;
 
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-use desk_core::shell::{login_env, which, without_claude_markers};
+use desk_core::shell::{find_program, login_env, with_local_bin, without_claude_markers};
 use desk_core::{Paths, Secret, SecretStore, Secrets, read_ports};
 use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
@@ -108,7 +109,7 @@ impl Logins {
         self.cancel(plan);
         let report = reporter(app, plan);
         report(Progress::Starting);
-        let env = without_claude_markers(login_env());
+        let env = with_local_bin(without_claude_markers(login_env()));
         let running = match plan {
             Plan::Claude => self.start_claude(paths, env, report),
             Plan::Chatgpt => self.start_chatgpt(paths, env, report),
@@ -124,7 +125,7 @@ impl Logins {
         env: std::collections::BTreeMap<String, String>,
         report: Report,
     ) -> eyre::Result<Running> {
-        let program = which("claude", &env)
+        let program = find_program("claude", &env)
             .ok_or_else(|| eyre::eyre!("Claude Code isn't installed on this Mac"))?;
         // Wide, so the token is never wrapped across lines.
         let pair = native_pty_system()
@@ -207,8 +208,8 @@ impl Logins {
         mut env: std::collections::BTreeMap<String, String>,
         report: Report,
     ) -> eyre::Result<Running> {
-        let program =
-            which("codex", &env).ok_or_else(|| eyre::eyre!("Codex isn't installed on this Mac"))?;
+        let program = find_program("codex", &env)
+            .ok_or_else(|| eyre::eyre!("Codex isn't installed on this Mac"))?;
         let home = private_dir(&paths.root.join("codex-login"))?;
         env.insert("CODEX_HOME".into(), home.to_string_lossy().into_owned());
         let mut child = Command::new(program)

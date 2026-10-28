@@ -1,14 +1,56 @@
 import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
-import { cancelLogin, onLoginProgress, openUrl, sendLoginCode, startLogin, subscribe, type LoginProgress, type PlanName } from "../platform";
+import {
+  cancelLogin,
+  cliInstalled,
+  installCli,
+  onInstallProgress,
+  onLoginProgress,
+  openUrl,
+  sendLoginCode,
+  startLogin,
+  subscribe,
+  type InstallProgress,
+  type LoginProgress,
+  type PlanName,
+} from "../platform";
 
-/** A plan's one-click sign-in through its own page in the browser. */
+/** The CLI each plan signs in with. */
+export const CLI_NAME: Record<PlanName, string> = { claude: "Claude Code", chatgpt: "Codex" };
+
+/** A plan's one-click sign-in through its own page in the browser —
+ *  installing its CLI first when this Mac doesn't have it. */
 export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void) {
   const fail = useDesk((s) => s.fail);
   const [progress, setProgress] = useState<LoginProgress | null>(null);
   const [code, setCode] = useState("");
+  // Null until known; anything Desk can't check counts as installed, so
+  // sign-in says what's wrong itself.
+  const [installed, setInstalled] = useState<boolean | null>(null);
+  const [install, setInstall] = useState<InstallProgress | null>(null);
   const connectedRef = useRef(onConnected);
   connectedRef.current = onConnected;
+
+  useEffect(() => {
+    if (!plan) return;
+    let live = true;
+    cliInstalled(plan)
+      .then((yes) => live && setInstalled(yes))
+      .catch(() => live && setInstalled(true));
+    const off = subscribe(
+      onInstallProgress((p, next) => {
+        if (p !== plan) return;
+        if (next.state !== "done") return setInstall(next);
+        setInstall(null);
+        setInstalled(true);
+        startLogin(plan).catch(fail);
+      }),
+    );
+    return () => {
+      live = false;
+      off();
+    };
+  }, [plan, fail]);
 
   useEffect(() => {
     if (!plan) return;
@@ -21,8 +63,11 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     );
   }, [plan]);
 
-  const busy = progress !== null && !["done", "failed"].includes(progress.state);
+  const installing = install?.state === "running";
+  const busy = installing || (progress !== null && !["done", "failed"].includes(progress.state));
   const status = (() => {
+    if (plan && installing) return `Installing ${CLI_NAME[plan]}… ${install.line}`;
+    if (install?.state === "failed") return install.message;
     switch (progress?.state) {
       case "starting":
         return "Opening the sign-in page…";
@@ -42,10 +87,20 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
   })();
 
   return {
+    plan,
     progress,
     status,
-    failed: progress?.state === "failed",
+    failed: progress?.state === "failed" || install?.state === "failed",
     busy,
+    installing,
+    /** False when the plan's CLI isn't on this Mac yet. */
+    installed,
+    install: () => {
+      if (!plan) return;
+      setInstall({ state: "running", line: "" });
+      setProgress(null);
+      installCli(plan).catch((e: unknown) => setInstall({ state: "failed", message: e instanceof Error ? e.message : String(e) }));
+    },
     code,
     setCode,
     start: () => plan && startLogin(plan).catch(fail),
@@ -89,10 +144,24 @@ export function PlanLoginAction({ login, label, signal = true }: { login: PlanLo
       </span>
     );
   }
+  if (login.installing) {
+    return (
+      <button type="button" className="btn" disabled>
+        Installing…
+      </button>
+    );
+  }
   if (login.busy) {
     return (
       <button type="button" className="btn" onClick={login.cancel}>
         Cancel
+      </button>
+    );
+  }
+  if (login.installed === false && login.plan) {
+    return (
+      <button type="button" className={`btn ${signal ? "btn-signal" : ""}`} onClick={login.install}>
+        Install {CLI_NAME[login.plan]}
       </button>
     );
   }
