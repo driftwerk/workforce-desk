@@ -51,6 +51,30 @@ pub fn ensure_rich(workspace: &std::path::Path) -> eyre::Result<()> {
     std::fs::write(&path, doc.to_string())?;
     Ok(())
 }
+
+/// Makes the agent the crew's overseer, only watching, when its
+/// `config.toml` says nothing about overseeing — Desk's switch reads the
+/// file, so the setting is written there. An `[oversight]` the person set
+/// (on or off), and the rest of the file, are left exactly as they are.
+pub fn ensure_oversight(workspace: &std::path::Path) -> eyre::Result<()> {
+    let path = workspace.join("config.toml");
+    let source = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let mut doc: toml_edit::DocumentMut = source.parse()?;
+    if doc.contains_key("oversight") {
+        return Ok(());
+    }
+    let mut oversight = toml_edit::Table::new();
+    oversight.insert("enabled", toml_edit::value(true));
+    oversight.insert("level", toml_edit::value("watch"));
+    doc.insert("oversight", toml_edit::Item::Table(oversight));
+    std::fs::create_dir_all(workspace)?;
+    std::fs::write(&path, doc.to_string())?;
+    Ok(())
+}
 pub const DATABASE_USER: &str = "postgres";
 
 fn table(entries: &[(&str, Value)]) -> Value {
@@ -180,6 +204,39 @@ mod tests {
         let kept = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(kept.starts_with("# keep me\n[llm]\nprovider = \"chatgpt\"\n"));
         assert!(kept.contains("[rich]\ntables = true"));
+    }
+
+    #[test]
+    fn the_desk_agent_oversees_the_crew_once_and_a_persons_choice_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let read = || std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        ensure_oversight(dir.path()).unwrap();
+        let fresh: Table = toml::from_str(&read()).unwrap();
+        assert_eq!(fresh["oversight"]["enabled"].as_bool(), Some(true));
+        assert_eq!(fresh["oversight"]["level"].as_str(), Some("watch"));
+
+        let off = "# mine\n[rich]\ncharts = false\n\n[oversight]\nenabled = false\n";
+        std::fs::write(dir.path().join("config.toml"), off).unwrap();
+        ensure_oversight(dir.path()).unwrap();
+        assert_eq!(read(), off);
+
+        let inline = "oversight = { enabled = true, level = \"act\" }\n";
+        std::fs::write(dir.path().join("config.toml"), inline).unwrap();
+        ensure_oversight(dir.path()).unwrap();
+        assert_eq!(read(), inline);
+
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "# keep me\n[llm]\nprovider = \"chatgpt\"\n",
+        )
+        .unwrap();
+        ensure_rich(dir.path()).unwrap();
+        ensure_oversight(dir.path()).unwrap();
+        let kept = read();
+        assert!(kept.starts_with("# keep me\n[llm]\nprovider = \"chatgpt\"\n"));
+        let doc: Table = toml::from_str(&kept).unwrap();
+        assert_eq!(doc["rich"]["tables"].as_bool(), Some(true));
+        assert_eq!(doc["oversight"]["level"].as_str(), Some("watch"));
     }
 
     #[test]

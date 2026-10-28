@@ -146,7 +146,9 @@ async fn main() -> Result<()> {
     let workforce = workforce_binary();
     let ports = ports(&paths)?;
     desk_core::write_private(&paths.hub_config(), &config::render(&paths, &ports))?;
-    config::ensure_rich(&paths.hub_data().join("agents").join(config::DESK_AGENT))?;
+    let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
+    config::ensure_rich(&desk_agent)?;
+    config::ensure_oversight(&desk_agent)?;
     let env = hub_env(&desk_core::shell::login_env(), &Secrets::for_paths(&paths))?;
     let pg = start_postgres(
         &paths,
