@@ -30,6 +30,9 @@ interface DeskState {
   clearError: () => void;
 }
 
+/** Others listening to the events socket (the overview, Activity). */
+export const deskListeners = new Set<(e: DeskEvent) => void>();
+
 /** Messages by id, oldest first. */
 export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
   const byId = new Map(a.map((m) => [m.id, m]));
@@ -109,6 +112,7 @@ export const useDesk = create<DeskState>((set, get) => ({
           restore: e.type === "snapshot" ? e.restore : s.restore.filter((r) => e.type !== "session" || r.id !== e.session.id),
           openId: e.type === "removed" && s.openId === e.id ? null : s.openId,
         }));
+        for (const f of deskListeners) f(e);
       },
       (connected) => set({ connected }),
     );

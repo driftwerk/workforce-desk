@@ -3,6 +3,8 @@
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
 // Only reachable from development builds.
 
+import { deskListeners } from "./hub/store";
+
 const params = (() => {
   const keys = ["hub", "admin", "device"] as const;
   const fromUrl = new URLSearchParams(location.search);
@@ -263,6 +265,8 @@ let probes = 0;
 export async function devHub<T>(method: string, path: string, body?: unknown): Promise<T> {
   await new Promise((r) => setTimeout(r, 250));
   const answer = (v: unknown) => structuredClone(v) as T;
+  const crew = crewRoute(method, path);
+  if (crew) return answer(crew.answer);
   if (method === "GET" && path === "/api/desk/providers") return answer({ providers: fixtures });
   const m = path.match(/^\/api\/desk\/providers\/([^/]+)(\/connect)?$/);
   const p = m && fixtures.find((f) => f.id === decodeURIComponent(m[1]!));
@@ -290,3 +294,243 @@ export async function devHub<T>(method: string, path: string, body?: unknown): P
   }
   throw new Error(`the preview has no ${method} ${path}`);
 }
+
+// ── The crew overview, until the hub has it ────────────────────────────────
+// Answers the overview, Activity, the manager and its suggestions (and the
+// approvals of the sessions in it) with the crew of the design: Desk
+// overseeing Ledger, Scout and four sessions. Acting on them changes them,
+// for this tab, and a new event arrives every so often.
+
+type Party = import("./hub/types").ActivityParty;
+type Event = import("./hub/types").ActivityEvent;
+type Item = import("./hub/types").OverviewItem;
+
+const ago = (min: number): string => new Date(Date.now() - min * 60_000).toISOString();
+
+const desk: Party = { kind: "manager", id: "desk", name: "Desk" };
+const party = (kind: Party["kind"], id: string, name: string, engine?: "claude" | "codex"): Party => ({
+  kind,
+  id,
+  name,
+  ...(engine ? { engine, origin: id === "s-oss" ? ("external" as const) : ("desk" as const) } : {}),
+});
+const LEDGER = party("agent", "ledger", "Ledger");
+const SCOUT = party("agent", "scout", "Scout");
+const WEB = party("session", "s-web", "acme-web", "claude");
+const E7 = party("session", "s-e7", "workforce-e7", "claude");
+const OSS = party("session", "s-oss", "open-sourcing", "codex");
+const SHADOW = party("session", "s-shadow", "dw-676-read-shadow", "claude");
+
+const items: Item[] = [
+  {
+    ...WEB,
+    kind: "session",
+    state: "needs_you",
+    task: "Upgrading the date picker to the new design system",
+    detail: "● Bash npm install @acme/ds@4.2.0",
+    since: ago(6),
+    lastActivity: ago(6),
+    approval: { id: "ap-web", summary: "Run npm install @acme/ds@4.2.0?" },
+    question: null,
+  },
+  {
+    ...SCOUT,
+    kind: "agent",
+    state: "needs_you",
+    task: "Preparing the staging deploy",
+    detail: null,
+    since: ago(3),
+    lastActivity: ago(3),
+    approval: null,
+    question: { text: "Should I deploy main or release/4.2 to staging?", options: ["main", "release/4.2"] },
+  },
+  {
+    ...LEDGER,
+    kind: "agent",
+    state: "working",
+    task: "Comparing yesterday’s RDS spend with the last 30 days",
+    detail: "● aws.cost_explorer",
+    since: ago(2),
+    lastActivity: ago(1),
+  },
+  {
+    ...E7,
+    kind: "session",
+    state: "quiet",
+    task: "Provider list for Desk",
+    detail: "● cargo nextest run -p workforce-desk",
+    since: ago(28),
+    lastActivity: ago(40),
+  },
+  {
+    ...OSS,
+    kind: "session",
+    state: "working",
+    task: "Writing the README for the public repo",
+    detail: "● Edit README.md",
+    since: ago(72),
+    lastActivity: ago(2),
+  },
+  { ...SHADOW, kind: "session", state: "done", task: "Read shadow for memories", detail: "Merged. Session closed.", since: ago(44) },
+  {
+    ...party("agent", "herald", "Herald"),
+    kind: "agent",
+    state: "done",
+    task: "Morning triage",
+    detail: "3 issues labelled, 1 assigned to you.",
+    since: ago(150),
+  },
+];
+
+let seq = 0;
+const event = (min: number, kind: Event["kind"], actor: Party, subject: Party | null, text: string, reason?: string): Event => ({
+  id: `ev-${String(++seq).padStart(4, "0")}`,
+  at: ago(min),
+  kind,
+  actor,
+  subject,
+  text,
+  reason: reason ?? null,
+  suggestionId: null,
+  approvalId: null,
+});
+
+// Oldest first as made; listed newest first.
+const events: Event[] = [
+  ...Array.from({ length: 110 }, (_, i) => {
+    const min = 1500 - i * 12;
+    return i % 3 === 0
+      ? event(min, "finished", LEDGER, LEDGER, `finished “Spend check ${110 - i}”`)
+      : i % 3 === 1
+        ? event(min, "started", SHADOW, SHADOW, "started “Read shadow for memories”")
+        : event(min, "nudged", desk, SHADOW, "asked dw-676-read-shadow how the review is going", "Quiet for 30 min while working.");
+  }),
+  event(204, "summary", desk, null, "sent your morning summary"),
+  event(164, "finished", SHADOW, SHADOW, "finished · PR merged"),
+  event(146, "started", E7, E7, "started “Provider list for Desk”"),
+  event(139, "resumed", desk, OSS, "resumed open-sourcing after its usage limit reset", "You allow Desk to resume stopped sessions."),
+  event(132, "finished", LEDGER, LEDGER, "finished Daily AWS check"),
+  event(3, "question", SCOUT, SCOUT, "asked which branch to deploy"),
+  event(6, "needs_you", WEB, WEB, "wants to run npm install"),
+  event(0.5, "nudged", desk, E7, "asked workforce-e7 “Still on the provider tests, or stuck?”", "Quiet for 40 min while working."),
+];
+
+const suggestions = [
+  {
+    id: "sg-e7",
+    at: ago(0.5),
+    text: "Stop the test and ask it to run the suite without the network tests.",
+    action: { type: "restart", session: "s-e7", prompt: "Run the suite without the network tests." },
+    state: "open" as "open" | "done" | "dismissed",
+    subject: E7,
+  },
+];
+
+const needsYou = (e: Event) => e.kind === "needs_you" || e.kind === "question";
+
+const record = (e: Event) => {
+  events.push(e);
+  for (const f of deskListeners) f({ type: "activity", event: e });
+};
+
+let live: ReturnType<typeof setInterval> | undefined;
+const LIVE: [Event["kind"], Party, string][] = [
+  ["working", LEDGER, "is reading the RDS cost report"],
+  ["working", OSS, "is editing CONTRIBUTING.md"],
+  ["finished", LEDGER, "finished comparing RDS spend · report in your DM"],
+  ["started", OSS, "started “Licence headers”"],
+];
+const startLive = () => {
+  let n = 0;
+  live ??= setInterval(() => {
+    const [kind, who, text] = LIVE[n++ % LIVE.length]!;
+    record({ ...event(0, kind, who, who, text), at: new Date().toISOString() });
+  }, 45_000);
+};
+
+function crewRoute(method: string, path: string): { answer: unknown } | null {
+  const url = new URL(path, "http://preview");
+  const route = `${method} ${url.pathname}`;
+  if (route === "GET /api/desk/manager") return { answer: { agentId: "desk", level: "suggest" } };
+  if (route === "GET /api/desk/overview") {
+    const n = (f: (i: Item) => boolean) => items.filter(f).length;
+    return {
+      answer: {
+        brief: {
+          text: "Two things need you: **acme-web** wants to run `npm install`, and **Scout** is asking which branch to deploy. Ledger is part-way through the AWS check. **workforce-e7** has been quiet for 40 minutes; I asked whether it’s stuck.",
+          at: ago(0.5),
+          by: { id: "desk", name: "Desk" },
+        },
+        counts: {
+          working: n((i) => i.state === "working" || i.state === "quiet"),
+          needsYou: n((i) => i.state === "needs_you"),
+          doneToday: n((i) => i.state === "done"),
+        },
+        items,
+      },
+    };
+  }
+  if (route === "GET /api/desk/activity") {
+    startLive();
+    const filter = url.searchParams.get("filter") ?? "all";
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    const before = url.searchParams.get("before");
+    const all = [...events]
+      .reverse()
+      .filter((e) => filter === "all" || (filter === "needs_you" ? needsYou(e) : e.actor.kind === "manager"));
+    const from = before ? all.findIndex((e) => e.id === before) + 1 : 0;
+    return { answer: { events: all.slice(from, from + limit), more: from + limit < all.length } };
+  }
+  if (route === "GET /api/desk/suggestions") return { answer: { suggestions } };
+  const sg = url.pathname.match(/^\/api\/desk\/suggestions\/([^/]+)\/(accept|dismiss)$/);
+  if (method === "POST" && sg) {
+    const s = suggestions.find((x) => x.id === decodeURIComponent(sg[1]!));
+    if (!s) throw new Error("That suggestion isn’t there any more.");
+    s.state = sg[2] === "accept" ? "done" : "dismissed";
+    record(
+      sg[2] === "accept"
+        ? { ...event(0, "restarted", { kind: "you", id: "you", name: "You" }, E7, "restarted workforce-e7 without the network tests"), suggestionId: s.id }
+        : { ...event(0, "dismissed", { kind: "you", id: "you", name: "You" }, E7, "dismissed Desk’s suggestion"), suggestionId: s.id },
+    );
+    return { answer: s };
+  }
+  const ap = url.pathname.match(/^\/api\/desk\/sessions\/([^/]+)\/approvals\/([^/]+)$/);
+  const it = ap && items.find((i) => i.id === ap[1] && i.approval?.id === ap[2]);
+  if (method === "POST" && it) {
+    it.approval = null;
+    it.state = "working";
+    it.since = new Date().toISOString();
+    record(event(0, "approved", { kind: "you", id: "you", name: "You" }, WEB, "allowed npm install"));
+    return { answer: {} };
+  }
+  return null;
+}
+
+/** The overseer's side of its DM in the design, with what it mentions to act
+ *  on: an approval and a suggestion. */
+export const devConversation = (agentId: string) =>
+  agentId !== "desk"
+    ? []
+    : [
+        {
+          id: "dev-m1",
+          from: "agent",
+          text: "`acme-web` is waiting on you to run `npm install @acme/ds@4.2.0`. It’s upgrading the date picker, so the install looks expected.",
+          at: ago(6),
+          desk: { approvals: [{ sessionId: "s-web", approvalId: "ap-web", summary: "Run npm install @acme/ds@4.2.0?" }] },
+        },
+        {
+          id: "dev-m2",
+          from: "agent",
+          text: "`workforce-e7` has run the same test for 40 minutes without output. I think it’s stuck on a test waiting for the network.",
+          at: ago(0.5),
+          desk: { suggestions: [{ id: "sg-e7", text: suggestions[0]!.text, state: "open" }] },
+        },
+        { id: "dev-m3", from: "user", text: "What’s everyone doing?", at: ago(0.4) },
+        {
+          id: "dev-m4",
+          from: "agent",
+          text: "| Who | Doing | State | For |\n| --- | --- | --- | --- |\n| **Ledger** | Comparing RDS spend with the last 30 days | Working | 4m |\n| **Scout** | Staging deploy: asked you main or release/4.2 | Needs you | 11m |\n| `acme-web` | Date picker upgrade: waiting on npm install | Needs you | 32m |\n| `workforce-e7` | Provider list for Desk: test stuck? | Working | 28m |\n| `open-sourcing` | README for the public repo · other terminal | Working | 1h 12m |\n\nTwo are waiting on you. The rest are moving; I’ll tell you when Ledger’s report is in.",
+          at: ago(0.3),
+        },
+      ];

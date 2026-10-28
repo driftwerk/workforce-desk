@@ -1,6 +1,19 @@
 import { preview } from "../preview";
 import type { Provider } from "./providers";
-import type { Decision, DeskEvent, NewSession, Room, RoomMemberRef, RoomMessage, Session } from "./types";
+import type {
+  ActivityFilter,
+  ActivityPage,
+  Decision,
+  DeskEvent,
+  Manager,
+  NewSession,
+  Overview,
+  Room,
+  RoomMemberRef,
+  RoomMessage,
+  Session,
+  Suggestion,
+} from "./types";
 
 export interface HubConnection {
   url: string;
@@ -101,7 +114,7 @@ export class DeskHub {
     this.call("POST", `/api/desk/sessions/${id}/resume`, { prompt });
   forget = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${id}`);
   decide = (id: string, approval: string, decision: Decision): Promise<Session> =>
-    this.call("POST", `/api/desk/sessions/${id}/approvals/${approval}`, { decision });
+    this.desk("POST", `/api/desk/sessions/${id}/approvals/${approval}`, { decision });
   restore = (ids: string[]): Promise<Session[]> => this.call("POST", "/api/desk/restore", { ids });
   dismissRestore = (): Promise<void> => this.call("POST", "/api/desk/restore/dismiss");
 
@@ -150,6 +163,23 @@ export class DeskHub {
   /** An agent's own `config.toml`, as text. */
   agentConfig = (id: string): Promise<string> => this.text(`/api/agents/${encodeURIComponent(id)}/config`);
   saveAgentConfig = (id: string, toml: string): Promise<void> => this.putText(`/api/agents/${encodeURIComponent(id)}/config`, toml);
+
+  /** The crew at a glance: who needs you, who's working, what's done today,
+   *  and the overseer's latest brief. */
+  overview = (): Promise<Overview> => this.desk("GET", "/api/desk/overview");
+  /** A page of what happened, newest first, from before event `before`. */
+  activity = (q: { filter?: ActivityFilter; before?: string; limit?: number } = {}): Promise<ActivityPage> => {
+    const params = new URLSearchParams({ limit: String(q.limit ?? 100), filter: q.filter ?? "all" });
+    if (q.before) params.set("before", q.before);
+    return this.desk("GET", `/api/desk/activity?${params}`);
+  };
+  /** Which agent oversees the crew, and how much it does on its own. */
+  manager = (): Promise<Manager> => this.desk("GET", "/api/desk/manager");
+  suggestions = async (): Promise<Suggestion[]> =>
+    (await this.desk<{ suggestions: Suggestion[] }>("GET", "/api/desk/suggestions")).suggestions;
+  /** Does what the overseer suggested, as you. */
+  acceptSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/accept`);
+  dismissSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/dismiss`);
 
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
   createRoom = (name: string, members: RoomMemberRef[], defaultMember?: string): Promise<Room> =>
