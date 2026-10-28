@@ -122,17 +122,21 @@ export async function setAgentPurpose(hub: DeskHub, id: string, name: string, pu
 /** Said when the hub can't rename agents yet. */
 export const RENAME_UNAVAILABLE = "Renaming isn’t available yet: Desk needs an update first. Their name is unchanged.";
 
-/** Renames an agent, then puts the new name in every file that says it:
- *  IDENTITY.md, and the sections Desk wrote from what it's for (`purpose`,
- *  or what SOUL.md says when not given). */
-export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string): Promise<void> {
-  const who = name.trim();
+/** Renames an agent on the hub. */
+export async function renameLocalAgent(hub: DeskHub, id: string, name: string): Promise<void> {
   try {
-    await hub.renameAgent(id, who);
+    await hub.renameAgent(id, name.trim());
   } catch (e) {
     if (e instanceof HubError && (e.status === 404 || e.status === 405)) throw new Error(RENAME_UNAVAILABLE);
     throw e;
   }
+}
+
+/** Puts an agent's new name in every file that says it: IDENTITY.md, and
+ *  the sections Desk wrote from what it's for (`purpose`, or what SOUL.md
+ *  says when not given). */
+export async function renameAgentFiles(hub: DeskHub, id: string, name: string, purpose?: string): Promise<void> {
+  const who = name.trim();
   await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
   const job = purpose?.trim() || purposeOf(await hub.identityFile(id, "SOUL.md"));
   if (job) await setAgentPurpose(hub, id, who, job);

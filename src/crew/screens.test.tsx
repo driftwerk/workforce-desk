@@ -221,4 +221,18 @@ describe("Renaming in Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(name.value).toBe("Ledger");
   });
+
+  it("keeps the new name when only their files couldn't be updated, and says so", async () => {
+    const hub = fakeHub({
+      renameAgent: vi.fn(() => Promise.resolve({})),
+      saveIdentityFile: vi.fn(() => Promise.reject(new HubError(500, "disk full"))),
+    } as Partial<DeskHub>);
+    renderSettings(hub);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText(/Renamed, but their files still say Ledger/)).toBeTruthy();
+    expect(useChat.getState().roster[0]!.name).toBe("Penny");
+    expect(name.value).toBe("Penny");
+  });
 });

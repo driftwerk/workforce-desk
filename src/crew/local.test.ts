@@ -6,6 +6,7 @@ import {
   instructions,
   purposeOf,
   RENAME_UNAVAILABLE,
+  renameAgentFiles,
   renameLocalAgent,
   withJob,
   withName,
@@ -90,7 +91,7 @@ const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> 
 };
 
 describe("renaming an agent", () => {
-  it("renames it, then puts the new name in its identity and the sections written from what it's for", async () => {
+  it("renames it, and puts the new name in its identity and the sections written from what it's for", async () => {
     const files: Record<string, string> = {
       "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
       "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
@@ -99,6 +100,7 @@ describe("renaming an agent", () => {
     };
     const hub = filesHub(files);
     await renameLocalAgent(hub, "ledger", "  Penny ");
+    await renameAgentFiles(hub, "ledger", "  Penny ");
     expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny");
     expect(files["IDENTITY.md"]).toBe("# Identity\n- **Name:** Penny\n- **Vibe:** calm\n");
     expect(files["SOUL.md"]).toContain("You are Penny.");
@@ -110,7 +112,7 @@ describe("renaming an agent", () => {
 
   it("writes a new purpose along with the new name", async () => {
     const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill."), "AGENTS.md": "# G\n" };
-    await renameLocalAgent(filesHub(files), "ledger", "Penny", "Watch deploys.");
+    await renameAgentFiles(filesHub(files), "ledger", "Penny", "Watch deploys.");
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
     expect(files["SOUL.md"]).toContain("You are Penny.");
   });

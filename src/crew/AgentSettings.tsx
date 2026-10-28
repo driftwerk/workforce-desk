@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { purposeOf, renameAgentFiles, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -80,32 +80,43 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
     const purposeChanged = saved !== null && purpose.trim() !== saved;
     setState("saving");
     setProblem(null);
-    try {
-      if (renaming) {
-        // Everywhere at once; put back if the rename doesn't take.
-        rename(key, nextName);
-        try {
-          await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
-        } catch (e) {
-          rename(key, savedName);
-          throw e;
-        }
-        setSavedName(nextName);
-        setName(nextName);
-      } else if (purposeChanged) {
+    if (renaming) {
+      // Everywhere at once; put back if the hub doesn't take it.
+      const was = savedName;
+      rename(key, nextName);
+      try {
+        await renameLocalAgent(desk, agent.id, nextName);
+      } catch (e) {
+        rename(key, was);
+        setProblem(plainError(e));
+        setState("idle");
+        return;
+      }
+      setSavedName(nextName);
+      setName(nextName);
+      void refreshRoster();
+      try {
+        await renameAgentFiles(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
+      } catch (e) {
+        setProblem(`Renamed, but their files still say ${was}: ${lower(plainError(e))}`);
+        setState("idle");
+        return;
+      }
+    } else if (purposeChanged) {
+      try {
         await setAgentPurpose(desk, agent.id, agent.name, purpose);
+      } catch (e) {
+        setProblem(plainError(e));
+        setState("idle");
+        return;
       }
-      refreshDrafts(key);
-      if (purposeChanged) {
-        setSaved(purpose.trim());
-        setPurpose(purpose.trim());
-      }
-      setState("saved");
-      if (renaming) void refreshRoster();
-    } catch (e) {
-      setProblem(plainError(e));
-      setState("idle");
     }
+    refreshDrafts(key);
+    if (purposeChanged) {
+      setSaved(purpose.trim());
+      setPurpose(purpose.trim());
+    }
+    setState("saved");
   };
 
   const discard = () => {

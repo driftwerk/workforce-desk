@@ -4,7 +4,10 @@ import { openUrl } from "../platform";
 import type { ChatMessage } from "../chat/types";
 import { Mark } from "../ui/Mark";
 
-const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const time = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
 
 export function Message({
   message,
