@@ -581,6 +581,42 @@ button {
   background: var(--surface);
   border: 1px solid var(--border);
 }
+.composer-mentions {
+  position: relative;
+}
+.mention-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+  z-index: 5;
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-width: 0;
+}
+.mention-option > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-option[aria-selected="true"] {
+  background: var(--sunken);
+}
 .composer textarea {
   flex: 1;
   border: 0;

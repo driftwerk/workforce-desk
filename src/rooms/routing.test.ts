@@ -31,4 +31,19 @@ describe("room routing", () => {
   it("relays with the room and the speaker", () => {
     expect(relay("release", "allan", "done")).toBe("[#release] allan: done");
   });
+
+  it("reads names with punctuation after them, names with spaces, and workspaces by name", () => {
+    const crew = [...roster, { hubId: "local", id: "release-captain", name: "Release Captain", model: null, provider: null, isDefault: false }];
+    const room = [...members, { hub: "local", agent: "release-captain" }];
+    const hubs = [{ id: "acme", label: "Acme", url: "https://acme", local: false, token: "t" }];
+    expect(addressees("thanks @scout.", room, crew, null).map(memberKey)).toEqual(["local/scout"]);
+    expect(addressees("@release-captain, ship it", room, crew, null).map(memberKey)).toEqual(["local/release-captain"]);
+    expect(addressees("@atlas@acme hi", room, crew, null, undefined, hubs).map(memberKey)).toEqual(["acme/atlas"]);
+    expect(addressees("mail allan@dw.example", room, crew, "local/scout").map(memberKey)).toEqual(["local/scout"]);
+  });
+
+  it("never routes to someone outside the room", () => {
+    const outsider = { hubId: "dw", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
+    expect(addressees("@ledger hi", members, [...roster, outsider], "local/scout").map(memberKey)).toEqual(["local/scout"]);
+  });
 });

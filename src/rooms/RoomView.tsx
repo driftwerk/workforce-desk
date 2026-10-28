@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
+import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
 import { Mark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { say } from "./engine";
+import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
 import { memberKey } from "./routing";
 
 const asChat = (m: RoomMessage) => ({
@@ -19,24 +21,109 @@ const asChat = (m: RoomMessage) => ({
 
 function Composer({ room, threadId, placeholder }: { room: Room; threadId: string | null; placeholder: string }) {
   const fail = useDesk((s) => s.fail);
+  const { roster, hubs } = useChat();
   const [draft, setDraft] = useState("");
+  const [caret, setCaret] = useState(0);
+  const [active, setActive] = useState(0);
+  // Escape closes the list until you type on.
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const listId = useId();
+
+  const typing = mentionAt(draft, caret);
+  const options = typing && dismissed !== typing.start ? suggestions(typing.query, roster, room.members) : [];
+  const open = options.length > 0;
+  const current = Math.min(active, options.length - 1);
+  const inRoom = (a: Agent) => room.members.some((m) => m.hub === a.hubId && m.agent === a.id);
+  const home = (a: Agent) => hubs.find((h) => h.id === a.hubId)?.label ?? a.hubId;
+
+  const pick = (a: Agent) => {
+    if (!typing) return;
+    const next = insertMention(draft, typing.start, caret, mentionFor(a, roster, hubs));
+    setDraft(next.text);
+    setCaret(next.caret);
+    setActive(0);
+    requestAnimationFrame(() => {
+      field.current?.focus();
+      field.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft;
+    if (!text.trim()) return;
     setDraft("");
+    setCaret(0);
     say(room, text, threadId).catch((err) => {
       setDraft(text);
       fail(err);
     });
   };
   return (
-    <form className="composer" onSubmit={submit}>
+    <form className="composer composer-mentions" onSubmit={submit}>
+      {open && (
+        <ul className="mention-menu" role="listbox" id={listId} aria-label="Mention someone">
+          {options.map((a, i) => (
+            <li
+              key={agentKey(a)}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === current}
+              className="mention-option"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(a);
+              }}
+              onMouseEnter={() => setActive(i)}
+            >
+              <Mark name={a.name} size="sm" />
+              <b>{a.name}</b>
+              <span className="faint small">
+                {home(a)}
+                {inRoom(a) ? "" : " · not in the room yet — mentioning adds them"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       <textarea
+        ref={field}
         rows={1}
         value={draft}
         placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open ? `${listId}-${current}` : undefined}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setCaret(e.target.selectionStart ?? e.target.value.length);
+          setActive(0);
+          setDismissed(null);
+        }}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
         onKeyDown={(e) => {
+          if (open) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const step = e.key === "ArrowDown" ? 1 : -1;
+              setActive((current + step + options.length) % options.length);
+              return;
+            }
+            if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+              e.preventDefault();
+              pick(options[current]!);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              setDismissed(typing!.start);
+              return;
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey) submit(e);
         }}
       />
@@ -122,7 +209,11 @@ export function RoomView({ room }: { room: Room }) {
           ))}
           <div ref={end} />
         </div>
-        <Composer room={room} threadId={null} placeholder={`Message ${room.name} — @ to bring someone in`} />
+        <Composer
+          room={room}
+          threadId={null}
+          placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
+        />
       </main>
       {parent && (
         <aside className="thread-panel" aria-label="Thread">
@@ -140,7 +231,7 @@ export function RoomView({ room }: { room: Room }) {
               <Message key={m.id} message={asChat(m)} author={author(m.author).name} onSubmitForm={noForms} />
             ))}
           </div>
-          <Composer room={room} threadId={parent.id} placeholder="Reply in thread" />
+          <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
         </aside>
       )}
     </div>

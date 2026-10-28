@@ -1,7 +1,9 @@
 import { Conversation } from "../chat/conversation";
 import { useChat } from "../chat/store";
+import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMemberRef } from "../hub/types";
+import { resolveMentions } from "./mentions";
 import { addressees, MAX_HOPS, memberKey, relay } from "./routing";
 
 /** Where a member's next answer goes: the thread it was asked in, one hop on. */
@@ -59,17 +61,40 @@ async function answered(roomId: string, m: RoomMemberRef, content: string) {
     return failed(e);
   }
   if (ctx.hop >= MAX_HOPS) return;
-  const next = addressees(content, room.members, useChat.getState().roster, null, memberKey(m));
+  const { roster, hubs: paired } = useChat.getState();
+  const next = addressees(content, room.members, roster, null, memberKey(m), paired);
   for (const n of next) deliver(room, n, relay(room.slug, displayName(m), content), ctx.threadId, ctx.hop + 1);
 }
 
-/** You say something in a room: it is kept, then sent to whoever it addresses. */
+/** Says who an ambiguous `@name` could be, in plain words. */
+const ambiguity = (name: string): string =>
+  `More than one of your crew is called @${name}. Pick the one you mean from the list as you type @.`;
+
+/** Brings the crew a message names into the room first, so they hear it
+ *  and answer; answers with the room as it now is. */
+async function bringIn(desk: DeskHub, room: Room, text: string): Promise<Room> {
+  const { roster, hubs } = useChat.getState();
+  const { outsiders, ambiguous } = resolveMentions(text, room.members, roster, hubs);
+  if (ambiguous.length) throw new Error(ambiguity(ambiguous[0]!));
+  if (!outsiders.length) return room;
+  const members: RoomMemberRef[] = [...room.members, ...outsiders.map((a) => ({ hub: a.hubId, agent: a.id }))];
+  const updated = await desk.updateRoom(room.id, { members });
+  // Kept at once, so nothing prunes the new members' conversations before
+  // the hub's own room event arrives.
+  useDesk.setState((s) => ({ rooms: { ...s.rooms, [updated.id]: updated } }));
+  return updated;
+}
+
+/** You say something in a room: anyone it names who isn't in the room is
+ *  brought in, it is kept, then sent to whoever it addresses. */
 export async function say(room: Room, text: string, threadId: string | null): Promise<void> {
   const hub = useDesk.getState().hub;
   if (!hub || !text.trim()) return;
-  await hub.post(room.id, { author: "you", content: text, threadId });
-  for (const m of addressees(text, room.members, useChat.getState().roster, room.defaultMember)) {
-    deliver(room, m, relay(room.slug, "you", text), threadId, 0);
+  const here = await bringIn(hub, room, text);
+  await hub.post(here.id, { author: "you", content: text, threadId });
+  const { roster, hubs } = useChat.getState();
+  for (const m of addressees(text, here.members, roster, here.defaultMember, undefined, hubs)) {
+    deliver(here, m, relay(here.slug, "you", text), threadId, 0);
   }
 }
 

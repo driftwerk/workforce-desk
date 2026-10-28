@@ -25,6 +25,7 @@ vi.mock("../chat/conversation", () => ({
 const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { say, prune } = await import("./engine");
+const { MAX_HOPS } = await import("./routing");
 
 const room = {
   id: "r1",
@@ -40,10 +41,12 @@ const room = {
 };
 
 const posts: unknown[] = [];
+const updates: unknown[] = [];
 
 beforeEach(() => {
   sent.length = 0;
   posts.length = 0;
+  updates.length = 0;
   answerers.clear();
   prune({});
   useChat.setState({
@@ -54,11 +57,20 @@ beforeEach(() => {
     roster: [
       { hubId: "dw", id: "allan", name: "allan", model: null, provider: null, isDefault: false },
       { hubId: "local", id: "scout", name: "scout", model: null, provider: null, isDefault: false },
+      { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false },
+      { hubId: "dw", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false },
+      { hubId: "dw", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
     ],
   });
   useDesk.setState({
     rooms: { r1: room },
-    hub: { post: async (_id: string, m: unknown) => (posts.push(m), m) } as never,
+    hub: {
+      post: async (_id: string, m: unknown) => (posts.push(m), m),
+      updateRoom: async (id: string, patch: { members: typeof room.members }) => {
+        updates.push(patch);
+        return { ...useDesk.getState().rooms[id]!, ...patch };
+      },
+    } as never,
   });
 });
 
@@ -78,5 +90,50 @@ describe("room engine", () => {
     answerers.get("scout")!("checked: green");
     await vi.waitFor(() => expect(posts).toHaveLength(3));
     expect(posts[2]).toMatchObject({ author: "local/scout", hop: 1, threadId: "t1" });
+  });
+
+  it("brings someone mentioned into the room, and they answer", async () => {
+    await say(room, "@atlas can you look?", null);
+    expect(updates).toEqual([{ members: [...room.members, { hub: "dw", agent: "atlas" }] }]);
+    expect(useDesk.getState().rooms.r1!.members).toContainEqual({ hub: "dw", agent: "atlas" });
+    expect(posts).toEqual([{ author: "you", content: "@atlas can you look?", threadId: null }]);
+    expect(sent).toEqual([{ agent: "atlas", channel: "desk:release", text: "[#release] you: @atlas can you look?" }]);
+  });
+
+  it("asks members it names without changing the room", async () => {
+    await say(room, "@scout, @allan. both of you", null);
+    expect(updates).toEqual([]);
+    expect(sent.map((x) => x.agent)).toEqual(["scout", "allan"]);
+  });
+
+  it("asks which one when a name could be two of the crew, before keeping anything", async () => {
+    await expect(say(room, "@ledger hi", null)).rejects.toThrow(/More than one of your crew is called @ledger/);
+    expect(posts).toEqual([]);
+    expect(sent).toEqual([]);
+    await say(room, "@ledger@local hi", null);
+    expect(updates).toEqual([{ members: [...room.members, { hub: "local", agent: "ledger" }] }]);
+  });
+
+  it("never lets an agent bring someone in", async () => {
+    await say(room, "@allan status?", null);
+    answerers.get("allan")!("ask @atlas");
+    await vi.waitFor(() => expect(posts).toHaveLength(2));
+    expect(updates).toEqual([]);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("stops agents handing on to each other after the last hop", async () => {
+    await say(room, "@allan start", null);
+    for (let hop = 0; hop <= MAX_HOPS; hop++) {
+      const who = hop % 2 === 0 ? "allan" : "scout";
+      const other = who === "allan" ? "scout" : "allan";
+      answerers.get(who)!(`over to you @${other}`);
+      await vi.waitFor(() => expect(posts).toHaveLength(hop + 2));
+    }
+    await new Promise((r) => setTimeout(r, 10));
+    // Your message and one answer per hop; the last answer goes to no one.
+    expect(posts).toHaveLength(MAX_HOPS + 2);
+    expect(posts.at(-1)).toMatchObject({ hop: MAX_HOPS });
+    expect(sent).toHaveLength(MAX_HOPS + 1);
   });
 });

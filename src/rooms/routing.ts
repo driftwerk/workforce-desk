@@ -1,4 +1,5 @@
-import type { Agent } from "../chat/types";
+import type { Agent, HubAccount } from "../chat/types";
+import { resolveMentions } from "./mentions";
 
 export interface RoomMember {
   hub: string;
@@ -9,25 +10,18 @@ export const memberKey = (m: RoomMember): string => `${m.hub}/${m.agent}`;
 
 export const MAX_HOPS = 3;
 
-/** Members a message addresses: every `@name` (or `@name@hub`) that names a
- *  member, else the room's default member. */
+/** Members a message addresses: every member an `@name` (or `@name@hub`)
+ *  names, else the room's default member. Never anyone outside the room:
+ *  bringing someone in is yours to do (`say`), not an agent's. */
 export const addressees = (
   text: string,
   members: RoomMember[],
   roster: Agent[],
   defaultMember: string | null,
   exclude?: string,
+  hubs: readonly HubAccount[] = [],
 ): RoomMember[] => {
-  const named = (m: RoomMember) => roster.find((a) => a.hubId === m.hub && a.id === m.agent)?.name ?? m.agent;
-  const mentions = [...text.matchAll(/@([\w.-]+)(?:@([\w.-]+))?/g)].map((x) => ({
-    name: x[1]!.toLowerCase(),
-    hub: x[2]?.toLowerCase(),
-  }));
-  const hit = members.filter((m) =>
-    mentions.some(
-      (x) => (x.name === m.agent.toLowerCase() || x.name === named(m).toLowerCase()) && (!x.hub || x.hub === m.hub.toLowerCase()),
-    ),
-  );
+  const hit = resolveMentions(text, members, roster, hubs).members;
   const chosen = hit.length ? hit : members.filter((m) => memberKey(m) === defaultMember);
   return chosen.filter((m) => memberKey(m) !== exclude);
 };
