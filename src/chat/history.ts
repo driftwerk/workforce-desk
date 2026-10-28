@@ -1,3 +1,5 @@
+import type { DeskExtras } from "../hub/types";
+import { preview } from "../preview";
 import type { ChatMessage, HubAccount } from "./types";
 
 /** One message of a DM as the hub keeps it. */
@@ -8,6 +10,8 @@ interface HubMessage {
   /** What the live channel calls the text, should a hub send it so. */
   content?: string;
   at?: string;
+  /** What an overseer's message mentions to act on in place. */
+  desk?: DeskExtras;
 }
 
 export interface HistoryPage {
@@ -26,7 +30,10 @@ const fromHub = (m: HubMessage): ChatMessage => ({
   at: m.at ?? "",
   status: "complete",
   tools: [],
+  ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
 });
+
+const actionable = (m: ChatMessage): boolean => !!(m.desk?.approvals?.length || m.desk?.suggestions?.length);
 
 /** A page of your conversation with an agent, from before message `before`
  *  (the latest when not given). Null where the hub doesn't keep DMs for
@@ -38,15 +45,24 @@ export async function fetchHistory(hub: HubAccount, agentId: string, before?: st
   if (before) url.searchParams.set("before", before);
   const res = await fetch(url, { headers: { authorization: `Bearer ${hub.token}` } });
   // Not on this hub (an older one, or one that won't share it with this device).
-  if ([401, 403, 404, 405].includes(res.status)) return null;
-  if (!res.ok) throw new Error(`history: ${res.status}`);
-  // An older hub answers a route it doesn't have with its web page.
-  if (!(res.headers.get("content-type") ?? "").includes("json")) return null;
-  const body = (await res.json()) as { messages?: HubMessage[]; more?: boolean };
-  return {
-    messages: (body.messages ?? []).filter((m) => m && typeof m.id === "string").map(fromHub).filter((m) => m.content.trim() !== ""),
+  const absent =
+    [401, 403, 404, 405].includes(res.status) ||
+    // An older hub answers a route it doesn't have with its web page.
+    (res.ok && !(res.headers.get("content-type") ?? "").includes("json"));
+  if (!absent && !res.ok) throw new Error(`history: ${res.status}`);
+  const body = absent ? null : ((await res.json()) as { messages?: HubMessage[]; more?: boolean });
+  const page = body && {
+    messages: (body.messages ?? [])
+      .filter((m) => m && typeof m.id === "string")
+      .map(fromHub)
+      .filter((m) => m.content.trim() !== "" || actionable(m)),
     more: body.more ?? false,
   };
+  if (!preview || before) return page;
+  // The browser preview shows the overseer's DM of the design.
+  const { devConversation } = await import("../devBridge");
+  const extra = devConversation(agentId).map(fromHub);
+  return extra.length ? { messages: [...(page?.messages ?? []), ...extra], more: page?.more ?? false } : page;
 }
 
 /** `earlier` put before `messages`, each message once. */

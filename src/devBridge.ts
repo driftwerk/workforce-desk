@@ -508,7 +508,9 @@ function crewRoute(method: string, path: string): { answer: unknown } | null {
 
 /** The overseer's side of its DM in the design, with what it mentions to act
  *  on: an approval and a suggestion. */
-export const devConversation = (agentId: string) =>
+export const devConversation = (
+  agentId: string,
+): { id: string; from: string; text: string; at: string; desk?: import("./hub/types").DeskExtras }[] =>
   agentId !== "desk"
     ? []
     : [

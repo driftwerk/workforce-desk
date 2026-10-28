@@ -2,6 +2,7 @@ import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { useMemo } from "react";
 import { openUrl } from "../platform";
 import type { ChatMessage } from "../chat/types";
+import { DeskActions } from "../overview/DeskActions";
 import { Mark } from "../ui/Mark";
 
 const time = (iso: string) => {
@@ -57,6 +58,7 @@ export function Message({
             </div>
           </RichHostProvider>
         )}
+        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}
       </div>
     </article>
   );

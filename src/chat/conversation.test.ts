@@ -87,4 +87,16 @@ describe("conversation", () => {
     const room = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan", "desk:release"));
     expect(room.searchParams.get("channel")).toBe("desk:release");
   });
+
+  it("keeps what an overseer's answer offers to act on, whichever copy of the answer carries it", () => {
+    const desk = { approvals: [{ sessionId: "s1", approvalId: "a1", summary: "Run npm install?" }] };
+    const whole = run([{ type: "message", content: "It wants to install.", desk }]);
+    expect(whole.messages[0]!.desk).toEqual(desk);
+    const repeated = run([{ type: "stream_start" }, { type: "stream_delta", content: "Done." }, { type: "stream_end" }, { type: "message", content: "Done.", desk }]);
+    expect(repeated.messages).toHaveLength(1);
+    expect(repeated.messages[0]!.desk).toEqual(desk);
+    const onEnd = run([{ type: "stream_start" }, { type: "stream_delta", content: "Done." }, { type: "stream_end", desk }]);
+    expect(onEnd.messages[0]!.desk).toEqual(desk);
+    expect(run([{ type: "message", content: "Plain." }]).messages[0]!.desk).toBeUndefined();
+  });
 });

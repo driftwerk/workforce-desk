@@ -91,14 +91,24 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
     }
     case "stream_discard":
       return { ...s, streaming: false, typing: true, messages: s.messages.filter((m) => m.status !== "streaming") };
-    case "stream_end":
-      return { ...s, streaming: false, working: null, messages: closeStreaming(s.messages) };
+    case "stream_end": {
+      const messages = closeStreaming(s.messages);
+      return { ...s, streaming: false, working: null, messages: msg.desk ? updateLast(messages, (m) => ({ ...m, desk: msg.desk })) : messages };
+    }
     case "message": {
       const content = msg.content ?? "";
       const last = s.messages.at(-1);
-      // A non-streamed answer that repeats what just streamed is the same answer.
+      const desk = msg.desk ? { desk: msg.desk } : {};
+      // A non-streamed answer that repeats what just streamed is the same
+      // answer (what it mentions to act on may come only with this copy).
       if (last?.role === "assistant" && last.content === content)
-        return { ...s, typing: false, streaming: false, working: null };
+        return {
+          ...s,
+          typing: false,
+          streaming: false,
+          working: null,
+          messages: msg.desk ? [...s.messages.slice(0, -1), { ...last, ...desk }] : s.messages,
+        };
       // Tools ran ahead of the answer: the answer belongs to that message.
       if (last?.role === "assistant" && last.status === "streaming" && last.content === "")
         return {
@@ -107,7 +117,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
           typing: false,
           streaming: false,
           working: null,
-          messages: [...s.messages.slice(0, -1), { ...last, content, status: "complete" }],
+          messages: [...s.messages.slice(0, -1), { ...last, content, status: "complete", ...desk }],
         };
       return {
         ...s,
@@ -115,7 +125,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
         typing: false,
         streaming: false,
         working: null,
-        messages: [...closeStreaming(s.messages), message("assistant", content)],
+        messages: [...closeStreaming(s.messages), { ...message("assistant", content), ...desk }],
       };
     }
     case "tool_start": {

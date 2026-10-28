@@ -1,3 +1,5 @@
+import type { DeskExtras } from "../hub/types";
+
 /** A hub Desk talks to: the local one, or a remote hub paired as a device. */
 export interface HubAccount {
   id: string;
@@ -55,6 +57,8 @@ export interface ChatMessage {
   at: string;
   status: "complete" | "streaming" | "error";
   tools: ToolCall[];
+  /** What an overseer's message mentions to act on in place. */
+  desk?: DeskExtras;
 }
 
 /** What the hub's `/ws` sends (the subset Desk renders). */
@@ -63,4 +67,5 @@ export interface ServerMessage {
   content?: string;
   error?: string;
   session_id?: string;
+  desk?: DeskExtras;
 }

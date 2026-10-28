@@ -14,6 +14,28 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Mark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
+import { useOverview } from "../overview/store";
+import type { Agent } from "../chat/types";
+import type { OversightLevel, Overview, Session } from "../hub/types";
+
+const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "Overseeing 3 crew and 4 sessions · Suggest" */
+const overseeingLine = (
+  roster: Agent[],
+  manager: Agent,
+  overview: Overview | null,
+  sessions: Record<string, Session>,
+  level: OversightLevel,
+): string => {
+  const crew = roster.filter((a) => a.hubId === manager.hubId && a.id !== manager.id).length;
+  const tracked = overview
+    ? overview.items.filter((i) => i.kind === "session").length
+    : Object.values(sessions).filter((s) => s.state !== "closed").length;
+  return `Overseeing ${crew} crew and ${count(tracked, "session", "sessions")} · ${LEVEL[level]}`;
+};
 
 export function Rooms() {
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
@@ -39,6 +61,9 @@ function DirectMessage() {
   const drafts = useDrafts((s) => s.drafts);
   const { brain, provider } = useAgentBrain(agent, local);
   const fallback = useProviders((s) => s.fallback);
+  const manager = useOverview((s) => s.manager);
+  const overview = useOverview((s) => s.overview);
+  const sessions = useDesk((s) => s.sessions);
   const [draft, setDraft] = useState("");
   // Each agent's tab, kept while you visit others.
   const [tabs, setTabs] = useState<Record<string, Tab>>({});
@@ -96,10 +121,12 @@ function DirectMessage() {
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
   const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files");
   // What the hub reports stands in until the providers list says more.
-  const subtitle =
+  const brainSubtitle =
     local && brain && provider && !fallback
       ? [hub?.label ?? "This Mac", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
+  const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
+  const subtitle = overseeing && tab === "chat" ? overseeingLine(roster, agent, overview, sessions, overseeing) : brainSubtitle;
   const busy = convo.working !== null;
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the
@@ -203,7 +230,7 @@ function DirectMessage() {
             <textarea
               rows={1}
               value={draft}
-              placeholder={`Message ${agent.name}`}
+              placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) submit(e);

@@ -160,4 +160,25 @@ describe("a DM's history in the store", () => {
     useChat.getState().openDm("local/scout");
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
   });
+
+  it("keeps what an overseer's messages offer to act on, even with no text", async () => {
+    const desk = { suggestions: [{ id: "sg-1", text: "Stop the test.", state: "open" }] };
+    answer(() =>
+      json({
+        messages: [
+          { id: "h1", from: "agent", text: "It looks stuck.", desk },
+          { id: "h2", from: "agent", text: "", desk },
+          { id: "h3", from: "agent", text: "" },
+          { id: "h4", from: "user", text: "ok", desk },
+        ],
+        more: false,
+      }),
+    );
+    const page = await fetchHistory(hub, "desk");
+    expect(page!.messages.map((m) => [m.id, m.desk])).toEqual([
+      ["h1", desk],
+      ["h2", desk],
+      ["h4", undefined],
+    ]);
+  });
 });
