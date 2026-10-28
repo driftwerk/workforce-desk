@@ -3,9 +3,15 @@
 //! reference, so speech played through the player node is removed from what
 //! the microphone hears. The player takes one fixed mono format (a buffer in
 //! any other format makes AVFAudio throw), so speech is resampled to it.
+//!
+//! Some Macs refuse to start voice processing (AVFAudio error -10875). The
+//! microphone is then opened plainly and goes quiet while Desk speaks, and
+//! for a moment after, so Desk never hears itself.
 
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use block2::RcBlock;
 use eyre::{Result, eyre};
@@ -20,6 +26,43 @@ use crate::{AudioIn, AudioOut, SharedAudioOut};
 
 const TAP_FRAMES: u32 = 4096;
 const PLAYBACK_RATE: u32 = 48_000;
+/// How long the microphone stays quiet after Desk stops speaking, when there
+/// is no echo canceller: the tail of the speech still in the room.
+const ECHO_TAIL_MS: u64 = 400;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Whether Desk is speaking, for a microphone without an echo canceller.
+#[derive(Default)]
+struct Speaking {
+    queued: AtomicUsize,
+    quiet_after: AtomicU64,
+}
+
+impl Speaking {
+    fn started(&self) {
+        self.queued.fetch_add(1, Ordering::SeqCst);
+    }
+    fn finished(&self) {
+        let _ = self
+            .queued
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        self.quiet_after
+            .store(now_ms() + ECHO_TAIL_MS, Ordering::SeqCst);
+    }
+    fn stopped(&self) {
+        self.queued.store(0, Ordering::SeqCst);
+        self.quiet_after
+            .store(now_ms() + ECHO_TAIL_MS, Ordering::SeqCst);
+    }
+    fn now(&self) -> bool {
+        self.queued.load(Ordering::SeqCst) > 0 || now_ms() < self.quiet_after.load(Ordering::SeqCst)
+    }
+}
 
 struct Engine {
     engine: Retained<AVAudioEngine>,
@@ -37,6 +80,7 @@ pub struct MacAudio {
     engine: Mutex<Engine>,
     format: Retained<AVAudioFormat>,
     resampler: Mutex<Option<Resampler>>,
+    speaking: Arc<Speaking>,
     _tap: Option<Tap>,
 }
 
@@ -47,7 +91,27 @@ unsafe impl Sync for MacAudio {}
 /// Starts the engine: the microphone (voice-processed) goes to `input` as
 /// mono samples at the hardware rate; the returned output plays speech.
 pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
-    Ok(Arc::new(build(Some(input))?))
+    let input: SharedIn = Arc::from(input);
+    // In a pool of its own, so a failed attempt's objects are gone before the retry.
+    match objc2::rc::autoreleasepool(|_| build(Some((input.clone(), true)))) {
+        Ok(audio) => Ok(Arc::new(audio)),
+        Err(e) => {
+            tracing::warn!(
+                "voice processing won't start ({e:#}); listening without it, quiet while speaking"
+            );
+            // The failed voice-processing unit winds down in the background;
+            // the plain microphone starts once it has.
+            let mut last = None;
+            for _ in 0..5 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                match objc2::rc::autoreleasepool(|_| build(Some((input.clone(), false)))) {
+                    Ok(audio) => return Ok(Arc::new(audio)),
+                    Err(e) => last = Some(e),
+                }
+            }
+            Err(last.unwrap_or_else(|| eyre!("the microphone won't start")))
+        }
+    }
 }
 
 /// Just the speaker side: for playing a sample while voice is off.
@@ -55,7 +119,12 @@ pub fn output() -> Result<SharedAudioOut> {
     Ok(Arc::new(build(None)?))
 }
 
-fn build(input: Option<AudioIn>) -> Result<MacAudio> {
+type SharedIn = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
+
+/// The engine, with the microphone when `input` is given: voice-processed
+/// (echo cancelled), or plain and quiet while Desk speaks.
+fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
+    let speaking = Arc::new(Speaking::default());
     unsafe {
         let engine = AVAudioEngine::new();
         let format = AVAudioFormat::initStandardFormatWithSampleRate_channels(
@@ -64,7 +133,12 @@ fn build(input: Option<AudioIn>) -> Result<MacAudio> {
             1,
         )
         .ok_or_else(|| eyre!("no mono playback format"))?;
-        let tap = input.map(|input| listen(&engine, input)).transpose()?;
+        let tap = input
+            .map(|(input, cancel_echo)| {
+                let gate = (!cancel_echo).then(|| speaking.clone());
+                listen(&engine, input, cancel_echo, gate)
+            })
+            .transpose()?;
 
         let player = AVAudioPlayerNode::new();
         engine.attachNode(&player);
@@ -72,26 +146,51 @@ fn build(input: Option<AudioIn>) -> Result<MacAudio> {
 
         engine.prepare();
         if let Err(e) = engine.startAndReturnError() {
+            // Leave the microphone as found: a voice-processing unit left
+            // behind keeps the next engine's plain microphone from starting.
             if tap.is_some() {
-                engine.inputNode().removeTapOnBus(0);
+                let mic = engine.inputNode();
+                mic.removeTapOnBus(0);
+                let _ = mic.setVoiceProcessingEnabled_error(false);
             }
-            return Err(eyre!("starting audio: {}", e.localizedDescription()));
+            engine.stop();
+            engine.reset();
+            return Err(eyre!(
+                "starting audio: {} ({} {})",
+                e.localizedDescription(),
+                e.domain(),
+                e.code()
+            ));
         }
         Ok(MacAudio {
             engine: Mutex::new(Engine { engine, player }),
             format,
             resampler: Mutex::new(None),
+            speaking,
             _tap: tap,
         })
     }
 }
 
-/// Voice processing on, and a tap on the processed microphone.
-unsafe fn listen(engine: &AVAudioEngine, input: AudioIn) -> Result<Tap> {
+/// A tap on the microphone: voice-processed when `cancel_echo`; otherwise
+/// silence goes to `input` while `gate` says Desk is speaking.
+unsafe fn listen(
+    engine: &AVAudioEngine,
+    input: SharedIn,
+    cancel_echo: bool,
+    gate: Option<Arc<Speaking>>,
+) -> Result<Tap> {
     unsafe {
         let mic = engine.inputNode();
-        mic.setVoiceProcessingEnabled_error(true)
-            .map_err(|e| eyre!("voice processing: {}", e.localizedDescription()))?;
+        mic.setVoiceProcessingEnabled_error(cancel_echo)
+            .map_err(|e| {
+                eyre!(
+                    "voice processing: {} ({} {})",
+                    e.localizedDescription(),
+                    e.domain(),
+                    e.code()
+                )
+            })?;
         let format = mic.outputFormatForBus(0);
         let rate = format.sampleRate() as u32;
         if rate == 0 || format.channelCount() == 0 {
@@ -108,7 +207,11 @@ unsafe fn listen(engine: &AVAudioEngine, input: AudioIn) -> Result<Tap> {
                 // With voice processing on, the first channel is the processed
                 // voice; any others are the unprocessed microphones.
                 let voice = std::slice::from_raw_parts((*data).as_ptr(), frames);
-                input(voice, rate);
+                if gate.as_ref().is_some_and(|g| g.now()) {
+                    input(&vec![0.0; frames], rate);
+                } else {
+                    input(voice, rate);
+                }
             },
         );
         mic.installTapOnBus_bufferSize_format_block(0, TAP_FRAMES, None, RcBlock::as_ptr(&tap));
@@ -138,7 +241,10 @@ impl AudioOut for MacAudio {
             return;
         };
         let done = Mutex::new(Some(done));
+        let speaking = self.speaking.clone();
+        speaking.started();
         let finished = RcBlock::new(move || {
+            speaking.finished();
             if let Some(done) = done.lock().ok().and_then(|mut d| d.take()) {
                 done();
             }
@@ -160,6 +266,7 @@ impl AudioOut for MacAudio {
         if let Ok(engine) = self.engine.lock() {
             unsafe { engine.player.stop() };
         }
+        self.speaking.stopped();
         if let Ok(mut r) = self.resampler.lock() {
             *r = None;
         }
@@ -203,6 +310,45 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
     use std::time::Duration;
+
+    #[test]
+    fn the_microphone_is_quiet_while_desk_speaks_and_just_after() {
+        let s = Speaking::default();
+        assert!(!s.now());
+        s.started();
+        s.started();
+        assert!(s.now());
+        s.finished();
+        assert!(s.now(), "one buffer still playing");
+        s.finished();
+        assert!(s.now(), "the tail of the speech is still in the room");
+        s.quiet_after.store(0, Ordering::SeqCst);
+        assert!(!s.now());
+        s.started();
+        s.stopped();
+        s.quiet_after.store(0, Ordering::SeqCst);
+        assert!(!s.now(), "stopping clears what was queued");
+        s.finished();
+        s.quiet_after.store(0, Ordering::SeqCst);
+        assert!(!s.now(), "a late completion after stop never goes negative");
+    }
+
+    /// Opens the real microphone (the terminal running the test needs
+    /// microphone permission) and hears at least one buffer.
+    #[test]
+    #[ignore = "uses the microphone"]
+    fn hears_the_microphone() {
+        let (tx, rx) = channel();
+        let tx = Mutex::new(tx);
+        let input: AudioIn = Box::new(move |samples: &[f32], rate: u32| {
+            let _ = tx.lock().unwrap().send((samples.len(), rate));
+        });
+        let _audio = open(input).unwrap();
+        let (n, rate) = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a buffer from the microphone");
+        assert!(n > 0 && rate > 0);
+    }
 
     /// Plays through the real output without the microphone (no permission
     /// needed): each engine's rate must reach the player as its own format.
