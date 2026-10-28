@@ -237,8 +237,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 label="Something has waited on you for"
                 checked={o.wake.waitingMinutes > 0}
                 onChange={turnOn("waiting", setWaiting, (x) => ({ ...x, wake: { ...x.wake, waitingMinutes: 0 } }))}
+                problem={{ id: `${ids}-waiting`, text: fields.waiting.problem }}
               >
                 <Num
+                  problemId={`${ids}-waiting`}
                   label="Minutes waiting"
                   value={fields.waiting}
                   disabled={o.wake.waitingMinutes === 0}
@@ -251,8 +253,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 label="Work has gone quiet while working for"
                 checked={o.wake.quietMinutes > 0}
                 onChange={turnOn("quiet", setQuiet, (x) => ({ ...x, wake: { ...x.wake, quietMinutes: 0 } }))}
+                problem={{ id: `${ids}-quiet`, text: fields.quiet.problem }}
               >
                 <Num
+                  problemId={`${ids}-quiet`}
                   label="Minutes quiet"
                   value={fields.quiet}
                   disabled={o.wake.quietMinutes === 0}
@@ -275,8 +279,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 label="Morning summary at"
                 checked={o.summaries.morning !== ""}
                 onChange={turnOn("morning", setMorning, (x) => ({ ...x, summaries: { ...x.summaries, morning: "" } }))}
+                problem={{ id: `${ids}-morning`, text: fields.morning.problem }}
               >
                 <Num
+                  problemId={`${ids}-morning`}
                   label="Morning summary time"
                   value={fields.morning}
                   disabled={o.summaries.morning === ""}
@@ -289,8 +295,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 label="End-of-day summary at"
                 checked={o.summaries.evening !== ""}
                 onChange={turnOn("evening", setEvening, (x) => ({ ...x, summaries: { ...x.summaries, evening: "" } }))}
+                problem={{ id: `${ids}-evening`, text: fields.evening.problem }}
               >
                 <Num
+                  problemId={`${ids}-evening`}
                   label="End-of-day summary time"
                   value={fields.evening}
                   disabled={o.summaries.evening === ""}
@@ -303,6 +311,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             <span className="oversee-sub oversee-cap">
               {name} checks in at most{" "}
               <Num
+                problemId={`${ids}-checkins`}
                 label="Check-ins a day"
                 value={fields.checkins}
                 onChange={(t) => setField("checkins", t)}
@@ -311,6 +320,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               />{" "}
               times a day. Events close together are taken as one.
             </span>
+            {fields.checkins.problem && <Problem id={`${ids}-checkins`} text={fields.checkins.problem} />}
           </div>
 
           {o.level === "act" && (
@@ -402,12 +412,14 @@ function Check({
   checked,
   onChange,
   children,
+  problem,
 }: {
   label: string;
   sub?: string;
   checked: boolean;
   onChange: (on: boolean) => void;
   children?: React.ReactNode;
+  problem?: { id: string; text: string | null };
 }) {
   return (
     <div className="oversee-row">
@@ -423,7 +435,16 @@ function Check({
         )}
       </label>
       {children}
+      {problem?.text && <Problem id={problem.id} text={problem.text} />}
     </div>
+  );
+}
+
+function Problem({ id, text }: { id: string; text: string }) {
+  return (
+    <span id={id} className="oversee-problem small state-blocked" role="alert">
+      {text}
+    </span>
   );
 }
 
@@ -438,9 +459,12 @@ function Num({
   unit,
   time = false,
   narrow = false,
+  problemId,
 }: {
   label: string;
   value: Typed;
+  /** Where what's wrong with it is said. */
+  problemId: string;
   onChange: (text: string) => void;
   onCommit: () => void;
   disabled?: boolean;
@@ -448,7 +472,7 @@ function Num({
   time?: boolean;
   narrow?: boolean;
 }) {
-  const id = useId();
+  const id = problemId;
   return (
     <span className="oversee-num">
       <input
@@ -470,11 +494,6 @@ function Num({
         }}
       />
       {unit && <span className="oversee-sub">{unit}</span>}
-      {value.problem && (
-        <span id={id} className="oversee-problem small state-blocked" role="alert">
-          {value.problem}
-        </span>
-      )}
     </span>
   );
 }

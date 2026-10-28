@@ -567,9 +567,10 @@
   flex-basis: 100%;
   text-align: right;
 }
+.oversee-part > .oversee-problem {
+  text-align: left;
+  margin-top: -6px;
+}
 .oversee-cap .oversee-num {
   vertical-align: middle;
-}
-.oversee-cap .oversee-problem {
-  text-align: left;
 }
