@@ -1,7 +1,5 @@
 import type { VoiceStatus } from "./api";
 
-export const PUSH_TO_TALK_LABEL = "⌥⌘Space";
-
 export type Step = "heard" | "transcribing" | "thinking" | "speaking";
 
 export const STEPS: { step: Step; label: string }[] = [
@@ -21,8 +19,21 @@ export interface PillView {
   progress: number | null;
 }
 
+/** Hold-to-talk as the pill mentions it: its keys, shown the macOS way, and
+ *  whether Desk got them. */
+export interface HoldToTalk {
+  label: string;
+  available: boolean;
+}
+
 /** What the voice pill says for the engine's state. */
-export const pillView = (s: VoiceStatus, thinking: boolean, heardBy: string | null, transcript: string): PillView => {
+export const pillView = (
+  s: VoiceStatus,
+  thinking: boolean,
+  heardBy: string | null,
+  transcript: string,
+  hold: HoldToTalk,
+): PillView => {
   const quoted = transcript ? `“${transcript}”` : "";
   switch (s.state) {
     case "off":
@@ -71,7 +82,9 @@ export const pillView = (s: VoiceStatus, thinking: boolean, heardBy: string | nu
       return {
         agent: null,
         title: "Listening for a name",
-        detail: `Say an agent's name, or hold ${PUSH_TO_TALK_LABEL}`,
+        detail: hold.available
+          ? `Say an agent's name, or hold ${hold.label}`
+          : `Say an agent's name · ${hold.label} is taken by another app, change it in Settings`,
         step: null,
         progress: null,
       };

@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 import { useSettings } from "../settings/store";
+import { shortcutLabel } from "../shortcuts/keys";
+import { useShortcuts } from "../shortcuts/manager";
 import { Mark } from "../ui/Mark";
 import { stopSpeaking } from "./api";
 import { useVoiceStore } from "./store";
@@ -21,7 +23,9 @@ export function VoicePill() {
   const { status, thinking, heardBy, transcript, error } = useVoiceStore();
   const on = useSettings((s) => s.voice);
   const setSettings = useSettings((s) => s.set);
-  const view = pillView(status, thinking, heardBy, transcript);
+  const holdKeys = useSettings((s) => s.pushToTalkShortcut);
+  const holdTaken = useShortcuts((s) => s.status.pushToTalk.state === "taken");
+  const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken });
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;
   const ring = { "--voice-progress": view.progress ?? 0 } as CSSProperties;
 

@@ -1,4 +1,3 @@
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
@@ -6,6 +5,7 @@ import { Floor } from "../floor/Floor";
 import { useDesk } from "../hub/store";
 import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe, themeFiles } from "../platform";
 import { useSettings } from "../settings/store";
+import { useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { prune } from "../rooms/engine";
@@ -84,17 +84,20 @@ export function App() {
     };
   }, [connect, fail, loadSettings, setCustom, setHubs]);
 
-  useEffect(() => {
-    if (!inApp) return;
-    const shortcut = "Alt+Space";
-    register(shortcut, (e) => {
+  useGlobalShortcut(
+    "ask",
+    useSettings((s) => (s.loaded ? s.askShortcut : null)),
+    (e) => {
       if (e.state !== "Pressed") return;
       const w = getCurrentWindow();
       void w.show().then(() => w.setFocus());
       setAsking(true);
-    }).catch(fail);
-    return () => void unregister(shortcut);
-  }, [fail]);
+    },
+  );
+  const askStatus = useShortcuts((s) => s.status.ask);
+  useEffect(() => {
+    if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Calls and voice`);
+  }, [askStatus, fail]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

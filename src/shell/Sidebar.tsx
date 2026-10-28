@@ -6,6 +6,8 @@ import { logoDot } from "../theme/builtin";
 import { allThemes, useTheme, useThemeStore } from "../theme/store";
 import { useOverview } from "../overview/store";
 import { Mark } from "../ui/Mark";
+import { useSettings } from "../settings/store";
+import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 
@@ -38,6 +40,7 @@ export function Sidebar({
   const list = sortedSessions(sessions).filter((s) => s.state !== "closed");
   const themes = [{ id: "system", name: "Auto" }, ...allThemes(custom).slice(0, 3)];
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
+  const askKeys = shortcutLabel(useSettings((s) => s.askShortcut));
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const overseer = (a: (typeof roster)[number]) => a.id === managerId && !!hubs.find((h) => h.id === a.hubId)?.local;
   return (
@@ -47,7 +50,7 @@ export function Sidebar({
         <span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />
       </div>
       <button type="button" className="ask" onClick={onAsk}>
-        Ask anyone <kbd>⌥Space</kbd>
+        Ask anyone <kbd>{askKeys}</kbd>
       </button>
       <div className="tabs" role="tablist" aria-label="View">
         {(["rooms", "floor"] as const).map((v) => (

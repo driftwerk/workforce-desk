@@ -566,3 +566,18 @@ legend.set-label {
 .check-row input {
   margin-top: 4px;
 }
+
+/* ── Shortcuts ──────────────────────────────────────────────────────────── */
+
+.shortcut-keys {
+  flex: none;
+  min-width: 132px;
+}
+.shortcut-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.shortcut-keys.recording {
+  border-color: var(--signal);
+  color: var(--signal);
+}

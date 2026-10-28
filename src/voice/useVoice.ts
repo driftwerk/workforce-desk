@@ -1,8 +1,8 @@
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { useEffect } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useSettings } from "../settings/store";
+import { useGlobalShortcut } from "../shortcuts/manager";
 import {
   disableVoice,
   enableVoice,
@@ -22,9 +22,6 @@ import type { VoiceSpec } from "../platform";
 import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
 import { DETAILS_IN_DESK, speakable } from "./speakable";
 import { useVoiceStore } from "./store";
-
-/** Hold to talk, release to send. */
-export const PUSH_TO_TALK = "Alt+Super+Space";
 
 const ACK_AFTER_MS = 2_000;
 const ANSWER_WAIT_MS = 10 * 60_000;
@@ -124,9 +121,10 @@ export class Turns {
   }
 }
 
-/** Voice, while `enabled`: wake on roster names, push-to-talk on
- *  {@link PUSH_TO_TALK}, requests to the named agent, answers read aloud or
- *  handed back to the cloud voice model, on the engine Desk's settings name.
+/** Voice, while `enabled`: wake on roster names, push-to-talk on the
+ *  `pushToTalkShortcut` setting, requests to the named agent, answers read
+ *  aloud or handed back to the cloud voice model, on the engine Desk's
+ *  settings name.
  *  Mount once in the shell, e.g. `useVoice(useSettings((s) => s.voice))`. */
 export function useVoice(enabled: boolean) {
   const engine = voiceEngine(useSettings((s) => s.voiceEngine)).id;
@@ -166,9 +164,6 @@ export function useVoice(enabled: boolean) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!enabled) return;
-    register(PUSH_TO_TALK, (e) => void pushToTalk(e.state === "Pressed").catch(failed)).catch(failed);
-    return () => void unregister(PUSH_TO_TALK).catch(failed);
-  }, [enabled]);
+  const holdKeys = useSettings((s) => (s.loaded ? s.pushToTalkShortcut : null));
+  useGlobalShortcut("pushToTalk", enabled ? holdKeys : null, (e) => void pushToTalk(e.state === "Pressed").catch(failed));
 }

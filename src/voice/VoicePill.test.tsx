@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
+import { useShortcuts } from "../shortcuts/manager";
 import { useVoiceStore } from "./store";
 import { VoicePill } from "./VoicePill";
 
@@ -39,5 +40,20 @@ describe("VoicePill", () => {
     act(() => useVoiceStore.setState({ status: { state: "off" }, error: "microphone access was denied" }));
     render(<VoicePill />);
     expect(screen.getByText("microphone access was denied").className).toContain("voice-error");
+  });
+
+  it("shows the configured hold-to-talk keys, and says when another app has them", () => {
+    act(() => {
+      useSettings.setState({ pushToTalkShortcut: "Control+Alt+K" });
+      useVoiceStore.setState({ status: { state: "listening", conversation: null }, thinking: false, heardBy: null, transcript: "", error: null });
+    });
+    render(<VoicePill />);
+    expect(screen.getByText("Say an agent's name, or hold ⌃⌥K")).toBeTruthy();
+    act(() =>
+      useShortcuts.setState({
+        status: { pushToTalk: { state: "taken", message: "⌃⌥K is taken by another app — choose another" }, ask: { state: "off" } },
+      }),
+    );
+    expect(screen.getByText("Say an agent's name · ⌃⌥K is taken by another app, change it in Settings")).toBeTruthy();
   });
 });

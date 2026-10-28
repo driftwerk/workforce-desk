@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { loadSettings, saveSettings, type Settings } from "../platform";
+import { DEFAULT_SHORTCUTS, usable } from "../shortcuts/keys";
 import { useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
@@ -9,7 +10,8 @@ interface SettingsStore extends Settings {
 }
 
 /** Desk's settings file, mirrored here; the theme choice lives in the theme
- *  store and is saved with the rest. */
+ *  store and is saved with the rest. A shortcut that's missing, unreadable or
+ *  one macOS keeps loads as its default. */
 export const useSettings = create<SettingsStore>((set, get) => ({
   theme: "system",
   tuple: false,
@@ -18,16 +20,24 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   agentVoices: {},
   voice: false,
   voiceEngine: "cascade",
+  pushToTalkShortcut: DEFAULT_SHORTCUTS.pushToTalk,
+  askShortcut: DEFAULT_SHORTCUTS.ask,
   loaded: false,
   load: async () => {
     const s = await loadSettings();
     useThemeStore.getState().setChoice(s.theme);
-    set({ ...s, loaded: true });
+    set({
+      ...s,
+      pushToTalkShortcut: usable(s.pushToTalkShortcut, "pushToTalk"),
+      askShortcut: usable(s.askShortcut, "ask"),
+      loaded: true,
+    });
   },
   set: (patch) => {
     set(patch);
-    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, loaded } = get();
-    if (loaded) void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine });
+    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, pushToTalkShortcut, askShortcut, loaded } = get();
+    if (loaded)
+      void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, pushToTalkShortcut, askShortcut });
   },
 }));
 

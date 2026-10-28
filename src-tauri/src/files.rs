@@ -67,6 +67,13 @@ pub struct Settings {
     /// "gemini-live". Kept as text so a newer Desk's choice survives.
     #[serde(default = "default_voice_engine")]
     pub voice_engine: String,
+    /// Hold to talk, as the global-shortcut plugin reads it. Kept as text;
+    /// the UI checks it and falls back to the default.
+    #[serde(default = "default_push_to_talk_shortcut")]
+    pub push_to_talk_shortcut: String,
+    /// Opens "Ask anyone" from any app.
+    #[serde(default = "default_ask_shortcut")]
+    pub ask_shortcut: String,
 }
 
 fn default_theme() -> String {
@@ -75,6 +82,14 @@ fn default_theme() -> String {
 
 fn default_voice_engine() -> String {
     "cascade".into()
+}
+
+fn default_push_to_talk_shortcut() -> String {
+    "Control+Shift+Space".into()
+}
+
+fn default_ask_shortcut() -> String {
+    "Alt+Space".into()
 }
 
 impl Default for Settings {
@@ -88,6 +103,8 @@ impl Default for Settings {
             agent_voices: Default::default(),
             voice: false,
             voice_engine: default_voice_engine(),
+            push_to_talk_shortcut: default_push_to_talk_shortcut(),
+            ask_shortcut: default_ask_shortcut(),
         }
     }
 }
@@ -218,6 +235,26 @@ mod tests {
                 .unwrap()
                 .contains(r#""voiceEngine": "gemini-live""#)
         );
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn shortcuts_round_trip_and_default_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"system","voice":true}"#).unwrap();
+        let loaded = load_settings(&paths).unwrap();
+        assert_eq!(loaded.push_to_talk_shortcut, "Control+Shift+Space");
+        assert_eq!(loaded.ask_shortcut, "Alt+Space");
+        let chosen = Settings {
+            push_to_talk_shortcut: "Control+Alt+K".into(),
+            ask_shortcut: "Control+Alt+Space".into(),
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        let written = std::fs::read_to_string(paths.settings()).unwrap();
+        assert!(written.contains(r#""pushToTalkShortcut": "Control+Alt+K""#));
+        assert!(written.contains(r#""askShortcut": "Control+Alt+Space""#));
         assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 
