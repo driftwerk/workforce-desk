@@ -4,6 +4,7 @@ import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { logoDot } from "../theme/builtin";
 import { allThemes, useTheme, useThemeStore } from "../theme/store";
+import { useOverview } from "../overview/store";
 import { Mark } from "../ui/Mark";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
@@ -37,6 +38,8 @@ export function Sidebar({
   const list = sortedSessions(sessions).filter((s) => s.state !== "closed");
   const themes = [{ id: "system", name: "Auto" }, ...allThemes(custom).slice(0, 3)];
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
+  const managerId = useOverview((s) => s.manager?.agentId ?? null);
+  const overseer = (a: (typeof roster)[number]) => a.id === managerId && !!hubs.find((h) => h.id === a.hubId)?.local;
   return (
     <nav className="sidebar" aria-label="Desk">
       <div className="wordmark" onMouseDown={dragWindow}>
@@ -91,7 +94,14 @@ export function Sidebar({
             }}
           >
             <Mark name={a.name} size="sm" />
-            <span className="display crew-name">{a.name}</span>
+            {overseer(a) ? (
+              <span className="crew-name crew-name-stack">
+                <span className="display">{a.name}</span>
+                <span className="faint small">Overseeing the crew</span>
+              </span>
+            ) : (
+              <span className="display crew-name">{a.name}</span>
+            )}
             <span className="faint small">{hubLabel(a.hubId)}</span>
           </button>
         ))}

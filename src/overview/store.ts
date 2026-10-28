@@ -39,6 +39,8 @@ interface OverviewStore {
   receive: (e: ActivityEvent) => void;
   loadManager: () => Promise<void>;
   loadSuggestions: () => Promise<void>;
+  /** Reads the suggestions once, for the messages that show them. */
+  wantSuggestions: () => void;
   accept: (id: string) => Promise<void>;
   dismiss: (id: string) => Promise<void>;
   decide: (sessionId: string, approvalId: string, decision: "allow" | "deny") => Promise<void>;
@@ -49,6 +51,8 @@ interface OverviewStore {
 export const missing = (e: unknown): boolean => e instanceof HubError && (e.status === 404 || e.status === 405);
 
 const hubNow = (): DeskHub | null => useDesk.getState().hub;
+
+let asking: Promise<void> | null = null;
 
 const timers: Partial<Record<"overview" | "suggestions", ReturnType<typeof setTimeout>>> = {};
 
@@ -146,6 +150,12 @@ export const useOverview = create<OverviewStore>((set, get) => ({
     } catch {
       // The messages' own copies stand in.
     }
+  },
+  wantSuggestions: () => {
+    if (get().suggestionsLoaded || asking) return;
+    asking = get()
+      .loadSuggestions()
+      .finally(() => (asking = null));
   },
   accept: async (id) => {
     const hub = hubNow();

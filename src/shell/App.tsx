@@ -128,7 +128,7 @@ export function App() {
               onSettings={() => setSettings(true)}
             />
           </ErrorBoundary>
-          <ErrorBoundary name="main">{view === "floor" ? <Floor /> : <Rooms />}</ErrorBoundary>
+          <ErrorBoundary name="main">{view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : <Rooms />}</ErrorBoundary>
           {open && (
             <ErrorBoundary name="session">
               <SessionCard session={open} />

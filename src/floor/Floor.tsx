@@ -1,8 +1,11 @@
+import { useEffect } from "react";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
 import { Mark } from "../ui/Mark";
 import { plain } from "../ui/plain";
+import { CrewFloor } from "../overview/CrewFloor";
+import { useOverview } from "../overview/store";
 import { RestoreBanner } from "./RestoreBanner";
 
 const LABEL: Record<Session["state"], string> = {
@@ -65,7 +68,30 @@ const summary = (sessions: Session[]): string => {
   ].join(", ");
 };
 
-export function Floor() {
+/** How often the overview is read again while it's shown, so "quiet for
+ *  40 min" and "6 min" stay true between events. */
+const REFRESH_MS = 60_000;
+
+/** The crew's overview where the hub has one; the sessions as they were
+ *  shown before, where it doesn't (or until it answers). */
+export function Floor({ onNewSession }: { onNewSession: () => void }) {
+  const hub = useDesk((s) => s.hub);
+  const overview = useOverview((s) => s.overview);
+  useEffect(() => {
+    if (!hub) return;
+    const { loadOverview, loadManager } = useOverview.getState();
+    void loadOverview();
+    void loadManager();
+    const t = setInterval(() => {
+      if (useOverview.getState().overviewSupport !== "no") void useOverview.getState().loadOverview();
+    }, REFRESH_MS);
+    return () => clearInterval(t);
+  }, [hub]);
+  return overview ? <CrewFloor overview={overview} onNewSession={onNewSession} /> : <SessionsFloor />;
+}
+
+/** Today's sessions, grouped by what they're doing. */
+export function SessionsFloor() {
   const sessions = sortedSessions(useDesk((s) => s.sessions));
   const blocked = sessions.filter((s) => s.state === "blocked").length;
   const seen = new Set<string>();

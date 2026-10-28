@@ -34,6 +34,9 @@ interface ChatStore {
   /** Reads the page before the earliest message shown. */
   loadEarlier: (key: string) => Promise<void>;
   send: (key: string, content: string) => boolean;
+  /** Says `content` to an agent without opening their DM (connecting first
+   *  if need be); false if it couldn't be sent. */
+  sendTo: (key: string, content: string) => Promise<boolean>;
   cancel: (key: string) => void;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
@@ -65,6 +68,19 @@ const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: A
   const agent = s.roster.find((a) => agentKey(a) === key);
   const hub = agent && s.hubs.find((h) => h.id === agent.hubId);
   return agent && hub ? { agent, hub } : null;
+};
+
+/** A live conversation with the agent, opened if it isn't yet; false for
+ *  an agent Desk doesn't know. */
+const ensure = (key: string): boolean => {
+  if (live.has(key)) return true;
+  const { roster, hubs } = useChat.getState();
+  const agent = roster.find((a) => agentKey(a) === key);
+  const hub = agent && hubs.find((h) => h.id === agent.hubId);
+  if (!agent || !hub) return false;
+  useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
+  live.set(key, new Conversation(hub, agent.id, (c) => useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }))));
+  return true;
 };
 
 export const useChat = create<ChatStore>((set, get) => ({
@@ -99,16 +115,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     set({ roster, rosterErrors });
   },
   openDm: (key) => {
-    if (!live.has(key)) {
-      const agent = get().roster.find((a) => agentKey(a) === key);
-      const hub = agent && get().hubs.find((h) => h.id === agent.hubId);
-      if (!agent || !hub) return;
-      set((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
-      live.set(
-        key,
-        new Conversation(hub, agent.id, (c) => set((s) => ({ conversations: { ...s.conversations, [key]: c } }))),
-      );
-    }
+    if (!ensure(key)) return;
     set({ activeAgent: key });
     if (!get().histories[key] || get().histories[key]!.state === "failed") void get().loadHistory(key);
   },
@@ -150,6 +157,18 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
   },
   send: (key, content) => live.get(key)?.send(content) ?? false,
+  sendTo: (key, content) =>
+    new Promise((resolve) => {
+      if (!ensure(key)) return resolve(false);
+      // The connection opens asynchronously; send once it is up.
+      let tries = 0;
+      const attempt = () => {
+        if (live.get(key)?.send(content)) resolve(true);
+        else if (++tries < 40) setTimeout(attempt, 150);
+        else resolve(false);
+      };
+      attempt();
+    }),
   cancel: (key) => live.get(key)?.cancel(),
   rename: (key, name) => set((s) => ({ roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)) })),
   forget: (key) => {
