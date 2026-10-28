@@ -1,0 +1,10 @@
+Desk
+Copyright (c) 2026 Kingsley Hendrickse
+
+Licensed under the PolyForm Shield License 1.0.0 (see LICENSE).
+
+Desk ships with the Workforce hub (https://github.com/driftwerk/workforce),
+Copyright (c) 2026 Kingsley Hendrickse, licensed under the Elastic License 2.0,
+and with the @workforce/rich renderer from the same repository under the same
+licence. Their licence terms are at
+https://github.com/driftwerk/workforce/blob/main/LICENSE.

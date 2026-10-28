@@ -44,3 +44,10 @@ DESK_HOME=/tmp/desk ./target/debug/desk-hubd --workforce ../workforce-public-des
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 npx tsc --noEmit && npx vitest run && npx vite build
 ```
+
+## Licence
+
+Copyright (c) 2026 Kingsley Hendrickse. Desk is source-available under the
+[PolyForm Shield License 1.0.0](LICENSE): free to use, change and share, but
+not to sell or to offer as a competing product or service. See the
+[licence FAQ](LICENSE-FAQ.md) and [NOTICE](NOTICE).
