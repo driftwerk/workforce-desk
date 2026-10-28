@@ -2,28 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import { cancelLogin, onLoginProgress, openUrl, sendLoginCode, startLogin, subscribe, type LoginProgress, type PlanName } from "../platform";
 
-const LABEL: Record<PlanName, string> = { claude: "Claude", chatgpt: "ChatGPT" };
-
-/** One plan's row: connected or not, and a one-click sign-in through the
- *  plan's own page in the browser. */
-export function PlanLogin({ plan, connected, onConnected }: { plan: PlanName; connected: boolean; onConnected: () => void }) {
+/** A plan's one-click sign-in through its own page in the browser. */
+export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void) {
   const fail = useDesk((s) => s.fail);
   const [progress, setProgress] = useState<LoginProgress | null>(null);
   const [code, setCode] = useState("");
   const connectedRef = useRef(onConnected);
   connectedRef.current = onConnected;
 
-  useEffect(
-    () =>
-      subscribe(
-        onLoginProgress((p, next) => {
-          if (p !== plan) return;
-          setProgress(next);
-          if (next.state === "done") connectedRef.current();
-        }),
-      ),
-    [plan],
-  );
+  useEffect(() => {
+    if (!plan) return;
+    return subscribe(
+      onLoginProgress((p, next) => {
+        if (p !== plan) return;
+        setProgress(next);
+        if (next.state === "done") connectedRef.current();
+      }),
+    );
+  }, [plan]);
 
   const busy = progress !== null && !["done", "failed"].includes(progress.state);
   const status = (() => {
@@ -41,47 +37,68 @@ export function PlanLogin({ plan, connected, onConnected }: { plan: PlanName; co
       case "failed":
         return progress.message;
       default:
-        return connected ? "Connected" : "Not connected";
+        return null;
     }
   })();
 
+  return {
+    progress,
+    status,
+    failed: progress?.state === "failed",
+    busy,
+    code,
+    setCode,
+    start: () => plan && startLogin(plan).catch(fail),
+    cancel: () => plan && void cancelLogin(plan).then(() => setProgress(null)),
+    send: () => plan && sendLoginCode(plan, code).then(() => setCode(""), fail),
+  };
+}
+
+export type PlanLoginState = ReturnType<typeof usePlanLogin>;
+
+/** "Open it again" while the browser page is open. */
+export function ReopenLink({ login }: { login: PlanLoginState }) {
+  if (login.progress?.state !== "browser") return null;
+  const url = login.progress.url;
   return (
-    <div className="hub-row plan-row">
-      <span className="hub-name">
-        <b className="display">{LABEL[plan]}</b>
-        <span className={`small ${progress?.state === "failed" ? "state-blocked" : "muted"}`}>
-          {status}
-          {progress?.state === "browser" && (
-            <>
-              {" "}
-              <button type="button" className="link small" onClick={() => openUrl(progress.url)}>
-                Open it again
-              </button>
-            </>
-          )}
-        </span>
+    <>
+      {" "}
+      <button type="button" className="link small" onClick={() => openUrl(url)}>
+        Open it again
+      </button>
+    </>
+  );
+}
+
+/** The sign-in's control: a code field when the page shows one, Cancel
+ *  while it runs, else `label`. */
+export function PlanLoginAction({ login, label, signal = true }: { login: PlanLoginState; label: string; signal?: boolean }) {
+  if (login.progress?.state === "needs-code") {
+    return (
+      <span className="field-row plan-field">
+        <input
+          value={login.code}
+          autoFocus
+          aria-label="Code from the sign-in page"
+          placeholder="Code from the page"
+          onChange={(e) => login.setCode(e.target.value)}
+        />
+        <button type="button" className="btn btn-signal" disabled={!login.code.trim()} onClick={() => void login.send()}>
+          Send
+        </button>
       </span>
-      {progress?.state === "needs-code" ? (
-        <span className="field-row plan-field">
-          <input value={code} autoFocus placeholder="Code from the page" onChange={(e) => setCode(e.target.value)} />
-          <button
-            type="button"
-            className="btn btn-signal"
-            disabled={!code.trim()}
-            onClick={() => sendLoginCode(plan, code).then(() => setCode(""), fail)}
-          >
-            Send
-          </button>
-        </span>
-      ) : busy ? (
-        <button type="button" className="btn" onClick={() => void cancelLogin(plan).then(() => setProgress(null))}>
-          Cancel
-        </button>
-      ) : (
-        <button type="button" className="btn btn-signal" onClick={() => startLogin(plan).catch(fail)}>
-          {connected ? "Reconnect" : "Connect"}
-        </button>
-      )}
-    </div>
+    );
+  }
+  if (login.busy) {
+    return (
+      <button type="button" className="btn" onClick={login.cancel}>
+        Cancel
+      </button>
+    );
+  }
+  return (
+    <button type="button" className={`btn ${signal ? "btn-signal" : ""}`} onClick={() => void login.start()}>
+      {label}
+    </button>
   );
 }

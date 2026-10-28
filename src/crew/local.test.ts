@@ -1,6 +1,7 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { agentId, instructions, pickPlan, planOf, withDeskSettings, withName, withPurpose, withVoice } from "./local";
+import { agentId, instructions, purposeOf, withJob, withName, withPurpose, withWelcome } from "./local";
+import { withVoice } from "./voice";
 
 describe("local crew", () => {
   it("makes a unique id from a name", () => {
@@ -25,12 +26,6 @@ describe("local crew", () => {
     expect(again).not.toContain("Watch CI.");
   });
 
-  it("sets an agent's own model and reads it back", () => {
-    const cfg = withDeskSettings("", "claude", "opus");
-    expect(planOf(cfg)).toEqual({ plan: "claude", model: "opus" });
-    expect(planOf("")).toEqual({ plan: null, model: null });
-  });
-
   it("gives the hub an agent's voice when the hub can speak with it", () => {
     const fish = parse(withVoice("[llm]\nprovider = \"chatgpt\"\n", { provider: "fish_audio", voice: "abc" })) as Record<string, Record<string, unknown>>;
     expect(fish.llm).toEqual({ provider: "chatgpt", speech: { provider: "fish_audio", voice: "abc" } });
@@ -45,22 +40,30 @@ describe("local crew", () => {
     expect(withName("- **Name:** \n- **Vibe:** \n", "Scout")).toBe("- **Name:** Scout\n- **Vibe:** \n");
   });
 
-  it("uses the connected plan when none is chosen", () => {
-    expect(pickPlan(null, [])).toBe("claude");
-    expect(pickPlan(null, ["codex/auth_json"])).toBe("chatgpt");
-    expect(pickPlan(null, ["codex/auth_json", "claude_code/oauth_token"])).toBe("claude");
-    expect(pickPlan("chatgpt", ["claude_code/oauth_token"])).toBe("chatgpt");
+  it("reads what the agent is for back from its soul", () => {
+    const soul = withPurpose("# SOUL.md\n\n## Core Identity\n\nYou are an AI agent.\n", "Scout", "Watch CI.\nTell me when it breaks.");
+    expect(purposeOf(soul)).toBe("Watch CI.\nTell me when it breaks.");
+    expect(purposeOf("# SOUL.md\n\n## Core Identity\n")).toBe("");
   });
 
-  it("sets the plan and rich blocks and keeps everything else", () => {
-    const out = parse(withDeskSettings('[llm]\nmax_rounds = 20\n\n[rich]\ncharts = false\n\n[memory]\nbackend = "sqlite"\n', "chatgpt")) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    expect(out.llm).toEqual({ max_rounds: 20, provider: "chatgpt", default_model: "standard" });
-    expect(out.rich!.charts).toBe(false);
-    expect(out.rich!.tables).toBe(true);
-    expect(out.memory).toEqual({ backend: "sqlite" });
-    expect(parse(withDeskSettings("", "claude")).llm).toEqual({ provider: "claude-code", default_model: "standard" });
+  it("puts the agent's job first in its working rules, keeping the hub's guidelines", () => {
+    const agents = "# Operational Guidelines\n\n## Every Session\n\n1. Read SOUL.md\n";
+    const once = withJob(agents, "Ledger", "Watch the AWS bill.");
+    expect(once.indexOf("## Your Job")).toBeLessThan(once.indexOf("## Every Session"));
+    expect(once).toContain("> Watch the AWS bill.");
+    const again = withJob(once, "Ledger", "Watch the GCP bill.");
+    expect(again.match(/## Your Job/g)).toHaveLength(1);
+    expect(again).not.toContain("AWS");
+    expect(withJob("", "Ledger", "Watch the bill.")).toMatch(/^## Your Job\n/);
+  });
+
+  it("opens its welcome by saying who it is, once", () => {
+    const welcome = "Read your IDENTITY.md and SOUL.md to know who you are.\nKeep it to 2-3 sentences.\n";
+    const once = withWelcome(welcome, "Ledger", "Watch the\nAWS bill.");
+    expect(once.startsWith("Greet them as Ledger, and say in one sentence what you're here for: Watch the AWS bill.\n")).toBe(true);
+    expect(once).toContain("Keep it to 2-3 sentences.");
+    const again = withWelcome(once, "Ledger", "Watch deploys.");
+    expect(again.match(/Greet them as/g)).toHaveLength(1);
+    expect(again).toContain("Watch deploys.");
   });
 });

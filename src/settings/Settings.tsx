@@ -3,11 +3,11 @@ import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
 import { Hubs } from "./Hubs";
-import { Plans } from "./Plans";
+import { Providers } from "./Providers";
 import { Voices } from "./Voices";
 import { dragWindow } from "../ui/drag";
 
-const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", plans: "Plans", voices: "Voices", calls: "Calls and voice" } as const;
+const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", providers: "Providers", voices: "Voices", calls: "Calls and voice" } as const;
 type Section = keyof typeof SECTIONS;
 
 export function Settings({ onClose }: { onClose: () => void }) {
@@ -44,7 +44,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       </nav>
       {section === "appearance" && <Appearance />}
       {section === "hubs" && <Hubs />}
-      {section === "plans" && <Plans />}
+      {section === "providers" && <Providers />}
       {section === "voices" && <Voices />}
       {section === "calls" && <Calls />}
     </div>

@@ -3,10 +3,9 @@ import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tau
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import type { HubAccount } from "./chat/types";
+import type { BrainChoice } from "./crew/brain";
 import type { HubConnection } from "./hub/client";
-
-/** The browser preview bridge runs only under `vite dev`, never in tests or builds. */
-const preview = import.meta.env.MODE === "development" && !("__TAURI_INTERNALS__" in window);
+import { preview } from "./preview";
 
 /** False only in that browser preview: app-only features (global shortcuts,
  *  voice, Tuple) stay off there. */
@@ -46,9 +45,9 @@ export interface VoiceSpec {
 export interface Settings {
   theme: string;
   tuple: boolean;
-  /** The plan new agents start on: "claude" | "chatgpt", or null for
-   *  whichever is connected. */
-  plan: string | null;
+  /** How new agents think: a provider, and optionally a model and effort
+   *  of it (its defaults otherwise); null for whichever plan is connected. */
+  newAgent: BrainChoice | null;
   defaultVoice: VoiceSpec;
   /** Agents' own voices, by agent key. */
   agentVoices: Record<string, VoiceSpec>;

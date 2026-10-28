@@ -13,7 +13,7 @@ interface SettingsStore extends Settings {
 export const useSettings = create<SettingsStore>((set, get) => ({
   theme: "system",
   tuple: false,
-  plan: null,
+  newAgent: null,
   defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },
   agentVoices: {},
   voice: false,
@@ -26,8 +26,8 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   },
   set: (patch) => {
     set(patch);
-    const { theme, tuple, plan, defaultVoice, agentVoices, voice, voiceEngine, loaded } = get();
-    if (loaded) void saveSettings({ theme, tuple, plan, defaultVoice, agentVoices, voice, voiceEngine });
+    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, loaded } = get();
+    if (loaded) void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine });
   },
 }));
 

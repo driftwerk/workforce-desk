@@ -19,6 +19,17 @@ pub struct VoiceSpec {
     pub voice: Option<String>,
 }
 
+/// How new agents think: a provider, and optionally one of its models and
+/// efforts (its defaults when unset).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BrainChoice {
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
 fn default_voice() -> VoiceSpec {
     VoiceSpec {
         provider: "fish_audio".into(),
@@ -35,9 +46,13 @@ pub struct Settings {
     /// Agents can be asked from Tuple calls.
     #[serde(default)]
     pub tuple: bool,
-    /// The plan agents on this Mac run on: `claude` or `chatgpt`; unset
-    /// means whichever is connected.
+    /// How new agents on this Mac think; unset means whichever plan is
+    /// connected.
     #[serde(default)]
+    pub new_agent: Option<BrainChoice>,
+    /// Older Desks' plan (`claude` or `chatgpt`), read once into
+    /// `new_agent` and never written again.
+    #[serde(default, skip_serializing)]
     pub plan: Option<String>,
     /// The voice agents speak with unless they have their own.
     #[serde(default = "default_voice")]
@@ -67,6 +82,7 @@ impl Default for Settings {
         Self {
             theme: default_theme(),
             tuple: false,
+            new_agent: None,
             plan: None,
             default_voice: default_voice(),
             agent_voices: Default::default(),
@@ -78,10 +94,30 @@ impl Default for Settings {
 
 pub fn load_settings(paths: &Paths) -> Result<Settings> {
     match std::fs::read_to_string(paths.settings()) {
-        Ok(s) => Ok(serde_json::from_str(&s)?),
+        Ok(s) => Ok(migrated(serde_json::from_str(&s)?)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
         Err(e) => Err(e.into()),
     }
+}
+
+/// An older Desk's plan as the provider new agents start on, with that
+/// provider's default model and effort.
+fn migrated(mut settings: Settings) -> Settings {
+    if let Some(plan) = settings.plan.take()
+        && settings.new_agent.is_none()
+    {
+        let provider = match plan.as_str() {
+            "claude" => Some("claude-code"),
+            "chatgpt" => Some("chatgpt"),
+            _ => None,
+        };
+        settings.new_agent = provider.map(|provider| BrainChoice {
+            provider: provider.into(),
+            model: None,
+            effort: None,
+        });
+    }
+    settings
 }
 
 pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<()> {
@@ -183,6 +219,51 @@ mod tests {
                 .contains(r#""voiceEngine": "gemini-live""#)
         );
         assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn an_older_plan_becomes_where_new_agents_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"system","plan":"chatgpt"}"#).unwrap();
+        let loaded = load_settings(&paths).unwrap();
+        assert_eq!(
+            loaded.new_agent,
+            Some(BrainChoice {
+                provider: "chatgpt".into(),
+                model: None,
+                effort: None
+            })
+        );
+        save_settings(&paths, &loaded).unwrap();
+        let written = std::fs::read_to_string(paths.settings()).unwrap();
+        assert!(!written.contains(r#""plan""#));
+        assert!(written.contains(r#""newAgent""#));
+        assert_eq!(load_settings(&paths).unwrap(), loaded);
+
+        std::fs::write(paths.settings(), r#"{"plan":"claude"}"#).unwrap();
+        assert_eq!(
+            load_settings(&paths).unwrap().new_agent.unwrap().provider,
+            "claude-code"
+        );
+    }
+
+    #[test]
+    fn a_chosen_brain_wins_over_an_older_plan_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(
+            paths.settings(),
+            r#"{"plan":"claude","newAgent":{"provider":"anthropic","model":"claude-opus-5-5","effort":"high"}}"#,
+        )
+        .unwrap();
+        let loaded = load_settings(&paths).unwrap();
+        let brain = loaded.new_agent.clone().unwrap();
+        assert_eq!(brain.provider, "anthropic");
+        assert_eq!(brain.effort.as_deref(), Some("high"));
+        assert_eq!(loaded.plan, None);
+        std::fs::write(paths.settings(), r#"{"plan":"something-else"}"#).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().new_agent, None);
     }
 
     #[test]

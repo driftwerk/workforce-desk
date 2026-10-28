@@ -1,15 +1,6 @@
-import { parse, stringify } from "smol-toml";
 import type { DeskHub } from "../hub/client";
-
-/** The plans an agent on this Mac can run on. */
-export type Plan = "claude" | "chatgpt";
-
-export const PLAN_PROVIDER: Record<Plan, string> = { claude: "claude-code", chatgpt: "chatgpt" };
-
-/** Vault paths that hold each plan's login. */
-export const PLAN_LOGIN: Record<Plan, string> = { claude: "claude_code/oauth_token", chatgpt: "codex/auth_json" };
-
-const RICH = { tables: true, charts: true, forms: true, maps: true, diagrams: true, images: true };
+import { withBrain, withDeskSettings, type Brain } from "./brain";
+import { withVoice } from "./voice";
 
 /** "Release Captain" → "release-captain", unique among `taken`. */
 export const agentId = (name: string, taken: readonly string[]): string => {
@@ -30,91 +21,104 @@ export const agentId = (name: string, taken: readonly string[]): string => {
 export const instructions = (name: string, purpose: string): string =>
   `You are ${name}, one of the agents the person works with in Desk.\n\nWhat you are for, in their words:\n${purpose.trim()}`;
 
-const PURPOSE_HEADING = "## What You're For";
-
-/** SOUL.md with a section saying who the agent is and what it's for, placed
- *  first so it frames the rest; an earlier one is replaced. */
-export const withPurpose = (soul: string, name: string, purpose: string): string => {
-  const section = `${PURPOSE_HEADING}\n\nYou are ${name}. Your human set you up for this, in their words:\n\n${purpose
+const quote = (text: string): string =>
+  text
     .trim()
     .split("\n")
     .map((l) => `> ${l}`)
-    .join("\n")}\n\nThat is your job. Everything below is how you go about it.\n`;
-  const without = soul.replace(new RegExp(`${PURPOSE_HEADING}\\n[\\s\\S]*?(?=\\n## |$)`), "").trimEnd();
+    .join("\n");
+
+const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** `doc` with `## heading` and `body` as its first section (after any
+ *  title); an earlier section of that heading is replaced. */
+const withSection = (doc: string, heading: string, body: string): string => {
+  const section = `## ${heading}\n\n${body}\n`;
+  const without = doc.replace(new RegExp(`## ${escape(heading)}\\n[\\s\\S]*?(?=\\n## |$)`), "").trimEnd();
   const firstSection = without.search(/\n## /);
+  if (!without) return section;
   return firstSection < 0
     ? `${without}\n\n${section}`
     : `${without.slice(0, firstSection)}\n\n${section}${without.slice(firstSection)}\n`;
 };
 
+const PURPOSE = "What You're For";
+
+/** SOUL.md with a section saying who the agent is and what it's for, placed
+ *  first so it frames the rest; an earlier one is replaced. */
+export const withPurpose = (soul: string, name: string, purpose: string): string =>
+  withSection(
+    soul,
+    PURPOSE,
+    `You are ${name}. Your human set you up for this, in their words:\n\n${quote(purpose)}\n\nThat is your job. Everything below is how you go about it.`,
+  );
+
+/** What the agent is for, in the person's words, as SOUL.md says it. */
+export const purposeOf = (soul: string): string => {
+  const section = soul.match(new RegExp(`## ${escape(PURPOSE)}\\n([\\s\\S]*?)(?=\\n## |$)`))?.[1] ?? "";
+  return section
+    .split("\n")
+    .filter((l) => l.startsWith(">"))
+    .map((l) => l.replace(/^> ?/, ""))
+    .join("\n")
+    .trim();
+};
+
+/** AGENTS.md with the agent's job first, so its working rules serve it; the
+ *  hub's own guidelines below stay. */
+export const withJob = (agents: string, name: string, purpose: string): string =>
+  withSection(
+    agents,
+    "Your Job",
+    `As ${name}, your work is this, in your human's words:\n\n${quote(purpose)}\n\nWhen something you're asked falls outside it, help anyway, and say so if it matters.`,
+  );
+
+const GREETING = /^Greet them as [^\n]*\n?/m;
+
+/** WELCOME.md (an instruction for the first message of a chat) opening by
+ *  saying who the agent is and what it's for. */
+export const withWelcome = (welcome: string, name: string, purpose: string): string =>
+  `Greet them as ${name}, and say in one sentence what you're here for: ${purpose.trim().replace(/\s+/g, " ")}\n${welcome.replace(GREETING, "")}`;
+
 /** IDENTITY.md with the agent's name filled in. */
 export const withName = (identity: string, name: string): string =>
   /\*\*Name:\*\*/.test(identity) ? identity.replace(/(\*\*Name:\*\*)[^\n]*/, `$1 ${name}`) : `- **Name:** ${name}\n${identity}`;
 
-/** The plan to use: the chosen one, else whichever plan is connected
- *  (Claude first). */
-export const pickPlan = (chosen: Plan | null, connected: readonly string[]): Plan => {
-  if (chosen) return chosen;
-  return connected.includes(PLAN_LOGIN.chatgpt) && !connected.includes(PLAN_LOGIN.claude) ? "chatgpt" : "claude";
-};
+const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: string) => string): Promise<void> =>
+  hub.saveIdentityFile(id, file, change(await hub.identityFile(id, file)));
 
-type Doc = Record<string, unknown>;
-
-const parseDoc = (source: string): Doc => (source.trim() ? (parse(source) as Doc) : {});
-
-/** An agent's config with Desk's settings in it: the plan, a model of that
- *  plan (its standard tier unless named), and every rich block on. Anything
- *  else in the file stays. */
-export const withDeskSettings = (source: string, plan: Plan, model = "standard"): string => {
-  const doc = parseDoc(source);
-  const llm = (doc.llm ?? {}) as Doc;
-  doc.llm = { ...llm, provider: PLAN_PROVIDER[plan], default_model: model };
-  doc.rich = { ...RICH, ...((doc.rich as object | undefined) ?? {}) };
-  return stringify(doc) + "\n";
-};
-
-/** Voice providers the hub speaks with too (voice notes, clips). */
-const HUB_SPEECH = new Set(["fish_audio", "elevenlabs", "openai"]);
-
-/** An agent's config speaking with `voice` wherever the hub speaks for it;
- *  a voice the hub can't use (Kokoro, the live engines) leaves it on the
- *  hub's default. */
-export const withVoice = (source: string, voice: { provider: string; model?: string; voice?: string }): string => {
-  const doc = parseDoc(source);
-  const llm = { ...((doc.llm ?? {}) as Doc) };
-  if (HUB_SPEECH.has(voice.provider)) {
-    llm.speech = Object.fromEntries(
-      Object.entries({ provider: voice.provider, model: voice.model, voice: voice.voice }).filter(([, v]) => v !== undefined),
-    );
-  } else delete llm.speech;
-  doc.llm = llm;
-  return stringify(doc) + "\n";
-};
-
-/** The plan and model an agent's config is on. */
-export const planOf = (source: string): { plan: Plan | null; model: string | null } => {
-  const llm = (parseDoc(source).llm ?? {}) as Doc;
-  const plan = (Object.keys(PLAN_PROVIDER) as Plan[]).find((p) => PLAN_PROVIDER[p] === llm.provider) ?? null;
-  return { plan, model: typeof llm.default_model === "string" ? llm.default_model : null };
-};
-
+/** A new agent on this Mac, thinking with `brain`, with its files written
+ *  from its name and what it's for. */
 export async function createLocalAgent(
   hub: DeskHub,
   name: string,
   purpose: string,
-  plan: Plan,
+  brain: Brain,
   taken: readonly string[],
 ): Promise<string> {
   const id = agentId(name, taken);
-  await hub.createAgent({ id, name: name.trim(), system_prompt: instructions(name.trim(), purpose) });
-  await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), plan));
-  await hub.saveIdentityFile(id, "SOUL.md", withPurpose(await hub.identityFile(id, "SOUL.md"), name.trim(), purpose));
-  await hub.saveIdentityFile(id, "IDENTITY.md", withName(await hub.identityFile(id, "IDENTITY.md"), name.trim()));
+  const who = name.trim();
+  await hub.createAgent({ id, name: who, system_prompt: instructions(who, purpose) });
+  await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), brain));
+  await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, who, purpose));
+  await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, who, purpose));
+  await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
+  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(t, who, purpose));
   return id;
 }
 
-export async function setAgentModel(hub: DeskHub, id: string, plan: Plan, model: string): Promise<void> {
-  await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), plan, model));
+/** A new description of what an agent is for, in every file that says it. */
+export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string): Promise<void> {
+  await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, name, purpose));
+  await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, name, purpose));
+  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(t, name, purpose));
+}
+
+/** Writes `brain` to the agent's config; answers with the config as written. */
+export async function setAgentBrain(hub: DeskHub, id: string, brain: Brain): Promise<string> {
+  const toml = withBrain(await hub.agentConfig(id), brain);
+  await hub.saveAgentConfig(id, toml);
+  return toml;
 }
 
 export async function setAgentVoice(hub: DeskHub, id: string, voice: { provider: string; model?: string; voice?: string }): Promise<void> {

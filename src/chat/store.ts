@@ -13,6 +13,8 @@ interface ChatStore {
   openDm: (key: string) => void;
   send: (key: string, content: string) => boolean;
   cancel: (key: string) => void;
+  /** Closes a removed agent's conversation and leaves it. */
+  forget: (key: string) => void;
 }
 
 const live = new Map<string, Conversation>();
@@ -77,4 +79,12 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   send: (key, content) => live.get(key)?.send(content) ?? false,
   cancel: (key) => live.get(key)?.cancel(),
+  forget: (key) => {
+    live.get(key)?.close();
+    live.delete(key);
+    set((s) => {
+      const { [key]: _gone, ...conversations } = s.conversations;
+      return { conversations, activeAgent: s.activeAgent === key ? null : s.activeAgent };
+    });
+  },
 }));
