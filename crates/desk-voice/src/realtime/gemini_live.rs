@@ -167,9 +167,9 @@ mod tests {
 
     #[test]
     fn sets_up_audio_with_an_async_ask_agent() {
-        let setup =
-            &json(&GeminiLive.start("gemini-3.8-live", &["Atlas".into()], None, Some("Puck"))[0])
-                ["setup"];
+        let setup = &json(
+            &GeminiLive.start("gemini-3.8-live", &["Atlas".into()], None, Some("Puck"))[0],
+        )["setup"];
         assert_eq!(setup["model"], "models/gemini-3.8-live");
         assert_eq!(
             setup["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"],
@@ -220,10 +220,7 @@ mod tests {
         let [Live::Call(c)] = parsed.as_slice() else {
             panic!()
         };
-        assert_eq!(
-            (c.id.as_str(), c.agent.as_deref()),
-            ("fc-1", Some("Atlas"))
-        );
+        assert_eq!((c.id.as_str(), c.agent.as_deref()), ("fc-1", Some("Atlas")));
         let reply = json(&GeminiLive.tool_result("fc-1", "Two tests failed.")[0]);
         assert_eq!(
             reply["toolResponse"]["functionResponses"][0],

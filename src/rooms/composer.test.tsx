@@ -53,14 +53,14 @@ describe("the room composer's @ list", () => {
       expect.stringContaining("Scout"),
       expect.stringMatching(/Atlas.*Driftwerk · not in the room yet/),
     ]);
-    type(box, "hey @la");
+    type(box, "hey @at");
     expect(screen.getAllByRole("option")).toHaveLength(1);
   });
 
   it("puts the one you pick into the message, then Enter sends", async () => {
     render(<RoomView room={room} />);
     const box = screen.getByRole("combobox") as HTMLTextAreaElement;
-    type(box, "@la");
+    type(box, "@at");
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box.value).toBe("@atlas ");
     expect(said).toEqual([]);

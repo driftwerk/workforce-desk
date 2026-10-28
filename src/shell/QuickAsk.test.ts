@@ -16,8 +16,8 @@ describe("parseAsk", () => {
   });
 
   it("resolves a unique prefix but not an ambiguous one", () => {
-    expect(parseAsk("@lat hi", roster).agent?.id).toBe("atlas");
-    expect(parseAsk("@la hi", roster).agent).toBeNull();
-    expect(parseAsk("@la hi", roster).matches).toHaveLength(2);
+    expect(parseAsk("@atl hi", roster).agent?.id).toBe("atlas");
+    expect(parseAsk("@a hi", roster).agent).toBeNull();
+    expect(parseAsk("@a hi", roster).matches).toHaveLength(2);
   });
 });

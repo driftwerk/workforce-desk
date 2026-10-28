@@ -416,18 +416,18 @@ mod tests {
             ("A", -3.0),
             ("Q", -4.0),
             ("T", -4.0),
-            ("ICE", -4.0),
-            ("▁LAT", -5.0),
-            ("TICE", -3.0),
-            ("▁LATT", -4.5),
+            ("AS", -4.0),
+            ("▁AT", -5.0),
+            ("LAS", -3.0),
+            ("▁ATL", -4.5),
         ];
         SentencePiece::from_pieces(pieces.into_iter().map(|(p, s)| (p.to_string(), s)))
     }
 
     #[test]
     fn picks_the_most_likely_segmentation() {
-        assert_eq!(toy().encode("ATLAS"), ["▁LAT", "TICE"]);
-        assert_eq!(toy().encode("LA ATLAS"), ["▁L", "A", "▁LAT", "TICE"]);
+        assert_eq!(toy().encode("ATLAS"), ["▁AT", "LAS"]);
+        assert_eq!(toy().encode("LA ATLAS"), ["▁L", "A", "▁AT", "LAS"]);
         assert_eq!(toy().encode("Q"), ["▁", "Q"]);
         assert_eq!(toy().encode("LAZ"), ["▁L", "A", "Z"]);
     }
@@ -478,16 +478,14 @@ mod tests {
     #[test]
     fn keywords_map_back_to_the_given_names() {
         let sp = toy();
-        let vocab: HashSet<String> = ["▁LAT", "TICE", "▁L", "A", "▁", "Q"]
-            .map(String::from)
-            .into();
+        let vocab: HashSet<String> = ["▁AT", "LAS", "▁L", "A", "▁", "Q"].map(String::from).into();
         let names = ["Atlas", "atlas", "Q", "Zed", "🤖", "la"].map(String::from);
         let k = Keywords::build(&names, &sp, &vocab);
-        assert_eq!(k.lines, ["▁LAT TICE @0", "▁ Q @1", "▁L A @2"]);
+        assert_eq!(k.lines, ["▁AT LAS @0", "▁ Q @1", "▁L A @2"]);
         assert_eq!(k.name("0"), Some("Atlas"));
         assert_eq!(k.name("2"), Some("la"));
         assert_eq!(k.name("9"), None);
-        assert_eq!(k.buffer(), "▁LAT TICE @0\n▁ Q @1\n▁L A @2");
+        assert_eq!(k.buffer(), "▁AT LAS @0\n▁ Q @1\n▁L A @2");
         assert!(Keywords::build(&[], &sp, &vocab).is_empty());
     }
 

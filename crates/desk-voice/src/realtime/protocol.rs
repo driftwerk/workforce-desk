@@ -163,10 +163,7 @@ mod tests {
     fn the_schema_lists_the_roster() {
         let names = ["Atlas".to_string(), "Allan".to_string()];
         let s = ask_agent_parameters(&names, false);
-        assert_eq!(
-            s["properties"]["agent"]["enum"],
-            json!(["Atlas", "Allan"])
-        );
+        assert_eq!(s["properties"]["agent"]["enum"], json!(["Atlas", "Allan"]));
         assert_eq!(s["additionalProperties"], json!(false));
         assert_eq!(s["required"], json!(["agent", "request"]));
         let g = ask_agent_parameters(&names, true);
