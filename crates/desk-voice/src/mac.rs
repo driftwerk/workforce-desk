@@ -134,6 +134,7 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
             1,
         )
         .ok_or_else(|| eyre!("no mono playback format"))?;
+        let cancels_echo = input.as_ref().is_some_and(|(_, cancel)| *cancel);
         let tap = input
             .map(|(input, cancel_echo)| {
                 let gate = (!cancel_echo).then(|| speaking.clone());
@@ -165,7 +166,7 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
         }
         let engine = Arc::new(Mutex::new(Engine { engine, player }));
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        keep_running(engine.clone(), alive.clone());
+        keep_running(engine.clone(), alive.clone(), cancels_echo);
         Ok(MacAudio {
             engine,
             alive,
@@ -200,6 +201,9 @@ unsafe fn listen(
         if format.sampleRate() == 0.0 || format.channelCount() == 0 {
             return Err(eyre!("no microphone input"));
         }
+        if cancel_echo {
+            match_output_to_microphone(engine)?;
+        }
         let tap: Tap = RcBlock::new(
             move |buffer: NonNull<AVAudioPCMBuffer>, _when: NonNull<AVAudioTime>| {
                 let buffer = buffer.as_ref();
@@ -210,8 +214,9 @@ unsafe fn listen(
                 let frames = buffer.frameLength() as usize;
                 // The buffer's own rate: a device can change it under a running tap.
                 let rate = buffer.format().sampleRate() as u32;
-                // With voice processing on, the first channel is the processed
-                // voice; any others are the unprocessed microphones.
+                // With voice processing on every channel carries the same
+                // processed voice (the 3-mic array and the speaker reference
+                // come out as one signal), so the first is the voice.
                 let voice = std::slice::from_raw_parts((*data).as_ptr(), frames);
                 if gate.as_ref().is_some_and(|g| g.now()) {
                     input(&vec![0.0; frames], rate);
@@ -282,7 +287,31 @@ impl AudioOut for MacAudio {
 /// macOS stops an engine whenever the audio device's configuration changes
 /// (another app, a device switch, a voice-processing unit winding down) and
 /// leaves restarting it to the app: this does, until the engine is dropped.
-fn keep_running(engine: Arc<Mutex<Engine>>, alive: Arc<std::sync::atomic::AtomicBool>) {
+/// The echo canceller won't start unless both its sides run at one rate. The
+/// output side is the main mixer's link to the speaker, which AVAudioEngine
+/// creates lazily — once voice processing is on it reads the speaker as 0 Hz
+/// and falls back to 44.1 kHz against the microphone's 48 kHz (AVFAudio
+/// -10875, "client-side input and output formats do not match"). So the link
+/// is made explicitly, at the microphone's rate.
+unsafe fn match_output_to_microphone(engine: &AVAudioEngine) -> Result<()> {
+    unsafe {
+        let rate = engine.inputNode().outputFormatForBus(0).sampleRate();
+        let stereo = AVAudioFormat::initStandardFormatWithSampleRate_channels(
+            AVAudioFormat::alloc(),
+            rate,
+            2,
+        )
+        .ok_or_else(|| eyre!("no {rate} Hz output format"))?;
+        engine.connect_to_format(&engine.mainMixerNode(), &engine.outputNode(), Some(&stereo));
+        Ok(())
+    }
+}
+
+fn keep_running(
+    engine: Arc<Mutex<Engine>>,
+    alive: Arc<std::sync::atomic::AtomicBool>,
+    cancel_echo: bool,
+) {
     std::thread::spawn(move || {
         let mut failures = 0u32;
         while alive.load(Ordering::SeqCst) {
@@ -293,6 +322,10 @@ fn keep_running(engine: Arc<Mutex<Engine>>, alive: Arc<std::sync::atomic::Atomic
                 continue;
             }
             match unsafe {
+                if cancel_echo {
+                    // A device change can leave the output at another rate.
+                    let _ = match_output_to_microphone(&e.engine);
+                }
                 e.engine.prepare();
                 e.engine.startAndReturnError()
             } {
