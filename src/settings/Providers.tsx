@@ -22,7 +22,7 @@ const names = (list: string[]): string =>
 /** What agents on this Mac can think with: plans, API keys and models
  *  running here, and where new agents start. */
 export function Providers() {
-  const { providers, loaded, problem, load } = useProviderList();
+  const { providers, loaded, problem, load } = useProviderList({ fresh: true });
   const hub = useDesk((s) => s.hub);
   const saved = useSettings((s) => s.newAgent);
   const set = useSettings((s) => s.set);

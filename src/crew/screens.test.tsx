@@ -40,6 +40,7 @@ const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
     saveIdentityFile: vi.fn(() => Promise.resolve()),
     identityRevisions: vi.fn(() => Promise.reject(new HubError(503, "revision history requires Postgres"))),
     connectProvider: vi.fn((id: string) => Promise.resolve({ ...plan(id, "Anthropic API", true) })),
+    providers: vi.fn(() => Promise.resolve(useProviders.getState().providers)),
     ...over,
   }) as unknown as DeskHub;
 

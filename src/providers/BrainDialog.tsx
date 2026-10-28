@@ -25,7 +25,7 @@ export function BrainDialog({
   onClose: () => void;
 }) {
   const hub = useDesk((s) => s.hub);
-  const { providers, loaded, problem, load } = useProviderList();
+  const { providers, loaded, problem, load } = useProviderList({ fresh: true });
   const [selected, setSelected] = useState(initial.provider);
   // Each provider's model and effort, kept while you look at others.
   const [picks, setPicks] = useState<Record<string, Brain>>({ [initial.provider]: initial });

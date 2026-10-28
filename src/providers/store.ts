@@ -52,7 +52,8 @@ export const useProviders = create<ProvidersState>((set, get) => ({
       if (e instanceof HubError && e.status === 404) {
         const paths = await hub.vaultPaths().catch(() => [] as string[]);
         set({ providers: fallbackProviders(paths), fallback: true, problem: null });
-      } else set({ problem: `Desk couldn’t list your providers. ${plainError(e)}` });
+      } else if (get().providers.length === 0) set({ problem: `Desk couldn’t list your providers. ${plainError(e)}` });
+      // A refresh that fails keeps the list the screen already shows.
     } finally {
       set({ loaded: true, loading: false });
     }
@@ -76,13 +77,16 @@ export const useProviders = create<ProvidersState>((set, get) => ({
   },
 }));
 
-/** The provider list, loaded once the local hub is there. */
-export function useProviderList(): ProvidersState {
+/** The provider list. A screen that shows it (`fresh`) asks the hub again
+ *  each time it opens, keeping the last list on screen meanwhile, so a
+ *  provider connected, started or added since then is there. Otherwise it
+ *  loads once, and again while it only has the plans' fallback. */
+export function useProviderList({ fresh = false }: { fresh?: boolean } = {}): ProvidersState {
   const hub = useDesk((s) => s.hub);
   const state = useProviders();
   useEffect(() => {
-    const { loaded, loading, load } = useProviders.getState();
-    if (hub && !loaded && !loading) void load(hub);
-  }, [hub]);
+    const { loaded, loading, fallback, load } = useProviders.getState();
+    if (hub && !loading && (fresh || !loaded || fallback)) void load(hub);
+  }, [hub, fresh]);
   return state;
 }
