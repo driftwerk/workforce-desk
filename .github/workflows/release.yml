@@ -1,0 +1,238 @@
+name: Release
+
+# Builds Desk.app for Apple Silicon and Intel in one universal bundle with
+# its helper and hub (the commit in hub.ref), signs every binary with the
+# Developer ID, notarizes and staples the app and the disk image, and
+# publishes them with the signed updater artifacts (latest.json) as a GitHub
+# release. See docs/RELEASING.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Where releases are published and where the app looks for updates. The
+  # updater downloads without credentials, so this must be a repo people can
+  # read: set the RELEASES_REPO variable to a public repo if this one is
+  # private (RELEASES_TOKEN must then be able to write to it).
+  RELEASES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
+  APP: desk/target/universal-apple-darwin/release/bundle/macos/Desk.app
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 240
+    steps:
+      - name: Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF#refs/tags/v}"
+          fi
+          v="${v#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Desk
+        uses: actions/checkout@v7
+        with:
+          path: desk
+
+      - name: Read the hub ref
+        id: hub
+        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+
+      # Beside Desk, under the name its package.json points at for the rich
+      # renderers (file:../workforce-public-desk/packages/rich).
+      - name: Check out the hub at hub.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.hub.outputs.ref }}
+          path: workforce-public-desk
+          token: ${{ secrets.HUB_REPO_TOKEN }}
+
+      - name: Set the version
+        working-directory: desk
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          # The workspace version every crate inherits.
+          sed -i '' "/^\[workspace.package\]/,/^\[/ s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          grep -A2 '^\[workspace.package\]' Cargo.toml
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            desk/package-lock.json
+            workforce-public-desk/packages/rich/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # The hub is a large build: keep both workspaces' release builds,
+      # keyed by the hub commit so a bump starts from the last cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desk -> target
+            workforce-public-desk -> target
+          key: hub-${{ steps.hub.outputs.ref }}
+          cache-on-failure: true
+
+      - name: Build the rich renderers
+        working-directory: workforce-public-desk/packages/rich
+        run: npm ci && npm run build
+
+      - name: Install Desk's packages
+        working-directory: desk
+        run: npm ci
+
+      - name: Build the helper and hub (universal)
+        working-directory: desk
+        env:
+          HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
+          MIN_FREE_GB: "12"
+        run: scripts/build-sidecars.sh
+
+      - name: Build Desk.app (universal)
+        working-directory: desk
+        env:
+          ENDPOINT: https://github.com/${{ env.RELEASES_REPO }}/releases/latest/download/latest.json
+        run: |
+          npx tauri build --target universal-apple-darwin --bundles app \
+            --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      - name: Import the Developer ID certificate
+        id: cert
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          pass=$(openssl rand -hex 24)
+          echo "::add-mask::$pass"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$pass" build.keychain
+          security default-keychain -s build.keychain
+          security list-keychains -d user -s build.keychain login.keychain
+          security unlock-keychain -p "$pass" build.keychain
+          security set-keychain-settings build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pass" build.keychain >/dev/null
+          rm certificate.p12
+          identity=$(security find-identity -v -p codesigning build.keychain \
+            | awk '/Developer ID Application/ { print $2; exit }')
+          [ -n "$identity" ] || { echo "no Developer ID Application identity in the certificate"; exit 1; }
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      # Inside out, each binary with only what it needs under the hardened
+      # runtime: the helper nothing, the hub JIT for its WebAssembly skills,
+      # the app the microphone.
+      - name: Sign
+        working-directory: desk
+        env:
+          IDENTITY: ${{ steps.cert.outputs.identity }}
+        run: |
+          app="${{ github.workspace }}/$APP"
+          sign() { codesign --force --timestamp --options runtime --entitlements "src-tauri/entitlements/$1" --sign "$IDENTITY" "$2"; }
+          sign Helper.entitlements "$app/Contents/MacOS/Desk Helper"
+          sign Agents.entitlements "$app/Contents/MacOS/Desk Agents"
+          sign Desk.entitlements "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Notarize and staple the app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent "$APP" notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --wait --timeout 60m
+          rm notarize.zip
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose "$APP"
+
+      - name: Disk image
+        id: dmg
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IDENTITY: ${{ steps.cert.outputs.identity }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          mkdir -p out dmg-root
+          ditto "$APP" dmg-root/Desk.app
+          ln -s /Applications dmg-root/Applications
+          dmg="out/Desk_${VERSION}_universal.dmg"
+          hdiutil create -volname Desk -srcfolder dmg-root -ov -format UDZO "$dmg"
+          codesign --force --timestamp --sign "$IDENTITY" "$dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --wait --timeout 60m
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          echo "path=$dmg" >> "$GITHUB_OUTPUT"
+
+      # The updater's download: the stapled app, signed with the updater key
+      # whose public half is in tauri.conf.json.
+      - name: Updater artifacts
+        working-directory: desk
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          out="${{ github.workspace }}/out"
+          tar -czf "$out/Desk.app.tar.gz" -C "$(dirname "${{ github.workspace }}/$APP")" Desk.app
+          npx tauri signer sign "$out/Desk.app.tar.gz"
+          url="https://github.com/$RELEASES_REPO/releases/download/v$VERSION/Desk.app.tar.gz"
+          jq -n --arg v "$VERSION" --arg url "$url" --arg sig "$(cat "$out/Desk.app.tar.gz.sig")" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION" '{
+              version: $v, notes: $notes, pub_date: $date,
+              platforms: {
+                "darwin-aarch64": { signature: $sig, url: $url },
+                "darwin-x86_64": { signature: $sig, url: $url }
+              }
+            }' > "$out/latest.json"
+          cat "$out/latest.json" | jq '.platforms | keys'
+
+      - name: Publish the release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+        run: |
+          tag="v$VERSION"
+          if ! gh release view "$tag" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$RELEASES_REPO" --title "Desk $VERSION" \
+              --notes "Desk $VERSION" --draft
+          fi
+          gh release upload "$tag" --repo "$RELEASES_REPO" --clobber \
+            "${{ steps.dmg.outputs.path }}" out/Desk.app.tar.gz out/Desk.app.tar.gz.sig out/latest.json
+          gh release edit "$tag" --repo "$RELEASES_REPO" --draft=false --latest
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain build.keychain 2>/dev/null || true

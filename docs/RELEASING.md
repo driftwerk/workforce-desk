@@ -1,0 +1,136 @@
+# Releasing Desk
+
+A release is one universal `Desk.app` (Apple Silicon and Intel) on a signed,
+notarized disk image. Inside it, beside the app:
+
+| In `Contents/MacOS` | What it is |
+| --- | --- |
+| `Desk` | the app |
+| `Desk Helper` | `desk-hubd`: Postgres, the hub's config and secrets, restarts |
+| `Desk Agents` | the hub (`workforce`), built from the commit in `hub.ref` |
+
+`Contents/Library/LaunchAgents/xyz.driftwerk.desk.helper.plist` is Desk
+Helper's login item. The app registers it with `SMAppService` the first time it
+opens from Applications. It appears in System Settings → General → Login Items
+as Desk. Postgres 18.6.1 is compiled into Desk Helper (pinned in
+`.cargo/config.toml`), so a first launch needs no network.
+
+## Cutting a release
+
+1. Make sure `hub.ref` is the hub commit this release should ship (see below)
+   and that the commit is pushed to `driftwerk/workforce`.
+2. Tag and push:
+
+   ```sh
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+   You can also run **Release** from the Actions tab with a version
+   (`workflow_dispatch`). The workflow writes that version into
+   `tauri.conf.json`, `package.json` and the workspace `Cargo.toml`. You don't
+   bump them by hand.
+3. `.github/workflows/release.yml` then:
+   - builds both sidecars for both architectures and joins each pair with
+     `lipo` (`scripts/build-sidecars.sh`)
+   - builds the app with `tauri build --target universal-apple-darwin`
+   - signs inside out with the Developer ID, using the hardened runtime and
+     the entitlements in `src-tauri/entitlements/`
+   - notarizes and staples the app, then builds, signs, notarizes and staples
+     the disk image
+   - writes the updater artifacts: `Desk.app.tar.gz`, its `.sig` and
+     `latest.json`
+   - publishes everything to a GitHub release
+
+Installed copies check `latest.json` on launch and every four hours. They
+download the update in the background and offer **Restart to update**.
+
+The first build of a new hub ref takes well over an hour. Later builds reuse
+the cargo cache, keyed by the hub ref. If the runner runs out of disk, move the
+job to a larger macOS runner.
+
+## Secrets and variables
+
+The Apple secret names are the same ones the Unison editor's release uses, so
+you can add the same values here.
+
+| Secret | What |
+| --- | --- |
+| `APPLE_CERTIFICATE` | the Developer ID Application certificate and key as a base64 `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12`'s password |
+| `APPLE_ID` | the Apple ID that notarizes |
+| `APPLE_PASSWORD` | an app-specific password for that Apple ID |
+| `APPLE_TEAM_ID` | your Apple Developer Team ID |
+| `TAURI_SIGNING_PRIVATE_KEY` | the contents of `~/.tauri/desk-updater.key` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the contents of `~/.tauri/desk-updater.key.password` |
+| `HUB_REPO_TOKEN` | a token that can read `driftwerk/workforce` (fine-grained, Contents: read) |
+| `RELEASES_TOKEN` | *(optional)* a token that can write releases to `RELEASES_REPO` when it isn't this repo |
+
+| Variable | What |
+| --- | --- |
+| `RELEASES_REPO` | *(optional)* `owner/name` to publish releases to. Defaults to this repo. |
+
+The updater and the download link fetch release assets without logging in, so
+releases must live in a repository people can read. While this repo is private,
+set `RELEASES_REPO` to a public releases-only repo and give `RELEASES_TOKEN`
+write access to it. The workflow builds the app's update address from
+`RELEASES_REPO`.
+
+The updater key pair is not in the repo. The private key and its password are
+in `~/.tauri/` on the machine that generated them. Only the public key is in
+`src-tauri/tauri.conf.json` (`plugins.updater.pubkey`). If you lose the private
+key, installed copies can no longer verify new updates and people must download
+the next version by hand.
+
+## Bumping the hub
+
+`hub.ref` holds one full commit SHA of `driftwerk/workforce`. To ship a newer
+hub:
+
+```sh
+git -C ../workforce-public-desk log -1 --format=%H   # the commit you want; push it first
+echo <sha> > hub.ref
+TARGETS=aarch64-apple-darwin HUB_SOURCE=../workforce-public-desk scripts/build-sidecars.sh   # optional local check
+git commit -m "Desk ships hub <short sha>: <why>" hub.ref
+```
+
+`build-sidecars.sh` refuses a `HUB_SOURCE` whose HEAD isn't `hub.ref`
+(`HUB_ANY_REF=1` overrides this for experiments). Without `HUB_SOURCE` it
+clones `HUB_REPO` (default `git@github.com:driftwerk/workforce.git`) into
+`~/Library/Caches/desk-build/hub` and checks the ref out there. A local clone
+works as `HUB_REPO` too.
+
+## Building locally
+
+```sh
+TARGETS=aarch64-apple-darwin HUB_REPO=../workforce-public-desk scripts/build-sidecars.sh
+npx tauri build --target aarch64-apple-darwin --bundles app
+```
+
+Drop `TARGETS` and use `--target universal-apple-darwin` for both
+architectures. Plan on roughly 30 GB of free disk for that. The script checks
+first; `MIN_FREE_GB` overrides the limit. A local build is unsigned unless you
+sign it. Ad-hoc signing (`codesign --force --deep --sign -`) is enough to run
+it on this Mac.
+
+To try a build without touching your real Desk data, give the bundled plist a
+throwaway home before signing and run the app with the same home:
+
+```sh
+plutil -insert EnvironmentVariables -json '{"DESK_HOME":"/tmp/desk-try"}' \
+  "Desk.app/Contents/Library/LaunchAgents/xyz.driftwerk.desk.helper.plist"
+codesign --force --deep --sign - Desk.app
+DESK_HOME=/tmp/desk-try DESK_REGISTER_HELPER=1 Desk.app/Contents/MacOS/desk
+```
+
+With `DESK_HOME` set, secrets go to a file in that folder, not the keychain.
+`DESK_REGISTER_HELPER=1` registers the bundled helper anyway. Afterwards,
+unregister it with **Settings → Help → Remove Desk's data…** from that copy, or
+with `sfltool`, and check `sfltool dumpbtm | grep -i desk` to confirm it's gone.
+
+## Development
+
+A development run (`npm run tauri dev` with `DESK_HOME` set) registers
+nothing. It talks to a `desk-hubd` you start yourself (`target/debug/desk-hubd
+--workforce <hub>`). `scripts/stage-sidecars.sh` builds the development
+sidecars under their bundle names (`Desk Helper-<triple>`,
+`Desk Agents-<triple>`).
