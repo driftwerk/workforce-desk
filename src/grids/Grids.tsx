@@ -4,6 +4,7 @@ import { useRef, useState, type ComponentProps, type KeyboardEvent } from "react
 import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useGridCounts } from "./GridView";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
+import { Confirm } from "../ui/Confirm";
 import { useGridDrag } from "./drag";
 import { closeGridWindow } from "../platform";
 import { createGrid, deleteGrid, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, useGrids } from "./store";
@@ -78,6 +79,7 @@ export function GridsSection() {
   const paneOver = useGridDrag((s) => (s.over?.kind === "row" ? s.over.gridId : null));
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [said, setSaid] = useState("");
   const justDragged = useRef(false);
@@ -90,11 +92,15 @@ export function GridsSection() {
     else bringBack(g.id);
   };
   // Its own window closes first, so it can't write the grid back.
+  // The last grid gives way to a new empty one, so Grids always has one.
   const removeGrid = (g: Grid) => {
     if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
     setOpen(g.id, false);
+    if (useGrids.getState().order.length <= 1) createGrid();
     deleteGrid(g.id, closeContent);
   };
+  /** An empty grid goes at once; one holding anything asks first. */
+  const askToRemove = (g: Grid) => (g.panes.some((p) => p.content) ? setDeleting(g.id) : removeGrid(g));
   const nudge = (id: string, by: -1 | 1) => {
     if (!nudgeGrid(id, by)) return setSaid(by < 0 ? "Already the first grid" : "Already the last grid");
     const now = useGrids.getState().order;
@@ -106,12 +112,8 @@ export function GridsSection() {
     g.placement.kind === "main"
       ? { kind: "item", label: "Open in its own window", onSelect: () => detach(g.id) }
       : { kind: "item", label: "Move back to the main window", onSelect: () => bringBack(g.id) },
-    ...(order.length > 1
-      ? [
-          { kind: "separator" as const },
-          { kind: "item" as const, label: "Delete grid", onSelect: () => removeGrid(g) },
-        ]
-      : []),
+    { kind: "separator" },
+    { kind: "item", label: "Delete grid…", onSelect: () => askToRemove(g) },
   ];
   const dropFor = (op: Operation): Drop | null => {
     const { source, target } = op;
@@ -203,7 +205,37 @@ export function GridsSection() {
           }}
         />
       )}
+      {deleting && grids[deleting] && (
+        <Confirm
+          title={`Delete “${grids[deleting]!.name}”?`}
+          action="Delete grid"
+          onConfirm={() => removeGrid(grids[deleting]!)}
+          onClose={() => setDeleting(null)}
+        >
+          <p className="muted">{deleteNote(grids[deleting]!)}</p>
+        </Confirm>
+      )}
     </div>
+  );
+}
+
+/** What deleting a grid does to what's in it. */
+export const deleteNote = (g: Grid): string => {
+  const terminals = g.panes.filter((p) => p.content?.kind === "terminal").length;
+  const others = g.panes.filter((p) => p.content && p.content.kind !== "terminal").length;
+  const parts = [];
+  if (others) parts.push(`Its ${others === 1 ? "session or agent stays" : `${others} sessions and agents stay`} where ${others === 1 ? "it is" : "they are"}, just off this grid.`);
+  if (terminals) parts.push(`${terminals === 1 ? "Its terminal closes" : `Its ${terminals} terminals close`}, with anything running in ${terminals === 1 ? "it" : "them"}.`);
+  return parts.join(" ") || "It's empty.";
+};
+
+export function MoreIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+      <circle cx="3" cy="7" r="1.3" />
+      <circle cx="7" cy="7" r="1.3" />
+      <circle cx="11" cy="7" r="1.3" />
+    </svg>
   );
 }
 
@@ -242,7 +274,7 @@ function GridRow({
   return (
     <>
       {lineBefore && <li className="drop-line drop-line-grid" aria-hidden="true" />}
-      <li className={`side-grid ${drag.isDragSource ? "ghost" : ""}`} data-drop-grid-row={grid.id}>
+      <li className={`side-grid side-item ${drag.isDragSource ? "ghost" : ""}`} data-drop-grid-row={grid.id}>
         {editing ? (
           <span className="side-row side-row-editing">
             <RenameField label="Grid name" initial={grid.name} mono={false} onDone={onRename} />
@@ -283,6 +315,20 @@ function GridRow({
           >
             <span className="side-name">{grid.name}</span>
             <span className="faint small">{where}</span>
+          </button>
+        )}
+        {!editing && (
+          <button
+            type="button"
+            className="icon-btn-sm side-more"
+            aria-label={`${grid.name} options`}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu({ x: r.left, y: r.bottom + 2 }, e.currentTarget);
+            }}
+          >
+            <MoreIcon />
           </button>
         )}
       </li>

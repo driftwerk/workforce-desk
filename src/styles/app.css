@@ -1529,3 +1529,40 @@ button {
   margin: 4px 6px;
   background: var(--border);
 }
+
+/* ── A sidebar row with a ⋯ menu that shows on hover ───────────────────── */
+.side-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  list-style: none;
+}
+.side-item > .side-row {
+  flex: 1;
+  min-width: 0;
+  padding-right: 34px;
+}
+.side-more {
+  position: absolute;
+  right: 4px;
+  opacity: 0;
+}
+.side-item:hover .side-more,
+.side-item:focus-within .side-more,
+.side-more[aria-expanded="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .side-more {
+    opacity: 1;
+  }
+}
+.confirm-body {
+  display: block;
+  padding: 0 28px 18px;
+  max-width: 460px;
+}
+.confirm-body p {
+  margin: 0;
+  line-height: 1.5;
+}

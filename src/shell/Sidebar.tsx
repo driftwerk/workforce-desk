@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
-import { GridsSection } from "../grids/Grids";
+import { GridsSection, MoreIcon } from "../grids/Grids";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
@@ -9,6 +9,8 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
+import { Confirm } from "../ui/Confirm";
+import { Menu } from "../ui/Menu";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { useSavedScroll } from "../restore/scroll";
 
@@ -67,6 +69,19 @@ export function Sidebar({
 }) {
   const { view, setView, connected, activeRoom, openRoom, unread } = useDesk();
   const rooms = Object.values(useDesk((s) => s.rooms)).sort((a, b) => a.name.localeCompare(b.name));
+  const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
+  const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
+  const roomsById = useDesk((s) => s.rooms);
+  /** Deletes a room on the hub, and here at once (the hub says so too). */
+  const deleteRoom = async (id: string) => {
+    const { hub } = useDesk.getState();
+    if (!hub) throw new Error("Desk isn't connected to its hub.");
+    await hub.deleteRoom(id);
+    useDesk.setState((s) => {
+      const { [id]: _gone, ...rest } = s.rooms;
+      return { rooms: rest, activeRoom: s.activeRoom === id ? null : s.activeRoom };
+    });
+  };
   const hubs = useChat((s) => s.hubs);
   const theme = useTheme();
   const keys = useSettings((s) => s.keys);
@@ -113,16 +128,54 @@ export function Sidebar({
                 </button>
               </span>
               {rooms.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  className={`side-row ${view === "rooms" && activeRoom === r.id ? "on" : ""}`}
-                  onClick={() => void openRoom(r.id)}
-                >
-                  <span className="side-name">{r.name}</span>
-                  {(unread[r.id] ?? 0) > 0 && <span className="badge">{unread[r.id]}</span>}
-                </button>
+                <div key={r.id} className="side-item">
+                  <button
+                    type="button"
+                    className={`side-row ${view === "rooms" && activeRoom === r.id ? "on" : ""}`}
+                    onClick={() => void openRoom(r.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setRoomMenu({ id: r.id, at: { x: e.clientX, y: e.clientY }, from: e.currentTarget });
+                    }}
+                  >
+                    <span className="side-name">{r.name}</span>
+                    {(unread[r.id] ?? 0) > 0 && <span className="badge">{unread[r.id]}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn-sm side-more"
+                    aria-label={`${r.name} options`}
+                    aria-haspopup="menu"
+                    onClick={(e) => {
+                      const b = e.currentTarget.getBoundingClientRect();
+                      setRoomMenu({ id: r.id, at: { x: b.left, y: b.bottom + 2 }, from: e.currentTarget });
+                    }}
+                  >
+                    <MoreIcon />
+                  </button>
+                </div>
               ))}
+              {roomMenu && roomsById[roomMenu.id] && (
+                <Menu
+                  label={`${roomsById[roomMenu.id]!.name} options`}
+                  at={roomMenu.at}
+                  entries={[{ kind: "item", label: "Delete room…", onSelect: () => setDeletingRoom(roomMenu.id) }]}
+                  onClose={(refocus) => {
+                    if (refocus) roomMenu.from?.focus();
+                    setRoomMenu(null);
+                  }}
+                />
+              )}
+              {deletingRoom && roomsById[deletingRoom] && (
+                <Confirm
+                  title={`Delete “${roomsById[deletingRoom]!.name}”?`}
+                  action="Delete room"
+                  onConfirm={() => deleteRoom(deletingRoom)}
+                  onClose={() => setDeletingRoom(null)}
+                >
+                  <p className="muted">Its messages are deleted for everyone in it. The agents in it stay in your crew.</p>
+                </Confirm>
+              )}
             </div>
           )}
           <SidebarGroups />

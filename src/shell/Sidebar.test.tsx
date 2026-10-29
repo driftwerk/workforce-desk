@@ -115,6 +115,7 @@ describe("grids in the sidebar", () => {
   const gridRows = () =>
     within(screen.getByRole("list", { name: "Grids" }))
       .getAllByRole("button")
+      .filter((b) => b.classList.contains("side-row"))
       .map((b) => b.querySelector(".side-name")?.textContent);
   const gridRow = (name: string) => within(screen.getByRole("list", { name: "Grids" })).getAllByRole("button").find((b) => b.querySelector(".side-name")?.textContent === name)!;
 
@@ -168,5 +169,32 @@ describe("grids in the sidebar", () => {
   it("marks each grid's row as a place to drop a pane", () => {
     sidebar();
     expect(gridRow("Main").closest("[data-drop-grid-row]")?.getAttribute("data-drop-grid-row")).toBe(MAIN_GRID);
+  });
+});
+
+describe("deleting from the sidebar", () => {
+  it("deletes a room from its ⋯ menu once you confirm", async () => {
+    const deleteRoom = vi.fn(() => Promise.resolve());
+    const room = { id: "r1", name: "Launch", members: [] } as unknown as ReturnType<typeof useDesk.getState>["rooms"][string];
+    useDesk.setState({ view: "rooms", rooms: { r1: room }, activeRoom: "r1", hub: { deleteRoom } as never });
+    sidebar();
+    fireEvent.click(screen.getByRole("button", { name: "Launch options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete room…" }));
+    expect(deleteRoom).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete room" })));
+    expect(deleteRoom).toHaveBeenCalledWith("r1");
+    expect(useDesk.getState().rooms).toEqual({});
+    expect(useDesk.getState().activeRoom).toBeNull();
+  });
+
+  it("deletes a grid, even the last one, leaving an empty one in its place", () => {
+    useDesk.setState({ view: "grids" });
+    sidebar();
+    expect(useGrids.getState().order).toHaveLength(1);
+    const was = useGrids.getState().order[0]!;
+    fireEvent.click(screen.getByRole("button", { name: `${useGrids.getState().grids[was]!.name} options` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete grid…" }));
+    expect(useGrids.getState().order).toHaveLength(1);
+    expect(useGrids.getState().order[0]).not.toBe(was);
   });
 });
