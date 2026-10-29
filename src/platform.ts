@@ -152,7 +152,7 @@ export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 /** Opens a page in the default browser; in the browser preview, a new tab. */
 export const openUrl = (url: string): void => {
   if (preview) window.open(url, "_blank", "noopener");
-  else void openExternal(url);
+  else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
 };
 
 export const saveHub = (label: string, url: string, token: string): Promise<{ id: string }> =>

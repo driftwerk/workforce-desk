@@ -226,6 +226,11 @@ export function PairHub({ onClose, again }: { onClose: () => void; again?: { url
               </p>
             )}
             <p className="pair-code mono">{step.pairing.code}</p>
+            {step.pairing.approveUrl && (
+              <p className="faint small">
+                If no page opened, go to <span className="mono selectable">{step.pairing.approveUrl}</span>
+              </p>
+            )}
             <p className="faint small">Waiting for approval… You can close this; Desk finishes connecting once it’s approved, even after a restart.</p>
             {error && <p className="state-blocked small">{error}</p>}
             <footer className="sheet-foot">

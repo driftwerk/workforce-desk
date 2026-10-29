@@ -1595,3 +1595,11 @@ button {
   margin: 0;
   line-height: 1.5;
 }
+
+/* Text people may need to copy, in a UI that otherwise isn't selectable. */
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  word-break: break-all;
+}
