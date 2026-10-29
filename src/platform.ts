@@ -80,6 +80,9 @@ export interface Settings {
   /** Names you've given sessions in Desk, by Desk session id; shown in
    *  place of the hub's everywhere Desk shows the session. */
   sessionNames: Record<string, string>;
+  /** The groups and names above were handed to the local hub, which keeps
+   *  them from then on; they stay here for a hub that can't. */
+  layoutOnHub?: boolean;
 }
 
 export interface ThemeFile {

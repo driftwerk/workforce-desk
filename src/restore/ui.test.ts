@@ -218,15 +218,28 @@ describe("through a hub restart", () => {
     expect(useDesk.getState().view).toBe("rooms");
   });
 
-  it("asks the hub for Desk's state each time it's connected again", async () => {
+  it("asks the hub for Desk's state on every snapshot, one read at a time", async () => {
     const store = new DeskStateStore(file());
-    const connect = vi.spyOn(store, "connect").mockResolvedValue();
+    let finish = () => {};
+    const connect = vi.spyOn(store, "connect").mockImplementation(() => new Promise<void>((r) => (finish = r)));
     const stop = followHub(store);
     const hub = { stateList: vi.fn(async () => []), statePut: vi.fn(), stateRemove: vi.fn(), roomMessages: vi.fn(async () => []) };
     useDesk.setState({ hub: hub as never, connected: true });
-    useDesk.setState({ connected: false });
-    useDesk.setState({ connected: true });
-    expect(connect).toHaveBeenCalledTimes(2);
+    const snapshot: DeskEvent = { type: "snapshot", sessions: [], restore: [], rooms: [] };
+    send(snapshot);
+    expect(connect).toHaveBeenCalledTimes(1);
+    // Two more while the first is reading: one more read, after it.
+    send(snapshot);
+    send(snapshot);
+    expect(connect).toHaveBeenCalledTimes(1);
+    finish();
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+    finish();
+    await Promise.resolve();
+    // A snapshot without a reconnection (events missed) reads it again too.
+    send(snapshot);
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(3));
+    finish();
     send({ type: "state", key: MAIN_UI_KEY, value: saved });
     stop();
   });

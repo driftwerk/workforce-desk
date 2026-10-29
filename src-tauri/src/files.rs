@@ -119,6 +119,10 @@ pub struct Settings {
     /// Names given to sessions in Desk, by Desk session id.
     #[serde(default)]
     pub session_names: std::collections::BTreeMap<String, String>,
+    /// The groups and names above were handed to the local hub, which
+    /// keeps them from then on; they stay here for a hub that can't.
+    #[serde(default)]
+    pub layout_on_hub: bool,
     /// Older Desks' hold-to-talk and Ask anyone keys, read once into
     /// `shortcuts` and never written again.
     #[serde(default, skip_serializing)]
@@ -159,6 +163,7 @@ impl Default for Settings {
             groups: Vec::new(),
             ungrouped: Ungrouped::default(),
             session_names: Default::default(),
+            layout_on_hub: false,
             push_to_talk_shortcut: None,
             ask_shortcut: None,
         }
@@ -350,6 +355,7 @@ mod tests {
         assert!(older.groups.is_empty());
         assert_eq!(older.ungrouped, Ungrouped::default());
         assert!(older.session_names.is_empty());
+        assert!(!older.layout_on_hub);
         let chosen = Settings {
             groups: vec![DeskGroup {
                 id: "g1".into(),
@@ -362,11 +368,13 @@ mod tests {
                 items: vec!["session:s2".into()],
             },
             session_names: [("s1".into(), "release notes".into())].into(),
+            layout_on_hub: true,
             ..Settings::default()
         };
         save_settings(&paths, &chosen).unwrap();
         let written = std::fs::read_to_string(paths.settings()).unwrap();
         assert!(written.contains(r#""sessionNames""#));
+        assert!(written.contains(r#""layoutOnHub": true"#));
         assert!(written.contains(r#""session:s1""#));
         assert_eq!(load_settings(&paths).unwrap(), chosen);
         // A group written without its optional fields still loads.

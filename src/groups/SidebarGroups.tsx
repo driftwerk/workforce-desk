@@ -8,24 +8,19 @@ import { reveal, revealIn } from "../grids/windows";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
-import { useSettings } from "../settings/store";
 import { Mark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
 import {
   agentItem,
-  createGroup,
-  deleteGroup,
   dropAt,
-  dropOn,
-  moveItem,
-  nudgeGroup,
-  nudgeItem,
-  removeFromGroup,
-  renameGroup,
+  moveGroup as movedGroup,
+  moveItem as moved,
+  nudgeGroupTarget,
+  nudgeTarget,
+  removeFromGroup as removed,
   resolve,
   sessionItem,
-  setCollapsed,
   UNGROUPED,
   type Drop,
   type DragEnd,
@@ -35,7 +30,19 @@ import {
 } from "./model";
 import { useSessionNames } from "./names";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
-import { changeLayout, layoutOf, nameSession } from "./store";
+import {
+  collapseGroup,
+  currentLayout,
+  deleteGroup,
+  dropItem,
+  moveGroup,
+  moveItem,
+  nameSession,
+  newGroup as addGroup,
+  removeFromGroup,
+  renameGroup,
+  useLayout,
+} from "./store";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude", codex: "Codex" };
 
@@ -66,14 +73,15 @@ const newId = (): string =>
 
 const GROUP_ACCEPTS = ["item", "group"];
 
-/** Groups of agents and sessions, Desk's own, with Ungrouped last. Drag to
+/** Groups of agents and sessions, kept by the hub (or, on a hub that can't,
+ *  by Desk), with Ungrouped last. Drag to
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
  *  One that's showing in a grid is shown there when clicked. */
 export function SidebarGroups() {
   const { sessions, openId, open, view, activeRoom, openRoom } = useDesk();
   const { roster, hubs, activeAgent, openDm } = useChat();
-  const groups = useSettings((s) => s.groups);
-  const ungrouped = useSettings((s) => s.ungrouped);
+  const layout = useLayout();
+  const { groups } = layout;
   const names = useSessionNames();
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const gridOrder = useGrids((s) => s.order);
@@ -88,7 +96,6 @@ export function SidebarGroups() {
   const rows = useRef(new Map<string, HTMLElement>());
   const hint = useId();
 
-  const layout: Layout = { groups, ungrouped };
   const items = new Map<ItemKey, Item>();
   for (const a of roster) items.set(agentItem(a), { key: agentItem(a), kind: "agent", agent: a });
   for (const s of sortedSessions(sessions)) if (s.state !== "closed") items.set(sessionItem(s.id), { key: sessionItem(s.id), kind: "session", session: s });
@@ -114,8 +121,8 @@ export function SidebarGroups() {
     rows.current.get(id)?.focus();
   });
 
-  const change = (f: (l: Layout) => Layout | null, focus?: string, say?: string) => {
-    changeLayout(f);
+  /** After a change: where focus goes, and what a screen reader hears. */
+  const after = (focus?: string, say?: string) => {
     if (focus) focusNext.current = focus;
     if (say) setSaid(say);
   };
@@ -126,34 +133,41 @@ export function SidebarGroups() {
   };
 
   const moveTo = (key: ItemKey, to: string) => {
-    const now = layoutOf(useSettings.getState());
-    const next = moveItem(now, present, key, to, null);
-    change(() => next, key, `Moved ${nameOf(items.get(key))} to ${where(next, key)}`);
+    const next = moved(currentLayout(), present, key, to, null);
+    moveItem(present, key, to, null);
+    after(key, `Moved ${nameOf(items.get(key))} to ${where(next, key)}`);
   };
 
   const nudge = (key: ItemKey, by: -1 | 1) => {
-    const next = nudgeItem(layoutOf(useSettings.getState()), present, key, by);
-    if (!next) return setSaid(by < 0 ? "Already at the top" : "Already at the bottom");
-    change(() => next, key, `${nameOf(items.get(key))}: ${where(next, key)}`);
+    const now = currentLayout();
+    const t = nudgeTarget(now, present, key, by);
+    if (!t) return setSaid(by < 0 ? "Already at the top" : "Already at the bottom");
+    const next = moved(now, present, key, t.to, t.before);
+    moveItem(present, key, t.to, t.before);
+    after(key, `${nameOf(items.get(key))}: ${where(next, key)}`);
   };
 
   const nudgeGroupBy = (id: string, by: -1 | 1) => {
-    const next = nudgeGroup(layoutOf(useSettings.getState()), id, by);
-    if (!next) return setSaid(by < 0 ? "Already the first group" : "Already the last group");
+    const now = currentLayout();
+    const t = nudgeGroupTarget(now, id, by);
+    if (!t) return setSaid(by < 0 ? "Already the first group" : "Already the last group");
+    const next = movedGroup(now, id, t.before);
+    moveGroup(id, t.before);
     const at = next.groups.findIndex((g) => g.id === id);
-    change(() => next, `group:${id}`, `${groupName(id)}: group ${at + 1} of ${next.groups.length}`);
+    after(`group:${id}`, `${groupName(id)}: group ${at + 1} of ${next.groups.length}`);
   };
 
   const newGroup = (with_?: ItemKey) => {
     const id = newId();
-    change((l) => createGroup(l, id, NEW_GROUP, with_ ? [with_] : []));
+    addGroup(id, NEW_GROUP, with_ ? [with_] : []);
     setEditing({ kind: "group", id });
     if (with_) setSaid(`Moved ${nameOf(items.get(with_))} to a new group`);
   };
 
   const removeGroup = (id: string) => {
     const name = groupName(id);
-    change((l) => deleteGroup(l, present, id), `group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
+    deleteGroup(present, id);
+    after(`group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
   };
 
   /** Opens it as always; or, when it's showing in a grid, shows it there. */
@@ -211,8 +225,9 @@ export function SidebarGroups() {
               kind: "item" as const,
               label: "Remove from group",
               onSelect: () => {
-                const next = removeFromGroup(layoutOf(useSettings.getState()), present, key);
-                change(() => next, key, `Moved ${nameOf(item)} to ${where(next, key)}`);
+                const next = removed(currentLayout(), present, key);
+                removeFromGroup(present, key);
+                after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
               },
             },
           ]
@@ -285,7 +300,7 @@ export function SidebarGroups() {
         setTimeout(() => (justDragged.current = false), 0);
         if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
         if (!s || !d) return;
-        changeLayout((l) => dropOn(l, present, end(s).id, d));
+        dropItem(present, end(s).id, d);
       }}
     >
       <div className="side-section groups" aria-label="Groups" role="region">
@@ -317,10 +332,10 @@ export function SidebarGroups() {
             dragging={dragging}
             editing={editing?.kind === "group" && editing.id === g.id}
             register={register}
-            onToggle={() => change((l) => setCollapsed(l, g.id, !g.collapsed))}
+            onToggle={() => collapseGroup(g.id, !g.collapsed)}
             onRename={(name) => {
               setEditing(null);
-              if (name !== null) changeLayout((l) => renameGroup(l, g.id, name));
+              if (name !== null) renameGroup(g.id, name);
               focusNext.current = `group:${g.id}`;
             }}
             onStartRename={() => g.id !== UNGROUPED && setEditing({ kind: "group", id: g.id })}

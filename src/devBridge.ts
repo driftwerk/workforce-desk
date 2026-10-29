@@ -40,6 +40,7 @@ let settings = {
   groups: [] as unknown[],
   ungrouped: { collapsed: false, items: [] as string[] },
   sessionNames: {} as Record<string, string>,
+  layoutOnHub: false,
 };
 
 // ── Desk's state file and the hub's state store, for the preview ──────────

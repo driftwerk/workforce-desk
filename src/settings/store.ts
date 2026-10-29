@@ -30,6 +30,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   groups: EMPTY_LAYOUT.groups,
   ungrouped: EMPTY_LAYOUT.ungrouped,
   sessionNames: {},
+  layoutOnHub: false,
   keys: DEFAULT_SHORTCUTS,
   loaded: false,
   load: async () => {
@@ -51,6 +52,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       groups: s.groups ?? EMPTY_LAYOUT.groups,
       ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
       sessionNames: s.sessionNames ?? {},
+      layoutOnHub: s.layoutOnHub ?? false,
       loaded: true,
     });
   },
@@ -75,6 +77,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       groups: s.groups,
       ungrouped: s.ungrouped,
       sessionNames: s.sessionNames,
+      layoutOnHub: s.layoutOnHub,
     });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),

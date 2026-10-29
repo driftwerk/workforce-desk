@@ -1,3 +1,5 @@
+import type { Layout } from "../groups/model";
+
 export type Engine = "claude" | "codex";
 
 export type SessionState =
@@ -40,6 +42,11 @@ export interface Session {
   /** The Desk terminal it runs in, when it was started there by hand and
    *  Desk's hooks registered it (a tracked terminal). */
   terminalId?: string | null;
+  /** The name the person gave it (kept by the hub), shown in place of
+   *  `name`; absent from hubs that don't keep names. */
+  displayName?: string | null;
+  /** The sidebar group it's in, as the hub has the layout. */
+  group?: { id: string; name: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -81,8 +88,9 @@ export interface NewTerminal {
   name?: string;
   /** An existing folder on the hub's machine. */
   cwd: string;
-  /** Added to the shell's environment: Claude Code's plugin folders and the
-   *  token Desk's hooks present. The hub adds `DESK_TERMINAL_ID`. */
+  /** Added to the shell's environment: Desk's Claude Code plugin folder
+   *  (the hub adds it to the person's own). The hub adds the terminal's id,
+   *  a token for its hooks and where they post. */
   env?: Record<string, string>;
 }
 
@@ -117,7 +125,17 @@ export interface RoomMessage {
 }
 
 export type DeskEvent =
-  | { type: "snapshot"; sessions: Session[]; restore: Session[]; rooms: Room[]; terminals?: TerminalInfo[] }
+  | {
+      type: "snapshot";
+      sessions: Session[];
+      restore: Session[];
+      rooms: Room[];
+      terminals?: TerminalInfo[];
+      /** The sidebar's groups, from hubs that keep them. */
+      layout?: Layout;
+    }
+  /** The sidebar's groups changed on the hub. */
+  | { type: "layout"; layout: Layout }
   | { type: "terminal"; terminal: TerminalInfo }
   | { type: "terminalRemoved"; id: string }
   | { type: "session"; session: Session }

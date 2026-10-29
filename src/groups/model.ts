@@ -1,4 +1,5 @@
-// The sidebar's groups: Desk's own, saved in its settings. A group holds
+// The sidebar's groups: kept by the hub when it keeps them (see store.ts),
+// else in Desk's settings. A group holds
 // agents (local and remote) and sessions by stable key; whatever isn't in a
 // group is Ungrouped, which always comes last. Every change — dragged, by
 // keyboard or from a menu — goes through these functions.
@@ -142,29 +143,47 @@ export const moveGroup = (layout: Layout, id: string, before: string | null): La
 
 export type Step = -1 | 1;
 
-/** Alt+↑ / Alt+↓ on an item: past its neighbour, or over the edge of its
- *  group into the next one (the end of the one above, the start of the one
- *  below). Null at the very top or bottom. */
-export const nudgeItem = (layout: Layout, present: readonly ItemKey[], key: ItemKey, step: Step): Layout | null => {
+/** Where Alt+↑ / Alt+↓ moves an item: past its neighbour, or over the
+ *  edge of its group into the next one (the end of the one above, the start
+ *  of the one below). Null at the very top or bottom. */
+export const nudgeTarget = (
+  layout: Layout,
+  present: readonly ItemKey[],
+  key: ItemKey,
+  step: Step,
+): { to: string; before: ItemKey | null } | null => {
   const shown = resolve(layout, present);
   const g = shown.findIndex((x) => x.items.includes(key));
   if (g < 0) return null;
   const items = shown[g]!.items;
   const i = items.indexOf(key);
   const id = shown[g]!.id;
-  if (step < 0 && i > 0) return moveItem(layout, present, key, id, items[i - 1]!);
-  if (step > 0 && i < items.length - 1) return moveItem(layout, present, key, id, items[i + 2] ?? null);
+  if (step < 0 && i > 0) return { to: id, before: items[i - 1]! };
+  if (step > 0 && i < items.length - 1) return { to: id, before: items[i + 2] ?? null };
   const next = shown[g + step];
   if (!next) return null;
-  return moveItem(layout, present, key, next.id, step < 0 ? null : (next.items[0] ?? null));
+  return { to: next.id, before: step < 0 ? null : (next.items[0] ?? null) };
 };
 
-/** Alt+↑ / Alt+↓ on a group's header. Ungrouped stays last. */
-export const nudgeGroup = (layout: Layout, id: string, step: Step): Layout | null => {
+/** Alt+↑ / Alt+↓ on an item, applied. */
+export const nudgeItem = (layout: Layout, present: readonly ItemKey[], key: ItemKey, step: Step): Layout | null => {
+  const t = nudgeTarget(layout, present, key, step);
+  return t && moveItem(layout, present, key, t.to, t.before);
+};
+
+/** Where Alt+↑ / Alt+↓ moves a group: before which (null: last). Null when
+ *  it can't go further. Ungrouped stays last. */
+export const nudgeGroupTarget = (layout: Layout, id: string, step: Step): { before: string | null } | null => {
   const i = layout.groups.findIndex((g) => g.id === id);
   const j = i + step;
   if (i < 0 || j < 0 || j >= layout.groups.length) return null;
-  return moveGroup(layout, id, step < 0 ? layout.groups[j]!.id : (layout.groups[j + 1]?.id ?? null));
+  return { before: step < 0 ? layout.groups[j]!.id : (layout.groups[j + 1]?.id ?? null) };
+};
+
+/** Alt+↑ / Alt+↓ on a group's header, applied. */
+export const nudgeGroup = (layout: Layout, id: string, step: Step): Layout | null => {
+  const t = nudgeGroupTarget(layout, id, step);
+  return t && moveGroup(layout, id, t.before);
 };
 
 /** Forgets sessions that are gone: out of every group, and their names. */

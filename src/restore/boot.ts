@@ -1,8 +1,9 @@
 // Puts back what was open before the shell first renders, then keeps it:
 // every change goes to Desk's file at once and to the hub shortly after, and
 // is flushed when the window loses focus, hides or unloads. The hub is asked
-// again each time its connection comes back (a hub restart), which is also
-// when its state store is first found and the file's contents sent to it.
+// again each time it sends a snapshot (on every connection, so after a hub
+// restart, and whenever Desk may have missed its events), which is also when
+// its state store is first found and the file's contents sent to it.
 
 import type { DeskHub } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
@@ -65,18 +66,39 @@ export function restore(store: DeskStateStore, r: Restorable): () => void {
   };
 }
 
-/** Keeps `store` on the hub `useDesk` is connected to, through restarts. */
+/** Keeps `store` on the hub `useDesk` is connected to, through restarts:
+ *  its state is read again on every snapshot (which doesn't carry it). One
+ *  read at a time; asked again meanwhile, it reads once more after. */
 export function followHub(store: DeskStateStore): () => void {
+  let reading = false;
+  let again = false;
+  const read = () => {
+    const hub = useDesk.getState().hub;
+    if (!hub) return;
+    if (reading) {
+      again = true;
+      return;
+    }
+    reading = true;
+    void store.connect(hubState(hub)).finally(() => {
+      reading = false;
+      if (again) {
+        again = false;
+        read();
+      }
+    });
+  };
   const onEvent = (e: import("../hub/types").DeskEvent) => {
     if (e.type === "state") void store.heard(e.key, e.value);
+    else if (e.type === "snapshot") read();
   };
   deskListeners.add(onEvent);
   const stop = useDesk.subscribe((s, before) => {
-    if (s.connected && s.hub && (!before.connected || s.hub !== before.hub)) void store.connect(hubState(s.hub));
     if (!s.hub && before.hub) void store.connect(null);
   });
+  // Connected before this started: its snapshot has gone by.
   const now = useDesk.getState();
-  if (now.connected && now.hub) void store.connect(hubState(now.hub));
+  if (now.connected && now.hub) read();
   return () => {
     deskListeners.delete(onEvent);
     stop();

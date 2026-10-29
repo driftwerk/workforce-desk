@@ -1,3 +1,4 @@
+import type { Layout } from "../groups/model";
 import { preview } from "../preview";
 import type { Provider } from "./providers";
 import type {
@@ -66,6 +67,17 @@ export const stateRows = (body: unknown): StateRow[] => {
   }
   return rows;
 };
+
+/** What the hub did with Desk's groups and names on the first push. */
+export interface LayoutImport {
+  /** False when it already had its own, which it kept. */
+  imported: boolean;
+  layout: Layout;
+  sessionNames: Record<string, string>;
+}
+
+/** An item key in a route (`agent:local/desk`), its `/` kept. */
+const itemPath = (item: string): string => item.split("/").map(encodeURIComponent).join("/");
 
 export class HubError extends Error {
   constructor(
@@ -159,6 +171,10 @@ export class DeskHub {
   forget = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${id}`);
   decide = (id: string, approval: string, decision: Decision): Promise<Session> =>
     this.desk("POST", `/api/desk/sessions/${id}/approvals/${approval}`, { decision });
+  /** The person's own name for a session (null or blank: none, so the
+   *  hub's shows). */
+  nameSession = (id: string, name: string | null): Promise<Session> =>
+    this.call("PUT", `/api/desk/sessions/${encodeURIComponent(id)}/name`, { name });
   restore = (ids: string[]): Promise<Session[]> => this.call("POST", "/api/desk/restore", { ids });
   dismissRestore = (): Promise<void> => this.call("POST", "/api/desk/restore/dismiss");
 
@@ -289,6 +305,30 @@ export class DeskHub {
     return ws;
   }
 
+  // ── The sidebar's groups, kept by the hub ───────────────────────────────
+  // Every route answers with the whole layout as it now is.
+
+  layout = (): Promise<Layout> => this.call("GET", "/api/desk/layout");
+  putLayout = (layout: Layout): Promise<Layout> => this.call("PUT", "/api/desk/layout", layout);
+  /** Desk's first push of the groups and names it kept itself; a hub that
+   *  already has some keeps its own (unless `force`). */
+  importLayout = (i: { layout: Layout; sessionNames: Record<string, string>; force?: boolean }): Promise<LayoutImport> =>
+    this.call("POST", "/api/desk/layout/import", i);
+  createGroup = (g: { id: string; name: string; items?: string[]; before?: string | null }): Promise<Layout> =>
+    this.call("POST", "/api/desk/groups", g);
+  /** Renames a group, or opens or closes it (Ungrouped too, by `ungrouped`). */
+  updateGroup = (id: string, patch: { name?: string; collapsed?: boolean }): Promise<Layout> =>
+    this.call("PATCH", `/api/desk/groups/${encodeURIComponent(id)}`, patch);
+  deleteGroup = (id: string): Promise<Layout> => this.call("DELETE", `/api/desk/groups/${encodeURIComponent(id)}`);
+  moveGroup = (id: string, before: string | null): Promise<Layout> =>
+    this.call("POST", `/api/desk/groups/${encodeURIComponent(id)}/move`, { before });
+  /** Puts an item in a group (or `ungrouped`) before another, out of
+   *  wherever it was. */
+  putInGroup = (group: string, item: string, before: string | null): Promise<Layout> =>
+    this.call("PUT", `/api/desk/groups/${encodeURIComponent(group)}/items/${itemPath(item)}`, { before });
+  removeFromGroup = (group: string, item: string): Promise<Layout> =>
+    this.call("DELETE", `/api/desk/groups/${encodeURIComponent(group)}/items/${itemPath(item)}`);
+
   // ── Terminals: login shells the hub hosts for grid panes ─────────────────
 
   /** Opens a login shell; it runs until closed, whether or not Desk is. */
@@ -305,7 +345,7 @@ export class DeskHub {
   };
 
   /** The same protocol as a session's: binary frames both ways, text
-   *  frames for control (resize). */
+   *  frames for control (see session/Terminal.tsx). */
   terminalSocket(id: string): WebSocket {
     const ws = new WebSocket(wsUrl(this.conn.url, `/api/desk/terminals/${encodeURIComponent(id)}/pty`, this.conn.token));
     ws.binaryType = "arraybuffer";

@@ -24,8 +24,10 @@ interface DeskState {
   openId: string | null;
   view: View;
   error: string | null;
-  /** With `notify: false` (a detached grid's window), sessions' changes
-   *  aren't told to macOS: the main window does that. */
+  /** A detached grid's window, which leaves telling macOS of sessions'
+   *  changes, and handing Desk's groups to the hub, to the main window. */
+  detached: boolean;
+  /** With `notify: false`, this is a detached grid's window. */
   connect: (conn: HubConnection, opts?: { notify?: boolean }) => () => void;
   open: (id: string | null) => void;
   setView: (view: View) => void;
@@ -99,12 +101,13 @@ export const useDesk = create<DeskState>((set, get) => ({
   view: "floor",
   loaded: false,
   error: null,
+  detached: false,
   connect: (conn, opts) => {
     const hub = new DeskHub(conn);
-    set({ hub });
+    set({ hub, detached: opts?.notify === false });
     return hub.events(
       (e) => {
-        if (e.type === "session" && opts?.notify !== false) {
+        if (e.type === "session" && !get().detached) {
           const n = notificationFor(get().sessions[e.session.id]?.state, e.session);
           if (n) void notify(n);
         }

@@ -9,7 +9,7 @@ export const notificationFor = (
   s: Session,
 ): { title: string; body: string } | null => {
   if (before === undefined || before === s.state) return null;
-  const name = sessionName(s.id, s.name);
+  const name = sessionName(s.id, s.name, s);
   if (s.state === "blocked")
     return { title: `${name} needs you`, body: s.pending ? `${s.pending.tool} ${s.pending.detail}`.trim() : "Waiting for an answer" };
   if (s.state === "done" && (before === "working" || before === "blocked"))
