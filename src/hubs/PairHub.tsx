@@ -163,7 +163,7 @@ export function PairHub({ onClose, again }: { onClose: () => void; again?: { url
                   <input className="mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="8CA2…" required />
                 </label>
                 <p className="small muted">
-                  This connects without linking your account; ask for a new code with your email to see agents shared only with you.
+                  This connects without linking your account. Afterwards, use Connect as you in Workspaces to sign in and see agents shared only with you.
                 </p>
               </>
             )}

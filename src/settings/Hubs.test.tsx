@@ -176,7 +176,7 @@ describe("Connect a workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "I already have an approved code" }));
     expect(
       screen.getByText(
-        "This connects without linking your account; ask for a new code with your email to see agents shared only with you.",
+        "This connects without linking your account. Afterwards, use Connect as you in Workspaces to sign in and see agents shared only with you.",
       ),
     ).toBeTruthy();
   });
