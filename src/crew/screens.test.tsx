@@ -44,6 +44,8 @@ const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
     identityRevisions: vi.fn(() => Promise.reject(new HubError(503, "revision history requires Postgres"))),
     connectProvider: vi.fn((id: string) => Promise.resolve({ ...plan(id, "Anthropic API", true) })),
     providers: vi.fn(() => Promise.resolve(useProviders.getState().providers)),
+    memorySummary: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
+    agentHeartbeat: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
     ...over,
   }) as unknown as DeskHub;
 

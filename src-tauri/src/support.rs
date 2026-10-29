@@ -10,7 +10,7 @@ use desk_core::{LOCAL_HUB_ID, Paths, Secret, Secrets, device_token_account, read
 use eyre::{Context, Result};
 
 /// The logs a report carries, newest part of each.
-const LOGS: [&str; 8] = [
+const LOGS: [&str; 10] = [
     "desk.log",
     "desk.log.1",
     "desk-hubd.log",
@@ -19,6 +19,8 @@ const LOGS: [&str; 8] = [
     "hub.log.1",
     "pty-holder.log",
     "pty-holder.log.1",
+    "memory.log",
+    "memory.log.1",
 ];
 const TAIL: u64 = 4 * 1024 * 1024;
 
@@ -121,14 +123,18 @@ pub fn write_report(paths: &Paths, known: &[String], about: &str, to: &Path) -> 
     Ok(())
 }
 
-/// Waits for the hub and its Postgres to let go of their ports.
+/// Waits for the hub, its Postgres and its memory store to let go of their
+/// ports.
 fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
     let Some(ports) = read_ports(&paths.hub_state())? else {
         return Ok(());
     };
     let deadline = Instant::now() + within;
     let free = |p: u16| TcpListener::bind(("127.0.0.1", p)).is_ok();
-    while !(free(ports.gateway) && free(ports.postgres)) {
+    while !(free(ports.gateway)
+        && free(ports.postgres)
+        && (ports.memory == 0 || free(ports.memory)))
+    {
         if Instant::now() > deadline {
             eyre::bail!(
                 "Desk Helper is still running. Quit it (or restart your Mac) and try again."
@@ -223,6 +229,7 @@ mod tests {
                 postgres: port,
                 admin: port,
                 gateway: port,
+                memory: port,
             },
         )
         .unwrap();

@@ -1,14 +1,18 @@
 //! `desk-hubd` — "Desk Helper" in the app bundle, run by launchd at login
-//! as Desk's login item. Starts the local Postgres, writes the hub's config,
-//! and keeps the hub running with the user's login environment and its
-//! secrets from the keychain. Starts the PTY holder before the hub, which
-//! keeps the hub's terminals through its restarts. Stops the hub and
-//! Postgres (never the holder) on SIGTERM, and when an update replaces the
-//! app bundle under it, so launchd starts the new one.
+//! as Desk's login item. Starts the local Postgres and the memory store,
+//! writes the hub's config, and keeps the hub running with the user's login
+//! environment and its secrets from the keychain. Starts the PTY holder
+//! before the hub, which keeps the hub's terminals through its restarts.
+//! Stops the hub, the memory store and Postgres (never the holder) on
+//! SIGTERM, and when an update replaces the app bundle under it, so launchd
+//! starts the new one.
 
 mod bootstrap;
 mod config;
 mod holder;
+mod memory;
+mod model;
+mod moving;
 
 use std::collections::BTreeMap;
 use std::net::TcpListener;
@@ -42,6 +46,7 @@ fn ports(paths: &Paths) -> Result<HubPorts> {
         postgres: pick(saved.map(|s| s.postgres))?,
         admin: pick(saved.map(|s| s.admin))?,
         gateway: pick(saved.map(|s| s.gateway))?,
+        memory: pick(saved.map(|s| s.memory).filter(|&p| p != 0))?,
     };
     if saved != Some(ports) {
         write_ports(&paths.hub_state(), &ports)?;
@@ -108,8 +113,10 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
     pg.setup().await.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
     let _ = std::fs::remove_file(&first_run);
-    if !pg.database_exists(config::DATABASE).await? {
-        pg.create_database(config::DATABASE).await?;
+    for db in [config::DATABASE, memory::DATABASE] {
+        if !pg.database_exists(db).await? {
+            pg.create_database(db).await?;
+        }
     }
     Ok(pg)
 }
@@ -280,30 +287,89 @@ async fn main() -> Result<()> {
         std::fs::create_dir_all(&dir)?;
     }
     let workforce = workforce_binary();
+    let store = memory::binary();
     // The installed helper hands over to an updated bundle: it stops when
-    // its own binary or the hub's is replaced, and launchd starts the new
-    // ones. A development build is left running whatever is rebuilt.
+    // its own binary, the hub's or the memory store's is replaced, and
+    // launchd starts the new ones. A development build is left running
+    // whatever is rebuilt.
     let exe = std::env::current_exe()?;
     let watched = if in_bundle(&exe) {
-        vec![exe, workforce.clone()]
+        let mut files = vec![exe, workforce.clone()];
+        files.extend(store.clone());
+        files
     } else {
         Vec::new()
     };
     let updated = replaced(watched, Duration::from_secs(10));
     tokio::pin!(updated);
     let ports = ports(&paths)?;
-    desk_core::write_private(&paths.hub_config(), &config::render(&paths, &ports))?;
+    // Once memories have moved into the store the hub always opens them
+    // there: SQLite no longer holds them.
+    let mut memories = if moving::moved(&paths).is_some() {
+        config::Memories::Store
+    } else {
+        config::Memories::Sqlite
+    };
+    write_config(&paths, &ports, memories)?;
     let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
     config::ensure_rich(&desk_agent)?;
     config::ensure_oversight(&desk_agent)?;
-    let env = hub_env(&desk_core::shell::login_env(), &Secrets::for_paths(&paths))?;
+    let login = desk_core::shell::login_env();
+    let env = hub_env(&login, &Secrets::for_paths(&paths))?;
     let pg = start_postgres(
         &paths,
         ports.postgres,
         env[Secret::PostgresPassword.env()].clone(),
     )
     .await?;
-    tracing::info!(gateway = %ports.gateway_url(), "local hub starting");
+
+    let node = match &store {
+        Some(binary) => {
+            memory::stop_leftover(&paths, binary).await;
+            Some(memory::Node::supervise(
+                binary.clone(),
+                paths.clone(),
+                memory::env(
+                    &paths,
+                    &ports,
+                    &env[Secret::PostgresPassword.env()],
+                    &env[Secret::MemoryKey.env()],
+                    &login,
+                ),
+            ))
+        }
+        None => {
+            tracing::warn!("no memory store beside Desk Helper; memories stay in SQLite");
+            None
+        }
+    };
+    if memories == config::Memories::Store && node.is_none() {
+        tracing::error!("memories are in the memory store, which is missing from this build");
+    }
+    // The model is fetched in the background: the hub starts on SQLite
+    // meanwhile, and moves to the store once the model is here.
+    let (model_ready, mut model_rx) =
+        tokio::sync::watch::channel(model::installed(&paths.memory_models()));
+    if node.is_some() {
+        if *model_rx.borrow() {
+            let _ = model::write_state(&paths.memory_model_state(), &model::State::Ready);
+        } else {
+            let models = paths.memory_models();
+            let state = paths.memory_model_state();
+            tokio::task::spawn_blocking(move || {
+                if model::fetch_until_installed(&models, &state, &model::HuggingFace) {
+                    let _ = model_ready.send(true);
+                }
+            });
+        }
+    }
+    let mut switch_pending = node.is_some() && memories == config::Memories::Sqlite;
+    if switch_pending && *model_rx.borrow() {
+        switch_pending = false;
+        memories = switch_to_store(&workforce, &paths, &ports, &env).await;
+    }
+
+    tracing::info!(gateway = %ports.gateway_url(), ?memories, "local hub starting");
     {
         let paths = paths.clone();
         let gateway = ports.gateway_url();
@@ -319,7 +385,7 @@ async fn main() -> Result<()> {
     let mut int = signal(SignalKind::interrupt())?;
     let mut backoff = Duration::from_secs(1);
     let socket = paths.pty_socket();
-    let outcome = loop {
+    let outcome = 'run: loop {
         if let Err(e) = holder::ensure(
             &workforce,
             &paths,
@@ -336,33 +402,90 @@ async fn main() -> Result<()> {
             Ok(c) => c,
             Err(e) => break Err(e),
         };
-        tokio::select! {
-            _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break Ok(()) }
-            _ = int.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break Ok(()) }
-            _ = &mut updated => {
-                tracing::info!("Desk was updated; handing over to the new helper");
-                stop(&mut hub, Duration::from_secs(20)).await;
-                break Ok(())
-            }
-            status = hub.wait() => {
-                if started.elapsed() > HEALTHY_AFTER {
-                    backoff = Duration::from_secs(1);
+        loop {
+            tokio::select! {
+                _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(()) }
+                _ = int.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(()) }
+                _ = &mut updated => {
+                    tracing::info!("Desk was updated; handing over to the new helper");
+                    stop(&mut hub, Duration::from_secs(20)).await;
+                    break 'run Ok(())
                 }
-                tracing::warn!(?status, retry_in = ?backoff, "hub exited; restarting");
-                tokio::select! {
-                    _ = term.recv() => break Ok(()),
-                    _ = int.recv() => break Ok(()),
-                    _ = &mut updated => break Ok(()),
-                    _ = tokio::time::sleep(backoff) => {}
+                ready = model_rx.wait_for(|&r| r), if switch_pending => {
+                    switch_pending = false;
+                    if ready.is_ok() {
+                        tracing::info!("the memory store's model is here; moving memories into the store");
+                        stop(&mut hub, Duration::from_secs(20)).await;
+                        memories = switch_to_store(&workforce, &paths, &ports, &env).await;
+                        tracing::info!(?memories, "local hub starting again");
+                        continue 'run;
+                    }
                 }
-                backoff = (backoff * 2).min(MAX_BACKOFF);
+                status = hub.wait() => {
+                    if started.elapsed() > HEALTHY_AFTER {
+                        backoff = Duration::from_secs(1);
+                    }
+                    tracing::warn!(?status, retry_in = ?backoff, "hub exited; restarting");
+                    tokio::select! {
+                        _ = term.recv() => break 'run Ok(()),
+                        _ = int.recv() => break 'run Ok(()),
+                        _ = &mut updated => break 'run Ok(()),
+                        _ = tokio::time::sleep(backoff) => {}
+                    }
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                    continue 'run;
+                }
             }
         }
     };
+    // A download under way stops at its next read and keeps what it has.
+    model::stop();
+    // The hub first, then the store it writes to, then the database both use.
+    if let Some(node) = node {
+        node.stop().await;
+    }
     if let Err(e) = pg.stop().await {
         tracing::warn!(error = %e, "Postgres did not stop cleanly");
     }
     outcome
+}
+
+fn write_config(paths: &Paths, ports: &HubPorts, memories: config::Memories) -> Result<()> {
+    desk_core::write_private(&paths.hub_config(), &config::render(paths, ports, memories))
+}
+
+/// Puts the hub's memories in the store, with the hub stopped: waits for
+/// the store, makes its tenant, writes the config that says the store, and
+/// moves what SQLite holds. Anything short of a checked move leaves the hub
+/// on SQLite, to be tried again on the next start.
+async fn switch_to_store(
+    workforce: &Path,
+    paths: &Paths,
+    ports: &HubPorts,
+    env: &BTreeMap<String, String>,
+) -> config::Memories {
+    let url = memory::url(ports);
+    let key = &env[Secret::MemoryKey.env()];
+    let moved = async {
+        memory::ready(&url, Duration::from_secs(120)).await?;
+        memory::ensure_tenant(&url, key).await?;
+        write_config(paths, ports, config::Memories::Store)?;
+        moving::move_sqlite(workforce, paths, env).await
+    }
+    .await;
+    match moved {
+        Ok(moved) => {
+            tracing::info!(counts = ?moved.counts, backup = ?moved.backup, "memories are in the memory store");
+            config::Memories::Store
+        }
+        Err(e) => {
+            tracing::error!(error = %format!("{e:#}"), "could not move memories into the memory store; staying on SQLite");
+            if let Err(e) = write_config(paths, ports, config::Memories::Sqlite) {
+                tracing::error!(error = %e, "could not write the hub's config");
+            }
+            config::Memories::Sqlite
+        }
+    }
 }
 
 #[cfg(test)]

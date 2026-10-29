@@ -27,6 +27,8 @@ pub const LEGACY_LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.hub";
 pub const HELPER_EXECUTABLE: &str = "Desk Helper";
 /// The local hub's executable beside it.
 pub const HUB_EXECUTABLE: &str = "Desk Agents";
+/// The local hub's memory store (a vellev node) beside them.
+pub const MEMORY_EXECUTABLE: &str = "Desk Memory";
 
 /// `~/Library/Application Support/Desk` and what lives under it.
 #[derive(Debug, Clone)]
@@ -71,6 +73,33 @@ impl Paths {
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
     }
+    /// The memory store's folder: its data, its cache, and the embedding
+    /// model it runs.
+    pub fn memory(&self) -> PathBuf {
+        self.hub().join("memory")
+    }
+    pub fn memory_store(&self) -> PathBuf {
+        self.memory().join("store")
+    }
+    pub fn memory_cache(&self) -> PathBuf {
+        self.memory().join("cache")
+    }
+    pub fn memory_models(&self) -> PathBuf {
+        self.memory().join("models")
+    }
+    /// How far the embedding model's download has got, for Desk to show.
+    pub fn memory_model_state(&self) -> PathBuf {
+        self.memory().join("model.json")
+    }
+    /// Written once the memories kept in SQLite were moved into the memory
+    /// store and checked.
+    pub fn memory_moved(&self) -> PathBuf {
+        self.memory().join("moved.json")
+    }
+    /// The local hub's SQLite memories, before they move to the memory store.
+    pub fn sqlite_memories(&self) -> PathBuf {
+        self.hub_data().join("memory.db")
+    }
     pub fn themes(&self) -> PathBuf {
         self.root.join("themes")
     }
@@ -93,6 +122,10 @@ pub struct HubPorts {
     pub postgres: u16,
     pub admin: u16,
     pub gateway: u16,
+    /// The memory store's; 0 in a `state.toml` from before it, until one is
+    /// chosen.
+    #[serde(default)]
+    pub memory: u16,
 }
 
 impl HubPorts {
@@ -138,14 +171,16 @@ pub enum Secret {
     JwtSecret,
     VaultKey,
     PostgresPassword,
+    MemoryKey,
 }
 
 impl Secret {
-    pub const ALL: [Secret; 4] = [
+    pub const ALL: [Secret; 5] = [
         Secret::GatewayToken,
         Secret::JwtSecret,
         Secret::VaultKey,
         Secret::PostgresPassword,
+        Secret::MemoryKey,
     ];
 
     /// Its keychain account.
@@ -155,6 +190,7 @@ impl Secret {
             Secret::JwtSecret => "hub-jwt-secret",
             Secret::VaultKey => "hub-vault-key",
             Secret::PostgresPassword => "hub-postgres-password",
+            Secret::MemoryKey => "hub-memory-key",
         }
     }
 
@@ -165,6 +201,7 @@ impl Secret {
             Secret::JwtSecret => "WORKFORCE_JWT_SECRET",
             Secret::VaultKey => "WORKFORCE_VAULT_KEY",
             Secret::PostgresPassword => "DESK_POSTGRES_PASSWORD",
+            Secret::MemoryKey => "DESK_MEMORY_KEY",
         }
     }
 
@@ -398,10 +435,27 @@ mod tests {
             postgres: 1,
             admin: 2,
             gateway: 3,
+            memory: 4,
         };
         write_ports(&path, &ports).unwrap();
         assert_eq!(read_ports(&path).unwrap(), Some(ports));
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn ports_saved_before_the_memory_store_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.toml");
+        std::fs::write(&path, "postgres = 1\nadmin = 2\ngateway = 3\n").unwrap();
+        assert_eq!(
+            read_ports(&path).unwrap(),
+            Some(HubPorts {
+                postgres: 1,
+                admin: 2,
+                gateway: 3,
+                memory: 0,
+            })
+        );
     }
 }

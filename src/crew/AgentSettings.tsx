@@ -12,6 +12,8 @@ import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
 import { purposeOf, renameAgentFiles, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { useUi } from "../shell/ui";
+import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
@@ -24,14 +26,57 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
   return (
     <div className="agent-page">
       <div className="agent-settings">
+        {local && <SectionLinks />}
         <About agent={agent} hub={hub} local={local} />
         {local ? <Thinking agent={agent} /> : <ThinkingElsewhere agent={agent} hub={hub} />}
         <Sound agent={agent} local={local} />
+        {local && <HowTheyRemember agent={agent} ago={ago} />}
+        {local && <HowTheyWork agent={agent} />}
+        {local && (
+          <CheckingIn
+            agent={agent}
+            ago={ago}
+            onEditList={() => {
+              useUi.getState().setAgentFile(agentKey(agent), "HEARTBEAT.md");
+              onOpenFiles();
+            }}
+          />
+        )}
         {local && <OverseesTheCrew agent={agent} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}
         {local && !agent.isDefault && <Remove agent={agent} />}
       </div>
     </div>
+  );
+}
+
+const SECTIONS: { id: string; name: string }[] = [
+  { id: "about", name: "About" },
+  { id: "think", name: "How they think" },
+  { id: "sound", name: "How they sound" },
+  { id: "remember", name: "How they remember" },
+  { id: "work", name: "How they work" },
+  { id: "checkin", name: "Checking in" },
+  { id: "tune", name: "Fine-tuning" },
+];
+
+/** Links to each section of a long Settings tab. */
+function SectionLinks() {
+  return (
+    <nav className="section-links" aria-label="Sections">
+      {SECTIONS.map((s) => (
+        <a
+          key={s.id}
+          href={`#${s.id}`}
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById(s.id)?.scrollIntoView({ block: "start", behavior: "smooth" });
+          }}
+        >
+          {s.name}
+        </a>
+      ))}
+    </nav>
   );
 }
 
@@ -128,7 +173,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   };
 
   return (
-    <section className="agent-section" aria-labelledby="about-head">
+    <section id="about" className="agent-section" aria-labelledby="about-head">
       <h2 id="about-head">About</h2>
       <label className="field-stack">
         <span className="field-label">Name</span>
@@ -199,7 +244,7 @@ function Thinking({ agent }: { agent: Agent }) {
   const model = brain ? modelOf(provider, brain.model) : undefined;
 
   return (
-    <section className="agent-section" aria-labelledby="think-head">
+    <section id="think" className="agent-section" aria-labelledby="think-head">
       <h2 id="think-head">How they think</h2>
       <div className="think-rows">
         <div className="think-row">
@@ -298,7 +343,7 @@ function Sound({ agent, local }: { agent: Agent; local: boolean }) {
   };
 
   return (
-    <section className="agent-section" aria-labelledby="sound-head">
+    <section id="sound" className="agent-section" aria-labelledby="sound-head">
       <h2 id="sound-head">How they sound</h2>
       <VoiceCard who={agent.name} spec={own ?? defaultVoice} isDefault={!own} withModel onChange={() => setChoosing(true)} />
       {choosing && (
@@ -334,11 +379,11 @@ function FineTuning({ agent, onOpen }: { agent: Agent; onOpen: () => void }) {
     };
   }, [desk, agent.id]);
   return (
-    <section className="agent-section" aria-labelledby="tune-head">
+    <section id="tune" className="agent-section" aria-labelledby="tune-head">
       <h2 id="tune-head">Fine-tuning</h2>
       <button type="button" className="setting-card link-card" onClick={onOpen}>
         <span className="card-text">
-          <b>Soul, Agents, Identity and Welcome</b>
+          <b>Soul, Agents, Identity, Welcome and Heartbeat</b>
           <span>The files that shape who they are.{edited ? ` Last edited ${ago(edited)}.` : ""}</span>
         </span>
         <span className="link-card-action">Edit files</span>

@@ -6,19 +6,25 @@ notarized disk image. Inside it, beside the app:
 | In `Contents/MacOS` | What it is |
 | --- | --- |
 | `Desk` | the app |
-| `Desk Helper` | `desk-hubd`: Postgres, the hub's config and secrets, restarts |
+| `Desk Helper` | `desk-hubd`: Postgres, the memory store, the hub's config and secrets, restarts |
 | `Desk Agents` | the hub (`workforce`), built from the commit in `hub.ref` |
+| `Desk Memory` | the hub's memory store (`vellev`), built from the commit in `vellev.ref` |
 
 `Contents/Library/LaunchAgents/xyz.driftwerk.desk.helper.plist` is Desk
 Helper's login item. The app registers it with `SMAppService` the first time it
 opens from Applications. It appears in System Settings → General → Login Items
 as Desk. Postgres 18.6.1 is compiled into Desk Helper (pinned in
-`.cargo/config.toml`), so a first launch needs no network.
+`.cargo/config.toml`), so a first launch needs no network. The memory
+store's embedding model (bge-base, about 436 MB) is not in the bundle: Desk
+Helper downloads it on first launch, in the background, into
+`~/Library/Application Support/Desk/hub/memory/models`. Until it is there the
+hub keeps memories in SQLite; then it moves them into the store, once.
 
 ## Cutting a release
 
 1. Make sure `hub.ref` is the hub commit this release should ship (see below)
-   and that the commit is pushed to `driftwerk/workforce`.
+   and that the commit is pushed to `driftwerk/workforce`; the same for
+   `vellev.ref` and `driftwerk/vellev`.
 2. Tag and push:
 
    ```sh
@@ -30,8 +36,11 @@ as Desk. Postgres 18.6.1 is compiled into Desk Helper (pinned in
    `tauri.conf.json`, `package.json` and the workspace `Cargo.toml`. You don't
    bump them by hand.
 3. `.github/workflows/release.yml` then:
-   - builds both sidecars for both architectures and joins each pair with
-     `lipo` (`scripts/build-sidecars.sh`)
+   - builds the three sidecars for both architectures and joins each pair
+     with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
+     Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
+     the job builds ONNX Runtime 1.28 from source
+     (`scripts/onnxruntime-x86_64.sh`, cached by its pin)
    - builds the app with `tauri build --target universal-apple-darwin`
    - signs inside out with the Developer ID, using the hardened runtime and
      the entitlements in `src-tauri/entitlements/`
@@ -44,8 +53,10 @@ as Desk. Postgres 18.6.1 is compiled into Desk Helper (pinned in
 Installed copies check `latest.json` on launch and every four hours. They
 download the update in the background and offer **Restart to update**.
 
-The first build of a new hub ref takes well over an hour. Later builds reuse
-the cargo cache, keyed by the hub ref. If the runner runs out of disk, move the
+The first build of a new hub ref takes well over an hour, and the first
+Intel ONNX Runtime build adds 30 to 60 minutes. Later builds reuse the cargo
+cache, keyed by the hub and vellev refs, and the ONNX Runtime build, keyed by
+its pin. If the runner runs out of disk, move the
 job to a larger macOS runner.
 
 ## Secrets and variables
@@ -99,6 +110,23 @@ clones `HUB_REPO` (default `git@github.com:driftwerk/workforce.git`) into
 `~/Library/Caches/desk-build/hub` and checks the ref out there. A local clone
 works as `HUB_REPO` too.
 
+## Bumping vellev
+
+`vellev.ref` holds one full commit SHA of `driftwerk/vellev`, and works as
+`hub.ref` does: `VELLEV_SOURCE`, `VELLEV_ANY_REF`, `VELLEV_REPO` (default
+`https://github.com/driftwerk/vellev.git`) and `VELLEV_CACHE`
+(`~/Library/Caches/desk-build/vellev`).
+
+```sh
+git -C ../vellev log -1 --format=%H origin/main   # the commit you want
+echo <sha> > vellev.ref
+git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
+```
+
+`build-sidecars.sh` refuses a vellev whose locked `ort-sys` is not the one
+`scripts/onnxruntime-x86_64.sh` builds ONNX Runtime for; move that script's
+pin (version and commit) to the ONNX Runtime the new `ort-sys` links.
+
 ## Building locally
 
 ```sh
@@ -141,4 +169,6 @@ A development run (`npm run tauri dev` with `DESK_HOME` set) registers
 nothing. It talks to a `desk-hubd` you start yourself (`target/debug/desk-hubd
 --workforce <hub>`). `scripts/stage-sidecars.sh` builds the development
 sidecars under their bundle names (`Desk Helper-<triple>`,
-`Desk Agents-<triple>`).
+`Desk Agents-<triple>`, `Desk Memory-<triple>`). Without a `vellev` beside
+`desk-hubd`, on `PATH` or given with `--memory <path>`, the development hub
+keeps memories in SQLite.

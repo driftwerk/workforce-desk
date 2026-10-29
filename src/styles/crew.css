@@ -459,6 +459,120 @@ button.card-icon:hover:not(:disabled) {
 .think-row b span.state-blocked {
   color: var(--blocked);
 }
+/* ── Abilities: remembering, working, checking in, knowing ────────────── */
+
+.section-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.section-links a {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.section-links a:hover {
+  color: var(--text);
+}
+.ability-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ability-head h2 {
+  flex: 1;
+}
+.ability-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+}
+.ability-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+}
+.ability-row + .ability-row {
+  border-top: 1px solid var(--border);
+}
+.ability-row .switch {
+  margin-top: 2px;
+}
+.ability-row-center {
+  align-items: center;
+}
+.ability-summary {
+  align-items: center;
+  background: var(--sunken);
+  border-radius: 12px 12px 0 0;
+}
+.ability-summary b {
+  font-size: 14px;
+}
+.ability-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ability-text b {
+  font-weight: 600;
+  font-size: 15px;
+}
+.ability-sub {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.ability-note {
+  margin: 0;
+}
+.ability-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.ability-gap {
+  width: 10px;
+}
+.ability-select {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ability-select:focus {
+  border-color: var(--signal);
+  outline: none;
+}
+.ability-seg {
+  flex: none;
+}
+.ability-seg button {
+  flex: none;
+  padding: 6px 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .agent-remove {
   display: flex;
   align-items: center;
