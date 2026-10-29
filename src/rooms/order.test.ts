@@ -129,3 +129,11 @@ describe("the rooms' order", () => {
     stop();
   });
 });
+
+describe("rooms before you first arrange them", () => {
+  it("stay by name, so nothing reshuffles on upgrade", () => {
+    const rooms = { b: room("b", "2026-01-01T00:00:00Z", "Zeta"), a: room("a", "2026-02-01T00:00:00Z", "Alpha") };
+    expect(arranged(rooms, []).map((r) => r.name)).toEqual(["Alpha", "Zeta"]);
+    expect(arranged({ ...rooms, c: room("c", "2026-03-01T00:00:00Z", "Beta") }, ["b"]).map((r) => r.name)).toEqual(["Zeta", "Alpha", "Beta"]);
+  });
+});

@@ -27,10 +27,11 @@ const oldestFirst = (a: Room, b: Room) => (a.createdAt ?? "").localeCompare(b.cr
 export const arranged = (rooms: Record<string, Room>, order: readonly string[]): Room[] => {
   const named = new Set(order);
   const first = order.flatMap((id) => rooms[id] ?? []);
-  const rest = Object.values(rooms)
-    .filter((r) => !named.has(r.id))
-    .sort(oldestFirst);
-  return [...first, ...rest];
+  const rest = Object.values(rooms).filter((r) => !named.has(r.id));
+  // Until you first arrange them, rooms stay by name, as they always were;
+  // after that, a room the order doesn't name yet goes last.
+  if (!order.length) return rest.sort((a, b) => a.name.localeCompare(b.name));
+  return [...first, ...rest.sort(oldestFirst)];
 };
 
 const shown = () => arranged(useDesk.getState().rooms, useRoomOrder.getState().order).map((r) => r.id);
