@@ -4,6 +4,8 @@ import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { createGrid, startGrids, useGrids } from "../grids/store";
 import { useDesk } from "../hub/store";
+import type { Room } from "../hub/types";
+import { useRoomOrder } from "../rooms/order";
 import { useSettings } from "../settings/store";
 import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
 import { Sidebar, scrollEdges } from "./Sidebar";
@@ -24,6 +26,7 @@ const memory = (): GridStorage =>
 
 beforeEach(() => {
   kept.clear();
+  useRoomOrder.setState({ order: [] });
   useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS, groups: [], sessionNames: {} });
   useDesk.setState({ view: "floor", rooms: {}, sessions: {} });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
@@ -192,11 +195,52 @@ describe("grids in the sidebar", () => {
   });
 });
 
+describe("rooms in the sidebar", () => {
+  const room = (id: string, name: string, createdAt: string) => ({ id, slug: id, name, members: [], defaultMember: null, createdAt, updatedAt: createdAt }) as Room;
+  const roomRows = () =>
+    within(screen.getByRole("list", { name: "Rooms" }))
+      .getAllByRole("button")
+      .filter((b) => b.classList.contains("gi"))
+      .map((b) => b.querySelector(".gi-name")?.textContent);
+  const roomRow = (name: string) => within(screen.getByRole("list", { name: "Rooms" })).getAllByRole("button").find((b) => b.querySelector(".gi-name")?.textContent === name)!;
+
+  beforeEach(() =>
+    useDesk.setState({
+      view: "rooms",
+      loaded: true,
+      rooms: { r1: room("r1", "Launch", "2026-01-01"), r2: room("r2", "Design", "2026-02-01"), r3: room("r3", "Ops", "2026-03-01") },
+    }),
+  );
+
+  it("draws rooms as a group's items are, with the grip and the ⋯", () => {
+    sidebar();
+    const row = roomRow("Launch");
+    expect(row.firstElementChild!.className).toBe("gi-handle");
+    expect(row.closest("ul")!.className).toBe("grp-items");
+    expect(screen.getByRole("button", { name: "Launch options" }).closest("li")).toBe(row.closest("li"));
+  });
+
+  it("lists rooms in the order they were put in, new ones last, and moves them with Alt+↑/↓", () => {
+    useRoomOrder.setState({ order: ["r3", "r1"] });
+    sidebar();
+    expect(roomRows()).toEqual(["Ops", "Launch", "Design"]);
+    fireEvent.keyDown(roomRow("Ops"), { key: "ArrowDown", altKey: true });
+    expect(roomRows()).toEqual(["Launch", "Ops", "Design"]);
+    expect(useRoomOrder.getState().order).toEqual(["r1", "r3", "r2"]);
+    fireEvent.keyDown(roomRow("Launch"), { key: "ArrowUp", altKey: true });
+    expect(roomRows()).toEqual(["Launch", "Ops", "Design"]);
+    expect(screen.getByText("Already the first room")).toBeTruthy();
+    act(() => useDesk.setState((s) => ({ rooms: { ...s.rooms, r4: room("r4", "Alpha", "2026-04-01") } })));
+    expect(roomRows()).toEqual(["Launch", "Ops", "Design", "Alpha"]);
+  });
+});
+
 describe("deleting from the sidebar", () => {
   it("deletes a room from its ⋯ menu once you confirm", async () => {
     const deleteRoom = vi.fn(() => Promise.resolve());
     const room = { id: "r1", name: "Launch", members: [] } as unknown as ReturnType<typeof useDesk.getState>["rooms"][string];
     useDesk.setState({ view: "rooms", rooms: { r1: room }, activeRoom: "r1", hub: { deleteRoom } as never });
+    useRoomOrder.setState({ order: ["r1"] });
     sidebar();
     fireEvent.click(screen.getByRole("button", { name: "Launch options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete room…" }));
@@ -205,6 +249,7 @@ describe("deleting from the sidebar", () => {
     expect(deleteRoom).toHaveBeenCalledWith("r1");
     expect(useDesk.getState().rooms).toEqual({});
     expect(useDesk.getState().activeRoom).toBeNull();
+    expect(useRoomOrder.getState().order).not.toContain("r1");
   });
 
   it("deletes a grid, even the last one, leaving an empty one in its place", () => {

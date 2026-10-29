@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { GridsSection } from "../grids/Grids";
-import { MoreIcon } from "../groups/rows";
+import { SortList, SortRow } from "../groups/rows";
+import { arranged, forgetRoom, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
@@ -69,7 +70,8 @@ export function Sidebar({
   onSettings: () => void;
 }) {
   const { view, setView, connected, activeRoom, openRoom, unread } = useDesk();
-  const rooms = Object.values(useDesk((s) => s.rooms)).sort((a, b) => a.name.localeCompare(b.name));
+  const roomOrder = useRoomOrder((s) => s.order);
+  const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
   const roomsById = useDesk((s) => s.rooms);
@@ -82,6 +84,20 @@ export function Sidebar({
       const { [id]: _gone, ...rest } = s.rooms;
       return { rooms: rest, activeRoom: s.activeRoom === id ? null : s.activeRoom };
     });
+    forgetRoom(id);
+  };
+  const [roomSaid, setRoomSaid] = useState("");
+  const roomRows = useRef(new Map<string, HTMLElement>());
+  const roomDragged = useRef(false);
+  const roomHint = useId();
+  const sayRoom = (id: string) => {
+    const ids = arranged(useDesk.getState().rooms, useRoomOrder.getState().order).map((r) => r.id);
+    setRoomSaid(`${useDesk.getState().rooms[id]?.name}: room ${ids.indexOf(id) + 1} of ${ids.length}`);
+  };
+  const nudgeRoomBy = (id: string, by: -1 | 1) => {
+    if (!nudgeRoom(id, by)) return setRoomSaid(by < 0 ? "Already the first room" : "Already the last room");
+    sayRoom(id);
+    requestAnimationFrame(() => roomRows.current.get(id)?.focus());
   };
   const hubs = useChat((s) => s.hubs);
   const theme = useTheme();
@@ -128,34 +144,46 @@ export function Sidebar({
                   </svg>
                 </button>
               </span>
-              {rooms.map((r) => (
-                <div key={r.id} className="side-item">
-                  <button
-                    type="button"
-                    className={`side-row ${view === "rooms" && activeRoom === r.id ? "on" : ""}`}
-                    onClick={() => void openRoom(r.id)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setRoomMenu({ id: r.id, at: { x: e.clientX, y: e.clientY }, from: e.currentTarget });
-                    }}
-                  >
-                    <span className="side-name">{r.name}</span>
-                    {(unread[r.id] ?? 0) > 0 && <span className="badge">{unread[r.id]}</span>}
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn-sm side-more"
-                    aria-label={`${r.name} options`}
-                    aria-haspopup="menu"
-                    onClick={(e) => {
-                      const b = e.currentTarget.getBoundingClientRect();
-                      setRoomMenu({ id: r.id, at: { x: b.left, y: b.bottom + 2 }, from: e.currentTarget });
-                    }}
-                  >
-                    <MoreIcon />
-                  </button>
-                </div>
-              ))}
+              <span id={roomHint} className="sr-only">
+                Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
+              </span>
+              <SortList
+                label="Rooms"
+                type="room"
+                ids={rooms.map((r) => r.id)}
+                chip={(id) => roomsById[id]?.name}
+                onDragStart={() => setRoomMenu(null)}
+                justDragged={roomDragged}
+                onMove={(id, before) => {
+                  moveRoom(id, before);
+                  sayRoom(id);
+                }}
+                row={(id, lineBefore) => {
+                  const r = roomsById[id]!;
+                  return (
+                    <SortRow
+                      key={id}
+                      id={id}
+                      type="room"
+                      lineBefore={lineBefore}
+                      on={view === "rooms" && activeRoom === id}
+                      name={r.name}
+                      title="Drag to reorder"
+                      describedBy={roomHint}
+                      more={`${r.name} options`}
+                      register={(el) => (el ? roomRows.current.set(id, el) : roomRows.current.delete(id))}
+                      onOpen={() => !roomDragged.current && void openRoom(id)}
+                      onNudge={(by) => nudgeRoomBy(id, by)}
+                      onMenu={(at, from) => setRoomMenu({ id, at, from })}
+                    >
+                      {(unread[id] ?? 0) > 0 && <span className="badge">{unread[id]}</span>}
+                    </SortRow>
+                  );
+                }}
+              />
+              <span className="sr-only" aria-live="polite">
+                {roomSaid}
+              </span>
               {roomMenu && roomsById[roomMenu.id] && (
                 <Menu
                   label={`${roomsById[roomMenu.id]!.name} options`}

@@ -1539,7 +1539,6 @@ button {
   align-items: center;
   list-style: none;
 }
-.side-item > .side-row,
 .side-item > .gi {
   flex: 1;
   min-width: 0;
