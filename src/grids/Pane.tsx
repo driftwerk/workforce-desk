@@ -1,4 +1,5 @@
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { useSessionName } from "../groups/names";
@@ -12,10 +13,11 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { useGridDrag } from "./drag";
-import { STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
-import { closePane, createGrid, movePane, newTerminal, replacePane, setFocus, useGrids, writes } from "./store";
+import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
+import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
+import { closePane, createGrid, movePane, newTerminal, replacePane, setFocus, swapInPane, useGrids, writes } from "./store";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
+import type { Grid } from "./model";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -111,27 +113,83 @@ export function usePaneLabel(content: PaneContent | null): Label {
   };
 }
 
-/** One pane: its header (state, name, what it is, its options) and what it
- *  holds — a session, a conversation, a terminal, or nothing yet. */
-export function GridPane({ gridId, pane, focused }: { gridId: string; pane: PaneData; focused: boolean }) {
-  const label = usePaneLabel(pane.content);
-  const over = useGridDrag((s) => (s.over && s.over.gridId === gridId ? s.over : null));
-  const dragging = useGridDrag((s) => s.item !== null);
-  const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
+/** Taking pane `pane` out of the grid: a session or a conversation just
+ *  leaves it (nothing ends); a terminal with something still running in it
+ *  asks first, as closing it ends that. */
+function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: () => void; dialog: ReactNode } {
   const [confirm, setConfirm] = useState(false);
   const running = useTerminals((s) =>
     pane.content?.kind === "terminal" && pane.content.terminalId ? describeTerminal(s.byId[pane.content.terminalId], s.programs[pane.content.terminalId]).running : null,
   );
-  const entries = usePaneMenu(gridId, pane, () => {
+  const remove = () => {
     const busy = pane.content?.kind === "terminal" && (label.tracked || running);
     if (busy) setConfirm(true);
     else closePane(gridId, pane.id, closeContent);
-  });
+  };
+  const dialog = confirm && (
+    <Dialog
+      onClose={() => setConfirm(false)}
+      title={(id) => (
+        <header className="dialog-head">
+          <span className="dialog-title">
+            <h1 id={id} className="display-md">
+              Close this terminal?
+            </h1>
+            <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
+          </span>
+          <CloseButton onClose={() => setConfirm(false)} />
+        </header>
+      )}
+    >
+      <footer className="dialog-foot">
+        <button type="button" className="btn btn-ghost" data-autofocus onClick={() => setConfirm(false)}>
+          Keep it
+        </button>
+        <button
+          type="button"
+          className="btn btn-danger"
+          onClick={() => {
+            setConfirm(false);
+            closePane(gridId, pane.id, closeContent);
+          }}
+        >
+          Close terminal
+        </button>
+      </footer>
+    </Dialog>
+  );
+  return { remove, dialog };
+}
+
+/** What removing a pane is called: a terminal closes; anything else only
+ *  leaves the grid. */
+const removeLabel = (pane: PaneData): string => (pane.content?.kind === "terminal" ? "Close terminal" : pane.content ? "Remove from grid" : "Close pane");
+
+const RemoveIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+    <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+  </svg>
+);
+
+/** One pane: its header (state, name, what it is, its options, and taking
+ *  it off the grid) and what it holds — a session, a conversation, a
+ *  terminal, or nothing yet. Its header drags it. */
+export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pane: PaneData; focused: boolean; alone: boolean }) {
+  const label = usePaneLabel(pane.content);
+  const over = useGridDrag((s) => (s.over && s.over.gridId === gridId ? s.over : null));
+  const dragging = useGridDrag((s) => s.item !== null);
+  const movingPane = useGridDrag((s) => !!s.item?.from);
+  const lifted = useGridDrag((s) => s.item?.from?.gridId === gridId && s.item.from.paneId === pane.id);
+  const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneId === pane.id ? s.flash.n : 0));
+  const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
+  const { remove, dialog } = useRemovePane(gridId, pane, label);
+  const entries = usePaneMenu(gridId, pane, remove);
+  const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
   return (
     <section
-      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"}`}
+      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""}`}
       style={boxStyle(pane.rect)}
       aria-label={label.name}
       data-drop-pane={pane.id}
@@ -140,7 +198,7 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
       onFocusCapture={() => setFocus(gridId, pane.id)}
     >
       <div className="gpane-box">
-        <header className="gpane-head">
+        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={pane.content ? "Drag to move" : undefined} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
           <span className={`gpane-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
           {label.meta && <span className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>{label.meta}</span>}
@@ -151,6 +209,7 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
             type="button"
             className="icon-btn-sm"
             aria-label="Pane options"
+            title="Pane options"
             aria-haspopup="menu"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
@@ -163,12 +222,18 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
               <circle cx="11" cy="7" r="1.3" />
             </svg>
           </button>
+          {!(alone && !pane.content) && (
+            <button type="button" className="icon-btn-sm gpane-remove" aria-label="Remove from grid" title="Remove from grid" onClick={remove}>
+              <RemoveIcon />
+            </button>
+          )}
         </header>
         <div className="gpane-body">
           <PaneBody gridId={gridId} pane={pane} />
         </div>
         {label.asking && <Approval session={label.asking} />}
-        {dragging && (zone || free) && <DropZones zone={zone} free={!!free} />}
+        {dragging && (zone || free) && <DropZones zone={zone} free={!!free} move={movingPane && !pane.content} />}
+        {flash > 0 && <span key={flash} className="gpane-flash" aria-hidden="true" />}
       </div>
       {menu && (
         <Menu
@@ -181,48 +246,74 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
           }}
         />
       )}
-      {confirm && (
-        <Dialog
-          onClose={() => setConfirm(false)}
-          title={(id) => (
-            <header className="dialog-head">
-              <span className="dialog-title">
-                <h1 id={id} className="display-md">
-                  Close this terminal?
-                </h1>
-                <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
-              </span>
-              <CloseButton onClose={() => setConfirm(false)} />
-            </header>
-          )}
-        >
-          <footer className="dialog-foot">
-            <button type="button" className="btn btn-ghost" data-autofocus onClick={() => setConfirm(false)}>
-              Keep it
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={() => {
-                setConfirm(false);
-                closePane(gridId, pane.id, closeContent);
-              }}
-            >
-              Close terminal
-            </button>
-          </footer>
-        </Dialog>
-      )}
+      {dialog}
     </section>
   );
 }
 
+/** A pane being dragged: its name, following the pointer. */
+export function PaneDragChip({ gridId }: { gridId: string }) {
+  const item = useGridDrag((s) => (s.item?.from?.gridId === gridId ? s.item : null));
+  const at = useGridDrag((s) => s.at);
+  if (!item || !at) return null;
+  return createPortal(
+    <div className="drag-chip gpane-chip" style={{ left: at.x + 12, top: at.y + 8 }} aria-hidden="true">
+      {item.name}
+    </div>,
+    document.body,
+  );
+}
+
+/** The panes a layout had no room for, still running: click one to swap it
+ *  in, or drag it onto a pane. */
+export function ParkedTray({ grid }: { grid: Grid }) {
+  const parked = parkedOrder(grid.panes);
+  if (!parked.length) return null;
+  return (
+    <div className="gtray" role="region" aria-label={`Parked (${parked.length})`}>
+      <span className="gtray-label small">Parked ({parked.length})</span>
+      <ul className="gtray-list">
+        {parked.map((p) => (
+          <ParkedItem key={p.id} gridId={grid.id} pane={p} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ParkedItem({ gridId, pane }: { gridId: string; pane: PaneData }) {
+  const label = usePaneLabel(pane.content);
+  const { remove, dialog } = useRemovePane(gridId, pane, label);
+  const handle = usePaneDrag(gridId, pane, label.name);
+  const asking = !!label.asking;
+  return (
+    <li className={`gtray-item ${asking ? "gtray-asking" : ""}`}>
+      <button
+        type="button"
+        className="gtray-chip"
+        data-drag-handle
+        title="Click to swap it in, or drag it onto a pane"
+        onPointerDown={handle.onPointerDown}
+        onClick={() => !paneJustDragged() && swapInPane(gridId, pane.id)}
+      >
+        <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
+        <span className={`gtray-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
+        {asking && <span className="state-blocked small">needs you</span>}
+      </button>
+      <button type="button" className="icon-btn-sm gtray-remove" aria-label={`Remove ${label.name} from grid`} title="Remove from grid" onClick={remove}>
+        <RemoveIcon />
+      </button>
+      {dialog}
+    </li>
+  );
+}
+
 /** Where a drop would go: a side splits the pane, the middle replaces it. */
-function DropZones({ zone, free }: { zone: Zone | null; free: boolean }) {
-  if (free) {
+function DropZones({ zone, free, move }: { zone: Zone | null; free: boolean; move: boolean }) {
+  if (free || move) {
     return (
       <div className="gzones" aria-hidden="true">
-        <div className="gzone gzone-free on">Next free place</div>
+        <div className="gzone gzone-free on">{move ? "Move here" : "Next free place"}</div>
       </div>
     );
   }
@@ -350,6 +441,6 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuE
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
     { kind: "separator" },
-    { kind: "item", label: pane.content?.kind === "terminal" ? "Close terminal" : "Close pane", onSelect: onClose },
+    { kind: "item", label: removeLabel(pane), onSelect: onClose },
   ];
 }

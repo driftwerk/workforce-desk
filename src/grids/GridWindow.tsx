@@ -22,7 +22,7 @@ import { dragWindow } from "../ui/drag";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { PRESETS } from "./engine";
-import { countsLine, GridCanvas, GridName, ParkedButton, useGridCounts } from "./GridView";
+import { countsLine, GridCanvas, GridName, LayoutUndo, useGridCounts } from "./GridView";
 import { WINDOW_MODES, type WindowMode } from "./model";
 import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
@@ -142,7 +142,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
           {[where, countsLine(counts)].filter(Boolean).join(" · ")}
         </span>
         <span className="grids-fill" onMouseDown={dragWindow} />
-        <ParkedButton grid={grid} />
+        <LayoutUndo gridId={grid.id} />
         <label className="gwin-mode small">
           Window
           <select value={mode} onChange={(e) => chooseMode(e.target.value as WindowMode)}>

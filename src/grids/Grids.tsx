@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { countsLine, GridCanvas, GridName, NewTerminalButton, ParkedButton, PresetPicker, useGridCounts } from "./GridView";
+import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useGridCounts } from "./GridView";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { closeGridWindow } from "../platform";
 import { createGrid, deleteGrid, setActive, setOpen, useGrids } from "./store";
@@ -34,7 +34,7 @@ export function GridsMain() {
         <span className="faint small grids-count">{countsLine(counts)}</span>
         <PresetPicker grid={grid} />
         <span className="grids-fill" />
-        <ParkedButton grid={grid} />
+        <LayoutUndo gridId={grid.id} />
         <NewTerminalButton gridId={grid.id} />
         <button type="button" className="btn btn-ghost gbtn" onClick={() => detach(grid.id)}>
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">

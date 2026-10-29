@@ -4,12 +4,11 @@ import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
-import { Menu, type MenuEntry } from "../ui/Menu";
 import { useGridDrag } from "./drag";
-import { PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Pane, type Preset, type PresetId, type Splitter } from "./engine";
-import { GridPane } from "./Pane";
-import { closePane, dragSplitter, layOut, newTerminal, renameGrid, unparkPane, useGrids } from "./store";
-import { closeContent, trackedIn } from "./terminals";
+import { laidOut, PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Preset, type PresetId, type Splitter } from "./engine";
+import { GridPane, PaneDragChip, ParkedTray } from "./Pane";
+import { dismissUndo, dragSplitter, layOut, newTerminal, renameGrid, undoFor, undoLayout, useGrids } from "./store";
+import { trackedIn } from "./terminals";
 import type { Grid } from "./model";
 
 /** A preset drawn small: its places as cells. */
@@ -78,54 +77,26 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
 export const countsLine = (c: { panes: number; working: number; needsYou: number }): string =>
   [`${c.panes} ${c.panes === 1 ? "pane" : "panes"}`, c.working ? `${c.working} working` : "", c.needsYou ? `${c.needsYou} needs you` : ""].filter(Boolean).join(" · ");
 
-/** Panes this grid has parked (out of the layout, still running), to bring
- *  back or close. */
-export function ParkedButton({ grid }: { grid: Grid }) {
-  const parked = grid.panes.filter((p) => !p.rect && p.content);
-  const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement } | null>(null);
-  const sessions = useDesk((s) => s.sessions);
-  const roster = useChat((s) => s.roster);
-  if (!parked.length) return null;
-  const name = (p: Pane): string => {
-    const c = p.content!;
-    if (c.kind === "session") return sessions[c.sessionId]?.name ?? "Session";
-    if (c.kind === "agent") return roster.find((a) => `${a.hubId}/${a.id}` === c.agent)?.name ?? "Agent";
-    return c.cwd ? `Terminal · ${c.cwd.split("/").filter(Boolean).pop() ?? "~"}` : "Terminal";
-  };
-  const entries: MenuEntry[] = parked.map((p) => ({
-    kind: "item",
-    label: name(p),
-    submenu: [
-      { kind: "item", label: "Bring back", onSelect: () => unparkPane(grid.id, p.id) },
-      { kind: "item", label: p.content?.kind === "terminal" ? "Close terminal" : "Remove", onSelect: () => closePane(grid.id, p.id, closeContent) },
-    ],
-  }));
+/** How long "N items parked · Undo" stays after a layout change. */
+const UNDO_MS = 10_000;
+
+/** Right after a layout change parked panes: how many, and an undo that
+ *  puts the grid back exactly as it was. */
+export function LayoutUndo({ gridId }: { gridId: string }) {
+  const undo = useGrids((s) => undoFor(s, gridId));
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => dismissUndo(gridId), UNDO_MS);
+    return () => clearTimeout(t);
+  }, [undo, gridId]);
+  if (!undo) return null;
   return (
-    <>
-      <button
-        type="button"
-        className="btn btn-ghost gbtn"
-        aria-haspopup="menu"
-        title="Out of this layout, still running"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          setMenu({ x: r.left, y: r.bottom + 4, from: e.currentTarget });
-        }}
-      >
-        {parked.length} parked
+    <span className="gundo small" role="status">
+      {undo.parked} {undo.parked === 1 ? "item" : "items"} parked ·{" "}
+      <button type="button" className="link small strong" onClick={() => undoLayout(gridId)}>
+        Undo
       </button>
-      {menu && (
-        <Menu
-          label="Parked panes"
-          at={menu}
-          entries={entries}
-          onClose={(refocus) => {
-            if (refocus) menu.from.focus();
-            setMenu(null);
-          }}
-        />
-      )}
-    </>
+    </span>
   );
 }
 
@@ -188,20 +159,26 @@ export function NewTerminalButton({ gridId }: { gridId: string }) {
  *  sidebar, the layouts to drop it on. */
 export function GridCanvas({ grid }: { grid: Grid }) {
   const focus = useGrids((s) => s.focus[grid.id]);
-  const dragging = useGridDrag((s) => s.item !== null);
+  // Layouts to drop on are for what comes from the sidebar; a pane moves.
+  const dragging = useGridDrag((s) => s.item !== null && !s.item.from);
   const area = useRef<HTMLDivElement>(null);
+  const alone = laidOut(grid.panes).length === 1;
   return (
-    <div className="gcanvas" data-drop-grid={grid.id}>
-      <div className="gcanvas-inner" ref={area}>
-        {grid.panes.map((p) => (
-          <GridPane key={p.id} gridId={grid.id} pane={p} focused={focus === p.id} />
-        ))}
-        {splitters(grid.panes).map((s) => (
-          <SplitterHandle key={splitterKey(s)} grid={grid} splitter={s} area={area} />
-        ))}
+    <>
+      <div className="gcanvas" data-drop-grid={grid.id}>
+        <div className="gcanvas-inner" ref={area}>
+          {grid.panes.map((p) => (
+            <GridPane key={p.id} gridId={grid.id} pane={p} focused={focus === p.id} alone={alone} />
+          ))}
+          {splitters(grid.panes).map((s) => (
+            <SplitterHandle key={splitterKey(s)} grid={grid} splitter={s} area={area} />
+          ))}
+        </div>
+        {dragging && <PresetStrip gridId={grid.id} />}
       </div>
-      {dragging && <PresetStrip gridId={grid.id} />}
-    </div>
+      <ParkedTray grid={grid} />
+      <PaneDragChip gridId={grid.id} />
+    </>
   );
 }
 
