@@ -1,3 +1,10 @@
+/** Every colour a theme has. Each can be overridden under
+ *  `[colors.override]` in a theme's TOML; those not set are derived from
+ *  the background, signal and text (see `derive`):
+ *  - `handle`: drag handles at rest (a column's resize grip, the edges
+ *    between grid panes) — the border colour unless set.
+ *  - `handleActive`: a drag handle hovered, dragged or focused — the
+ *    signal colour unless set. */
 export const TOKENS = [
   "bg",
   "surface",
@@ -21,6 +28,8 @@ export const TOKENS = [
   "ansiRed",
   "ansiGreen",
   "ansiCyan",
+  "handle",
+  "handleActive",
 ] as const;
 
 export type Token = (typeof TOKENS)[number];
@@ -96,7 +105,7 @@ export const derive = (spec: ThemeSpec): Theme => {
   const text = spec.text ?? (dark ? PAPER_TEXT : INK);
   const signal = spec.signal;
   const signalSoft = mix(signal, bg, 0.78);
-  const derived: Palette = {
+  const derived: Omit<Palette, "handle" | "handleActive"> = {
     bg,
     surface: mix(bg, text, 0.04),
     raised: mix(bg, text, 0.08),
@@ -121,7 +130,10 @@ export const derive = (spec: ThemeSpec): Theme => {
     ansiGreen: dark ? "#A6E37A" : "#3F7A12",
     ansiCyan: dark ? "#8FD8E8" : "#0E7490",
   };
-  return { spec, dark, colors: { ...derived, ...spec.overrides } };
+  const colors = { ...derived, ...spec.overrides };
+  // The handles follow the border and signal as they end up, overrides
+  // included, unless a theme sets them itself.
+  return { spec, dark, colors: { ...colors, handle: spec.overrides.handle ?? colors.border, handleActive: spec.overrides.handleActive ?? colors.signal } };
 };
 
 const kebab = (token: string): string => token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);

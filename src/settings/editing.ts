@@ -46,6 +46,8 @@ export const DERIVED: readonly [Token, string][] = [
   ["ansiRed", "red"],
   ["ansiGreen", "green"],
   ["ansiCyan", "cyan"],
+  ["handle", "drag handle"],
+  ["handleActive", "drag handle, active"],
 ];
 
 export const FONTS = [
