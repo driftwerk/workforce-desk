@@ -82,8 +82,21 @@ pub fn accounts(paths: &Paths) -> Result<Vec<HubAccount>> {
     Ok(out)
 }
 
-/// Keeps a remote hub Desk has just been paired with.
+/// Keeps a remote hub Desk has just been paired with. Pairing the same
+/// address again (to connect as yourself, say) replaces its token where it
+/// is: the id comes from the host, so it — and every grid, group and DM
+/// that names its agents — stays the same, and so does its place.
 pub fn save(paths: &Paths, label: &str, url: &str, token: &str) -> Result<HubRecord> {
+    save_with(&Secrets::for_paths(paths), paths, label, url, token)
+}
+
+fn save_with(
+    secrets: &Secrets,
+    paths: &Paths,
+    label: &str,
+    url: &str,
+    token: &str,
+) -> Result<HubRecord> {
     let url = url.trim_end_matches('/').to_string();
     if !url.starts_with("https://")
         && !url.starts_with("http://127.0.0.1")
@@ -99,12 +112,12 @@ pub fn save(paths: &Paths, label: &str, url: &str, token: &str) -> Result<HubRec
     if record.id == LOCAL_HUB_ID {
         eyre::bail!("that name is reserved for the local hub");
     }
-    Secrets::for_paths(paths).set_account(&device_token_account(&record.id), token)?;
-    let mut records: Vec<_> = read_records(paths)?
-        .into_iter()
-        .filter(|r| r.id != record.id)
-        .collect();
-    records.push(record.clone());
+    secrets.set_account(&device_token_account(&record.id), token)?;
+    let mut records = read_records(paths)?;
+    match records.iter_mut().find(|r| r.id == record.id) {
+        Some(kept) => *kept = record.clone(),
+        None => records.push(record.clone()),
+    }
     write_records(paths, &records)?;
     Ok(record)
 }
@@ -133,6 +146,33 @@ mod tests {
             "hub-example-com"
         );
         assert!(id_for("not a url").is_err());
+    }
+
+    #[test]
+    fn pairing_an_address_again_replaces_its_token_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let secrets = Secrets::File(desk_core::FileSecrets::new(&paths));
+        let token = |id: &str| secrets.get_account(&device_token_account(id)).unwrap();
+        save_with(&secrets, &paths, "Acme", "https://a.example.com", "first").unwrap();
+        save_with(&secrets, &paths, "Other", "https://b.example.com", "other").unwrap();
+        let again =
+            save_with(&secrets, &paths, "Acme", "https://a.example.com/", "second").unwrap();
+        assert_eq!(again.id, "a-example-com");
+        let ids: Vec<_> = read_records(&paths)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.id, r.label))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("a-example-com".to_string(), "Acme".to_string()),
+                ("b-example-com".to_string(), "Other".to_string())
+            ]
+        );
+        assert_eq!(token("a-example-com").as_deref(), Some("second"));
+        assert_eq!(token("b-example-com").as_deref(), Some("other"));
     }
 
     #[test]

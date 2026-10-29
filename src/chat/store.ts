@@ -136,16 +136,24 @@ export const useChat = create<ChatStore>((set, get) => ({
   activeAgent: null,
   rosterRead: false,
   setHubs: (hubs) => {
+    const before = get().hubs;
+    /** Conversations on a hub Desk now reaches with another token (paired
+     *  again, as you): reopened with it, under the same keys. */
+    const reopen: string[] = [];
     for (const [key, c] of live) {
-      if (!hubs.some((h) => key.startsWith(`${h.id}/`))) {
+      const hub = hubs.find((h) => key.startsWith(`${h.id}/`));
+      const was = hub && before.find((h) => h.id === hub.id);
+      if (!hub || (was && (was.token !== hub.token || was.url !== hub.url))) {
         c.close();
         live.delete(key);
+        if (hub) reopen.push(key);
       }
     }
     set((s) => ({
       hubs,
       histories: Object.fromEntries(Object.entries(s.histories).filter(([key]) => hubs.some((h) => key.startsWith(`${h.id}/`)))),
     }));
+    for (const key of reopen) ensure(key);
     void get().refreshRoster();
     // The overseer, and so its suggestions, are on this Mac.
     for (const hub of hubs.filter((h) => h.local && !(h.id in get().people)))
