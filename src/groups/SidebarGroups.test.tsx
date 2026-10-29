@@ -7,6 +7,9 @@ import { Tile } from "../floor/SessionTile";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { SessionCard } from "../session/SessionCard";
+import { MAIN_GRID } from "../grids/model";
+import type { GridStorage } from "../grids/storage";
+import { createGrid, deliver, layOut, startGrids, useGrids } from "../grids/store";
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { SidebarGroups } from "./SidebarGroups";
@@ -62,7 +65,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const groups = () => render(<SidebarGroups onNewSession={() => {}} newSessionKeys="⌘N" onNewCrew={() => {}} />);
+const groups = () => render(<SidebarGroups />);
 const section = (name: string) => screen.getByRole("group", { name });
 const rows = (name: string) =>
   within(section(name))
@@ -168,7 +171,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Open"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
@@ -247,5 +250,87 @@ describe("groups in the sidebar", () => {
     );
     expect(rows("Acme")).toEqual(["Scout"]);
     expect(rows("Ungrouped")).toEqual(["Ada", "web-release", "fresh"]);
+  });
+});
+
+describe("sessions and agents in grids", () => {
+  const memory = (): GridStorage => {
+    const kept = new Map<string, unknown>();
+    return { get: (k) => kept.get(k), set: (k, v) => void kept.set(k, v), remove: (k) => void kept.delete(k), subscribe: () => () => {} } as GridStorage;
+  };
+  beforeEach(() => {
+    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
+    startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+    useDesk.setState({ view: "floor", openId: null });
+    useChat.setState({ activeAgent: null });
+  });
+  const contentOf = (gridId: string) => useGrids.getState().grids[gridId]!.panes.filter((p) => p.rect).map((p) => p.content);
+
+  it("a click on one showing in a grid shows that grid and points its pane out, from a group too", () => {
+    layOut(MAIN_GRID, "halves");
+    const other = createGrid();
+    useGrids.setState({ active: MAIN_GRID });
+    layOut(other, "halves");
+    deliver(other, { kind: "session", sessionId: "s1" });
+    deliver(other, { kind: "agent", agent: "remote/ada" });
+    groups();
+    // api-e7 (s1) is in Acme.
+    fireEvent.click(row("api-e7"));
+    const s = useGrids.getState();
+    const pane = s.grids[other]!.panes.find((p) => p.content?.kind === "session")!;
+    expect(useDesk.getState().view).toBe("grids");
+    expect(s.active).toBe(other);
+    expect(s.flash).toMatchObject({ gridId: other, paneId: pane.id });
+    expect(s.focus[other]).toBe(pane.id);
+    expect(useDesk.getState().openId).toBeNull();
+
+    useDesk.setState({ view: "floor" });
+    fireEvent.click(row("Ada"));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(useGrids.getState().flash?.paneId).toBe(useGrids.getState().grids[other]!.panes.find((p) => p.content?.kind === "agent")!.id);
+    expect(useChat.getState().activeAgent).toBeNull();
+  });
+
+  it("a click on one in no grid (or only parked in one) opens it as before", () => {
+    layOut(MAIN_GRID, "one");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    layOut(MAIN_GRID, "one");
+    expect(contentOf(MAIN_GRID)).toEqual([{ kind: "session", sessionId: "s1" }]);
+    groups();
+    fireEvent.click(row("web-release"));
+    expect(useDesk.getState().openId).toBe("s2");
+    // As before: a session opens beside Rooms.
+    expect(useDesk.getState().view).toBe("rooms");
+    expect(useGrids.getState().flash).toBeNull();
+  });
+
+  it("adds one to a grid from its menu: the first empty pane, else beside the largest, or a new grid", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    useGrids.setState((s) => ({ grids: { ...s.grids, [MAIN_GRID]: { ...s.grids[MAIN_GRID]!, name: "Release" } } }));
+    groups();
+    const add = (name: string, grid: string) => {
+      fireEvent.contextMenu(row(name));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Add to grid" }));
+      const sub = screen.getByRole("menu", { name: "Add to grid" });
+      expect(within(sub).getAllByRole("menuitem").map((m) => m.textContent)).toEqual([...useGrids.getState().order.map((id) => useGrids.getState().grids[id]!.name), "New grid"]);
+      fireEvent.click(within(sub).getByRole("menuitem", { name: grid }));
+    };
+    add("web-release", "Release");
+    expect(contentOf(MAIN_GRID)).toEqual([
+      { kind: "session", sessionId: "s1" },
+      { kind: "session", sessionId: "s2" },
+    ]);
+    expect(useDesk.getState().view).toBe("grids");
+    add("Scout", "Release");
+    const shown = useGrids.getState().grids[MAIN_GRID]!.panes.filter((p) => p.rect);
+    expect(shown).toHaveLength(3);
+    expect(shown.find((p) => p.content?.kind === "agent")!.rect).toEqual({ x: 0, y: 6, w: 6, h: 6 });
+    add("Ada", "New grid");
+    const fresh = useGrids.getState().order.at(-1)!;
+    expect(fresh).not.toBe(MAIN_GRID);
+    expect(contentOf(fresh)).toEqual([{ kind: "agent", agent: "remote/ada" }]);
+    expect(useGrids.getState().active).toBe(fresh);
   });
 });

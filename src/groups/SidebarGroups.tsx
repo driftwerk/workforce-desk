@@ -14,12 +14,15 @@ import {
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
+import { createGrid, deliver, useGrids } from "../grids/store";
+import { reveal, revealIn } from "../grids/windows";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { Mark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
+import { RenameField } from "../ui/RenameField";
 import {
   agentItem,
   createGroup,
@@ -94,14 +97,17 @@ const GROUP_ACCEPTS = ["item", "group"];
 type Operation = Parameters<NonNullable<ComponentProps<typeof DragDropProvider>["onDragMove"]>>[0]["operation"];
 
 /** Groups of agents and sessions, Desk's own, with Ungrouped last. Drag to
- *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest. */
-export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onNewSession: () => void; newSessionKeys: string; onNewCrew: () => void }) {
+ *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
+ *  One that's showing in a grid is shown there when clicked. */
+export function SidebarGroups() {
   const { sessions, openId, open, view, activeRoom, openRoom } = useDesk();
   const { roster, hubs, activeAgent, openDm } = useChat();
   const groups = useSettings((s) => s.groups);
   const ungrouped = useSettings((s) => s.ungrouped);
   const names = useSessionNames();
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
+  const gridOrder = useGrids((s) => s.order);
+  const allGrids = useGrids((s) => s.grids);
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -180,12 +186,26 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
     change((l) => deleteGroup(l, present, id), `group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
   };
 
+  /** Opens it as always; or, when it's showing in a grid, shows it there. */
   const openItem = (item: Item) => {
+    const content = contentOfItem(item.key);
+    if (content && reveal(content)) return;
     if (item.kind === "session") open(item.session.id);
     else {
       void openRoom(null);
       openDm(agentKey(item.agent));
     }
+  };
+
+  /** Puts it in grid `gridId` (its first empty pane, else beside the
+   *  largest), or a new grid, and shows it there. */
+  const addToGrid = (item: Item, gridId: string | null) => {
+    const content = contentOfItem(item.key);
+    if (!content) return;
+    const id = gridId ?? createGrid();
+    deliver(id, content);
+    revealIn(id, content);
+    setSaid(`Added ${nameOf(item)} to ${useGrids.getState().grids[id]?.name ?? "the grid"}`);
   };
 
   const startRename = (item: Item) => item.kind === "session" && setEditing({ kind: "session", key: item.key });
@@ -204,6 +224,15 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
           ...targets.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => moveTo(key, g.id) })),
           ...(targets.length ? [{ kind: "separator" as const }] : []),
           { kind: "item", label: "New group…", onSelect: () => newGroup(key) },
+        ],
+      },
+      {
+        kind: "item",
+        label: "Add to grid",
+        submenu: [
+          ...gridOrder.flatMap((id): MenuEntry[] => (allGrids[id] ? [{ kind: "item", label: allGrids[id]!.name, onSelect: () => addToGrid(item, id) }] : [])),
+          ...(gridOrder.length ? [{ kind: "separator" as const }] : []),
+          { kind: "item", label: "New grid", onSelect: () => addToGrid(item, null) },
         ],
       },
       ...(from !== UNGROUPED
@@ -290,7 +319,7 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
       }}
     >
       <div className="side-section groups" aria-label="Groups" role="region">
-        <span className="side-label side-label-action groups-head">
+        <span className="side-label side-label-action side-head">
           Groups
           <button type="button" className="icon-btn-sm" aria-label="New group" title="New group" onClick={() => newGroup()}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -369,14 +398,6 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
             })}
           </GroupSection>
         ))}
-        <span className="groups-new">
-          <button type="button" className="link small" onClick={onNewSession} aria-label="New session">
-            New session {newSessionKeys}
-          </button>
-          <button type="button" className="link small" onClick={onNewCrew}>
-            New crew member
-          </button>
-        </span>
         <span className="sr-only" aria-live="polite">
           {said}
         </span>
@@ -646,38 +667,5 @@ function ItemRow({
         )}
       </li>
     </>
-  );
-}
-
-/** Renames in place: Enter saves, Escape cancels, and leaving saves. */
-function RenameField({ label, initial, mono, onDone }: { label: string; initial: string; mono: boolean; onDone: (name: string | null) => void }) {
-  const [value, setValue] = useState(initial);
-  const done = useRef(false);
-  const finish = (name: string | null) => {
-    if (done.current) return;
-    done.current = true;
-    onDone(name);
-  };
-  return (
-    <input
-      className={`rename-field ${mono ? "mono" : ""}`}
-      aria-label={label}
-      value={value}
-      autoFocus
-      spellCheck={false}
-      onFocus={(e) => e.currentTarget.select()}
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          finish(value);
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();
-          finish(null);
-        }
-      }}
-      onBlur={() => finish(value)}
-    />
   );
 }

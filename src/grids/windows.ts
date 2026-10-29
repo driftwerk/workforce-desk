@@ -18,7 +18,7 @@ import {
   type MonitorInfo,
 } from "../platform";
 import { deskState } from "../restore/boot";
-import type { PaneContent } from "./engine";
+import { findContent, laidOut, type PaneContent } from "./engine";
 import { gridOfLabel, MAIN_GRID, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
 import { useDesk } from "../hub/store";
@@ -77,12 +77,7 @@ export async function startGridsHere(role: Role): Promise<() => void> {
     listenerCleanup(listen<{ gridId: string; content: PaneContent }>("grid-deliver", (e) => deliver(e.payload.gridId, e.payload.content))),
     listenerCleanup(listen<{ gridId: string; name: string }>("grid-rename", (e) => renameGrid(e.payload.gridId, e.payload.name))),
     // The main window points a pane out here (see `reveal`).
-    listenerCleanup(
-      listen<{ gridId: string; paneId: string }>("grid-flash", (e) => {
-        setFocus(e.payload.gridId, e.payload.paneId);
-        flashPane(e.payload.gridId, e.payload.paneId);
-      }),
-    ),
+    listenerCleanup(listen<{ gridId: string; content: PaneContent }>("grid-flash", (e) => void pointOut(e.payload.gridId, e.payload.content))),
   ];
   return () => stops.forEach((s) => s());
 }
@@ -190,26 +185,42 @@ export const focusGridWindow = async (id: string): Promise<void> => {
   );
 };
 
-/** Shows where `content` is in a grid, if it's in one that can be seen:
- *  the main window's Grids view on that grid, or that grid's own window
- *  brought forward; the pane is pointed out for a moment. False when it
- *  isn't, so it's opened as usual. */
-export const reveal = (content: PaneContent): boolean => {
+/** Focuses and points out the pane showing `content` in grid `gridId`, in
+ *  this window; false when it isn't laid out there. */
+const pointOut = (gridId: string, content: PaneContent): boolean => {
+  const p = findContent(laidOut(useGrids.getState().grids[gridId]?.panes ?? []), content);
+  if (!p) return false;
+  setFocus(gridId, p.id);
+  flashPane(gridId, p.id);
+  return true;
+};
+
+/** Shows `content` in grid `gridId`: the main window's Grids view on that
+ *  grid, or the grid's own window brought forward, with its pane pointed
+ *  out for a moment. */
+export const revealIn = (gridId: string, content: PaneContent): boolean => {
   const s = useGrids.getState();
-  const at = showing(s, content);
-  if (!at) return false;
-  const g = s.grids[at.gridId]!;
-  if (g.placement.kind === "main") {
-    setActive(at.gridId);
-    setFocus(at.gridId, at.paneId);
-    flashPane(at.gridId, at.paneId);
-    const desk = useDesk.getState();
-    // A session card open on top would hide it.
-    if (desk.openId) desk.open(null);
-    desk.setView("grids");
+  const g = s.grids[gridId];
+  if (!g) return false;
+  if (g.placement.kind === "window" && s.open[gridId]) {
+    void focusGridWindow(gridId);
+    // Sent after anything delivered there, so it's placed by then.
+    void emitTo(windowLabel(gridId), "grid-flash", { gridId, content }).catch(() => undefined);
     return true;
   }
-  void focusGridWindow(at.gridId);
-  void emitTo(windowLabel(at.gridId), "grid-flash", at).catch(() => undefined);
+  if (g.placement.kind !== "main") return false;
+  setActive(gridId);
+  if (!pointOut(gridId, content)) return false;
+  const desk = useDesk.getState();
+  // A session card open on top would hide it.
+  if (desk.openId) desk.open(null);
+  desk.setView("grids");
   return true;
+};
+
+/** Shows where `content` is in a grid, if it's in one that can be seen (see
+ *  `showing`). False when it isn't, so it's opened as usual. */
+export const reveal = (content: PaneContent): boolean => {
+  const at = showing(useGrids.getState(), content);
+  return !!at && revealIn(at.gridId, content);
 };

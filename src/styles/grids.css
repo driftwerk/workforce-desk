@@ -510,11 +510,27 @@ body.gsplitting-h * {
   white-space: nowrap;
 }
 
-/* The sidebar in the Grids view. */
-.side-row-add {
-  color: var(--signal-soft-text);
-  font-weight: 600;
-  font-size: 13px;
+/* The sidebar in the Grids view: its grids, in their order. */
+.side-grids {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.side-grid.ghost {
+  opacity: 0.35;
+}
+.side-row.drop-in {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+.side-row-editing {
+  padding: 3px 6px;
+}
+.drop-line-grid {
+  margin: 1px 8px;
 }
 .side-hint {
   margin: 0;

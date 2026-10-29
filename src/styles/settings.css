@@ -32,15 +32,10 @@
   padding: 8px 10px;
   text-align: left;
 }
-.settings-done kbd,
-.side-settings kbd {
+.settings-done kbd {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
-}
-.side-settings {
-  align-self: flex-start;
-  padding: 0 8px;
 }
 
 .settings-main {
