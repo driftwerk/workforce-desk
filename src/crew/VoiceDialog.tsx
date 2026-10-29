@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { VoiceSpec } from "../platform";
-import { providerById, sampleLine, tryVoice, voicesOf, VOICE_PROVIDERS, type VoiceChoice } from "../settings/voiceCatalog";
+import { AddVoiceById } from "../settings/AddVoiceById";
+import { addCustomVoice, removeCustomVoice, useSettings } from "../settings/store";
+import { providerById, sampleLine, tryVoice, voicesOf, withCustom, VOICE_PROVIDERS, type VoiceChoice } from "../settings/voiceCatalog";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 
 const PlayIcon = () => (
@@ -11,7 +13,7 @@ const PlayIcon = () => (
 );
 
 /** The voices `provider` offers, loaded from the voice engine where it
- *  keeps them. */
+ *  keeps them, and then the ones added to it by id. */
 export function useVoices(provider: string): { voices: VoiceChoice[]; problem: string | null } {
   const fixed = (id: string): VoiceChoice[] => {
     const v = providerById(id)?.voices;
@@ -35,8 +37,11 @@ export function useVoices(provider: string): { voices: VoiceChoice[]; problem: s
       live = false;
     };
   }, [provider]);
+  const custom = useSettings((s) => s.customVoices[provider]);
   // Never another provider's voices: picking one would save it under this one.
-  return state.of === provider ? { voices: state.voices, problem: state.problem } : { voices: fixed(provider), problem: null };
+  return state.of === provider
+    ? { voices: withCustom(state.voices, custom), problem: state.problem }
+    : { voices: withCustom(fixed(provider), custom), problem: null };
 }
 
 const sameVoice = (a: VoiceSpec, b: VoiceSpec): boolean =>
@@ -135,6 +140,7 @@ export function VoiceDialog({
   const [choice, setChoice] = useState<VoiceSpec>(start);
   const [have, setHave] = useState<string[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const { voices, problem: listProblem } = useVoices(provider);
   const p = providerById(provider);
 
@@ -189,7 +195,10 @@ export function VoiceDialog({
                 className="provider-row"
                 aria-current={vp.id === provider ? "true" : undefined}
                 data-autofocus={vp.id === provider ? true : undefined}
-                onClick={() => setProvider(vp.id)}
+                onClick={() => {
+                  setProvider(vp.id);
+                  setAdding(false);
+                }}
               >
                 <span className="provider-text">
                   <b>{vp.name}</b>
@@ -251,10 +260,38 @@ export function VoiceDialog({
                       <span className="chip chip-default">Default</span>
                     )}
                   </button>
+                  {v.custom && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      aria-label={`Remove ${v.name}`}
+                      onClick={() => removeCustomVoice(provider, v.id)}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           </div>
+          {p?.customIds &&
+            (adding ? (
+              <AddVoiceById
+                key={provider}
+                provider={p}
+                model={model(provider)}
+                onCancel={() => setAdding(false)}
+                onAdd={(v) => {
+                  addCustomVoice(provider, v);
+                  setChoice({ provider, model: model(provider), voice: v.id });
+                  setAdding(false);
+                }}
+              />
+            ) : (
+              <button type="button" className="btn btn-ghost add-voice-open" onClick={() => setAdding(true)}>
+                Use a voice ID
+              </button>
+            ))}
         </div>
       </div>
       <footer className="dialog-foot">

@@ -43,6 +43,14 @@ export interface VoiceSpec {
   voice?: string;
 }
 
+/** A voice someone added by its id (a cloned or community voice), named as
+ *  its provider calls it or as they chose. */
+export interface CustomVoice {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 export interface Settings {
   theme: string;
   /** The sidebar chooser's theme, kept while Auto, Night or Day is on;
@@ -55,6 +63,8 @@ export interface Settings {
   defaultVoice: VoiceSpec;
   /** Agents' own voices, by agent key. */
   agentVoices: Record<string, VoiceSpec>;
+  /** Voices added by id, by provider (`fish_audio`, `elevenlabs`). */
+  customVoices: Record<string, CustomVoice[]>;
   voice: boolean;
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;

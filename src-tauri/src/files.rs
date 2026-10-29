@@ -19,6 +19,16 @@ pub struct VoiceSpec {
     pub voice: Option<String>,
 }
 
+/// A voice someone added by its id (a cloned or community voice), named
+/// as its provider calls it or as they chose.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomVoice {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// How new agents think: a provider, and optionally one of its models and
 /// efforts (its defaults when unset).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -85,6 +95,9 @@ pub struct Settings {
     /// Agents' own voices, by agent key (`hub/agent`).
     #[serde(default)]
     pub agent_voices: std::collections::BTreeMap<String, VoiceSpec>,
+    /// Voices added by id, by provider (`fish_audio`, `elevenlabs`).
+    #[serde(default)]
+    pub custom_voices: std::collections::BTreeMap<String, Vec<CustomVoice>>,
     /// Wake-by-name and push-to-talk.
     #[serde(default)]
     pub voice: bool,
@@ -139,6 +152,7 @@ impl Default for Settings {
             plan: None,
             default_voice: default_voice(),
             agent_voices: Default::default(),
+            custom_voices: Default::default(),
             voice: false,
             voice_engine: default_voice_engine(),
             shortcuts: Default::default(),
@@ -279,6 +293,30 @@ mod tests {
         .unwrap();
         assert!(load_settings(&paths).unwrap().tuple);
         assert_eq!(load_settings(&paths).unwrap().theme, "harbour");
+    }
+
+    #[test]
+    fn voices_added_by_id_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"harbour"}"#).unwrap();
+        assert!(load_settings(&paths).unwrap().custom_voices.is_empty());
+        let mut settings = Settings::default();
+        settings.custom_voices.insert(
+            "elevenlabs".into(),
+            vec![CustomVoice {
+                id: "Xb7hH8MSUJpSbSDYk0k2".into(),
+                name: "My clone".into(),
+                description: None,
+            }],
+        );
+        save_settings(&paths, &settings).unwrap();
+        assert!(
+            std::fs::read_to_string(paths.settings())
+                .unwrap()
+                .contains(r#""customVoices""#)
+        );
+        assert_eq!(load_settings(&paths).unwrap(), settings);
     }
 
     #[test]

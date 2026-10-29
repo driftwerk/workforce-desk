@@ -89,6 +89,42 @@ impl Hub {
             .content_type("application/json")
             .send(body)
     }
+
+    /// The key Desk keeps for a speech provider (`speech/<provider>/api_key`
+    /// in the hub's vault, where Settings → Voices saves it); `None` when
+    /// there's none. It is never logged.
+    pub fn speech_key(&self, provider: &str) -> Result<Option<String>> {
+        let mut response = self
+            .agent
+            .get(&format!(
+                "{}/api/vault/speech/{provider}/api_key",
+                self.base
+            ))
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .call()?;
+        let status = response.status();
+        if status.as_u16() == 404 {
+            return Ok(None);
+        }
+        let body = response.body_mut().read_to_string()?;
+        if !status.is_success() {
+            bail!(
+                "Desk's hub wouldn't read the key ({status}): {}",
+                refusal(&body)
+            );
+        }
+        #[derive(Deserialize)]
+        struct Entry {
+            value: serde_json::Value,
+        }
+        let entry: Entry = serde_json::from_str(&body)?;
+        Ok(entry
+            .value
+            .as_str()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(String::from))
+    }
 }
 
 #[derive(Deserialize)]
@@ -289,6 +325,33 @@ mod tests {
             hub.speak(&fish(), "hi"),
             Err(SpeechError::Provider(_))
         ));
+    }
+
+    #[test]
+    fn reads_a_speech_key_from_the_vault() {
+        let (hub, seen) = fake(
+            200,
+            "application/json",
+            r#"{"path":"speech/fish_audio/api_key","value":"vault-key"}"#.into(),
+        );
+        assert_eq!(
+            hub.speech_key("fish_audio").unwrap().as_deref(),
+            Some("vault-key")
+        );
+        let seen = seen.recv().unwrap();
+        assert!(
+            seen.head
+                .starts_with("GET /api/vault/speech/fish_audio/api_key ")
+        );
+        assert!(
+            seen.head
+                .to_lowercase()
+                .contains("authorization: bearer gateway-token")
+        );
+        let (hub, _) = fake(404, "text/plain", Vec::new());
+        assert_eq!(hub.speech_key("elevenlabs").unwrap(), None);
+        let (hub, _) = fake(403, "application/json", r#"{"error":"no"}"#.into());
+        assert!(hub.speech_key("elevenlabs").is_err());
     }
 
     #[test]

@@ -540,6 +540,7 @@ pub fn run() {
             voice::voice_try,
             voice::voice_kokoro_voices,
             voice::voice_engine_voices,
+            voice::voice_lookup,
             voice::voice_status
         ])
         .build(tauri::generate_context!())

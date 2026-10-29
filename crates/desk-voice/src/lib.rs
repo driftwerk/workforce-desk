@@ -9,6 +9,7 @@ pub mod conversation;
 pub mod decode;
 pub mod hub;
 pub mod keywords;
+pub mod lookup;
 #[cfg(target_os = "macos")]
 pub mod mac;
 pub mod models;

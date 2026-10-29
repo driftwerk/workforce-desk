@@ -1,9 +1,11 @@
-import { invoke, type VoiceSpec } from "../platform";
+import { invoke, type CustomVoice, type VoiceSpec } from "../platform";
 
 export interface VoiceChoice {
   id: string;
   name: string;
   description: string;
+  /** Added by its id, not one of Desk's recommendations. */
+  custom?: boolean;
 }
 
 export interface ModelChoice {
@@ -21,6 +23,9 @@ export interface VoiceProvider {
   models: ModelChoice[];
   /** Fixed recommendations, or loaded from the voice engine. */
   voices: VoiceChoice[] | "engine";
+  /** Takes any voice by its id (a cloned or community voice): where to
+   *  find one. */
+  customIds?: string;
 }
 
 export const VOICE_PROVIDERS: VoiceProvider[] = [
@@ -29,6 +34,7 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
     name: "Fish Audio",
     blurb: "Natural cloud voices at a fraction of ElevenLabs’ price.",
     keyPath: "speech/fish_audio/api_key",
+    customIds: "The id in a voice’s address on fish.audio — yours, or any public voice.",
     models: [{ id: "s1", name: "S1", note: "Fish Audio’s current model" }],
     voices: [
       { id: "802e3bc2b27e49c2995d23ef70e6ac89", name: "Energetic Male", description: "Clear, professional American accent" },
@@ -46,6 +52,7 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
     name: "ElevenLabs",
     blurb: "Premium cloud voices.",
     keyPath: "speech/elevenlabs/api_key",
+    customIds: "The Voice ID from My Voices on elevenlabs.io — a clone of yours, or one added from the Voice Library.",
     models: [
       { id: "eleven_multilingual_v2", name: "Multilingual v2", note: "Best quality" },
       { id: "eleven_flash_v2_5", name: "Flash v2.5", note: "Fastest, cheapest" },
@@ -113,6 +120,50 @@ export const engineVoices = (provider: string): Promise<VoiceChoice[]> =>
 
 export const voicesOf = async (p: VoiceProvider): Promise<VoiceChoice[]> =>
   p.voices === "engine" ? engineVoices(p.id) : p.voices;
+
+/** A provider's voices with the ones added by id after Desk's own (once
+ *  each). */
+export const withCustom = (voices: VoiceChoice[], custom: CustomVoice[] | undefined): VoiceChoice[] => [
+  ...voices,
+  ...(custom ?? [])
+    .filter((c) => !voices.some((v) => v.id === c.id))
+    .map((c) => ({ id: c.id, name: c.name, description: c.description ?? "Added by its id", custom: true })),
+];
+
+/** What a provider said about a voice id (see `voice_lookup`). */
+export type VoiceLookup =
+  | { state: "found"; name: string; description?: string }
+  | { state: "not-found" }
+  | { state: "no-key" }
+  | { state: "key-refused"; message: string }
+  | { state: "failed"; message: string };
+
+/** Asks the provider for voice `id`, with the key Desk keeps for it; the key
+ *  itself never leaves the app's native side. */
+export const lookupVoice = async (provider: string, id: string): Promise<VoiceLookup> => {
+  try {
+    const found = await invoke<VoiceLookup | undefined>("voice_lookup", { provider, voice: id.trim() });
+    return found ?? { state: "failed", message: "Looking a voice up needs the Desk app." };
+  } catch (e) {
+    return { state: "failed", message: String(e) };
+  }
+};
+
+/** A lookup in plain words, for anything but a found voice. */
+export const lookupProblem = (l: VoiceLookup, provider: VoiceProvider): string | null => {
+  switch (l.state) {
+    case "found":
+      return null;
+    case "not-found":
+      return `${provider.name} has no voice with that id. Check it, and that it’s shared with your account if it’s private.`;
+    case "no-key":
+      return `Add your ${provider.name} key first: Desk uses it to find the voice.`;
+    case "key-refused":
+      return `Your ${provider.name} key can’t read that voice: ${l.message}`;
+    case "failed":
+      return l.message;
+  }
+};
 
 /** "Fish Audio · Sarah" */
 export const describeVoice = (spec: VoiceSpec, voices: VoiceChoice[] = []): string => {

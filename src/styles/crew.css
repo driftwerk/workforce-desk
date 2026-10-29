@@ -741,3 +741,17 @@ button.card-icon:hover:not(:disabled) {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+
+/* "Use a voice ID": a voice added by its id, under a provider's voices. */
+.add-voice {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.add-voice-actions {
+  justify-content: flex-end;
+}
+.add-voice-open {
+  align-self: flex-start;
+  margin-top: 8px;
+}

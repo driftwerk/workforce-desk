@@ -33,6 +33,7 @@ let settings = {
   newAgent: null as { provider: string; model?: string; effort?: string } | null,
   defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },
   agentVoices: {},
+  customVoices: {},
   voice: false,
   voiceEngine: "cascade",
   shortcuts: {} as Record<string, string>,
@@ -152,6 +153,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     default:
       // Voice and Tuple live in the app process; in the preview they are off.
       if (cmd === "voice_status") return answer({ state: "off" });
+      if (cmd === "voice_lookup") return answer({ state: "failed", message: "Looking a voice up needs the Desk app." });
       if (/^(voice|tuple)_/.test(cmd)) return answer(undefined);
       throw new Error(`${cmd} is only available in the Desk app`);
   }

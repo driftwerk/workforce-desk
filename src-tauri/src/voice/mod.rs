@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use desk_core::{Paths, Secret, SecretStore, Secrets};
 use desk_voice::cascade::Voices;
 use desk_voice::hub::{CloudSpeech, Grant, Hub, Sessions, SpeechError};
+use desk_voice::lookup::{self, Endpoints, Lookup};
 use desk_voice::models::{Progress, TTS, default_dir};
 use desk_voice::realtime::gemini_live::GeminiLive;
 use desk_voice::realtime::gpt_live::GptLive;
@@ -398,6 +399,36 @@ pub async fn voice_try(
     };
     out.play(&audio.samples, audio.rate, Box::new(|| {}));
     Ok(())
+}
+
+/// Looks up a voice someone entered by id (Fish Audio, ElevenLabs) with the
+/// provider, using the key Desk keeps for it in the local hub's vault. The
+/// key stays here; the page only hears what the provider said.
+#[tauri::command]
+pub async fn voice_lookup(
+    desk: State<'_, Voice>,
+    provider: Provider,
+    voice: String,
+) -> CommandResult<Lookup> {
+    let hub = desk.hub.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(name) = lookup::key_name(provider).filter(|_| lookup::takes_custom_ids(provider))
+        else {
+            return Ok(Lookup::Failed {
+                message: "this provider's voices can't be added by id".into(),
+            });
+        };
+        let key = hub
+            .get()
+            .and_then(|h| h.speech_key(name))
+            .map_err(|e| format!("{e:#}"))?;
+        Ok(match key {
+            None => Lookup::NoKey,
+            Some(key) => lookup::lookup(&Endpoints::default(), provider, &voice, &key),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Kokoro's voices, as `{id, name, description}`.

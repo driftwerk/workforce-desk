@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
-import { useSettings } from "./store";
+import { AddVoiceById } from "./AddVoiceById";
+import { addCustomVoice, removeCustomVoice, useSettings } from "./store";
 import {
   describeVoice,
   providerById,
@@ -10,6 +11,7 @@ import {
   VOICE_PROVIDERS,
   type VoiceChoice,
   type VoiceProvider,
+  withCustom,
 } from "./voiceCatalog";
 
 const LIVE = new Set(["gpt-live", "gemini-live"]);
@@ -18,7 +20,7 @@ const LIVE = new Set(["gpt-live", "gemini-live"]);
  *  use. Agents use the default voice unless they have their own. */
 export function Voices() {
   const { hub, fail } = useDesk();
-  const { defaultVoice, set } = useSettings();
+  const { defaultVoice, customVoices, set } = useSettings();
   const [selected, setSelected] = useState(defaultVoice.provider);
   const [have, setHave] = useState<string[]>([]);
   const provider = providerById(selected) ?? VOICE_PROVIDERS[0]!;
@@ -56,7 +58,7 @@ export function Voices() {
         hasKey={!provider.keyPath || have.includes(provider.keyPath)}
         onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
         isLive={LIVE.has(provider.id)}
-        defaultVoiceLabel={describeVoice(defaultVoice)}
+        defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
         onUse={(voice, model) => set({ defaultVoice: { provider: provider.id, model, voice } })}
         currentDefault={defaultVoice.provider === provider.id ? defaultVoice.voice : undefined}
       />
@@ -87,6 +89,9 @@ function ProviderDetail({
   const [key, setKey] = useState("");
   const [trying, setTrying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const custom = useSettings((s) => s.customVoices[provider.id]);
+  const shown = withCustom(voices, custom);
 
   useEffect(() => {
     voicesOf(provider)
@@ -149,7 +154,7 @@ function ProviderDetail({
       )}
 
       <div className="voice-list">
-        {voices.map((v) => (
+        {shown.map((v) => (
           <div key={v.id} className="hub-row voice-row">
             <span className="hub-name">
               <b className="display">{v.name}</b>
@@ -165,9 +170,30 @@ function ProviderDetail({
                 Use
               </button>
             )}
+            {v.custom && (
+              <button type="button" className="btn btn-ghost" aria-label={`Remove ${v.name}`} onClick={() => removeCustomVoice(provider.id, v.id)}>
+                Remove
+              </button>
+            )}
           </div>
         ))}
       </div>
+      {provider.customIds &&
+        (adding ? (
+          <AddVoiceById
+            provider={provider}
+            model={model}
+            onCancel={() => setAdding(false)}
+            onAdd={(v) => {
+              addCustomVoice(provider.id, v);
+              setAdding(false);
+            }}
+          />
+        ) : (
+          <button type="button" className="btn add-voice-open" onClick={() => setAdding(true)}>
+            Use a voice ID
+          </button>
+        ))}
       {isLive && <p className="faint small">Give an agent one of these voices in its settings; it’s used when {provider.name} is your voice engine.</p>}
       {problem && <p className="state-blocked small">{problem}</p>}
     </section>

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { EMPTY_LAYOUT } from "../groups/model";
-import { loadSettings, saveSettings, type Settings, type VoiceSpec } from "../platform";
+import { loadSettings, saveSettings, type CustomVoice, type Settings, type VoiceSpec } from "../platform";
 import { choose, DEFAULT_SHORTCUTS, resolve, type ShortcutId } from "../shortcuts/keys";
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
@@ -23,6 +23,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   newAgent: null,
   defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },
   agentVoices: {},
+  customVoices: {},
   voice: false,
   voiceEngine: "cascade",
   shortcuts: {},
@@ -46,6 +47,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       keys,
       defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
       agentVoices: repairVoices(s.agentVoices),
+      customVoices: s.customVoices ?? {},
       groups: s.groups ?? EMPTY_LAYOUT.groups,
       ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
       sessionNames: s.sessionNames ?? {},
@@ -66,6 +68,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       newAgent: s.newAgent,
       defaultVoice: s.defaultVoice,
       agentVoices: s.agentVoices,
+      customVoices: s.customVoices,
       voice: s.voice,
       voiceEngine: s.voiceEngine,
       shortcuts: s.shortcuts,
@@ -80,6 +83,23 @@ export const useSettings = create<SettingsStore>((set, get) => ({
 useThemeStore.subscribe((s, before) => {
   if (s.choice !== before.choice || s.pick !== before.pick) useSettings.getState().set({ theme: s.choice, themePick: s.pick });
 });
+
+/** Keeps a voice added by id under `provider` (once: adding it again
+ *  renames it). */
+export const addCustomVoice = (provider: string, voice: CustomVoice): void => {
+  const { customVoices, set } = useSettings.getState();
+  const others = (customVoices[provider] ?? []).filter((v) => v.id !== voice.id);
+  set({ customVoices: { ...customVoices, [provider]: [...others, voice] } });
+};
+
+/** Forgets a voice added by id. Agents already speaking with it keep it:
+ *  their voice is the id itself, which goes on working. */
+export const removeCustomVoice = (provider: string, id: string): void => {
+  const { customVoices, set } = useSettings.getState();
+  const left = (customVoices[provider] ?? []).filter((v) => v.id !== id);
+  const { [provider]: _was, ...others } = customVoices;
+  set({ customVoices: left.length ? { ...others, [provider]: left } : others });
+};
 
 /** Kokoro's own voices are named like af_heart or bm_george. */
 const KOKORO_VOICE = /^[ab][fm]_[a-z]+$/;
