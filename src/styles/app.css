@@ -672,6 +672,29 @@ button {
   background: var(--blocked-soft);
   border-color: var(--blocked);
 }
+.tile-working,
+.tile-starting,
+.ov-tile-working {
+  position: relative;
+  border-color: transparent;
+}
+.tile-working::before,
+.tile-starting::before,
+.ov-tile-working::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(from var(--flow-angle), var(--border) 0 70%, var(--working) 85%, var(--border) 100%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: desk-flow 3s linear infinite;
+}
 .tile-open {
   display: flex;
   align-items: center;
@@ -1197,6 +1220,16 @@ button {
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 0%, transparent);
   }
 }
+@property --flow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes desk-flow {
+  to {
+    --flow-angle: 360deg;
+  }
+}
 @keyframes desk-glow {
   0%,
   100% {
@@ -1213,7 +1246,10 @@ button {
   }
   .dot-working,
   .dot-starting,
-  .ring-working {
+  .ring-working,
+  .tile-working::before,
+  .tile-starting::before,
+  .ov-tile-working::before {
     animation: none;
   }
 }
