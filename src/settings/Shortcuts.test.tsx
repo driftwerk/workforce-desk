@@ -117,9 +117,9 @@ describe("Keyboard shortcuts", () => {
     render(<Shortcuts />);
     act(() =>
       useShortcuts.setState({
-        status: { pushToTalk: { state: "taken", message: "⌃⇧Space is taken by another app — choose another" }, ask: { state: "ready" } },
+        status: { pushToTalk: { state: "taken", message: "Hold to talk can’t use ⌃⇧Space: another app already has it — choose other keys" }, ask: { state: "ready" } },
       }),
     );
-    expect(screen.getByRole("alert").textContent).toBe("⌃⇧Space is taken by another app — choose another");
+    expect(screen.getByRole("alert").textContent).toBe("Hold to talk can’t use ⌃⇧Space: another app already has it — choose other keys");
   });
 });

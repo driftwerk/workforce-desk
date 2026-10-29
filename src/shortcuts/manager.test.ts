@@ -46,7 +46,7 @@ describe("global shortcuts", () => {
     await flush();
     expect(useShortcuts.getState().status.pushToTalk).toEqual({
       state: "taken",
-      message: "⌃⇧Space is taken by another app — choose another",
+      message: "Hold to talk can’t use ⌃⇧Space: another app already has it — choose other keys",
     });
     unmount();
     await flush();

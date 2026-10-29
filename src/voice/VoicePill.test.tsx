@@ -51,7 +51,7 @@ describe("VoicePill", () => {
     expect(screen.getByText("Say an agent's name, or hold ⌃⌥K")).toBeTruthy();
     act(() =>
       useShortcuts.setState({
-        status: { pushToTalk: { state: "taken", message: "⌃⌥K is taken by another app — choose another" }, ask: { state: "off" } },
+        status: { pushToTalk: { state: "taken", message: "Hold to talk can’t use ⌃⌥K: another app already has it — choose other keys" }, ask: { state: "off" } },
       }),
     );
     expect(screen.getByText("Say an agent's name · ⌃⌥K is taken by another app, change it in Settings")).toBeTruthy();

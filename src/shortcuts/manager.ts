@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { inApp } from "../platform";
 import { useSettings } from "../settings/store";
-import { matches, shortcutLabel, type GlobalShortcutId, type ShortcutId } from "./keys";
+import { matches, shortcutLabel, SHORTCUTS, type GlobalShortcutId, type ShortcutId } from "./keys";
 
 export type ShortcutStatus = { state: "off" } | { state: "ready" } | { state: "taken"; message: string };
 
@@ -22,8 +22,12 @@ export const useShortcuts = create<ShortcutStore>(() => ({
 const setStatus = (id: GlobalShortcutId, s: ShortcutStatus) =>
   useShortcuts.setState((store) => ({ status: { ...store.status, [id]: s } }));
 
-/** What the person reads when macOS or another app has the keys. */
-export const takenMessage = (accel: string): string => `${shortcutLabel(accel)} is taken by another app — choose another`;
+/** What the person reads when macOS or another app has the keys: which
+ *  shortcut it is, and the keys it couldn't get. */
+export const takenMessage = (id: GlobalShortcutId, accel: string): string => {
+  const name = SHORTCUTS.find((s) => s.id === id)?.name ?? "A shortcut";
+  return `${name} can’t use ${shortcutLabel(accel)}: another app already has it — choose other keys`;
+};
 
 /** Every register and unregister, one after another: an old shortcut is gone
  *  before its replacement asks for the keys, and a remount's register never
@@ -50,7 +54,7 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
         setStatus(id, { state: "ready" });
       } catch (e) {
         console.warn(`global shortcut ${wanted}: ${e instanceof Error ? e.message : String(e)}`);
-        setStatus(id, { state: "taken", message: takenMessage(wanted) });
+        setStatus(id, { state: "taken", message: takenMessage(id, wanted) });
       }
     });
     return () =>

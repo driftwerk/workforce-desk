@@ -96,7 +96,7 @@ export function App() {
   );
   const askStatus = useShortcuts((s) => s.status.ask);
   useEffect(() => {
-    if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Shortcuts`);
+    if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Shortcuts.`);
   }, [askStatus, fail]);
 
   useAppShortcut("newSession", () => setNewSession(true));
