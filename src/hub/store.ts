@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { shownState } from "../floor/background";
 import { notificationFor, notify } from "../shell/notify";
 import type { Working } from "../chat/conversation";
 import { DeskHub, type HubConnection } from "./client";
@@ -108,7 +109,8 @@ export const useDesk = create<DeskState>((set, get) => ({
     return hub.events(
       (e) => {
         if (e.type === "session" && !get().detached) {
-          const n = notificationFor(get().sessions[e.session.id]?.state, e.session);
+          const was = get().sessions[e.session.id];
+          const n = notificationFor(was && shownState(was), e.session);
           if (n) void notify(n);
         }
         set((s) => ({
@@ -196,5 +198,5 @@ const RANK: Record<Session["state"], number> = {
 
 export const sortedSessions = (sessions: Record<string, Session>): Session[] =>
   Object.values(sessions).sort(
-    (a, b) => RANK[a.state] - RANK[b.state] || b.updatedAt.localeCompare(a.updatedAt),
+    (a, b) => RANK[shownState(a)] - RANK[shownState(b)] || b.updatedAt.localeCompare(a.updatedAt),
   );

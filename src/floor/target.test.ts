@@ -20,7 +20,10 @@ describe("where a need or a turn opens", () => {
       roomId: "r1",
       threadId: "m-9",
     });
-    expect(targetOf({ who: agent("scout"), place: { kind: "room", room: "elsewhere", thread: null } }, "b", rooms)).toEqual({ kind: "agent", key: "b/scout" });
+    expect(targetOf({ who: agent("scout"), place: { kind: "room", room: "elsewhere", thread: null } }, "b", rooms)).toEqual({
+      kind: "agent",
+      key: "b/scout",
+    });
     expect(placeLabel({ kind: "room", room: "r1", thread: null }, rooms)).toBe("in Launch");
     expect(placeLabel({ kind: "room", room: "elsewhere", thread: null }, rooms)).toBe("in a room on another Mac");
   });

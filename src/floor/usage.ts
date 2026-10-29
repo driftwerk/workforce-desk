@@ -50,7 +50,9 @@ export const plans = (sources: readonly PlanSource[]): PlanCard[] => {
     s.usage.readings.map((r) => ({ reading: shifted(r, s.offset), where: whereOf(s), from: `${s.hubId}:${r.where}` })),
   );
   const push = (m: Map<string, Seen[]>, key: string, x: Seen) => m.set(key, [...(m.get(key) ?? []), x]);
-  const accounts = seen.filter((x) => x.reading.account).reduce((m, x) => push(m, `${x.reading.kind}:${x.reading.account}`, x), new Map<string, Seen[]>());
+  const accounts = seen
+    .filter((x) => x.reading.account)
+    .reduce((m, x) => push(m, `${x.reading.kind}:${x.reading.account}`, x), new Map<string, Seen[]>());
   const groups = seen
     .filter((x) => !x.reading.account)
     .reduce((m, x) => {
@@ -91,12 +93,13 @@ const startMs = (w: PlanWindow): number | null => {
 };
 
 /** A window as it stands now: a reading from before its window reset counts
- *  for nothing, never for the percentage it had then. */
+ *  for nothing, never for the percentage it had then. `resetAt` is when it
+ *  resets, or, once it has, when it did. */
 export const windowNow = (w: PlanWindow, observedAt: string, now: number): { used: number; resetAt: number | null; reset: boolean } => {
   const resetAt = resetMs(w);
   const start = startMs(w);
   const reset = resetAt !== null && (resetAt <= now || (start !== null && Date.parse(observedAt) < start));
-  return { used: reset ? 0 : w.usedPercent, resetAt, reset };
+  return { used: reset ? 0 : w.usedPercent, resetAt: reset && resetAt > now ? start : resetAt, reset };
 };
 
 /** How far through its window an even pace would be: 0 to 1. */

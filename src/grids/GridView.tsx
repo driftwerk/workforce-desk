@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useChat } from "../chat/store";
+import { shownState } from "../floor/background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
@@ -70,8 +71,9 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
     if (c?.kind === "session") s = sessions[c.sessionId];
     else if (c?.kind === "terminal") s = trackedIn(sessions, c.terminalId);
     else if (c?.kind === "agent" && conversations[c.agent]?.working) working += 1;
-    if (s?.state === "blocked") needsYou += 1;
-    else if (s?.state === "working" || s?.state === "starting") working += 1;
+    const state = s && shownState(s);
+    if (state === "blocked") needsYou += 1;
+    else if (state === "working" || state === "starting") working += 1;
   }
   return { panes: shown.length, working, needsYou };
 }

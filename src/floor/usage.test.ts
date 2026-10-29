@@ -44,7 +44,10 @@ describe("plan cards", () => {
   });
 
   it("put a reading with no account with the only card of its kind, else on its own", () => {
-    const one = plans([source("local", { readings: [reading({ observedAt: at(5) })] }), source("b", { readings: [reading({ account: null, where: "hub" })] })]);
+    const one = plans([
+      source("local", { readings: [reading({ observedAt: at(5) })] }),
+      source("b", { readings: [reading({ account: null, where: "hub" })] }),
+    ]);
     expect(one.filter((c) => c.kind === "claude")).toHaveLength(1);
     const two = plans([
       source("local", { readings: [reading(), reading({ account: "acct-2", where: "hub" })] }),
@@ -90,14 +93,16 @@ describe("a plan window", () => {
 
   it("projects the limit only once it can tell, and only before the reset", () => {
     expect(projection(five(5, 295), NOW)).toBeNull();
-    expect(projection(five(80, 150), NOW)).toEqual({ hitsAt: NOW + (20 / (80 / (150 * MIN))) });
+    expect(projection(five(80, 150), NOW)).toEqual({ hitsAt: NOW + 20 / (80 / (150 * MIN)) });
     expect(projection(five(20, 150), NOW)).toBeNull();
     expect(projection(five(100, 30), NOW)).toEqual({ atLimit: true });
     expect(projection(five(100, -1), NOW)).toBeNull();
   });
 
   it("changes next at the soonest reset to come", () => {
-    const cards = plans([source("local", { readings: [reading({ windows: [five(10, 30), five(10, -5), { usedPercent: 1, resetsAt: later(900), minutes: 10_080 }] })] })]);
+    const cards = plans([
+      source("local", { readings: [reading({ windows: [five(10, 30), five(10, -5), { usedPercent: 1, resetsAt: later(900), minutes: 10_080 }] })] }),
+    ]);
     expect(nextChange(cards, NOW)).toBe(NOW + 30 * MIN);
     expect(nextChange([], NOW)).toBeNull();
   });

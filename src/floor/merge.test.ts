@@ -37,7 +37,18 @@ describe("every hub's floor as one", () => {
   });
 
   it("shows a hub's times in this Mac's clock", () => {
-    const m = merged({ b: ready(view({ needs: [need("q", agent("a"), { since: at(10) })], lanes: [{ who: agent("a"), spans: [{ kind: "working", from: at(30), to: null }] }] }), { offset: 120_000 }) }, [remote]);
+    const m = merged(
+      {
+        b: ready(
+          view({
+            needs: [need("q", agent("a"), { since: at(10) })],
+            lanes: [{ who: agent("a"), spans: [{ kind: "working", from: at(30), to: null }] }],
+          }),
+          { offset: 120_000 },
+        ),
+      },
+      [remote],
+    );
     expect(m.needs[0]!.since).toBe(at(12));
     expect(m.lanes[0]!.spans[0]).toEqual({ kind: "working", from: at(32), to: null });
   });

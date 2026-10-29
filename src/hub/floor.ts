@@ -7,8 +7,7 @@ export type Choice = "allow" | "deny";
  *  lanes, and the plans' usage, all as the person; and answering a need. */
 export const floorOf = (hub: HubConnection) => ({
   /** `day`: the start of the person's day, in their own time. */
-  floor: (day: Date): Promise<FloorView> =>
-    deskCall(hub, "GET", `/api/desk/floor?${new URLSearchParams({ day: localIso(day) })}`),
+  floor: (day: Date): Promise<FloorView> => deskCall(hub, "GET", `/api/desk/floor?${new URLSearchParams({ day: localIso(day) })}`),
   usage: (): Promise<UsageView> => deskCall(hub, "GET", "/api/desk/usage"),
   decide: (at: DecideRef, choice: Choice): Promise<void> => deskCall(hub, "POST", "/api/desk/needs/decide", { at, choice }),
 });

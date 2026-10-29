@@ -6,7 +6,13 @@ import { agent, session } from "./testing";
 beforeAll(() => void vi.stubEnv("TZ", "Europe/London"));
 afterAll(() => void vi.unstubAllEnvs());
 
-const lane = (id: string, spans: FloorLane["spans"], hubId = "local"): FloorLane => ({ who: agent(id), spans, hubId, key: `${hubId}/agent:${id}`, stale: false });
+const lane = (id: string, spans: FloorLane["spans"], hubId = "local"): FloorLane => ({
+  who: agent(id),
+  spans,
+  hubId,
+  key: `${hubId}/agent:${id}`,
+  stale: false,
+});
 
 describe("today's lanes", () => {
   it("scale a 25-hour day truly, a tick on each even local hour", () => {
@@ -52,7 +58,9 @@ describe("today's lanes", () => {
     const needs = [{ hubId: "local", key: "k", stale: false, who: agent("asking") }];
     const working = [{ hubId: "local", key: "w", stale: false, who: agent("working") }];
     expect(ordered(lanes, needs, working).map((l) => l.who.id)).toEqual(["asking", "working", "done-late", "done-early"]);
-    expect(ordered([lane("s", [{ kind: "waiting", from: "2026-10-29T08:00:00Z", to: null }]), ...lanes.slice(0, 1)], [], []).map((l) => l.who.id)).toEqual(["s", "done-early"]);
+    expect(
+      ordered([lane("s", [{ kind: "waiting", from: "2026-10-29T08:00:00Z", to: null }]), ...lanes.slice(0, 1)], [], []).map((l) => l.who.id),
+    ).toEqual(["s", "done-early"]);
     expect(session("x").kind).toBe("session");
     expect(LANE_CAP).toBe(8);
   });

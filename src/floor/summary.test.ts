@@ -5,7 +5,12 @@ import { NOW, agent, approval, at, need, session, work } from "./testing";
 
 const day = Date.parse("2026-10-29T00:00:00Z");
 const tag = <T>(x: T) => ({ ...x, hubId: "local", key: Math.random().toString(), stale: false });
-const m = (over: Partial<Pick<Merged, "needs" | "working" | "done">>): Pick<Merged, "needs" | "working" | "done"> => ({ needs: [], working: [], done: [], ...over });
+const m = (over: Partial<Pick<Merged, "needs" | "working" | "done">>): Pick<Merged, "needs" | "working" | "done"> => ({
+  needs: [],
+  working: [],
+  done: [],
+  ...over,
+});
 
 describe("Desk's own summary", () => {
   it("says when nothing is going on", () => {
@@ -22,7 +27,9 @@ describe("Desk's own summary", () => {
         }),
         day,
       ),
-    ).toBe("One thing is waiting on you: acme-web wants to run npm test. Ledger is working on “Comparing spend”. Since this morning: Herald finished “Labelled 3 issues”.");
+    ).toBe(
+      "One thing is waiting on you: acme-web wants to run npm test. Ledger is working on “Comparing spend”. Since this morning: Herald finished “Labelled 3 issues”.",
+    );
   });
 
   it("names three of each at most, uses the person's names for sessions, and says background work", () => {

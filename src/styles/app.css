@@ -495,10 +495,15 @@ button {
   border: 2px solid var(--idle);
 }
 .dot-working,
-.dot-starting {
+.dot-starting,
+.dot-background {
   border-color: var(--working);
   background: var(--working);
   animation: desk-breathe 1.8s ease-in-out infinite;
+}
+.dot-background {
+  background: color-mix(in srgb, var(--working) 40%, transparent);
+  animation-duration: 3.6s;
 }
 .dot-blocked,
 .dot-interrupted {
@@ -557,9 +562,14 @@ button {
   border-radius: 11px;
   font-size: 14px;
 }
-.ring-working {
+.ring-working,
+.ring-background {
   border-color: var(--working);
   animation: desk-glow 1.8s ease-in-out infinite;
+}
+.ring-background {
+  border-color: color-mix(in srgb, var(--working) 55%, transparent);
+  animation-duration: 3.6s;
 }
 .ring-blocked {
   border-color: var(--blocked);
@@ -674,13 +684,17 @@ button {
 }
 .tile-working,
 .tile-starting,
-.ov-tile-working {
+.ov-tile-working,
+.tile-background,
+.ov-tile-background {
   position: relative;
   border-color: transparent;
 }
 .tile-working::before,
 .tile-starting::before,
-.ov-tile-working::before {
+.ov-tile-working::before,
+.tile-background::before,
+.ov-tile-background::before {
   content: "";
   position: absolute;
   inset: -1px;
@@ -694,6 +708,11 @@ button {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: desk-flow 3s linear infinite;
+}
+.tile-background::before,
+.ov-tile-background::before {
+  opacity: 0.5;
+  animation-duration: 6s;
 }
 .tile-open {
   display: flex;
@@ -1249,10 +1268,14 @@ button {
   }
   .dot-working,
   .dot-starting,
+  .dot-background,
   .ring-working,
+  .ring-background,
   .tile-working::before,
   .tile-starting::before,
-  .ov-tile-working::before {
+  .ov-tile-working::before,
+  .tile-background::before,
+  .ov-tile-background::before {
     animation: none;
   }
 }

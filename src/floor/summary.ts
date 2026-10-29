@@ -31,7 +31,11 @@ const doing = (w: Work, names: Readonly<Record<string, string>>): string => {
 
 const ended = (w: Work, names: Readonly<Record<string, string>>): string => {
   const who = nameOf(w.who, names);
-  return w.outcome === "failed" ? `${who} failed on ${quoted(w.what)}` : w.outcome === "limit" ? `${who} hit its plan’s limit` : `${who} finished ${quoted(w.what)}`;
+  return w.outcome === "failed"
+    ? `${who} failed on ${quoted(w.what)}`
+    : w.outcome === "limit"
+      ? `${who} hit its plan’s limit`
+      : `${who} finished ${quoted(w.what)}`;
 };
 
 /** Desk's own line on the floor, when no overseer writes one: what waits on

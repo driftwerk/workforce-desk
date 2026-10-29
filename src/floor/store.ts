@@ -3,8 +3,9 @@ import { create } from "zustand";
 import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
+import { deskListeners } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
-import type { FloorView, Need, UsageView } from "../hub/types";
+import type { DeskEvent, FloorView, Need, UsageView } from "../hub/types";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { merged, type Merged } from "./merge";
@@ -60,22 +61,20 @@ const without = <V>(record: Record<string, V>, drop: (key: string, v: V) => bool
 const ofHub = (hubId: string) => (key: string) => key.startsWith(`${hubId}/`);
 
 export const useFloor = create<FloorStore>((set) => {
-  const put = (hubId: string, f: (was: HubFloor) => HubFloor) =>
-    set((s) => ({ hubs: { ...s.hubs, [hubId]: f(s.hubs[hubId] ?? blank()) } }));
+  const put = (hubId: string, f: (was: HubFloor) => HubFloor) => set((s) => ({ hubs: { ...s.hubs, [hubId]: f(s.hubs[hubId] ?? blank()) } }));
 
   const read = async (hubId: string): Promise<void> => {
     const hub = accountOf(hubId);
     if (!hub) return;
     const day = startOfLocalDay();
     const api = floorOf(hub);
-    const [floor, usage] = await Promise.allSettled([api.floor(day), api.usage()]);
-    const receivedAt = Date.now();
+    const [floor, usage] = await Promise.allSettled([api.floor(day).then((view) => ({ view, receivedAt: Date.now() })), api.usage()]);
     if (!sameAccount(accountOf(hubId), hub)) return;
     if (floor.status === "rejected") {
       if (missing(floor.reason)) return put(hubId, () => ({ ...blank(), state: "unsupported" }));
       return put(hubId, (was) => (was.floor ? { ...was, state: "ready", stale: true } : { ...was, state: "failed" }));
     }
-    const view = floor.value;
+    const { view, receivedAt } = floor.value;
     const listed = new Set(view.needs.map((n) => `${hubId}/${n.id}`));
     set((s) => ({
       day: day.getTime(),
@@ -176,12 +175,24 @@ const supported = (): string[] =>
 
 const everyHub = (): string[] => useChat.getState().hubs.map((h) => h.id);
 
+/** The events of this Mac's hub after which its floor may differ. */
+const MOVES = new Set<DeskEvent["type"]>(["snapshot", "session", "removed", "activity"]);
+
 /** The floor kept in step with the hubs: read when a hub is added or
  *  paired again (one removed is dropped), when Desk comes forward (asking
- *  again of hubs that had none), and again at midnight for the new day. */
+ *  again of hubs that had none), again at midnight for the new day, and on
+ *  this Mac's hub whenever its events say a session or the crew moved. */
 export const watchFloor = (): (() => void) => {
   const sync = (hubs: readonly HubAccount[], before: readonly HubAccount[]) => {
-    const changed = hubs.filter((h) => !sameAccount(before.find((b) => b.id === h.id), h)).map((h) => h.id);
+    const changed = hubs
+      .filter(
+        (h) =>
+          !sameAccount(
+            before.find((b) => b.id === h.id),
+            h,
+          ),
+      )
+      .map((h) => h.id);
     useFloor.setState((s) => {
       const gone = (k: string) => !hubs.some((h) => k === h.id || k.startsWith(`${h.id}/`));
       const fresh = (k: string) => changed.some((id) => k === id || ofHub(id)(k));
@@ -198,6 +209,11 @@ export const watchFloor = (): (() => void) => {
   const unsubscribe = useChat.subscribe((s, prev) => s.hubs !== prev.hubs && sync(s.hubs, prev.hubs));
   const focused = () => ask(everyHub());
   window.addEventListener("focus", focused);
+  const heard = (e: DeskEvent) => {
+    const local = useChat.getState().hubs.find((h) => h.local)?.id;
+    if (local && MOVES.has(e.type) && supported().includes(local)) ask([local]);
+  };
+  deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;
   const atMidnight = () => {
     midnight = setTimeout(() => {
@@ -210,6 +226,7 @@ export const watchFloor = (): (() => void) => {
   return () => {
     unsubscribe();
     window.removeEventListener("focus", focused);
+    deskListeners.delete(heard);
     clearTimeout(midnight);
   };
 };

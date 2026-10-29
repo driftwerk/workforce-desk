@@ -21,6 +21,7 @@ import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
+import { useFocusRequest } from "../shell/focus";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -92,6 +93,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const [leaving, setLeaving] = useState<Tab | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  useFocusRequest(activeAgent ? `agent:${activeAgent}` : null, composer);
   const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
   const scrollerRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -294,6 +297,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           </div>
           <form className="composer" onSubmit={submit}>
             <textarea
+              ref={composer}
               rows={1}
               value={draft}
               placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}

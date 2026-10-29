@@ -85,7 +85,15 @@ export interface FakeHub {
   decided: { at: unknown; choice: string }[];
 }
 
-export const fakeHub = (over: Partial<FakeHub> = {}): FakeHub => ({ floor: view(), usage: null, down: false, decide: () => 204, days: [], decided: [], ...over });
+export const fakeHub = (over: Partial<FakeHub> = {}): FakeHub => ({
+  floor: view(),
+  usage: null,
+  down: false,
+  decide: () => 204,
+  days: [],
+  decided: [],
+  ...over,
+});
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -98,9 +106,10 @@ export const fakeFetch = (hubs: Record<string, FakeHub>) =>
     const route = `${init?.method ?? "GET"} ${url.pathname}`;
     if (route === "GET /api/desk/floor") {
       h.days.push(url.searchParams.get("day") ?? "");
-      return h.floor ? json(h.floor) : new Response("Not Found", { status: 404 });
+      return h.floor ? json({ ...h.floor, asOf: new Date().toISOString() }) : new Response("Not Found", { status: 404 });
     }
-    if (route === "GET /api/desk/usage") return h.usage ? json(h.usage) : new Response("Not Found", { status: 404 });
+    if (route === "GET /api/desk/usage")
+      return h.usage ? json({ ...h.usage, asOf: new Date().toISOString() }) : new Response("Not Found", { status: 404 });
     if (route === "POST /api/desk/needs/decide") {
       const body = JSON.parse(String(init?.body)) as { at: unknown; choice: string };
       h.decided.push(body);

@@ -1,9 +1,10 @@
-import type { SessionState } from "../hub/types";
+import type { Look } from "../floor/background";
 import { markFor } from "../theme/tokens";
 
-const RING: Partial<Record<SessionState, string>> = {
+const RING: Partial<Record<Look, string>> = {
   working: "ring-working",
   starting: "ring-working",
+  background: "ring-background",
   blocked: "ring-blocked",
   done: "ring-done",
 };
@@ -19,7 +20,7 @@ export function Mark({
 }: {
   name: string;
   engine?: string;
-  state?: SessionState;
+  state?: Look;
   size?: "sm" | "md" | "lg";
 }) {
   return (
