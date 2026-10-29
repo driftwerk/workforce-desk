@@ -39,3 +39,76 @@ export const pairingStatus = async (url: string, code: string): Promise<PairStat
   }
   return body.status === "rejected" ? { status: "rejected" } : { status: "pending" };
 };
+
+/** A pairing Desk has asked for and not yet collected. It's kept, so a reload,
+ *  a quit or a crash while you approve it doesn't lose it: an approved code
+ *  keeps its token on the hub until Desk collects it. */
+export interface PendingPairing {
+  url: string;
+  label: string;
+  code: string;
+}
+
+const PENDING = "pairing.pending";
+
+/** Where a pending pairing is kept: Desk's state store, or a stand-in. */
+export interface PendingStore {
+  get(key: string): unknown;
+  set(key: string, value: unknown): void;
+  remove(key: string): void;
+}
+
+export const pendingPairing = (store: PendingStore): PendingPairing | null => {
+  const p = store.get(PENDING) as Partial<PendingPairing> | undefined;
+  return p && typeof p.url === "string" && typeof p.code === "string" && p.code
+    ? { url: p.url, label: typeof p.label === "string" ? p.label : "", code: p.code }
+    : null;
+};
+
+export const keepPending = (store: PendingStore, p: PendingPairing): void => store.set(PENDING, p);
+
+export const dropPending = (store: PendingStore, code?: string): void => {
+  if (!code || pendingPairing(store)?.code === code) store.remove(PENDING);
+};
+
+/** A pairing that ended without a token: turned down or expired. */
+export class PairingEnded extends Error {}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The one collection running per code: the token can be read only once, so
+ *  the dialog and the resume at launch share it. */
+const collecting = new Map<string, Promise<string>>();
+
+/** Waits for `p` to be approved, then saves the hub with its token (`save`)
+ *  and forgets the pending pairing; answers the hub's label. A refusal or
+ *  expiry forgets it too and throws `PairingEnded`; anything else throws and
+ *  keeps it for next time. */
+export function collectPairing(
+  store: PendingStore,
+  p: PendingPairing,
+  save: (label: string, url: string, token: string) => Promise<unknown>,
+  every = 2000,
+): Promise<string> {
+  const running = collecting.get(p.code);
+  if (running) return running;
+  const run = (async () => {
+    for (;;) {
+      const s = await pairingStatus(p.url, p.code);
+      if (s.status === "approved") {
+        const label = p.label || new URL(p.url).hostname;
+        await save(label, p.url, s.token);
+        dropPending(store, p.code);
+        return label;
+      }
+      if (s.status !== "pending") {
+        dropPending(store, p.code);
+        throw new PairingEnded(s.status === "rejected" ? "The workspace turned the request down." : "The code expired. Ask for a new one.");
+      }
+      await sleep(every);
+    }
+  })();
+  collecting.set(p.code, run);
+  void run.finally(() => collecting.delete(p.code)).catch(() => {});
+  return run;
+}

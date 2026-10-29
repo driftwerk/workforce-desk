@@ -14,6 +14,7 @@ import { useVoice } from "../voice";
 import { prune } from "../rooms/engine";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
+import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { NewSession } from "../session/NewSession";
@@ -85,6 +86,7 @@ export function App() {
       .then(() => (inApp ? resumeAfterUpdate() : undefined))
       .then(() => hubAccounts())
       .then(setHubs)
+      .then(resumePairing)
       .catch(fail);
     return () => {
       stop?.();
