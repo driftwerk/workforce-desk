@@ -1,15 +1,18 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, type ShortcutId } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
 import { xtermTheme } from "../theme/xterm";
+import { Viewer } from "./viewer";
 
 /** A session's terminal, or a grid's: the hub's pseudo-terminal, attached
- *  over its socket (which replays what it kept, then streams). */
+ *  over its socket (which replays what it kept, then streams). Where the
+ *  same terminal shows in more than one place, the one the person last
+ *  turned to types into it and sets its size; the others mirror it. */
 export function Terminal({
   sessionId,
   terminalId,
@@ -24,6 +27,8 @@ export function Terminal({
   const term = useRef<XTerm | null>(null);
   const hub = useDesk((s) => s.hub);
   const theme = useTheme();
+  /** Shown while another viewer is the one typing into this terminal. */
+  const [viewing, setViewing] = useState(false);
 
   useEffect(() => {
     if (!host.current || !hub || !(sessionId || terminalId)) return;
@@ -36,41 +41,64 @@ export function Terminal({
       scrollback: 10_000,
       theme: xtermTheme(theme),
     });
-    // Desk's own shortcuts (⌘T, ⌘N, ⌘,) reach Desk, not the shell.
-    x.attachCustomKeyEventHandler((e) => {
-      const keys = useSettings.getState().keys;
-      return !(Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, keys[id]));
-    });
     const fit = new FitAddon();
     x.loadAddon(fit);
     x.open(host.current);
     term.current = x;
     const ws = terminalId ? hub.terminalSocket(terminalId) : hub.ptySocket(sessionId!);
     const encoder = new TextEncoder();
-    const sendSize = () => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols: x.cols, rows: x.rows }));
-    };
-    // A pane that isn't laid out (parked) has no size: it keeps the one it had.
-    const refit = () => {
-      if (host.current && host.current.clientWidth > 0 && host.current.clientHeight > 0) fit.fit();
-    };
-    ws.onopen = () => {
-      refit();
-      sendSize();
-    };
+    const viewer = new Viewer({
+      // A pane that isn't laid out (parked) has no size: it keeps the one it had.
+      propose: () => {
+        if (!host.current || host.current.clientWidth <= 0 || host.current.clientHeight <= 0) return null;
+        return fit.proposeDimensions() ?? null;
+      },
+      resize: ({ cols, rows }) => {
+        if (x.cols !== cols || x.rows !== rows) x.resize(cols, rows);
+      },
+      send: (c) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(c)),
+      role: (active) => setViewing(!active),
+    });
+    const inPane = () => !!host.current && host.current.contains(document.activeElement);
+    ws.onopen = () => viewer.opened(inPane());
     ws.onmessage = (m) => {
       if (m.data instanceof ArrayBuffer) x.write(new Uint8Array(m.data));
+      else if (typeof m.data === "string") {
+        try {
+          viewer.heard(JSON.parse(m.data));
+        } catch {
+          // Not a control message this Desk knows.
+        }
+      }
     };
-    ws.onclose = () => x.write(`\r\n\x1b[2m— ${terminalId ? "terminal closed" : "session detached"} —\x1b[0m\r\n`);
+    ws.onclose = () => {
+      setViewing(false);
+      x.write(`\r\n\x1b[2m— ${terminalId ? "terminal closed" : "session detached"} —\x1b[0m\r\n`);
+    };
+    // Keys go to the hub as typed; it keeps only the active viewer's. The
+    // claim comes from the person turning here (a click, focus, a key, a
+    // paste), never from onData, which also carries xterm's answers to the
+    // program's queries. The listeners capture, so the claim goes ahead of
+    // what xterm sends for the same event (a focus report, a mouse report).
     const input = x.onData((d) => ws.readyState === WebSocket.OPEN && ws.send(encoder.encode(d)));
-    const resized = x.onResize(sendSize);
-    const observer = new ResizeObserver(refit);
-    observer.observe(host.current);
+    const turnedHere = () => viewer.claim();
+    const el = host.current;
+    const turns = ["mousedown", "focus", "paste"] as const;
+    for (const t of turns) el.addEventListener(t, turnedHere, true);
+    // Desk's own shortcuts (⌘T, ⌘N, ⌘,) reach Desk, not the shell.
+    x.attachCustomKeyEventHandler((e) => {
+      const keys = useSettings.getState().keys;
+      const desks = (Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, keys[id]));
+      if (!desks && e.type === "keydown") viewer.claim();
+      return !desks;
+    });
+    const observer = new ResizeObserver(() => viewer.boxChanged());
+    observer.observe(el);
     if (autoFocus) x.focus();
     return () => {
       observer.disconnect();
+      for (const t of turns) el.removeEventListener(t, turnedHere, true);
       input.dispose();
-      resized.dispose();
       ws.close();
       x.dispose();
       term.current = null;
@@ -82,5 +110,14 @@ export function Terminal({
     if (term.current) term.current.options.theme = xtermTheme(theme);
   }, [theme]);
 
-  return <div className="terminal" ref={host} />;
+  return (
+    <div className="terminal-frame">
+      <div className="terminal" ref={host} />
+      {viewing && (
+        <button type="button" className="terminal-viewing" onClick={() => term.current?.focus()}>
+          Viewing · click to type here
+        </button>
+      )}
+    </div>
+  );
 }
