@@ -262,4 +262,24 @@ describe("Desk's state store", () => {
       STATE_PREFIXES.delete("grid.");
     }
   });
+
+  it("setSoon holds a value back until it's been still for the debounce, and a flush or remove settles it at once", async () => {
+    const file = fakeFile();
+    const s = new DeskStateStore(file);
+    s.setSoon("draft.dm.a", "h");
+    s.setSoon("draft.dm.a", "hi");
+    expect(s.get("draft.dm.a")).toBe("hi");
+    expect(file.put).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(file.put).toHaveBeenCalledTimes(1);
+    expect(file.entries["draft.dm.a"]?.value).toBe("hi");
+    s.setSoon("draft.dm.a", "hi there");
+    await s.flush();
+    expect(file.entries["draft.dm.a"]?.value).toBe("hi there");
+    s.setSoon("draft.dm.a", "hi there!");
+    s.remove("draft.dm.a");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(s.get("draft.dm.a")).toBeUndefined();
+    expect(file.entries["draft.dm.a"]).toBeUndefined();
+  });
 });

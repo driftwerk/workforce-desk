@@ -9,6 +9,9 @@ import { Message } from "./Message";
 import { say } from "./engine";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
 import { memberKey } from "./routing";
+import { draftKey, useDraft } from "../restore/drafts";
+import { useAnchoredScroll } from "../restore/scroll";
+import { useUi } from "../shell/ui";
 
 const asChat = (m: RoomMessage) => ({
   id: m.id,
@@ -22,7 +25,8 @@ const asChat = (m: RoomMessage) => ({
 function Composer({ room, threadId, placeholder }: { room: Room; threadId: string | null; placeholder: string }) {
   const fail = useDesk((s) => s.fail);
   const { roster, hubs } = useChat();
-  const [draft, setDraft] = useState("");
+  // Kept per room and thread until it's sent (and through a crash).
+  const [draft, setDraft] = useDraft(draftKey.room(room.id, threadId));
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   // Escape closes the list until you type on.
@@ -138,7 +142,12 @@ export function RoomView({ room }: { room: Room }) {
   const { timelines, openThread } = useDesk();
   const working = useDesk((s) => s.roomWorking[room.id]) ?? {};
   const { roster, hubs } = useChat();
-  const [thread, setThread] = useState<string | null>(null);
+  // The open thread, per room (and across launches).
+  const thread = useUi((u) => u.roomThreads[room.id] ?? null);
+  const setRoomThread = useUi((u) => u.setRoomThread);
+  const setThread = (id: string | null) => setRoomThread(room.id, id);
+  const connected = useDesk((s) => s.connected);
+  const scroller = useAnchoredScroll<HTMLDivElement>(`room:${room.id}`);
   const end = useRef<HTMLDivElement>(null);
   const all = timelines[room.id] ?? [];
   const main = all.filter((m) => !m.threadId);
@@ -151,9 +160,11 @@ export function RoomView({ room }: { room: Room }) {
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
   }, [main.length, Object.keys(working).length]);
+  // A thread put back on launch, or open while the hub restarted: its
+  // replies are read (again).
   useEffect(() => {
-    setThread(null);
-  }, [room.id]);
+    if (thread && connected) void openThread(room.id, thread);
+  }, [room.id, thread, connected, openThread]);
 
   const author = (key: string) => {
     const [hub, agent] = key.split("/");
@@ -184,7 +195,7 @@ export function RoomView({ room }: { room: Room }) {
             </span>
           </span>
         </header>
-        <div className="room-scroll">
+        <div ref={scroller} className="room-scroll">
           {main.map((m) => {
             const a = author(m.author);
             const n = replies.get(m.id)?.length ?? 0;
@@ -194,10 +205,7 @@ export function RoomView({ room }: { room: Room }) {
                 <button
                   type="button"
                   className="link small thread-link"
-                  onClick={() => {
-                    setThread(m.id);
-                    void openThread(room.id, m.id);
-                  }}
+                  onClick={() => setThread(m.id)}
                 >
                   {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
                 </button>

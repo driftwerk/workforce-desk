@@ -6,6 +6,8 @@ import { useSettings } from "../settings/store";
 import { matches, shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
+import { withKeptChanges } from "../restore/drafts";
+import { useUi } from "../shell/ui";
 import {
   AGENT_FILES,
   ago,
@@ -57,7 +59,11 @@ export function AgentFiles({ agent }: { agent: Agent }) {
   const key = agentKey(agent);
   const drafts = useDrafts((s) => s.drafts);
   const put = useDrafts((s) => s.put);
-  const [file, setFile] = useState<string>(AGENT_FILES[0].name);
+  // The file open, per agent (and across launches).
+  const chosen = useUi((u) => u.agentFiles[key]);
+  const file = AGENT_FILES.some((f) => f.name === chosen) ? chosen! : AGENT_FILES[0].name;
+  const setAgentFile = useUi((u) => u.setAgentFile);
+  const setFile = (f: string) => setAgentFile(key, f);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const saveKeys = useSettings((s) => s.keys.saveFile);
@@ -72,7 +78,8 @@ export function AgentFiles({ agent }: { agent: Agent }) {
       if (draftOf(useDrafts.getState().drafts, key, f.name)) continue;
       Promise.all([hub.identityFile(agent.id, f.name), savedAt(hub, agent.id, f.name)]).then(
         ([text, at]) => {
-          if (!draftOf(useDrafts.getState().drafts, key, f.name)) put(key, f.name, opened(text, at));
+          // Changes kept from before (a crash, a quit) go back over it.
+          if (!draftOf(useDrafts.getState().drafts, key, f.name)) put(key, f.name, withKeptChanges(opened(text, at), key, f.name));
         },
         (e: unknown) => setProblem(`Desk couldn’t open ${f.name}. ${plainError(e)}`),
       );

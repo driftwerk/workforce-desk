@@ -38,6 +38,9 @@ const saved: MainUi = {
   settings: "shortcuts",
   agentTabs: { "local/scout": "files" },
   scroll: { sidebar: 120, floor: 40 },
+  agentFiles: { "local/scout": "AGENTS.md" },
+  roomThreads: { r1: "m7" },
+  anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
 };
 
 const room = (id: string) => ({ id, name: id, members: [] }) as unknown as Room;
@@ -67,7 +70,7 @@ const latest = () => FakeSocket.all.at(-1)!;
 const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
   useChat.setState({ activeAgent: null, roster: [], rosterRead: false });
-  useUi.setState({ settings: null, agentTabs: {}, scroll: {} });
+  useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {} });
 };
 
 beforeEach(reset);
@@ -85,15 +88,32 @@ describe("ui.main", () => {
         settings: "nowhere",
         agentTabs: { a: "files", b: "zzz" },
         scroll: { sidebar: -3, floor: Number.NaN, other: 5 },
+        agentFiles: { a: "SOUL.md", b: 3 },
+        roomThreads: { r: "", s: "m1" },
+        anchors: { "dm:a": { id: "m1", offset: 4 }, "dm:b": { id: 2, offset: 0 }, "dm:c": "x" },
         future: true,
       }),
-    ).toEqual({ ...DEFAULT_UI, agentTabs: { a: "files" }, scroll: { other: 5 } });
+    ).toEqual({
+      ...DEFAULT_UI,
+      agentTabs: { a: "files" },
+      scroll: { other: 5 },
+      agentFiles: { a: "SOUL.md" },
+      roomThreads: { s: "m1" },
+      anchors: { "dm:a": { id: "m1", offset: 4 } },
+    });
   });
 
   it("captures what's shown and puts it back", () => {
     useDesk.setState({ view: "rooms", activeRoom: "r1", openId: "s1" });
     useChat.setState({ activeAgent: "local/scout" });
-    useUi.setState({ settings: "shortcuts", agentTabs: { "local/scout": "files" }, scroll: { sidebar: 120, floor: 40 } });
+    useUi.setState({
+      settings: "shortcuts",
+      agentTabs: { "local/scout": "files" },
+      scroll: { sidebar: 120, floor: 40 },
+      agentFiles: { "local/scout": "AGENTS.md" },
+      roomThreads: { r1: "m7" },
+      anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
+    });
     const ui = capture();
     expect(ui).toEqual(saved);
     reset();

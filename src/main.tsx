@@ -5,6 +5,7 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { deskReady } from "./platform";
 import { restoreBeforeRender } from "./restore/boot";
+import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
 import { App } from "./shell/App";
 import "./styles/app.css";
@@ -23,6 +24,7 @@ function Ready() {
 // What was open is put back before the shell first renders, and the window
 // (made hidden, where it was) is shown once it has: no default view first.
 void restoreBeforeRender([mainUi]).then(() => {
+  keepFileDrafts();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App />

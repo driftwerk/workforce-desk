@@ -36,7 +36,7 @@ export interface HubState {
 }
 
 /** The key families Desk keeps; another kind of state registers its own. */
-export const STATE_PREFIXES = new Set(["ui.", "window."]);
+export const STATE_PREFIXES = new Set(["ui.", "window.", "draft."]);
 
 /** JSON with keys sorted, so equal values compare equal. */
 export const stable = (v: unknown): string =>
@@ -80,6 +80,8 @@ export class DeskStateStore {
   private removed = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private sending: Promise<void> = Promise.resolve();
+  /** Values `setSoon` is holding back, by key. */
+  private soon = new Map<string, { value: unknown; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(
     private readonly local: LocalState,
@@ -96,6 +98,7 @@ export class DeskStateStore {
   }
 
   get(key: string): unknown {
+    if (this.soon.has(key)) return this.soon.get(key)!.value;
     return this.entries.get(key)?.value;
   }
 
@@ -124,6 +127,7 @@ export class DeskStateStore {
 
   /** A change made here: in the file at once, on the hub shortly. */
   set(key: string, value: unknown): void {
+    this.cancelSoon(key);
     const was = this.entries.get(key);
     if (was && same(was.value, value)) return;
     this.entries.set(key, { value, updatedAt: was?.updatedAt ?? null, dirty: true });
@@ -134,7 +138,21 @@ export class DeskStateStore {
     this.changed(key, value, "local");
   }
 
+  /** `set`, for values that change with every keystroke (drafts): held
+   *  back until they've been still for the debounce, or the next flush. */
+  setSoon(key: string, value: unknown): void {
+    this.cancelSoon(key);
+    const timer = setTimeout(() => this.set(key, value), this.delay);
+    this.soon.set(key, { value, timer });
+  }
+
+  private cancelSoon(key: string) {
+    clearTimeout(this.soon.get(key)?.timer);
+    this.soon.delete(key);
+  }
+
   remove(key: string): void {
+    this.cancelSoon(key);
     if (!this.entries.delete(key)) return;
     this.pending.delete(key);
     this.removed.add(key);
@@ -168,6 +186,7 @@ export class DeskStateStore {
 
   /** Sends what's waiting to the hub, and has the file written, now. */
   async flush(): Promise<void> {
+    for (const [key, { value }] of [...this.soon]) this.set(key, value);
     clearTimeout(this.timer);
     await Promise.all([this.send(), this.local.flush().catch(() => undefined)]);
   }

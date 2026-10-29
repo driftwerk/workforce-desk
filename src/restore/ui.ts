@@ -5,7 +5,7 @@
 
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
-import { SETTINGS_SECTIONS, useUi, type AgentTab, type SettingsSection } from "../shell/ui";
+import { SETTINGS_SECTIONS, useUi, type AgentTab, type Anchor, type SettingsSection } from "../shell/ui";
 import type { Restorable } from "./boot";
 
 export const MAIN_UI_KEY = "ui.main";
@@ -22,6 +22,12 @@ export interface MainUi {
   settings: SettingsSection | null;
   agentTabs: Record<string, AgentTab>;
   scroll: Record<string, number>;
+  /** The file open in each agent's Files tab. */
+  agentFiles: Record<string, string>;
+  /** The thread open in each room. */
+  roomThreads: Record<string, string>;
+  /** Conversations scrolled up from their newest message. */
+  anchors: Record<string, Anchor>;
 }
 
 export const DEFAULT_UI: MainUi = {
@@ -33,6 +39,9 @@ export const DEFAULT_UI: MainUi = {
   settings: null,
   agentTabs: {},
   scroll: {},
+  agentFiles: {},
+  roomThreads: {},
+  anchors: {},
 };
 
 const TABS: readonly string[] = ["chat", "settings", "files"];
@@ -55,6 +64,17 @@ export const sanitize = (raw: unknown): MainUi => {
     settings: typeof o.settings === "string" && o.settings in SETTINGS_SECTIONS ? (o.settings as SettingsSection) : null,
     agentTabs: record(o.agentTabs, (v): v is AgentTab => typeof v === "string" && TABS.includes(v)),
     scroll: record(o.scroll, (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0),
+    agentFiles: record(o.agentFiles, (v): v is string => typeof v === "string" && v !== ""),
+    roomThreads: record(o.roomThreads, (v): v is string => typeof v === "string" && v !== ""),
+    anchors: record(
+      o.anchors,
+      (v): v is Anchor =>
+        !!v &&
+        typeof v === "object" &&
+        typeof (v as Anchor).id === "string" &&
+        typeof (v as Anchor).offset === "number" &&
+        Number.isFinite((v as Anchor).offset),
+    ),
   };
 };
 
@@ -70,6 +90,9 @@ export const capture = (): MainUi => {
     settings: ui.settings,
     agentTabs: ui.agentTabs,
     scroll: ui.scroll,
+    agentFiles: ui.agentFiles,
+    roomThreads: ui.roomThreads,
+    anchors: ui.anchors,
   };
 };
 
@@ -78,7 +101,14 @@ export const capture = (): MainUi => {
 export const apply = (ui: MainUi): void => {
   useDesk.setState({ view: ui.view, activeRoom: ui.room, openId: ui.session });
   useChat.setState({ activeAgent: ui.dm });
-  useUi.setState({ settings: ui.settings, agentTabs: ui.agentTabs, scroll: ui.scroll });
+  useUi.setState({
+    settings: ui.settings,
+    agentTabs: ui.agentTabs,
+    scroll: ui.scroll,
+    agentFiles: ui.agentFiles,
+    roomThreads: ui.roomThreads,
+    anchors: ui.anchors,
+  });
   if (ui.room) void useDesk.getState().reloadRoom(ui.room);
   if (ui.dm) useChat.getState().reopenDm();
 };

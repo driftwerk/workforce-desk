@@ -37,7 +37,7 @@ export function Message({
   const you = message.role === "user" && !fromOverseer;
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
   return (
-    <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`}>
+    <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`} data-message-id={message.id}>
       {you ? <span className="msg-avatar">K</span> : <Mark name={fromOverseer ? relayed.overseer : author} />}
       <div className="msg-body">
         <span className="msg-head">

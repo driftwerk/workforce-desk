@@ -17,6 +17,8 @@ import { Message } from "./Message";
 import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
+import { draftKey, useDraft } from "../restore/drafts";
+import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
 
@@ -77,7 +79,8 @@ function DirectMessage() {
   const manager = useOverview((s) => s.manager);
   const overview = useOverview((s) => s.overview);
   const sessions = useDesk((s) => s.sessions);
-  const [draft, setDraft] = useState("");
+  // What's typed to each agent, kept until it's sent (and through a crash).
+  const [draft, setDraft] = useDraft(activeAgent ? draftKey.dm(activeAgent) : null);
   // Each agent's tab, kept while you visit others (and across launches).
   const tabs = useUi((u) => u.agentTabs);
   const setAgentTab = useUi((u) => u.setAgentTab);
@@ -85,7 +88,15 @@ function DirectMessage() {
   const rosterErrors = useChat((s) => s.rosterErrors);
   const [leaving, setLeaving] = useState<Tab | null>(null);
   const end = useRef<HTMLDivElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
+  const scrollerRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      scroller.current = el;
+      anchored(el);
+    },
+    [anchored],
+  );
   // Distance from the bottom when an earlier page was asked for, so the
   // messages you were reading stay put as it lands above them.
   const anchor = useRef<number | null>(null);
@@ -200,7 +211,7 @@ function DirectMessage() {
       ) : (
         <>
           <div
-            ref={scroller}
+            ref={scrollerRef}
             className="room-scroll"
             role="tabpanel"
             id="agent-tab-panel"
