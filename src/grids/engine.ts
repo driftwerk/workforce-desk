@@ -30,6 +30,10 @@ export interface Pane {
   /** Null: parked. */
   rect: Rect | null;
   content: PaneContent | null;
+  /** When it was last focused or given something to show (ms since the
+   *  epoch): which panes a smaller layout keeps, and which parked ones a
+   *  larger one brings back first. */
+  lastActive?: number;
 }
 
 export type Side = "left" | "right" | "top" | "bottom";
@@ -101,18 +105,55 @@ export const contentKey = (c: PaneContent): string =>
 export const findContent = (panes: readonly Pane[], c: PaneContent): Pane | undefined =>
   c.kind === "terminal" && !c.terminalId ? undefined : panes.find((p) => p.content && contentKey(p.content) === contentKey(c));
 
-/** Lays the grid out as `preset`. Panes with content keep it, in reading
- *  order (parked ones after), and fill the preset's places in its order;
- *  places left over get empty panes; panes left over park if they hold
- *  something and go if they don't. With `insert`, that pane takes place
- *  `insert.slot` and the rest move along. */
+/** What a layout change weighs when it can't show everything. */
+export interface Keep {
+  /** Panes whose session is waiting on an approval. */
+  asking?: readonly string[];
+  /** The pane last clicked or focused. */
+  focused?: string | null;
+}
+
+/** The panes with something in them, in the order a smaller layout keeps
+ *  them: those that need you, then the focused one, then the ones laid out
+ *  now before parked ones, each by how recently it was active (then in
+ *  reading order). */
+export const keepOrder = (panes: readonly Pane[], keep: Keep = {}): Pane[] => {
+  const asking = new Set(keep.asking ?? []);
+  const base = [...reading(laidOut(panes)).filter((p) => p.content), ...panes.filter((p) => !p.rect && p.content)];
+  const at = new Map(base.map((p, i) => [p.id, i]));
+  const rank = (p: Pane) => [asking.has(p.id) ? 0 : 1, p.id === keep.focused ? 0 : 1, p.rect ? 0 : 1, -(p.lastActive ?? 0), at.get(p.id)!];
+  return [...base].sort((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
+    return 0;
+  });
+};
+
+/** Parked panes, most recently active first: the order a larger layout
+ *  brings them back in, and the parked tray lists them in. */
+export const parkedOrder = (panes: readonly Pane[]): Pane[] =>
+  panes
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => !p.rect && p.content)
+    .sort((a, b) => (b.p.lastActive ?? 0) - (a.p.lastActive ?? 0) || a.i - b.i)
+    .map(({ p }) => p);
+
+/** Lays the grid out as `preset`. When it has fewer places than there are
+ *  panes with something in them, `keepOrder` says which stay; they keep
+ *  reading order, and parked panes fill the places left, most recently
+ *  active first. Places left over get empty panes; panes left over park if
+ *  they hold something and go if they don't. With `insert`, that pane takes
+ *  place `insert.slot` and the rest move along. */
 export const applyPreset = (
   panes: readonly Pane[],
   preset: Preset,
   newId: () => string,
   insert?: { slot: number; pane: Pane },
+  keep?: Keep,
 ): Pane[] => {
-  const full = [...reading(laidOut(panes)).filter((p) => p.content), ...panes.filter((p) => !p.rect && p.content)];
+  const room = preset.rects.length - (insert ? 1 : 0);
+  const kept = new Set(keepOrder(panes, keep).slice(0, Math.max(0, room)).map((p) => p.id));
+  const full = [...reading(laidOut(panes)).filter((p) => kept.has(p.id)), ...parkedOrder(panes).filter((p) => kept.has(p.id))];
   if (insert) full.splice(Math.max(0, Math.min(insert.slot, full.length)), 0, insert.pane);
   const empty = reading(laidOut(panes)).filter((p) => !p.content);
   const queue = [...full, ...empty];
@@ -120,7 +161,8 @@ export const applyPreset = (
     const p = queue.shift();
     return p ? { ...p, rect } : { id: newId(), rect, content: null };
   });
-  const parked = queue.filter((p) => p.content).map((p) => ({ ...p, rect: null }));
+  const placedIds = new Set(placed.map((p) => p.id));
+  const parked = panes.filter((p) => p.content && !placedIds.has(p.id)).map((p) => ({ ...p, rect: null }));
   // The panes keep the order they were in, so the keyed list only grows at
   // its end and nothing is moved in the DOM.
   const order = new Map(panes.map((p, i) => [p.id, i]));
@@ -349,6 +391,74 @@ export const unpark = (panes: readonly Pane[], id: string): Pane[] | null => {
 export const without = (panes: readonly Pane[], content: PaneContent): Pane[] => {
   const there = findContent(panes, content);
   return there ? close(panes, there.id) : [...panes];
+};
+
+/** Pane `id` back at `index` in the list, so the keyed view doesn't move
+ *  it in the DOM. */
+const atIndex = (panes: Pane[], id: string, index: number): Pane[] => {
+  const moved = panes.find((p) => p.id === id)!;
+  const rest = panes.filter((p) => p.id !== id);
+  rest.splice(Math.min(index, rest.length), 0, moved);
+  return rest;
+};
+
+/** Moves pane `id` itself onto pane `target` — it keeps its id, so what it
+ *  shows isn't started again. The middle of a pane with something in it
+ *  swaps the two (a parked pane swapped in parks what it replaces); a side
+ *  splits the target, and the room the pane leaves goes to its neighbours
+ *  as when it's closed. An empty target just takes it, whatever the part:
+ *  the empty pane goes where it was (or goes, when it was parked). Null
+ *  when nothing would change or there's no room. */
+export const movePaneTo = (panes: readonly Pane[], id: string, target: string, zone: Zone, newId: () => string): Pane[] | null => {
+  if (id === target) return null;
+  const src = panes.find((p) => p.id === id);
+  const dst = panes.find((p) => p.id === target);
+  if (!src || !dst?.rect) return null;
+  if (!dst.content || zone === "center") {
+    if (!dst.content && !src.rect) return panes.filter((p) => p.id !== target).map((p) => (p.id === id ? { ...p, rect: dst.rect } : p));
+    return panes.map((p) => (p.id === id ? { ...p, rect: dst.rect } : p.id === target ? { ...p, rect: src.rect } : p));
+  }
+  const index = panes.findIndex((p) => p.id === id);
+  if (!src.rect) {
+    const done = split(
+      panes.filter((p) => p.id !== id),
+      target,
+      zone,
+      src,
+    );
+    return done && atIndex(done, id, index);
+  }
+  // Its place is closed as a pane of its own, so the neighbours take it.
+  const HOLE = "(vacated)";
+  const vacated = close(
+    panes.map((p) => (p.id === id ? { id: HOLE, rect: src.rect, content: null } : p)),
+    HOLE,
+  );
+  const done = split(vacated, target, zone, src);
+  if (!done) return null;
+  // No side could take it: an empty pane stays there.
+  const hole = done.find((p) => p.id === HOLE);
+  const out = atIndex(
+    done.filter((p) => p.id !== HOLE),
+    id,
+    index,
+  );
+  return hole ? [...out, { ...hole, id: newId() }] : out;
+};
+
+/** Brings parked pane `id` in: into the first empty place, else swapped
+ *  with the pane least recently active (not one that needs you, while
+ *  another will do), which parks. Both keep their ids. */
+export const swapIn = (panes: readonly Pane[], id: string, asking: readonly string[] = [], newId: () => string = () => `p-${Date.now()}`): Pane[] | null => {
+  if (!panes.some((p) => p.id === id && !p.rect)) return null;
+  const shown = reading(laidOut(panes));
+  const empty = shown.find((p) => !p.content);
+  if (empty) return movePaneTo(panes, id, empty.id, "center", newId);
+  const calm = shown.filter((p) => !asking.includes(p.id));
+  const pool = calm.length ? calm : shown;
+  // The least recently active; of equals, the last in reading order.
+  const victim = pool.reduce<(typeof pool)[number] | undefined>((v, p) => (!v || (p.lastActive ?? 0) <= (v.lastActive ?? 0) ? p : v), undefined);
+  return victim ? movePaneTo(panes, id, victim.id, "center", newId) : null;
 };
 
 /** A grid that's a single empty pane. */

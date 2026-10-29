@@ -15,6 +15,10 @@ import {
   snapRect,
   split,
   findSplitter,
+  keepOrder,
+  movePaneTo,
+  parkedOrder,
+  swapIn,
   splitterKey,
   splitterRange,
   splitters,
@@ -291,3 +295,130 @@ describe("parked panes", () => {
     expect(unpark(beside, "y")).toBeNull();
   });
 });
+
+/** A layout with content in every place, ids a, b, c, …, in reading order. */
+const filled = (preset: Parameters<typeof presetById>[0], at: (i: number) => number = () => 0): Pane[] =>
+  presetById(preset).rects.map((rect, i) => ({ id: String.fromCharCode(97 + i), rect, content: term(`t${i}`), lastActive: at(i) }));
+
+describe("moving a pane itself", () => {
+  it("swaps two panes in the middle, both keeping their ids and their place in the list", () => {
+    const q = filled("quarters");
+    const moved = movePaneTo(q, "a", "d", "center", ids())!;
+    expect(rects(moved)).toEqual({ a: [6, 6, 6, 6], b: [6, 0, 6, 6], c: [0, 6, 6, 6], d: [0, 0, 6, 6] });
+    expect(moved.map((p) => p.id)).toEqual(["a", "b", "c", "d"]);
+    expect(moved.find((p) => p.id === "a")!.content).toEqual(term("t0"));
+    expect(tiles(moved)).toBe(true);
+  });
+
+  it("moves into an empty pane whatever part it's dropped on, leaving the empty pane where it was", () => {
+    const q = filled("quarters").map((p) => (p.id === "d" ? { ...p, content: null } : p));
+    for (const zone of ["left", "top", "center"] as const) {
+      const moved = movePaneTo(q, "a", "d", zone, ids())!;
+      expect(rects(moved)).toEqual({ a: [6, 6, 6, 6], b: [6, 0, 6, 6], c: [0, 6, 6, 6], d: [0, 0, 6, 6] });
+      expect(moved.find((p) => p.id === "d")!.content).toBeNull();
+    }
+  });
+
+  it("splits the target on a side, its old place going to its neighbours, without a new id", () => {
+    const thirds = filled("thirds");
+    const moved = movePaneTo(thirds, "a", "c", "bottom", ids())!;
+    // a's place went to b (its only neighbour); c was split, a below it.
+    expect(rects(moved)).toEqual({ a: [8, 6, 4, 6], b: [0, 0, 8, 12], c: [8, 0, 4, 6] });
+    expect(moved.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    expect(tiles(moved)).toBe(true);
+  });
+
+  it("leaves an empty pane, under a fresh id, where no neighbour can take its place", () => {
+    // A pinwheel: the middle pane is bordered on every side by panes that
+    // run past it, so closing it can only empty it.
+    const pin: Pane[] = [
+      { id: "n", rect: { x: 0, y: 0, w: 8, h: 4 }, content: sess("n") },
+      { id: "e", rect: { x: 8, y: 0, w: 4, h: 8 }, content: sess("e") },
+      { id: "s", rect: { x: 4, y: 8, w: 8, h: 4 }, content: sess("s") },
+      { id: "w", rect: { x: 0, y: 4, w: 4, h: 8 }, content: sess("w") },
+      { id: "m", rect: { x: 4, y: 4, w: 4, h: 4 }, content: term("m") },
+    ];
+    expect(tiles(pin)).toBe(true);
+    const moved = movePaneTo(pin, "m", "e", "bottom", ids())!;
+    expect(tiles(moved)).toBe(true);
+    expect(moved.map((p) => p.id)).toEqual(["n", "e", "s", "w", "m", "p1"]);
+    expect(moved.find((p) => p.id === "p1")).toEqual({ id: "p1", rect: { x: 4, y: 4, w: 4, h: 4 }, content: null });
+    expect(rects(moved).m).toEqual([8, 4, 4, 4]);
+  });
+
+  it("does nothing onto itself, and nothing where the target is a single step", () => {
+    const q = filled("quarters");
+    expect(movePaneTo(q, "a", "a", "left", ids())).toBeNull();
+    const thin: Pane[] = [
+      { id: "a", rect: { x: 0, y: 0, w: 6, h: 12 }, content: sess("a") },
+      { id: "b", rect: { x: 6, y: 0, w: 5, h: 12 }, content: sess("b") },
+      { id: "c", rect: { x: 11, y: 0, w: 1, h: 12 }, content: sess("c") },
+    ];
+    expect(movePaneTo(thin, "a", "c", "left", ids())).toBeNull();
+    expect(movePaneTo(thin, "a", "c", "top", ids())).not.toBeNull();
+  });
+
+  it("brings a parked pane in by its own id: a swap parks what it replaces, a side splits", () => {
+    const halves = [...filled("halves"), { id: "z", rect: null, content: term("tz") }];
+    const swapped = movePaneTo(halves, "z", "b", "center", ids())!;
+    expect(rects(swapped)).toEqual({ a: [0, 0, 6, 12], b: null, z: [6, 0, 6, 12] });
+    const split = movePaneTo(halves, "z", "b", "top", ids())!;
+    expect(rects(split)).toEqual({ a: [0, 0, 6, 12], b: [6, 6, 6, 6], z: [6, 0, 6, 6] });
+    expect(split.map((p) => p.id)).toEqual(["a", "b", "z"]);
+  });
+});
+
+describe("a smaller layout", () => {
+  it("keeps what needs you, then the focused pane, then the most recently active", () => {
+    // Nine panes; e and g were active last, h needs you, b is focused.
+    const nine = filled("nine", (i) => [0, 0, 0, 0, 50, 0, 40, 0, 0][i]!);
+    expect(keepOrder(nine, { asking: ["h"], focused: "b" }).map((p) => p.id).slice(0, 4)).toEqual(["h", "b", "e", "g"]);
+    const halves = applyPreset(nine, presetById("halves"), ids(), undefined, { asking: ["h"], focused: "b" });
+    // What stays keeps reading order; the rest park, ids kept.
+    expect(laidOutIds(halves)).toEqual(["b", "h"]);
+    expect(halves.filter((p) => !p.rect).map((p) => p.id)).toEqual(["a", "c", "d", "e", "f", "g", "i"]);
+    expect(halves.map((p) => p.id)).toEqual(nine.map((p) => p.id));
+  });
+
+  it("without any of that, keeps the first in reading order, as before", () => {
+    const halves = applyPreset(filled("nine"), presetById("halves"), ids());
+    expect(laidOutIds(halves)).toEqual(["a", "b"]);
+  });
+
+  it("refills from the parked panes, most recently active first, when a layout has room again", () => {
+    const nine = filled("nine", (i) => i * 10);
+    const one = applyPreset(nine, presetById("one"), ids());
+    expect(laidOutIds(one)).toEqual(["i"]);
+    expect(parkedOrder(one).map((p) => p.id)).toEqual(["h", "g", "f", "e", "d", "c", "b", "a"]);
+    const quarters = applyPreset(one, presetById("quarters"), ids());
+    expect(laidOutIds(quarters)).toEqual(["i", "h", "g", "f"]);
+    expect(tiles(quarters)).toBe(true);
+  });
+
+  it("is undone exactly by putting the panes it had back", () => {
+    const nine = filled("nine", (i) => i);
+    const before = structuredClone(nine);
+    const halves = applyPreset(nine, presetById("halves"), ids(), undefined, { focused: "a" });
+    expect(halves.filter((p) => !p.rect)).toHaveLength(7);
+    // The change never touched what it was given, which is the undo.
+    expect(nine).toEqual(before);
+    expect(presetOf(nine)).toBe("nine");
+  });
+});
+
+describe("swapping a parked pane in", () => {
+  it("fills an empty place first, else swaps with the least recently active pane that doesn't need you", () => {
+    const parked = { id: "z", rect: null, content: term("tz") } as Pane;
+    const withEmpty = [...filled("halves").map((p) => (p.id === "b" ? { ...p, content: null } : p)), parked];
+    expect(rects(swapIn(withEmpty, "z")!)).toEqual({ a: [0, 0, 6, 12], z: [6, 0, 6, 12] });
+    const busy = [...filled("thirds", (i) => [5, 1, 9][i]!), parked];
+    expect(rects(swapIn(busy, "z")!)).toEqual({ a: [0, 0, 4, 12], b: null, c: [8, 0, 4, 12], z: [4, 0, 4, 12] });
+    expect(rects(swapIn(busy, "z", ["b"])!)).toEqual({ a: null, b: [4, 0, 4, 12], c: [8, 0, 4, 12], z: [0, 0, 4, 12] });
+  });
+});
+
+const laidOutIds = (panes: Pane[]) =>
+  panes
+    .filter((p) => p.rect)
+    .sort((a, b) => a.rect!.y - b.rect!.y || a.rect!.x - b.rect!.x)
+    .map((p) => p.id);
