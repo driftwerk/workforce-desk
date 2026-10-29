@@ -221,8 +221,8 @@ export function PairHub({ onClose, again }: { onClose: () => void; again?: { url
               </p>
             ) : (
               <p className="muted">
-                Approve this code in {host(step.pairing.url)}’s Pairing page — the same place you approved your phone — or ask its
-                admin:
+                Approve the request with this code in {host(step.pairing.url)}’s Pairing page — the same place you approved your
+                phone — or ask its admin:
               </p>
             )}
             <p className="pair-code mono">{step.pairing.code}</p>
