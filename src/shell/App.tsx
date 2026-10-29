@@ -18,6 +18,7 @@ import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { AgentPanel, useAgentPanel } from "../rooms/AgentPanel";
 import { Stage, type OpenPanel } from "../panels/Stage";
 import { useSessionName } from "../groups/names";
 import { useMainKey, useMainName } from "./mainName";
@@ -152,6 +153,7 @@ export function App() {
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
   const thread = useOpenThread();
+  const beside = useAgentPanel();
   const mainName = useMainName();
   const mainKey = useMainKey();
   const panels: OpenPanel[] = [];
@@ -162,6 +164,17 @@ export function App() {
       element: (
         <ErrorBoundary name="thread">
           <ThreadPanel room={thread.room} thread={thread.thread} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (beside) {
+    panels.push({
+      kind: "agent",
+      label: beside.name,
+      element: (
+        <ErrorBoundary name="agent">
+          <AgentPanel agent={beside} />
         </ErrorBoundary>
       ),
     });

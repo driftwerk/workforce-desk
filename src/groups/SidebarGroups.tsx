@@ -5,6 +5,7 @@ import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { useGrids } from "../grids/store";
 import { addToGrid as placeInGrid, reveal } from "../grids/windows";
+import { openAgent } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
@@ -78,8 +79,8 @@ const GROUP_ACCEPTS = ["item", "group"];
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
  *  One that's showing in a grid is shown there when clicked. */
 export function SidebarGroups() {
-  const { sessions, openId, open, view, activeRoom, openRoom } = useDesk();
-  const { roster, hubs, activeAgent, openDm } = useChat();
+  const { sessions, openId, open, view, activeRoom } = useDesk();
+  const { roster, hubs, activeAgent, panelAgent } = useChat();
   const layout = useLayout();
   const { groups } = layout;
   const names = useSessionNames();
@@ -172,13 +173,8 @@ export function SidebarGroups() {
 
   /** Opens it as always; or, when it's showing in a grid, shows it there. */
   const openItem = (item: Item) => {
-    const content = contentOfItem(item.key);
-    if (content && reveal(content)) return;
-    if (item.kind === "session") open(item.session.id);
-    else {
-      void openRoom(null);
-      openDm(agentKey(item.agent));
-    }
+    if (item.kind === "agent") openAgent(agentKey(item.agent));
+    else if (!reveal({ kind: "session", sessionId: item.session.id })) open(item.session.id);
   };
 
   /** Puts it in grid `gridId` (its first empty pane, else beside the
@@ -353,7 +349,9 @@ export function SidebarGroups() {
                   on={
                     item.kind === "session"
                       ? openId === item.session.id
-                      : view === "rooms" && !activeRoom && activeAgent === agentKey(item.agent)
+                      : view === "rooms"
+                        ? !activeRoom && activeAgent === agentKey(item.agent)
+                        : view === "floor" && panelAgent === agentKey(item.agent)
                   }
                   meta={
                     item.kind === "session"

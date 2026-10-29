@@ -36,6 +36,7 @@ const saved: MainUi = {
   room: "r1",
   dm: "local/scout",
   session: "s1",
+  panelAgent: "local/ledger",
   grid: "g2",
   settings: "shortcuts",
   agentTabs: { "local/scout": "files" },
@@ -73,7 +74,7 @@ const latest = () => FakeSocket.all.at(-1)!;
 
 const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
-  useChat.setState({ activeAgent: null, roster: [], rosterRead: false });
+  useChat.setState({ activeAgent: null, panelAgent: null, hubs: [], roster: [], rosterErrors: {}, rosterRead: false });
   useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {}, panelWidths: {}, panelFocus: null });
   useGrids.setState({ active: null });
 };
@@ -95,6 +96,7 @@ describe("ui.main", () => {
         scroll: { sidebar: -3, floor: Number.NaN, other: 5 },
         agentFiles: { a: "SOUL.md", b: 3 },
         roomThreads: { r: "", s: "m1" },
+        panelAgent: 4,
         anchors: { "dm:a": { id: "m1", offset: 4 }, "dm:b": { id: 2, offset: 0 }, "dm:c": "x" },
         future: true,
       }),
@@ -110,7 +112,7 @@ describe("ui.main", () => {
 
   it("captures what's shown and puts it back", () => {
     useDesk.setState({ view: "rooms", activeRoom: "r1", openId: "s1" });
-    useChat.setState({ activeAgent: "local/scout" });
+    useChat.setState({ activeAgent: "local/scout", panelAgent: "local/ledger" });
     useUi.setState({
       settings: "shortcuts",
       agentTabs: { "local/scout": "files" },
@@ -127,6 +129,47 @@ describe("ui.main", () => {
     reset();
     mainUi.write(ui);
     expect(capture()).toEqual(saved);
+  });
+});
+
+describe("the DM put back beside the Floor", () => {
+  const LOCAL = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+  const OFFICE = { id: "office", label: "Office", url: "http://127.0.0.1:2", local: false, token: "t" };
+  /** Each hub's agents, as `/api/agents` lists them; a hub missing here
+   *  doesn't answer. */
+  const agentsOn = (lists: Record<string, string[]>) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        const ids = lists[url.port === "1" ? "local" : "office"];
+        return ids ? new Response(JSON.stringify({ agents: ids.map((id) => ({ id })) })) : new Response("", { status: 502, statusText: "Bad Gateway" });
+      }),
+    );
+  afterEach(() => vi.unstubAllGlobals());
+
+  const launch = async (panelAgent: string, lists: Record<string, string[]>, hubs = [LOCAL, OFFICE]) => {
+    agentsOn(lists);
+    mainUi.write({ ...saved, view: "floor", panelAgent });
+    expect(useChat.getState().panelAgent).toBe(panelAgent);
+    useChat.getState().setHubs(hubs);
+    await vi.waitFor(() => expect(useChat.getState().rosterRead).toBe(true));
+    return useChat.getState().panelAgent;
+  };
+
+  it("stays once its hub lists the agent", async () => {
+    expect(await launch("office/ada", { local: ["scout"], office: ["ada"] })).toBe("office/ada");
+  });
+
+  it("goes once its hub has been read without the agent", async () => {
+    expect(await launch("office/ada", { local: ["scout"], office: ["grace"] })).toBeNull();
+  });
+
+  it("stays while its hub doesn't answer", async () => {
+    expect(await launch("office/ada", { local: ["scout"] })).toBe("office/ada");
+  });
+
+  it("goes when its hub isn't paired any more", async () => {
+    expect(await launch("office/ada", { local: ["scout"] }, [LOCAL])).toBeNull();
   });
 });
 

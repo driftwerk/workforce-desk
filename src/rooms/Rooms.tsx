@@ -66,7 +66,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 /** A DM: the one Rooms shows, or with `agent`, that agent's in a grid pane
- *  — the conversation alone, under the pane's own header. */
+ *  or the side panel — the conversation alone, under its own header. */
 export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm } = useChat();
   const activeAgent = inPane ?? shownInRooms;

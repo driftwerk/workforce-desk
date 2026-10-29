@@ -1149,6 +1149,9 @@ button {
 .thread-panel .composer {
   margin: 0 12px 12px;
 }
+.dm-panel {
+  background: var(--surface);
+}
 
 .badge {
   min-width: 18px;

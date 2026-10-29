@@ -1,7 +1,8 @@
 /* The main area and the columns on its right (panels/Stage.tsx): sessions,
-   room threads. Every colour is a theme token (theme/tokens.ts); the drag
-   handles have their own, --handle and --handle-active, which a theme can
-   override and which otherwise follow --border and --signal. */
+   room threads, DMs beside the Floor. Every colour is a theme token
+   (theme/tokens.ts); the drag handles have their own, --handle and
+   --handle-active, which a theme can override and which otherwise follow
+   --border and --signal. */
 
 .stage {
   flex: 1;

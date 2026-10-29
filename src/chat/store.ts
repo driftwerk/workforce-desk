@@ -30,12 +30,16 @@ interface ChatStore {
   /** Each open DM's earlier messages, by agent key. */
   histories: Record<string, History>;
   activeAgent: string | null;
+  /** The agent whose DM is open in the side panel beside the Floor. */
+  panelAgent: string | null;
   setHubs: (hubs: HubAccount[]) => void;
   refreshRoster: () => Promise<void>;
   openDm: (key: string) => void;
   /** Opens the DM that's shown (`activeAgent`, as restored) once its agent
    *  is on the roster; until then it stays chosen. */
   reopenDm: () => void;
+  /** Shows agent `key`'s DM in the side panel (null closes it). */
+  setPanelAgent: (key: string | null) => void;
   /** The roster has been read at least once. */
   rosterRead: boolean;
   /** Opens a conversation (and reads what the hub kept of it) without
@@ -62,6 +66,9 @@ interface ChatStore {
 }
 
 const live = new Map<string, Conversation>();
+
+/** The hub an agent key (`hub/agent`) is on. */
+const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
 
 interface AgentsResponse {
   agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean }[];
@@ -134,6 +141,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   conversations: {},
   histories: {},
   activeAgent: null,
+  panelAgent: null,
   rosterRead: false,
   setHubs: (hubs) => {
     const before = get().hubs;
@@ -152,6 +160,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     set((s) => ({
       hubs,
       histories: Object.fromEntries(Object.entries(s.histories).filter(([key]) => hubs.some((h) => key.startsWith(`${h.id}/`)))),
+      // On a hub that isn't paired any more, the side panel's agent is gone.
+      panelAgent: hubs.some((h) => s.panelAgent?.startsWith(`${h.id}/`)) ? s.panelAgent : null,
     }));
     for (const key of reopen) ensure(key);
     void get().refreshRoster();
@@ -165,18 +175,25 @@ export const useChat = create<ChatStore>((set, get) => ({
     const results = await Promise.allSettled(get().hubs.map(fetchAgents));
     const roster: Agent[] = [];
     const rosterErrors: Record<string, string> = {};
+    const read = new Set<string>();
     results.forEach((r, i) => {
       const hub = get().hubs[i]!;
-      if (r.status === "fulfilled") roster.push(...r.value);
-      else rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      if (r.status === "fulfilled") {
+        roster.push(...r.value);
+        read.add(hub.id);
+      } else rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
     });
-    set({ roster, rosterErrors, rosterRead: true });
+    // The side panel's agent goes once its hub has been read without it.
+    const panel = get().panelAgent;
+    const gone = !!panel && read.has(hubOf(panel)) && !roster.some((a) => agentKey(a) === panel);
+    set({ roster, rosterErrors, rosterRead: true, ...(gone ? { panelAgent: null } : {}) });
     get().reopenDm();
   },
   reopenDm: () => {
     const key = get().activeAgent;
     if (key && !live.has(key) && get().roster.some((a) => agentKey(a) === key)) get().openDm(key);
   },
+  setPanelAgent: (key) => set((s) => (s.panelAgent === key ? s : { panelAgent: key })),
   openDm: (key) => {
     if (!ensure(key)) return;
     set({ activeAgent: key });
@@ -273,7 +290,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     set((s) => {
       const { [key]: _gone, ...conversations } = s.conversations;
       const { [key]: _kept, ...histories } = s.histories;
-      return { conversations, histories, activeAgent: s.activeAgent === key ? null : s.activeAgent };
+      return {
+        conversations,
+        histories,
+        activeAgent: s.activeAgent === key ? null : s.activeAgent,
+        panelAgent: s.panelAgent === key ? null : s.panelAgent,
+      };
     });
   },
 }));

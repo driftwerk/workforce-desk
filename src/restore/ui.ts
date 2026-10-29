@@ -1,7 +1,7 @@
 // `ui.main`: what the main window shows — Floor or Rooms, the room or DM
-// that's open, the session card, the right-hand panels' widths and the one
-// focused, the settings page and its section, each
-// agent's tab and the panes' scroll positions. Dialogs aren't kept: they
+// that's open, the session card, the DM beside the Floor, the right-hand
+// panels' widths and the one focused, the settings page and its section,
+// each agent's tab and the panes' scroll positions. Dialogs aren't kept: they
 // reopen on nothing.
 
 import { useChat } from "../chat/store";
@@ -22,6 +22,8 @@ export interface MainUi {
   dm: string | null;
   /** The open session card's id. */
   session: string | null;
+  /** The agent key whose DM is in the side panel beside the Floor. */
+  panelAgent: string | null;
   /** The grid the Grids view shows (none: there are no grids). */
   grid: string | null;
   settings: SettingsSection | null;
@@ -45,6 +47,7 @@ export const DEFAULT_UI: MainUi = {
   room: null,
   dm: null,
   session: null,
+  panelAgent: null,
   grid: null,
   settings: null,
   agentTabs: {},
@@ -80,6 +83,7 @@ export const sanitize = (raw: unknown): MainUi => {
     room: text(o.room),
     dm: text(o.dm),
     session: text(o.session),
+    panelAgent: text(o.panelAgent),
     grid: text(o.grid),
     settings: typeof o.settings === "string" && o.settings in SETTINGS_SECTIONS ? (o.settings as SettingsSection) : null,
     agentTabs: record(o.agentTabs, (v): v is AgentTab => typeof v === "string" && TABS.includes(v)),
@@ -106,13 +110,15 @@ export const sanitize = (raw: unknown): MainUi => {
 
 export const capture = (): MainUi => {
   const desk = useDesk.getState();
+  const chat = useChat.getState();
   const ui = useUi.getState();
   return {
     v: 1,
     view: desk.view,
     room: desk.activeRoom,
-    dm: useChat.getState().activeAgent,
+    dm: chat.activeAgent,
     session: desk.openId,
+    panelAgent: chat.panelAgent,
     grid: useGrids.getState().active,
     settings: ui.settings,
     agentTabs: ui.agentTabs,
@@ -130,7 +136,7 @@ export const capture = (): MainUi => {
 export const apply = (ui: MainUi): void => {
   useDesk.setState({ view: ui.view, activeRoom: ui.room, openId: ui.session });
   useGrids.setState({ active: ui.grid });
-  useChat.setState({ activeAgent: ui.dm });
+  useChat.setState({ activeAgent: ui.dm, panelAgent: ui.panelAgent });
   useUi.setState({
     settings: ui.settings,
     agentTabs: ui.agentTabs,
