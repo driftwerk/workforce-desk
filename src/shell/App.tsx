@@ -55,6 +55,18 @@ export function App() {
     applyTheme(theme);
   }, [theme]);
 
+  // Workspaces add, remove and share agents without telling Desk, so their
+  // agent lists are read again every minute and whenever Desk comes forward.
+  useEffect(() => {
+    const again = () => void useChat.getState().refreshRoster();
+    const every = setInterval(again, ROSTER_EVERY_MS);
+    window.addEventListener("focus", again);
+    return () => {
+      clearInterval(every);
+      window.removeEventListener("focus", again);
+    };
+  }, []);
+
   // Agents on this Mac still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);
   const localIds = useChat((s) =>
