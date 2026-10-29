@@ -1,6 +1,7 @@
 import type { DeskExtras } from "../hub/types";
 import { preview } from "../preview";
 import type { Author, ChatMessage, HubAccount } from "./types";
+import { hubFetch } from "../hub/net";
 
 /** One message of a DM as the hub keeps it. */
 interface HubMessage {
@@ -57,7 +58,7 @@ export async function fetchHistory(hub: HubAccount, agentId: string, before?: st
   const url = new URL(`/api/desk/conversations/${encodeURIComponent(agentId)}`, hub.url);
   url.searchParams.set("limit", String(PAGE));
   if (before) url.searchParams.set("before", before);
-  const res = await fetch(url, { headers: { authorization: `Bearer ${hub.token}` } });
+  const res = await hubFetch(url, { headers: { authorization: `Bearer ${hub.token}` } });
   // Not on this hub (an older one, or one that won't share it with this device).
   const absent =
     [401, 403, 404, 405].includes(res.status) ||

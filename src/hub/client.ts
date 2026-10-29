@@ -14,6 +14,7 @@ import type {
   Session,
   Suggestion,
 } from "./types";
+import { hubFetch } from "./net";
 
 export interface HubConnection {
   url: string;
@@ -70,7 +71,7 @@ export class DeskHub {
   constructor(private readonly conn: HubConnection) {}
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(new URL(path, this.conn.url), {
+    const res = await hubFetch(new URL(path, this.conn.url), {
       method,
       headers: {
         authorization: `Bearer ${this.conn.token}`,
@@ -100,13 +101,13 @@ export class DeskHub {
   }
 
   private async text(path: string): Promise<string> {
-    const res = await fetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });
+    const res = await hubFetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });
     if (!res.ok) throw await refusal(res);
     return res.text();
   }
 
   private async putText(path: string, text: string): Promise<void> {
-    const res = await fetch(new URL(path, this.conn.url), {
+    const res = await hubFetch(new URL(path, this.conn.url), {
       method: "PUT",
       headers: { authorization: `Bearer ${this.conn.token}`, "content-type": "text/plain" },
       body: text,

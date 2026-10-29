@@ -1,3 +1,5 @@
+import { hubFetch } from "../hub/net";
+
 /** Pairing Desk with a remote hub, the way the iPhone pairs: ask for a code,
  *  the person approves it on that hub, Desk collects a device token once. */
 
@@ -15,7 +17,7 @@ export const normaliseHubUrl = (raw: string): string => {
 };
 
 export const requestPairing = async (url: string, deviceName: string, email: string): Promise<string> => {
-  const res = await fetch(`${url}/api/pair/device/request`, {
+  const res = await hubFetch(`${url}/api/pair/device/request`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ device_name: deviceName, identity_hint: email || undefined, device_kind: "desk" }),
@@ -27,7 +29,7 @@ export const requestPairing = async (url: string, deviceName: string, email: str
 };
 
 export const pairingStatus = async (url: string, code: string): Promise<PairStatus> => {
-  const res = await fetch(`${url}/api/pair/device/status/${encodeURIComponent(code)}`);
+  const res = await hubFetch(`${url}/api/pair/device/status/${encodeURIComponent(code)}`);
   if (res.status === 404) return { status: "expired" };
   if (!res.ok) throw new Error(`The workspace could not say how the request went (${res.status}).`);
   const body = (await res.json()) as { status: string; token?: string };

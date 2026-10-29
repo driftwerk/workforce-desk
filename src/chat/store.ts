@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
 import { covered, fetchHistory, prepend } from "./history";
 import { agentKey, type Agent, type ChatMessage, type HubAccount } from "./types";
+import { hubFetch } from "../hub/net";
 
 /** What the hub kept of a DM, read when it opens. */
 export interface History {
@@ -59,7 +60,7 @@ interface AgentsResponse {
 }
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
-  const res = await fetch(new URL("/api/agents", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+  const res = await hubFetch(new URL("/api/agents", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
   if (!res.ok) throw new Error(`${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
   const body = (await res.json()) as AgentsResponse;
   return body.agents.map((a) => ({
@@ -75,7 +76,7 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
 /** Your name on `hub`, if it says. */
 const fetchPerson = async (hub: HubAccount): Promise<string | null> => {
   try {
-    const res = await fetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+    const res = await hubFetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
     const body = (await res.json()) as { display_name?: unknown };
     return typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
