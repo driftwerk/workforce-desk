@@ -11,6 +11,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use eyre::{Context, Result, bail};
@@ -58,6 +59,18 @@ pub const FILES: [ModelFile; 5] = [
         sha256: "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3",
     },
 ];
+
+/// Set as Desk Helper stops: a download under way stops at its next read,
+/// keeping what it has to take up from there next time.
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+pub fn stop() {
+    STOPPING.store(true, Ordering::Relaxed);
+}
+
+fn stopping() -> bool {
+    STOPPING.load(Ordering::Relaxed)
+}
 
 /// Every file's bytes together: what a first start downloads.
 pub fn total() -> u64 {
@@ -126,7 +139,12 @@ pub struct HuggingFace;
 impl Fetch for HuggingFace {
     fn open(&self, name: &str, from: u64) -> Result<(Box<dyn Read>, Option<u64>)> {
         let url = format!("https://huggingface.co/{REPO}/resolve/{REVISION}/{name}");
-        let mut request = ureq::get(&url);
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
+            .build()
+            .into();
+        let mut request = agent.get(&url);
         if from > 0 {
             request = request.header("Range", &format!("bytes={from}-"));
         }
@@ -193,6 +211,9 @@ fn fetch_file(
     let mut n = if resumed == Some(held) { held } else { 0 };
     let mut buf = vec![0u8; 1 << 16];
     loop {
+        if stopping() {
+            bail!("Desk Helper is stopping");
+        }
         let read = body.read(&mut buf)?;
         if read == 0 {
             break;
@@ -226,8 +247,9 @@ fn fetch_file(
 
 /// Fetches the model until it is in `models`, writing how far it has got to
 /// `state` (at most a few times a second), and trying again with a growing
-/// wait after a failure, as when the Mac is offline. Blocking.
-pub fn fetch_until_installed(models: &Path, state: &Path, fetch: &dyn Fetch) {
+/// wait after a failure, as when the Mac is offline. Blocking; whether the
+/// model is here, which it is not when Desk Helper stopped first.
+pub fn fetch_until_installed(models: &Path, state: &Path, fetch: &dyn Fetch) -> bool {
     let total = total();
     let mut wait = Duration::from_secs(15);
     loop {
@@ -244,8 +266,9 @@ pub fn fetch_until_installed(models: &Path, state: &Path, fetch: &dyn Fetch) {
             Ok(()) => {
                 let _ = write_state(state, &State::Ready);
                 tracing::info!(model = MODEL, "the memory store's model is ready");
-                return;
+                return true;
             }
+            Err(_) if stopping() => return false,
             Err(e) => {
                 tracing::warn!(error = %format!("{e:#}"), retry_in = ?wait, "could not download the memory store's model");
                 let _ = write_state(
@@ -256,7 +279,13 @@ pub fn fetch_until_installed(models: &Path, state: &Path, fetch: &dyn Fetch) {
                         error: format!("{e:#}"),
                     },
                 );
-                std::thread::sleep(wait);
+                let until = Instant::now() + wait;
+                while Instant::now() < until {
+                    if stopping() {
+                        return false;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
                 wait = (wait * 2).min(Duration::from_secs(600));
             }
         }

@@ -349,8 +349,9 @@ async fn main() -> Result<()> {
             let models = paths.memory_models();
             let state = paths.memory_model_state();
             tokio::task::spawn_blocking(move || {
-                model::fetch_until_installed(&models, &state, &model::HuggingFace);
-                let _ = model_ready.send(true);
+                if model::fetch_until_installed(&models, &state, &model::HuggingFace) {
+                    let _ = model_ready.send(true);
+                }
             });
         }
     }
@@ -417,6 +418,8 @@ async fn main() -> Result<()> {
             }
         }
     };
+    // A download under way stops at its next read and keeps what it has.
+    model::stop();
     // The hub first, then the store it writes to, then the database both use.
     if let Some(node) = node {
         node.stop().await;
