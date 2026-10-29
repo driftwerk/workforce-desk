@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
+import { useSettings } from "../settings/store";
 import type { PaneContent } from "./engine";
 import { GridCanvas, LayoutUndo } from "./GridView";
 import { MAIN_GRID } from "./model";
@@ -146,5 +147,59 @@ describe("dropping a dragged pane", () => {
     expect(grid().panes.some((p) => p.content?.kind === "terminal")).toBe(false);
     expect(useGrids.getState().grids[other]!.panes[0]!.content).toEqual({ kind: "terminal", terminalId: "t1" });
     expect(closeTerminal).not.toHaveBeenCalled();
+  });
+});
+
+describe("a session renamed in Desk", () => {
+  afterEach(() => useSettings.setState({ sessionNames: {} }));
+
+  it("goes by its new name in the replace menu, the move-to-grid menu and its header", () => {
+    useSettings.setState({ sessionNames: { s0: "date picker", s3: "invoice totals" } });
+    createGrid();
+    useGrids.setState({ active: MAIN_GRID });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    deliver(MAIN_GRID, sess("s3"));
+    canvas();
+    act(() => layOut(MAIN_GRID, "halves"));
+    // The header.
+    const pane = screen.getByRole("region", { name: "date picker" });
+    expect(within(pane).getByText("date picker")).toBeTruthy();
+    // Its options, and Replace's list of sessions.
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    expect(screen.getByRole("menu", { name: "date picker options" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Replace" }));
+    const replace = screen.getByRole("menu", { name: "Replace" });
+    const labels = within(replace).getAllByRole("menuitem").map((m) => m.firstChild?.textContent);
+    expect(labels).toContain("date picker");
+    expect(labels).toContain("invoice totals");
+    expect(labels).not.toContain("task-0");
+    expect(labels).not.toContain("task-3");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    // Move to grid: the menu is the session's, by its new name.
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to grid" }));
+    expect(screen.getByRole("menu", { name: "Move to grid" })).toBeTruthy();
+    expect(screen.getByRole("menu", { name: "date picker options" })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  });
+
+  it("is listed by its new name in the parked tray", () => {
+    useSettings.setState({ sessionNames: { s2: "date picker" } });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s1"));
+    deliver(MAIN_GRID, sess("s2"));
+    canvas();
+    const s1 = grid().panes.find((p) => p.content && (p.content as { sessionId: string }).sessionId === "s1")!;
+    act(() => {
+      useGrids.setState((s) => ({ focus: { ...s.focus, [MAIN_GRID]: s1.id } }));
+      layOut(MAIN_GRID, "one");
+    });
+    const tray = screen.getByRole("region", { name: "Parked (1)" });
+    expect(within(tray).getByRole("button", { name: "date picker" })).toBeTruthy();
+    expect(within(tray).getByRole("button", { name: "Remove date picker from grid" })).toBeTruthy();
   });
 });

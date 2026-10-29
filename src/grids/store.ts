@@ -203,6 +203,9 @@ const touch = (gridId: string, pane: string) =>
 export const flashPane = (gridId: string, paneId: string): void =>
   useGrids.setState((s) => ({ flash: { gridId, paneId, n: (s.flash?.n ?? 0) + 1 } }));
 
+/** Pointing out `n` is over (so a grid shown again doesn't do it again). */
+export const flashDone = (n: number): void => void (get().flash?.n === n && useGrids.setState({ flash: null }));
+
 export const setActive = (id: string): void => useGrids.setState({ active: id });
 
 const saveOrder = (order: string[]) => {

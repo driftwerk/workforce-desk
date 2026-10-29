@@ -2,7 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
-import { useSessionName } from "../groups/names";
+import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
@@ -15,7 +15,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
-import { closePane, createGrid, movePane, newTerminal, replacePane, setFocus, swapInPane, useGrids, writes } from "./store";
+import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, setFocus, swapInPane, useGrids, writes } from "./store";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
 
@@ -233,7 +233,7 @@ export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pan
         </div>
         {label.asking && <Approval session={label.asking} />}
         {dragging && (zone || free) && <DropZones zone={zone} free={!!free} move={movingPane && !pane.content} />}
-        {flash > 0 && <span key={flash} className="gpane-flash" aria-hidden="true" />}
+        {flash > 0 && <span key={flash} className="gpane-flash" aria-hidden="true" onAnimationEnd={() => flashDone(flash)} />}
       </div>
       {menu && (
         <Menu
@@ -409,12 +409,14 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuE
   const grids = order.flatMap((id) => all[id] ?? []);
   const role = useGrids((s) => s.role);
   const keys = useSettings((s) => s.keys.newTerminal);
+  // Sessions by the names given them, as the sidebar shows them.
+  const names = useSessionNames();
   const shown = sortedSessions(sessions).filter((s) => s.state !== "closed");
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
   const replace: MenuEntry[] = [
     { kind: "item", label: "New terminal", kbd: shortcutLabel(keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: s.name, kbd: STATE_LABEL[s.state], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
+    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[s.state], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
   ];
