@@ -30,6 +30,9 @@ import { dragWindow } from "../ui/drag";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
 
+/** How often the agents every workspace lists are read again. */
+const ROSTER_EVERY_MS = 60_000;
+
 export function App() {
   const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
   const theme = useTheme();
