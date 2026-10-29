@@ -128,7 +128,7 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
   const free = over?.kind === "free";
   return (
     <section
-      className={`gpane ${focused ? "focused" : ""} ${label.asking ? "asking" : ""} ${pane.content ? "" : "empty"}`}
+      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"}`}
       style={boxStyle(pane.rect)}
       aria-label={label.name}
       data-drop-pane={pane.id}
@@ -297,7 +297,11 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
 function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuEntry[] {
   const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
-  const grids = useGrids((s) => s.order.map((id) => s.grids[id]).filter((g) => !!g));
+  // Selected as they're kept (a list made in the selector would be new on
+  // every read, which zustand takes for a change).
+  const order = useGrids((s) => s.order);
+  const all = useGrids((s) => s.grids);
+  const grids = order.flatMap((id) => all[id] ?? []);
   const role = useGrids((s) => s.role);
   const keys = useSettings((s) => s.keys.newTerminal);
   const shown = sortedSessions(sessions).filter((s) => s.state !== "closed");

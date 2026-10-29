@@ -139,13 +139,13 @@
   background: var(--sunken);
   overflow: hidden;
 }
-.gpane.focused .gpane-box {
+.gpane-focused .gpane-box {
   border-color: var(--faint);
 }
-.gpane.asking .gpane-box {
+.gpane-asking .gpane-box {
   border-color: var(--blocked);
 }
-.gpane.empty .gpane-box {
+.gpane-vacant .gpane-box {
   border-style: dashed;
 }
 .gpane-head {
