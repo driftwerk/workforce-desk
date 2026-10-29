@@ -51,12 +51,18 @@ const stateRow = (x: unknown): StateRow | null => {
   return { key: r.key, value: r.value, updatedAt: typeof at === "string" ? at : null };
 };
 
-/** A listing as a list of rows, or under `entries`, `items` or `state`. */
+/** A listing (`[{key, value, updatedAt}]`, or the same under `entries`). A
+ *  JSON answer that's no listing is a hub without the route (its `error`);
+ *  one whose rows Desk can't read is said, not taken as an empty store. */
 export const stateRows = (body: unknown): StateRow[] => {
   const o = body as Record<string, unknown> | null;
-  const list = Array.isArray(body) ? body : (o?.entries ?? o?.items ?? o?.state ?? o?.states);
+  const list = Array.isArray(body) ? body : o?.entries;
   if (!Array.isArray(list)) throw new HubError(404, NO_ROUTE);
-  return list.flatMap((x) => stateRow(x) ?? []);
+  const rows = list.flatMap((x) => stateRow(x) ?? []);
+  if (rows.length < list.length) {
+    throw new HubError(502, `The hub's Desk state listing has ${list.length - rows.length} rows Desk can't read.`);
+  }
+  return rows;
 };
 
 export class HubError extends Error {
@@ -235,7 +241,7 @@ export class DeskHub {
   /** Desk's restorable state on this hub (see restore/store.ts); a hub
    *  without a state store answers 404. */
   stateList = async (prefix: string): Promise<StateRow[]> =>
-    stateRows(await this.desk<unknown>("GET", `/api/desk/state?prefix=${encodeURIComponent(prefix)}`));
+    stateRows(await this.desk<unknown>("GET", `/api/desk/state?prefix=${encodeURIComponent(prefix)}&values=true`));
   statePut = async (key: string, value: unknown): Promise<{ updatedAt: string | null }> => {
     const body = await this.desk<unknown>("PUT", `/api/desk/state/${encodeURIComponent(key)}`, { value });
     return { updatedAt: stateRow(body)?.updatedAt ?? null };

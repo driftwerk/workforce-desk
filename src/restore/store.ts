@@ -63,9 +63,9 @@ type Subscriber = { prefix: string; f: (key: string, value: unknown, origin: Cha
 /**
  * The keyed store everything restorable goes through:
  * `get` / `set` / `remove` / `list(prefix)`, `subscribe(prefix, …)` for every
- * change and `watch(key, …)` for the hub replacing a value. Register a new
- * key family with `STATE_PREFIXES.add("grid.")` before the hub connects so
- * it is listed from (and migrated to) the hub with the rest.
+ * change and `watch(key, …)` for the hub replacing a value. A new key family
+ * is registered with `register("grid.")` (at any time): it is listed from,
+ * and sent to, the hub with the rest.
  */
 export class DeskStateStore {
   private entries = new Map<string, StateEntry>();
@@ -172,6 +172,14 @@ export class DeskStateStore {
     await Promise.all([this.send(), this.local.flush().catch(() => undefined)]);
   }
 
+  /** Keeps keys under `prefix` on the hub too; if the hub is connected, its
+   *  keys under it are read now (else on connecting). */
+  async register(prefix: string): Promise<void> {
+    if (STATE_PREFIXES.has(prefix)) return;
+    STATE_PREFIXES.add(prefix);
+    if (this.hub) await this.connect(this.hub);
+  }
+
   /** The hub is (again) there: asks it for its state store, and once it has
    *  one, sends it what it hasn't been told and takes what it has newer. */
   async connect(hub: HubState | null): Promise<void> {
@@ -183,7 +191,7 @@ export class DeskStateStore {
     } catch (e) {
       // No state store yet: the file keeps everything until there is one.
       if (routeMissing(e)) this.hubHas = "no";
-      else console.warn("couldn't read the hub's desk state:", e);
+      else console.warn("couldn't read the hub's Desk state; keeping it in Desk's file:", e);
       return;
     }
     if (this.hub !== hub) return;

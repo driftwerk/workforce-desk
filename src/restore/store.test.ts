@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubError, stateRows } from "../hub/client";
-import { DeskStateStore, stable, type HubState, type LocalState, type StateEntry } from "./store";
+import { DeskStateStore, stable, STATE_PREFIXES, type HubState, type LocalState, type StateEntry } from "./store";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
@@ -128,7 +128,9 @@ describe("Desk's state store", () => {
     expect(stateRows({ entries: [{ key: "ui.main", value: 1, updatedAt: "t" }] })).toEqual([
       { key: "ui.main", value: 1, updatedAt: "t" },
     ]);
-    expect(stateRows([{ key: "k", value: null, updated_at: "u" }, { nope: 1 }])).toEqual([{ key: "k", value: null, updatedAt: "u" }]);
+    expect(stateRows([{ key: "k", value: null, updated_at: "u" }])).toEqual([{ key: "k", value: null, updatedAt: "u" }]);
+    // The hub has a store but rows Desk can't read (keys without values): said, not empty.
+    expect(() => stateRows([{ key: "k", updatedAt: "u" }])).toThrow(/can't read/);
   });
 
   it("once the hub has a state store, the file's contents move to it, and the hub's own keys come back", async () => {
@@ -242,5 +244,22 @@ describe("Desk's state store", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(hub.kept.get("window.main.abc")?.value).toEqual({ x: 5 });
     expect(file.put).not.toHaveBeenCalled();
+  });
+
+  it("a key family registered after the hub connected is read from it at once", async () => {
+    const file = fakeFile();
+    const hub = fakeHub({ "grid.main": { cells: 4 } });
+    const s = new DeskStateStore(file);
+    await s.connect(hub);
+    expect(s.get("grid.main")).toBeUndefined();
+    try {
+      await s.register("grid.");
+      expect(s.get("grid.main")).toEqual({ cells: 4 });
+      s.set("grid.main", { cells: 6 });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(hub.kept.get("grid.main")?.value).toEqual({ cells: 6 });
+    } finally {
+      STATE_PREFIXES.delete("grid.");
+    }
   });
 });

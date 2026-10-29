@@ -279,6 +279,7 @@ fn desk_state_flush(store: State<'_, Arc<state::StateStore>>) -> CommandResult<(
 /// The page has put back what was open: the window can be seen.
 #[tauri::command]
 fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>) {
+    tracing::info!(label = window.label(), "page ready");
     if let Some(t) = frames.0.lock().expect("frames").get(window.label()) {
         t.show(&window, "page ready");
     } else {

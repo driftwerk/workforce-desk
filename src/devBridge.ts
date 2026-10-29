@@ -101,12 +101,12 @@ function stateRoute(method: string, path: string, body: unknown): { answer: unkn
   const url = new URL(path, "http://preview");
   if (method === "GET" && url.pathname === "/api/desk/state") {
     const prefix = url.searchParams.get("prefix") ?? "";
+    const values = url.searchParams.get("values") === "true";
     return {
-      answer: {
-        entries: Object.entries(hubState)
-          .filter(([k]) => k.startsWith(prefix))
-          .map(([key, e]) => ({ key, ...e })),
-      },
+      answer: Object.entries(hubState)
+        .filter(([k]) => k.startsWith(prefix))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, e]) => (values ? { key, ...e } : { key, updatedAt: e.updatedAt })),
     };
   }
   const m = url.pathname.match(/^\/api\/desk\/state\/(.+)$/);
