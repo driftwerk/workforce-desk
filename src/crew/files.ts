@@ -6,6 +6,7 @@ export const AGENT_FILES = [
   { name: "AGENTS.md", about: "How they work: rules, habits, what to avoid" },
   { name: "IDENTITY.md", about: "Their name and how they introduce themselves" },
   { name: "WELCOME.md", about: "What they say when you first open a chat" },
+  { name: "HEARTBEAT.md", about: "Their check-in list: what they look over when they check in on their own" },
 ] as const;
 
 /** One file being edited: what the agent has, and what's in the editor. */

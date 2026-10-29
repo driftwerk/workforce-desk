@@ -257,7 +257,17 @@ fn learning(doc: &mut Table, ports: &HubPorts, memories: Memories) {
     let mut knowledge = vec![("enabled", b(false))];
     knowledge.extend(vectors);
     doc.insert("knowledge".into(), table(&knowledge));
-    doc.insert("heartbeat".into(), table(&[("enabled", b(false))]));
+    // Check-ins stay off until the person turns them on for an agent (its
+    // own `[heartbeat]`); they then come every hour, into the agent's Desk
+    // chat, and only when something needs the person.
+    doc.insert(
+        "heartbeat".into(),
+        table(&[
+            ("enabled", b(false)),
+            ("interval_secs", int(3600)),
+            ("deliver", s("actionable_only")),
+        ]),
+    );
 }
 
 fn table(entries: &[(&str, Value)]) -> Value {
@@ -538,6 +548,11 @@ mod tests {
             // Off until the person turns them on for an agent.
             assert_eq!(doc["knowledge"]["enabled"].as_bool(), Some(false));
             assert_eq!(doc["heartbeat"]["enabled"].as_bool(), Some(false));
+            assert_eq!(doc["heartbeat"]["interval_secs"].as_integer(), Some(3600));
+            assert_eq!(
+                doc["heartbeat"]["deliver"].as_str(),
+                Some("actionable_only")
+            );
             // No other provider's model is named anywhere.
             let text = toml::to_string(&doc).unwrap();
             for name in ["gpt-", "haiku", "sonnet", "opus", "gemini", "llama"] {

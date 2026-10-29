@@ -35,6 +35,27 @@ export interface Revision {
   created_at: string;
 }
 
+/** `GET /api/agents/{id}/memory/summary`. */
+export interface MemorySummaryWire {
+  memories: number;
+  lessons: number;
+  tidied_at: string | null;
+}
+
+/** `GET /api/agents/{id}/heartbeat`. */
+export interface AgentHeartbeat {
+  enabled: boolean;
+  interval_secs: number;
+  quiet_start: string | null;
+  quiet_end: string | null;
+  /** Things on the check-in list (HEARTBEAT.md). */
+  items: number;
+  last_checked: string | null;
+  /** Whether the last check-in needed the person; null before any. */
+  needed_you: boolean | null;
+  last_error: string | null;
+}
+
 /** What a hub without a route is taken to have said. */
 const NO_ROUTE = "This hub doesn’t have that yet.";
 
@@ -203,6 +224,13 @@ export class DeskHub {
   /** Puts version `rev` back (as a new version: history is never lost). */
   restoreIdentityRevision = (id: string, file: string, rev: number): Promise<unknown> =>
     this.call("POST", `/api/agents/${encodeURIComponent(id)}/identity/${file}/revisions/${rev}/restore`);
+
+  /** How much an agent remembers of you and has learned, and when your
+   *  memories with it were last tidied. */
+  memorySummary = (id: string): Promise<MemorySummaryWire> =>
+    this.call("GET", `/api/agents/${encodeURIComponent(id)}/memory/summary`);
+  /** An agent's own check-ins: on or off, its check-in list, the last run. */
+  agentHeartbeat = (id: string): Promise<AgentHeartbeat> => this.call("GET", `/api/agents/${encodeURIComponent(id)}/heartbeat`);
 
   /** An agent's own `config.toml`, as text. */
   agentConfig = (id: string): Promise<string> => this.text(`/api/agents/${encodeURIComponent(id)}/config`);
