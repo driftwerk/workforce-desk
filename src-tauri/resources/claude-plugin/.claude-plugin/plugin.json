@@ -1,0 +1,5 @@
+{
+  "name": "desk",
+  "version": "0.1.0",
+  "description": "Lets Desk follow a Claude Code session started in one of its terminals: its state, its approvals, and its place on the Floor."
+}

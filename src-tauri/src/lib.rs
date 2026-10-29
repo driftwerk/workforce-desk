@@ -5,6 +5,7 @@ mod hubs;
 mod logins;
 mod state;
 mod support;
+mod terminals;
 mod tuple;
 mod updates;
 mod voice;
@@ -291,6 +292,22 @@ fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>) {
 #[derive(Default)]
 struct Frames(Mutex<BTreeMap<String, Arc<frame::Tracker>>>);
 
+/// Desk's Claude Code plugin folder, for the shells of grid terminals; none
+/// when this build doesn't have it.
+#[tauri::command]
+fn claude_plugin_dir(app: tauri::AppHandle) -> Option<String> {
+    terminals::plugin_dir(&app).map(|p| p.to_string_lossy().into_owned())
+}
+
+/// What's running in a terminal whose shell is `pid`, shell first.
+#[tauri::command]
+async fn programs_under(pid: u32) -> CommandResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || terminals::programs_under(pid))
+        .await
+        .map_err(text)?
+        .map_err(text)
+}
+
 #[tauri::command]
 fn resume_later(app: State<'_, App>, ids: Vec<String>) -> CommandResult<()> {
     updates::resume_later(&app.paths, &ids).map_err(text)
@@ -422,6 +439,8 @@ pub fn run() {
             desk_state_adopt,
             desk_state_flush,
             desk_ready,
+            claude_plugin_dir,
+            programs_under,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_roster,

@@ -42,6 +42,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns"
     ],
+    "resources": {
+      "resources/claude-plugin/": "claude-plugin/"
+    },
     "externalBin": [
       "binaries/Desk Helper",
       "binaries/Desk Agents"
