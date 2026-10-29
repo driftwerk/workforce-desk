@@ -19,7 +19,7 @@ import {
   reading,
   replace,
   split,
-
+  unpark,
   type Pane,
   type PaneContent,
   type PresetId,
@@ -230,23 +230,31 @@ const focusContent = (gridId: string, content: PaneContent) => {
   if (p) setFocus(gridId, p.id);
 };
 
-/** Drops `content` on pane `paneId`: a side splits it, the middle replaces
+/** What a pane held before something else took its place: a terminal
+ *  parks (it keeps running, and comes back when there's room); a session
+ *  or a conversation just leaves the grid. */
+const keepReplaced = (panes: Pane[], old: PaneContent | null | undefined): Pane[] =>
+  old?.kind === "terminal" && old.terminalId ? [...panes, { id: paneId(), rect: null, content: old }] : panes;
+
+/** `content` out of the grid if it's there, unless it's in pane `but`. */
+const takeOut = (panes: Pane[], content: PaneContent, but: string): Pane[] => {
+  const there = findContent(panes, content);
+  if (!there || there.id === but) return panes;
+  return there.rect ? close(panes, there.id) : panes.filter((p) => p.id !== there.id);
+};
+
+/** Drops `content` on pane `target`: a side splits it, the middle replaces
  *  what it holds. Already in the grid, it moves. */
-export const dropOnPane = (gridId: string, target: string, zone: Side | "center", content: PaneContent, onReplaced?: (c: PaneContent) => void): void => {
-  const panes = get().grids[gridId]?.panes;
-  const there = panes && findContent(panes, content);
-  if (!panes || there?.id === target) return;
+export const dropOnPane = (gridId: string, target: string, zone: Side | "center", content: PaneContent): void => {
+  const there = findContent(get().grids[gridId]?.panes ?? [], content);
+  if (there?.id === target) return;
   changePanes(gridId, (all) => {
     if (zone === "center") {
       const old = all.find((p) => p.id === target)?.content;
-      if (old && onReplaced) onReplaced(old);
-      const moved = there ? (there.rect ? close(all, there.id) : all.filter((p) => p.id !== there.id)) : all;
-      return replace(moved, target, content);
+      return keepReplaced(replace(takeOut(all, content, target), target, content), old);
     }
-    const id = paneId();
-    const done = split(all, target, zone, { id, content });
-    if (!done) return null;
-    return there ? close(done, there.id) : done;
+    const done = split(all, target, zone, { id: paneId(), content });
+    return done && takeOut(done, content, done.at(-1)!.id);
   });
   focusContent(gridId, content);
 };
@@ -266,22 +274,29 @@ export const deliver = (gridId: string, content: PaneContent): void => {
   focusContent(gridId, content);
 };
 
-/** Takes pane `paneId` out of the grid; what it held is passed on. */
+/** Takes pane `pane` out of the grid; what it held is passed on (for the
+ *  hub to close a terminal). */
 export const closePane = (gridId: string, pane: string, onContent?: (c: PaneContent) => void): void => {
   const p = get().grids[gridId]?.panes.find((x) => x.id === pane);
   if (p?.content && onContent) onContent(p.content);
   changePanes(gridId, (panes) => close(panes, pane));
 };
 
-export const replacePane = (gridId: string, pane: string, content: PaneContent | null, onReplaced?: (c: PaneContent) => void): void => {
-  const p = get().grids[gridId]?.panes.find((x) => x.id === pane);
-  if (p?.content && onReplaced) onReplaced(p.content);
+/** Pane `pane` holds `content` instead (see `keepReplaced`). */
+export const replacePane = (gridId: string, pane: string, content: PaneContent | null): void => {
   changePanes(gridId, (panes) => {
-    const there = content && findContent(panes, content);
-    const moved = there && there.id !== pane ? (there.rect ? close(panes, there.id) : panes.filter((x) => x.id !== there.id)) : panes;
-    return replace(moved, pane, content);
+    const old = panes.find((x) => x.id === pane)?.content;
+    const moved = content ? takeOut(panes, content, pane) : panes;
+    return keepReplaced(replace(moved, pane, content), old);
   });
   setFocus(gridId, pane);
+};
+
+/** Brings a parked pane back into the layout. */
+export const unparkPane = (gridId: string, pane: string): boolean => {
+  const done = changePanes(gridId, (panes) => unpark(panes, pane));
+  if (done) setFocus(gridId, pane);
+  return done;
 };
 
 /** Moves pane `paneId`'s content to grid `to` (its pane here closes). */

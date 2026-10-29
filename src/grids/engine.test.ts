@@ -11,6 +11,7 @@ import {
   PRESETS,
   replace,
   snap,
+  unpark,
   snapRect,
   split,
   splitterRange,
@@ -255,5 +256,23 @@ describe("dropping", () => {
     expect(tiles(more)).toBe(true);
     expect(more).toHaveLength(3);
     expect(more.find((p) => p.id === "n")!.rect).toEqual({ x: 0, y: 6, w: 6, h: 6 });
+  });
+});
+
+describe("parked panes", () => {
+  it("come back under their own id: into an empty pane's place, else beside the largest", () => {
+    const next = ids();
+    const halves = applyPreset(blank(next), presetById("halves"), next);
+    const withParked: Pane[] = [...replace(halves, halves[0]!.id, term("a")), { id: "x", rect: null, content: term("b") }];
+    const back = unpark(withParked, "x")!;
+    expect(tiles(back)).toBe(true);
+    expect(back.find((p) => p.id === "x")!.rect).toEqual({ x: 6, y: 0, w: 6, h: 12 });
+    expect(back).toHaveLength(2);
+    const full = back.map((p) => ({ ...p, content: p.content ?? term("c") }));
+    const crowded: Pane[] = [...full, { id: "y", rect: null, content: term("d") }];
+    const beside = unpark(crowded, "y")!;
+    expect(tiles(beside)).toBe(true);
+    expect(beside.find((p) => p.id === "y")!.rect).not.toBeNull();
+    expect(unpark(beside, "y")).toBeNull();
   });
 });

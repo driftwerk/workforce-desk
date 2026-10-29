@@ -96,6 +96,14 @@ export const pickFolder = async (): Promise<string | null> => {
   return typeof picked === "string" ? picked : null;
 };
 
+/** Desk's Claude Code plugin folder, which grid terminals' shells load so
+ *  a `claude` started there is tracked; null outside the app. */
+export const claudePluginDir = async (): Promise<string | null> => (preview ? null : invoke<string | null>("claude_plugin_dir"));
+
+/** What's running in a terminal whose shell is `pid`, shell first; empty
+ *  where Desk can't look (outside the app). */
+export const programsUnder = async (pid: number): Promise<string[]> => (preview ? [] : invoke<string[]>("programs_under", { pid }));
+
 /** The local hub (once Desk is paired with it) and every paired remote hub. */
 export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 

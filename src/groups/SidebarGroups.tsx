@@ -13,6 +13,7 @@ import {
 } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
+import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
@@ -261,23 +262,29 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
       onDragStart={(e) => {
         const s = e.operation.source;
         if (s) setDragging({ kind: s.type === "group" ? "group" : "item", id: String(s.id) });
+        // An agent or session can also be dropped on a grid's pane.
+        const content = s && s.type !== "group" ? contentOfItem(String(s.id)) : null;
+        if (content) startGridDrag(content, nameOf(items.get(String(s!.id))));
         setMenu(null);
       }}
       onDragMove={(e) => {
-        const d = dropFor(e.operation);
+        const { x, y } = e.operation.position.current;
+        const d = moveGridDrag(x, y) ? null : dropFor(e.operation);
         setDrop((was) => (sameDrop(was, d) ? was : d));
       }}
       onDragOver={(e) => {
-        const d = dropFor(e.operation);
+        const d = useGridDrag.getState().over ? null : dropFor(e.operation);
         setDrop((was) => (sameDrop(was, d) ? was : d));
       }}
       onDragEnd={(e) => {
         const s = e.operation.source;
-        const d = e.canceled ? null : dropFor(e.operation);
+        const onGrid = endGridDrag(e.canceled);
+        const d = e.canceled || onGrid ? null : dropFor(e.operation);
         setDrop(null);
         setDragging(null);
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 0);
+        if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
         if (!s || !d) return;
         changeLayout((l) => dropOn(l, present, end(s).id, d));
       }}

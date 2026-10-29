@@ -319,6 +319,18 @@ export const place = (panes: readonly Pane[], pane: Omit<Pane, "rect">): Pane[] 
   return split(panes, largest.id, wide ? "right" : "bottom", pane) ?? split(panes, largest.id, wide ? "bottom" : "right", pane);
 };
 
+/** Brings parked pane `id` back into the layout, keeping its id (so what it
+ *  shows isn't started again): in the first empty pane's place, else beside
+ *  the largest. Null when there's no room. */
+export const unpark = (panes: readonly Pane[], id: string): Pane[] | null => {
+  const parked = panes.find((p) => p.id === id && !p.rect);
+  if (!parked) return null;
+  const rest = panes.filter((p) => p.id !== id);
+  const empty = reading(laidOut(rest)).find((p) => !p.content);
+  if (empty) return [...rest.filter((p) => p.id !== empty.id), { ...parked, rect: empty.rect }];
+  return place(rest, parked);
+};
+
 /** Takes `content` out of the grid wherever it is (a pane laid out closes,
  *  a parked one goes), so it can be put somewhere else. */
 export const without = (panes: readonly Pane[], content: PaneContent): Pane[] => {
