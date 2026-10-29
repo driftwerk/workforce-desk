@@ -744,6 +744,7 @@ button.card-icon:hover:not(:disabled) {
 
 /* "Use a voice ID": a voice added by its id, under a provider's voices. */
 .add-voice {
+  align-self: stretch;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);

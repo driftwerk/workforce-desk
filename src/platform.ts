@@ -146,8 +146,10 @@ export const monitorsNow = (): Promise<MonitorInfo[]> => invoke("grid_monitors")
 /** The local hub (once Desk is paired with it) and every paired remote hub. */
 export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 
+/** Opens a page in the default browser; in the browser preview, a new tab. */
 export const openUrl = (url: string): void => {
-  void openExternal(url);
+  if (preview) window.open(url, "_blank", "noopener");
+  else void openExternal(url);
 };
 
 export const saveHub = (label: string, url: string, token: string): Promise<{ id: string }> =>
