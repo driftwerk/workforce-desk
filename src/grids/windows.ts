@@ -219,8 +219,14 @@ export const revealIn = (gridId: string, content: PaneContent): boolean => {
 };
 
 /** Shows where `content` is in a grid, if it's in one that can be seen (see
- *  `showing`). False when it isn't, so it's opened as usual. */
+ *  `showing`). A session started in a grid's terminal is shown by that
+ *  terminal's pane. False when it's in neither, so it's opened as usual. */
 export const reveal = (content: PaneContent): boolean => {
-  const at = showing(useGrids.getState(), content);
-  return !!at && revealIn(at.gridId, content);
+  const grids = useGrids.getState();
+  const terminalId = content.kind === "session" ? useDesk.getState().sessions[content.sessionId]?.terminalId : null;
+  for (const c of terminalId ? [content, { kind: "terminal" as const, terminalId }] : [content]) {
+    const at = showing(grids, c);
+    if (at) return revealIn(at.gridId, c);
+  }
+  return false;
 };
