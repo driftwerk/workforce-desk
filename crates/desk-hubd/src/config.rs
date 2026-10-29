@@ -52,20 +52,23 @@ const BGE_SCORE_MAP: [[f64; 2]; 8] = [
 ];
 
 /// The read-only tools a chained-tools program may call: reading files,
-/// the web, code knowledge and memory, never anything that writes.
-const PROGRAM_READ_TOOLS: [&str; 12] = [
+/// code, code knowledge and the web, never anything that writes. (Memory
+/// is one tool whose actions write too, so it is not among them.)
+const PROGRAM_READ_TOOLS: [&str; 14] = [
     "filesystem.read",
     "filesystem.list",
     "filesystem.grep",
     "filesystem.glob",
-    "repo.grep",
-    "repo.glob",
+    "code.read",
+    "code.search",
+    "code.find",
+    "code.symbols",
+    "code.tree",
     "web.fetch",
     "web.search",
     "knowledge.ask",
     "knowledge.symbol",
     "knowledge.impact",
-    "memory.recall",
 ];
 
 /// Claude Code subprocesses at once across the hub (second opinions and
@@ -544,7 +547,12 @@ mod tests {
             assert_eq!(programs["mode"].as_str(), Some("on"));
             let tools = programs["read_tools"].as_array().unwrap();
             assert!(!tools.is_empty());
-            assert!(tools.iter().all(|t| !t.as_str().unwrap().contains("write")));
+            for t in tools {
+                let t = t.as_str().unwrap();
+                assert!(!t.contains("write") && !t.contains("edit"), "{t}");
+                // A tool whose actions write may not be listed whole.
+                assert!(t.contains('.'), "{t}");
+            }
             // Off until the person turns them on for an agent.
             assert_eq!(doc["knowledge"]["enabled"].as_bool(), Some(false));
             assert_eq!(doc["heartbeat"]["enabled"].as_bool(), Some(false));
