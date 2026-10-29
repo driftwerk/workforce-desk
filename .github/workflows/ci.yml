@@ -64,6 +64,8 @@ jobs:
       # The embedded-Postgres build script calls the GitHub API; the job's own
       # read-only token keeps it off the anonymous rate limit.
       GITHUB_TOKEN: ${{ github.token }}
+      # sherpa-onnx's archives, kept out of target/ (see scripts/sherpa-onnx.sh).
+      SHERPA_ONNX_ARCHIVE_DIR: ${{ github.workspace }}/sherpa-onnx
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -85,6 +87,18 @@ jobs:
         with:
           workspaces: desk
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Read the sherpa-onnx version
+        id: sherpa
+        run: echo "version=$(desk/scripts/sherpa-onnx.sh version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: sherpa-onnx-${{ steps.sherpa.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+      # rust-cache restores target/sherpa-onnx-prebuilt without its libraries;
+      # sherpa-onnx-sys's build script unpacks them again from the archives.
+      - name: Speech libraries
+        working-directory: desk
+        run: scripts/sherpa-onnx.sh prepare
       - name: Build the rich renderers
         working-directory: workforce-public-desk/packages/rich
         run: npm ci && npm run build

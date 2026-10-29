@@ -31,6 +31,8 @@ env:
   # private (RELEASES_TOKEN must then be able to write to it).
   RELEASES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
   APP: desk/target/universal-apple-darwin/release/bundle/macos/Desk.app
+  # sherpa-onnx's archives, kept out of target/ (see scripts/sherpa-onnx.sh).
+  SHERPA_ONNX_ARCHIVE_DIR: ${{ github.workspace }}/sherpa-onnx
 
 jobs:
   macos:
@@ -103,6 +105,22 @@ jobs:
             workforce-public-desk -> target
           key: hub-${{ steps.hub.outputs.ref }}
           cache-on-failure: true
+
+      - name: Read the sherpa-onnx version
+        id: sherpa
+        run: echo "version=$(desk/scripts/sherpa-onnx.sh version)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: sherpa-onnx-${{ steps.sherpa.outputs.version }}-${{ runner.os }}-universal
+
+      # rust-cache restores target/sherpa-onnx-prebuilt without its libraries;
+      # sherpa-onnx-sys's build script unpacks them again from the archives,
+      # for each architecture the app is built for.
+      - name: Speech libraries
+        working-directory: desk
+        run: scripts/sherpa-onnx.sh prepare --release aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Build the rich renderers
         working-directory: workforce-public-desk/packages/rich
