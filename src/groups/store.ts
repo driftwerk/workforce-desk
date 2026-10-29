@@ -78,16 +78,16 @@ const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>) => {
   });
 };
 
-/** Applies `change` to the groups; on a hub that keeps them, also sends it,
- *  through `call` (one of its group routes) or else as the whole layout. */
-export const changeLayout = (change: (layout: Layout) => Layout | null, call?: (hub: DeskHub) => Promise<Layout>): void => {
+/** Applies `change` to the groups; on a hub that keeps them, also sends it
+ *  through `call` (its group routes), given the layout as changed. */
+export const changeLayout = (change: (layout: Layout) => Layout | null, call: (hub: DeskHub, next: Layout) => Promise<Layout>): void => {
   const hubLayout = useHubLayout.getState().layout;
   const hub = useDesk.getState().hub;
   if (hubLayout && hub) {
     const next = change(hubLayout);
     if (!next || next === hubLayout) return;
     useHubLayout.setState({ layout: next });
-    send(hub, call ?? ((h) => h.putLayout(next)));
+    send(hub, (h) => call(h, next));
     return;
   }
   const s = useSettings.getState();
@@ -97,7 +97,7 @@ export const changeLayout = (change: (layout: Layout) => Layout | null, call?: (
 
 // Each change, as `model` makes it and as the hub's routes do. Ungrouped's
 // order is Desk's to settle (it lists what shows there unplaced, which only
-// Desk knows), so changes that place things in it send the whole layout.
+// Desk knows), so changes that place things in it send that order.
 
 export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): void =>
   changeLayout(
@@ -118,7 +118,11 @@ export const collapseGroup = (id: string, to: boolean): void =>
   );
 
 /** Its members go to the end of Ungrouped. */
-export const deleteGroup = (present: readonly ItemKey[], id: string): void => changeLayout((l) => deleted(l, present, id));
+export const deleteGroup = (present: readonly ItemKey[], id: string): void =>
+  changeLayout(
+    (l) => deleted(l, present, id),
+    (h, next) => h.deleteGroup(id).then(() => h.orderUngrouped(next.ungrouped.items)),
+  );
 
 export const moveGroup = (id: string, before: string | null): void =>
   changeLayout(
@@ -129,10 +133,14 @@ export const moveGroup = (id: string, before: string | null): void =>
 export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
   changeLayout(
     (l) => moved(l, present, key, to, before),
-    to === UNGROUPED ? undefined : (h) => h.putInGroup(to, key, before),
+    (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
   );
 
-export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void => changeLayout((l) => removed(l, present, key));
+export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
+  changeLayout(
+    (l) => removed(l, present, key),
+    (h, next) => h.orderUngrouped(next.ungrouped.items),
+  );
 
 export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Drop): void =>
   drop.kind === "item" ? moveItem(present, dragged, drop.group, drop.before) : moveGroup(dragged, drop.before);

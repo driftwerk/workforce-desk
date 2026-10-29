@@ -3,9 +3,20 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session } from "../hub/types";
 import { loadSettings, saveSettings, type Settings } from "../platform";
 import { useSettings } from "../settings/store";
-import { createGroup, EMPTY_LAYOUT, moveItem as moved, UNGROUPED, type Layout } from "./model";
+import { EMPTY_LAYOUT, UNGROUPED, type Layout } from "./model";
 import { sessionName } from "./names";
-import { changeLayout, collapseGroup, currentLayout, moveItem, nameSession, newGroup, onHub, renameGroup, useHubLayout } from "./store";
+import {
+  collapseGroup,
+  currentLayout,
+  deleteGroup,
+  moveItem,
+  nameSession,
+  newGroup,
+  onHub,
+  removeFromGroup,
+  renameGroup,
+  useHubLayout,
+} from "./store";
 
 vi.mock("../platform", () => ({ loadSettings: vi.fn(), saveSettings: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -42,8 +53,8 @@ describe("saved groups", () => {
   it("groups, their order and names save with the rest of the settings and load back", async () => {
     vi.mocked(loadSettings).mockResolvedValue(file());
     await useSettings.getState().load();
-    changeLayout((l) => createGroup(l, "g1", "Acme"));
-    changeLayout((l) => moved(l, ["session:s1"], "session:s1", "g1", null));
+    newGroup("g1", "Acme");
+    moveItem(["session:s1"], "session:s1", "g1", null);
     nameSession("s1", "release notes", "hub-s1");
     const saved = vi.mocked(saveSettings).mock.lastCall![0];
     expect(saved).toMatchObject({
@@ -100,7 +111,8 @@ describe("on a hub that keeps the groups and names", () => {
     const hub = {
       importLayout: vi.fn(async (i: { layout: Layout; sessionNames: Record<string, string> }) => ({ imported: true, layout: i.layout, sessionNames: i.sessionNames })),
       layout: answer(hubLayout),
-      putLayout: vi.fn(async (l: Layout) => l),
+      orderUngrouped: answer(hubLayout),
+      deleteGroup: answer(hubLayout),
       createGroup: answer(hubLayout),
       updateGroup: answer(hubLayout),
       moveGroup: answer(hubLayout),
@@ -157,7 +169,7 @@ describe("on a hub that keeps the groups and names", () => {
     expect(useSettings.getState().groups.map((g) => g.id)).toEqual(["g9"]);
   });
 
-  it("changes show at once, go through the group routes, and Ungrouped's order goes whole", async () => {
+  it("changes show at once, go through the group routes, and Ungrouped's order goes as Desk shows it", async () => {
     const hub = fakeHub();
     vi.mocked(loadSettings).mockResolvedValue(file({ layoutOnHub: true }));
     await useSettings.getState().load();
@@ -172,13 +184,29 @@ describe("on a hub that keeps the groups and names", () => {
     // The hub answered with its own (s2 in no group): that shows.
     await vi.waitFor(() => expect(currentLayout()).toEqual(hubLayout));
     // Out of a group to the very end of Ungrouped, after s2, which only
-    // shows there: Ungrouped's order is sent whole.
+    // shows there: Desk sends Ungrouped's order as it shows it.
     moveItem(present, "session:s1", UNGROUPED, null);
-    await vi.waitFor(() => expect(hub.putLayout).toHaveBeenCalled());
-    expect(hub.putLayout.mock.lastCall![0].ungrouped.items).toEqual(["session:s2", "session:s1"]);
-    // What the hub answers last is what shows.
-    await vi.waitFor(() => expect(currentLayout()).toEqual(hub.putLayout.mock.lastCall![0]));
+    await vi.waitFor(() => expect(hub.orderUngrouped).toHaveBeenLastCalledWith(["session:s2", "session:s1"]));
     expect(useSettings.getState().groups).toEqual([]);
+  });
+
+  it("taking an item out of a group, or deleting a group, sends Ungrouped's order", async () => {
+    const hub = fakeHub();
+    vi.mocked(loadSettings).mockResolvedValue(file({ layoutOnHub: true }));
+    await useSettings.getState().load();
+    send(snapshot(hubLayout));
+    const present = ["session:s1", "session:s2"];
+    removeFromGroup(present, "session:s1");
+    await vi.waitFor(() => expect(hub.orderUngrouped).toHaveBeenCalledTimes(1));
+    expect(hub.orderUngrouped.mock.lastCall![0]).toContain("session:s1");
+    // The hub answered with s1 back in h1; deleting h1 sends its members on.
+    await vi.waitFor(() => expect(currentLayout()).toEqual(hubLayout));
+    deleteGroup(present, "h1");
+    expect(currentLayout().groups).toEqual([]);
+    await vi.waitFor(() => expect(hub.orderUngrouped).toHaveBeenCalledTimes(2));
+    expect(hub.deleteGroup).toHaveBeenCalledWith("h1");
+    expect(hub.deleteGroup.mock.invocationCallOrder[0]!).toBeLessThan(hub.orderUngrouped.mock.invocationCallOrder[1]!);
+    expect(hub.orderUngrouped.mock.lastCall![0]).toContain("session:s1");
   });
 
   it("a layout announced while a change is on its way waits for it to be answered", async () => {

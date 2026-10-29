@@ -309,7 +309,6 @@ export class DeskHub {
   // Every route answers with the whole layout as it now is.
 
   layout = (): Promise<Layout> => this.call("GET", "/api/desk/layout");
-  putLayout = (layout: Layout): Promise<Layout> => this.call("PUT", "/api/desk/layout", layout);
   /** Desk's first push of the groups and names it kept itself; a hub that
    *  already has some keeps its own (unless `force`). */
   importLayout = (i: { layout: Layout; sessionNames: Record<string, string>; force?: boolean }): Promise<LayoutImport> =>
@@ -326,8 +325,10 @@ export class DeskHub {
    *  wherever it was. */
   putInGroup = (group: string, item: string, before: string | null): Promise<Layout> =>
     this.call("PUT", `/api/desk/groups/${encodeURIComponent(group)}/items/${itemPath(item)}`, { before });
-  removeFromGroup = (group: string, item: string): Promise<Layout> =>
-    this.call("DELETE", `/api/desk/groups/${encodeURIComponent(group)}/items/${itemPath(item)}`);
+  /** Sets Ungrouped's order to `items` as Desk shows it (only Desk knows
+   *  what shows there unlisted), taking each out of whichever group held it. */
+  orderUngrouped = (items: string[]): Promise<Layout> =>
+    this.call("PUT", "/api/desk/groups/ungrouped/order", { items });
 
   // ── Terminals: login shells the hub hosts for grid panes ─────────────────
 
