@@ -115,9 +115,9 @@ describe("grids in the sidebar", () => {
   const gridRows = () =>
     within(screen.getByRole("list", { name: "Grids" }))
       .getAllByRole("button")
-      .filter((b) => b.classList.contains("side-row"))
-      .map((b) => b.querySelector(".side-name")?.textContent);
-  const gridRow = (name: string) => within(screen.getByRole("list", { name: "Grids" })).getAllByRole("button").find((b) => b.querySelector(".side-name")?.textContent === name)!;
+      .filter((b) => b.classList.contains("gi"))
+      .map((b) => b.querySelector(".gi-name")?.textContent);
+  const gridRow = (name: string) => within(screen.getByRole("list", { name: "Grids" })).getAllByRole("button").find((b) => b.querySelector(".gi-name")?.textContent === name)!;
 
   beforeEach(() => useDesk.setState({ view: "grids" }));
 
@@ -164,6 +164,26 @@ describe("grids in the sidebar", () => {
     expect((kept.get("grid.index") as { order: string[] }).order).toEqual(useGrids.getState().order);
     fireEvent.keyDown(gridRow("Grid 3"), { key: "ArrowDown", altKey: true });
     expect(gridRows()).toEqual(["Grid 2", "Main", "Grid 3"]);
+  });
+
+  it("draws grid rows as a group's items are: the grip, the indent, and the ⋯ beside them", () => {
+    act(() => void createGrid());
+    useSettings.setState({ groups: [{ id: "g1", name: "Team", collapsed: false, items: [] }] });
+    const { container } = sidebar();
+    const row = gridRow("Main");
+    const item = container.querySelector<HTMLElement>(".groups .grp-items");
+    // The same list, row and grip as a group's items.
+    expect(row.closest("ul")!.className).toBe(item!.className);
+    expect(row.closest("ul")!.parentElement!.className).toBe("grp");
+    expect(row.className.split(" ")[0]).toBe("gi");
+    expect(row.firstElementChild!.className).toBe("gi-handle");
+    expect(row.querySelector(".gi-handle svg")).toBeTruthy();
+    expect(row.closest("li")!.classList.contains("gi-wrap")).toBe(true);
+    // Its ⋯ still opens its menu.
+    const more = screen.getByRole("button", { name: "Main options" });
+    expect(more.closest("li")).toBe(row.closest("li"));
+    fireEvent.click(more);
+    expect(screen.getByRole("menuitem", { name: /Rename grid/ })).toBeTruthy();
   });
 
   it("marks each grid's row as a place to drop a pane", () => {

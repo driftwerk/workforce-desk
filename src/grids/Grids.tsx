@@ -1,10 +1,9 @@
-import { Accessibility, defaultPreset, PointerSensor } from "@dnd-kit/dom";
-import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { useRef, useState, type ComponentProps, type KeyboardEvent } from "react";
+import { useId, useRef, useState } from "react";
 import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useGridCounts } from "./GridView";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
 import { Confirm } from "../ui/Confirm";
+import { SortList, SortRow } from "../groups/rows";
 import { useGridDrag } from "./drag";
 import { closeGridWindow } from "../platform";
 import { createGrid, deleteGrid, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, useGrids } from "./store";
@@ -58,19 +57,10 @@ export function GridsMain() {
 const whereIs = (g: Grid, open: Record<string, true>): string =>
   g.placement.kind === "main" ? "this window" : `${g.placement.monitor?.name ?? "its own window"}${isAway(g, open) && g.placement.monitor ? " · away" : ""}`;
 
-/** Only the pointer drags (Alt+↑/↓ moves from the keyboard), as in the
- *  sidebar's groups. */
-const SENSORS = [PointerSensor];
-const PLUGINS = defaultPreset.plugins.filter((p) => p !== Accessibility);
-
-type Operation = Parameters<NonNullable<ComponentProps<typeof DragDropProvider>["onDragMove"]>>[0]["operation"];
-
-/** Where a dragged grid would go: before this grid, or last. */
-type Drop = { before: string | null };
-
-/** The sidebar's list of grids, in the Grids view: click one to show it,
- *  drag to reorder, double-click or F2 to rename, right-click or Shift+F10
- *  for the rest. A pane dragged onto a row goes to that grid. */
+/** The sidebar's list of grids, in the Grids view, drawn as a group's
+ *  items are: click one to show it, drag (or Alt+↑/↓) to reorder,
+ *  double-click or F2 to rename, right-click, Shift+F10 or its ⋯ for the
+ *  rest. A pane dragged onto a row goes to that grid. */
 export function GridsSection() {
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
@@ -80,10 +70,10 @@ export function GridsSection() {
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [drop, setDrop] = useState<Drop | null>(null);
   const [said, setSaid] = useState("");
   const justDragged = useRef(false);
   const rows = useRef(new Map<string, HTMLElement>());
+  const hint = useId();
   const choose = (g: Grid) => {
     if (justDragged.current) return;
     if (g.placement.kind === "main") setActive(g.id);
@@ -92,19 +82,22 @@ export function GridsSection() {
     else bringBack(g.id);
   };
   // Its own window closes first, so it can't write the grid back.
-  // The last grid gives way to a new empty one, so Grids always has one.
   const removeGrid = (g: Grid) => {
     if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
     setOpen(g.id, false);
+    // The last grid gives way to a new empty one, so Grids always has one.
     if (useGrids.getState().order.length <= 1) createGrid();
     deleteGrid(g.id, closeContent);
   };
   /** An empty grid goes at once; one holding anything asks first. */
   const askToRemove = (g: Grid) => (g.panes.some((p) => p.content) ? setDeleting(g.id) : removeGrid(g));
-  const nudge = (id: string, by: -1 | 1) => {
-    if (!nudgeGrid(id, by)) return setSaid(by < 0 ? "Already the first grid" : "Already the last grid");
+  const sayWhere = (id: string) => {
     const now = useGrids.getState().order;
     setSaid(`${grids[id]?.name}: grid ${now.indexOf(id) + 1} of ${now.length}`);
+  };
+  const nudge = (id: string, by: -1 | 1) => {
+    if (!nudgeGrid(id, by)) return setSaid(by < 0 ? "Already the first grid" : "Already the last grid");
+    sayWhere(id);
     requestAnimationFrame(() => rows.current.get(id)?.focus());
   };
   const entries = (g: Grid): MenuEntry[] => [
@@ -115,16 +108,7 @@ export function GridsSection() {
     { kind: "separator" },
     { kind: "item", label: "Delete grid…", onSelect: () => askToRemove(g) },
   ];
-  const dropFor = (op: Operation): Drop | null => {
-    const { source, target } = op;
-    if (!source || !target || source.type !== "grid") return null;
-    const id = String(target.id);
-    const rect = target.element?.getBoundingClientRect();
-    const upper = rect ? op.position.current.y < rect.top + rect.height / 2 : true;
-    const before = upper ? id : (order[order.indexOf(id) + 1] ?? null);
-    return { before };
-  };
-  const same = (a: Drop | null, b: Drop | null) => a?.before === b?.before && !a === !b;
+  const ids = order.filter((id) => grids[id]);
   return (
     <div className="side-section" role="region" aria-label="Grids">
       <span className="side-label side-label-action side-head">
@@ -135,62 +119,59 @@ export function GridsSection() {
           </svg>
         </button>
       </span>
-      <DragDropProvider
-        sensors={SENSORS}
-        plugins={PLUGINS}
+      <span id={hint} className="sr-only">
+        Alt+Up and Alt+Down move it. F2 renames. Shift+F10 opens its menu.
+      </span>
+      <SortList
+        label="Grids"
+        type="grid"
+        ids={ids}
+        chip={(id) => grids[id]?.name}
         onDragStart={() => setMenu(null)}
-        onDragMove={(e) => {
-          const d = dropFor(e.operation);
-          setDrop((was) => (same(was, d) ? was : d));
+        justDragged={justDragged}
+        onMove={(id, before) => {
+          moveGrid(id, before);
+          sayWhere(id);
         }}
-        onDragOver={(e) => {
-          const d = dropFor(e.operation);
-          setDrop((was) => (same(was, d) ? was : d));
+        row={(id, lineBefore) => {
+          const g = grids[id]!;
+          return (
+            <SortRow
+              key={id}
+              id={id}
+              type="grid"
+              lineBefore={lineBefore}
+              on={g.placement.kind === "main" && active === id}
+              className={paneOver === id ? "drop-in" : ""}
+              editing={
+                editing === id ? (
+                  <RenameField
+                    label="Grid name"
+                    initial={g.name}
+                    mono={false}
+                    onDone={(name) => {
+                      setEditing(null);
+                      if (name !== null) renameGrid(id, name);
+                      requestAnimationFrame(() => rows.current.get(id)?.focus());
+                    }}
+                  />
+                ) : null
+              }
+              name={g.name}
+              meta={<span className="gi-meta faint small">{whereIs(g, open)}</span>}
+              title="Drag to reorder · double-click to rename"
+              describedBy={hint}
+              more={`${g.name} options`}
+              wrap={{ "data-drop-grid-row": id }}
+              register={(el) => (el ? rows.current.set(id, el) : rows.current.delete(id))}
+              onOpen={() => choose(g)}
+              onStartRename={() => setEditing(id)}
+              onNudge={(by) => nudge(id, by)}
+              onMenu={(at, from) => setMenu({ id, at, from })}
+            />
+          );
         }}
-        onDragEnd={(e) => {
-          const s = e.operation.source;
-          const d = e.canceled ? null : dropFor(e.operation);
-          setDrop(null);
-          justDragged.current = true;
-          setTimeout(() => (justDragged.current = false), 0);
-          if (!s || !d) return;
-          const id = String(s.id);
-          if (d.before === id || order[order.indexOf(id) + 1] === d.before) return;
-          moveGrid(id, d.before);
-          const now = useGrids.getState().order;
-          setSaid(`${grids[id]?.name}: grid ${now.indexOf(id) + 1} of ${now.length}`);
-        }}
-      >
-        <ul className="side-grids" aria-label="Grids">
-          {order.map((id) => {
-            const g = grids[id];
-            if (!g) return null;
-            return (
-              <GridRow
-                key={id}
-                grid={g}
-                where={whereIs(g, open)}
-                on={g.placement.kind === "main" && active === id}
-                lineBefore={drop?.before === id}
-                paneOver={paneOver === id}
-                editing={editing === id}
-                register={(el) => (el ? rows.current.set(id, el) : rows.current.delete(id))}
-                onChoose={() => choose(g)}
-                onRename={(name) => {
-                  setEditing(null);
-                  if (name !== null) renameGrid(id, name);
-                  requestAnimationFrame(() => rows.current.get(id)?.focus());
-                }}
-                onStartRename={() => setEditing(id)}
-                onNudge={(by) => nudge(id, by)}
-                onMenu={(at, from) => setMenu({ id, at, from })}
-              />
-            );
-          })}
-          {drop && drop.before === null && <li className="drop-line drop-line-grid" aria-hidden="true" />}
-        </ul>
-        <DragOverlay dropAnimation={null}>{(source) => <div className="drag-chip">{grids[String(source.id)]?.name}</div>}</DragOverlay>
-      </DragDropProvider>
+      />
       <span className="sr-only" aria-live="polite">
         {said}
       </span>
@@ -228,110 +209,3 @@ export const deleteNote = (g: Grid): string => {
   if (terminals) parts.push(`${terminals === 1 ? "Its terminal closes" : `Its ${terminals} terminals close`}, with anything running in ${terminals === 1 ? "it" : "them"}.`);
   return parts.join(" ") || "It's empty.";
 };
-
-export function MoreIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-      <circle cx="3" cy="7" r="1.3" />
-      <circle cx="7" cy="7" r="1.3" />
-      <circle cx="11" cy="7" r="1.3" />
-    </svg>
-  );
-}
-
-const isMenuKey = (e: KeyboardEvent) => e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
-
-function GridRow({
-  grid,
-  where,
-  on,
-  lineBefore,
-  paneOver,
-  editing,
-  register,
-  onChoose,
-  onRename,
-  onStartRename,
-  onNudge,
-  onMenu,
-}: {
-  grid: Grid;
-  where: string;
-  on: boolean;
-  lineBefore: boolean;
-  paneOver: boolean;
-  editing: boolean;
-  register: (el: HTMLElement | null) => void;
-  onChoose: () => void;
-  onRename: (name: string | null) => void;
-  onStartRename: () => void;
-  onNudge: (by: -1 | 1) => void;
-  onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
-}) {
-  const row = useRef<HTMLButtonElement | null>(null);
-  const drag = useDraggable({ id: grid.id, type: "grid", element: row, disabled: editing });
-  useDroppable({ id: grid.id, type: "grid", accept: "grid", element: row });
-  return (
-    <>
-      {lineBefore && <li className="drop-line drop-line-grid" aria-hidden="true" />}
-      <li className={`side-grid side-item ${drag.isDragSource ? "ghost" : ""}`} data-drop-grid-row={grid.id}>
-        {editing ? (
-          <span className="side-row side-row-editing">
-            <RenameField label="Grid name" initial={grid.name} mono={false} onDone={onRename} />
-          </span>
-        ) : (
-          <button
-            ref={(el) => {
-              row.current = el;
-              register(el);
-            }}
-            type="button"
-            className={`side-row ${on ? "on" : ""} ${paneOver ? "drop-in" : ""}`}
-            aria-current={on ? "true" : undefined}
-            title="Drag to reorder · double-click to rename"
-            onClick={onChoose}
-            onDoubleClick={(e) => {
-              e.preventDefault();
-              onStartRename();
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onMenu({ x: e.clientX, y: e.clientY }, e.currentTarget);
-            }}
-            onKeyDown={(e) => {
-              const by = e.altKey && !e.metaKey && !e.ctrlKey ? (e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0) : 0;
-              if (by) {
-                e.preventDefault();
-                onNudge(by);
-              } else if (e.key === "F2") {
-                e.preventDefault();
-                onStartRename();
-              } else if (isMenuKey(e)) {
-                e.preventDefault();
-                const r = e.currentTarget.getBoundingClientRect();
-                onMenu({ x: r.left + 12, y: r.bottom + 2 }, e.currentTarget);
-              }
-            }}
-          >
-            <span className="side-name">{grid.name}</span>
-            <span className="faint small">{where}</span>
-          </button>
-        )}
-        {!editing && (
-          <button
-            type="button"
-            className="icon-btn-sm side-more"
-            aria-label={`${grid.name} options`}
-            aria-haspopup="menu"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              onMenu({ x: r.left, y: r.bottom + 2 }, e.currentTarget);
-            }}
-          >
-            <MoreIcon />
-          </button>
-        )}
-      </li>
-    </>
-  );
-}

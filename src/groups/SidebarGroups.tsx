@@ -1,16 +1,5 @@
-import { Accessibility, defaultPreset, PointerSensor } from "@dnd-kit/dom";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ComponentProps,
-  type KeyboardEvent,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
@@ -45,6 +34,7 @@ import {
   type Shown,
 } from "./model";
 import { useSessionNames } from "./names";
+import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import { changeLayout, layoutOf, nameSession } from "./store";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude", codex: "Codex" };
@@ -74,27 +64,7 @@ type Opened =
 const newId = (): string =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-/** Where a menu opened from the keyboard appears: under what it's for. */
-const below = (el: HTMLElement) => {
-  const r = el.getBoundingClientRect();
-  return { x: r.left + 12, y: r.bottom + 2 };
-};
-
-const isMenuKey = (e: KeyboardEvent) => e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
-
-const step = (e: KeyboardEvent): -1 | 1 | null =>
-  e.altKey && !e.metaKey && !e.ctrlKey ? (e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : null) : null;
-
-/** Only the pointer drags: the keyboard moves with Alt+↑/↓ and the menus,
- *  and Desk says so itself, so the library's keyboard dragging and its
- *  instructions are left out. */
-const SENSORS = [PointerSensor];
-// Module-level, so the provider sees the same lists every render (it
-// reapplies them whenever they change).
-const PLUGINS = defaultPreset.plugins.filter((p) => p !== Accessibility);
 const GROUP_ACCEPTS = ["item", "group"];
-
-type Operation = Parameters<NonNullable<ComponentProps<typeof DragDropProvider>["onDragMove"]>>[0]["operation"];
 
 /** Groups of agents and sessions, Desk's own, with Ungrouped last. Drag to
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
@@ -405,13 +375,13 @@ export function SidebarGroups() {
       <DragOverlay dropAnimation={null}>
         {(source) => {
           const id = String(source.id);
-          if (source.type === "group") return <div className="drag-chip">{groupName(id.slice(6))}</div>;
+          if (source.type === "group") return <DragChip>{groupName(id.slice(6))}</DragChip>;
           const item = items.get(id);
           return item ? (
-            <div className={`drag-chip ${item.kind === "session" ? "mono" : ""}`}>
+            <DragChip mono={item.kind === "session"}>
               {item.kind === "session" ? <span className={`dot dot-${item.session.state}`} /> : <Mark name={item.agent.name} size="sm" />}
               {nameOf(item)}
-            </div>
+            </DragChip>
           ) : null;
         }}
       </DragOverlay>
@@ -546,11 +516,7 @@ function GroupSection({
               aria-haspopup="menu"
               onClick={(e) => onMenu(below(e.currentTarget), e.currentTarget)}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-                <circle cx="3" cy="7" r="1.3" />
-                <circle cx="7" cy="7" r="1.3" />
-                <circle cx="11" cy="7" r="1.3" />
-              </svg>
+              <MoreIcon />
             </button>
           )}
         </div>
@@ -600,72 +566,27 @@ function ItemRow({
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
 }) {
-  const row = useRef<HTMLButtonElement | null>(null);
-  const drag = useDraggable({ id: item.key, type: "item", element: row, disabled: editing });
-  useDroppable({ id: item.key, type: "item", accept: "item", element: row, collisionPriority: 3 });
   const session = item.kind === "session" ? item.session : null;
   return (
-    <>
-      {lineBefore && <li className="drop-line" aria-hidden="true" />}
-      <li className={`gi-wrap ${drag.isDragSource ? "ghost" : ""} ${editing ? "editing" : ""}`}>
-        {editing && session ? (
-          <span className="gi gi-editing">
-            <span className="gi-handle" aria-hidden="true" />
-            <span className={`dot dot-${session.state}`} aria-hidden="true" />
-            <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} />
-          </span>
-        ) : (
-          <button
-            ref={(el) => {
-              row.current = el;
-              register(item.key, el);
-            }}
-            type="button"
-            className={`gi ${on ? "on" : ""}`}
-            data-item={item.key}
-            title={title}
-            aria-describedby={hint}
-            aria-current={on ? "true" : undefined}
-            onClick={onOpen}
-            onDoubleClick={(e) => {
-              if (!session) return;
-              e.preventDefault();
-              onStartRename();
-            }}
-            onKeyDown={(e) => {
-              const by = step(e);
-              if (by) {
-                e.preventDefault();
-                onNudge(by);
-              } else if (e.key === "F2" && session) {
-                e.preventDefault();
-                onStartRename();
-              } else if (isMenuKey(e)) {
-                e.preventDefault();
-                onMenu(below(e.currentTarget), e.currentTarget);
-              }
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onMenu({ x: e.clientX, y: e.clientY }, row.current);
-            }}
-          >
-            <span className="gi-handle" aria-hidden="true">
-              <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor">
-                <circle cx="2" cy="2" r="1" />
-                <circle cx="6" cy="2" r="1" />
-                <circle cx="2" cy="6" r="1" />
-                <circle cx="6" cy="6" r="1" />
-                <circle cx="2" cy="10" r="1" />
-                <circle cx="6" cy="10" r="1" />
-              </svg>
-            </span>
-            {session ? <span className={`dot dot-${session.state}`} aria-hidden="true" /> : <Mark name={name} size="sm" />}
-            <span className={session ? "mono gi-name" : "display gi-name"}>{name}</span>
-            <span className={`gi-meta small ${session?.state === "blocked" ? "state-blocked" : "faint"}`}>{meta}</span>
-          </button>
-        )}
-      </li>
-    </>
+    <SortRow
+      id={item.key}
+      type="item"
+      collisionPriority={3}
+      lineBefore={lineBefore}
+      on={on}
+      editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
+      lead={session ? <span className={`dot dot-${session.state}`} aria-hidden="true" /> : <Mark name={name} size="sm" />}
+      name={name}
+      nameClass={session ? "mono" : "display"}
+      meta={<span className={`gi-meta small ${session?.state === "blocked" ? "state-blocked" : "faint"}`}>{meta}</span>}
+      title={title}
+      describedBy={hint}
+      data={{ "data-item": item.key }}
+      register={(el) => register(item.key, el)}
+      onOpen={onOpen}
+      onStartRename={session ? onStartRename : undefined}
+      onNudge={onNudge}
+      onMenu={onMenu}
+    />
   );
 }

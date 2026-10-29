@@ -32,6 +32,7 @@ import {
 } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, mainGrid, newId, nextName, paneId, readGrid, readIndex, type Grid, type Placement } from "./model";
 import { GRID_PREFIX, type GridStorage } from "./storage";
+import { moved, nudged } from "../ui/reorder";
 
 /** Which window this is: Desk's main window, or a detached grid's. */
 export type Role = { kind: "main" } | { kind: "grid"; gridId: string };
@@ -216,25 +217,15 @@ const saveOrder = (order: string[]) => {
 /** Moves grid `id` before grid `before` (last when null), as the sidebar
  *  lists them; kept in `grid.index`. */
 export const moveGrid = (id: string, before: string | null): void => {
-  const order = get().order;
-  if (!order.includes(id) || id === before) return;
-  const rest = order.filter((x) => x !== id);
-  const at = before === null ? rest.length : rest.indexOf(before);
-  if (at < 0) return;
-  rest.splice(at, 0, id);
-  if (rest.join() !== order.join()) saveOrder(rest);
+  const next = moved(get().order, id, before);
+  if (next) saveOrder(next);
 };
 
 /** Moves grid `id` one place up or down; false when it's already at that end. */
 export const nudgeGrid = (id: string, by: -1 | 1): boolean => {
-  const order = get().order;
-  const i = order.indexOf(id);
-  const j = i + by;
-  if (i < 0 || j < 0 || j >= order.length) return false;
-  const next = [...order];
-  [next[i], next[j]] = [next[j]!, next[i]!];
-  saveOrder(next);
-  return true;
+  const next = nudged(get().order, id, by);
+  if (next) saveOrder(next);
+  return !!next;
 };
 
 /** A new grid in the main window, shown there. */

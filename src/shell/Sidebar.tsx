@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
-import { GridsSection, MoreIcon } from "../grids/Grids";
+import { GridsSection } from "../grids/Grids";
+import { MoreIcon } from "../groups/rows";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";

@@ -1406,7 +1406,9 @@ button {
   cursor: grab;
 }
 .gi:hover .gi-handle,
-.gi:focus-visible .gi-handle {
+.gi:focus-visible .gi-handle,
+.side-item:hover .gi-handle,
+.side-item:focus-within .gi-handle {
   opacity: 1;
 }
 .gi .dot {
@@ -1537,10 +1539,15 @@ button {
   align-items: center;
   list-style: none;
 }
-.side-item > .side-row {
+.side-item > .side-row,
+.side-item > .gi {
   flex: 1;
   min-width: 0;
   padding-right: 34px;
+}
+/* Hovering its ⋯ still shows the row as hovered. */
+.side-item:hover > .gi {
+  background: var(--raised);
 }
 .side-more {
   position: absolute;
