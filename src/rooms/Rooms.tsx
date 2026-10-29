@@ -65,8 +65,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "files", label: "Files" },
 ];
 
-function DirectMessage() {
-  const { activeAgent, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier } = useChat();
+/** A DM: the one Rooms shows, or with `agent`, that agent's in a grid pane
+ *  — the conversation alone, under the pane's own header. */
+export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
+  const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm } = useChat();
+  const activeAgent = inPane ?? shownInRooms;
   const agent = roster.find((a) => agentKey(a) === activeAgent);
   const convo = activeAgent ? conversations[activeAgent] : undefined;
   const history = activeAgent ? histories[activeAgent] : undefined;
@@ -100,19 +103,29 @@ function DirectMessage() {
   // Distance from the bottom when an earlier page was asked for, so the
   // messages you were reading stay put as it lands above them.
   const anchor = useRef<number | null>(null);
-  const tab: Tab = (activeAgent && tabs[activeAgent]) || "chat";
+  const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
+  const known = roster.some((a) => agentKey(a) === inPane);
+  useEffect(() => {
+    if (inPane && known) watchDm(inPane);
+  }, [inPane, known, watchDm]);
+
+  // In a pane, only the pane's own list scrolls: never the grid around it.
+  const toEnd = useCallback(() => {
+    if (!inPane) end.current?.scrollIntoView({ block: "end" });
+    else if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+  }, [inPane]);
 
   useEffect(() => {
-    if (tab === "chat") end.current?.scrollIntoView({ block: "end" });
-  }, [convo?.messages, convo?.working?.step, tab]);
+    if (tab === "chat") toEnd();
+  }, [convo?.messages, convo?.working?.step, tab, toEnd]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el || tab !== "chat") return;
     if (anchor.current !== null) el.scrollTop = el.scrollHeight - anchor.current;
-    else end.current?.scrollIntoView({ block: "end" });
+    else toEnd();
     anchor.current = null;
-  }, [history?.messages, tab]);
+  }, [history?.messages, tab, toEnd]);
 
   const earlier = useCallback(() => {
     if (!activeAgent || !history?.more || history.earlier === "loading") return;
@@ -127,6 +140,13 @@ function DirectMessage() {
     [activeAgent, send],
   );
 
+  if (inPane && (!agent || !convo)) {
+    return (
+      <div className="pane-note">
+        <p className="muted small">{agent ? "Connecting…" : "This agent isn’t on any hub Desk is paired with right now."}</p>
+      </div>
+    );
+  }
   if (!agent || !activeAgent || !convo) {
     // The DM put back on launch, until its hub's roster is read.
     const hubId = activeAgent?.split("/")[0] ?? "";
@@ -157,6 +177,7 @@ function DirectMessage() {
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
   const subtitle = overseeing && tab === "chat" ? overseeingLine(roster, agent, overview, sessions, overseeing) : brainSubtitle;
+  const Root = inPane ? "div" : "main";
   const busy = convo.working !== null;
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the
@@ -174,32 +195,34 @@ function DirectMessage() {
   const sentOn = { local, crew: crewNames, overseer: overseerName, person: people[agent.hubId] ?? null };
 
   return (
-    <main className="room" aria-label={`Conversation with ${agent.name}`}>
-      <header className="room-head">
-        <Mark name={agent.name} size="lg" />
-        <span className="room-title">
-          <h1 className="display-lg">{agent.name}</h1>
-          <span className="faint small">
-            {subtitle}
-            {convo.connected ? "" : " · reconnecting…"}
+    <Root className={inPane ? "room room-in-pane" : "room"} aria-label={`Conversation with ${agent.name}`}>
+      {!inPane && (
+        <header className="room-head">
+          <Mark name={agent.name} size="lg" />
+          <span className="room-title">
+            <h1 className="display-lg">{agent.name}</h1>
+            <span className="faint small">
+              {subtitle}
+              {convo.connected ? "" : " · reconnecting…"}
+            </span>
           </span>
-        </span>
-        <div className="tabs agent-tabs" role="tablist" aria-label={agent.name}>
-          {shownTabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              id={`agent-tab-${t.id}`}
-              aria-selected={tab === t.id}
-              aria-controls="agent-tab-panel"
-              onClick={() => choose(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </header>
+          <div className="tabs agent-tabs" role="tablist" aria-label={agent.name}>
+            {shownTabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                id={`agent-tab-${t.id}`}
+                aria-selected={tab === t.id}
+                aria-controls="agent-tab-panel"
+                onClick={() => choose(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </header>
+      )}
       {tab === "settings" ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-settings">
           <AgentSettings agent={agent} hub={hub} onOpenFiles={() => go("files")} />
@@ -213,9 +236,9 @@ function DirectMessage() {
           <div
             ref={scrollerRef}
             className="room-scroll"
-            role="tabpanel"
-            id="agent-tab-panel"
-            aria-labelledby="agent-tab-chat"
+            role={inPane ? undefined : "tabpanel"}
+            id={inPane ? undefined : "agent-tab-panel"}
+            aria-labelledby={inPane ? undefined : "agent-tab-chat"}
             onScroll={(e) => {
               if (e.currentTarget.scrollTop < 80 && history?.earlier === "idle") earlier();
             }}
@@ -308,7 +331,7 @@ function DirectMessage() {
           }}
         />
       )}
-    </main>
+    </Root>
   );
 }
 

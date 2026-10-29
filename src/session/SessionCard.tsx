@@ -62,25 +62,36 @@ export function SessionCard({ session }: { session: Session }) {
           </button>
         )}
       </div>
-      {session.live ? (
-        <Terminal key={session.id} sessionId={session.id} />
-      ) : (
-        <div className="terminal-idle">
-          <p className="muted">
-            {session.origin === "external"
-              ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."
-              : session.state === "interrupted"
-                ? "This session was working when it stopped. Resume picks up the same conversation."
-                : "Not running. Resume picks up the same conversation."}
-          </p>
-          {session.lastReply && (
-            <div className="transcript-tail rich">
-              <RichMarkdown text={session.lastReply} />
-            </div>
-          )}
-        </div>
-      )}
+      <SessionBody session={session} />
       <Approval session={session} />
     </aside>
+  );
+}
+
+/** What a session shows: its terminal while it runs (the Desk terminal it
+ *  was started in, for a tracked one), else why it isn't running and the
+ *  last thing it said. */
+export function SessionBody({ session, autoFocus = true }: { session: Session; autoFocus?: boolean }) {
+  return session.live ? (
+    session.terminalId ? (
+      <Terminal key={session.terminalId} terminalId={session.terminalId} autoFocus={autoFocus} />
+    ) : (
+      <Terminal key={session.id} sessionId={session.id} autoFocus={autoFocus} />
+    )
+  ) : (
+    <div className="terminal-idle">
+      <p className="muted">
+        {session.origin === "external"
+          ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."
+          : session.state === "interrupted"
+            ? "This session was working when it stopped. Resume picks up the same conversation."
+            : "Not running. Resume picks up the same conversation."}
+      </p>
+      {session.lastReply && (
+        <div className="transcript-tail rich">
+          <RichMarkdown text={session.lastReply} />
+        </div>
+      )}
+    </div>
   );
 }

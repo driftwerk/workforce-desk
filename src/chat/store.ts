@@ -38,6 +38,9 @@ interface ChatStore {
   reopenDm: () => void;
   /** The roster has been read at least once. */
   rosterRead: boolean;
+  /** Opens a conversation (and reads what the hub kept of it) without
+   *  making it the DM Rooms shows: for a grid pane. */
+  watchDm: (key: string) => void;
   /** Reads a DM's latest messages from its hub (again, after a failure). */
   loadHistory: (key: string) => Promise<void>;
   /** Reads the page before the earliest message shown. */
@@ -169,6 +172,10 @@ export const useChat = create<ChatStore>((set, get) => ({
   openDm: (key) => {
     if (!ensure(key)) return;
     set({ activeAgent: key });
+    get().watchDm(key);
+  },
+  watchDm: (key) => {
+    if (!ensure(key)) return;
     if (!get().histories[key] || get().histories[key]!.state === "failed") void get().loadHistory(key);
   },
   loadHistory: async (key) => {
