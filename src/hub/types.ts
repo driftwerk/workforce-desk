@@ -59,6 +59,9 @@ export interface NewSession {
   worktree?: string;
   prompt?: string;
   approvals?: "desk" | "terminal";
+  /** Added to the session's environment, as for a terminal: Desk's Claude
+   *  Code plugin folder, joined by the hub to the person's own. */
+  env?: Record<string, string>;
 }
 
 /** A login shell the hub hosts for one of Desk's grid panes. */

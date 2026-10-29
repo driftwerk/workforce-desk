@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { pluginEnv } from "../grids/terminals";
 import { useDesk } from "../hub/store";
 import type { Engine } from "../hub/types";
 import { pickFolder } from "../platform";
@@ -34,6 +35,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
         goal,
         approvals,
         worktree: worktree.trim() || undefined,
+        env: await pluginEnv(),
       });
       open(s.id);
       onClose();
