@@ -28,6 +28,7 @@ const need = (k: keyof typeof params): string => {
 
 let settings = {
   theme: "system",
+  themePick: "harbour",
   tuple: false,
   newAgent: null as { provider: string; model?: string; effort?: string } | null,
   defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },

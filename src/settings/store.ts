@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { loadSettings, saveSettings, type Settings, type VoiceSpec } from "../platform";
 import { choose, DEFAULT_SHORTCUTS, resolve, type ShortcutId } from "../shortcuts/keys";
-import { useThemeStore } from "../theme/store";
+import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
   /** Each shortcut's keys: the chosen ones, else the default. */
@@ -17,6 +17,7 @@ interface SettingsStore extends Settings {
  *  can't be Desk's, or has another shortcut's keys loads as its default. */
 export const useSettings = create<SettingsStore>((set, get) => ({
   theme: "system",
+  themePick: DEFAULT_PICK,
   tuple: false,
   newAgent: null,
   defaultVoice: { provider: "fish_audio", voice: "802e3bc2b27e49c2995d23ef70e6ac89" },
@@ -28,10 +29,15 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   loaded: false,
   load: async () => {
     const s = await loadSettings();
+    // The pick first: a saved theme other than Auto, Night and Day (an older
+    // Desk's "harbour") is the chooser's, and setting it picks it again.
+    useThemeStore.getState().setPick(s.themePick ?? DEFAULT_PICK);
     useThemeStore.getState().setChoice(s.theme);
     const { keys, chosen } = resolve(s.shortcuts ?? {});
     set({
       ...s,
+      theme: useThemeStore.getState().choice,
+      themePick: useThemeStore.getState().pick,
       shortcuts: chosen,
       keys,
       defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
@@ -44,14 +50,14 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       const { keys, chosen } = resolve(patch.shortcuts);
       set({ ...patch, shortcuts: chosen, keys });
     } else set(patch);
-    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts, loaded } = get();
-    if (loaded) void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts });
+    const { theme, themePick, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts, loaded } = get();
+    if (loaded) void saveSettings({ theme, themePick, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),
 }));
 
 useThemeStore.subscribe((s, before) => {
-  if (s.choice !== before.choice) useSettings.getState().set({ theme: s.choice });
+  if (s.choice !== before.choice || s.pick !== before.pick) useSettings.getState().set({ theme: s.choice, themePick: s.pick });
 });
 
 /** Kokoro's own voices are named like af_heart or bm_george. */

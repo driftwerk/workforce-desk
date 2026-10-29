@@ -44,6 +44,9 @@ export interface VoiceSpec {
 
 export interface Settings {
   theme: string;
+  /** The sidebar chooser's theme, kept while Auto, Night or Day is on;
+   *  older files have none (Harbour). */
+  themePick?: string;
   tuple: boolean;
   /** How new agents think: a provider, and optionally a model and effort
    *  of it (its defaults otherwise); null for whichever plan is connected. */

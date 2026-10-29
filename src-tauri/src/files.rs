@@ -43,6 +43,10 @@ fn default_voice() -> VoiceSpec {
 pub struct Settings {
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// The sidebar chooser's theme, kept while Auto, Night or Day is on.
+    /// Older Desks saved none, which the UI reads as Harbour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_pick: Option<String>,
     /// Agents can be asked from Tuple calls.
     #[serde(default)]
     pub tuple: bool,
@@ -100,6 +104,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: default_theme(),
+            theme_pick: None,
             tuple: false,
             new_agent: None,
             plan: None,
@@ -242,6 +247,28 @@ mod tests {
         .unwrap();
         assert!(load_settings(&paths).unwrap().tuple);
         assert_eq!(load_settings(&paths).unwrap().theme, "harbour");
+    }
+
+    #[test]
+    fn the_theme_choosers_pick_round_trips_and_older_files_have_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"harbour"}"#).unwrap();
+        let older = load_settings(&paths).unwrap();
+        assert_eq!(older.theme, "harbour");
+        assert_eq!(older.theme_pick, None);
+        let chosen = Settings {
+            theme: "night".into(),
+            theme_pick: Some("acme-dusk".into()),
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        assert!(
+            std::fs::read_to_string(paths.settings())
+                .unwrap()
+                .contains(r#""themePick": "acme-dusk""#)
+        );
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 
     #[test]

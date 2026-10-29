@@ -3,13 +3,14 @@ import { agentKey, describeAgent } from "../chat/types";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { logoDot } from "../theme/builtin";
-import { allThemes, useTheme, useThemeStore } from "../theme/store";
+import { useTheme } from "../theme/store";
 import { useOverview } from "../overview/store";
 import { Mark } from "../ui/Mark";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 const STATE_LABEL: Partial<Record<Session["state"], string>> = {
   working: "working",
@@ -36,9 +37,7 @@ export function Sidebar({
   const rooms = Object.values(useDesk((s) => s.rooms)).sort((a, b) => a.name.localeCompare(b.name));
   const { roster, hubs, activeAgent, openDm } = useChat();
   const theme = useTheme();
-  const { choice, custom, setChoice } = useThemeStore();
   const list = sortedSessions(sessions).filter((s) => s.state !== "closed");
-  const themes = [{ id: "system", name: "Auto" }, ...allThemes(custom).slice(0, 3)];
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
   const keys = useSettings((s) => s.keys);
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
@@ -131,13 +130,7 @@ export function Sidebar({
         <span className="faint small">
           {connected ? hubs.map((h) => h.label).join(" · ") || "This Mac" : "Starting…"}
         </span>
-        <div className="seg" role="radiogroup" aria-label="Theme">
-          {themes.map((t) => (
-            <button key={t.id} type="button" role="radio" aria-checked={choice === t.id} onClick={() => setChoice(t.id)}>
-              {t.name}
-            </button>
-          ))}
-        </div>
+        <ThemeSwitcher onSettings={onSettings} />
         <button type="button" className="link small side-settings" onClick={onSettings}>
           Settings <kbd>{shortcutLabel(keys.settings)}</kbd>
         </button>
