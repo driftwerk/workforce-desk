@@ -1,6 +1,7 @@
 //! What the Desk app and `desk-hubd` share: where Desk keeps its files, the
-//! local hub's ports, and its secrets in the macOS keychain.
+//! local hub's ports, its secrets in the macOS keychain, and its PTY holder.
 
+pub mod holder;
 pub mod redact;
 pub mod shell;
 

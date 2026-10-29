@@ -148,7 +148,22 @@ pub fn render(paths: &Paths, ports: &HubPorts) -> String {
             ("default_model", s("standard")),
         ]),
     );
-    doc.insert("desk".into(), table(&[("enabled", Value::Boolean(true))]));
+    // Terminals and sessions live in the PTY holder desk-hubd starts, so
+    // they outlive the hub restarting; it takes the hub's admin token.
+    doc.insert(
+        "desk".into(),
+        table(&[
+            ("enabled", Value::Boolean(true)),
+            (
+                "pty_holder_socket",
+                s(&paths.pty_socket().to_string_lossy()),
+            ),
+            (
+                "pty_holder_token",
+                s(&format!("${{{}}}", Secret::GatewayToken.env())),
+            ),
+        ]),
+    );
     // Local agents may run on the person's ChatGPT plan as well as Claude's.
     doc.insert(
         "subscription".into(),
@@ -260,6 +275,14 @@ mod tests {
         }
         assert_eq!(doc["weaviate"]["enabled"].as_bool(), Some(false));
         assert_eq!(doc["desk"]["enabled"].as_bool(), Some(true));
+        assert_eq!(
+            doc["desk"]["pty_holder_socket"].as_str(),
+            Some("/Users/k/Library/Application Support/Desk/hub/run/pty.sock")
+        );
+        assert_eq!(
+            doc["desk"]["pty_holder_token"].as_str(),
+            Some("${WORKFORCE_GATEWAY_TOKEN}")
+        );
         assert_eq!(
             doc["pairing"]["device_pairing_enabled"].as_bool(),
             Some(true)

@@ -10,13 +10,15 @@ use desk_core::{LOCAL_HUB_ID, Paths, Secret, Secrets, device_token_account, read
 use eyre::{Context, Result};
 
 /// The logs a report carries, newest part of each.
-const LOGS: [&str; 6] = [
+const LOGS: [&str; 8] = [
     "desk.log",
     "desk.log.1",
     "desk-hubd.log",
     "desk-hubd.log.1",
     "hub.log",
     "hub.log.1",
+    "pty-holder.log",
+    "pty-holder.log.1",
 ];
 const TAIL: u64 = 4 * 1024 * 1024;
 
@@ -138,14 +140,16 @@ fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
 }
 
 /// Stops Desk Helper and takes it out of Login Items; with `everything`,
-/// also deletes Desk's folder and its keychain items. Nothing is deleted
-/// while the helper is still running.
+/// also ends the PTY holder (and with it the hub's terminals) and deletes
+/// Desk's folder and its keychain items. Nothing is deleted while the
+/// helper is still running.
 pub fn remove(paths: &Paths, everything: bool) -> Result<()> {
     crate::helper::unregister(paths)?;
     if !everything {
         return Ok(());
     }
     wait_stopped(paths, Duration::from_secs(40))?;
+    desk_core::holder::stop(&paths.pty_socket(), Duration::from_secs(10))?;
     forget_secrets(paths)?;
     match std::fs::remove_dir_all(&paths.root) {
         Ok(()) => Ok(()),

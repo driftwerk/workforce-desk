@@ -1,11 +1,14 @@
 //! `desk-hubd` — "Desk Helper" in the app bundle, run by launchd at login
 //! as Desk's login item. Starts the local Postgres, writes the hub's config,
 //! and keeps the hub running with the user's login environment and its
-//! secrets from the keychain. Stops both on SIGTERM, and when an update
-//! replaces the app bundle under it, so launchd starts the new one.
+//! secrets from the keychain. Starts the PTY holder before the hub, which
+//! keeps the hub's terminals through its restarts. Stops the hub and
+//! Postgres (never the holder) on SIGTERM, and when an update replaces the
+//! app bundle under it, so launchd starts the new one.
 
 mod bootstrap;
 mod config;
+mod holder;
 
 use std::collections::BTreeMap;
 use std::net::TcpListener;
@@ -46,8 +49,13 @@ fn ports(paths: &Paths) -> Result<HubPorts> {
     Ok(ports)
 }
 
+/// Claude Code's own plugin folders, which the hub keeps for the shells it
+/// opens (adding Desk's), unlike the rest of `CLAUDE*`.
+const PLUGIN_DIRS: &str = "CLAUDE_CODE_PLUGIN_DIRS";
+
 /// Environment for `workforce serve`: login env, minus anything a parent
-/// Claude Code session leaked, plus the secrets.
+/// Claude Code session leaked (but the person's plugin folders), plus the
+/// secrets.
 fn hub_env(
     login: &BTreeMap<String, String>,
     secrets: &impl SecretStore,
@@ -57,7 +65,7 @@ fn hub_env(
     let mut env = desk_core::shell::with_local_bin(
         login
             .iter()
-            .filter(|(k, _)| !k.starts_with("CLAUDE"))
+            .filter(|(k, _)| !k.starts_with("CLAUDE") || k.as_str() == PLUGIN_DIRS)
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     );
@@ -310,7 +318,19 @@ async fn main() -> Result<()> {
     let mut term = signal(SignalKind::terminate())?;
     let mut int = signal(SignalKind::interrupt())?;
     let mut backoff = Duration::from_secs(1);
+    let socket = paths.pty_socket();
     let outcome = loop {
+        if let Err(e) = holder::ensure(
+            &workforce,
+            &paths,
+            &socket,
+            &env,
+            &env[Secret::GatewayToken.env()],
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "no PTY holder; the hub's terminals end when it restarts");
+        }
         let started = Instant::now();
         let mut hub = match spawn_hub(&workforce, &paths, &env) {
             Ok(c) => c,
@@ -370,9 +390,13 @@ mod tests {
             ("PATH".to_string(), "/usr/bin".to_string()),
             ("CLAUDE_CODE_CHILD_SESSION".to_string(), "1".to_string()),
             ("CLAUDECODE".to_string(), "1".to_string()),
+            ("CLAUDE_CODE_PLUGIN_DIRS".to_string(), "/mine".to_string()),
         ]);
         let env = hub_env(&login, &Memory::default()).unwrap();
-        assert!(!env.keys().any(|k| k.starts_with("CLAUDE")));
+        let claude: Vec<_> = env.keys().filter(|k| k.starts_with("CLAUDE")).collect();
+        // The person's own plugin folders stay; the hub adds Desk's.
+        assert_eq!(claude, ["CLAUDE_CODE_PLUGIN_DIRS"]);
+        assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
         for s in Secret::ALL {
             assert!(!env[s.env()].is_empty());
         }

@@ -1023,6 +1023,7 @@ dependencies = [
  "dirs",
  "eyre",
  "keyring",
+ "libc",
  "rand 0.10.3",
  "regex",
  "serde",
