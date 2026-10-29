@@ -63,7 +63,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const groups = () => render(<SidebarGroups onNewSession={() => {}} newSessionKeys="⌘N" onNewCrew={() => {}} />);
-const section = (name: string) => screen.getByRole("region", { name });
+const section = (name: string) => screen.getByRole("group", { name });
 const rows = (name: string) =>
   within(section(name))
     .queryAllByRole("button")
@@ -131,8 +131,10 @@ describe("groups in the sidebar", () => {
     expect(screen.queryByText("api-e7")).toBeNull();
   });
 
-  it("agents can't be renamed here", () => {
+  it("agents can't be renamed here, and aren't told they can", () => {
     groups();
+    expect(document.getElementById(row("Scout").getAttribute("aria-describedby")!)!.textContent).not.toContain("F2");
+    expect(document.getElementById(row("api-e7").getAttribute("aria-describedby")!)!.textContent).toContain("F2");
     fireEvent.keyDown(row("Scout"), { key: "F2" });
     expect(screen.queryByRole("textbox")).toBeNull();
   });
@@ -158,7 +160,7 @@ describe("groups in the sidebar", () => {
   it("reorders groups with Alt+↑/↓ on their headers", () => {
     groups();
     fireEvent.keyDown(header("Beta"), { key: "ArrowUp", altKey: true });
-    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Groups", "Beta", "Acme", "Ungrouped"]);
+    expect(screen.getAllByRole("group").map((r) => r.getAttribute("aria-label"))).toEqual(["Beta", "Acme", "Ungrouped"]);
     expect(document.activeElement).toBe(header("Beta"));
   });
 
@@ -226,7 +228,7 @@ describe("groups in the sidebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Acme Labs options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
-    expect(screen.queryByRole("region", { name: "Acme Labs" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Acme Labs" })).toBeNull();
     expect(rows("Ungrouped")).toEqual(["Ada", "web-release", "Scout", "api-e7"]);
     expect((lastSaved().groups as DeskGroup[]).map((g) => g.id)).toEqual(["beta"]);
   });

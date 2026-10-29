@@ -291,14 +291,20 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
             </svg>
           </button>
         </span>
-        <span id={hint} className="sr-only">
+        <span id={`${hint}-session`} className="sr-only">
           Alt+Up and Alt+Down move it. F2 renames. Shift+F10 opens its menu.
+        </span>
+        <span id={`${hint}-agent`} className="sr-only">
+          Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
+        </span>
+        <span id={`${hint}-group`} className="sr-only">
+          Alt+Up and Alt+Down move the group. F2 renames it. Shift+F10 opens its options.
         </span>
         {shown.map((g) => (
           <GroupSection
             key={g.id}
             group={g}
-            hint={hint}
+            hint={`${hint}-group`}
             dropBefore={drop?.kind === "group" && drop.before === g.id && dragging?.kind === "group"}
             dropAfter={drop?.kind === "group" && drop.before === null && g.id === groups.at(-1)?.id && dragging?.kind === "group"}
             dropInside={drop?.kind === "item" && drop.group === g.id && drop.before === null && dragging?.kind === "item"}
@@ -323,7 +329,7 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
                   key={key}
                   item={item}
                   name={nameOf(item)}
-                  hint={hint}
+                  hint={`${hint}-${item.kind}`}
                   lineBefore={lineBefore}
                   on={
                     item.kind === "session"
@@ -361,7 +367,7 @@ export function SidebarGroups({ onNewSession, newSessionKeys, onNewCrew }: { onN
             New session {newSessionKeys}
           </button>
           <button type="button" className="link small" onClick={onNewCrew}>
-            New agent
+            New crew member
           </button>
         </span>
         <span className="sr-only" aria-live="polite">
@@ -438,6 +444,7 @@ function GroupSection({
       {dropBefore && <div className="drop-line drop-line-group" aria-hidden="true" />}
       <section
         ref={section}
+        role="group"
         className={`grp ${dropInside ? "drop-in" : ""} ${drag.isDragSource ? "ghost" : ""}`}
         aria-label={group.name}
         data-group={group.id}
