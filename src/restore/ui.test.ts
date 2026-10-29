@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Room } from "../hub/types";
+import { MAIN_GRID } from "../grids/model";
+import { useGrids } from "../grids/store";
 import { useUi } from "../shell/ui";
 import { followHub, restore, restoreBeforeRender } from "./boot";
 import { DeskStateStore, type LocalState, type StateEntry } from "./store";
@@ -35,6 +37,7 @@ const saved: MainUi = {
   room: "r1",
   dm: "local/scout",
   session: "s1",
+  grid: "g2",
   settings: "shortcuts",
   agentTabs: { "local/scout": "files" },
   scroll: { sidebar: 120, floor: 40 },
@@ -71,6 +74,7 @@ const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
   useChat.setState({ activeAgent: null, roster: [], rosterRead: false });
   useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {} });
+  useGrids.setState({ active: MAIN_GRID });
 };
 
 beforeEach(reset);
@@ -114,6 +118,7 @@ describe("ui.main", () => {
       roomThreads: { r1: "m7" },
       anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
     });
+    useGrids.setState({ active: "g2" });
     const ui = capture();
     expect(ui).toEqual(saved);
     reset();

@@ -4,8 +4,10 @@
 
 import { blank, type Pane } from "./engine";
 
+import type { GridWindowMode } from "../platform";
+
 /** "Fills the screen" (its work area), "Free size", or "Full screen (own Space)". */
-export type WindowMode = "fill" | "free" | "fullscreen";
+export type WindowMode = GridWindowMode;
 
 export const WINDOW_MODES: { id: WindowMode; label: string }[] = [
   { id: "fill", label: "Fills the screen" },

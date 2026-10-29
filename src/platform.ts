@@ -104,6 +104,35 @@ export const claudePluginDir = async (): Promise<string | null> => (preview ? nu
  *  where Desk can't look (outside the app). */
 export const programsUnder = async (pid: number): Promise<string[]> => (preview ? [] : invoke<string[]>("programs_under", { pid }));
 
+/** A monitor as Desk recognises it again (see src-tauri/src/grid_windows.rs). */
+export interface MonitorInfo {
+  /** `name:WxH@scale`. */
+  id: string;
+  name: string;
+  /** Its work area's origin, in points: tells identical monitors apart. */
+  origin: [number, number];
+  primary: boolean;
+}
+
+export type GridWindowMode = "fill" | "free" | "fullscreen";
+
+/** Opens grid `grid`'s own window on its monitor (or brings it forward);
+ *  null while that monitor isn't connected. */
+export const openGridWindow = (
+  grid: string,
+  title: string,
+  mode: GridWindowMode,
+  monitor: { id: string; origin: [number, number] } | null,
+): Promise<MonitorInfo | null> => invoke("grid_window_open", { grid, title, mode, monitor });
+export const closeGridWindow = (grid: string): Promise<void> => invoke("grid_window_close", { grid });
+/** The grids that have a window of their own now. */
+export const gridWindowsOpen = (): Promise<string[]> => invoke("grid_windows_open");
+/** Puts this (grid) window in a window mode. */
+export const setGridWindowMode = (mode: GridWindowMode): Promise<void> => invoke("grid_window_mode", { mode });
+/** The monitor this window is on. */
+export const gridWindowMonitor = (): Promise<MonitorInfo | null> => invoke("grid_window_monitor");
+export const monitorsNow = (): Promise<MonitorInfo[]> => invoke("grid_monitors");
+
 /** The local hub (once Desk is paired with it) and every paired remote hub. */
 export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 

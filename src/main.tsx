@@ -4,13 +4,17 @@ import "@fontsource-variable/geist-mono";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { deskReady } from "./platform";
-import { restoreBeforeRender } from "./restore/boot";
+import { GridWindow } from "./grids/GridWindow";
+import { GRID_PREFIX } from "./grids/storage";
+import { detachedGrid } from "./grids/windows";
+import { deskState, restoreBeforeRender } from "./restore/boot";
 import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
 import { App } from "./shell/App";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/overview.css";
+import "./styles/grids.css";
 
 /** Shows the window once the restored shell has been committed. (Not on an
  *  animation frame: a hidden window's page never gets one.) */
@@ -21,13 +25,20 @@ function Ready() {
   return null;
 }
 
+// Grids are kept with the rest of what Desk restores.
+void deskState.register(GRID_PREFIX);
+
+// A detached grid's window shows that grid alone (see grids/GridWindow).
+const grid = detachedGrid();
+
 // What was open is put back before the shell first renders, and the window
 // (made hidden, where it was) is shown once it has: no default view first.
-void restoreBeforeRender([mainUi]).then(() => {
-  keepFileDrafts();
+void restoreBeforeRender(grid ? [] : [mainUi]).then(() => {
+  // A detached grid has no drafts of its own to keep.
+  if (!grid) keepFileDrafts();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App />
+      {grid ? <GridWindow gridId={grid} /> : <App />}
       <Ready />
     </StrictMode>,
   );

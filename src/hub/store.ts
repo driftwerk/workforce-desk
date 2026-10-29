@@ -4,6 +4,9 @@ import type { Working } from "../chat/conversation";
 import { DeskHub, type HubConnection } from "./client";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
+/** The main window's views: the Floor, Rooms, and Grids. */
+export type View = "rooms" | "floor" | "grids";
+
 interface DeskState {
   hub: DeskHub | null;
   connected: boolean;
@@ -19,11 +22,13 @@ interface DeskState {
   roomWorking: Record<string, Record<string, Working>>;
   setRoomWorking: (roomId: string, member: string, working: Working | null) => void;
   openId: string | null;
-  view: "rooms" | "floor";
+  view: View;
   error: string | null;
-  connect: (conn: HubConnection) => () => void;
+  /** With `notify: false` (a detached grid's window), sessions' changes
+   *  aren't told to macOS: the main window does that. */
+  connect: (conn: HubConnection, opts?: { notify?: boolean }) => () => void;
   open: (id: string | null) => void;
-  setView: (view: "rooms" | "floor") => void;
+  setView: (view: View) => void;
   openRoom: (id: string | null) => Promise<void>;
   /** Reads a room's latest messages again, keeping those already read
    *  (after a restore, or the hub coming back). */
@@ -94,12 +99,12 @@ export const useDesk = create<DeskState>((set, get) => ({
   view: "floor",
   loaded: false,
   error: null,
-  connect: (conn) => {
+  connect: (conn, opts) => {
     const hub = new DeskHub(conn);
     set({ hub });
     return hub.events(
       (e) => {
-        if (e.type === "session") {
+        if (e.type === "session" && opts?.notify !== false) {
           const n = notificationFor(get().sessions[e.session.id]?.state, e.session);
           if (n) void notify(n);
         }

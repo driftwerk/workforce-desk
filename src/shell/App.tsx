@@ -2,8 +2,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
+import { GridsMain } from "../grids/Grids";
+import { newTerminal, useGrids } from "../grids/store";
+import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
-import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe, themeFiles } from "../platform";
+import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe } from "../platform";
 import { useSettings } from "../settings/store";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
@@ -18,24 +21,13 @@ import { SessionCard } from "../session/SessionCard";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
-import { parseTheme, ThemeError } from "../theme/toml";
-import type { ThemeSpec } from "../theme/tokens";
+import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
 import { dragWindow } from "../ui/drag";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
-
-const loadCustomThemes = async (): Promise<ThemeSpec[]> =>
-  (await themeFiles()).flatMap((f) => {
-    try {
-      return [parseTheme(f.id, f.source)];
-    } catch (e) {
-      if (e instanceof ThemeError) console.warn(`theme ${f.id}.toml: ${e.message}`);
-      return [];
-    }
-  });
 
 export function App() {
   const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
@@ -115,7 +107,25 @@ export function App() {
     if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Shortcuts.`);
   }, [askStatus, fail]);
 
+  // Grids: kept in step with the other windows, and each detached one's
+  // window kept open on its monitor.
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let gone = false;
+    void startGridsHere({ kind: "main" }).then((s) => (gone ? s() : (stop = s)));
+    return () => {
+      gone = true;
+      stop?.();
+    };
+  }, []);
+  useGridWindows(useGrids((s) => s.ready));
+
   useAppShortcut("newSession", () => setNewSession(true));
+  useAppShortcut("newTerminal", () => {
+    useUi.getState().closeSettings();
+    useDesk.getState().setView("grids");
+    newTerminal(useGrids.getState().active);
+  });
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
 
   const open = openId ? sessions[openId] : undefined;
@@ -139,7 +149,9 @@ export function App() {
               onSettings={() => openSettings()}
             />
           </ErrorBoundary>
-          <ErrorBoundary name="main">{view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : <Rooms />}</ErrorBoundary>
+          <ErrorBoundary name="main">
+            {view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : view === "grids" ? <GridsMain /> : <Rooms />}
+          </ErrorBoundary>
           {open && (
             <ErrorBoundary name="session">
               <SessionCard session={open} />

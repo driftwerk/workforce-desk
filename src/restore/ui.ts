@@ -4,7 +4,9 @@
 // reopen on nothing.
 
 import { useChat } from "../chat/store";
-import { useDesk } from "../hub/store";
+import { MAIN_GRID } from "../grids/model";
+import { useGrids } from "../grids/store";
+import { useDesk, type View } from "../hub/store";
 import { SETTINGS_SECTIONS, useUi, type AgentTab, type Anchor, type SettingsSection } from "../shell/ui";
 import type { Restorable } from "./boot";
 
@@ -12,13 +14,15 @@ export const MAIN_UI_KEY = "ui.main";
 
 export interface MainUi {
   v: 1;
-  view: "floor" | "rooms";
+  view: View;
   /** The open room's id. */
   room: string | null;
   /** The DM's agent key (`hub/agent`): shown in Rooms when no room is. */
   dm: string | null;
   /** The open session card's id. */
   session: string | null;
+  /** The grid the Grids view shows. */
+  grid: string;
   settings: SettingsSection | null;
   agentTabs: Record<string, AgentTab>;
   scroll: Record<string, number>;
@@ -36,6 +40,7 @@ export const DEFAULT_UI: MainUi = {
   room: null,
   dm: null,
   session: null,
+  grid: MAIN_GRID,
   settings: null,
   agentTabs: {},
   scroll: {},
@@ -57,10 +62,11 @@ export const sanitize = (raw: unknown): MainUi => {
       : {};
   return {
     v: 1,
-    view: o.view === "rooms" || o.view === "floor" ? o.view : DEFAULT_UI.view,
+    view: o.view === "rooms" || o.view === "floor" || o.view === "grids" ? o.view : DEFAULT_UI.view,
     room: text(o.room),
     dm: text(o.dm),
     session: text(o.session),
+    grid: text(o.grid) ?? DEFAULT_UI.grid,
     settings: typeof o.settings === "string" && o.settings in SETTINGS_SECTIONS ? (o.settings as SettingsSection) : null,
     agentTabs: record(o.agentTabs, (v): v is AgentTab => typeof v === "string" && TABS.includes(v)),
     scroll: record(o.scroll, (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0),
@@ -87,6 +93,7 @@ export const capture = (): MainUi => {
     room: desk.activeRoom,
     dm: useChat.getState().activeAgent,
     session: desk.openId,
+    grid: useGrids.getState().active,
     settings: ui.settings,
     agentTabs: ui.agentTabs,
     scroll: ui.scroll,
@@ -100,6 +107,7 @@ export const capture = (): MainUi => {
  *  rooms and sessions) shows once it is. */
 export const apply = (ui: MainUi): void => {
   useDesk.setState({ view: ui.view, activeRoom: ui.room, openId: ui.session });
+  useGrids.setState({ active: ui.grid });
   useChat.setState({ activeAgent: ui.dm });
   useUi.setState({
     settings: ui.settings,
@@ -118,7 +126,7 @@ export const mainUi: Restorable = {
   read: capture,
   write: (v) => apply(sanitize(v)),
   subscribe: (onChange) => {
-    const stops = [useDesk.subscribe(onChange), useChat.subscribe(onChange), useUi.subscribe(onChange)];
+    const stops = [useDesk.subscribe(onChange), useChat.subscribe(onChange), useUi.subscribe(onChange), useGrids.subscribe(onChange)];
     return () => stops.forEach((s) => s());
   },
 };

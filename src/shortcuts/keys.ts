@@ -26,6 +26,13 @@ export const SHORTCUTS = [
     scope: "global",
   },
   { id: "newSession", name: "New session", about: "Starts a new session.", keys: "Super+N", scope: "app" },
+  {
+    id: "newTerminal",
+    name: "New terminal",
+    about: "Opens a terminal in the grid you’re looking at: in its empty pane, or beside the one you’re in.",
+    keys: "Super+T",
+    scope: "app",
+  },
   { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Super+Comma", scope: "app" },
   { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Super+S", scope: "app" },
 ] as const satisfies readonly ShortcutSpec[];

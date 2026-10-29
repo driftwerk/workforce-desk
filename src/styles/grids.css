@@ -1,0 +1,440 @@
+/* ── Grids: panes of sessions, conversations and terminals ─────────────── */
+
+.grids {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 28px;
+}
+.grids-none,
+.grid-window.grids-none {
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+.grids-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  flex-wrap: wrap;
+}
+.grids-title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.grids-title.rename-field {
+  width: 180px;
+}
+.grids-count {
+  margin-right: 6px;
+}
+.grids-fill {
+  flex: 1;
+  align-self: stretch;
+}
+
+/* Layout presets, drawn as their places. */
+.gpresets {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+}
+.gpresets button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+}
+.gpresets button:hover {
+  background: var(--raised);
+}
+.gpresets button[aria-checked="true"] {
+  background: var(--signal-soft);
+}
+.gpreset {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 14px;
+  flex: none;
+}
+.gpreset > span {
+  position: absolute;
+  box-sizing: border-box;
+  border: 0.75px solid transparent;
+  background: var(--faint);
+  background-clip: padding-box;
+  border-radius: 2px;
+}
+.gpresets button[aria-checked="true"] .gpreset > span {
+  background-color: var(--signal);
+}
+.gpreset-lg {
+  width: 46px;
+  height: 32px;
+  padding: 3px;
+  border-radius: 6px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+}
+.gpreset-lg > span {
+  border-width: 1.5px;
+  background-color: var(--raised);
+}
+.gpreset-lg > span.on {
+  background-color: var(--signal);
+}
+
+.gbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.gbtn kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+}
+
+/* The canvas: panes are placed by their share of it. */
+.gcanvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+.gcanvas-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.gpane {
+  position: absolute;
+  padding: 4px;
+}
+.gpane-box {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.gpane.focused .gpane-box {
+  border-color: var(--faint);
+}
+.gpane.asking .gpane-box {
+  border-color: var(--blocked);
+}
+.gpane.empty .gpane-box {
+  border-style: dashed;
+}
+.gpane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: none;
+  min-width: 0;
+}
+.gpane-head .dot {
+  width: 9px;
+  height: 9px;
+}
+.dot-none {
+  border-color: var(--border);
+}
+.gpane-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gpane-meta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.gpane-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  white-space: nowrap;
+}
+.gpane-fill {
+  flex: 1;
+}
+.gpane-cwd {
+  min-width: 0;
+  max-width: 40%;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.gpane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.gpane-body .terminal {
+  padding: 6px 4px 4px 8px;
+}
+.gpane-body .terminal-idle {
+  padding: 12px;
+  overflow-y: auto;
+}
+.gpane-empty,
+.pane-note {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+}
+.gpane-empty p,
+.pane-note p {
+  margin: 0;
+  max-width: 260px;
+}
+.gpane-actions {
+  padding: 0 12px 12px;
+}
+.gpane-box > .approval {
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+}
+.room-in-pane {
+  flex: 1;
+  min-height: 0;
+}
+.room-in-pane .composer {
+  margin: 0;
+  padding: 8px;
+}
+
+/* Where a drop lands: a side splits the pane, the middle replaces it. */
+.gzones {
+  position: absolute;
+  inset: 32px 0 0 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.gzone {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--signal);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--signal) 8%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.gzone.on {
+  border-style: solid;
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  color: var(--text);
+}
+.gzone-left {
+  left: 8px;
+  top: 8px;
+  bottom: 8px;
+  width: 22%;
+}
+.gzone-right {
+  right: 8px;
+  top: 8px;
+  bottom: 8px;
+  width: 22%;
+}
+.gzone-top {
+  left: 26%;
+  right: 26%;
+  top: 8px;
+  height: 22%;
+}
+.gzone-bottom {
+  left: 26%;
+  right: 26%;
+  bottom: 8px;
+  height: 22%;
+}
+.gzone-center {
+  left: 26%;
+  right: 26%;
+  top: 30%;
+  bottom: 30%;
+}
+.gzone-free {
+  inset: 8px;
+}
+
+/* The shared edges between panes. */
+.gsplit {
+  position: absolute;
+  z-index: 4;
+}
+.gsplit-v {
+  width: 8px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+.gsplit-h {
+  height: 8px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+.gsplit::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.gsplit-v::after {
+  left: 3px;
+  width: 2px;
+  top: 12px;
+  bottom: 12px;
+}
+.gsplit-h::after {
+  top: 3px;
+  height: 2px;
+  left: 12px;
+  right: 12px;
+}
+.gsplit:hover::after,
+.gsplit:focus-visible::after {
+  background: var(--signal);
+}
+.gsplit:focus-visible {
+  outline: none;
+}
+body.gsplitting-v,
+body.gsplitting-v * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.gsplitting-h,
+body.gsplitting-h * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+/* While something is dragged here: the layouts to drop it on. */
+.gstrip {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--raised);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.35);
+}
+.gstrip-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+/* The sidebar in the Grids view. */
+.side-row-add {
+  color: var(--signal-soft-text);
+  font-weight: 600;
+  font-size: 13px;
+}
+.side-hint {
+  margin: 0;
+  padding: 0 8px;
+  line-height: 1.5;
+}
+
+/* A grid in a window of its own. */
+.grid-window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.gwin-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 10px 0 84px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: none;
+  user-select: none;
+}
+.gwin-title {
+  margin: 0;
+  font-size: 15px;
+}
+.gwin-head .gbtn {
+  min-height: 26px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+.gwin-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.gwin-mode select {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+.grid-window .gcanvas {
+  padding: 2px;
+}
