@@ -53,7 +53,12 @@ export function QuickAsk({ onClose }: { onClose: () => void }) {
           value={input}
           placeholder="@allan what's left before we cut 0.9?"
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Escape" && onClose()}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            // Its own: not also a focused panel's or a filled grid's way back.
+            e.preventDefault();
+            onClose();
+          }}
         />
         <div className="quick-list">
           {parsed.matches.slice(0, 6).map((a) => (

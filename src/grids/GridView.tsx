@@ -122,7 +122,10 @@ export function GridName({ grid, className }: { grid: Grid; className: string })
         onBlur={() => done(true)}
         onKeyDown={(e) => {
           if (e.key === "Enter") done(true);
-          else if (e.key === "Escape") done(false);
+          else if (e.key === "Escape") {
+            e.preventDefault();
+            done(false);
+          }
         }}
       />
     );

@@ -132,6 +132,20 @@ describe("resizing a column", () => {
     expect(sanitize({ panelWidths: { session: 640, thread: 5, nope: 400 } }).panelWidths).toEqual({ session: 640 });
   });
 
+  it("shows it's being dragged however far the pointer strays, and a click that doesn't move it keeps the width it was given", () => {
+    useUi.setState({ panelWidths: { session: 700 } });
+    rowWidth = 1100;
+    render(<Shell />);
+    const h = handle("web-release");
+    const shrunk = Number(h.getAttribute("aria-valuenow"));
+    expect(shrunk).toBeLessThan(700);
+    fireEvent.pointerDown(h, { clientX: 500, button: 0, pointerId: 1 });
+    expect(h.className).toContain("rpanel-dragging");
+    fireEvent.pointerUp(h, { clientX: 500, pointerId: 1 });
+    expect(h.className).not.toContain("rpanel-dragging");
+    expect(useUi.getState().panelWidths).toEqual({ session: 700 });
+  });
+
   it("moves 24px a key press, and double-click puts the default back", () => {
     render(<Shell />);
     const h = handle("Thread");
@@ -255,6 +269,8 @@ describe("the drag handles' colours", () => {
 
   it("come from the theme's handle tokens, with no colour written in", () => {
     const grip = rules(/rpanel-grip/).join("\n");
+    // Hovered or dragged (however far the pointer strays), it's the active colour.
+    expect(rules(/\.rpanel-dragging \.rpanel-grip/).join("\n")).toMatch(/background:\s*var\(--handle-active\)/);
     expect(grip).toMatch(/background:\s*var\(--handle\)/);
     expect(grip).toMatch(/background:\s*var\(--handle-active\)/);
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/i);

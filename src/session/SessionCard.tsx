@@ -111,7 +111,7 @@ export function PutInGrid({ session }: { session: Session }) {
           <rect x="1.5" y="1.5" width="11" height="11" rx="2" />
           <path d="M7 1.5v11M1.5 7h11" />
         </svg>
-        Put in grid ▾
+        <span className="rpanel-put-label">Put in grid</span> ▾
       </button>
       {menu && (
         <Menu

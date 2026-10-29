@@ -186,18 +186,23 @@ function ResizeHandle({
   onCommit: (w: number) => void;
 }) {
   const drag = useRef<{ x: number; w: number; now: number } | null>(null);
+  /** While it's dragged, however far the pointer strays from it. */
+  const [dragging, setDragging] = useState(false);
   const stop = () => document.body.classList.remove("rpanel-resizing");
   useEffect(() => stop, []);
   const end = () => {
     const d = drag.current;
     drag.current = null;
+    setDragging(false);
     stop();
-    if (d) onCommit(d.now);
+    // A click that didn't move it keeps the width it was given: what's
+    // drawn may be that width shrunk to fit a narrow window.
+    if (d && d.now !== d.w) onCommit(d.now);
   };
   const finite = Number.isFinite(max);
   return (
     <div
-      className="rpanel-handle"
+      className={`rpanel-handle ${dragging ? "rpanel-dragging" : ""}`}
       role="separator"
       aria-orientation="vertical"
       aria-label={`Resize ${label}`}
@@ -211,6 +216,7 @@ function ResizeHandle({
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
         drag.current = { x: e.clientX, w: width, now: width };
+        setDragging(true);
         document.body.classList.add("rpanel-resizing");
       }}
       onPointerMove={(e) => {

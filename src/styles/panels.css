@@ -79,12 +79,22 @@
   margin-top: 12px;
 }
 .rpanel-head {
+  container-type: inline-size;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 12px 12px 16px;
   background: var(--surface);
   min-width: 0;
+}
+/* The title gives way first: one line each, cut short. */
+.rpanel-head .session-title {
+  flex: 1;
+}
+.rpanel-head .session-title > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rpanel-name {
   flex: 1;
@@ -111,6 +121,12 @@
   font-size: 12px;
   border-color: var(--border);
 }
+/* A narrow column keeps "Put in grid" as its icon. */
+@container (max-width: 460px) {
+  .rpanel-put-label {
+    display: none;
+  }
+}
 
 /* ── Its drag handle ───────────────────────────────────────────────────── */
 
@@ -134,8 +150,7 @@
     height 0.12s;
 }
 .rpanel-handle:hover .rpanel-grip,
-.rpanel-handle:active .rpanel-grip,
-body.rpanel-resizing .rpanel-handle:focus .rpanel-grip {
+.rpanel-dragging .rpanel-grip {
   background: var(--handle-active);
   height: 64px;
 }
