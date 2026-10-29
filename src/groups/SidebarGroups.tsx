@@ -4,11 +4,11 @@ import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { useGrids } from "../grids/store";
-import { addToGrid as placeInGrid, reveal } from "../grids/windows";
-import { openAgent } from "../rooms/AgentPanel";
+import { addToGrid as placeInGrid } from "../grids/windows";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
+import { openTarget, targetOfItem } from "../shell/navigate";
 import { Mark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
@@ -79,7 +79,7 @@ const GROUP_ACCEPTS = ["item", "group"];
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
  *  One that's showing in a grid is shown there when clicked. */
 export function SidebarGroups() {
-  const { sessions, openId, open, view, activeRoom } = useDesk();
+  const { sessions, openId, view, activeRoom } = useDesk();
   const { roster, hubs, activeAgent, panelAgent } = useChat();
   const layout = useLayout();
   const { groups } = layout;
@@ -173,8 +173,8 @@ export function SidebarGroups() {
 
   /** Opens it as always; or, when it's showing in a grid, shows it there. */
   const openItem = (item: Item) => {
-    if (item.kind === "agent") openAgent(agentKey(item.agent));
-    else if (!reveal({ kind: "session", sessionId: item.session.id })) open(item.session.id);
+    const target = targetOfItem(item.key);
+    if (target) openTarget(target);
   };
 
   /** Puts it in grid `gridId` (its first empty pane, else beside the

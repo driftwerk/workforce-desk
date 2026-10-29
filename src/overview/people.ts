@@ -1,7 +1,7 @@
 import { useChat } from "../chat/store";
-import { agentKey, type Agent } from "../chat/types";
+import type { Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
-import { openAgent } from "../rooms/AgentPanel";
+import { openTarget } from "../shell/navigate";
 
 /** The key of an agent on this Mac (the overview lists only those). */
 export const localKey = (id: string): string | null => {
@@ -18,13 +18,11 @@ export const useLocalAgent = (id: string | null | undefined): Agent | undefined 
 /** Opens your DM with an agent on this Mac. */
 export const openLocalDm = (id: string): void => {
   const key = localKey(id);
-  if (key && useChat.getState().roster.some((a) => agentKey(a) === key)) openAgent(key);
+  if (key) openTarget({ kind: "agent", key });
 };
 
 /** Whether Desk lists the session, so its card can open. */
 export const useKnownSession = (id: string | null | undefined): boolean => useDesk((s) => !!id && !!s.sessions[id]);
 
-/** Opens a session's card, if Desk lists it (else it would open nothing). */
-export const openSession = (id: string): void => {
-  if (useDesk.getState().sessions[id]) useDesk.getState().open(id);
-};
+/** Opens a session, if Desk lists it (else it would open nothing). */
+export const openSession = (id: string): void => openTarget({ kind: "session", sessionId: id });

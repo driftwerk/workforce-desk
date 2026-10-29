@@ -10,7 +10,7 @@ import { Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { ActivityRail } from "./ActivityRail";
 import { ItemTile } from "./ItemTile";
-import { clock } from "./overview";
+import { clock } from "../floor/time";
 import { localKey, openLocalDm, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 import { useSavedScroll } from "../restore/scroll";

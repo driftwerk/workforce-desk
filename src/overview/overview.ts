@@ -68,22 +68,3 @@ export const group = (items: readonly OverviewItem[], sessions: Record<string, S
   }
   return out;
 };
-
-/** "6 min", "1h 12m", "2 days" since `iso`. */
-export const since = (iso: string | null | undefined, now = Date.now()): string => {
-  const t = iso ? Date.parse(iso) : NaN;
-  if (Number.isNaN(t)) return "";
-  const m = Math.max(0, Math.floor((now - t) / 60_000));
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
-  const d = Math.floor(h / 24);
-  return d === 1 ? "1 day" : `${d} days`;
-};
-
-/** "10:24" */
-export const clock = (iso: string): string => {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-};

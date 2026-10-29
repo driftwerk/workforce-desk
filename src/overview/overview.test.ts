@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OverviewItem, Session } from "../hub/types";
-import { group, since } from "./overview";
+import { since } from "../floor/time";
+import { group } from "./overview";
 
 const item = (id: string, state: OverviewItem["state"], kind: OverviewItem["kind"] = "agent"): OverviewItem => ({
   kind,

@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
+import { watchFloor } from "../floor/store";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
@@ -74,6 +75,8 @@ export function App() {
       window.removeEventListener("focus", again);
     };
   }, []);
+
+  useEffect(watchFloor, []);
 
   // Agents on this Mac still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);

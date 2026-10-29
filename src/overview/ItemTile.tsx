@@ -5,7 +5,7 @@ import { useDesk } from "../hub/store";
 import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/types";
 import { Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { since } from "./overview";
+import { since } from "../floor/time";
 import { localKey, openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 

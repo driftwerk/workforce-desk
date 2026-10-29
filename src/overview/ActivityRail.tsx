@@ -3,7 +3,7 @@ import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
 import { lineOf, toneOf } from "./activity";
-import { clock } from "./overview";
+import { clock } from "../floor/time";
 import { useOverview } from "./store";
 
 const dayOf = (iso: string): string => {
