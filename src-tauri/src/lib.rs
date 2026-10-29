@@ -1,5 +1,6 @@
 mod files;
 mod frame;
+mod grid_windows;
 mod helper;
 mod hubs;
 mod logins;
@@ -292,6 +293,88 @@ fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>) {
 #[derive(Default)]
 struct Frames(Mutex<BTreeMap<String, Arc<frame::Tracker>>>);
 
+/// Opens grid `grid`'s own window on its monitor (or brings it forward if
+/// it's open); answers the monitor it's on, or none when that monitor isn't
+/// connected (the grid waits for it).
+#[tauri::command]
+fn grid_window_open(
+    app: tauri::AppHandle,
+    frames: State<'_, Frames>,
+    store: State<'_, Arc<state::StateStore>>,
+    grid: String,
+    title: String,
+    mode: grid_windows::Mode,
+    monitor: Option<grid_windows::Wanted>,
+) -> CommandResult<Option<grid_windows::MonitorInfo>> {
+    let label = grid_windows::label(&grid);
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.set_focus();
+        return Ok(grid_windows::monitor_of(&w));
+    }
+    let made = grid_windows::open(
+        &app,
+        store.inner().clone(),
+        &grid,
+        &title,
+        mode,
+        monitor.as_ref(),
+    )
+    .map_err(text)?;
+    Ok(made.map(|(tracker, monitor)| {
+        frames.0.lock().expect("frames").insert(label, tracker);
+        monitor
+    }))
+}
+
+/// Closes grid `grid`'s window, if it has one (its monitor went away, or
+/// the grid moved back to the main window).
+#[tauri::command]
+fn grid_window_close(app: tauri::AppHandle, frames: State<'_, Frames>, grid: String) {
+    let label = grid_windows::label(&grid);
+    frames.0.lock().expect("frames").remove(&label);
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.destroy();
+    }
+}
+
+/// The grids that have a window of their own now.
+#[tauri::command]
+fn grid_windows_open(app: tauri::AppHandle) -> Vec<String> {
+    app.webview_windows()
+        .keys()
+        .filter_map(|l| l.strip_prefix("grid-").map(str::to_string))
+        .collect()
+}
+
+/// Puts this grid window in a window mode.
+#[tauri::command]
+fn grid_window_mode(
+    window: tauri::WebviewWindow,
+    frames: State<'_, Frames>,
+    store: State<'_, Arc<state::StateStore>>,
+    mode: grid_windows::Mode,
+) {
+    let tracker = frames
+        .0
+        .lock()
+        .expect("frames")
+        .get(window.label())
+        .cloned();
+    grid_windows::set_mode(&window, tracker, store.inner().clone(), mode);
+}
+
+/// The monitor this window is on.
+#[tauri::command]
+fn grid_window_monitor(window: tauri::WebviewWindow) -> Option<grid_windows::MonitorInfo> {
+    grid_windows::monitor_of(&window)
+}
+
+/// The monitors connected now.
+#[tauri::command]
+fn grid_monitors(app: tauri::AppHandle) -> Vec<grid_windows::MonitorInfo> {
+    grid_windows::monitors(&app)
+}
+
 /// Desk's Claude Code plugin folder, for the shells of grid terminals; none
 /// when this build doesn't have it.
 #[tauri::command]
@@ -441,6 +524,12 @@ pub fn run() {
             desk_ready,
             claude_plugin_dir,
             programs_under,
+            grid_window_open,
+            grid_window_close,
+            grid_windows_open,
+            grid_window_mode,
+            grid_window_monitor,
+            grid_monitors,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_roster,
@@ -457,6 +546,9 @@ pub fn run() {
         .expect("Desk failed to start")
         .run(|app, event| {
             // Quitting, however it happens, writes what's pending first.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                grid_windows::quitting();
+            }
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event
                 && let Some(store) = app.try_state::<Arc<state::StateStore>>()
                 && let Err(e) = store.flush()

@@ -140,7 +140,7 @@ pub fn choose(
         .map(|(_, f)| f)
 }
 
-fn primary(screens: &[Screen]) -> Option<&Screen> {
+pub(crate) fn primary(screens: &[Screen]) -> Option<&Screen> {
     screens.iter().find(|s| s.primary).or(screens.first())
 }
 
@@ -166,7 +166,7 @@ pub fn reachable(rect: &Rect, screens: &[Screen]) -> bool {
     })
 }
 
-fn centred(on: &Rect, width: f64, height: f64) -> Rect {
+pub(crate) fn centred(on: &Rect, width: f64, height: f64) -> Rect {
     Rect {
         x: on.x + ((on.width - width) / 2.0).max(0.0),
         y: on.y + ((on.height - height) / 2.0).max(0.0),
@@ -324,6 +324,9 @@ pub struct Tracker {
     /// Full screen waits until the window is shown.
     fullscreen_on_show: AtomicBool,
     closed: AtomicBool,
+    /// Off while a grid's window fills its monitor: that frame isn't the one
+    /// to go back to.
+    keeping: AtomicBool,
 }
 
 /// How often the monitors are looked at for one being plugged in (unplugging
@@ -370,15 +373,33 @@ impl Tracker {
                 .maximized(p.maximized);
         }
         let window = builder.build()?;
+        tracing::info!(label, restored = saved.is_some(), "window placed");
+        Ok(Self::keep(
+            &window,
+            store,
+            &screens,
+            placement.is_some_and(|p| p.fullscreen),
+        ))
+    }
+
+    /// Keeps the frame of a window made hidden elsewhere (a grid's own
+    /// window) from now on, and shows it when its page is ready.
+    pub fn keep<R: Runtime>(
+        window: &WebviewWindow<R>,
+        store: Arc<StateStore>,
+        screens: &[Screen],
+        fullscreen_on_show: bool,
+    ) -> Arc<Self> {
+        let label = window.label();
         let tracker = Arc::new(Self {
             label: label.into(),
             store,
-            current: Mutex::new(key(label, &screens)),
+            current: Mutex::new(key(label, screens)),
             shown: AtomicBool::new(false),
-            fullscreen_on_show: AtomicBool::new(placement.is_some_and(|p| p.fullscreen)),
+            fullscreen_on_show: AtomicBool::new(fullscreen_on_show),
             closed: AtomicBool::new(false),
+            keeping: AtomicBool::new(true),
         });
-        tracing::info!(label, restored = saved.is_some(), "window placed");
 
         let t = tracker.clone();
         let w = window.clone();
@@ -410,7 +431,12 @@ impl Tracker {
                 t.observe(&w);
             }
         });
-        Ok(tracker)
+        tracker
+    }
+
+    /// Whether the window's frame is kept (and put back on a monitor change).
+    pub fn set_keeping(&self, keeping: bool) {
+        self.keeping.store(keeping, Ordering::SeqCst);
     }
 
     /// Shows the window (once), full screen if it was.
@@ -435,7 +461,10 @@ impl Tracker {
     /// Keeps the window's frame — or, when the monitors are now an
     /// arrangement it has a frame for, puts it there instead.
     fn observe<R: Runtime>(&self, window: &WebviewWindow<R>) {
-        if !self.shown.load(Ordering::SeqCst) || window.is_minimized().unwrap_or(true) {
+        if !self.shown.load(Ordering::SeqCst)
+            || !self.keeping.load(Ordering::SeqCst)
+            || window.is_minimized().unwrap_or(true)
+        {
             return;
         }
         let screens = screens(window.available_monitors(), window.primary_monitor());
