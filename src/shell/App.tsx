@@ -17,6 +17,10 @@ import { adoptDeskWelcome } from "../crew/welcome";
 import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
+import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { Stage, type OpenPanel } from "../panels/Stage";
+import { useSessionName } from "../groups/names";
+import { useMainKey, useMainName } from "./mainName";
 import { NewSession } from "../session/NewSession";
 import { SessionCard } from "../session/SessionCard";
 import { Settings } from "../settings/Settings";
@@ -146,6 +150,33 @@ export function App() {
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
 
   const open = openId ? sessions[openId] : undefined;
+  const sessionName = useSessionName(open?.id, open?.name ?? "");
+  const thread = useOpenThread();
+  const mainName = useMainName();
+  const mainKey = useMainKey();
+  const panels: OpenPanel[] = [];
+  if (thread) {
+    panels.push({
+      kind: "thread",
+      label: "Thread",
+      element: (
+        <ErrorBoundary name="thread">
+          <ThreadPanel room={thread.room} thread={thread.thread} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (open) {
+    panels.push({
+      kind: "session",
+      label: sessionName,
+      element: (
+        <ErrorBoundary name="session">
+          <SessionCard session={open} />
+        </ErrorBoundary>
+      ),
+    });
+  }
   return (
     <div className="app">
       {/* The window has no title bar (traffic lights overlay the content), so
@@ -166,14 +197,16 @@ export function App() {
               onSettings={() => openSettings()}
             />
           </ErrorBoundary>
-          <ErrorBoundary name="main">
-            {view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : view === "grids" ? <GridsMain /> : <Rooms />}
-          </ErrorBoundary>
-          {open && (
-            <ErrorBoundary name="session">
-              <SessionCard session={open} />
-            </ErrorBoundary>
-          )}
+          <Stage
+            mainKey={mainKey}
+            mainName={mainName}
+            panels={panels}
+            main={
+              <ErrorBoundary name="main">
+                {view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : view === "grids" ? <GridsMain /> : <Rooms />}
+              </ErrorBoundary>
+            }
+          />
         </>
       )}
       {newSession && <NewSession onClose={() => setNewSession(false)} />}

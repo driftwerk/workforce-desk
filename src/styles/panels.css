@@ -1,0 +1,198 @@
+/* The main area and the columns on its right (panels/Stage.tsx): sessions,
+   room threads. Every colour is a theme token (theme/tokens.ts); the drag
+   handles have their own, --handle and --handle-active, which a theme can
+   override and which otherwise follow --border and --signal. */
+
+.stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stage-row {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+/* The gap to the window's edge while a column shows (layout.ts GUTTER). */
+.stage-row-open {
+  padding-right: 16px;
+}
+.stage-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* Out of sight but still laid out and mounted: the main area behind a
+   focused panel, and the panels folded into tabs. */
+.stowed {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.stage-main.stowed {
+  left: 0;
+  right: 0;
+}
+.rpanel-slot.stowed {
+  right: 0;
+}
+
+.rpanel-slot {
+  flex: none;
+  min-width: 0;
+  display: flex;
+}
+.rpanel-focused {
+  flex: 1;
+  padding-left: 16px;
+}
+
+/* ── A column ──────────────────────────────────────────────────────────── */
+
+.rpanel {
+  flex: 1;
+  min-width: 0;
+  margin: 16px 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.stage-focused .rpanel {
+  margin-top: 12px;
+}
+.rpanel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 16px;
+  background: var(--surface);
+  min-width: 0;
+}
+.rpanel-name {
+  flex: 1;
+  font-size: 14px;
+}
+.rpanel-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  flex: none;
+}
+.rpanel-actions > .link {
+  margin-right: 6px;
+}
+.rpanel-btn {
+  width: 30px;
+  height: 30px;
+}
+.rpanel-put {
+  min-height: 30px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-color: var(--border);
+}
+
+/* ── Its drag handle ───────────────────────────────────────────────────── */
+
+.rpanel-handle {
+  flex: none;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+}
+.rpanel-grip {
+  width: 4px;
+  height: 44px;
+  border-radius: 2px;
+  background: var(--handle);
+  transition:
+    background 0.12s,
+    height 0.12s;
+}
+.rpanel-handle:hover .rpanel-grip,
+.rpanel-handle:active .rpanel-grip,
+body.rpanel-resizing .rpanel-handle:focus .rpanel-grip {
+  background: var(--handle-active);
+  height: 64px;
+}
+.rpanel-handle:focus-visible .rpanel-grip {
+  background: var(--handle-active);
+}
+body.rpanel-resizing,
+body.rpanel-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* ── Focused: the way back, and the other panels as tabs ───────────────── */
+
+.stage-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 30px 16px 0 16px;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.crumb:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.stage-dock {
+  flex: none;
+  width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+}
+.dock-tab {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 12px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dock-tab:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.dock-tab[aria-pressed="true"] {
+  border-color: var(--handle-active);
+  color: var(--text);
+}

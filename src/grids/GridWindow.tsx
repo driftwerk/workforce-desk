@@ -22,7 +22,7 @@ import { dragWindow } from "../ui/drag";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { PRESETS } from "./engine";
-import { countsLine, GridCanvas, GridName, LayoutUndo, useGridCounts } from "./GridView";
+import { countsLine, GridCanvas, GridName, LayoutUndo, useFillKeys, useGridCounts } from "./GridView";
 import { WINDOW_MODES, type WindowMode } from "./model";
 import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
@@ -112,6 +112,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
   }, [gridId]);
 
   useAppShortcut("newTerminal", () => newTerminal(gridId), !!grid);
+  useFillKeys(gridId, !!grid);
 
   if (!ready) return <div className="grid-window" />;
   if (!grid) {

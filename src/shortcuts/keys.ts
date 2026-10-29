@@ -33,6 +33,13 @@ export const SHORTCUTS = [
     keys: "Super+T",
     scope: "app",
   },
+  {
+    id: "fillPane",
+    name: "Fill the grid",
+    about: "Gives the grid pane you’re in the whole grid for a while, and puts the grid back.",
+    keys: "Shift+Super+Enter",
+    scope: "app",
+  },
   { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Super+Comma", scope: "app" },
   { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Super+S", scope: "app" },
 ] as const satisfies readonly ShortcutSpec[];

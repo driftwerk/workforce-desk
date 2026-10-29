@@ -43,6 +43,8 @@ const saved: MainUi = {
   agentFiles: { "local/scout": "AGENTS.md" },
   roomThreads: { r1: "m7" },
   anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
+  panelWidths: { session: 640 },
+  panelFocus: { kind: "session", beside: "thread" },
 };
 
 const room = (id: string) => ({ id, name: id, members: [] }) as unknown as Room;
@@ -72,7 +74,7 @@ const latest = () => FakeSocket.all.at(-1)!;
 const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
   useChat.setState({ activeAgent: null, roster: [], rosterRead: false });
-  useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {} });
+  useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {}, panelWidths: {}, panelFocus: null });
   useGrids.setState({ active: null });
 };
 
@@ -116,6 +118,8 @@ describe("ui.main", () => {
       agentFiles: { "local/scout": "AGENTS.md" },
       roomThreads: { r1: "m7" },
       anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
+      panelWidths: { session: 640 },
+      panelFocus: { kind: "session", beside: "thread" },
     });
     useGrids.setState({ active: "g2" });
     const ui = capture();

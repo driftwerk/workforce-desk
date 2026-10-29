@@ -12,6 +12,7 @@ import { memberKey } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
+import { SidePanel } from "../panels/Stage";
 
 const asChat = (m: RoomMessage) => ({
   id: m.id,
@@ -138,11 +139,61 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
   );
 }
 
+/** Who wrote `key` (`hub/agent`), and where they live. */
+function useAuthor(): (key: string) => { name: string; home: string } {
+  const { roster, hubs } = useChat();
+  return (key: string) => {
+    const [hub, agent] = key.split("/");
+    return {
+      name: roster.find((a) => a.hubId === hub && a.id === agent)?.name ?? agent ?? key,
+      home: hubs.find((h) => h.id === hub)?.label ?? hub ?? key,
+    };
+  };
+}
+
+const noForms = () => false;
+
+/** The thread open in the room Rooms shows, while its first message is
+ *  loaded: it opens as a column on the right. */
+export function useOpenThread(): { room: Room; thread: string } | null {
+  const room = useDesk((s) => (s.view === "rooms" && s.activeRoom ? s.rooms[s.activeRoom] : undefined));
+  const thread = useUi((u) => (room ? (u.roomThreads[room.id] ?? null) : null));
+  const loaded = useDesk((s) => !!(room && thread && s.timelines[room.id]?.some((m) => m.id === thread)));
+  return room && thread && loaded ? { room, thread } : null;
+}
+
+/** A room's thread: its first message, the replies, and a reply box. */
+export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
+  const all = useDesk((s) => s.timelines[room.id]) ?? [];
+  const setRoomThread = useUi((u) => u.setRoomThread);
+  const author = useAuthor();
+  const parent = all.find((m) => m.id === thread);
+  if (!parent) return null;
+  const replies = all.filter((m) => m.threadId === thread);
+  return (
+    <SidePanel
+      className="thread-panel"
+      label="Thread"
+      noun="the thread"
+      onClose={() => setRoomThread(room.id, null)}
+      title={<b className="display rpanel-name">Thread</b>}
+    >
+      <div className="room-scroll">
+        <Message message={asChat(parent)} author={author(parent.author).name} onSubmitForm={noForms} />
+        {replies.map((m) => (
+          <Message key={m.id} message={asChat(m)} author={author(m.author).name} onSubmitForm={noForms} />
+        ))}
+      </div>
+      <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
+    </SidePanel>
+  );
+}
+
 export function RoomView({ room }: { room: Room }) {
   const { timelines, openThread } = useDesk();
   const working = useDesk((s) => s.roomWorking[room.id]) ?? {};
-  const { roster, hubs } = useChat();
-  // The open thread, per room (and across launches).
+  // The open thread, per room (and across launches): shown beside, as a
+  // column of its own.
   const thread = useUi((u) => u.roomThreads[room.id] ?? null);
   const setRoomThread = useUi((u) => u.setRoomThread);
   const setThread = (id: string | null) => setRoomThread(room.id, id);
@@ -166,82 +217,53 @@ export function RoomView({ room }: { room: Room }) {
     if (thread && connected) void openThread(room.id, thread);
   }, [room.id, thread, connected, openThread]);
 
-  const author = (key: string) => {
-    const [hub, agent] = key.split("/");
-    return {
-      name: roster.find((a) => a.hubId === hub && a.id === agent)?.name ?? agent ?? key,
-      home: hubs.find((h) => h.id === hub)?.label ?? hub,
-    };
-  };
-  const parent = thread ? all.find((m) => m.id === thread) : undefined;
-  const noForms = () => false;
+  const author = useAuthor();
 
   return (
-    <div className="room-split">
-      <main className="room" aria-label={`Room ${room.name}`}>
-        <header className="room-head">
-          <span className="room-title">
-            <span className="room-title-row">
-              <h1 className="display-lg">{room.name}</h1>
-              <span className="member-stack">
-                {room.members.map((m) => (
-                  <Mark key={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
-                ))}
-              </span>
-            </span>
-            <span className="faint small">
-              {room.members.map((m) => `@${author(memberKey(m)).name}`).join(" ") || "No members yet"}
-              {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
+    <main className="room" aria-label={`Room ${room.name}`}>
+      <header className="room-head">
+        <span className="room-title">
+          <span className="room-title-row">
+            <h1 className="display-lg">{room.name}</h1>
+            <span className="member-stack">
+              {room.members.map((m) => (
+                <Mark key={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
+              ))}
             </span>
           </span>
-        </header>
-        <div ref={scroller} className="room-scroll">
-          {main.map((m) => {
-            const a = author(m.author);
-            const n = replies.get(m.id)?.length ?? 0;
-            return (
-              <div key={m.id} className="room-msg">
-                <Message message={asChat(m)} author={a.name} home={m.author.includes("/") ? a.home : undefined} onSubmitForm={noForms} />
-                <button
-                  type="button"
-                  className="link small thread-link"
-                  onClick={() => setThread(m.id)}
-                >
-                  {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
-                </button>
-              </div>
-            );
-          })}
-          {Object.entries(working).map(([key, w]) => (
-            <WorkingRow key={key} name={author(key).name} working={w} />
-          ))}
-          <div ref={end} />
-        </div>
-        <Composer
-          room={room}
-          threadId={null}
-          placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
-        />
-      </main>
-      {parent && (
-        <aside className="thread-panel" aria-label="Thread">
-          <header className="session-head">
-            <b className="display">Thread</b>
-            <span className="session-actions">
-              <button type="button" className="link" onClick={() => setThread(null)}>
-                Close
+          <span className="faint small">
+            {room.members.map((m) => `@${author(memberKey(m)).name}`).join(" ") || "No members yet"}
+            {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
+          </span>
+        </span>
+      </header>
+      <div ref={scroller} className="room-scroll">
+        {main.map((m) => {
+          const a = author(m.author);
+          const n = replies.get(m.id)?.length ?? 0;
+          return (
+            <div key={m.id} className="room-msg">
+              <Message message={asChat(m)} author={a.name} home={m.author.includes("/") ? a.home : undefined} onSubmitForm={noForms} />
+              <button
+                type="button"
+                className="link small thread-link"
+                onClick={() => setThread(m.id)}
+              >
+                {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
               </button>
-            </span>
-          </header>
-          <div className="room-scroll">
-            <Message message={asChat(parent)} author={author(parent.author).name} onSubmitForm={noForms} />
-            {(replies.get(parent.id) ?? []).map((m) => (
-              <Message key={m.id} message={asChat(m)} author={author(m.author).name} onSubmitForm={noForms} />
-            ))}
-          </div>
-          <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
-        </aside>
-      )}
-    </div>
+            </div>
+          );
+        })}
+        {Object.entries(working).map(([key, w]) => (
+          <WorkingRow key={key} name={author(key).name} working={w} />
+        ))}
+        <div ref={end} />
+      </div>
+      <Composer
+        room={room}
+        threadId={null}
+        placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
+      />
+    </main>
   );
 }

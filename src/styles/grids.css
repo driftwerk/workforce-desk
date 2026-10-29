@@ -476,7 +476,7 @@ body.gpane-moving * {
 }
 .gsplit:hover::after,
 .gsplit:focus-visible::after {
-  background: var(--signal);
+  background: var(--handle-active);
 }
 .gsplit:focus-visible {
   outline: none;
@@ -490,6 +490,17 @@ body.gsplitting-h,
 body.gsplitting-h * {
   cursor: row-resize !important;
   user-select: none;
+}
+
+/* A pane given the whole grid for now; the others wait, hidden. */
+.gpane-filling:not(.gpane-asking) .gpane-box {
+  border-color: var(--signal-soft);
+}
+.gpane-waiting {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
 }
 
 /* While something is dragged here: the layouts to drop it on. */

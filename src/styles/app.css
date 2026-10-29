@@ -889,33 +889,12 @@ button {
 /* ── Session card ───────────────────────────────────────────────────────── */
 
 .session-card {
-  flex: 0 1 560px;
-  min-width: 420px;
-  margin: 16px 16px 16px 0;
-  border-radius: var(--radius-lg);
   background: var(--sunken);
-  border: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.session-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--surface);
 }
 .session-title {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-.session-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 12px;
-  font-size: 13px;
 }
 .session-goal {
   padding: 8px 16px;
@@ -1114,11 +1093,6 @@ button {
   background: var(--sunken);
 }
 
-.room-split {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-}
 .room-title-row {
   display: flex;
   align-items: center;
@@ -1145,15 +1119,7 @@ button {
   margin-left: 46px;
 }
 .thread-panel {
-  flex: 0 1 420px;
-  min-width: 340px;
-  margin: 16px 16px 16px 0;
-  border-radius: var(--radius-lg);
   background: var(--surface);
-  border: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 .thread-panel .composer {
   margin: 0 12px 12px;

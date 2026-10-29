@@ -144,7 +144,9 @@ export const useDesk = create<DeskState>((set, get) => ({
       },
     );
   },
-  open: (openId) => set({ openId, view: openId && get().view === "floor" ? "rooms" : get().view }),
+  // The session opens as a column beside whatever the main area shows,
+  // the Floor included.
+  open: (openId) => set({ openId }),
   setView: (view) => set({ view }),
   openRoom: async (id) => {
     set((s) => ({ activeRoom: id, view: "rooms", unread: id ? { ...s.unread, [id]: 0 } : s.unread }));

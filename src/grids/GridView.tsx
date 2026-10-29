@@ -7,7 +7,9 @@ import { shortcutLabel } from "../shortcuts/keys";
 import { useGridDrag } from "./drag";
 import { laidOut, PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Preset, type PresetId, type Splitter } from "./engine";
 import { GridPane, PaneDragChip, ParkedTray } from "./Pane";
-import { dismissUndo, dragSplitter, layOut, newTerminal, renameGrid, undoFor, undoLayout, useGrids } from "./store";
+import { dismissUndo, dragSplitter, filledPane, layOut, newTerminal, renameGrid, toggleFill, undoFor, undoLayout, unfill, useGrids } from "./store";
+import { useAppShortcut } from "../shortcuts/manager";
+import { inTerminal } from "../panels/Stage";
 import { trackedIn } from "./terminals";
 import type { Grid } from "./model";
 
@@ -159,20 +161,28 @@ export function NewTerminalButton({ gridId }: { gridId: string }) {
  *  sidebar, the layouts to drop it on. */
 export function GridCanvas({ grid }: { grid: Grid }) {
   const focus = useGrids((s) => s.focus[grid.id]);
+  const filled = useGrids((s) => filledPane(s, grid.id));
   // Layouts to drop on are for what comes from the sidebar; a pane moves.
   const dragging = useGridDrag((s) => s.item !== null && !s.item.from);
   const area = useRef<HTMLDivElement>(null);
-  const alone = laidOut(grid.panes).length === 1;
+  const shown = laidOut(grid.panes).length;
+  const alone = shown === 1;
   return (
     <>
       <div className="gcanvas" data-drop-grid={grid.id}>
-        <div className="gcanvas-inner" ref={area}>
+        <div className={`gcanvas-inner ${filled ? "gcanvas-filled" : ""}`} ref={area}>
           {grid.panes.map((p) => (
-            <GridPane key={p.id} gridId={grid.id} pane={p} focused={focus === p.id} alone={alone} />
+            <GridPane
+              key={p.id}
+              gridId={grid.id}
+              pane={p}
+              focused={focus === p.id}
+              alone={alone}
+              fill={!filled ? null : filled === p.id ? { waiting: shown - 1 } : "hidden"}
+            />
           ))}
-          {splitters(grid.panes).map((s) => (
-            <SplitterHandle key={splitterKey(s)} grid={grid} splitter={s} area={area} />
-          ))}
+          {!filled &&
+            splitters(grid.panes).map((s) => <SplitterHandle key={splitterKey(s)} grid={grid} splitter={s} area={area} />)}
         </div>
         {dragging && <PresetStrip gridId={grid.id} />}
       </div>
@@ -265,3 +275,22 @@ function PresetStrip({ gridId }: { gridId: string }) {
   );
 }
 
+
+/** The keys for filling grid `gridId` (while `enabled`: the grid is in
+ *  sight): ⌘⇧↩ (as set in Settings) gives the focused pane the whole grid
+ *  or gives it back; Esc gives it back, unless it was typed into a
+ *  terminal, whose Esc is its own. */
+export function useFillKeys(gridId: string | null, enabled: boolean) {
+  useAppShortcut("fillPane", () => gridId && toggleFill(gridId), enabled && !!gridId);
+  const filled = useGrids((s) => (gridId ? filledPane(s, gridId) : null));
+  useEffect(() => {
+    if (!enabled || !filled || !gridId) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || inTerminal(e.target)) return;
+      e.preventDefault();
+      unfill(gridId);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled, filled, gridId]);
+}

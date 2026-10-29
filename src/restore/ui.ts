@@ -1,12 +1,14 @@
 // `ui.main`: what the main window shows — Floor or Rooms, the room or DM
-// that's open, the session card, the settings page and its section, each
+// that's open, the session card, the right-hand panels' widths and the one
+// focused, the settings page and its section, each
 // agent's tab and the panes' scroll positions. Dialogs aren't kept: they
 // reopen on nothing.
 
 import { useChat } from "../chat/store";
 import { useGrids } from "../grids/store";
 import { useDesk, type View } from "../hub/store";
-import { SETTINGS_SECTIONS, useUi, type AgentTab, type Anchor, type SettingsSection } from "../shell/ui";
+import { isPanelKind, MAX_KEPT, MIN_WIDTH, type PanelKind } from "../panels/layout";
+import { SETTINGS_SECTIONS, useUi, type AgentTab, type Anchor, type PanelFocus, type SettingsSection } from "../shell/ui";
 import type { Restorable } from "./boot";
 
 export const MAIN_UI_KEY = "ui.main";
@@ -31,6 +33,10 @@ export interface MainUi {
   roomThreads: Record<string, string>;
   /** Conversations scrolled up from their newest message. */
   anchors: Record<string, Anchor>;
+  /** Each right-hand panel kind's width, once dragged. */
+  panelWidths: Partial<Record<PanelKind, number>>;
+  /** The panel filling the main area, and the one beside it. */
+  panelFocus: PanelFocus | null;
 }
 
 export const DEFAULT_UI: MainUi = {
@@ -46,10 +52,19 @@ export const DEFAULT_UI: MainUi = {
   agentFiles: {},
   roomThreads: {},
   anchors: {},
+  panelWidths: {},
+  panelFocus: null,
 };
 
 const TABS: readonly string[] = ["chat", "settings", "files"];
 const text = (x: unknown): string | null => (typeof x === "string" && x ? x : null);
+
+const focusOf = (x: unknown): PanelFocus | null => {
+  if (!x || typeof x !== "object") return null;
+  const f = x as Record<string, unknown>;
+  if (!isPanelKind(f.kind)) return null;
+  return { kind: f.kind, beside: isPanelKind(f.beside) && f.beside !== f.kind ? f.beside : null };
+};
 
 /** A saved value as a `MainUi`: each field that's missing or unreadable
  *  (an older or newer Desk's, or a damaged one) is its default. */
@@ -80,6 +95,12 @@ export const sanitize = (raw: unknown): MainUi => {
         typeof (v as Anchor).offset === "number" &&
         Number.isFinite((v as Anchor).offset),
     ),
+    panelWidths: Object.fromEntries(
+      Object.entries(record(o.panelWidths, (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_KEPT)).filter(
+        ([k]) => isPanelKind(k),
+      ),
+    ),
+    panelFocus: focusOf(o.panelFocus),
   };
 };
 
@@ -99,6 +120,8 @@ export const capture = (): MainUi => {
     agentFiles: ui.agentFiles,
     roomThreads: ui.roomThreads,
     anchors: ui.anchors,
+    panelWidths: ui.panelWidths,
+    panelFocus: ui.panelFocus,
   };
 };
 
@@ -115,6 +138,8 @@ export const apply = (ui: MainUi): void => {
     agentFiles: ui.agentFiles,
     roomThreads: ui.roomThreads,
     anchors: ui.anchors,
+    panelWidths: ui.panelWidths,
+    panelFocus: ui.panelFocus,
   });
   if (ui.room) void useDesk.getState().reloadRoom(ui.room);
   if (ui.dm) useChat.getState().reopenDm();

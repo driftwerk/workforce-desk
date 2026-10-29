@@ -77,6 +77,9 @@ interface GridsState {
   /** By grid: the last layout change that parked panes, while it can be undone. */
   undo: Record<string, Undo>;
   flash: Flash | null;
+  /** By grid: the pane given the whole grid for now. Not a layout change:
+   *  nothing is saved, nothing parks, and the other panes stay mounted. */
+  filled: Record<string, string>;
 }
 
 export const useGrids = create<GridsState>(() => ({
@@ -89,6 +92,7 @@ export const useGrids = create<GridsState>(() => ({
   open: {},
   undo: {},
   flash: null,
+  filled: {},
 }));
 
 let storage: GridStorage | null = null;
@@ -212,6 +216,37 @@ export const flashPane = (gridId: string, paneId: string): void =>
 export const flashDone = (n: number): void => void (get().flash?.n === n && useGrids.setState({ flash: null }));
 
 export const setActive = (id: string | null): void => useGrids.setState({ active: id });
+
+// ── Filling the grid ───────────────────────────────────────────────────────
+
+/** The pane filling grid `gridId`, while it's still laid out there beside
+ *  others; else none. */
+export const filledPane = (s: GridsState, gridId: string): string | null => {
+  const id = s.filled[gridId];
+  const g = s.grids[gridId];
+  if (!id || !g) return null;
+  const shown = laidOut(g.panes);
+  return shown.length > 1 && shown.some((p) => p.id === id) ? id : null;
+};
+
+/** The grid as laid out again, every pane in its place. */
+export const unfill = (gridId: string): void =>
+  useGrids.setState((s) => {
+    if (!(gridId in s.filled)) return s;
+    const { [gridId]: _was, ...rest } = s.filled;
+    return { filled: rest };
+  });
+
+/** Pane `pane` (the focused one by default) takes the whole grid, or gives
+ *  it back if it has it. Only what's shown changes: the grid's layout, as
+ *  kept, doesn't. */
+export const toggleFill = (gridId: string, pane: string | null = get().focus[gridId] ?? null): void => {
+  const s = get();
+  if (filledPane(s, gridId) && (!pane || filledPane(s, gridId) === pane)) return unfill(gridId);
+  const shown = laidOut(s.grids[gridId]?.panes ?? []);
+  if (!pane || shown.length < 2 || !shown.some((p) => p.id === pane)) return;
+  useGrids.setState({ filled: { ...s.filled, [gridId]: pane } });
+};
 
 /** The grid the main window's Grids view shows: the active one while it's
  *  in the main window, else the first that is; none when every grid is in

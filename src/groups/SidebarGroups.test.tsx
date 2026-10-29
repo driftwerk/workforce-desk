@@ -298,11 +298,13 @@ describe("sessions and agents in grids", () => {
     deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
     layOut(MAIN_GRID, "one");
     expect(contentOf(MAIN_GRID)).toEqual([{ kind: "session", sessionId: "s1" }]);
+    const view = useDesk.getState().view;
     groups();
     fireEvent.click(row("web-release"));
     expect(useDesk.getState().openId).toBe("s2");
-    // As before: a session opens beside Rooms.
-    expect(useDesk.getState().view).toBe("rooms");
+    // As before, but where you are (the Floor too): a session opens as a
+    // column beside what's shown.
+    expect(useDesk.getState().view).toBe(view);
     expect(useGrids.getState().flash).toBeNull();
   });
 

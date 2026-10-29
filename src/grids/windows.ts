@@ -23,7 +23,9 @@ import { gridOfLabel, windowLabel, type Grid, type MonitorRef, type WindowMode }
 import { GRID_PREFIX } from "./storage";
 import { useDesk } from "../hub/store";
 import {
+  createGrid,
   deliver,
+  filledPane,
   flashPane,
   heardGrid,
   renameGrid,
@@ -33,6 +35,7 @@ import {
   setPlacement,
   showing,
   startGrids,
+  unfill,
   useGrids,
   type Role,
 } from "./store";
@@ -190,6 +193,8 @@ export const focusGridWindow = async (id: string): Promise<void> => {
 const pointOut = (gridId: string, content: PaneContent): boolean => {
   const p = findContent(laidOut(useGrids.getState().grids[gridId]?.panes ?? []), content);
   if (!p) return false;
+  // Another pane filling the grid would hide it.
+  if (filledPane(useGrids.getState(), gridId) !== p.id) unfill(gridId);
   setFocus(gridId, p.id);
   flashPane(gridId, p.id);
   return true;
@@ -229,4 +234,13 @@ export const reveal = (content: PaneContent): boolean => {
     if (at) return revealIn(at.gridId, c);
   }
   return false;
+};
+
+/** Puts `content` in grid `gridId` (its first empty pane, else beside the
+ *  largest), or in a new grid when that's null, and shows it there; the
+ *  grid it went to, and whether it could be shown. */
+export const addToGrid = (content: PaneContent, gridId: string | null): { gridId: string; shown: boolean } => {
+  const id = gridId ?? createGrid();
+  deliver(id, content);
+  return { gridId: id, shown: revealIn(id, content) };
 };

@@ -32,7 +32,7 @@ const { edited, opened, saved, useDrafts } = await import("../crew/files");
 const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { useUi } = await import("../shell/ui");
-const { RoomView } = await import("../rooms/RoomView");
+const { RoomView, ThreadPanel } = await import("../rooms/RoomView");
 
 const room = {
   id: "r1",
@@ -127,12 +127,17 @@ describe("a room's thread", () => {
     useDesk.setState({ timelines: { r1: [message("m1"), message("m2", "m1")] } });
     useUi.setState({ roomThreads: { r1: "m1" } });
     deskState.set(draftKey.room("r1", "m1"), "a reply");
-    render(<RoomView room={room} />);
+    render(
+      <>
+        <RoomView room={room} />
+        <ThreadPanel room={room} thread="m1" />
+      </>,
+    );
     const thread = screen.getByRole("complementary", { name: "Thread" });
     expect(thread.textContent).toContain("message m2");
     const boxes = screen.getAllByRole("combobox") as HTMLTextAreaElement[];
     expect(boxes.map((b) => b.value)).toEqual(["", "a reply"]);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close the thread" }));
     expect(useUi.getState().roomThreads).toEqual({});
   });
 });

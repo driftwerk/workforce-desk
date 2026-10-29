@@ -3,8 +3,8 @@ import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type 
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
-import { createGrid, deliver, useGrids } from "../grids/store";
-import { reveal, revealIn } from "../grids/windows";
+import { useGrids } from "../grids/store";
+import { addToGrid as placeInGrid, reveal } from "../grids/windows";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
@@ -186,9 +186,7 @@ export function SidebarGroups() {
   const addToGrid = (item: Item, gridId: string | null) => {
     const content = contentOfItem(item.key);
     if (!content) return;
-    const id = gridId ?? createGrid();
-    deliver(id, content);
-    revealIn(id, content);
+    const id = placeInGrid(content, gridId).gridId;
     setSaid(`Added ${nameOf(item)} to ${useGrids.getState().grids[id]?.name ?? "the grid"}`);
   };
 

@@ -15,7 +15,8 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
-import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, setFocus, swapInPane, useGrids, writes } from "./store";
+import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
+import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
 
@@ -174,7 +175,25 @@ const RemoveIcon = () => (
 /** One pane: its header (state, name, what it is, its options, and taking
  *  it off the grid) and what it holds — a session, a conversation, a
  *  terminal, or nothing yet. Its header drags it. */
-export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pane: PaneData; focused: boolean; alone: boolean }) {
+/** The whole grid, for a pane filling it. */
+const WHOLE: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
+
+export function GridPane({
+  gridId,
+  pane,
+  focused,
+  alone,
+  fill = null,
+}: {
+  gridId: string;
+  pane: PaneData;
+  focused: boolean;
+  alone: boolean;
+  /** While a pane fills the grid: this one, with how many others wait
+   *  hidden, or one of those. */
+  fill?: { waiting: number } | "hidden" | null;
+}) {
+  const fillKeys = useSettings((s) => s.keys.fillPane);
   const label = usePaneLabel(pane.content);
   const over = useGridDrag((s) => (s.over && s.over.kind !== "new" && s.over.gridId === gridId ? s.over : null));
   const dragging = useGridDrag((s) => s.item !== null);
@@ -190,8 +209,8 @@ export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pan
   const free = over?.kind === "free";
   return (
     <section
-      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""}`}
-      style={boxStyle(pane.rect)}
+      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
+      style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}
       data-drop-pane={pane.id}
       data-grid={gridId}
@@ -206,6 +225,29 @@ export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pan
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
           <span className="gpane-fill" />
           {label.cwd && <span className="gpane-cwd mono">{label.cwd}</span>}
+          {fill && fill !== "hidden" ? (
+            <>
+              <span className="gpane-waiting">
+                {fill.waiting} other {fill.waiting === 1 ? "pane" : "panes"} waiting
+              </span>
+              <button type="button" className="icon-btn-sm" aria-label="Back to the grid" title="Back to the grid (Esc)" onClick={() => unfill(gridId)}>
+                <UnfocusIcon />
+              </button>
+            </>
+          ) : (
+            pane.rect &&
+            !alone && (
+              <button
+                type="button"
+                className="icon-btn-sm"
+                aria-label="Fill the grid"
+                title={`Fill the grid (${shortcutLabel(fillKeys)})`}
+                onClick={() => toggleFill(gridId, pane.id)}
+              >
+                <FocusIcon />
+              </button>
+            )
+          )}
           <button
             type="button"
             className="icon-btn-sm"

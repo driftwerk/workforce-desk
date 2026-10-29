@@ -11,14 +11,15 @@ describe("shortcut keys", () => {
       pushToTalk: "Control+Shift+Space",
       newSession: "Super+N",
       newTerminal: "Super+T",
+      fillPane: "Shift+Super+Enter",
       settings: "Super+Comma",
       saveFile: "Super+S",
     });
     expect(refusal(DEFAULT_SHORTCUTS.pushToTalk)).toBeNull();
     expect(refusal(DEFAULT_SHORTCUTS.ask)).toBeNull();
     expect(warning(DEFAULT_SHORTCUTS.ask)).toBeNull();
-    for (const id of ["newSession", "newTerminal", "settings", "saveFile"] as const) expect(refusal(DEFAULT_SHORTCUTS[id], "app")).toBeNull();
-    expect(new Set(Object.values(DEFAULT_SHORTCUTS)).size).toBe(6);
+    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile"] as const) expect(refusal(DEFAULT_SHORTCUTS[id], "app")).toBeNull();
+    expect(new Set(Object.values(DEFAULT_SHORTCUTS)).size).toBe(7);
   });
 
   it("warns about ⌥Space, which launchers take, without refusing it", () => {

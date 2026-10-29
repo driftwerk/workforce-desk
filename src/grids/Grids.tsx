@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from "react";
-import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useGridCounts } from "./GridView";
+import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useFillKeys, useGridCounts } from "./GridView";
+import { useMainHidden } from "../panels/Stage";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
 import { Confirm } from "../ui/Confirm";
@@ -22,6 +23,8 @@ export function GridsMain() {
   const dragging = useGridDrag((s) => !!s.item && !s.item.from);
   const over = useGridDrag((s) => s.over?.kind === "new");
   const counts = useGridCounts(grid);
+  // Behind a focused side panel, the grid doesn't take keys.
+  useFillKeys(grid?.id ?? null, !useMainHidden());
   if (!ready) return <main className="grids" aria-label="Grids" />;
   if (!grid) {
     return (
