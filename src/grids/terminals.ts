@@ -68,19 +68,13 @@ const problemOf = (e: unknown): string =>
 
 let pluginDirs: Promise<string | null> | null = null;
 
-/** A random token for Desk's hooks to present from this terminal. */
-const hookToken = (): string => {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-};
-
 /** What Desk adds to a terminal's environment: its Claude Code plugin
- *  folder and the token its hooks present. The hub adds the terminal's id
- *  and where the hooks post. */
+ *  folder, which the hub joins to any the person already loads (the hub has
+ *  no way to find it itself). The hub adds the terminal's id, the token its
+ *  hooks present and where they post. */
 export const terminalEnv = async (): Promise<Record<string, string>> => {
   const dir = await (pluginDirs ??= claudePluginDir().catch(() => null));
-  return { ...(dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {}), DESK_HOOK_TOKEN: hookToken() };
+  return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
 
 const opening = new Map<string, Promise<void>>();

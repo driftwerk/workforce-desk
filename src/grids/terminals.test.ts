@@ -34,13 +34,9 @@ describe("grid terminals", () => {
     expect(useTerminals.getState().byId.a).toMatchObject({ cwd: "/work/atlas", state: "exited" });
   });
 
-  it("carry Desk's plugin folder and a fresh token for its hooks", async () => {
-    const one = await terminalEnv();
-    const two = await terminalEnv();
-    expect(one.CLAUDE_CODE_PLUGIN_DIRS).toBe("/Applications/Desk.app/Contents/Resources/claude-plugin");
-    expect(one.DESK_HOOK_TOKEN).toMatch(/^[0-9a-f]{48}$/);
-    expect(one.DESK_HOOK_TOKEN).not.toBe(two.DESK_HOOK_TOKEN);
-    expect(Object.keys(one)).not.toContain("DESK_TERMINAL_ID");
+  it("carry Desk's plugin folder, and leave the hooks' token to the hub", async () => {
+    const env = await terminalEnv();
+    expect(env).toEqual({ CLAUDE_CODE_PLUGIN_DIRS: "/Applications/Desk.app/Contents/Resources/claude-plugin" });
   });
 
   it("say what runs in them, and recognise Codex by its process", () => {
