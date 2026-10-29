@@ -44,7 +44,7 @@ describe("VoicePill", () => {
 
   it("shows the configured hold-to-talk keys, and says when another app has them", () => {
     act(() => {
-      useSettings.setState({ pushToTalkShortcut: "Control+Alt+K" });
+      useSettings.getState().setShortcut("pushToTalk", "Control+Alt+K");
       useVoiceStore.setState({ status: { state: "listening", conversation: null }, thinking: false, heardBy: null, transcript: "", error: null });
     });
     render(<VoicePill />);

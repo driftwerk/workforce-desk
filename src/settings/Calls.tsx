@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 import { onTupleStatus, subscribe, type TupleStatus } from "../platform";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VOICE_ENGINES, voiceEngine } from "../voice/engines";
-import { ShortcutField } from "./ShortcutField";
 import { useSettings } from "./store";
 
 export function Calls() {
-  const { tuple, voice, voiceEngine: engineId, pushToTalkShortcut, set } = useSettings();
+  const { tuple, voice, voiceEngine: engineId, keys, set } = useSettings();
   const engine = voiceEngine(engineId);
   const [status, setStatus] = useState<TupleStatus>({ state: "off" });
   useEffect(() => subscribe(onTupleStatus(setStatus)), []);
@@ -18,7 +17,7 @@ export function Calls() {
         <span>
           <b>Talk to agents by name</b>
           <span className="muted small">
-            Say an agent’s name — “Atlas, what failed overnight?” — or hold {shortcutLabel(pushToTalkShortcut)} to talk. {engine.privacy}
+            Say an agent’s name — “Atlas, what failed overnight?” — or hold {shortcutLabel(keys.pushToTalk)} to talk (change the keys in Shortcuts). {engine.privacy}
           </span>
         </span>
       </label>
@@ -34,11 +33,6 @@ export function Calls() {
           </div>
         </div>
       )}
-      <div className="set-group">
-        <span className="set-label">Shortcuts</span>
-        <ShortcutField id="pushToTalk" about="Hold to talk to an agent, let go to send. Works while voice is on." />
-        <ShortcutField id="ask" about="Opens Ask anyone from any app." />
-      </div>
       <label className="toggle-row">
         <input type="checkbox" checked={tuple} onChange={(e) => set({ tuple: e.target.checked })} />
         <span>

@@ -1,17 +1,20 @@
 import { create } from "zustand";
 import { loadSettings, saveSettings, type Settings, type VoiceSpec } from "../platform";
-import { DEFAULT_SHORTCUTS, usable } from "../shortcuts/keys";
+import { choose, DEFAULT_SHORTCUTS, resolve, type ShortcutId } from "../shortcuts/keys";
 import { useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
+  /** Each shortcut's keys: the chosen ones, else the default. */
+  keys: Record<ShortcutId, string>;
   loaded: boolean;
   load: () => Promise<void>;
   set: (patch: Partial<Settings>) => void;
+  setShortcut: (id: ShortcutId, accel: string) => void;
 }
 
 /** Desk's settings file, mirrored here; the theme choice lives in the theme
- *  store and is saved with the rest. A shortcut that's missing, unreadable or
- *  one macOS keeps loads as its default. */
+ *  store and is saved with the rest. A chosen shortcut that's unreadable,
+ *  can't be Desk's, or has another shortcut's keys loads as its default. */
 export const useSettings = create<SettingsStore>((set, get) => ({
   theme: "system",
   tuple: false,
@@ -20,27 +23,31 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   agentVoices: {},
   voice: false,
   voiceEngine: "cascade",
-  pushToTalkShortcut: DEFAULT_SHORTCUTS.pushToTalk,
-  askShortcut: DEFAULT_SHORTCUTS.ask,
+  shortcuts: {},
+  keys: DEFAULT_SHORTCUTS,
   loaded: false,
   load: async () => {
     const s = await loadSettings();
     useThemeStore.getState().setChoice(s.theme);
+    const { keys, chosen } = resolve(s.shortcuts ?? {});
     set({
       ...s,
-      pushToTalkShortcut: usable(s.pushToTalkShortcut, "pushToTalk"),
-      askShortcut: usable(s.askShortcut, "ask"),
+      shortcuts: chosen,
+      keys,
       defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
       agentVoices: repairVoices(s.agentVoices),
       loaded: true,
     });
   },
   set: (patch) => {
-    set(patch);
-    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, pushToTalkShortcut, askShortcut, loaded } = get();
-    if (loaded)
-      void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, pushToTalkShortcut, askShortcut });
+    if (patch.shortcuts) {
+      const { keys, chosen } = resolve(patch.shortcuts);
+      set({ ...patch, shortcuts: chosen, keys });
+    } else set(patch);
+    const { theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts, loaded } = get();
+    if (loaded) void saveSettings({ theme, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts });
   },
+  setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),
 }));
 
 useThemeStore.subscribe((s, before) => {

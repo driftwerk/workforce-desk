@@ -34,8 +34,7 @@ let settings = {
   agentVoices: {},
   voice: false,
   voiceEngine: "cascade",
-  pushToTalkShortcut: "Control+Shift+Space",
-  askShortcut: "Alt+Space",
+  shortcuts: {} as Record<string, string>,
 };
 
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

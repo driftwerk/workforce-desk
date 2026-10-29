@@ -2,12 +2,13 @@ import { register, unregister, type ShortcutEvent } from "@tauri-apps/plugin-glo
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { inApp } from "../platform";
-import { shortcutLabel, type ShortcutId } from "./keys";
+import { useSettings } from "../settings/store";
+import { matches, shortcutLabel, type GlobalShortcutId, type ShortcutId } from "./keys";
 
 export type ShortcutStatus = { state: "off" } | { state: "ready" } | { state: "taken"; message: string };
 
 interface ShortcutStore {
-  status: Record<ShortcutId, ShortcutStatus>;
+  status: Record<GlobalShortcutId, ShortcutStatus>;
   /** A shortcut is being recorded: Desk's own step aside so its keys reach
    *  the recorder. */
   recording: boolean;
@@ -18,7 +19,7 @@ export const useShortcuts = create<ShortcutStore>(() => ({
   recording: false,
 }));
 
-const setStatus = (id: ShortcutId, s: ShortcutStatus) =>
+const setStatus = (id: GlobalShortcutId, s: ShortcutStatus) =>
   useShortcuts.setState((store) => ({ status: { ...store.status, [id]: s } }));
 
 /** What the person reads when macOS or another app has the keys. */
@@ -33,7 +34,7 @@ const enqueue = (step: () => Promise<void>): Promise<void> => (queue = queue.the
 /** Holds `accel` as global shortcut `id` while it's non-null (and Desk isn't
  *  recording one), re-registering when it changes; whether it got the keys is
  *  in `useShortcuts`. */
-export function useGlobalShortcut(id: ShortcutId, accel: string | null, onEvent: (e: ShortcutEvent) => void) {
+export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, onEvent: (e: ShortcutEvent) => void) {
   const handler = useRef(onEvent);
   handler.current = onEvent;
   const recording = useShortcuts((s) => s.recording);
@@ -58,6 +59,25 @@ export function useGlobalShortcut(id: ShortcutId, accel: string | null, onEvent:
         setStatus(id, { state: "off" });
       });
   }, [id, wanted]);
+}
+
+/** Runs `onPress` when shortcut `id`'s keys are pressed while Desk is in
+ *  front, unless `enabled` is false or a shortcut is being recorded. */
+export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true) {
+  const handler = useRef(onPress);
+  handler.current = onPress;
+  const keys = useSettings((s) => s.keys[id]);
+  const recording = useShortcuts((s) => s.recording);
+  useEffect(() => {
+    if (!enabled || recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || !matches(e, keys)) return;
+      e.preventDefault();
+      handler.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [keys, enabled, recording]);
 }
 
 /** Waits for every queued register and unregister (tests). */

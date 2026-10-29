@@ -5,7 +5,7 @@ import { Floor } from "../floor/Floor";
 import { useDesk } from "../hub/store";
 import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe, themeFiles } from "../platform";
 import { useSettings } from "../settings/store";
-import { useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
+import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { prune } from "../rooms/engine";
@@ -86,7 +86,7 @@ export function App() {
 
   useGlobalShortcut(
     "ask",
-    useSettings((s) => (s.loaded ? s.askShortcut : null)),
+    useSettings((s) => (s.loaded ? s.keys.ask : null)),
     (e) => {
       if (e.state !== "Pressed") return;
       const w = getCurrentWindow();
@@ -96,23 +96,11 @@ export function App() {
   );
   const askStatus = useShortcuts((s) => s.status.ask);
   useEffect(() => {
-    if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Calls and voice`);
+    if (askStatus.state === "taken") fail(`${askStatus.message} in Settings → Shortcuts`);
   }, [askStatus, fail]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === "n") {
-        e.preventDefault();
-        setNewSession(true);
-      }
-      if (e.metaKey && e.key === ",") {
-        e.preventDefault();
-        setSettings((s) => !s);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useAppShortcut("newSession", () => setNewSession(true));
+  useAppShortcut("settings", () => setSettings((s) => !s));
 
   const open = openId ? sessions[openId] : undefined;
   return (

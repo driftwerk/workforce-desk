@@ -1,7 +1,9 @@
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { settled, useGlobalShortcut, useShortcuts } from "./manager";
+import { useSettings } from "../settings/store";
+import { DEFAULT_SHORTCUTS } from "./keys";
+import { settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({
@@ -66,5 +68,26 @@ describe("global shortcuts", () => {
     renderHook(() => useGlobalShortcut("pushToTalk", null, () => {}));
     await flush();
     expect(register).not.toHaveBeenCalled();
+  });
+});
+
+describe("shortcuts in Desk", () => {
+  const press = (init: KeyboardEventInit) => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", init)));
+
+  it("run on the configured keys only, and not while one is being recorded", () => {
+    useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS });
+    const onPress = vi.fn();
+    renderHook(() => useAppShortcut("newSession", onPress));
+    press({ code: "KeyN", key: "n", metaKey: true });
+    expect(onPress).toHaveBeenCalledTimes(1);
+    act(() => useSettings.getState().setShortcut("newSession", "Super+J"));
+    press({ code: "KeyN", key: "n", metaKey: true });
+    press({ code: "KeyJ", key: "j", metaKey: true, shiftKey: true });
+    expect(onPress).toHaveBeenCalledTimes(1);
+    press({ code: "KeyJ", key: "j", metaKey: true });
+    expect(onPress).toHaveBeenCalledTimes(2);
+    act(() => useShortcuts.setState({ recording: true }));
+    press({ code: "KeyJ", key: "j", metaKey: true });
+    expect(onPress).toHaveBeenCalledTimes(2);
   });
 });

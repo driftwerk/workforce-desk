@@ -67,13 +67,18 @@ pub struct Settings {
     /// "gemini-live". Kept as text so a newer Desk's choice survives.
     #[serde(default = "default_voice_engine")]
     pub voice_engine: String,
-    /// Hold to talk, as the global-shortcut plugin reads it. Kept as text;
-    /// the UI checks it and falls back to the default.
-    #[serde(default = "default_push_to_talk_shortcut")]
-    pub push_to_talk_shortcut: String,
-    /// Opens "Ask anyone" from any app.
-    #[serde(default = "default_ask_shortcut")]
-    pub ask_shortcut: String,
+    /// The keyboard shortcuts chosen in place of their defaults, by id
+    /// (`ask`, `newSession`), as the global-shortcut plugin reads them
+    /// (`Control+Shift+Space`). Kept as text so a newer Desk's survive; the
+    /// UI checks them and falls back to the defaults, which it owns.
+    #[serde(default)]
+    pub shortcuts: std::collections::BTreeMap<String, String>,
+    /// Older Desks' hold-to-talk and Ask anyone keys, read once into
+    /// `shortcuts` and never written again.
+    #[serde(default, skip_serializing)]
+    pub push_to_talk_shortcut: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub ask_shortcut: Option<String>,
 }
 
 fn default_theme() -> String {
@@ -84,13 +89,12 @@ fn default_voice_engine() -> String {
     "cascade".into()
 }
 
-fn default_push_to_talk_shortcut() -> String {
-    "Control+Shift+Space".into()
-}
-
-fn default_ask_shortcut() -> String {
-    "Alt+Space".into()
-}
+/// Hold to talk's default, then and now.
+const PUSH_TO_TALK_DEFAULT: &str = "Control+Shift+Space";
+/// Ask anyone's old default, which launchers like Raycast and Alfred take.
+const OLD_ASK_DEFAULT: &str = "Alt+Space";
+/// Ask anyone's default now (the UI's `DEFAULT_SHORTCUTS.ask`).
+const ASK_DEFAULT: &str = "Control+Shift+K";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -103,8 +107,9 @@ impl Default for Settings {
             agent_voices: Default::default(),
             voice: false,
             voice_engine: default_voice_engine(),
-            push_to_talk_shortcut: default_push_to_talk_shortcut(),
-            ask_shortcut: default_ask_shortcut(),
+            shortcuts: Default::default(),
+            push_to_talk_shortcut: None,
+            ask_shortcut: None,
         }
     }
 }
@@ -133,6 +138,27 @@ fn migrated(mut settings: Settings) -> Settings {
             model: None,
             effort: None,
         });
+    }
+    // An older Desk saved both shortcuts whether or not they were chosen, so
+    // the old defaults mean untouched: hold to talk stays as it was, and Ask
+    // anyone moves to the new default — unless hold to talk already has
+    // those keys.
+    if let Some(keys) = settings.push_to_talk_shortcut.take()
+        && keys != PUSH_TO_TALK_DEFAULT
+    {
+        settings
+            .shortcuts
+            .entry("pushToTalk".into())
+            .or_insert(keys);
+    }
+    if let Some(keys) = settings.ask_shortcut.take() {
+        let hold = settings
+            .shortcuts
+            .get("pushToTalk")
+            .map_or(PUSH_TO_TALK_DEFAULT, String::as_str);
+        if keys != OLD_ASK_DEFAULT || hold == ASK_DEFAULT {
+            settings.shortcuts.entry("ask".into()).or_insert(keys);
+        }
     }
     settings
 }
@@ -239,23 +265,50 @@ mod tests {
     }
 
     #[test]
-    fn shortcuts_round_trip_and_default_when_missing() {
+    fn chosen_shortcuts_round_trip_and_none_means_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         std::fs::write(paths.settings(), r#"{"theme":"system","voice":true}"#).unwrap();
-        let loaded = load_settings(&paths).unwrap();
-        assert_eq!(loaded.push_to_talk_shortcut, "Control+Shift+Space");
-        assert_eq!(loaded.ask_shortcut, "Alt+Space");
+        assert!(load_settings(&paths).unwrap().shortcuts.is_empty());
         let chosen = Settings {
-            push_to_talk_shortcut: "Control+Alt+K".into(),
-            ask_shortcut: "Control+Alt+J".into(),
+            shortcuts: [
+                ("ask".into(), "Alt+Space".into()),
+                ("newSession".into(), "Super+J".into()),
+            ]
+            .into(),
             ..Settings::default()
         };
         save_settings(&paths, &chosen).unwrap();
         let written = std::fs::read_to_string(paths.settings()).unwrap();
-        assert!(written.contains(r#""pushToTalkShortcut": "Control+Alt+K""#));
-        assert!(written.contains(r#""askShortcut": "Control+Alt+J""#));
+        assert!(written.contains(r#""ask": "Alt+Space""#));
+        assert!(!written.contains("askShortcut"));
         assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn an_older_desks_shortcuts_move_ask_anyone_off_the_launchers_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let load = |json: &str| {
+            std::fs::write(paths.settings(), json).unwrap();
+            load_settings(&paths).unwrap().shortcuts
+        };
+        let untouched =
+            load(r#"{"pushToTalkShortcut":"Control+Shift+Space","askShortcut":"Alt+Space"}"#);
+        assert!(untouched.is_empty());
+        let chosen =
+            load(r#"{"pushToTalkShortcut":"Control+Alt+J","askShortcut":"Control+Alt+A"}"#);
+        assert_eq!(
+            chosen.get("pushToTalk").map(String::as_str),
+            Some("Control+Alt+J")
+        );
+        assert_eq!(chosen.get("ask").map(String::as_str), Some("Control+Alt+A"));
+        // Hold to talk already has the new default, so Ask anyone keeps its keys.
+        let taken = load(r#"{"pushToTalkShortcut":"Control+Shift+K","askShortcut":"Alt+Space"}"#);
+        assert_eq!(taken.get("ask").map(String::as_str), Some("Alt+Space"));
+        // Once this Desk has saved, ⌥Space is a choice and stays.
+        let saved = load(r#"{"shortcuts":{"ask":"Alt+Space"}}"#);
+        assert_eq!(saved.get("ask").map(String::as_str), Some("Alt+Space"));
     }
 
     #[test]

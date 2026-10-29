@@ -54,10 +54,10 @@ export interface Settings {
   voice: boolean;
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;
-  /** Global shortcuts, as the global-shortcut plugin reads them
-   *  ("Control+Shift+Space"): hold to talk, and open "Ask anyone". */
-  pushToTalkShortcut: string;
-  askShortcut: string;
+  /** The keyboard shortcuts chosen in place of their defaults, by id
+   *  ("ask", "newSession"), as the global-shortcut plugin reads them
+   *  ("Control+Shift+Space"). */
+  shortcuts: Record<string, string>;
 }
 
 export interface ThemeFile {

@@ -23,7 +23,7 @@ export function VoicePill() {
   const { status, thinking, heardBy, transcript, error } = useVoiceStore();
   const on = useSettings((s) => s.voice);
   const setSettings = useSettings((s) => s.set);
-  const holdKeys = useSettings((s) => s.pushToTalkShortcut);
+  const holdKeys = useSettings((s) => s.keys.pushToTalk);
   const holdTaken = useShortcuts((s) => s.status.pushToTalk.state === "taken");
   const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken });
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;

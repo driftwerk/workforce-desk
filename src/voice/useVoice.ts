@@ -122,7 +122,7 @@ export class Turns {
 }
 
 /** Voice, while `enabled`: wake on roster names, push-to-talk on the
- *  `pushToTalkShortcut` setting, requests to the named agent, answers read
+ *  `pushToTalk` shortcut, requests to the named agent, answers read
  *  aloud or handed back to the cloud voice model, on the engine Desk's
  *  settings name.
  *  Mount once in the shell, e.g. `useVoice(useSettings((s) => s.voice))`. */
@@ -164,6 +164,6 @@ export function useVoice(enabled: boolean) {
     };
   }, []);
 
-  const holdKeys = useSettings((s) => (s.loaded ? s.pushToTalkShortcut : null));
+  const holdKeys = useSettings((s) => (s.loaded ? s.keys.pushToTalk : null));
   useGlobalShortcut("pushToTalk", enabled ? holdKeys : null, (e) => void pushToTalk(e.state === "Pressed").catch(failed));
 }

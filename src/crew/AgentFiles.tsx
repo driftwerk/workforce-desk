@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { agentKey, type Agent } from "../chat/types";
 import { HubError, type DeskHub, type Revision } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { useSettings } from "../settings/store";
+import { matches, shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import {
@@ -58,6 +60,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
   const [file, setFile] = useState<string>(AGENT_FILES[0].name);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const saveKeys = useSettings((s) => s.keys.saveFile);
   const [history, setHistory] = useState(false);
   const draft = draftOf(drafts, key, file);
   const dirty = isDirty(draft);
@@ -93,7 +96,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
     <div
       className="files"
       onKeyDown={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        if (matches(e, saveKeys)) {
           e.preventDefault();
           void save();
         }
@@ -151,7 +154,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
         <div className="files-foot">
           <span>Markdown · takes effect from {agent.name}’s next message</span>
           <span>
-            <kbd>⌘S</kbd> to save
+            <kbd>{shortcutLabel(saveKeys)}</kbd> to save
           </span>
         </div>
       </section>

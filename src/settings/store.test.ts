@@ -23,22 +23,27 @@ describe("settings", () => {
   it("an older settings file gets the default shortcuts", async () => {
     vi.mocked(loadSettings).mockResolvedValue(older);
     await useSettings.getState().load();
-    expect(useSettings.getState()).toMatchObject({ voice: true, pushToTalkShortcut: "Control+Shift+Space", askShortcut: "Alt+Space" });
+    expect(useSettings.getState()).toMatchObject({ voice: true, shortcuts: {} });
+    expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Shift+Space", ask: "Control+Shift+K", settings: "Super+Comma" });
   });
 
   it("a shortcut macOS keeps, or Desk can't read, loads as the default", async () => {
-    vi.mocked(loadSettings).mockResolvedValue({ ...older, pushToTalkShortcut: "Alt+Super+Space", askShortcut: "Hyper+Q" });
+    vi.mocked(loadSettings).mockResolvedValue({ ...older, shortcuts: { pushToTalk: "Alt+Super+Space", ask: "Hyper+Q" } });
     await useSettings.getState().load();
-    expect(useSettings.getState()).toMatchObject({ pushToTalkShortcut: "Control+Shift+Space", askShortcut: "Alt+Space" });
+    expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Shift+Space", ask: "Control+Shift+K" });
+    expect(useSettings.getState().shortcuts).toEqual({});
   });
 
-  it("chosen shortcuts load and save with the rest", async () => {
-    vi.mocked(loadSettings).mockResolvedValue({ ...older, pushToTalkShortcut: "Control+Alt+K", askShortcut: "Control+Alt+Space" });
+  it("chosen shortcuts load and save with the rest, defaults left out", async () => {
+    vi.mocked(loadSettings).mockResolvedValue({ ...older, shortcuts: { pushToTalk: "Control+Alt+K", ask: "Alt+Space" } });
     await useSettings.getState().load();
-    useSettings.getState().set({ askShortcut: "Control+Alt+J" });
-    expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ voice: true, pushToTalkShortcut: "Control+Alt+K", askShortcut: "Control+Alt+J" }),
+    expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Alt+K", ask: "Alt+Space" });
+    useSettings.getState().setShortcut("ask", "Control+Shift+K");
+    useSettings.getState().setShortcut("newSession", "Super+J");
+    expect(saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ voice: true, shortcuts: { pushToTalk: "Control+Alt+K", newSession: "Super+J" } }),
     );
+    expect(useSettings.getState().keys).toMatchObject({ ask: "Control+Shift+K", newSession: "Super+J" });
   });
 });
 

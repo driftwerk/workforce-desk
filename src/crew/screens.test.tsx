@@ -10,6 +10,7 @@ import { useChat } from "../chat/store";
 import { AgentFiles } from "./AgentFiles";
 import { AgentSettings } from "./AgentSettings";
 import { useDrafts } from "./files";
+import { useSettings } from "../settings/store";
 
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
@@ -153,7 +154,7 @@ describe("Files", () => {
     expect(screen.getByRole("status").textContent).toBe("Unsaved changes");
     expect(screen.getAllByLabelText("Unsaved changes")).toHaveLength(1);
 
-    await act(async () => fireEvent.keyDown(editor, { key: "s", metaKey: true }));
+    await act(async () => fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }));
     expect(hub.saveIdentityFile).toHaveBeenCalledWith("ledger", "SOUL.md", "# Soul\n\nWatch the bill.\n");
     expect(screen.getByRole("status").textContent).toBe("Saved");
     expect(screen.queryAllByLabelText("Unsaved changes")).toHaveLength(0);
@@ -162,6 +163,21 @@ describe("Files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(editor.value).toBe("# Soul\n\nWatch the bill.\n");
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("saves with the configured keys, and says which", async () => {
+    const hub = fakeHub();
+    useDesk.setState({ hub });
+    useSettings.getState().setShortcut("saveFile", "Control+Alt+S");
+    render(<AgentFiles agent={agent} />);
+    const editor = (await screen.findByDisplayValue("# Soul")) as HTMLTextAreaElement;
+    expect(screen.getByText("⌃⌥S")).toBeTruthy();
+    fireEvent.change(editor, { target: { value: "# Soul\n\nNew.\n" } });
+    await act(async () => fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }));
+    expect(hub.saveIdentityFile).not.toHaveBeenCalled();
+    await act(async () => fireEvent.keyDown(editor, { key: "ß", code: "KeyS", ctrlKey: true, altKey: true }));
+    expect(hub.saveIdentityFile).toHaveBeenCalledWith("ledger", "SOUL.md", "# Soul\n\nNew.\n");
+    useSettings.getState().setShortcut("saveFile", "Super+S");
   });
 
   it("keeps a file's unsaved text while another is open", async () => {

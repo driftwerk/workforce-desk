@@ -40,7 +40,7 @@ export function Sidebar({
   const list = sortedSessions(sessions).filter((s) => s.state !== "closed");
   const themes = [{ id: "system", name: "Auto" }, ...allThemes(custom).slice(0, 3)];
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
-  const askKeys = shortcutLabel(useSettings((s) => s.askShortcut));
+  const keys = useSettings((s) => s.keys);
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const overseer = (a: (typeof roster)[number]) => a.id === managerId && !!hubs.find((h) => h.id === a.hubId)?.local;
   return (
@@ -50,7 +50,7 @@ export function Sidebar({
         <span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />
       </div>
       <button type="button" className="ask" onClick={onAsk}>
-        Ask anyone <kbd>{askKeys}</kbd>
+        Ask anyone <kbd>{shortcutLabel(keys.ask)}</kbd>
       </button>
       <div className="tabs" role="tablist" aria-label="View">
         {(["rooms", "floor"] as const).map((v) => (
@@ -115,7 +115,7 @@ export function Sidebar({
         <span className="side-label side-label-action">
           Sessions
           <button type="button" className="link small" onClick={onNewSession} aria-label="New session">
-            New ⌘N
+            New {shortcutLabel(keys.newSession)}
           </button>
         </span>
         {list.map((s) => (
@@ -139,7 +139,7 @@ export function Sidebar({
           ))}
         </div>
         <button type="button" className="link small side-settings" onClick={onSettings}>
-          Settings <kbd>⌘,</kbd>
+          Settings <kbd>{shortcutLabel(keys.settings)}</kbd>
         </button>
       </div>
     </nav>

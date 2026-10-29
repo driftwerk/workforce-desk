@@ -1,18 +1,52 @@
-/** Desk's two global shortcuts, written the way the global-shortcut plugin
- *  reads them ("Control+Shift+Space") and shown the way macOS does (⌃⇧Space). */
+/** Desk's keyboard shortcuts, written the way the global-shortcut plugin
+ *  reads them ("Control+Shift+Space") and shown the way macOS does (⌃⇧Space).
+ *  The global ones work from any app; the rest only while Desk is in front. */
 
-export type ShortcutId = "pushToTalk" | "ask";
+export type Scope = "global" | "app";
 
-/** Hold to talk, release to send; and open "Ask anyone" from any app. */
-export const DEFAULT_SHORTCUTS: Record<ShortcutId, string> = {
-  pushToTalk: "Control+Shift+Space",
-  ask: "Alt+Space",
-};
+export interface ShortcutSpec {
+  id: string;
+  name: string;
+  about: string;
+  /** The default keys. */
+  keys: string;
+  scope: Scope;
+}
 
-export const SHORTCUT_NAMES: Record<ShortcutId, string> = {
-  pushToTalk: "Hold to talk",
-  ask: "Ask anyone",
-};
+/** Every shortcut Desk has, in the order Settings lists them. Esc, Enter
+ *  and the arrows in text fields and dialogs work as they do everywhere and
+ *  aren't here. */
+export const SHORTCUTS = [
+  { id: "ask", name: "Ask anyone", about: "Opens Ask anyone from any app.", keys: "Control+Shift+K", scope: "global" },
+  {
+    id: "pushToTalk",
+    name: "Hold to talk",
+    about: "Hold to talk to an agent, let go to send. Works from any app while voice is on.",
+    keys: "Control+Shift+Space",
+    scope: "global",
+  },
+  { id: "newSession", name: "New session", about: "Starts a new session.", keys: "Super+N", scope: "app" },
+  { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Super+Comma", scope: "app" },
+  { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Super+S", scope: "app" },
+] as const satisfies readonly ShortcutSpec[];
+
+type Spec = (typeof SHORTCUTS)[number];
+export type ShortcutId = Spec["id"];
+export type GlobalShortcutId = Extract<Spec, { scope: "global" }>["id"];
+
+export const SHORTCUT_IDS: ShortcutId[] = SHORTCUTS.map((s) => s.id);
+
+const SPEC = Object.fromEntries(SHORTCUTS.map((s) => [s.id, s])) as Record<ShortcutId, Spec>;
+
+export const DEFAULT_SHORTCUTS = Object.fromEntries(SHORTCUTS.map((s) => [s.id, s.keys])) as Record<ShortcutId, string>;
+
+export const SHORTCUT_NAMES = Object.fromEntries(SHORTCUTS.map((s) => [s.id, s.name])) as Record<ShortcutId, string>;
+
+export const scopeOf = (id: ShortcutId): Scope => SPEC[id].scope;
+
+export const isGlobal = (id: ShortcutId): id is GlobalShortcutId => scopeOf(id) === "global";
+
+export const isShortcutId = (id: string): id is ShortcutId => id in SPEC;
 
 /** In macOS's order: ⌃⌥⇧⌘. */
 const MODIFIERS = ["Control", "Alt", "Shift", "Super"] as const;
@@ -163,25 +197,114 @@ const RESERVED: [string, string][] = [
 ];
 const RESERVED_BY = new Map(RESERVED.map(([accel, what]) => [normalize(accel)!, what]));
 
-/** Why a shortcut can't be Desk's, in plain words; null when it can. */
-export const refusal = (accel: string): string | null => {
+/** What Desk's own menu does with keys: the menu takes them before any
+ *  shortcut of Desk's could. */
+const MENU: [string, string][] = [
+  ["Super+Q", "Quit"],
+  ["Super+H", "Hide"],
+  ["Alt+Super+H", "Hide Others"],
+  ["Super+W", "Close Window"],
+  ["Super+M", "Minimize"],
+  ["Super+Z", "Undo"],
+  ["Shift+Super+Z", "Redo"],
+  ["Super+X", "Cut"],
+  ["Super+C", "Copy"],
+  ["Super+V", "Paste"],
+  ["Super+A", "Select All"],
+  ["Control+Super+F", "Full Screen"],
+];
+const MENU_BY = new Map(MENU.map(([accel, what]) => [normalize(accel)!, what]));
+
+/** Keys other apps commonly take for themselves. Desk lets you choose them,
+ *  and says they may never reach it. */
+const COMMON: [string, string][] = [["Alt+Space", "Launchers like Raycast, Alfred, ChatGPT and Claude"]];
+const COMMON_BY = new Map(COMMON.map(([accel, who]) => [normalize(accel)!, who]));
+
+/** Why a shortcut can't be Desk's, in plain words; null when it can. A
+ *  global one mustn't be a key an app uses for itself; one that works only
+ *  in Desk needs ⌘ or ⌃ so it doesn't stop you typing. */
+export const refusal = (accel: string, scope: Scope = "global"): string | null => {
   const p = parse(accel);
   if (!p) return "Desk can’t use that key — choose another";
   const label = shortcutLabel(accel);
-  const what = RESERVED_BY.get(write(p));
+  const keys = write(p);
+  const what = RESERVED_BY.get(keys);
   if (what) return `macOS uses ${label} for ${what} — choose another`;
   const fKey = /^F\d+$/.test(p.key);
-  if (!p.mods.has("Control") && !p.mods.has("Alt") && !p.mods.has("Super") && !fKey)
-    return `${label} would stop you typing it — add ⌃, ⌥ or ⌘`;
-  if (p.mods.size === 1 && p.mods.has("Super") && !fKey) return `${label} belongs to whichever app you’re in — add ⌃, ⌥ or ⇧`;
+  if (scope === "app") {
+    if (!p.mods.has("Control") && !p.mods.has("Super") && !fKey) return `${label} would stop you typing — add ⌘ or ⌃`;
+  } else {
+    if (!p.mods.has("Control") && !p.mods.has("Alt") && !p.mods.has("Super") && !fKey)
+      return `${label} would stop you typing it — add ⌃, ⌥ or ⌘`;
+    if (p.mods.size === 1 && p.mods.has("Super") && !fKey) return `${label} belongs to whichever app you’re in — add ⌃, ⌥ or ⇧`;
+  }
+  const menu = MENU_BY.get(keys);
+  if (menu) return `${label} is ${menu} — choose another`;
   return null;
 };
 
+/** A word of caution about keys Desk can have but another app often takes
+ *  first; null when there's none. */
+export const warning = (accel: string): string | null => {
+  const n = normalize(accel);
+  const who = n ? COMMON_BY.get(n) : undefined;
+  return who ? `${who} often use ${shortcutLabel(accel)} — if nothing happens, choose another` : null;
+};
+
 /** The shortcut to use for a stored value: the default when there's none,
- *  Desk can't read it, or macOS keeps it. */
+ *  Desk can't read it, or it can't be Desk's. */
 export const usable = (stored: string | undefined | null, id: ShortcutId): string => {
   const n = stored ? normalize(stored) : null;
-  return n && !refusal(n) ? n : DEFAULT_SHORTCUTS[id];
+  return n && !refusal(n, scopeOf(id)) ? n : DEFAULT_SHORTCUTS[id];
+};
+
+/** Why `accel` can't be `id`'s when Desk's shortcuts are `keys`: another
+ *  of Desk's own already has it. */
+export const clash = (keys: Record<ShortcutId, string>, id: ShortcutId, accel: string): string | null => {
+  const n = normalize(accel);
+  const other = SHORTCUT_IDS.find((o) => o !== id && normalize(keys[o]) === n);
+  return other ? `${shortcutLabel(accel)} is already ${SHORTCUT_NAMES[other]} — choose another` : null;
+};
+
+/** Desk's shortcuts from the chosen ones (saved by id, only where they
+ *  differ from the default): each one's keys, and the choices that still
+ *  stand. A choice Desk can't use, or that has keys another shortcut has,
+ *  is dropped for the default; ids a newer Desk saved are kept as they are. */
+export const resolve = (chosen: Record<string, string>): { keys: Record<ShortcutId, string>; chosen: Record<string, string> } => {
+  const kept: Record<string, string> = {};
+  for (const [id, accel] of Object.entries(chosen)) {
+    if (!isShortcutId(id)) kept[id] = accel;
+    else if (usable(accel, id) !== DEFAULT_SHORTCUTS[id]) kept[id] = usable(accel, id);
+  }
+  const keysOf = (): Record<ShortcutId, string> =>
+    Object.fromEntries(SHORTCUT_IDS.map((id) => [id, kept[id] ?? DEFAULT_SHORTCUTS[id]])) as Record<ShortcutId, string>;
+  // Defaults never clash with each other, so dropping choices one at a time
+  // — the later of two choices, or a choice over a default — ends clean.
+  for (;;) {
+    const keys = keysOf();
+    const seen = new Map<string, ShortcutId>();
+    let drop: ShortcutId | null = null;
+    for (const id of SHORTCUT_IDS) {
+      const first = seen.get(keys[id]);
+      if (first === undefined) {
+        seen.set(keys[id], id);
+        continue;
+      }
+      drop = kept[id] !== undefined ? id : first;
+      break;
+    }
+    if (!drop) return { keys, chosen: kept };
+    delete kept[drop];
+  }
+};
+
+/** The chosen shortcuts with `id` set to `accel`; the default isn't saved,
+ *  so it follows Desk's default if that ever changes. */
+export const choose = (chosen: Record<string, string>, id: ShortcutId, accel: string): Record<string, string> => {
+  const rest = { ...chosen };
+  delete rest[id];
+  const n = normalize(accel) ?? accel;
+  return n === DEFAULT_SHORTCUTS[id] ? rest : { ...rest, [id]: n };
 };
 
 export interface KeyPress {
@@ -208,4 +331,10 @@ export const pressed = (e: KeyPress): Pressed => {
     return { kind: "modifiers", label: MODIFIERS.filter((m) => mods.has(m)).map((m) => MODIFIER_SYMBOL[m]).join("") };
   const key = KEYS[e.code];
   return key ? { kind: "shortcut", accel: write({ mods, key }) } : { kind: "unknown" };
+};
+
+/** Whether a key press is the shortcut `accel`, by where the keys are. */
+export const matches = (e: KeyPress, accel: string): boolean => {
+  const p = pressed(e);
+  return p.kind === "shortcut" && p.accel === normalize(accel);
 };
