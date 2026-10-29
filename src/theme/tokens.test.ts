@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DAY, HARBOUR, NIGHT } from "./builtin";
-import { contrast, contrastChecks, cssVariables, derive, markFor, MARKS } from "./tokens";
+import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 
 describe("themes", () => {
@@ -49,6 +49,19 @@ describe("themes", () => {
     expect(vars["--signal-soft-text"]).toBe("#DFFF7A");
     expect(vars["--rich-accent"]).toBe("#D4FF3A");
     expect(vars["--radius"]).toBe("14px");
+  });
+
+  it("code in replies is readable in every built-in theme", () => {
+    for (const t of [NIGHT, DAY, HARBOUR]) {
+      const { bg, ...inks } = codeColors(derive(t).colors);
+      for (const [token, ink] of Object.entries(inks)) {
+        const ratio = contrast(ink, bg!);
+        expect(ratio, `${t.id}: code ${token} ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    const vars = cssVariables(derive(HARBOUR));
+    expect(vars["--rich-code-bg"]).toBe("#0A121A");
+    expect(vars["--rich-code-keyword"]).toBe("#FF8F8F");
   });
 
   it("an agent keeps the same mark colour", () => {

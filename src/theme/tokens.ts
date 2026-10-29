@@ -149,8 +149,29 @@ export const cssVariables = (theme: Theme): Record<string, string> => {
     "--rich-border": colors.border,
     "--rich-accent": colors.signal,
     ...Object.fromEntries(SERIES.map((c, i) => [`--rich-series-${i + 1}`, c])),
+    ...Object.fromEntries(Object.entries(codeColors(colors)).map(([k, v]) => [`--rich-code-${k}`, v])),
   };
 };
+
+/** Fenced code in agents' replies: drawn like the terminal panes (sunken ground,
+ *  terminal text), with syntax colours taken from the palette's own status and
+ *  ANSI colours, so a custom theme's overrides carry through to its code. */
+export const codeColors = (c: Palette): Record<string, string> => ({
+  bg: c.sunken,
+  text: c.termText,
+  comment: c.faint,
+  keyword: c.ansiRed,
+  string: c.ansiGreen,
+  "string-expression": c.ansiGreen,
+  constant: c.ansiCyan,
+  function: c.working,
+  parameter: c.blocked,
+  punctuation: c.muted,
+  link: c.working,
+  inserted: c.done,
+  deleted: c.ansiRed,
+  changed: c.blocked,
+});
 
 export const MARKS = ["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"] as const;
 const SERIES = [...MARKS, "#D4FF3A", "#8FD8E8"];
