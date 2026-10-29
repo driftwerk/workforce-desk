@@ -41,8 +41,102 @@ let settings = {
   sessionNames: {} as Record<string, string>,
 };
 
+// ── Desk's state file and the hub's state store, for the preview ──────────
+// The file is this browser's localStorage; the hub's store (answering
+// `/api/desk/state` while the running hub doesn't) is another key of it, so
+// a reload of the preview comes back as it was, like the app.
+
+type DevEntry = { value: unknown; updatedAt?: string | null; dirty?: boolean };
+const stored = <V>(key: string): Record<string, V> => {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, V>;
+  } catch {
+    return {};
+  }
+};
+const store = (key: string, v: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    /* private window: kept for this page only */
+  }
+};
+const FILE = "desk.dev.stateFile";
+const HUB_STATE = "desk.dev.hubState";
+const stateFile = stored<DevEntry>(FILE);
+const hubState = stored<{ value: unknown; updatedAt: string }>(HUB_STATE);
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+function stateCommand(cmd: string, args: Record<string, unknown> = {}): { answer: unknown } | null {
+  const key = args.key as string;
+  switch (cmd) {
+    case "desk_state_load":
+      return { answer: stateFile };
+    case "desk_state_put":
+      stateFile[key] = { value: args.value, updatedAt: stateFile[key]?.updatedAt ?? null, dirty: true };
+      break;
+    case "desk_state_remove":
+      delete stateFile[key];
+      break;
+    case "desk_state_synced":
+      if (stateFile[key] && same(stateFile[key].value, args.value)) stateFile[key] = { ...stateFile[key], dirty: false, updatedAt: args.updatedAt as string };
+      break;
+    case "desk_state_adopt":
+      if (stateFile[key]?.dirty) return { answer: false };
+      if (args.value === null || args.value === undefined) delete stateFile[key];
+      else stateFile[key] = { value: args.value, updatedAt: (args.updatedAt as string) ?? null, dirty: false };
+      store(FILE, stateFile);
+      return { answer: true };
+    case "desk_state_flush":
+    case "desk_ready":
+      return { answer: undefined };
+    default:
+      return null;
+  }
+  store(FILE, stateFile);
+  return { answer: undefined };
+}
+
+function stateRoute(method: string, path: string, body: unknown): { answer: unknown } | null {
+  const url = new URL(path, "http://preview");
+  if (method === "GET" && url.pathname === "/api/desk/state") {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    return {
+      answer: {
+        entries: Object.entries(hubState)
+          .filter(([k]) => k.startsWith(prefix))
+          .map(([key, e]) => ({ key, ...e })),
+      },
+    };
+  }
+  const m = url.pathname.match(/^\/api\/desk\/state\/(.+)$/);
+  if (!m) return null;
+  const key = decodeURIComponent(m[1]!);
+  const announce = (value: unknown) => deskListeners.forEach((f) => f({ type: "state", key, value }));
+  if (method === "PUT") {
+    const value = (body as { value?: unknown } | undefined)?.value ?? null;
+    hubState[key] = { value, updatedAt: new Date().toISOString() };
+    store(HUB_STATE, hubState);
+    announce(value);
+    return { answer: { key, ...hubState[key] } };
+  }
+  if (method === "DELETE") {
+    delete hubState[key];
+    store(HUB_STATE, hubState);
+    announce(null);
+    return { answer: undefined };
+  }
+  if (method === "GET") {
+    if (!hubState[key]) throw new Error(`no ${key}`);
+    return { answer: { key, ...hubState[key] } };
+  }
+  return null;
+}
+
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const answer = (v: unknown) => v as T;
+  const state = stateCommand(cmd, args);
+  if (state) return answer(state.answer);
   switch (cmd) {
     case "hub_connection":
       return answer({ url: need("hub"), token: need("admin") });
@@ -272,6 +366,8 @@ export async function devHub<T>(method: string, path: string, body?: unknown): P
   const answer = (v: unknown) => structuredClone(v) as T;
   const crew = crewRoute(method, path);
   if (crew) return answer(crew.answer);
+  const state = stateRoute(method, path, body);
+  if (state) return answer(state.answer);
   if (method === "GET" && path === "/api/desk/providers") return answer({ providers: fixtures });
   const m = path.match(/^\/api\/desk\/providers\/([^/]+)(\/connect)?$/);
   const p = m && fixtures.find((f) => f.id === decodeURIComponent(m[1]!));

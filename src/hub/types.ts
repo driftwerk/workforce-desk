@@ -88,7 +88,9 @@ export type DeskEvent =
   | { type: "room"; room: Room }
   | { type: "roomRemoved"; id: string }
   | { type: "roomMessage"; message: RoomMessage }
-  | { type: "activity"; event: ActivityEvent };
+  | { type: "activity"; event: ActivityEvent }
+  /** A key of Desk's restorable state changed on the hub (null: removed). */
+  | { type: "state"; key: string; value: unknown };
 
 export type Decision = "allow" | "deny" | "terminal";
 

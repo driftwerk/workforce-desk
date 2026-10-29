@@ -13,6 +13,7 @@ import { ItemTile } from "./ItemTile";
 import { clock } from "./overview";
 import { localKey, openLocalDm, useLocalAgent } from "./people";
 import { useOverview } from "./store";
+import { useSavedScroll } from "../restore/scroll";
 
 /** Where an agent goes on the Floor, by what the overview says it's doing. */
 const AGENT_GROUP: Record<OverviewItem["state"], string> = {
@@ -67,6 +68,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   };
   const working = count("Working");
   const needsYou = count("Needs you");
+  const scroller = useSavedScroll<HTMLDivElement>("floor");
 
   return (
     <main className="crew-floor" aria-label="Floor">
@@ -87,7 +89,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
         </button>
       </header>
       <div className="crew-floor-body">
-        <div className="crew-floor-main">
+        <div ref={scroller} className="crew-floor-main">
           <RestoreBanner />
           {overview.brief && manager?.agentId ? (
             <BriefCard brief={overview.brief} managerId={manager.agentId} name={managerName ?? overview.brief.by.name} onPaused={setPaused} />

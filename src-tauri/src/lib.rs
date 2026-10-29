@@ -1,19 +1,22 @@
 mod files;
+mod frame;
 mod helper;
 mod hubs;
 mod logins;
+mod state;
 mod support;
 mod tuple;
 mod updates;
 mod voice;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use desk_core::{Paths, Secret, SecretStore, Secrets};
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 struct App {
     paths: Paths,
@@ -228,6 +231,65 @@ async fn data_remove(app: State<'_, App>, everything: bool) -> CommandResult<()>
         .map_err(text)
 }
 
+/// Everything Desk keeps to restore (its own copy; the hub has the same).
+#[tauri::command]
+fn desk_state_load(store: State<'_, Arc<state::StateStore>>) -> BTreeMap<String, state::Entry> {
+    store.all()
+}
+
+/// A change the page made, kept at once and written within the debounce.
+#[tauri::command]
+fn desk_state_put(store: State<'_, Arc<state::StateStore>>, key: String, value: serde_json::Value) {
+    store.put(&key, value);
+}
+
+#[tauri::command]
+fn desk_state_remove(store: State<'_, Arc<state::StateStore>>, key: String) {
+    store.remove(&key);
+}
+
+/// The hub has stored `value` under `key`.
+#[tauri::command]
+fn desk_state_synced(
+    store: State<'_, Arc<state::StateStore>>,
+    key: String,
+    value: serde_json::Value,
+    updated_at: Option<String>,
+) {
+    store.synced(&key, &value, updated_at);
+}
+
+/// The hub's value for `key` (none: it has none), taken unless this one
+/// hasn't reached the hub yet. True when taken.
+#[tauri::command]
+fn desk_state_adopt(
+    store: State<'_, Arc<state::StateStore>>,
+    key: String,
+    value: Option<serde_json::Value>,
+    updated_at: Option<String>,
+) -> bool {
+    store.adopt(&key, value.map(|v| (v, updated_at)))
+}
+
+#[tauri::command]
+fn desk_state_flush(store: State<'_, Arc<state::StateStore>>) -> CommandResult<()> {
+    store.flush().map_err(text)
+}
+
+/// The page has put back what was open: the window can be seen.
+#[tauri::command]
+fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>) {
+    if let Some(t) = frames.0.lock().expect("frames").get(window.label()) {
+        t.show(&window, "page ready");
+    } else {
+        let _ = window.show();
+    }
+}
+
+/// Each window's frame keeper, by label.
+#[derive(Default)]
+struct Frames(Mutex<BTreeMap<String, Arc<frame::Tracker>>>);
+
 #[tauri::command]
 fn resume_later(app: State<'_, App>, ids: Vec<String>) -> CommandResult<()> {
     updates::resume_later(&app.paths, &ids).map_err(text)
@@ -299,8 +361,22 @@ pub fn run() {
         .manage(tuple::Tuple::default())
         .manage(logins::Logins::default())
         .manage(logins::install::Installs::default())
+        .manage(Frames::default())
         .setup(|app| {
             let paths = Paths::new()?;
+            // What was open, and where the window was, before anything shows.
+            let store = state::StateStore::open(paths.desk_state());
+            let handle = app.handle().clone();
+            store.on_native_change(move |changed| {
+                let _ = handle.emit("desk-state", changed);
+            });
+            let main = frame::Tracker::build(app, "main", store.clone())?;
+            app.state::<Frames>()
+                .0
+                .lock()
+                .expect("frames")
+                .insert("main".into(), main);
+            app.manage(store);
             // The installed app makes Desk Helper its login item; a
             // development run talks to a supervisor started by hand.
             let helper = helper::ensure(&paths);
@@ -338,6 +414,13 @@ pub fn run() {
             data_remove,
             resume_later,
             resume_take,
+            desk_state_load,
+            desk_state_put,
+            desk_state_remove,
+            desk_state_synced,
+            desk_state_adopt,
+            desk_state_flush,
+            desk_ready,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_roster,
@@ -350,6 +433,15 @@ pub fn run() {
             voice::voice_engine_voices,
             voice::voice_status
         ])
-        .run(tauri::generate_context!())
-        .expect("Desk failed to start");
+        .build(tauri::generate_context!())
+        .expect("Desk failed to start")
+        .run(|app, event| {
+            // Quitting, however it happens, writes what's pending first.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event
+                && let Some(store) = app.try_state::<Arc<state::StateStore>>()
+                && let Err(e) = store.flush()
+            {
+                tracing::warn!(error = %e, "couldn't save desk state");
+            }
+        });
 }

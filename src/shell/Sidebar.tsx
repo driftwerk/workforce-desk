@@ -8,6 +8,7 @@ import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { useSavedScroll } from "../restore/scroll";
 
 export function Sidebar({
   onAsk,
@@ -27,8 +28,9 @@ export function Sidebar({
   const hubs = useChat((s) => s.hubs);
   const theme = useTheme();
   const keys = useSettings((s) => s.keys);
+  const scroller = useSavedScroll<HTMLElement>("sidebar");
   return (
-    <nav className="sidebar" aria-label="Desk">
+    <nav ref={scroller} className="sidebar" aria-label="Desk">
       <div className="wordmark" onMouseDown={dragWindow}>
         <span>desk</span>
         <span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />

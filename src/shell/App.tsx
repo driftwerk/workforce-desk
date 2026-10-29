@@ -21,6 +21,7 @@ import { parseTheme, ThemeError } from "../theme/toml";
 import type { ThemeSpec } from "../theme/tokens";
 import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
+import { useUi } from "./ui";
 import { dragWindow } from "../ui/drag";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
@@ -47,7 +48,8 @@ export function App() {
   useEffect(() => {
     prune(rooms);
   }, [rooms]);
-  const [settings, setSettings] = useState(false);
+  const settings = useUi((u) => u.settings !== null);
+  const { openSettings, closeSettings } = useUi.getState();
   const setHubs = useChat((s) => s.setHubs);
   const loadSettings = useSettings((s) => s.load);
   const tupleOn = useSettings((s) => s.tuple);
@@ -100,7 +102,7 @@ export function App() {
   }, [askStatus, fail]);
 
   useAppShortcut("newSession", () => setNewSession(true));
-  useAppShortcut("settings", () => setSettings((s) => !s));
+  useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
 
   const open = openId ? sessions[openId] : undefined;
   return (
@@ -110,7 +112,7 @@ export function App() {
       <div className="titlebar" onMouseDown={dragWindow} />
       {settings ? (
         <ErrorBoundary name="settings">
-          <Settings onClose={() => setSettings(false)} />
+          <Settings onClose={closeSettings} />
         </ErrorBoundary>
       ) : (
         <>
@@ -120,7 +122,7 @@ export function App() {
               onNewSession={() => setNewSession(true)}
               onNewRoom={() => setNewRoom(true)}
               onNewCrew={() => setNewCrew(true)}
-              onSettings={() => setSettings(true)}
+              onSettings={() => openSettings()}
             />
           </ErrorBoundary>
           <ErrorBoundary name="main">{view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : <Rooms />}</ErrorBoundary>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
@@ -8,12 +8,11 @@ import { Providers } from "./Providers";
 import { Shortcuts } from "./Shortcuts";
 import { Voices } from "./Voices";
 import { dragWindow } from "../ui/drag";
-
-const SECTIONS = { appearance: "Appearance", hubs: "Workspaces", providers: "Providers", voices: "Voices", calls: "Calls and voice", shortcuts: "Shortcuts", help: "Help" } as const;
-type Section = keyof typeof SECTIONS;
+import { SETTINGS_SECTIONS as SECTIONS, useUi, type SettingsSection as Section } from "../shell/ui";
 
 export function Settings({ onClose }: { onClose: () => void }) {
-  const [section, setSection] = useState<Section>("appearance");
+  const section = useUi((u) => u.settings) ?? "appearance";
+  const setSection = useUi((u) => u.openSettings);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const inSheet = e.target instanceof Element && e.target.closest(".sheet-backdrop");

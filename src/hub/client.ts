@@ -33,6 +33,32 @@ export interface Revision {
   created_at: string;
 }
 
+/** What a hub without a route is taken to have said. */
+const NO_ROUTE = "This hub doesn’t have that yet.";
+
+/** One key of Desk's state on a hub. */
+export interface StateRow {
+  key: string;
+  value: unknown;
+  updatedAt: string | null;
+}
+
+const stateRow = (x: unknown): StateRow | null => {
+  if (!x || typeof x !== "object") return null;
+  const r = x as { key?: unknown; value?: unknown; updatedAt?: unknown; updated_at?: unknown };
+  if (typeof r.key !== "string" || !("value" in r)) return null;
+  const at = r.updatedAt ?? r.updated_at;
+  return { key: r.key, value: r.value, updatedAt: typeof at === "string" ? at : null };
+};
+
+/** A listing as a list of rows, or under `entries`, `items` or `state`. */
+export const stateRows = (body: unknown): StateRow[] => {
+  const o = body as Record<string, unknown> | null;
+  const list = Array.isArray(body) ? body : (o?.entries ?? o?.items ?? o?.state ?? o?.states);
+  if (!Array.isArray(list)) throw new HubError(404, NO_ROUTE);
+  return list.flatMap((x) => stateRow(x) ?? []);
+};
+
 export class HubError extends Error {
   constructor(
     readonly status: number,
@@ -83,7 +109,7 @@ export class DeskHub {
     if (res.status === 204) return undefined as T;
     // A hub without this route answers with its web page, not a 404.
     if (!(res.headers.get("content-type") ?? "").includes("json")) {
-      throw new HubError(404, "This hub doesn’t have that yet.");
+      throw new HubError(404, NO_ROUTE);
     }
     return (await res.json()) as T;
   }
@@ -205,6 +231,23 @@ export class DeskHub {
     this.call("POST", `/api/desk/rooms/${id}/messages`, m);
   search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
     this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
+
+  /** Desk's restorable state on this hub (see restore/store.ts); a hub
+   *  without a state store answers 404. */
+  stateList = async (prefix: string): Promise<StateRow[]> =>
+    stateRows(await this.desk<unknown>("GET", `/api/desk/state?prefix=${encodeURIComponent(prefix)}`));
+  statePut = async (key: string, value: unknown): Promise<{ updatedAt: string | null }> => {
+    const body = await this.desk<unknown>("PUT", `/api/desk/state/${encodeURIComponent(key)}`, { value });
+    return { updatedAt: stateRow(body)?.updatedAt ?? null };
+  };
+  stateRemove = async (key: string): Promise<void> => {
+    try {
+      await this.desk<unknown>("DELETE", `/api/desk/state/${encodeURIComponent(key)}`);
+    } catch (e) {
+      // Already gone is gone; a hub without the store says so another way.
+      if (!(e instanceof HubError && e.status === 404 && e.message !== NO_ROUTE)) throw e;
+    }
+  };
 
   events(onEvent: (e: DeskEvent) => void, onState: (open: boolean) => void): () => void {
     let ws: WebSocket | null = null;

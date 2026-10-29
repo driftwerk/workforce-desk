@@ -5,6 +5,7 @@ import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
 import { RestoreBanner } from "./RestoreBanner";
 import { GROUPS, Tile } from "./SessionTile";
+import { useSavedScroll } from "../restore/scroll";
 
 export { Tile } from "./SessionTile";
 
@@ -48,8 +49,9 @@ export function SessionsFloor() {
     tiles.forEach((s) => seen.add(s.id));
     return { ...g, tiles };
   }).filter((g) => g.tiles.length);
+  const scroller = useSavedScroll<HTMLElement>("floor");
   return (
-    <main className="floor" aria-label="Floor">
+    <main ref={scroller} className="floor" aria-label="Floor">
       <header className="floor-head">
         <h1 className="display-xl">Floor</h1>
         <span className="floor-summary">

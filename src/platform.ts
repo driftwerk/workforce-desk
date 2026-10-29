@@ -180,3 +180,23 @@ export const removeDeskData = (everything: boolean): Promise<void> => invoke("da
 /** Sessions to resume once Desk has restarted into an update. */
 export const resumeLater = (ids: string[]): Promise<void> => invoke("resume_later", { ids });
 export const takeResume = (): Promise<string[]> => invoke("resume_take");
+
+/** Desk's own copy of what it restores (see restore/store.ts). */
+export interface StateEntry {
+  value: unknown;
+  updatedAt?: string | null;
+  dirty?: boolean;
+}
+export const stateLoad = (): Promise<Record<string, StateEntry>> => invoke("desk_state_load");
+export const statePut = (key: string, value: unknown): Promise<void> => invoke("desk_state_put", { key, value });
+export const stateRemove = (key: string): Promise<void> => invoke("desk_state_remove", { key });
+export const stateSynced = (key: string, value: unknown, updatedAt: string | null): Promise<void> =>
+  invoke("desk_state_synced", { key, value, updatedAt });
+export const stateAdopt = (key: string, value: unknown, updatedAt: string | null): Promise<boolean> =>
+  invoke("desk_state_adopt", { key, value, updatedAt });
+export const stateFlush = (): Promise<void> => invoke("desk_state_flush");
+/** Changes Desk's native side made to it (a window's frame). */
+export const onNativeState = (f: (changes: [string, StateEntry][]) => void): Promise<() => void> =>
+  listen<[string, StateEntry][]>("desk-state", (e) => f(e.payload));
+/** The page has put back what was open: the window can be shown. */
+export const deskReady = (): Promise<void> => invoke("desk_ready");

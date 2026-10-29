@@ -33,6 +33,11 @@ interface ChatStore {
   setHubs: (hubs: HubAccount[]) => void;
   refreshRoster: () => Promise<void>;
   openDm: (key: string) => void;
+  /** Opens the DM that's shown (`activeAgent`, as restored) once its agent
+   *  is on the roster; until then it stays chosen. */
+  reopenDm: () => void;
+  /** The roster has been read at least once. */
+  rosterRead: boolean;
   /** Reads a DM's latest messages from its hub (again, after a failure). */
   loadHistory: (key: string) => Promise<void>;
   /** Reads the page before the earliest message shown. */
@@ -100,11 +105,17 @@ const ensure = (key: string): boolean => {
   const hub = agent && hubs.find((h) => h.id === agent.hubId);
   if (!agent || !hub) return false;
   useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
+  let everConnected = false;
   live.set(
     key,
     new Conversation(hub, agent.id, (c) => {
       const was = useChat.getState().conversations[key];
       useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
+      // Back after the hub restarted: what was said meanwhile is only in its copy.
+      if (c.connected && !was?.connected) {
+        if (everConnected) void useChat.getState().refreshHistory(key);
+        everConnected = true;
+      }
       // A turn whose prompt never came live: only the hub's copy has it.
       if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
     }),
@@ -120,6 +131,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   conversations: {},
   histories: {},
   activeAgent: null,
+  rosterRead: false,
   setHubs: (hubs) => {
     for (const [key, c] of live) {
       if (!hubs.some((h) => key.startsWith(`${h.id}/`))) {
@@ -147,7 +159,12 @@ export const useChat = create<ChatStore>((set, get) => ({
       if (r.status === "fulfilled") roster.push(...r.value);
       else rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
     });
-    set({ roster, rosterErrors });
+    set({ roster, rosterErrors, rosterRead: true });
+    get().reopenDm();
+  },
+  reopenDm: () => {
+    const key = get().activeAgent;
+    if (key && !live.has(key) && get().roster.some((a) => agentKey(a) === key)) get().openDm(key);
   },
   openDm: (key) => {
     if (!ensure(key)) return;

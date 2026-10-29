@@ -16,6 +16,7 @@ import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
+import { useUi, type AgentTab } from "../shell/ui";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
 
@@ -39,11 +40,22 @@ const overseeingLine = (
 };
 
 export function Rooms() {
+  const activeRoom = useDesk((s) => s.activeRoom);
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
-  return room ? <RoomView room={room} /> : <DirectMessage />;
+  const loaded = useDesk((s) => s.loaded);
+  if (room) return <RoomView room={room} />;
+  // A room put back on launch shows once the hub says what rooms it has.
+  if (activeRoom && !loaded) return <Waiting />;
+  return <DirectMessage />;
 }
 
-type Tab = "chat" | "settings" | "files";
+/** In place of a room or DM that's open but not loaded yet: not the empty
+ *  Rooms, which would read as everything having closed. */
+function Waiting() {
+  return <main className="room room-empty" aria-label="Rooms" aria-busy="true" />;
+}
+
+type Tab = AgentTab;
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
@@ -66,8 +78,11 @@ function DirectMessage() {
   const overview = useOverview((s) => s.overview);
   const sessions = useDesk((s) => s.sessions);
   const [draft, setDraft] = useState("");
-  // Each agent's tab, kept while you visit others.
-  const [tabs, setTabs] = useState<Record<string, Tab>>({});
+  // Each agent's tab, kept while you visit others (and across launches).
+  const tabs = useUi((u) => u.agentTabs);
+  const setAgentTab = useUi((u) => u.setAgentTab);
+  const rosterRead = useChat((s) => s.rosterRead);
+  const rosterErrors = useChat((s) => s.rosterErrors);
   const [leaving, setLeaving] = useState<Tab | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -102,6 +117,9 @@ function DirectMessage() {
   );
 
   if (!agent || !activeAgent || !convo) {
+    // The DM put back on launch, until its hub's roster is read.
+    const hubId = activeAgent?.split("/")[0] ?? "";
+    if (activeAgent && (!rosterRead || hubId in rosterErrors || (agent && !convo))) return <Waiting />;
     return (
       <main className="room room-empty" aria-label="Rooms">
         <h1 className="display-lg">Rooms</h1>
@@ -118,7 +136,7 @@ function DirectMessage() {
     if (send(activeAgent, draft)) setDraft("");
   };
   const unsaved = dirtyFiles(drafts, activeAgent);
-  const go = (next: Tab) => setTabs((t) => ({ ...t, [activeAgent]: next }));
+  const go = (next: Tab) => setAgentTab(activeAgent, next);
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
   const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files");
   // What the hub reports stands in until the providers list says more.

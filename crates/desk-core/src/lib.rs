@@ -79,6 +79,11 @@ impl Paths {
     pub fn hubs(&self) -> PathBuf {
         self.root.join("hubs.json")
     }
+    /// What Desk restores on launch (its views, selection and window
+    /// frames), kept here as well as on the hub.
+    pub fn desk_state(&self) -> PathBuf {
+        self.root.join("desk-state.json")
+    }
 }
 
 /// Ports chosen on first run and kept, so the app always finds the hub.

@@ -25,6 +25,11 @@ interface DeskState {
   open: (id: string | null) => void;
   setView: (view: "rooms" | "floor") => void;
   openRoom: (id: string | null) => Promise<void>;
+  /** Reads a room's latest messages again, keeping those already read
+   *  (after a restore, or the hub coming back). */
+  reloadRoom: (id: string) => Promise<void>;
+  /** The hub has said which rooms and sessions it has. */
+  loaded: boolean;
   openThread: (roomId: string, threadId: string) => Promise<void>;
   fail: (e: unknown) => void;
   clearError: () => void;
@@ -87,6 +92,7 @@ export const useDesk = create<DeskState>((set, get) => ({
     }),
   openId: null,
   view: "floor",
+  loaded: false,
   error: null,
   connect: (conn) => {
     const hub = new DeskHub(conn);
@@ -103,7 +109,14 @@ export const useDesk = create<DeskState>((set, get) => ({
             e.type === "roomMessage" && s.timelines[e.message.roomId]
               ? { ...s.timelines, [e.message.roomId]: merge(s.timelines[e.message.roomId]!, [e.message]) }
               : s.timelines,
-          activeRoom: e.type === "roomRemoved" && s.activeRoom === e.id ? null : s.activeRoom,
+          // A room gone while Desk was closed is no longer open; one the hub
+          // still has stays open through its restart.
+          activeRoom:
+            (e.type === "roomRemoved" && s.activeRoom === e.id) ||
+            (e.type === "snapshot" && s.activeRoom && !e.rooms.some((r) => r.id === s.activeRoom))
+              ? null
+              : s.activeRoom,
+          loaded: s.loaded || e.type === "snapshot",
           unread:
             e.type === "roomMessage" && e.message.author !== "you" && !(s.view === "rooms" && s.activeRoom === e.message.roomId)
               ? { ...s.unread, [e.message.roomId]: (s.unread[e.message.roomId] ?? 0) + 1 }
@@ -114,7 +127,13 @@ export const useDesk = create<DeskState>((set, get) => ({
         }));
         for (const f of deskListeners) f(e);
       },
-      (connected) => set({ connected }),
+      (connected) => {
+        set({ connected });
+        // Back after a hub restart (or first connected after a restore):
+        // the open room shows what was said meanwhile.
+        const room = get().activeRoom;
+        if (connected && room) void get().reloadRoom(room);
+      },
     );
   },
   open: (openId) => set({ openId, view: openId && get().view === "floor" ? "rooms" : get().view }),
@@ -128,6 +147,16 @@ export const useDesk = create<DeskState>((set, get) => ({
       set((s) => ({ timelines: { ...s.timelines, [id]: merge(s.timelines[id] ?? [], main) } }));
     } catch (e) {
       get().fail(e);
+    }
+  },
+  reloadRoom: async (id) => {
+    const hub = get().hub;
+    if (!hub) return;
+    try {
+      const main = await hub.roomMessages(id);
+      set((s) => ({ timelines: { ...s.timelines, [id]: merge(s.timelines[id] ?? [], main) } }));
+    } catch {
+      /* Shown as it was; read again when the hub is back. */
     }
   },
   openThread: async (roomId, threadId) => {
