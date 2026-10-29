@@ -23,6 +23,8 @@ export type GridTarget =
 export interface FromPane {
   gridId: string;
   paneId: string;
+  /** Dragged from the parked tray: it swaps with the pane it's dropped on. */
+  parked?: boolean;
 }
 
 interface GridDrag {
@@ -166,7 +168,8 @@ export const dropPane = (from: FromPane, over: GridTarget): void => {
   const p = useGrids.getState().grids[from.gridId]?.panes.find((x) => x.id === from.paneId);
   if (!p?.content) return;
   if (over.gridId === from.gridId) {
-    if (over.kind === "pane") movePaneWithin(from.gridId, from.paneId, over.paneId, over.zone);
+    // A parked pane swaps in, whatever part of the pane it's dropped on.
+    if (over.kind === "pane") movePaneWithin(from.gridId, from.paneId, over.paneId, p.rect ? over.zone : "center");
     return;
   }
   if (over.kind === "pane") {
@@ -193,7 +196,7 @@ export function usePaneDrag(gridId: string, pane: Pane, name: string): { onPoint
       if (!moving) {
         if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_PX) return;
         moving = true;
-        startPaneDrag({ gridId, paneId: pane.id }, content, name, ev.clientX, ev.clientY);
+        startPaneDrag({ gridId, paneId: pane.id, parked: !pane.rect }, content, name, ev.clientX, ev.clientY);
       }
       moveGridDrag(ev.clientX, ev.clientY);
     };

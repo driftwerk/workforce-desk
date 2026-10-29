@@ -179,6 +179,7 @@ export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pan
   const over = useGridDrag((s) => (s.over && s.over.gridId === gridId ? s.over : null));
   const dragging = useGridDrag((s) => s.item !== null);
   const movingPane = useGridDrag((s) => !!s.item?.from);
+  const swapping = useGridDrag((s) => !!s.item?.from?.parked);
   const lifted = useGridDrag((s) => s.item?.from?.gridId === gridId && s.item.from.paneId === pane.id);
   const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneId === pane.id ? s.flash.n : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
@@ -232,7 +233,7 @@ export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pan
           <PaneBody gridId={gridId} pane={pane} />
         </div>
         {label.asking && <Approval session={label.asking} />}
-        {dragging && (zone || free) && <DropZones zone={zone} free={!!free} move={movingPane && !pane.content} />}
+        {dragging && (zone || free) && <DropZones zone={zone} free={!!free} single={movingPane && !pane.content ? "Move here" : swapping ? "Swap in" : null} />}
         {flash > 0 && <span key={flash} className="gpane-flash" aria-hidden="true" onAnimationEnd={() => flashDone(flash)} />}
       </div>
       {menu && (
@@ -309,11 +310,11 @@ function ParkedItem({ gridId, pane }: { gridId: string; pane: PaneData }) {
 }
 
 /** Where a drop would go: a side splits the pane, the middle replaces it. */
-function DropZones({ zone, free, move }: { zone: Zone | null; free: boolean; move: boolean }) {
-  if (free || move) {
+function DropZones({ zone, free, single }: { zone: Zone | null; free: boolean; single: string | null }) {
+  if (free || single) {
     return (
       <div className="gzones" aria-hidden="true">
-        <div className="gzone gzone-free on">{move ? "Move here" : "Next free place"}</div>
+        <div className="gzone gzone-free on">{single ?? "Next free place"}</div>
       </div>
     );
   }

@@ -150,6 +150,22 @@ describe("dropping a dragged pane", () => {
   });
 });
 
+describe("dragging a parked pane from the tray", () => {
+  it("swaps it in whatever part of a pane it's dropped on, parking that pane", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    deliver(MAIN_GRID, sess("s2"));
+    layOut(MAIN_GRID, "halves");
+    const parked = grid().panes.find((p) => !p.rect)!;
+    const target = grid().panes.find((p) => p.rect)!;
+    dropPane({ gridId: MAIN_GRID, paneId: parked.id, parked: true }, { kind: "pane", gridId: MAIN_GRID, paneId: target.id, zone: "left" });
+    expect(grid().panes.find((p) => p.id === parked.id)!.rect).toEqual(target.rect);
+    expect(grid().panes.find((p) => p.id === target.id)!.rect).toBeNull();
+    expect(grid().panes.filter((p) => p.rect)).toHaveLength(2);
+  });
+});
+
 describe("a session renamed in Desk", () => {
   afterEach(() => useSettings.setState({ sessionNames: {} }));
 
