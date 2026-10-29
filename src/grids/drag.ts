@@ -9,7 +9,7 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { create } from "zustand";
 import { close, zoneAt, type Pane, type PaneContent, type PresetId, type Zone } from "./engine";
-import { changePanes, deliver, dropOnPane, layOut, movePane, movePaneWithin, useGrids } from "./store";
+import { changePanes, createGrid, deliver, dropOnPane, layOut, movePane, movePaneWithin, useGrids } from "./store";
 
 export type GridTarget =
   | { kind: "pane"; gridId: string; paneId: string; zone: Zone }
@@ -17,7 +17,9 @@ export type GridTarget =
   /** ⇧ held: anywhere on the grid, into the next free place. */
   | { kind: "free"; gridId: string }
   /** A grid's row in the sidebar: its next free place. */
-  | { kind: "row"; gridId: string };
+  | { kind: "row"; gridId: string }
+  /** The Grids view showing no grid: a new grid, holding it. */
+  | { kind: "new" };
 
 /** A pane being dragged, from where it is. */
 export interface FromPane {
@@ -75,6 +77,7 @@ export const targetAt = (x: number, y: number, free: boolean, from?: FromPane): 
     if (!(el instanceof HTMLElement)) continue;
     const row = el.closest<HTMLElement>("[data-drop-grid-row]");
     if (row) return { kind: "row", gridId: row.dataset.dropGridRow! };
+    if (!from && el.closest("[data-drop-new-grid]")) return { kind: "new" };
     const slot = from ? null : el.closest<HTMLElement>("[data-drop-preset]");
     if (slot) {
       return { kind: "preset", gridId: slot.dataset.grid!, preset: slot.dataset.dropPreset as PresetId, slot: Number(slot.dataset.slot ?? 0) };
@@ -119,7 +122,8 @@ export const endGridDrag = (canceled: boolean): { target: GridTarget; content: P
 
 /** Puts what was dropped where it landed. */
 export const dropOnGrid = (target: GridTarget, content: PaneContent): void => {
-  if (target.kind === "pane") dropOnPane(target.gridId, target.paneId, target.zone, content);
+  if (target.kind === "new") deliver(createGrid(), content);
+  else if (target.kind === "pane") dropOnPane(target.gridId, target.paneId, target.zone, content);
   else if (target.kind === "preset") layOut(target.gridId, target.preset, { slot: target.slot, content });
   else deliver(target.gridId, content);
 };
@@ -166,7 +170,8 @@ export const endPaneDrag = (canceled: boolean): void => {
 /** Puts pane `from` where it was dropped. */
 export const dropPane = (from: FromPane, over: GridTarget): void => {
   const p = useGrids.getState().grids[from.gridId]?.panes.find((x) => x.id === from.paneId);
-  if (!p?.content) return;
+  // A pane is in a grid already, so there's one to show (see `targetAt`).
+  if (!p?.content || over.kind === "new") return;
   if (over.gridId === from.gridId) {
     // A parked pane swaps in, whatever part of the pane it's dropped on.
     if (over.kind === "pane") movePaneWithin(from.gridId, from.paneId, over.paneId, p.rect ? over.zone : "center");

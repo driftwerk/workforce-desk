@@ -13,6 +13,11 @@
   justify-content: center;
   gap: 14px;
 }
+/* A session or agent dragged over the Grids view with no grid shown. */
+.grids-none.drop-in {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--signal-soft);
+}
 .grids-head {
   display: flex;
   align-items: center;

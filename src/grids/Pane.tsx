@@ -176,7 +176,7 @@ const RemoveIcon = () => (
  *  terminal, or nothing yet. Its header drags it. */
 export function GridPane({ gridId, pane, focused, alone }: { gridId: string; pane: PaneData; focused: boolean; alone: boolean }) {
   const label = usePaneLabel(pane.content);
-  const over = useGridDrag((s) => (s.over && s.over.gridId === gridId ? s.over : null));
+  const over = useGridDrag((s) => (s.over && s.over.kind !== "new" && s.over.gridId === gridId ? s.over : null));
   const dragging = useGridDrag((s) => s.item !== null);
   const movingPane = useGridDrag((s) => !!s.item?.from);
   const swapping = useGridDrag((s) => !!s.item?.from?.parked);

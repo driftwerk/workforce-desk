@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Room } from "../hub/types";
-import { MAIN_GRID } from "../grids/model";
 import { useGrids } from "../grids/store";
 import { useUi } from "../shell/ui";
 import { followHub, restore, restoreBeforeRender } from "./boot";
@@ -74,7 +73,7 @@ const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
   useChat.setState({ activeAgent: null, roster: [], rosterRead: false });
   useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {} });
-  useGrids.setState({ active: MAIN_GRID });
+  useGrids.setState({ active: null });
 };
 
 beforeEach(reset);

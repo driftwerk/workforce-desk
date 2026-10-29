@@ -9,7 +9,8 @@ import type { Session } from "../hub/types";
 import { SessionCard } from "../session/SessionCard";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
-import { createGrid, deliver, layOut, startGrids, useGrids } from "../grids/store";
+import { closeContent } from "../grids/terminals";
+import { createGrid, deleteGrid, deliver, layOut, startGrids, useGrids } from "../grids/store";
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { SidebarGroups } from "./SidebarGroups";
@@ -332,5 +333,22 @@ describe("sessions and agents in grids", () => {
     expect(fresh).not.toBe(MAIN_GRID);
     expect(contentOf(fresh)).toEqual([{ kind: "agent", agent: "remote/ada" }]);
     expect(useGrids.getState().active).toBe(fresh);
+  });
+
+  it("with no grids, Add to grid offers only New grid, which makes one holding it", () => {
+    deleteGrid(MAIN_GRID, closeContent);
+    expect(useGrids.getState().order).toEqual([]);
+    groups();
+    fireEvent.contextMenu(row("Scout"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add to grid" }));
+    const sub = screen.getByRole("menu", { name: "Add to grid" });
+    expect(within(sub).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["New grid"]);
+    expect(within(sub).queryByRole("separator")).toBeNull();
+    fireEvent.click(within(sub).getByRole("menuitem", { name: "New grid" }));
+    const [fresh] = useGrids.getState().order;
+    expect(useGrids.getState().order).toHaveLength(1);
+    expect(contentOf(fresh!)).toEqual([{ kind: "agent", agent: "local/scout" }]);
+    expect(useGrids.getState().active).toBe(fresh);
+    expect(useDesk.getState().view).toBe("grids");
   });
 });

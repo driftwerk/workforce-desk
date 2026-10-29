@@ -19,7 +19,7 @@ import {
 } from "../platform";
 import { deskState } from "../restore/boot";
 import { findContent, laidOut, type PaneContent } from "./engine";
-import { gridOfLabel, MAIN_GRID, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
+import { gridOfLabel, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
 import { useDesk } from "../hub/store";
 import {
@@ -160,7 +160,7 @@ export function useGridWindows(enabled: boolean) {
 export const detach = (id: string, mode: WindowMode = "fill"): void => {
   setPlacement(id, { kind: "window", mode, monitor: null });
   const s = useGrids.getState();
-  if (s.active === id) setActive(s.order.find((x) => x !== id && s.grids[x]?.placement.kind === "main") ?? MAIN_GRID);
+  if (s.active === id) setActive(s.order.find((x) => x !== id && s.grids[x]?.placement.kind === "main") ?? null);
 };
 
 /** Shows grid `id` in the main window again. Its own window, while it has

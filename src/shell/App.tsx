@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { GridsMain } from "../grids/Grids";
-import { newTerminal, useGrids } from "../grids/store";
+import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe } from "../platform";
@@ -126,7 +126,7 @@ export function App() {
   useAppShortcut("newTerminal", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setView("grids");
-    newTerminal(useGrids.getState().active);
+    newTerminalHere();
   });
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
 

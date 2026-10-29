@@ -4,7 +4,7 @@ import { DeskStateStore, stable, type HubState, type LocalState, type StateEntry
 import { presetOf } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, type Grid } from "./model";
 import { GRID_PREFIX } from "./storage";
-import { createGrid, layOut, moveGrid, newTerminal, nudgeGrid, setPlacement, setTerminal, startGrids, useGrids } from "./store";
+import { createGrid, deleteGrid, layOut, moveGrid, newTerminal, nudgeGrid, setPlacement, setTerminal, startGrids, useGrids } from "./store";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
@@ -61,7 +61,7 @@ const started = async (file: LocalState, hub: HubState | null) => {
   return store;
 };
 
-const blankState = () => useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
+const blankState = () => useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: null, focus: {}, open: {}, undo: {}, flash: null });
 
 beforeEach(blankState);
 
@@ -162,5 +162,34 @@ describe("grids, kept", () => {
     blankState();
     startGrids(await started(fakeFile(), hub), { kind: "main" }, bus);
     expect(useGrids.getState().order).toEqual([b, MAIN_GRID, c]);
+  });
+
+  it("stay at none once every one is deleted, after a restart here or on another Mac; Main is made only the first time", async () => {
+    const file = fakeFile();
+    const hub = fakeHub();
+    const first = await started(file, hub);
+    startGrids(first, { kind: "main" }, bus);
+    const other = createGrid();
+    deleteGrid(MAIN_GRID, () => {});
+    deleteGrid(other, () => {});
+    expect(useGrids.getState()).toMatchObject({ order: [], grids: {}, active: null });
+    await first.flush();
+    expect(hub.kept.get(INDEX_KEY)).toEqual({ order: [] });
+    expect(hub.kept.has(gridKey(MAIN_GRID))).toBe(false);
+
+    for (const fromFile of [fakeFile(file.entries), fakeFile()]) {
+      blankState();
+      startGrids(await started(fromFile, hub), { kind: "main" }, bus);
+      expect(useGrids.getState()).toMatchObject({ ready: true, order: [], grids: {}, active: null });
+    }
+    // Its own file alone, the hub not there.
+    blankState();
+    startGrids(await started(fakeFile(file.entries), null), { kind: "main" }, bus);
+    expect(useGrids.getState().order).toEqual([]);
+
+    // A Mac that never had grids gets Main.
+    blankState();
+    startGrids(await started(fakeFile(), fakeHub()), { kind: "main" }, bus);
+    expect(useGrids.getState().order).toEqual([MAIN_GRID]);
   });
 });

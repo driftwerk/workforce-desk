@@ -75,8 +75,9 @@ export const readIndex = (v: unknown): string[] | null => {
   return Array.isArray(order) ? order.filter((x): x is string => typeof x === "string") : null;
 };
 
-/** "Grid 2", "Grid 3", … — the first free one. */
+/** "Grid 2", "Grid 3", … — the first free one (Main being the first grid);
+ *  "Grid 1" when there are none. */
 export const nextName = (grids: Grid[]): string => {
   const taken = new Set(grids.map((g) => g.name));
-  for (let n = 2; ; n++) if (!taken.has(`Grid ${n}`)) return `Grid ${n}`;
+  for (let n = grids.length ? 2 : 1; ; n++) if (!taken.has(`Grid ${n}`)) return `Grid ${n}`;
 };

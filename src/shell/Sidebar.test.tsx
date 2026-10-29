@@ -252,14 +252,23 @@ describe("deleting from the sidebar", () => {
     expect(useRoomOrder.getState().order).not.toContain("r1");
   });
 
-  it("deletes a grid, even the last one, leaving an empty one in its place", () => {
+  it("deletes a grid, even the last one, leaving none: the Grids section keeps its + and says so", () => {
     useDesk.setState({ view: "grids" });
     sidebar();
     expect(useGrids.getState().order).toHaveLength(1);
     const was = useGrids.getState().order[0]!;
     fireEvent.click(screen.getByRole("button", { name: `${useGrids.getState().grids[was]!.name} options` }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete grid…" }));
+    expect(useGrids.getState().order).toEqual([]);
+    expect(useGrids.getState().active).toBeNull();
+    expect(kept.get("grid.index")).toEqual({ order: [] });
+    expect(kept.has(`grid.${was}`)).toBe(false);
+    const grids = screen.getByRole("region", { name: "Grids" });
+    expect(within(grids).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["New grid"]);
+    expect(within(grids).getByText("No grids yet")).toBeTruthy();
+    // + makes one again.
+    fireEvent.click(within(grids).getByRole("button", { name: "New grid" }));
     expect(useGrids.getState().order).toHaveLength(1);
-    expect(useGrids.getState().order[0]).not.toBe(was);
+    expect(within(grids).queryByText("No grids yet")).toBeNull();
   });
 });

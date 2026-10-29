@@ -4,7 +4,6 @@
 // reopen on nothing.
 
 import { useChat } from "../chat/store";
-import { MAIN_GRID } from "../grids/model";
 import { useGrids } from "../grids/store";
 import { useDesk, type View } from "../hub/store";
 import { SETTINGS_SECTIONS, useUi, type AgentTab, type Anchor, type SettingsSection } from "../shell/ui";
@@ -21,8 +20,8 @@ export interface MainUi {
   dm: string | null;
   /** The open session card's id. */
   session: string | null;
-  /** The grid the Grids view shows. */
-  grid: string;
+  /** The grid the Grids view shows (none: there are no grids). */
+  grid: string | null;
   settings: SettingsSection | null;
   agentTabs: Record<string, AgentTab>;
   scroll: Record<string, number>;
@@ -40,7 +39,7 @@ export const DEFAULT_UI: MainUi = {
   room: null,
   dm: null,
   session: null,
-  grid: MAIN_GRID,
+  grid: null,
   settings: null,
   agentTabs: {},
   scroll: {},
@@ -66,7 +65,7 @@ export const sanitize = (raw: unknown): MainUi => {
     room: text(o.room),
     dm: text(o.dm),
     session: text(o.session),
-    grid: text(o.grid) ?? DEFAULT_UI.grid,
+    grid: text(o.grid),
     settings: typeof o.settings === "string" && o.settings in SETTINGS_SECTIONS ? (o.settings as SettingsSection) : null,
     agentTabs: record(o.agentTabs, (v): v is AgentTab => typeof v === "string" && TABS.includes(v)),
     scroll: record(o.scroll, (v): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0),

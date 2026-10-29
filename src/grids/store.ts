@@ -67,8 +67,9 @@ interface GridsState {
   role: Role;
   order: string[];
   grids: Record<string, Grid>;
-  /** The grid the main window's Grids view shows. */
-  active: string;
+  /** The grid the main window's Grids view shows (see `shownGrid`); none
+   *  when there are no grids. */
+  active: string | null;
   /** The pane last clicked or focused, by grid. */
   focus: Record<string, string>;
   /** Detached grids whose window is open now (the main window keeps this). */
@@ -83,7 +84,7 @@ export const useGrids = create<GridsState>(() => ({
   role: { kind: "main" },
   order: [],
   grids: {},
-  active: MAIN_GRID,
+  active: null,
   focus: {},
   open: {},
   undo: {},
@@ -141,15 +142,17 @@ export const heardGrid = (key: string, value: unknown): void => {
   });
 };
 
-/** Starts keeping grids in `store`. The main window makes Main if there are
- *  no grids yet. */
+/** Starts keeping grids in `store`. The main window makes Main the first
+ *  time, when there's no `grid.index` at all; once there is one, no grids
+ *  is just that (they were all deleted). */
 export const startGrids = (store: GridStorage, role: Role, deliverer: GridBus): void => {
   storage = store;
   bus = deliverer;
   stopListening?.();
-  let order = readIndex(store.get(INDEX_KEY)) ?? [];
+  const index = readIndex(store.get(INDEX_KEY));
+  let order = index ?? [];
   let grids = readAll(order);
-  if (role.kind === "main" && !grids[MAIN_GRID] && !order.length) {
+  if (role.kind === "main" && index === null) {
     const main = mainGrid();
     grids = { [MAIN_GRID]: main };
     order = [MAIN_GRID];
@@ -157,7 +160,8 @@ export const startGrids = (store: GridStorage, role: Role, deliverer: GridBus): 
     store.set(INDEX_KEY, { order });
   }
   order = order.filter((id) => grids[id]);
-  const active = order.includes(get().active) ? get().active : (order.find((id) => grids[id]!.placement.kind === "main") ?? order[0] ?? MAIN_GRID);
+  const was = get().active;
+  const active = was && order.includes(was) ? was : (order.find((id) => grids[id]!.placement.kind === "main") ?? order[0] ?? null);
   useGrids.setState({ ready: true, role, order, grids, active });
   stopListening = store.subscribe(GRID_PREFIX, (key, value, origin) => {
     if (origin === "hub") heardGrid(key, value);
@@ -207,7 +211,15 @@ export const flashPane = (gridId: string, paneId: string): void =>
 /** Pointing out `n` is over (so a grid shown again doesn't do it again). */
 export const flashDone = (n: number): void => void (get().flash?.n === n && useGrids.setState({ flash: null }));
 
-export const setActive = (id: string): void => useGrids.setState({ active: id });
+export const setActive = (id: string | null): void => useGrids.setState({ active: id });
+
+/** The grid the main window's Grids view shows: the active one while it's
+ *  in the main window, else the first that is; none when every grid is in
+ *  a window of its own, or there are none. */
+export const shownGrid = (s: GridsState): Grid | undefined => {
+  const g = s.active ? s.grids[s.active] : undefined;
+  return g?.placement.kind === "main" ? g : s.order.map((id) => s.grids[id]).find((x) => x?.placement.kind === "main");
+};
 
 const saveOrder = (order: string[]) => {
   useGrids.setState({ order });
@@ -246,15 +258,16 @@ export const renameGrid = (id: string, name: string): void => {
   else bus?.rename(id, n);
 };
 
-/** Forgets grid `id` (never the last one); `onContent` hears of each thing
- *  it held, to close what the hub hosts for it. */
+/** Forgets grid `id`, the last one too (no grids is a state of its own);
+ *  `onContent` hears of each thing it held, to close what the hub hosts
+ *  for it. */
 export const deleteGrid = (id: string, onContent: (c: PaneContent) => void): void => {
   const s = get();
-  if (s.order.length <= 1 || !s.grids[id]) return;
+  if (!s.grids[id]) return;
   for (const p of s.grids[id]!.panes) if (p.content) onContent(p.content);
   const order = s.order.filter((x) => x !== id);
   const { [id]: _gone, ...grids } = s.grids;
-  useGrids.setState({ grids, active: s.active === id ? (order.find((x) => grids[x]?.placement.kind === "main") ?? order[0]!) : s.active });
+  useGrids.setState({ grids, active: s.active === id ? (order.find((x) => grids[x]?.placement.kind === "main") ?? order[0] ?? null) : s.active });
   storage?.remove(gridKey(id));
   saveOrder(order);
 };
@@ -422,7 +435,7 @@ export const swapInPane = (gridId: string, pane: string): boolean => {
  *  the main window, or in a window of its own that's open (the grid shown
  *  in the main window first). Parked panes don't count. */
 export const showing = (s: GridsState, content: PaneContent): { gridId: string; paneId: string } | null => {
-  const ids = [s.active, ...s.order.filter((id) => id !== s.active)];
+  const ids = s.active ? [s.active, ...s.order.filter((id) => id !== s.active)] : s.order;
   for (const id of ids) {
     const g = s.grids[id];
     if (!g || (g.placement.kind === "window" && !s.open[id])) continue;
@@ -472,6 +485,10 @@ export const newTerminal = (gridId: string): void => {
   if (done) setFocus(gridId, id);
   else if (changePanes(gridId, (panes) => place(panes, { id, content }))) setFocus(gridId, id);
 };
+
+/** ⌘T in the main window: a new terminal in the grid the Grids view shows,
+ *  or in a new grid when it shows none. */
+export const newTerminalHere = (): void => newTerminal(shownGrid(get())?.id ?? createGrid());
 
 /** A terminal pane's hub id, once the hub has opened it (or opened it again). */
 export const setTerminal = (gridId: string, pane: string, terminalId: string, cwd?: string | null): void =>

@@ -6,25 +6,27 @@ import { Confirm } from "../ui/Confirm";
 import { SortList, SortRow } from "../groups/rows";
 import { useGridDrag } from "./drag";
 import { closeGridWindow } from "../platform";
-import { createGrid, deleteGrid, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, useGrids } from "./store";
+import { createGrid, deleteGrid, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, shownGrid, useGrids } from "./store";
 import { closeContent } from "./terminals";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
 
 /** The Grids view of the main window: the grid shown here, with its
- *  layouts, a new terminal, and a window of its own. */
+ *  layouts, a new terminal, and a window of its own. With none shown (there
+ *  are none, or each is in a window of its own) it offers a new one, and a
+ *  session or agent dropped on it makes one holding it. */
 export function GridsMain() {
   const ready = useGrids((s) => s.ready);
-  const grid = useGrids((s) => {
-    const g = s.grids[s.active];
-    return g?.placement.kind === "main" ? g : s.order.map((id) => s.grids[id]).find((x) => x?.placement.kind === "main");
-  });
+  const grid = useGrids(shownGrid);
+  const none = useGrids((s) => !s.order.some((id) => s.grids[id]));
+  const dragging = useGridDrag((s) => !!s.item && !s.item.from);
+  const over = useGridDrag((s) => s.over?.kind === "new");
   const counts = useGridCounts(grid);
   if (!ready) return <main className="grids" aria-label="Grids" />;
   if (!grid) {
     return (
-      <main className="grids grids-none" aria-label="Grids">
-        <p className="muted">Every grid is in a window of its own.</p>
+      <main className={`grids grids-none ${over ? "drop-in" : ""}`} aria-label="Grids" data-drop-new-grid="">
+        <p className="muted">{dragging ? "Drop it here for a new grid." : none ? "No grids yet" : "Every grid is in a window of its own."}</p>
         <button type="button" className="btn btn-signal" onClick={() => createGrid()}>
           New grid
         </button>
@@ -85,8 +87,6 @@ export function GridsSection() {
   const removeGrid = (g: Grid) => {
     if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
     setOpen(g.id, false);
-    // The last grid gives way to a new empty one, so Grids always has one.
-    if (useGrids.getState().order.length <= 1) createGrid();
     deleteGrid(g.id, closeContent);
   };
   /** An empty grid goes at once; one holding anything asks first. */
@@ -133,6 +133,7 @@ export function GridsSection() {
           moveGrid(id, before);
           sayWhere(id);
         }}
+        empty={<li className="grp-empty faint small">No grids yet</li>}
         row={(id, lineBefore) => {
           const g = grids[id]!;
           return (
