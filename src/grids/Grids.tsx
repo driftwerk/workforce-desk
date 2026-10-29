@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { countsLine, GridCanvas, GridName, NewTerminalButton, ParkedButton, PresetPicker, useGridCounts } from "./GridView";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { createGrid, deleteGrid, setActive, useGrids } from "./store";
+import { closeGridWindow } from "../platform";
+import { createGrid, deleteGrid, setActive, setOpen, useGrids } from "./store";
 import { closeContent } from "./terminals";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
@@ -65,6 +66,12 @@ export function GridsSection() {
     // Its monitor is away: shown here until it's back (or for good).
     else bringBack(g.id);
   };
+  // Its own window closes first, so it can't write the grid back.
+  const removeGrid = (g: Grid) => {
+    if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
+    setOpen(g.id, false);
+    deleteGrid(g.id, closeContent);
+  };
   const entries = (g: Grid): MenuEntry[] => [
     g.placement.kind === "main"
       ? { kind: "item", label: "Open in its own window", onSelect: () => detach(g.id) }
@@ -72,7 +79,7 @@ export function GridsSection() {
     ...(order.length > 1
       ? [
           { kind: "separator" as const },
-          { kind: "item" as const, label: "Delete grid", onSelect: () => deleteGrid(g.id, closeContent) },
+          { kind: "item" as const, label: "Delete grid", onSelect: () => removeGrid(g) },
         ]
       : []),
   ];

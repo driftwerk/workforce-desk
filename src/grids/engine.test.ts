@@ -14,6 +14,8 @@ import {
   unpark,
   snapRect,
   split,
+  findSplitter,
+  splitterKey,
   splitterRange,
   splitters,
   tiles,
@@ -167,6 +169,19 @@ describe("splitters", () => {
     ]);
     const clamped = moveSplitter(focus, v, 40);
     expect(clamped.find((p) => p.rect?.x === 0)!.rect!.w).toBe(11);
+  });
+
+  it("is the same splitter step after step, so a drag keeps going", () => {
+    const next = ids();
+    let panes = applyPreset(blank(next), presetById("focus"), next);
+    const first = splitters(panes).find((s) => s.axis === "x")!;
+    for (const to of [7, 6, 5]) {
+      const live = findSplitter(panes, first)!;
+      expect(splitterKey(live)).toBe(splitterKey(first));
+      panes = moveSplitter(panes, live, to);
+    }
+    expect(tiles(panes)).toBe(true);
+    expect(findSplitter(panes, first)!.at).toBe(5);
   });
 
   it("moves the top half of a crossing without the bottom", () => {

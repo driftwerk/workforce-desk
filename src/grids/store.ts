@@ -12,6 +12,7 @@ import {
   blank,
   close,
   findContent,
+  findSplitter,
   laidOut,
   moveSplitter,
   place,
@@ -301,7 +302,13 @@ export const movePane = (from: string, pane: string, to: string): void => {
   deliver(to, content);
 };
 
-export const dragSplitter = (gridId: string, s: Splitter, at: number): void => void changePanes(gridId, (panes) => moveSplitter(panes, s, at));
+/** Moves splitter `s` (as the panes are now) to line `at`, or by `by` steps. */
+export const dragSplitter = (gridId: string, s: Splitter, to: { at: number } | { by: number }): void =>
+  void changePanes(gridId, (panes) => {
+    const live = findSplitter(panes, s);
+    if (!live) return null;
+    return moveSplitter(panes, live, "at" in to ? to.at : live.at + to.by);
+  });
 
 /** A new terminal in grid `gridId`: in the focused pane if it's empty, else
  *  the first empty pane, else beside the focused pane. */

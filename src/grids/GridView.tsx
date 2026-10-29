@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -6,7 +6,7 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { useGridDrag } from "./drag";
-import { PRESETS, presetOf, splitterRange, splitters, STEPS, type Pane, type Preset, type PresetId, type Splitter } from "./engine";
+import { PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Pane, type Preset, type PresetId, type Splitter } from "./engine";
 import { GridPane } from "./Pane";
 import { closePane, dragSplitter, layOut, newTerminal, renameGrid, unparkPane, useGrids } from "./store";
 import { closeContent, trackedIn, useTerminals } from "./terminals";
@@ -198,7 +198,7 @@ export function GridCanvas({ grid }: { grid: Grid }) {
           <GridPane key={p.id} gridId={grid.id} pane={p} focused={focus === p.id} />
         ))}
         {splitters(grid.panes).map((s) => (
-          <SplitterHandle key={s.id} grid={grid} splitter={s} area={area} />
+          <SplitterHandle key={splitterKey(s)} grid={grid} splitter={s} area={area} />
         ))}
       </div>
       {dragging && <PresetStrip gridId={grid.id} />}
@@ -214,13 +214,20 @@ function SplitterHandle({ grid, splitter: s, area }: { grid: Grid; splitter: Spl
   const at = (s.at / STEPS) * 100;
   const from = (s.from / STEPS) * 100;
   const len = ((s.to - s.from) / STEPS) * 100;
-  const style = vertical ? { left: `${at}%`, top: `${from}%`, height: `${len}%` } : { top: `${at}%`, left: `${from}%`, width: `${len}%` };
+  // Each end stops short, so where edges meet each can still be taken.
+  const style = vertical
+    ? { left: `${at}%`, top: `calc(${from}% + 8px)`, height: `calc(${len}% - 16px)` }
+    : { top: `${at}%`, left: `calc(${from}% + 8px)`, width: `calc(${len}% - 16px)` };
+  const cursor = vertical ? "gsplitting-v" : "gsplitting-h";
+  const stop = () => document.body.classList.remove(cursor);
+  // However the drag ends — let go, taken away, or this edge gone.
+  useEffect(() => () => document.body.classList.remove(cursor), [cursor]);
   const move = (e: PointerEvent) => {
     const r = area.current?.getBoundingClientRect();
     if (!r) return;
     const f = vertical ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height;
     const to = Math.round(f * STEPS);
-    if (to !== s.at) dragSplitter(grid.id, s, to);
+    if (to !== s.at) dragSplitter(grid.id, s, { at: to });
   };
   return (
     <div
@@ -236,19 +243,21 @@ function SplitterHandle({ grid, splitter: s, area }: { grid: Grid; splitter: Spl
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
-        document.body.classList.add(vertical ? "gsplitting-v" : "gsplitting-h");
+        document.body.classList.add(cursor);
       }}
       onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && move(e)}
       onPointerUp={(e) => {
         e.currentTarget.releasePointerCapture(e.pointerId);
-        document.body.classList.remove("gsplitting-v", "gsplitting-h");
+        stop();
       }}
+      onPointerCancel={stop}
+      onLostPointerCapture={stop}
       onKeyDown={(e) => {
         const back = vertical ? "ArrowLeft" : "ArrowUp";
         const fwd = vertical ? "ArrowRight" : "ArrowDown";
         if (e.key !== back && e.key !== fwd) return;
         e.preventDefault();
-        dragSplitter(grid.id, s, s.at + (e.key === fwd ? 1 : -1));
+        dragSplitter(grid.id, s, { by: e.key === fwd ? 1 : -1 });
       }}
     />
   );

@@ -263,6 +263,19 @@ export const splitters = (panes: readonly Pane[]): Splitter[] => {
   return out;
 };
 
+/** A splitter by the panes on either side of it, which stay the same while
+ *  it moves (its line doesn't). */
+export const splitterKey = (s: Pick<Splitter, "axis" | "before" | "after">): string =>
+  `${s.axis}:${[...s.before].sort().join(",")}|${[...s.after].sort().join(",")}`;
+
+/** Splitter `s` as the panes are now: the same panes on either side, else
+ *  the edge between the same two first panes (after it met another edge). */
+export const findSplitter = (panes: readonly Pane[], s: Pick<Splitter, "axis" | "before" | "after">): Splitter | undefined => {
+  const all = splitters(panes).filter((x) => x.axis === s.axis);
+  const key = splitterKey(s);
+  return all.find((x) => splitterKey(x) === key) ?? all.find((x) => x.before.includes(s.before[0]!) && x.after.includes(s.after[0]!));
+};
+
 /** How far a splitter can go: every pane keeps at least one step. */
 export const splitterRange = (panes: readonly Pane[], s: Splitter): [number, number] => {
   const byId = new Map(laidOut(panes).map((p) => [p.id, p.rect]));
