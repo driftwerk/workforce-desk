@@ -37,6 +37,9 @@ export interface Session {
   currentTool: string | null;
   pending: PendingApproval | null;
   approvals: "desk" | "terminal";
+  /** The Desk terminal it runs in, when it was started there by hand and
+   *  Desk's hooks registered it (a tracked terminal). */
+  terminalId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +52,26 @@ export interface NewSession {
   worktree?: string;
   prompt?: string;
   approvals?: "desk" | "terminal";
+}
+
+/** A login shell the hub hosts for one of Desk's grid panes. */
+export interface TerminalInfo {
+  id: string;
+  /** Where its shell is now, when the hub can tell. */
+  cwd: string | null;
+  /** The shell's process id, for seeing what runs in it. */
+  pid: number | null;
+  /** The session running in it now, once Desk's hooks have registered one. */
+  sessionId?: string | null;
+}
+
+export interface NewTerminal {
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  /** Added to the shell's environment (the plugin directory Claude Code
+   *  loads Desk's hooks from). */
+  env?: Record<string, string>;
 }
 
 export interface RestoreOffer {

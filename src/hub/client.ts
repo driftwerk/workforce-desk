@@ -7,12 +7,14 @@ import type {
   DeskEvent,
   Manager,
   NewSession,
+  NewTerminal,
   Overview,
   Room,
   RoomMemberRef,
   RoomMessage,
   Session,
   Suggestion,
+  TerminalInfo,
 } from "./types";
 import { hubFetch } from "./net";
 
@@ -283,6 +285,28 @@ export class DeskHub {
 
   ptySocket(id: string): WebSocket {
     const ws = new WebSocket(wsUrl(this.conn.url, `/api/desk/sessions/${id}/pty`, this.conn.token));
+    ws.binaryType = "arraybuffer";
+    return ws;
+  }
+
+  // ── Terminals: login shells the hub hosts for grid panes ─────────────────
+
+  /** Opens a login shell; it runs until closed, whether or not Desk is. */
+  openTerminal = (t: NewTerminal): Promise<TerminalInfo> => this.call("POST", "/api/desk/terminals", t);
+  /** A terminal, or a 404 `HubError` once the hub no longer has it. */
+  terminal = (id: string): Promise<TerminalInfo> => this.call("GET", `/api/desk/terminals/${encodeURIComponent(id)}`);
+  closeTerminal = async (id: string): Promise<void> => {
+    try {
+      await this.call<unknown>("DELETE", `/api/desk/terminals/${encodeURIComponent(id)}`);
+    } catch (e) {
+      if (!(e instanceof HubError && e.status === 404)) throw e;
+    }
+  };
+
+  /** The same protocol as a session's: binary frames both ways, text
+   *  frames for control (resize). */
+  terminalSocket(id: string): WebSocket {
+    const ws = new WebSocket(wsUrl(this.conn.url, `/api/desk/terminals/${encodeURIComponent(id)}/pty`, this.conn.token));
     ws.binaryType = "arraybuffer";
     return ws;
   }
