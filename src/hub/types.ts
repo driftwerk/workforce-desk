@@ -57,20 +57,32 @@ export interface NewSession {
 /** A login shell the hub hosts for one of Desk's grid panes. */
 export interface TerminalInfo {
   id: string;
-  /** Where its shell is now, when the hub can tell. */
-  cwd: string | null;
-  /** The shell's process id, for seeing what runs in it. */
-  pid: number | null;
-  /** The session running in it now, once Desk's hooks have registered one. */
-  sessionId?: string | null;
+  name: string;
+  /** Where its shell is (followed as it moves): where it reopens. */
+  cwd: string;
+  /** The names (never the values) of what Desk added to its environment. */
+  envKeys: string[];
+  shell: string;
+  /** `exited`: its shell ended; `lost`: a reboot ended it. */
+  state: "running" | "exited" | "lost";
+  /** Its shell is running now. */
+  live: boolean;
+  exitCode: number | null;
+  /** The shell's process id, for seeing what runs in it (Codex); asked of
+   *  the hub, and absent until it sends it. */
+  pid?: number | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface NewTerminal {
-  cwd?: string;
-  cols?: number;
-  rows?: number;
-  /** Added to the shell's environment (the plugin directory Claude Code
-   *  loads Desk's hooks from). */
+  /** Desk's own id for it, so a pane knows it before the shell starts. */
+  id?: string;
+  name?: string;
+  /** An existing folder on the hub's machine. */
+  cwd: string;
+  /** Added to the shell's environment: Claude Code's plugin folders and the
+   *  token Desk's hooks present. The hub adds `DESK_TERMINAL_ID`. */
   env?: Record<string, string>;
 }
 
@@ -105,7 +117,9 @@ export interface RoomMessage {
 }
 
 export type DeskEvent =
-  | { type: "snapshot"; sessions: Session[]; restore: Session[]; rooms: Room[] }
+  | { type: "snapshot"; sessions: Session[]; restore: Session[]; rooms: Room[]; terminals?: TerminalInfo[] }
+  | { type: "terminal"; terminal: TerminalInfo }
+  | { type: "terminalRemoved"; id: string }
   | { type: "session"; session: Session }
   | { type: "removed"; id: string }
   | { type: "room"; room: Room }

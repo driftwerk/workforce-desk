@@ -9,7 +9,7 @@ import { useGridDrag } from "./drag";
 import { PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Pane, type Preset, type PresetId, type Splitter } from "./engine";
 import { GridPane } from "./Pane";
 import { closePane, dragSplitter, layOut, newTerminal, renameGrid, unparkPane, useGrids } from "./store";
-import { closeContent, trackedIn, useTerminals } from "./terminals";
+import { closeContent, trackedIn } from "./terminals";
 import type { Grid } from "./model";
 
 /** A preset drawn small: its places as cells. */
@@ -60,7 +60,6 @@ export function PresetPicker({ grid }: { grid: Grid }) {
 export function useGridCounts(grid: Grid | undefined): { panes: number; working: number; needsYou: number } {
   const sessions = useDesk((s) => s.sessions);
   const conversations = useChat((s) => s.conversations);
-  const terminals = useTerminals((s) => s.byId);
   let working = 0;
   let needsYou = 0;
   const shown = grid?.panes.filter((p) => p.rect) ?? [];
@@ -68,7 +67,7 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
     const c = p.content;
     let s: Session | null | undefined = null;
     if (c?.kind === "session") s = sessions[c.sessionId];
-    else if (c?.kind === "terminal") s = trackedIn(sessions, c.terminalId, c.terminalId ? terminals[c.terminalId] : undefined);
+    else if (c?.kind === "terminal") s = trackedIn(sessions, c.terminalId);
     else if (c?.kind === "agent" && conversations[c.agent]?.working) working += 1;
     if (s?.state === "blocked") needsYou += 1;
     else if (s?.state === "working" || s?.state === "starting") working += 1;

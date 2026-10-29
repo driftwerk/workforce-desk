@@ -293,8 +293,9 @@ export class DeskHub {
 
   /** Opens a login shell; it runs until closed, whether or not Desk is. */
   openTerminal = (t: NewTerminal): Promise<TerminalInfo> => this.call("POST", "/api/desk/terminals", t);
-  /** A terminal, or a 404 `HubError` once the hub no longer has it. */
-  terminal = (id: string): Promise<TerminalInfo> => this.call("GET", `/api/desk/terminals/${encodeURIComponent(id)}`);
+  terminals = (): Promise<TerminalInfo[]> => this.call("GET", "/api/desk/terminals");
+  /** Starts a terminal whose shell ended again, where it was. */
+  reopenTerminal = (id: string): Promise<TerminalInfo> => this.call("POST", `/api/desk/terminals/${encodeURIComponent(id)}/reopen`);
   closeTerminal = async (id: string): Promise<void> => {
     try {
       await this.call<unknown>("DELETE", `/api/desk/terminals/${encodeURIComponent(id)}`);

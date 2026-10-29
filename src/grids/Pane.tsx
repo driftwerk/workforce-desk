@@ -15,7 +15,7 @@ import { Menu, type MenuEntry } from "../ui/Menu";
 import { useGridDrag } from "./drag";
 import { STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, movePane, newTerminal, replacePane, setFocus, useGrids, writes } from "./store";
-import { closeContent, describeTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
+import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -66,9 +66,10 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const roster = useChat((s) => s.roster);
   const hubs = useChat((s) => s.hubs);
   const working = useChat((s) => (content?.kind === "agent" ? (s.conversations[content.agent]?.working ?? null) : null));
-  const watched = useTerminals((s) => (content?.kind === "terminal" && content.terminalId ? s.byId[content.terminalId] : undefined));
+  const info = useTerminals((s) => (content?.kind === "terminal" && content.terminalId ? s.byId[content.terminalId] : undefined));
+  const programs = useTerminals((s) => (content?.kind === "terminal" && content.terminalId ? s.programs[content.terminalId] : undefined));
   const sessionId = content?.kind === "session" ? content.sessionId : null;
-  const tracked = content?.kind === "terminal" ? trackedIn(sessions, content.terminalId, watched) : null;
+  const tracked = content?.kind === "terminal" ? trackedIn(sessions, content.terminalId) : null;
   const session = sessionId ? sessions[sessionId] : tracked;
   const name = useSessionName(session?.id, session?.name ?? "");
   if (!content) return { name: "Empty pane", meta: "", state: null, tracked: null, asking: null, cwd: null, mono: false };
@@ -92,13 +93,13 @@ export function usePaneLabel(content: PaneContent | null): Label {
       state: session.state,
       tracked,
       asking: session.pending ? session : null,
-      cwd: content.kind === "terminal" ? home(watched?.info.cwd ?? content.cwd) : null,
+      cwd: content.kind === "terminal" ? home(info?.cwd ?? content.cwd) : null,
       mono: true,
     };
   }
   if (content.kind === "session") return { name: "Session", meta: "no longer on the hub", state: "closed", tracked: null, asking: null, cwd: null, mono: true };
-  const t = describeTerminal(watched);
-  const cwd = watched?.info.cwd ?? content.cwd ?? null;
+  const t = describeTerminal(info, programs);
+  const cwd = info?.cwd ?? content.cwd ?? null;
   return {
     name: t.codex ? "Codex" : t.claude ? "Claude Code" : ["Terminal", folder(cwd)].filter(Boolean).join(" · "),
     meta: t.running ? `${t.shell} → ${t.running}` : t.shell,
@@ -118,9 +119,11 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
   const dragging = useGridDrag((s) => s.item !== null);
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const [confirm, setConfirm] = useState(false);
-  const watched = useTerminals((s) => (pane.content?.kind === "terminal" && pane.content.terminalId ? s.byId[pane.content.terminalId] : undefined));
+  const running = useTerminals((s) =>
+    pane.content?.kind === "terminal" && pane.content.terminalId ? describeTerminal(s.byId[pane.content.terminalId], s.programs[pane.content.terminalId]).running : null,
+  );
   const entries = usePaneMenu(gridId, pane, () => {
-    const busy = pane.content?.kind === "terminal" && (label.tracked || describeTerminal(watched).running);
+    const busy = pane.content?.kind === "terminal" && (label.tracked || running);
     if (busy) setConfirm(true);
     else closePane(gridId, pane.id, closeContent);
   });
@@ -187,7 +190,7 @@ export function GridPane({ gridId, pane, focused }: { gridId: string; pane: Pane
                 <h1 id={id} className="display-md">
                   Close this terminal?
                 </h1>
-                <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${describeTerminal(watched).running ?? "A program"} is still running in it.`}</p>
+                <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
               </span>
               <CloseButton onClose={() => setConfirm(false)} />
             </header>
@@ -274,22 +277,33 @@ function SessionPane({ id }: { id: string }) {
 }
 
 function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string; content: Extract<PaneContent, { kind: "terminal" }> }) {
-  useTerminalPane(gridId, pane, content);
+  const { info, known } = useTerminalPane(gridId, pane, content);
   const problem = useTerminals((s) => s.problems[pane]);
-  if (problem) {
-    return (
-      <div className="gpane-empty">
-        <p className="muted small">{problem}</p>
-      </div>
-    );
+  const note = (text: string, action?: { label: string; run: () => void }) => (
+    <div className="gpane-empty">
+      <p className="muted small">
+        {text}
+        {action && (
+          <>
+            {" "}
+            <button type="button" className="link small" onClick={action.run}>
+              {action.label}
+            </button>
+          </>
+        )}
+      </p>
+    </div>
+  );
+  if (problem) return note(problem);
+  if (!content.terminalId || (known && !info)) return note(writes(gridId) ? "Opening a terminal…" : "Waiting for the terminal…");
+  // Its shell ended (`exit`): it opens again where it was when asked.
+  if (info && !info.live && info.state === "exited") {
+    return note(`The shell ended${info.exitCode ? ` (exit ${info.exitCode})` : ""}.`, {
+      label: "Open it again",
+      run: () => void reopenTerminal(pane, info.id),
+    });
   }
-  if (!content.terminalId) {
-    return (
-      <div className="gpane-empty">
-        <p className="faint small">{writes(gridId) ? "Opening a terminal…" : "Waiting for the terminal…"}</p>
-      </div>
-    );
-  }
+  if (info && !info.live) return note("Opening the terminal again…");
   return <Terminal key={content.terminalId} terminalId={content.terminalId} autoFocus={false} />;
 }
 
