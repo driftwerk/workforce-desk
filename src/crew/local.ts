@@ -1,6 +1,7 @@
 import { HubError, type DeskHub } from "../hub/client";
 import { withBrain, withDeskSettings, type Brain } from "./brain";
 import { withVoice } from "./voice";
+import { withDeskWelcome } from "./welcome";
 
 /** "Release Captain" → "release-captain", unique among `taken`. */
 export const agentId = (name: string, taken: readonly string[]): string => {
@@ -108,7 +109,7 @@ export async function createLocalAgent(
   await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, who, purpose));
   await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, who, purpose));
   await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
-  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(t, who, purpose));
+  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(withDeskWelcome(t), who, purpose));
   return id;
 }
 

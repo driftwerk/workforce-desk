@@ -10,6 +10,7 @@ import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { prune } from "../rooms/engine";
 import { NewCrew } from "../crew/NewCrew";
+import { adoptDeskWelcome } from "../crew/welcome";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { NewSession } from "../session/NewSession";
@@ -60,6 +61,19 @@ export function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // Agents on this Mac still greeting with the hub's WELCOME.md get Desk's.
+  const desk = useDesk((s) => s.hub);
+  const localIds = useChat((s) =>
+    s.roster
+      .filter((a) => s.hubs.some((h) => h.local && h.id === a.hubId))
+      .map((a) => a.id)
+      .sort()
+      .join(" "),
+  );
+  useEffect(() => {
+    if (desk && localIds) void adoptDeskWelcome(desk, localIds.split(" "));
+  }, [desk, localIds]);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
