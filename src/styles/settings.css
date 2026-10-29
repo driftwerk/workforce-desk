@@ -501,6 +501,15 @@ legend.set-label {
   flex-direction: column;
   min-width: 0;
 }
+/* A workspace with who Desk is connected as, and a warning on its own line
+   when that's nobody. */
+.hub-row-who {
+  flex-wrap: wrap;
+}
+.hub-row-warning {
+  flex-basis: 100%;
+  margin: 0;
+}
 .toggle-row {
   display: flex;
   gap: 12px;
