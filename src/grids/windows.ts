@@ -21,7 +21,21 @@ import { deskState } from "../restore/boot";
 import type { PaneContent } from "./engine";
 import { gridOfLabel, MAIN_GRID, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
-import { deliver, heardGrid, setActive, setOpen, setPlacement, startGrids, useGrids, type Role } from "./store";
+import { useDesk } from "../hub/store";
+import {
+  deliver,
+  flashPane,
+  heardGrid,
+  renameGrid,
+  setActive,
+  setFocus,
+  setOpen,
+  setPlacement,
+  showing,
+  startGrids,
+  useGrids,
+  type Role,
+} from "./store";
 
 /** This window's label: `main`, or `grid-<id>` for a detached grid. */
 export const thisWindow = (): string => (inApp ? getCurrentWindow().label : "main");
@@ -42,9 +56,10 @@ const hubAnswered = async (ms: number) => {
 export async function startGridsHere(role: Role): Promise<() => void> {
   const label = role.kind === "main" ? "main" : windowLabel(role.gridId);
   if (!deskState.get("grid.index")) await hubAnswered(FIRST_GRID_WAIT_MS);
+  const writer = (gridId: string) => (role.kind === "main" ? windowLabel(gridId) : "main");
   startGrids(deskState, role, {
-    deliver: (gridId, content) =>
-      void emitTo(role.kind === "main" ? windowLabel(gridId) : "main", "grid-deliver", { gridId, content }).catch(() => undefined),
+    deliver: (gridId, content) => void emitTo(writer(gridId), "grid-deliver", { gridId, content }).catch(() => undefined),
+    rename: (gridId, name) => void emitTo(writer(gridId), "grid-rename", { gridId, name }).catch(() => undefined),
   });
   if (!inApp) return () => {};
   const stops = [
@@ -60,6 +75,14 @@ export async function startGridsHere(role: Role): Promise<() => void> {
     ),
     // A pane sent here: placed if this window writes its grid, else passed on.
     listenerCleanup(listen<{ gridId: string; content: PaneContent }>("grid-deliver", (e) => deliver(e.payload.gridId, e.payload.content))),
+    listenerCleanup(listen<{ gridId: string; name: string }>("grid-rename", (e) => renameGrid(e.payload.gridId, e.payload.name))),
+    // The main window points a pane out here (see `reveal`).
+    listenerCleanup(
+      listen<{ gridId: string; paneId: string }>("grid-flash", (e) => {
+        setFocus(e.payload.gridId, e.payload.paneId);
+        flashPane(e.payload.gridId, e.payload.paneId);
+      }),
+    ),
   ];
   return () => stops.forEach((s) => s());
 }
@@ -165,4 +188,28 @@ export const focusGridWindow = async (id: string): Promise<void> => {
   await openGridWindow(id, g.name, g.placement.mode, g.placement.monitor && { id: g.placement.monitor.id, origin: g.placement.monitor.origin }).catch(
     (e: unknown) => console.warn(`couldn't bring ${g.name} forward:`, e),
   );
+};
+
+/** Shows where `content` is in a grid, if it's in one that can be seen:
+ *  the main window's Grids view on that grid, or that grid's own window
+ *  brought forward; the pane is pointed out for a moment. False when it
+ *  isn't, so it's opened as usual. */
+export const reveal = (content: PaneContent): boolean => {
+  const s = useGrids.getState();
+  const at = showing(s, content);
+  if (!at) return false;
+  const g = s.grids[at.gridId]!;
+  if (g.placement.kind === "main") {
+    setActive(at.gridId);
+    setFocus(at.gridId, at.paneId);
+    flashPane(at.gridId, at.paneId);
+    const desk = useDesk.getState();
+    // A session card open on top would hide it.
+    if (desk.openId) desk.open(null);
+    desk.setView("grids");
+    return true;
+  }
+  void focusGridWindow(at.gridId);
+  void emitTo(windowLabel(at.gridId), "grid-flash", at).catch(() => undefined);
+  return true;
 };

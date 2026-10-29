@@ -14,18 +14,21 @@ import {
   findContent,
   findSplitter,
   laidOut,
+  movePaneTo,
   moveSplitter,
   place,
   presetById,
   reading,
   replace,
   split,
+  swapIn,
   unpark,
   type Pane,
   type PaneContent,
   type PresetId,
   type Side,
   type Splitter,
+  type Zone,
 } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, mainGrid, newId, nextName, paneId, readGrid, readIndex, type Grid, type Placement } from "./model";
 import { GRID_PREFIX, type GridStorage } from "./storage";
@@ -37,6 +40,25 @@ export type Role = { kind: "main" } | { kind: "grid"; gridId: string };
 export interface GridBus {
   /** Sends `content` to grid `gridId`'s writer, which places it. */
   deliver(gridId: string, content: PaneContent): void;
+  /** Asks grid `gridId`'s writer to rename it. */
+  rename(gridId: string, name: string): void;
+}
+
+/** A layout change that parked panes, which can be taken back while the
+ *  grid is still as it left it. */
+export interface Undo {
+  before: Pane[];
+  /** The layout it left (see `layoutSig`). */
+  after: string;
+  parked: number;
+}
+
+/** A pane to point out for a moment: `n` counts, so the same pane can be
+ *  pointed out again. */
+export interface Flash {
+  gridId: string;
+  paneId: string;
+  n: number;
 }
 
 interface GridsState {
@@ -50,6 +72,9 @@ interface GridsState {
   focus: Record<string, string>;
   /** Detached grids whose window is open now (the main window keeps this). */
   open: Record<string, true>;
+  /** By grid: the last layout change that parked panes, while it can be undone. */
+  undo: Record<string, Undo>;
+  flash: Flash | null;
 }
 
 export const useGrids = create<GridsState>(() => ({
@@ -60,11 +85,20 @@ export const useGrids = create<GridsState>(() => ({
   active: MAIN_GRID,
   focus: {},
   open: {},
+  undo: {},
+  flash: null,
 }));
 
 let storage: GridStorage | null = null;
 let bus: GridBus | null = null;
 let stopListening: (() => void) | null = null;
+/** Which of these panes are waiting on an approval (the hub's sessions
+ *  know; see terminals.ts). */
+let askingIn: (panes: readonly Pane[]) => string[] = () => [];
+
+export const setAskingCheck = (f: (panes: readonly Pane[]) => string[]): void => {
+  askingIn = f;
+};
 
 const get = () => useGrids.getState();
 
@@ -152,14 +186,52 @@ export const changePanes = (id: string, f: (panes: Pane[]) => Pane[] | null): bo
   return done;
 };
 
-export const setFocus = (gridId: string, pane: string): void =>
-  void (get().focus[gridId] !== pane && useGrids.setState((s) => ({ focus: { ...s.focus, [gridId]: pane } })));
+/** Pane `pane` was clicked or focused: it's the grid's focused pane, and
+ *  the most recently active (kept with the grid, for which panes a smaller
+ *  layout keeps). */
+export const setFocus = (gridId: string, pane: string, again = false): void => {
+  if (get().focus[gridId] === pane && !again) return;
+  useGrids.setState((s) => ({ focus: { ...s.focus, [gridId]: pane } }));
+  touch(gridId, pane);
+};
+
+/** Pane `pane` was active just now. */
+const touch = (gridId: string, pane: string) =>
+  changePanes(gridId, (panes) => (panes.some((p) => p.id === pane) ? panes.map((p) => (p.id === pane ? { ...p, lastActive: Date.now() } : p)) : null));
+
+/** Points pane `pane` out for a moment. */
+export const flashPane = (gridId: string, paneId: string): void =>
+  useGrids.setState((s) => ({ flash: { gridId, paneId, n: (s.flash?.n ?? 0) + 1 } }));
 
 export const setActive = (id: string): void => useGrids.setState({ active: id });
 
 const saveOrder = (order: string[]) => {
   useGrids.setState({ order });
   storage?.set(INDEX_KEY, { order });
+};
+
+/** Moves grid `id` before grid `before` (last when null), as the sidebar
+ *  lists them; kept in `grid.index`. */
+export const moveGrid = (id: string, before: string | null): void => {
+  const order = get().order;
+  if (!order.includes(id) || id === before) return;
+  const rest = order.filter((x) => x !== id);
+  const at = before === null ? rest.length : rest.indexOf(before);
+  if (at < 0) return;
+  rest.splice(at, 0, id);
+  if (rest.join() !== order.join()) saveOrder(rest);
+};
+
+/** Moves grid `id` one place up or down; false when it's already at that end. */
+export const nudgeGrid = (id: string, by: -1 | 1): boolean => {
+  const order = get().order;
+  const i = order.indexOf(id);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= order.length) return false;
+  const next = [...order];
+  [next[i], next[j]] = [next[j]!, next[i]!];
+  saveOrder(next);
+  return true;
 };
 
 /** A new grid in the main window, shown there. */
@@ -172,9 +244,12 @@ export const createGrid = (): string => {
   return id;
 };
 
+/** Renames grid `id`; a grid another window writes is renamed there. */
 export const renameGrid = (id: string, name: string): void => {
   const n = name.trim();
-  if (n) changeGrid(id, (g) => ({ ...g, name: n }));
+  if (!n || !get().grids[id] || get().grids[id]!.name === n) return;
+  if (writes(id)) changeGrid(id, (g) => ({ ...g, name: n }));
+  else bus?.rename(id, n);
 };
 
 /** Forgets grid `id` (never the last one); `onContent` hears of each thing
@@ -202,14 +277,55 @@ export const setOpen = (id: string, open: boolean): void =>
 
 // ── Pane operations ────────────────────────────────────────────────────────
 
-/** Lays grid `id` out as a preset; with `insert`, `content` takes place `slot`. */
+/** The layout as it is, without when each pane was last active (which
+ *  changes as panes are clicked, and doesn't stop an undo). */
+export const layoutSig = (panes: readonly Pane[]): string => JSON.stringify(panes.map((p) => [p.id, p.rect, p.content]));
+
+const parkedIds = (panes: readonly Pane[]) => new Set(panes.filter((p) => !p.rect && p.content).map((p) => p.id));
+
+/** Lays grid `id` out as a preset; with `insert`, `content` takes place
+ *  `slot`. What doesn't fit parks (see `applyPreset` for which panes stay),
+ *  and the change can be undone while the grid is still as it left it. */
 export const layOut = (id: string, preset: PresetId, insert?: { slot: number; content: PaneContent }): void => {
+  const before = get().grids[id]?.panes;
   changePanes(id, (panes) => {
     const base = insert ? withoutParked(panes, insert.content) : panes;
-    return applyPreset(base, presetById(preset), paneId, insert && { slot: insert.slot, pane: { id: paneId(), rect: null, content: insert.content } });
+    const keep = { asking: askingIn(base), focused: get().focus[id] ?? null };
+    return applyPreset(base, presetById(preset), paneId, insert && { slot: insert.slot, pane: { id: paneId(), rect: null, content: insert.content } }, keep);
   });
+  const after = get().grids[id]?.panes;
+  if (before && after && after !== before) {
+    const was = parkedIds(before);
+    const parked = [...parkedIds(after)].filter((x) => !was.has(x)).length;
+    useGrids.setState((s) => {
+      const { [id]: _old, ...rest } = s.undo;
+      return { undo: parked ? { ...rest, [id]: { before, after: layoutSig(after), parked } } : rest };
+    });
+  }
   if (insert) focusContent(id, insert.content);
 };
+
+/** The undo grid `id` can offer now: its last layout change parked panes
+ *  and nothing has moved since. */
+export const undoFor = (s: GridsState, id: string): Undo | null => {
+  const u = s.undo[id];
+  const g = s.grids[id];
+  return u && g && layoutSig(g.panes) === u.after ? u : null;
+};
+
+/** Puts grid `id` back as it was before its last layout change. */
+export const undoLayout = (id: string): void => {
+  const u = undoFor(get(), id);
+  dismissUndo(id);
+  if (u) changePanes(id, () => u.before);
+};
+
+export const dismissUndo = (id: string): void =>
+  useGrids.setState((s) => {
+    if (!s.undo[id]) return s;
+    const { [id]: _gone, ...rest } = s.undo;
+    return { undo: rest };
+  });
 
 /** `content` out of the panes wherever it is: a laid-out pane is emptied
  *  (so the layout doesn't shift under a drop), a parked one goes. */
@@ -291,6 +407,35 @@ export const unparkPane = (gridId: string, pane: string): boolean => {
   const done = changePanes(gridId, (panes) => unpark(panes, pane));
   if (done) setFocus(gridId, pane);
   return done;
+};
+
+/** Moves pane `pane` itself onto pane `target` of the same grid (see
+ *  `movePaneTo`): it keeps its id, so what it shows carries on. */
+export const movePaneWithin = (gridId: string, pane: string, target: string, zone: Zone): boolean => {
+  const done = changePanes(gridId, (panes) => movePaneTo(panes, pane, target, zone, paneId));
+  if (done) setFocus(gridId, pane, true);
+  return done;
+};
+
+/** Swaps parked pane `pane` into the layout (see `swapIn`). */
+export const swapInPane = (gridId: string, pane: string): boolean => {
+  const done = changePanes(gridId, (panes) => swapIn(panes, pane, askingIn(panes), paneId));
+  if (done) setFocus(gridId, pane, true);
+  return done;
+};
+
+/** The grid and pane showing `content` where it can be seen: a grid in
+ *  the main window, or in a window of its own that's open (the grid shown
+ *  in the main window first). Parked panes don't count. */
+export const showing = (s: GridsState, content: PaneContent): { gridId: string; paneId: string } | null => {
+  const ids = [s.active, ...s.order.filter((id) => id !== s.active)];
+  for (const id of ids) {
+    const g = s.grids[id];
+    if (!g || (g.placement.kind === "window" && !s.open[id])) continue;
+    const p = findContent(laidOut(g.panes), content);
+    if (p) return { gridId: id, paneId: p.id };
+  }
+  return null;
 };
 
 /** Moves pane `paneId`'s content to grid `to` (its pane here closes). */

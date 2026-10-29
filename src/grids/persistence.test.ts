@@ -4,7 +4,7 @@ import { DeskStateStore, stable, type HubState, type LocalState, type StateEntry
 import { presetOf } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, type Grid } from "./model";
 import { GRID_PREFIX } from "./storage";
-import { createGrid, layOut, newTerminal, setPlacement, setTerminal, startGrids, useGrids } from "./store";
+import { createGrid, layOut, moveGrid, newTerminal, nudgeGrid, setPlacement, setTerminal, startGrids, useGrids } from "./store";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
@@ -50,7 +50,7 @@ const fakeHub = (missing = false) => {
   return hub;
 };
 
-const bus = { deliver: vi.fn() };
+const bus = { deliver: vi.fn(), rename: vi.fn() };
 
 /** A Desk that has just started: its file read, the hub (if any) connected. */
 const started = async (file: LocalState, hub: HubState | null) => {
@@ -61,7 +61,7 @@ const started = async (file: LocalState, hub: HubState | null) => {
   return store;
 };
 
-const blankState = () => useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {} });
+const blankState = () => useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
 
 beforeEach(blankState);
 
@@ -139,5 +139,28 @@ describe("grids, kept", () => {
     expect(useGrids.getState().grids[MAIN_GRID]).toEqual(main);
     layOut(other, "halves");
     expect(presetOf(useGrids.getState().grids[other]!.panes)).toBe("halves");
+  });
+
+  it("keep the order they were dragged into, after a restart", async () => {
+    const file = fakeFile();
+    const hub = fakeHub();
+    const first = await started(file, hub);
+    startGrids(first, { kind: "main" }, bus);
+    const b = createGrid();
+    const c = createGrid();
+    moveGrid(c, MAIN_GRID);
+    expect(useGrids.getState().order).toEqual([c, MAIN_GRID, b]);
+    nudgeGrid(b, -1);
+    expect(useGrids.getState().order).toEqual([c, b, MAIN_GRID]);
+    expect(nudgeGrid(c, -1)).toBe(false);
+    moveGrid(c, null);
+    await first.flush();
+
+    blankState();
+    startGrids(await started(fakeFile(file.entries), hub), { kind: "main" }, bus);
+    expect(useGrids.getState().order).toEqual([b, MAIN_GRID, c]);
+    blankState();
+    startGrids(await started(fakeFile(), hub), { kind: "main" }, bus);
+    expect(useGrids.getState().order).toEqual([b, MAIN_GRID, c]);
   });
 });

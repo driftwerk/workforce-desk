@@ -17,9 +17,9 @@ import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session, TerminalInfo } from "../hub/types";
 import { claudePluginDir, inApp, programsUnder } from "../platform";
-import type { PaneContent } from "./engine";
+import type { Pane, PaneContent } from "./engine";
 import { newId } from "./model";
-import { setTerminal, useGrids, writes } from "./store";
+import { setAskingCheck, setTerminal, useGrids, writes } from "./store";
 
 interface TerminalsState {
   /** Terminals as the hub last said. */
@@ -193,3 +193,14 @@ export const describeTerminal = (info: TerminalInfo | undefined, programs: strin
 /** The session running in terminal `id`, once Desk's hooks have registered it. */
 export const trackedIn = (sessions: Record<string, Session>, id: string | null): Session | null =>
   id ? (Object.values(sessions).find((s) => s.terminalId === id && s.live) ?? null) : null;
+
+/** The session pane `content` shows, or the one started in its terminal. */
+export const sessionIn = (sessions: Record<string, Session>, content: PaneContent | null): Session | null =>
+  content?.kind === "session" ? (sessions[content.sessionId] ?? null) : content?.kind === "terminal" ? trackedIn(sessions, content.terminalId) : null;
+
+/** The panes whose session is waiting on an approval. */
+export const askingIn = (panes: readonly Pane[], sessions: Record<string, Session> = useDesk.getState().sessions): string[] =>
+  panes.filter((p) => sessionIn(sessions, p.content)?.pending).map((p) => p.id);
+
+// A smaller layout keeps these first.
+setAskingCheck((panes) => askingIn(panes));
