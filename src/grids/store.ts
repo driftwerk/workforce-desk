@@ -27,7 +27,7 @@ import {
   type Splitter,
 } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, mainGrid, newId, nextName, paneId, readGrid, readIndex, type Grid, type Placement } from "./model";
-import type { GridStorage } from "./storage";
+import { GRID_PREFIX, type GridStorage } from "./storage";
 
 /** Which window this is: Desk's main window, or a detached grid's. */
 export type Role = { kind: "main" } | { kind: "grid"; gridId: string };
@@ -63,7 +63,7 @@ export const useGrids = create<GridsState>(() => ({
 
 let storage: GridStorage | null = null;
 let bus: GridBus | null = null;
-const unwatch = new Map<string, () => void>();
+let stopListening: (() => void) | null = null;
 
 const get = () => useGrids.getState();
 
@@ -75,23 +75,6 @@ export const writes = (id: string, s: GridsState = get()): boolean => {
   return g.placement.kind === "main" || !s.open[id];
 };
 
-const watchGrid = (id: string) => {
-  if (!storage || unwatch.has(id)) return;
-  unwatch.set(
-    id,
-    storage.watch(gridKey(id), (v) => {
-      const g = readGrid(v);
-      useGrids.setState((s) => {
-        if (!g) {
-          const { [id]: _gone, ...rest } = s.grids;
-          return { grids: rest };
-        }
-        return { grids: { ...s.grids, [id]: g } };
-      });
-    }),
-  );
-};
-
 const readAll = (order: string[]): Record<string, Grid> => {
   const grids: Record<string, Grid> = {};
   for (const id of order) {
@@ -101,13 +84,33 @@ const readAll = (order: string[]): Record<string, Grid> => {
   return grids;
 };
 
+/** A grid key someone else changed — the hub (another Mac, or after a
+ *  restart) or another of Desk's windows; null when it was removed. */
+export const heardGrid = (key: string, value: unknown): void => {
+  if (key === INDEX_KEY) {
+    const order = readIndex(value) ?? [];
+    const fresh = readAll(order.filter((id) => !get().grids[id]));
+    useGrids.setState((s) => ({ order, grids: { ...s.grids, ...fresh } }));
+    return;
+  }
+  if (!key.startsWith(GRID_PREFIX)) return;
+  const id = key.slice(GRID_PREFIX.length);
+  const g = value === null ? null : readGrid(value);
+  useGrids.setState((s) => {
+    if (!g) {
+      const { [id]: _gone, ...rest } = s.grids;
+      return { grids: rest };
+    }
+    return { grids: { ...s.grids, [id]: g } };
+  });
+};
+
 /** Starts keeping grids in `store`. The main window makes Main if there are
  *  no grids yet. */
 export const startGrids = (store: GridStorage, role: Role, deliverer: GridBus): void => {
   storage = store;
   bus = deliverer;
-  for (const u of unwatch.values()) u();
-  unwatch.clear();
+  stopListening?.();
   let order = readIndex(store.get(INDEX_KEY)) ?? [];
   let grids = readAll(order);
   if (role.kind === "main" && !grids[MAIN_GRID] && !order.length) {
@@ -120,16 +123,9 @@ export const startGrids = (store: GridStorage, role: Role, deliverer: GridBus): 
   order = order.filter((id) => grids[id]);
   const active = order.includes(get().active) ? get().active : (order.find((id) => grids[id]!.placement.kind === "main") ?? order[0] ?? MAIN_GRID);
   useGrids.setState({ ready: true, role, order, grids, active });
-  for (const id of order) watchGrid(id);
-  unwatch.set(
-    INDEX_KEY,
-    store.watch(INDEX_KEY, (v) => {
-      const next = readIndex(v) ?? [];
-      const fresh = readAll(next.filter((id) => !get().grids[id]));
-      useGrids.setState((s) => ({ order: next, grids: { ...s.grids, ...fresh } }));
-      for (const id of next) watchGrid(id);
-    }),
-  );
+  stopListening = store.subscribe(GRID_PREFIX, (key, value, origin) => {
+    if (origin === "hub") heardGrid(key, value);
+  });
 };
 
 const save = (g: Grid) => storage?.set(gridKey(g.id), g);
@@ -171,7 +167,6 @@ export const createGrid = (): string => {
   const g: Grid = { id, name: nextName(Object.values(get().grids)), panes: blank(paneId), placement: { kind: "main" } };
   useGrids.setState((s) => ({ grids: { ...s.grids, [id]: g }, active: id }));
   save(g);
-  watchGrid(id);
   saveOrder([...get().order, id]);
   return id;
 };
@@ -187,8 +182,6 @@ export const deleteGrid = (id: string, onContent: (c: PaneContent) => void): voi
   const s = get();
   if (s.order.length <= 1 || !s.grids[id]) return;
   for (const p of s.grids[id]!.panes) if (p.content) onContent(p.content);
-  unwatch.get(id)?.();
-  unwatch.delete(id);
   const order = s.order.filter((x) => x !== id);
   const { [id]: _gone, ...grids } = s.grids;
   useGrids.setState({ grids, active: s.active === id ? (order.find((x) => grids[x]?.placement.kind === "main") ?? order[0]!) : s.active });

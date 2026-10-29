@@ -22,17 +22,12 @@ export interface MonitorRef {
   origin: [number, number];
 }
 
-/** A free-size window, in points, from its monitor's work area origin. */
-export interface Frame {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 export type Placement =
   | { kind: "main" }
-  | { kind: "window"; mode: WindowMode; monitor: MonitorRef | null; frame: Frame | null };
+  /** In a window of its own. Its frame is kept by Desk's native side, per
+   *  monitor arrangement, under `window.grid-<id>.<arrangement>`, as the
+   *  main window's is. */
+  | { kind: "window"; mode: WindowMode; monitor: MonitorRef | null };
 
 export interface Grid {
   id: string;
@@ -67,7 +62,6 @@ export const readGrid = (v: unknown): Grid | null => {
           kind: "window",
           mode: (["fill", "free", "fullscreen"] as const).includes(g.placement.mode) ? g.placement.mode : "fill",
           monitor: g.placement.monitor ?? null,
-          frame: g.placement.frame ?? null,
         }
       : { kind: "main" };
   const panes = g.panes.filter((p): p is Pane => !!p && typeof p === "object" && typeof (p as Pane).id === "string");
