@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useUi } from "../shell/ui";
-import { clampWidth, fitWidths, maxWidth, MIN_WIDTH, spaceFor, STEP, wantedWidth, type PanelKind } from "./layout";
+import { clampWidth, fitWidths, HANDLE, maxWidth, MIN_WIDTH, spaceFor, STEP, wantedWidth, type PanelKind } from "./layout";
 
 /** A column open on the right: what it is, what its tab says when it's
  *  docked, and what it shows (a `SidePanel`). */
@@ -128,7 +128,7 @@ export function Stage({ main, mainKey, mainName, panels }: { main: ReactNode; ma
               <div
                 key={p.kind}
                 className={`rpanel-slot rpanel-${place} ${place === "docked" ? "stowed" : ""}`}
-                style={place === "focused" ? undefined : { width }}
+                style={place === "focused" ? undefined : { width: place === "column" ? width + HANDLE : width }}
                 data-panel={p.kind}
                 aria-hidden={place === "docked" || undefined}
               >

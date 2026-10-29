@@ -97,7 +97,8 @@ function Shell({ panels = [thread, session], mainKey = "room:r1", main }: { pane
 
 const slot = (kind: string) => document.querySelector<HTMLElement>(`[data-panel="${kind}"]`)!;
 const handle = (label: string) => screen.getByRole("separator", { name: `Resize ${label}` });
-const widthOf = (kind: string) => parseInt(slot(kind).style.width, 10);
+/** A column's width, its handle aside. */
+const widthOf = (kind: string) => parseInt(slot(kind).style.width, 10) - (slot(kind).classList.contains("rpanel-column") ? HANDLE : 0);
 const space = (n: number) => rowWidth - GUTTER - n * HANDLE;
 
 describe("resizing a column", () => {

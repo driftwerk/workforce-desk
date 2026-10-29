@@ -54,6 +54,14 @@
   flex: 1;
   padding-left: 16px;
 }
+/* A docked panel opened beside the focused one goes to its right, its
+   handle between them; drawn there by `order` alone, so nothing remounts. */
+.stage-focused .rpanel-column {
+  order: 1;
+}
+.stage-dock {
+  order: 2;
+}
 
 /* ── A column ──────────────────────────────────────────────────────────── */
 
