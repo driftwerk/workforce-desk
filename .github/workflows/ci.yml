@@ -108,15 +108,15 @@ jobs:
       - name: Types and frontend tests
         working-directory: desk
         run: npx tsc --noEmit && npx vitest run
-      # The app bundles the helper and the hub as sidecars; checks only need
-      # the files to exist (release builds them for real).
+      # The app bundles the helper, the hub and its memory store as sidecars;
+      # checks only need the files to exist (release builds them for real).
       - name: Placeholder sidecars
         run: |
           triple=$(rustc -vV | sed -n 's/^host: //p')
           mkdir -p desk/src-tauri/binaries
           cd desk/src-tauri/binaries
-          touch "Desk Helper-$triple" "Desk Agents-$triple"
-          chmod +x "Desk Helper-$triple" "Desk Agents-$triple"
+          touch "Desk Helper-$triple" "Desk Agents-$triple" "Desk Memory-$triple"
+          chmod +x "Desk Helper-$triple" "Desk Agents-$triple" "Desk Memory-$triple"
       - name: Format
         working-directory: desk
         run: cargo fmt --all -- --check

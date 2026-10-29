@@ -47,7 +47,8 @@
     },
     "externalBin": [
       "binaries/Desk Helper",
-      "binaries/Desk Agents"
+      "binaries/Desk Agents",
+      "binaries/Desk Memory"
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",

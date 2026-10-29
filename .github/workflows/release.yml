@@ -1,7 +1,8 @@
 name: Release
 
 # Builds Desk.app for Apple Silicon and Intel in one universal bundle with
-# its helper and hub (the commit in hub.ref), signs every binary with the
+# its helper, hub (the commit in hub.ref) and memory store (vellev, the
+# commit in vellev.ref), signs every binary with the
 # Developer ID, notarizes and staples the app and the disk image, and
 # publishes them with the signed updater artifacts (latest.json) as a GitHub
 # release. See docs/RELEASING.md.
@@ -59,6 +60,19 @@ jobs:
         id: hub
         run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
+      - name: Read the vellev ref
+        id: vellev
+        run: echo "ref=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out vellev at vellev.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/vellev
+          ref: ${{ steps.vellev.outputs.ref }}
+          path: vellev
+          # vellev is public; a token is only needed if it ever isn't.
+          token: ${{ secrets.VELLEV_REPO_TOKEN || github.token }}
+
       # Beside Desk, under the name its package.json points at for the rich
       # renderers (file:../workforce-public-desk/packages/rich).
       - name: Check out the hub at hub.ref
@@ -73,6 +87,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # vellev's ONNX Runtime for Intel Macs, built from source (ort ships
+      # none): the slowest step on a cold cache, keyed by its pin.
+      - name: Cache ONNX Runtime for Intel
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime-x86_64.sh') }}
 
       - name: Set the version
         working-directory: desk
@@ -103,7 +125,8 @@ jobs:
           workspaces: |
             desk -> target
             workforce-public-desk -> target
-          key: hub-${{ steps.hub.outputs.ref }}
+            vellev -> target
+          key: hub-${{ steps.hub.outputs.ref }}-vellev-${{ steps.vellev.outputs.ref }}
           cache-on-failure: true
 
       - name: Read the sherpa-onnx version
@@ -130,10 +153,11 @@ jobs:
         working-directory: desk
         run: npm ci
 
-      - name: Build the helper and hub (universal)
+      - name: Build the helper, hub and memory store (universal)
         working-directory: desk
         env:
           HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
+          VELLEV_SOURCE: ${{ github.workspace }}/vellev
           MIN_FREE_GB: "12"
           # postgresql_embedded asks GitHub which Postgres builds exist; a
           # token keeps it under the API's rate limit.
@@ -172,8 +196,8 @@ jobs:
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
 
       # Inside out, each binary with only what it needs under the hardened
-      # runtime: the helper nothing, the hub JIT for its WebAssembly skills,
-      # the app the microphone.
+      # runtime: the helper and the memory store nothing, the hub JIT for its
+      # WebAssembly skills, the app the microphone.
       - name: Sign
         working-directory: desk
         env:
@@ -183,6 +207,7 @@ jobs:
           sign() { codesign --force --timestamp --options runtime --entitlements "src-tauri/entitlements/$1" --sign "$IDENTITY" "$2"; }
           sign Helper.entitlements "$app/Contents/MacOS/Desk Helper"
           sign Agents.entitlements "$app/Contents/MacOS/Desk Agents"
+          sign Memory.entitlements "$app/Contents/MacOS/Desk Memory"
           sign Desk.entitlements "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
 
