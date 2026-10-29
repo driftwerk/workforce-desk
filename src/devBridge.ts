@@ -36,6 +36,9 @@ let settings = {
   voice: false,
   voiceEngine: "cascade",
   shortcuts: {} as Record<string, string>,
+  groups: [] as unknown[],
+  ungrouped: { collapsed: false, items: [] as string[] },
+  sessionNames: {} as Record<string, string>,
 };
 
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

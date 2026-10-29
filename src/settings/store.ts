@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { EMPTY_LAYOUT } from "../groups/model";
 import { loadSettings, saveSettings, type Settings, type VoiceSpec } from "../platform";
 import { choose, DEFAULT_SHORTCUTS, resolve, type ShortcutId } from "../shortcuts/keys";
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
@@ -25,6 +26,9 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   voice: false,
   voiceEngine: "cascade",
   shortcuts: {},
+  groups: EMPTY_LAYOUT.groups,
+  ungrouped: EMPTY_LAYOUT.ungrouped,
+  sessionNames: {},
   keys: DEFAULT_SHORTCUTS,
   loaded: false,
   load: async () => {
@@ -42,6 +46,9 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       keys,
       defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
       agentVoices: repairVoices(s.agentVoices),
+      groups: s.groups ?? EMPTY_LAYOUT.groups,
+      ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
+      sessionNames: s.sessionNames ?? {},
       loaded: true,
     });
   },
@@ -50,8 +57,22 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       const { keys, chosen } = resolve(patch.shortcuts);
       set({ ...patch, shortcuts: chosen, keys });
     } else set(patch);
-    const { theme, themePick, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts, loaded } = get();
-    if (loaded) void saveSettings({ theme, themePick, tuple, newAgent, defaultVoice, agentVoices, voice, voiceEngine, shortcuts });
+    const s = get();
+    if (!s.loaded) return;
+    void saveSettings({
+      theme: s.theme,
+      themePick: s.themePick,
+      tuple: s.tuple,
+      newAgent: s.newAgent,
+      defaultVoice: s.defaultVoice,
+      agentVoices: s.agentVoices,
+      voice: s.voice,
+      voiceEngine: s.voiceEngine,
+      shortcuts: s.shortcuts,
+      groups: s.groups,
+      ungrouped: s.ungrouped,
+      sessionNames: s.sessionNames,
+    });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),
 }));

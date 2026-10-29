@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import type { HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
+import type { DeskGroup, Ungrouped } from "./groups/model";
 import type { HubConnection } from "./hub/client";
 import { preview } from "./preview";
 
@@ -61,6 +62,14 @@ export interface Settings {
    *  ("ask", "newSession"), as the global-shortcut plugin reads them
    *  ("Control+Shift+Space"). */
   shortcuts: Record<string, string>;
+  /** The sidebar's groups, in order, each with its agents and sessions by
+   *  key (`agent:<hub>/<agent>`, `session:<id>`). */
+  groups: DeskGroup[];
+  /** Ungrouped's order and whether it's collapsed. */
+  ungrouped: Ungrouped;
+  /** Names you've given sessions in Desk, by Desk session id; shown in
+   *  place of the hub's everywhere Desk shows the session. */
+  sessionNames: Record<string, string>;
 }
 
 export interface ThemeFile {

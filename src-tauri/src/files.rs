@@ -30,6 +30,27 @@ pub struct BrainChoice {
     pub effort: Option<String>,
 }
 
+/// A sidebar group: Desk's own, holding agents and sessions by key
+/// (`agent:<hub>/<agent>`, `session:<id>`), kept as text the UI reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeskGroup {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub items: Vec<String>,
+}
+
+/// Ungrouped: everything in no group, in this order first.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Ungrouped {
+    #[serde(default)]
+    pub collapsed: bool,
+    #[serde(default)]
+    pub items: Vec<String>,
+}
+
 fn default_voice() -> VoiceSpec {
     VoiceSpec {
         provider: "fish_audio".into(),
@@ -77,6 +98,14 @@ pub struct Settings {
     /// UI checks them and falls back to the defaults, which it owns.
     #[serde(default)]
     pub shortcuts: std::collections::BTreeMap<String, String>,
+    /// The sidebar's groups, in order.
+    #[serde(default)]
+    pub groups: Vec<DeskGroup>,
+    #[serde(default)]
+    pub ungrouped: Ungrouped,
+    /// Names given to sessions in Desk, by Desk session id.
+    #[serde(default)]
+    pub session_names: std::collections::BTreeMap<String, String>,
     /// Older Desks' hold-to-talk and Ask anyone keys, read once into
     /// `shortcuts` and never written again.
     #[serde(default, skip_serializing)]
@@ -113,6 +142,9 @@ impl Default for Settings {
             voice: false,
             voice_engine: default_voice_engine(),
             shortcuts: Default::default(),
+            groups: Vec::new(),
+            ungrouped: Ungrouped::default(),
+            session_names: Default::default(),
             push_to_talk_shortcut: None,
             ask_shortcut: None,
         }
@@ -269,6 +301,45 @@ mod tests {
                 .contains(r#""themePick": "acme-dusk""#)
         );
         assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn groups_and_session_names_round_trip_and_older_files_have_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"system"}"#).unwrap();
+        let older = load_settings(&paths).unwrap();
+        assert!(older.groups.is_empty());
+        assert_eq!(older.ungrouped, Ungrouped::default());
+        assert!(older.session_names.is_empty());
+        let chosen = Settings {
+            groups: vec![DeskGroup {
+                id: "g1".into(),
+                name: "Acme".into(),
+                collapsed: true,
+                items: vec!["agent:local/scout".into(), "session:s1".into()],
+            }],
+            ungrouped: Ungrouped {
+                collapsed: false,
+                items: vec!["session:s2".into()],
+            },
+            session_names: [("s1".into(), "release notes".into())].into(),
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        let written = std::fs::read_to_string(paths.settings()).unwrap();
+        assert!(written.contains(r#""sessionNames""#));
+        assert!(written.contains(r#""session:s1""#));
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
+        // A group written without its optional fields still loads.
+        std::fs::write(
+            paths.settings(),
+            r#"{"groups":[{"id":"g2","name":"Beta"}],"ungrouped":{}}"#,
+        )
+        .unwrap();
+        let sparse = load_settings(&paths).unwrap();
+        assert_eq!(sparse.groups[0].name, "Beta");
+        assert!(!sparse.groups[0].collapsed && sparse.groups[0].items.is_empty());
     }
 
     #[test]
