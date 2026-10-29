@@ -558,26 +558,8 @@ button {
   font-size: 14px;
 }
 .ring-working {
-  position: relative;
-  border-color: color-mix(in srgb, var(--working) 22%, transparent);
-}
-.ring-working::after {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  padding: 2px;
-  border-radius: inherit;
-  background: conic-gradient(from 0deg, transparent 0 60%, var(--working) 100%);
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: desk-orbit 1.6s linear infinite;
-}
-.mark-lg.ring-working::after {
-  inset: -3px;
-  padding: 3px;
+  border-color: var(--working);
+  animation: desk-glow 1.8s ease-in-out infinite;
 }
 .ring-blocked {
   border-color: var(--blocked);
@@ -1215,9 +1197,13 @@ button {
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 0%, transparent);
   }
 }
-@keyframes desk-orbit {
-  to {
-    transform: rotate(360deg);
+@keyframes desk-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--working) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1227,11 +1213,8 @@ button {
   }
   .dot-working,
   .dot-starting,
-  .ring-working::after {
-    animation: none;
-  }
   .ring-working {
-    border-color: var(--working);
+    animation: none;
   }
 }
 
