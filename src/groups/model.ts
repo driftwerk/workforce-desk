@@ -97,10 +97,10 @@ export const renameGroup = (layout: Layout, id: string, name: string): Layout =>
 };
 
 /** A deleted group's members go to the end of Ungrouped, in their order. */
-export const deleteGroup = (layout: Layout, id: string): Layout => {
+export const deleteGroup = (layout: Layout, present: readonly ItemKey[], id: string): Layout => {
   const gone = layout.groups.find((g) => g.id === id);
   if (!gone) return layout;
-  const items = layout.ungrouped.items.filter((k) => !gone.items.includes(k));
+  const items = settled(layout, present).filter((k) => !gone.items.includes(k));
   return { groups: layout.groups.filter((g) => g.id !== id), ungrouped: { ...layout.ungrouped, items: [...items, ...gone.items] } };
 };
 
@@ -207,6 +207,39 @@ export const groupDrop = (layout: Layout, over: string, upperHalf: boolean): Dro
   if (over === UNGROUPED) return { kind: "group", before: null };
   const i = layout.groups.findIndex((g) => g.id === over);
   return { kind: "group", before: upperHalf ? over : (layout.groups[i + 1]?.id ?? null) };
+};
+
+/** What's being dragged, or dragged over: an item by key, or a group by id. */
+export interface DragEnd {
+  type: "item" | "group";
+  id: string;
+}
+
+/** Where a drag lands, or null where it would change nothing (so no line is
+ *  drawn): an item over an item goes before or after it, over a group's
+ *  header or empty space to its end; a group over a group goes before or
+ *  after it. */
+export const dropAt = (layout: Layout, shown: readonly Shown[], source: DragEnd, target: DragEnd, upperHalf: boolean): Drop | null => {
+  if (source.type === "item") {
+    const d: Drop | null =
+      target.type === "item"
+        ? target.id === source.id
+          ? null
+          : itemDrop(shown, target.id, upperHalf)
+        : { kind: "item", group: target.id, before: null };
+    if (!d || d.kind !== "item") return d;
+    const g = shown.find((x) => x.items.includes(source.id));
+    if (g?.id === d.group) {
+      const at = g.items.indexOf(source.id);
+      if (d.before === source.id || d.before === (g.items[at + 1] ?? null)) return null;
+    }
+    return d;
+  }
+  if (target.type !== "group") return null;
+  const d = groupDrop(layout, target.id, upperHalf);
+  if (d.kind !== "group" || d.before === source.id) return null;
+  const i = layout.groups.findIndex((x) => x.id === source.id);
+  return i < 0 || d.before === (layout.groups[i + 1]?.id ?? null) ? null : d;
 };
 
 /** Applies a drop. */

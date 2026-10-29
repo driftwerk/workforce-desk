@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSessionNames } from "../groups/names";
 import { useDesk } from "../hub/store";
 import { inApp } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
@@ -26,6 +27,7 @@ const list = (names: string[]): string =>
 export function UpdateNotice() {
   const { state, waiting, wait, restart } = useUpdates();
   const sessions = useDesk((s) => s.sessions);
+  const names = useSessionNames();
   const fail = useDesk((s) => s.fail);
   const [asking, setAsking] = useState(false);
   const live = Object.values(sessions).filter(isLive);
@@ -71,7 +73,7 @@ export function UpdateNotice() {
                 </h1>
                 <p>
                   {working.length > 0
-                    ? `${list(working.map((s) => s.name))} ${working.length === 1 ? "is" : "are"} working right now.`
+                    ? `${list(working.map((s) => names[s.id] ?? s.name))} ${working.length === 1 ? "is" : "are"} working right now.`
                     : "Your sessions are open but idle."}
                 </p>
               </span>
@@ -84,7 +86,7 @@ export function UpdateNotice() {
             <ul className="update-sessions">
               {live.map((s) => (
                 <li key={s.id}>
-                  <span className="mono">{s.name}</span>
+                  <span className="mono">{names[s.id] ?? s.name}</span>
                   <span className="faint small">{s.goal || s.lastPrompt || s.cwd}</span>
                 </li>
               ))}

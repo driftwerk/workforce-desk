@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createGroup,
   deleteGroup,
+  dropAt,
   dropOn,
   EMPTY_LAYOUT,
   forgetSessions,
@@ -69,9 +70,9 @@ describe("changing groups", () => {
   });
 
   it("deleting a group sends its members to Ungrouped", () => {
-    const l = deleteGroup(two, "acme");
+    const l = deleteGroup(two, present, "acme");
     expect(l.groups.map((g) => g.id)).toEqual(["beta"]);
-    expect(shown(l).at(-1)).toEqual([UNGROUPED, ["agent:local/scout", "session:s1", "agent:remote/ada", "session:s3"]]);
+    expect(shown(l).at(-1)).toEqual([UNGROUPED, ["agent:remote/ada", "session:s3", "agent:local/scout", "session:s1"]]);
   });
 
   it("moves an item between groups and within one", () => {
@@ -152,6 +153,34 @@ describe("dropping", () => {
     expect(groupDrop(two, "acme", false)).toEqual({ kind: "group", before: "beta" });
     expect(groupDrop(two, UNGROUPED, true)).toEqual({ kind: "group", before: null });
     expect(dropOn(two, present, "beta", groupDrop(two, "acme", true)).groups.map((g) => g.id)).toEqual(["beta", "acme"]);
+  });
+});
+
+describe("where a drag lands", () => {
+  const s = resolve(two, present);
+  const item = (id: string) => ({ type: "item" as const, id });
+  const group = (id: string) => ({ type: "group" as const, id });
+
+  it("an item over an item: before or after it; over a group: its end", () => {
+    expect(dropAt(two, s, item("session:s3"), item("session:s1"), true)).toEqual({ kind: "item", group: "acme", before: "session:s1" });
+    expect(dropAt(two, s, item("session:s3"), group("beta"), true)).toEqual({ kind: "item", group: "beta", before: null });
+    expect(dropAt(two, s, item("agent:remote/ada"), group(UNGROUPED), false)).toEqual({ kind: "item", group: UNGROUPED, before: null });
+  });
+
+  it("nothing where the item already is", () => {
+    expect(dropAt(two, s, item("session:s1"), item("session:s1"), true)).toBeNull();
+    expect(dropAt(two, s, item("session:s1"), item("agent:local/scout"), false)).toBeNull();
+    expect(dropAt(two, s, item("agent:local/scout"), item("session:s1"), true)).toBeNull();
+    expect(dropAt(two, s, item("session:s1"), group("acme"), true)).toBeNull();
+    expect(dropAt(two, s, item("agent:local/scout"), item("session:s1"), false)).toEqual({ kind: "item", group: "acme", before: null });
+  });
+
+  it("a group over a group: before or after it, nothing where it is, and never over an item", () => {
+    expect(dropAt(two, s, group("beta"), group("acme"), true)).toEqual({ kind: "group", before: "acme" });
+    expect(dropAt(two, s, group("acme"), group(UNGROUPED), true)).toEqual({ kind: "group", before: null });
+    expect(dropAt(two, s, group("acme"), group("beta"), true)).toBeNull();
+    expect(dropAt(two, s, group("beta"), group(UNGROUPED), true)).toBeNull();
+    expect(dropAt(two, s, group("acme"), item("session:s2"), true)).toBeNull();
   });
 });
 

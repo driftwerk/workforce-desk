@@ -31,6 +31,14 @@ describe("activity lists", () => {
     expect(matches("manager", nudged) && !matches("needs_you", nudged)).toBe(true);
   });
 
+  it("call sessions by the names you gave them in Desk, split where the hub named them", () => {
+    const names = { e7: "date picker" };
+    expect(lineOf(ev("s", "09:58"), names).lead).toEqual({ name: "date picker", session: true });
+    expect(
+      lineOf(ev("n", "10:24", { kind: "nudged", actor: manager, text: "asked workforce-e7 “Still stuck?”" }), names).parts,
+    ).toEqual([{ text: "asked " }, { text: "date picker", session: true, name: true }, { text: " “Still stuck?”" }]);
+  });
+
   it("read as sentences about who did what", () => {
     expect(lineOf(ev("s", "09:58"))).toEqual({
       lead: { name: "workforce-e7", session: true },

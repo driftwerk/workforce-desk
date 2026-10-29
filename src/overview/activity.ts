@@ -1,4 +1,4 @@
-import type { ActivityEvent, ActivityFilter, ActivityKind } from "../hub/types";
+import type { ActivityEvent, ActivityFilter, ActivityKind, ActivityParty } from "../hub/types";
 
 /** Kinds the "Needs you" filter shows. */
 const NEEDS_YOU = new Set<ActivityKind>(["needs_you", "question"]);
@@ -52,22 +52,24 @@ export interface Line {
 }
 
 /** An event as a sentence: "Desk asked workforce-e7 …", "Scout asked which
- *  branch to deploy". */
-export const lineOf = (e: ActivityEvent): Line => {
+ *  branch to deploy". Sessions you've named in Desk (`names`, by session
+ *  id) go by that name; the hub's text is still split at the name it used. */
+export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>> = {}): Line => {
+  const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : p.name);
   const acting = e.actor.kind === "manager" || e.actor.kind === "you" || !e.subject;
   const who = acting ? e.actor : e.subject!;
-  const lead = who.kind === "you" ? { name: "You", session: false } : { name: who.name, session: who.kind === "session" };
+  const lead = who.kind === "you" ? { name: "You", session: false } : { name: shown(who), session: who.kind === "session" };
   const other = acting && e.subject && e.subject.id !== who.id ? e.subject : null;
   const text = e.text.trim();
   if (!other) return { lead, parts: [{ text }] };
   const at = other.name ? text.indexOf(other.name) : -1;
   const isSession = other.kind === "session";
-  if (at < 0) return { lead, parts: [{ text }, { text: " · " }, { text: other.name, session: isSession, name: true }] };
+  if (at < 0) return { lead, parts: [{ text }, { text: " · " }, { text: shown(other), session: isSession, name: true }] };
   return {
     lead,
     parts: [
       { text: text.slice(0, at) },
-      { text: other.name, session: isSession, name: true },
+      { text: shown(other), session: isSession, name: true },
       { text: text.slice(at + other.name.length) },
     ].filter((p) => p.text !== ""),
   };

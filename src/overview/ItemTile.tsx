@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useChat } from "../chat/store";
+import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/types";
 import { Mark } from "../ui/Mark";
@@ -46,7 +47,9 @@ const useOpens = (item: OverviewItem): boolean => {
 
 /** An agent or a session on the Floor: who, what they're doing, and what
  *  they need from you, answered in place. */
-export function ItemTile({ item }: { item: OverviewItem }) {
+export function ItemTile({ item: listed }: { item: OverviewItem }) {
+  const named = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
+  const item = named === listed.name ? listed : { ...listed, name: named };
   const session = useDesk((s) => (item.kind === "session" ? s.sessions[item.id] : undefined));
   const tone = item.state === "quiet" ? "working" : item.state;
   const opens = useOpens(item);

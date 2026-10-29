@@ -1,4 +1,5 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { sessionName } from "../groups/names";
 import type { Session, SessionState } from "../hub/types";
 
 /** The notification a state change deserves, if any: a session that starts
@@ -8,10 +9,11 @@ export const notificationFor = (
   s: Session,
 ): { title: string; body: string } | null => {
   if (before === undefined || before === s.state) return null;
+  const name = sessionName(s.id, s.name);
   if (s.state === "blocked")
-    return { title: `${s.name} needs you`, body: s.pending ? `${s.pending.tool} ${s.pending.detail}`.trim() : "Waiting for an answer" };
+    return { title: `${name} needs you`, body: s.pending ? `${s.pending.tool} ${s.pending.detail}`.trim() : "Waiting for an answer" };
   if (s.state === "done" && (before === "working" || before === "blocked"))
-    return { title: `${s.name} is done`, body: s.lastReply?.split("\n")[0] ?? s.goal };
+    return { title: `${name} is done`, body: s.lastReply?.split("\n")[0] ?? s.goal };
   return null;
 };
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
 import { lineOf, toneOf } from "./activity";
@@ -17,7 +18,7 @@ const dayOf = (iso: string): string => {
 };
 
 export function ActivityRow({ event }: { event: ActivityEvent }) {
-  const line = lineOf(event);
+  const line = lineOf(event, useSessionNames());
   return (
     <li className="ev">
       <time className="ev-time" dateTime={event.at}>

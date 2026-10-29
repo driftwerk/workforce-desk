@@ -1,5 +1,6 @@
 import { RichMarkdown } from "@workforce/rich";
 import { useState } from "react";
+import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Mark } from "../ui/Mark";
@@ -13,6 +14,7 @@ const where = (s: Session): string =>
 
 export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open } = useDesk();
+  const name = useSessionName(session.id, session.name);
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
   const saveGoal = () => {
@@ -20,11 +22,11 @@ export function SessionCard({ session }: { session: Session }) {
     if (goal !== session.goal) hub?.update(session.id, { goal }).catch(fail);
   };
   return (
-    <aside className="session-card" aria-label={`Session ${session.name}`}>
+    <aside className="session-card" aria-label={`Session ${name}`}>
       <header className="session-head">
-        <Mark name={session.name} engine={session.engine} state={session.state} />
+        <Mark name={name} engine={session.engine} state={session.state} />
         <span className="session-title">
-          <span className="mono">{session.name}</span>
+          <span className="mono">{name}</span>
           <span className="faint small">{where(session)}</span>
         </span>
         <span className="session-actions">

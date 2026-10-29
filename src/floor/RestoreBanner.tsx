@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useSessionNames } from "../groups/names";
 import { useDesk } from "../hub/store";
 
 export function RestoreBanner() {
   const { restore, hub, fail } = useDesk();
+  const names = useSessionNames();
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   if (!restore.length || !hub) return null;
@@ -38,7 +40,7 @@ export function RestoreBanner() {
           {restore.map((s) => (
             <label key={s.id} className="restore-row">
               <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} />
-              <span className="mono">{s.name}</span>
+              <span className="mono">{names[s.id] ?? s.name}</span>
               <span className="faint small">{s.goal || s.lastPrompt || s.cwd}</span>
             </label>
           ))}

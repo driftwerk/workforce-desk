@@ -1,3 +1,4 @@
+import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -38,13 +39,14 @@ const log = (s: Session): string | null =>
 
 export function Tile({ session }: { session: Session }) {
   const open = useDesk((s) => s.open);
+  const name = useSessionName(session.id, session.name);
   const text = log(session);
   return (
     <article className={`tile tile-${session.state}`}>
       <button type="button" className="tile-open" onClick={() => open(session.id)}>
-        <Mark name={session.name} engine={session.engine} state={session.state} size="lg" />
+        <Mark name={name} engine={session.engine} state={session.state} size="lg" />
         <span className="tile-name">
-          <span className="mono tile-title">{session.name}</span>
+          <span className="mono tile-title">{name}</span>
           <span className={`tile-state state-${session.state}`}>
             {LABEL[session.state]} · {home(session)}
           </span>

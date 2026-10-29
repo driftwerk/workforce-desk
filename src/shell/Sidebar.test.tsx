@@ -17,13 +17,13 @@ describe("Sidebar", () => {
     useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS });
     sidebar();
     expect(screen.getByRole("button", { name: /Ask anyone/ }).textContent).toBe("Ask anyone ⌃⇧K");
-    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New ⌘N");
+    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New session ⌘N");
     expect(screen.getByRole("button", { name: /^Settings/ }).textContent).toBe("Settings ⌘,");
     cleanup();
     useSettings.getState().set({ shortcuts: { ask: "Alt+Space", newSession: "Super+J", settings: "Control+Alt+Comma" } });
     sidebar();
     expect(screen.getByRole("button", { name: /Ask anyone/ }).textContent).toBe("Ask anyone ⌥Space");
-    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New ⌘J");
+    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New session ⌘J");
     expect(screen.getByRole("button", { name: /^Settings/ }).textContent).toBe("Settings ⌃⌥,");
   });
 });
