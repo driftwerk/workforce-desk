@@ -332,6 +332,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_bundled_plist_runs_the_helper_from_the_bundle() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))

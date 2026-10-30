@@ -267,8 +267,12 @@ mod tests {
         let store = reopen(&path);
         store.put("ui.main", json!({"view": "floor"}));
         assert!(!path.exists(), "not before the debounce");
-        std::thread::sleep(DEBOUNCE * 3);
-        assert!(path.exists());
+        // The writer's own thread: on a busy computer it runs a little late.
+        let deadline = std::time::Instant::now() + DEBOUNCE * 20;
+        while !path.exists() {
+            assert!(std::time::Instant::now() < deadline, "never written");
+            std::thread::sleep(DEBOUNCE / 10);
+        }
         assert_eq!(
             reopen(&path).get("ui.main").unwrap().value,
             json!({"view": "floor"})
