@@ -392,11 +392,8 @@ const focusContent = (gridId: string, content: PaneContent) => {
 
 /** Whether a pane of grid `gridId` (as `panes`, there) or of another grid
  *  shows terminal `id`: its own pane, or a session's that runs in it. */
-const showsTerminal = (gridId: string, panes: readonly Pane[], id: string): boolean => {
-  const s = get();
-  const all = s.order.map((g) => (g === gridId ? panes : (s.grids[g]?.panes ?? [])));
-  return all.some((ps) => ps.some((p) => p.content && terminalOf(p.content) === id));
-};
+const showsTerminal = (gridId: string, panes: readonly Pane[], id: string, s: GridsState = get()): boolean =>
+  s.order.some((g) => (g === gridId ? panes : (s.grids[g]?.panes ?? [])).some((p) => p.content && terminalOf(p.content) === id));
 
 /** What a pane held before something else took its place: a terminal
  *  parks (it keeps running, and comes back when there's room), and so does
@@ -413,11 +410,10 @@ const keepReplaced = (gridId: string, panes: Pane[], old: PaneContent | null | u
  *  place of the terminal that session runs in: closing the pane closes it
  *  too, as closing the terminal's own pane would. */
 export const hostedBy = (gridId: string, pane: string, s: GridsState = get()): string | null => {
-  const content = s.grids[gridId]?.panes.find((p) => p.id === pane)?.content;
+  const panes = s.grids[gridId]?.panes ?? [];
+  const content = panes.find((p) => p.id === pane)?.content;
   const id = content?.kind === "session" ? terminalOf(content) : null;
-  if (!id) return null;
-  const elsewhere = s.order.some((g) => s.grids[g]?.panes.some((p) => !(g === gridId && p.id === pane) && p.content && terminalOf(p.content) === id));
-  return elsewhere ? null : id;
+  return id && !showsTerminal(gridId, panes.filter((p) => p.id !== pane), id, s) ? id : null;
 };
 
 /** `content` out of the grid if it's there, unless it's in pane `but`. */
