@@ -37,6 +37,14 @@ export const fitFrame = (image: Size, view: number, frame: Frame): Frame => {
   return { zoom, x: clamp(frame.x, -mx, mx), y: clamp(frame.y, -my, my) };
 };
 
+/** `frame` zoomed to `zoom`, about the square's centre: what's under it
+ *  stays under it. */
+export const zoomFrame = (image: Size, view: number, frame: Frame, zoom: number): Frame => {
+  const to = clamp(zoom, 1, MAX_ZOOM);
+  const by = to / frame.zoom;
+  return fitFrame(image, view, { zoom: to, x: frame.x * by, y: frame.y * by });
+};
+
 /** The square of the image the frame shows, in the image's own pixels. */
 export const sourceSquare = (image: Size, view: number, frame: Frame): { sx: number; sy: number; size: number } => {
   const f = fitFrame(image, view, frame);
