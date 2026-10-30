@@ -110,7 +110,7 @@ export const FEATURES = {
   usage: "desk.usage",
 } as const;
 
-export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice";
+export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "other";
 
 export type DeskPlace =
   | { kind: "dm" }

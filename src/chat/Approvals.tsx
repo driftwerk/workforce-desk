@@ -6,8 +6,8 @@ import { useChat } from "./store";
 import type { PermissionChoice } from "./types";
 
 /** A tool call the agent is waiting on you for: what it would do, and
- *  the choices the hub offers. "Always allow" saves the choice for that
- *  destination, so it isn't asked again. */
+ *  the choices the hub offers. "Always allow" saves the choice for that tool
+ *  and destination, so it isn't asked again. */
 export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (choice: PermissionChoice) => boolean }) {
   const [problem, setProblem] = useState<string | null>(null);
   const answer = (choice: PermissionChoice) => {
