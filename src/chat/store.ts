@@ -1,7 +1,16 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
-import { covered, fetchHistory, prepend } from "./history";
-import { agentKey, type Agent, type ChatMessage, type HubAccount } from "./types";
+import { covered, cursorIn, fetchHistory, prepend } from "./history";
+import {
+  agentKey,
+  FEATURES,
+  type Agent,
+  type Attachment,
+  type ChatMessage,
+  type DeskTurn,
+  type HubAccount,
+  type PermissionChoice,
+} from "./types";
 import { hubFetch } from "../hub/net";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -32,6 +41,14 @@ interface ChatStore {
   activeAgent: string | null;
   /** The agent whose DM is open in the side panel beside the Floor. */
   panelAgent: string | null;
+  /** What each hub offers Desk, by hub id, as its connections and link say. */
+  hubFeatures: Record<string, ReadonlySet<string>>;
+  learnFeatures: (hubId: string, features: ReadonlySet<string>) => void;
+  /** Messages delivered into DMs you haven't opened since, by agent key. */
+  dmUnread: Record<string, number>;
+  /** One more message in a DM; none while it is the one shown. */
+  bumpDm: (key: string) => void;
+  seenDm: (key: string) => void;
   setHubs: (hubs: HubAccount[]) => void;
   refreshRoster: () => Promise<void>;
   openDm: (key: string) => void;
@@ -54,16 +71,34 @@ interface ChatStore {
    *  overseer's on a hub that doesn't send it live); the live messages that
    *  copy shows give way to it. */
   refreshHistory: (key: string) => Promise<void>;
-  send: (key: string, content: string) => boolean;
+  send: (key: string, content: string, opts?: SendOptions) => boolean;
   /** Says `content` to an agent without opening their DM (connecting first
    *  if need be); false if it couldn't be sent. */
   sendTo: (key: string, content: string) => Promise<boolean>;
+  /** Answers a permission prompt in a DM. */
+  answerPrompt: (key: string, requestId: string, choice: PermissionChoice) => boolean;
   cancel: (key: string) => void;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
   forget: (key: string) => void;
 }
+
+/** How a DM message is sent: spoken (voice), and with files uploaded to the
+ *  agent already. */
+export interface SendOptions {
+  spoken?: boolean;
+  attachments?: Attachment[];
+}
+
+/** A turn in your DM with an agent. */
+export const dmTurn = (spoken = false): DeskTurn => ({
+  place: { kind: "dm" },
+  speaker: { kind: "person" },
+  hop: 0,
+  context: [],
+  spoken,
+});
 
 const live = new Map<string, Conversation>();
 
@@ -116,20 +151,33 @@ const ensure = (key: string): boolean => {
   if (!agent || !hub) return false;
   useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
   let everConnected = false;
-  live.set(
-    key,
-    new Conversation(hub, agent.id, (c) => {
-      const was = useChat.getState().conversations[key];
-      useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
-      // Back after the hub restarted: what was said meanwhile is only in its copy.
-      if (c.connected && !was?.connected) {
-        if (everConnected) void useChat.getState().refreshHistory(key);
-        everConnected = true;
-      }
-      // A turn whose prompt never came live: only the hub's copy has it.
-      if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
-    }),
-  );
+  const settling = new Set<string>();
+  const convo = new Conversation(hub, agent.id, (c) => {
+    const was = useChat.getState().conversations[key];
+    useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
+    if (c.features && c.features !== was?.features) useChat.getState().learnFeatures(hub.id, c.features);
+    // Back after the hub restarted: what was said meanwhile is only in its copy.
+    if (c.connected && !was?.connected) {
+      if (everConnected) void useChat.getState().refreshHistory(key);
+      everConnected = true;
+    }
+    // A turn whose prompt never came live: only the hub's copy has it.
+    if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+    // A turn that ended is in the hub's copy, by the id it was saved under.
+    const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
+    if (!settled.length) return;
+    settled.forEach((t) => settling.add(t.ref));
+    void useChat
+      .getState()
+      .refreshHistory(key)
+      .finally(() =>
+        settled.forEach((t) => {
+          settling.delete(t.ref);
+          live.get(key)?.forget(t.ref);
+        }),
+      );
+  });
+  live.set(key, convo);
   return true;
 };
 
@@ -142,6 +190,22 @@ export const useChat = create<ChatStore>((set, get) => ({
   histories: {},
   activeAgent: null,
   panelAgent: null,
+  hubFeatures: {},
+  learnFeatures: (hubId, features) =>
+    set((s) => {
+      const had = s.hubFeatures[hubId];
+      const same = had && had.size === features.size && [...features].every((f) => had.has(f));
+      return same ? s : { hubFeatures: { ...s.hubFeatures, [hubId]: features } };
+    }),
+  dmUnread: {},
+  bumpDm: (key) =>
+    set((s) => (s.activeAgent === key || s.panelAgent === key ? s : { dmUnread: { ...s.dmUnread, [key]: (s.dmUnread[key] ?? 0) + 1 } })),
+  seenDm: (key) =>
+    set((s) => {
+      if (!(key in s.dmUnread)) return s;
+      const { [key]: _seen, ...dmUnread } = s.dmUnread;
+      return { dmUnread };
+    }),
   rosterRead: false,
   setHubs: (hubs) => {
     const before = get().hubs;
@@ -193,10 +257,14 @@ export const useChat = create<ChatStore>((set, get) => ({
     const key = get().activeAgent;
     if (key && !live.has(key) && get().roster.some((a) => agentKey(a) === key)) get().openDm(key);
   },
-  setPanelAgent: (key) => set((s) => (s.panelAgent === key ? s : { panelAgent: key })),
+  setPanelAgent: (key) => {
+    set((s) => (s.panelAgent === key ? s : { panelAgent: key }));
+    if (key) get().seenDm(key);
+  },
   openDm: (key) => {
     if (!ensure(key)) return;
     set({ activeAgent: key });
+    get().seenDm(key);
     get().watchDm(key);
   },
   watchDm: (key) => {
@@ -224,13 +292,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   loadEarlier: async (key) => {
     const history = get().histories[key];
     const target = whereIs(get(), key);
-    const first = history?.messages[0];
+    const first = history && cursorIn(history.messages, "first");
     if (!target || !history || history.state !== "ready" || !history.more || history.earlier === "loading" || !first) return;
     const put = (f: (h: History) => Partial<History>) =>
       set((s) => (s.histories[key] ? { histories: { ...s.histories, [key]: { ...s.histories[key]!, ...f(s.histories[key]!) } } } : {}));
     put(() => ({ earlier: "loading" }));
     try {
-      const page = await fetchHistory(target.hub, target.agent.id, first.id);
+      const page = await fetchHistory(target.hub, target.agent.id, first);
       put((h) => ({
         earlier: "idle",
         messages: page ? prepend(page.messages, h.messages) : h.messages,
@@ -252,9 +320,9 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     const was = get().histories[key];
     if (!page || was?.state !== "ready") return;
-    const first = was.messages[0];
+    const first = cursorIn(was.messages, "first");
     // Earlier pages already read stay above it.
-    const reachesBack = !first || page.messages.some((m) => m.id === first.id);
+    const reachesBack = !first || page.messages.some((m) => m.id === first);
     set((s) => ({
       histories: {
         ...s.histories,
@@ -267,16 +335,18 @@ export const useChat = create<ChatStore>((set, get) => ({
       },
     }));
     const convo = get().conversations[key];
-    if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started));
+    if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream)));
   },
-  send: (key, content) => live.get(key)?.send(content) ?? false,
+  send: (key, content, opts = {}) =>
+    (live.get(key)?.send(content, { turn: dmTurn(opts.spoken), attachments: opts.attachments }) ?? false) !== false,
+  answerPrompt: (key, requestId, choice) => live.get(key)?.answer(requestId, choice) ?? false,
   sendTo: (key, content) =>
     new Promise((resolve) => {
       if (!ensure(key)) return resolve(false);
       // The connection opens asynchronously; send once it is up.
       let tries = 0;
       const attempt = () => {
-        if (live.get(key)?.send(content)) resolve(true);
+        if (get().send(key, content)) resolve(true);
         else if (++tries < 40) setTimeout(attempt, 150);
         else resolve(false);
       };

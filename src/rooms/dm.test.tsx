@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyConversation } from "../chat/conversation";
@@ -164,4 +164,29 @@ describe("a DM turn the overseer sent on", () => {
     expect(texts()).toEqual(["Allan asks: is this you?"]);
   });
 });
+});
+
+describe("what's delivered into a DM", () => {
+  it("badges a reminder and asks a prompt's choices", () => {
+    show(history({ messages: [{ ...msg("h1", "assistant", "🔔 Reminder: stand-up", "2026-10-28T09:00:00Z"), delivery: "reminder" }] }));
+    expect(screen.getByText("Reminder")).toBeTruthy();
+    const prompt = {
+      requestId: "q1",
+      tool: "slack.send",
+      content: 'Posts outside Desk, to slack #ops: "deploy done"',
+      options: { allow_once: true, deny_once: true, allow_always: true, deny_always: true },
+      turnRef: "t1",
+    };
+    act(() => useChat.setState((s) => ({ conversations: { "dw/allan": { ...s.conversations["dw/allan"]!, prompts: [prompt] } } })));
+    expect(screen.getByText('Posts outside Desk, to slack #ops: "deploy done"')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeTruthy();
+  });
+
+  it("offers a routed approval's choices on its hub", () => {
+    show(history({ messages: [{ ...msg("h1", "assistant", "Run the deploy job?", "2026-10-28T09:00:00Z"), delivery: "approval", requestId: "q7" }] }));
+    expect(screen.getByText("Approval")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
 });

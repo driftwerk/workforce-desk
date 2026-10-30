@@ -578,6 +578,7 @@ function ItemRow({
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
+  const unread = useChat((s) => (item.kind === "agent" ? (s.dmUnread[agentKey(item.agent)] ?? 0) : 0));
   return (
     <SortRow
       id={item.key}
@@ -598,6 +599,8 @@ function ItemRow({
       onStartRename={session ? onStartRename : undefined}
       onNudge={onNudge}
       onMenu={onMenu}
-    />
+    >
+      {unread > 0 && <span className="badge">{unread}</span>}
+    </SortRow>
   );
 }

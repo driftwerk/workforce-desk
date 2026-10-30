@@ -1,10 +1,20 @@
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { useMemo } from "react";
+import { RoutedApproval } from "../chat/Approvals";
 import { openUrl } from "../platform";
 import type { Relayed } from "../chat/relayed";
-import type { ChatMessage } from "../chat/types";
+import type { ChatMessage, DeliveryKind } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
 import { Mark } from "../ui/Mark";
+
+/** What a delivered message is badged as, for the kinds that are shown. */
+export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
+  reminder: "Reminder",
+  job: "Scheduled job",
+  workflow: "Workflow",
+  check_in: "Check-in",
+  approval: "Approval",
+};
 
 const time = (iso: string) => {
   const d = new Date(iso);
@@ -16,11 +26,15 @@ export function Message({
   author,
   home,
   relayed,
+  origin,
   onSubmitForm,
 }: {
   message: ChatMessage;
   author: string;
   home?: string;
+  /** The hub and agent of the conversation it is in: where an approval it
+   *  asks for is decided. */
+  origin?: { hub: string; agent: string };
   /** A turn the overseer sent on, shown as from it (or from you, saying yes
    *  to it), not as something you typed. */
   relayed?: Relayed | null;
@@ -36,6 +50,7 @@ export function Message({
   const fromOverseer = relayed?.by === "overseer";
   const you = message.role === "user" && !fromOverseer;
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
+  const badge = message.delivery && DELIVERY_BADGES[message.delivery];
   return (
     <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`} data-message-id={message.id}>
       {you ? <span className="msg-avatar">K</span> : <Mark name={fromOverseer ? relayed.overseer : author} />}
@@ -49,6 +64,7 @@ export function Message({
               </span>{" "}
             </>
           )}
+          {badge && <span className="chip msg-delivery">{badge}</span>}{" "}
           <span className="faint small">
             {home ? `${home} · ` : ""}
             {time(message.at)}
@@ -63,7 +79,7 @@ export function Message({
             ))}
           </span>
         )}
-        {message.role !== "assistant" ? (
+        {!message.content.trim() ? null : message.role !== "assistant" ? (
           <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>{relayed?.text ?? message.content}</p>
         ) : (
           <RichHostProvider host={host}>
@@ -73,6 +89,9 @@ export function Message({
           </RichHostProvider>
         )}
         {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}
+        {message.delivery === "approval" && message.requestId && origin && (
+          <RoutedApproval hubId={origin.hub} requestId={message.requestId} />
+        )}
       </div>
     </article>
   );

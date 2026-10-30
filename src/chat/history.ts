@@ -1,10 +1,10 @@
 import type { DeskExtras } from "../hub/types";
 import { preview } from "../preview";
-import type { Author, ChatMessage, HubAccount } from "./types";
+import type { Attachment, Author, ChatMessage, DeskMark, HubAccount } from "./types";
 import { hubFetch } from "../hub/net";
 
-/** One message of a DM as the hub keeps it. */
-interface HubMessage {
+/** One message of a Desk conversation as the hub keeps it. */
+export interface HubMessage {
   id: string;
   from: string;
   text?: string;
@@ -15,6 +15,9 @@ interface HubMessage {
   desk?: DeskExtras;
   /** Who said it; an older hub doesn't say. */
   author?: Partial<Author> | null;
+  /** Its place in the conversation: room, thread, why it was delivered. */
+  mark?: DeskMark | null;
+  attachments?: Attachment[];
 }
 
 export interface HistoryPage {
@@ -34,51 +37,86 @@ export const authorOf = (a: Partial<Author> | null | undefined): Author | null =
     ? { kind: a.kind, id: typeof a.id === "string" ? a.id : "", name: typeof a.name === "string" ? a.name : "" }
     : null;
 
+/** The text of a kept message. */
+export const textOf = (m: HubMessage): string => m.text ?? m.content ?? "";
+
 const fromHub = (m: HubMessage): ChatMessage => {
   const author = authorOf(m.author);
   return {
     id: m.id,
     role: m.from === "user" ? "user" : "assistant",
-    content: m.text ?? m.content ?? "",
+    content: textOf(m),
     at: m.at ?? "",
     status: "complete",
     tools: [],
     ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
     ...(author ? { author } : {}),
+    ...(m.mark?.delivery ? { delivery: m.mark.delivery } : {}),
+    ...(m.mark?.request_id ? { requestId: m.mark.request_id } : {}),
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   };
 };
 
-const actionable = (m: ChatMessage): boolean => !!(m.desk?.approvals?.length || m.desk?.suggestions?.length);
+const shown = (m: ChatMessage): boolean =>
+  m.content.trim() !== "" || !!(m.desk?.approvals?.length || m.desk?.suggestions?.length) || !!m.attachments?.length || !!m.requestId;
 
-/** A page of your conversation with an agent, from before message `before`
- *  (the latest when not given). Null where the hub doesn't keep DMs for
- *  Desk: the conversation starts empty there, as it always has. Anything
- *  else that goes wrong throws. */
-export async function fetchHistory(hub: HubAccount, agentId: string, before?: string): Promise<HistoryPage | null> {
+/** Where a page of a conversation is read from: a Desk channel (the DM
+ *  unless said), and the messages before or after one. */
+export interface PageAt {
+  channel?: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+}
+
+/** A page of your conversation with an agent on a Desk channel, as the hub
+ *  keeps it. Null where the hub doesn't keep it for Desk (an older hub, or
+ *  one that won't share it with this device). Anything else that goes
+ *  wrong throws. */
+export async function readConversation(
+  hub: HubAccount,
+  agentId: string,
+  at: PageAt = {},
+): Promise<{ messages: HubMessage[]; more: boolean } | null> {
   const url = new URL(`/api/desk/conversations/${encodeURIComponent(agentId)}`, hub.url);
-  url.searchParams.set("limit", String(PAGE));
-  if (before) url.searchParams.set("before", before);
+  url.searchParams.set("limit", String(at.limit ?? PAGE));
+  if (at.channel) url.searchParams.set("channel", at.channel);
+  if (at.before) url.searchParams.set("before", at.before);
+  if (at.after) url.searchParams.set("after", at.after);
   const res = await hubFetch(url, { headers: { authorization: `Bearer ${hub.token}` } });
-  // Not on this hub (an older one, or one that won't share it with this device).
-  const absent =
-    [401, 403, 404, 405].includes(res.status) ||
-    // An older hub answers a route it doesn't have with its web page.
-    (res.ok && !(res.headers.get("content-type") ?? "").includes("json"));
-  if (!absent && !res.ok) throw new Error(`history: ${res.status}`);
-  const body = absent ? null : ((await res.json()) as { messages?: HubMessage[]; more?: boolean });
-  const page = body && {
-    messages: (body.messages ?? [])
-      .filter((m) => m && typeof m.id === "string")
-      .map(fromHub)
-      .filter((m) => m.content.trim() !== "" || actionable(m)),
-    more: body.more ?? false,
-  };
+  if (absent(res)) return null;
+  if (!res.ok) throw new Error(`history: ${res.status}`);
+  const body = (await res.json()) as { messages?: HubMessage[]; more?: boolean };
+  return { messages: (body.messages ?? []).filter((m) => m && typeof m.id === "string"), more: body.more ?? false };
+}
+
+/** Whether `res` says the hub has no such route: an older one (which
+ *  answers a route it doesn't have with its web page), or one that won't
+ *  share it with this device. */
+export const absent = (res: Response): boolean =>
+  [401, 403, 404, 405].includes(res.status) || (res.ok && !(res.headers.get("content-type") ?? "").includes("json"));
+
+/** A page of your DM with an agent, from before message `before` (the
+ *  latest when not given). Null where the hub doesn't keep DMs for Desk:
+ *  the conversation starts empty there, as it always has. */
+export async function fetchHistory(hub: HubAccount, agentId: string, before?: string): Promise<HistoryPage | null> {
+  const read = await readConversation(hub, agentId, { before });
+  const page = read && { messages: read.messages.map(fromHub).filter(shown), more: read.more };
   if (!preview || before) return page;
   // The browser preview shows the overseer's DM of the design.
   const { devConversation } = await import("../devBridge");
   const extra = devConversation(agentId).map(fromHub);
   return extra.length ? { messages: [...(page?.messages ?? []), ...extra], more: page?.more ?? false } : page;
 }
+
+/** The id a page before or after `messages` can be read from: the first
+ *  (or last) that is a message of the transcript, not a file of its own. */
+export const cursorIn = (messages: readonly { id: string }[], end: "first" | "last"): string | undefined =>
+  (end === "first" ? messages : [...messages].reverse()).find((m) => !m.id.startsWith(FILE_PREFIX))?.id;
+
+/** A file the hub shows as a message of its own carries an id no
+ *  transcript message has. */
+export const FILE_PREFIX = "file:";
 
 /** `earlier` put before `messages`, each message once. */
 export const prepend = (earlier: ChatMessage[], messages: ChatMessage[]): ChatMessage[] => {
@@ -132,12 +170,15 @@ const copyOf = (k: ChatMessage, m: ChatMessage): boolean => {
 /** The live messages, finished by `before`, that `kept` (the hub's latest
  *  page, oldest first) now shows: matched in order from the end, so a reply
  *  the hub hasn't kept yet stays live, and an older one that says the same
- *  thing doesn't stand in for it. */
-export const covered = (kept: ChatMessage[], all: ChatMessage[], before: string): Set<string> => {
-  // Those the hub sent live by their id are known by it.
+ *  thing doesn't stand in for it. On a hub that streams answers by id
+ *  (`streamed`), an answer is known by its id alone; what you said, which
+ *  the hub keeps under an id of its own, is still matched by its text. */
+export const covered = (kept: ChatMessage[], all: ChatMessage[], before: string, streamed = false): Set<string> => {
+  // Those the hub sent live by their id are known by it; on a hub that
+  // streams its answers by id, every answer is.
   const keptIds = new Set(kept.map((m) => m.id));
   const ids = new Set(all.filter((m) => keptIds.has(m.id)).map((m) => m.id));
-  const live = all.filter((m) => !ids.has(m.id));
+  const live = all.filter((m) => !ids.has(m.id) && !(streamed && m.role === "assistant"));
   let j = kept.length - 1;
   for (let i = live.length - 1; i >= 0 && j >= 0; i--) {
     const m = live[i]!;

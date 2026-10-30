@@ -7,6 +7,7 @@ import type {
   Decision,
   DeskEvent,
   Manager,
+  NewRoomMessage,
   NewSession,
   NewTerminal,
   Overview,
@@ -112,7 +113,7 @@ export class HubError extends Error {
 /** What a hub said when it refused: its JSON `error` when it gives one,
  *  else a plain-text body as written (never JSON or a web page), else the
  *  status line. */
-const refusal = async (res: Response): Promise<HubError> => {
+export const refusal = async (res: Response): Promise<HubError> => {
   const text = (await res.text().catch(() => "")).trim();
   let message = text.startsWith("<") ? "" : text;
   try {
@@ -137,7 +138,7 @@ const wsUrl = (base: string, path: string, token: string): string => {
 export class DeskHub {
   constructor(private readonly conn: HubConnection) {}
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
     const res = await hubFetch(new URL(path, this.conn.url), {
       method,
       headers: {
@@ -147,12 +148,16 @@ export class DeskHub {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) throw await refusal(res);
-    if (res.status === 204) return undefined as T;
+    if (res.status === 204) return { status: res.status, body: undefined as T };
     // A hub without this route answers with its web page, not a 404.
     if (!(res.headers.get("content-type") ?? "").includes("json")) {
       throw new HubError(404, NO_ROUTE);
     }
-    return (await res.json()) as T;
+    return { status: res.status, body: (await res.json()) as T };
+  }
+
+  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return (await this.request<T>(method, path, body)).body;
   }
 
   /** A Desk route; in the browser preview, the dev bridge answers the ones
@@ -279,8 +284,12 @@ export class DeskHub {
   deleteRoom = (id: string): Promise<void> => this.call("DELETE", `/api/desk/rooms/${id}`);
   roomMessages = (id: string, thread?: string): Promise<RoomMessage[]> =>
     this.call("GET", `/api/desk/rooms/${id}/messages${thread ? `?thread=${thread}` : ""}`);
-  post = (id: string, m: { author: string; content: string; threadId?: string | null; hop?: number }): Promise<RoomMessage> =>
-    this.call("POST", `/api/desk/rooms/${id}/messages`, m);
+  /** Keeps a message in a room; `created` is false when one with its
+   *  source was kept already (a hub that keeps no sources keeps it anew). */
+  post = async (id: string, m: NewRoomMessage): Promise<{ message: RoomMessage; created: boolean }> => {
+    const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${id}/messages`, m);
+    return { message: body, created: status === 201 || (!!m.source && !body.source) };
+  };
   search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
     this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
 

@@ -2,9 +2,17 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const said: string[] = [];
+const retried: string[] = [];
 vi.mock("./engine", () => ({
   say: vi.fn(async (_room: unknown, text: string) => void said.push(text)),
   prune: () => {},
+  retry: (_room: string, id: string) => void retried.push(id),
+  dismiss: () => {},
+  answerPrompt: () => true,
+}));
+vi.mock("@workforce/rich", () => ({
+  RichHostProvider: ({ children }: { children: unknown }) => children,
+  RichMarkdown: ({ text }: { text: string }) => text,
 }));
 
 const { useChat } = await import("../chat/store");
@@ -36,7 +44,7 @@ beforeEach(() => {
       { hubId: "dw", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
     ],
   });
-  useDesk.setState({ rooms: { r1: room }, timelines: { r1: [] }, roomWorking: {} });
+  useDesk.setState({ rooms: { r1: room }, timelines: { r1: [] }, roomDrafts: {} });
 });
 afterEach(cleanup);
 
@@ -86,5 +94,36 @@ describe("the room composer's @ list", () => {
   it("says plainly what @ does", () => {
     render(<RoomView room={room} />);
     expect(screen.getByPlaceholderText("Message release — @ someone to ask them, or to bring them in")).toBeTruthy();
+  });
+});
+
+describe("answers on their way in a room", () => {
+  it("shows a draft's words and status, what it asks you first, and offers Retry when it was cut off", () => {
+    const working = { since: Date.now(), at: Date.now(), phase: "thinking" as const, step: "Thinking" };
+    const prompt = {
+      requestId: "q1",
+      tool: "slack.send",
+      content: 'Posts outside Desk, to slack #ops: "deploy done"',
+      options: { allow_once: true, deny_once: true, allow_always: true, deny_always: true },
+      turnRef: "t1",
+    };
+    const draft = { member: "local/scout", threadId: null, tools: [], attachments: [], prompts: [], error: undefined };
+    useDesk.setState({
+      roomDrafts: {
+        r1: [
+          { ...draft, id: "a1", text: "Two PRs are", working, state: "live", prompts: [prompt] },
+          { ...draft, id: "a2", text: "", working: null, state: "interrupted" },
+          { ...draft, id: "a3", text: "done", working: null, state: "live", source: "local/scout/m1" },
+        ],
+      },
+      timelines: { r1: [{ id: "p1", roomId: "r1", threadId: null, author: "local/scout", content: "done", hop: 0, createdAt: "", source: "local/scout/m1" }] },
+    });
+    render(<RoomView room={room} />);
+    expect(screen.getByText("Two PRs are")).toBeTruthy();
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retried).toEqual(["a2"]);
+    expect(screen.getAllByText("done")).toHaveLength(1);
   });
 });

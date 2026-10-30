@@ -50,6 +50,13 @@ const voiceOf = (agent: Agent): VoiceSpec => {
   return voiceFor(agent, agentVoices, defaultVoice);
 };
 
+/** Reads `text`, something delivered to be spoken, aloud in `agent`'s voice
+ *  while voice is on. */
+export const readAloud = (agent: Agent, text: string): void => {
+  if (!useSettings.getState().voice || useVoiceStore.getState().status.state === "off") return;
+  aloud(voiceOf(agent)).answer(speakable(text));
+};
+
 const toModel = (callId: string): Reply => ({
   answer: (text) => void toolResult(callId, text).catch(failed),
 });
@@ -79,7 +86,7 @@ export class Turns {
     chat.openDm(key);
     const done = this.awaitAnswer(key, agent.name, reply, Boolean(u.callId));
     const attempt = (n: number) => {
-      if (useChat.getState().send(key, u.text)) return;
+      if (useChat.getState().send(key, u.text, { spoken: true })) return;
       if (n < SEND_TRIES) setTimeout(() => attempt(n + 1), SEND_RETRY_MS);
       else {
         done();

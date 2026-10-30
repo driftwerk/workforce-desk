@@ -4,7 +4,7 @@ import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
 import { disableTuple, enableTuple, onTupleRequest, replyOnTuple, subscribe } from "../platform";
-import { callPrompt, pickAgent } from "./route";
+import { callPrompt, callTurn, pickAgent } from "./route";
 
 /** While enabled, follows Tuple calls: requests go to the named agent on a
  *  `desk:tuple` conversation of its own, and the answer goes back over the call. */
@@ -42,9 +42,9 @@ export function useTuple(enabled: boolean) {
         });
         conversations.current.set(k, c);
       }
-      const prompt = callPrompt(r.text, r.context);
+      const ask = { turn: callTurn(r.context), legacy: callPrompt(r.text, r.context) };
       const attempt = (n: number) => {
-        if (!c.send(prompt) && n < 60) setTimeout(() => attempt(n + 1), 250);
+        if (!c.send(r.text, ask) && n < 60) setTimeout(() => attempt(n + 1), 250);
       };
       attempt(0);
     });

@@ -1,3 +1,4 @@
+import type { Attachment, DeliveryKind } from "../chat/types";
 import type { Layout } from "../groups/model";
 
 export type Engine = "claude" | "codex";
@@ -107,6 +108,9 @@ export interface Room {
   id: string;
   slug: string;
   name: string;
+  /** The channel its agents' conversations are on, frozen when it was
+   *  made; an older hub doesn't say (`desk:<slug>`). */
+  channel?: string;
   members: RoomMemberRef[];
   defaultMember: string | null;
   createdAt: string;
@@ -122,6 +126,27 @@ export interface RoomMessage {
   content: string;
   hop: number;
   createdAt: string;
+  /** Its files, each naming the hub and agent whose store holds it. */
+  attachments?: Attachment[];
+  /** The agent's session message it is: `<hub>/<agent>/<message id>`. */
+  source?: string;
+  /** Why it was delivered outside a turn. */
+  delivery?: DeliveryKind;
+  /** The routed approval an `approval` delivery asks you to decide, on
+   *  the hub of its author. */
+  requestId?: string;
+}
+
+/** A room message to keep. */
+export interface NewRoomMessage {
+  author: string;
+  content: string;
+  threadId?: string | null;
+  hop?: number;
+  attachments?: Attachment[];
+  source?: string;
+  delivery?: DeliveryKind;
+  requestId?: string;
 }
 
 export type DeskEvent =

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { notificationFor, notify } from "../shell/notify";
-import type { Working } from "../chat/conversation";
+import type { Prompt, Working } from "../chat/conversation";
+import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, type HubConnection } from "./client";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
@@ -18,9 +19,12 @@ interface DeskState {
   activeRoom: string | null;
   /** Agent messages in rooms you aren't looking at. */
   unread: Record<string, number>;
-  /** Members answering in each room right now, by member key. */
-  roomWorking: Record<string, Record<string, Working>>;
-  setRoomWorking: (roomId: string, member: string, working: Working | null) => void;
+  /** Answers on their way in each room, oldest first, by room id. */
+  roomDrafts: Record<string, RoomDraft[]>;
+  putDraft: (roomId: string, draft: RoomDraft) => void;
+  dropDraft: (roomId: string, id: string) => void;
+  /** A message kept in a room just now, shown at once. */
+  keep: (message: RoomMessage) => void;
   openId: string | null;
   view: View;
   error: string | null;
@@ -41,6 +45,33 @@ interface DeskState {
   fail: (e: unknown) => void;
   clearError: () => void;
 }
+
+/** A member's answer to something said in a room, while it's on its way:
+ *  what it has said so far and is doing, until it is posted. */
+export interface RoomDraft {
+  /** The ask it answers. */
+  id: string;
+  /** Who is answering (`hub/agent`). */
+  member: string;
+  threadId: string | null;
+  text: string;
+  working: Working | null;
+  tools: ToolCall[];
+  attachments: Attachment[];
+  prompts: Prompt[];
+  /** `queued`: waiting for the member's answer in another thread. */
+  state: "queued" | "live" | "stalled" | "interrupted" | "failed";
+  error?: string;
+  /** What its answer is posted under, once the hub has said its id. */
+  source?: string;
+}
+
+/** Drafts once `posted` is in the room: the one it answered is done. */
+const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Record<string, RoomDraft[]> => {
+  const here = drafts[posted.roomId];
+  if (!posted.source || !here?.some((d) => d.source === posted.source)) return drafts;
+  return { ...drafts, [posted.roomId]: here.filter((d) => d.source !== posted.source) };
+};
 
 /** Others listening to the events socket (the overview, Activity). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
@@ -91,12 +122,27 @@ export const useDesk = create<DeskState>((set, get) => ({
   timelines: {},
   activeRoom: null,
   unread: {},
-  roomWorking: {},
-  setRoomWorking: (roomId, member, working) =>
+  roomDrafts: {},
+  putDraft: (roomId, draft) =>
     set((s) => {
-      const { [member]: _was, ...others } = s.roomWorking[roomId] ?? {};
-      return { roomWorking: { ...s.roomWorking, [roomId]: working ? { ...others, [member]: working } : others } };
+      const here = s.roomDrafts[roomId] ?? [];
+      const at = here.findIndex((d) => d.id === draft.id);
+      const next = at < 0 ? [...here, draft] : here.map((d, i) => (i === at ? draft : d));
+      return { roomDrafts: { ...s.roomDrafts, [roomId]: next } };
     }),
+  dropDraft: (roomId, id) =>
+    set((s) =>
+      s.roomDrafts[roomId]?.some((d) => d.id === id)
+        ? { roomDrafts: { ...s.roomDrafts, [roomId]: s.roomDrafts[roomId]!.filter((d) => d.id !== id) } }
+        : s,
+    ),
+  keep: (message) =>
+    set((s) => ({
+      timelines: s.timelines[message.roomId]
+        ? { ...s.timelines, [message.roomId]: merge(s.timelines[message.roomId]!, [message]) }
+        : s.timelines,
+      roomDrafts: answered(s.roomDrafts, message),
+    })),
   openId: null,
   view: "floor",
   loaded: false,
@@ -117,6 +163,7 @@ export const useDesk = create<DeskState>((set, get) => ({
             e.type === "roomMessage" && s.timelines[e.message.roomId]
               ? { ...s.timelines, [e.message.roomId]: merge(s.timelines[e.message.roomId]!, [e.message]) }
               : s.timelines,
+          roomDrafts: e.type === "roomMessage" ? answered(s.roomDrafts, e.message) : s.roomDrafts,
           // A room gone while Desk was closed is no longer open; one the hub
           // still has stays open through its restart.
           activeRoom:

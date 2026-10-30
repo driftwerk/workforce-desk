@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { createGrid, startGrids, useGrids } from "../grids/store";
+import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { Room } from "../hub/types";
 import { useRoomOrder } from "../rooms/order";
@@ -236,9 +237,21 @@ describe("rooms in the sidebar", () => {
 });
 
 describe("deleting from the sidebar", () => {
-  it("deletes a room from its ⋯ menu once you confirm", async () => {
-    const deleteRoom = vi.fn(() => Promise.resolve());
-    const room = { id: "r1", name: "Launch", members: [] } as unknown as ReturnType<typeof useDesk.getState>["rooms"][string];
+  it("deletes a room from its ⋯ menu once you confirm, telling its members' hubs first", async () => {
+    const closed: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: URL | string, init?: RequestInit) => {
+        closed.push(`${new URL(u).pathname} ${String(init?.body)}`);
+        return new Response("{}", { headers: { "content-type": "application/json" } });
+      }),
+    );
+    useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" }] });
+    const deleteRoom = vi.fn(() => {
+      expect(closed).toEqual(['/api/desk/conversations/allan/close {"channel":"desk:r1-channel","undelivered":[]}']);
+      return Promise.resolve();
+    });
+    const room = { id: "r1", name: "Launch", slug: "launch", channel: "desk:r1-channel", members: [{ hub: "dw", agent: "allan" }] } as unknown as Room;
     useDesk.setState({ view: "rooms", rooms: { r1: room }, activeRoom: "r1", hub: { deleteRoom } as never });
     useRoomOrder.setState({ order: ["r1"] });
     sidebar();
@@ -250,6 +263,7 @@ describe("deleting from the sidebar", () => {
     expect(useDesk.getState().rooms).toEqual({});
     expect(useDesk.getState().activeRoom).toBeNull();
     expect(useRoomOrder.getState().order).not.toContain("r1");
+    vi.unstubAllGlobals();
   });
 
   it("deletes a grid, even the last one, leaving none: the Grids section keeps its + and says so", () => {

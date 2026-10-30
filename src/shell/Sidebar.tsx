@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { GridsSection } from "../grids/Grids";
 import { SortList, SortRow } from "../groups/rows";
 import { arranged, forgetRoom, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
+import { closeRoom } from "../rooms/engine";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
@@ -75,10 +76,14 @@ export function Sidebar({
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
   const roomsById = useDesk((s) => s.rooms);
-  /** Deletes a room on the hub, and here at once (the hub says so too). */
+  /** Deletes a room on the hub, and here at once (the hub says so too).
+   *  Its members' hubs are told first, so what was set up there reaches
+   *  your DM instead. */
   const deleteRoom = async (id: string) => {
-    const { hub } = useDesk.getState();
+    const { hub, rooms } = useDesk.getState();
     if (!hub) throw new Error("Desk isn't connected to its hub.");
+    const room = rooms[id];
+    if (room) await closeRoom(room);
     await hub.deleteRoom(id);
     useDesk.setState((s) => {
       const { [id]: _gone, ...rest } = s.rooms;

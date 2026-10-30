@@ -11,6 +11,7 @@ import { useSettings } from "../settings/store";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
+import { useHubLinks } from "../hubs/follow";
 import { prune } from "../rooms/engine";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
@@ -47,9 +48,11 @@ export function App() {
   const [newRoom, setNewRoom] = useState(false);
   const [newCrew, setNewCrew] = useState(false);
   const rooms = useDesk((s) => s.rooms);
+  const hubs = useChat((s) => s.hubs);
   useEffect(() => {
-    prune(rooms);
-  }, [rooms]);
+    prune(rooms, hubs);
+  }, [rooms, hubs]);
+  useHubLinks();
   const settings = useUi((u) => u.settings !== null);
   const { openSettings, closeSettings } = useUi.getState();
   const setHubs = useChat((s) => s.setHubs);

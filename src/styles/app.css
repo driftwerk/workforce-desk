@@ -1153,6 +1153,23 @@ button {
   background: var(--surface);
 }
 
+/* ── Delivered messages and answers on their way ───────────────────────── */
+
+.msg-delivery {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--signal-soft-text);
+  background: var(--signal-soft);
+  border-color: transparent;
+}
+.draft-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
 .badge {
   min-width: 18px;
   text-align: center;

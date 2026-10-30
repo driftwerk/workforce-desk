@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { PromptCard } from "../chat/Approvals";
 import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
@@ -68,7 +69,8 @@ const TABS: { id: Tab; label: string }[] = [
 /** A DM: the one Rooms shows, or with `agent`, that agent's in a grid pane
  *  or the side panel — the conversation alone, under its own header. */
 export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
-  const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm } = useChat();
+  const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } =
+    useChat();
   const activeAgent = inPane ?? shownInRooms;
   const agent = roster.find((a) => agentKey(a) === activeAgent);
   const convo = activeAgent ? conversations[activeAgent] : undefined;
@@ -117,7 +119,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   useEffect(() => {
     if (tab === "chat") toEnd();
-  }, [convo?.messages, convo?.working?.step, tab, toEnd]);
+  }, [convo?.messages, convo?.working?.step, convo?.prompts.length, tab, toEnd]);
+  // Shown: what was delivered into it isn't unread any more.
+  useEffect(() => {
+    if (activeAgent && tab === "chat") seenDm(activeAgent);
+  }, [activeAgent, tab, history?.messages, seenDm]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -286,8 +292,12 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 author={agent.name}
                 home={hub?.label}
                 relayed={relayedOf(m, sentOn)}
+                origin={{ hub: agent.hubId, agent: agent.id }}
                 onSubmitForm={submitForm}
               />
+            ))}
+            {convo.prompts.map((p) => (
+              <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
             ))}
             {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />
