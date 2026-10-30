@@ -181,7 +181,7 @@ describe("Connect a workspace", () => {
     ).toBeTruthy();
   });
 
-  it("unpairs this Mac from a workspace before it forgets it", async () => {
+  it("unpairs this computer from a workspace before it forgets it", async () => {
     const asked: string[] = [];
     hubsAnswer({
       "/api/me": () => json({ display_name: "Kings", email: "k@example.com" }),

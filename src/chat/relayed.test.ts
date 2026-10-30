@@ -99,7 +99,7 @@ describe("who sent a DM message on, as the hub says", () => {
     });
   });
 
-  it("is told by its wording, on this Mac, where the hub doesn't say or says it's yours", () => {
+  it("is told by its wording, on this computer, where the hub doesn't say or says it's yours", () => {
     expect(relayedOf(said("Atlas asks: and the docs?"), here)).toMatchObject({ by: "overseer", overseer: "Atlas" });
     expect(relayedOf(said("Atlas asks: and the docs?", { author: you }), here)).toMatchObject({ by: "overseer" });
     expect(relayedOf(said("Sam asks: Restart the build.", { author: you }), here)).toMatchObject({ by: "you", text: "Restart the build." });

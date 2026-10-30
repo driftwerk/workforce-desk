@@ -175,7 +175,7 @@ export const fileUrl = (hub: HubAccount, agent: string, artifact: string): strin
     ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(hub.token)}`
     : `deskfile://localhost/${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
 
-/** Opens a file in the app this Mac opens its kind with. */
+/** Opens a file in the app this computer opens its kind with. */
 export const openFile = (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<void> =>
   preview ? Promise.resolve(void window.open(fileUrl(hub, agent, artifact), "_blank", "noopener")) : invoke("attachment_open", { hub: hub.id, agent, artifact, filename });
 
@@ -251,7 +251,7 @@ export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): 
     f(plan, progress as LoginProgress);
   });
 
-/** Desk Helper — what keeps the agents and sessions on this Mac running —
+/** Desk Helper — what keeps the agents and sessions on this computer running —
  *  as a login item. */
 export type HelperStatus =
   | { state: "running" }
@@ -266,7 +266,7 @@ export const openLoginItems = (): Promise<void> => invoke("helper_open_login_ite
 
 export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
 
-/** Whether the CLI a plan signs in with (`claude`, `codex`) is on this Mac. */
+/** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
 export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
 /** Runs its official installer; progress arrives through `onInstallProgress`. */
 export const installCli = (plan: PlanName): Promise<void> => invoke("cli_install", { plan });

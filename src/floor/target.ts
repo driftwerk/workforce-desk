@@ -5,7 +5,7 @@ const slackUrl = (place: Extract<Place, { kind: "slack" }>): string =>
   `https://slack.com/app_redirect?${new URLSearchParams({ ...(place.team ? { team: place.team } : {}), channel: place.channel })}`;
 
 /** Where an item opens: a session in its pane or card; a room (or its
- *  thread) this Mac has; Slack where the turn was; else the agent's DM. */
+ *  thread) this computer has; Slack where the turn was; else the agent's DM. */
 export const targetOf = (item: Pick<Need, "who" | "place">, hubId: string, rooms: Readonly<Record<string, Room>>): Target => {
   if (item.who.kind === "session") return { kind: "session", sessionId: item.who.id };
   const dm: Target = { kind: "agent", key: `${hubId}/${item.who.id}` };
@@ -23,7 +23,7 @@ export const targetOf = (item: Pick<Need, "who" | "place">, hubId: string, rooms
 export const placeLabel = (place: Place, rooms: Readonly<Record<string, Room>>): string | null => {
   switch (place.kind) {
     case "room":
-      return rooms[place.room] ? `in ${rooms[place.room]!.name}` : "in a room on another Mac";
+      return rooms[place.room] ? `in ${rooms[place.room]!.name}` : "in a room on another computer";
     case "call":
       return "in a call";
     case "slack":

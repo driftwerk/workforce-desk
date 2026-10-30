@@ -44,7 +44,7 @@ export function Voices() {
               {p.id === defaultVoice.provider
                 ? "default"
                 : !p.keyPath
-                  ? "this Mac"
+                  ? "this computer"
                   : have.includes(p.keyPath)
                     ? "key saved"
                     : ""}

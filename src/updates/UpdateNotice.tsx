@@ -6,7 +6,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { CHECK_EVERY_MS, isLive, isWorking, useUpdates } from "./store";
 
 /** Looks for a new version on launch and every few hours; downloads it in
- *  the background. Quiet when there's none or this Mac is offline. */
+ *  the background. Quiet when there's none or this computer is offline. */
 export function useUpdateChecks() {
   const check = useUpdates((s) => s.check);
   useEffect(() => {

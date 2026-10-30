@@ -14,7 +14,7 @@ export const floorOf = (hub: HubConnection) => ({
 
 const pad = (n: number, width = 2): string => String(Math.abs(n)).padStart(width, "0");
 
-/** `d` as RFC 3339 in this Mac's time, with its offset: `2026-10-29T00:00:00+01:00`. */
+/** `d` as RFC 3339 in this computer's time, with its offset: `2026-10-29T00:00:00+01:00`. */
 export const localIso = (d: Date): string => {
   const offset = -d.getTimezoneOffset();
   const sign = offset < 0 ? "-" : "+";

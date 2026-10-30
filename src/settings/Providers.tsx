@@ -12,14 +12,14 @@ import { useSettings } from "./store";
 const SECTIONS: { group: ProviderGroup; label: string }[] = [
   { group: "plan", label: "Your plans" },
   { group: "key", label: "API keys" },
-  { group: "local", label: "On this Mac or your network" },
+  { group: "local", label: "On this computer or your network" },
 ];
 
 /** "Desk, Ledger and Scout" */
 const names = (list: string[]): string =>
   list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
 
-/** What agents on this Mac can think with: plans, API keys and models
+/** What agents on this computer can think with: plans, API keys and models
  *  running here, and where new agents start. */
 export function Providers() {
   const { providers, loaded, problem, load } = useProviderList({ fresh: true });
@@ -38,7 +38,7 @@ export function Providers() {
       <header>
         <h1 className="display-lg">Providers</h1>
         <p className="muted">
-          Connect what your agents on this Mac can think with. Each agent picks its own provider, model and effort in its settings.
+          Connect what your agents on this computer can think with. Each agent picks its own provider, model and effort in its settings.
         </p>
       </header>
 
@@ -78,7 +78,7 @@ export function Providers() {
         );
       })}
 
-      <p className="small faint">Keys are kept in this Mac’s vault and never leave it except to call the provider. Speech keys live under Voices.</p>
+      <p className="small faint">Keys are kept in this computer’s vault and never leave it except to call the provider. Speech keys live under Voices.</p>
 
       {choosing && (
         <BrainDialog
@@ -129,7 +129,7 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
   const status = (() => {
     if (provider.connect.kind === "login" && login.status) return login.status;
     if (login.installed === false && login.plan && !provider.connected) {
-      return `Signing in needs ${CLI_NAME[login.plan]}, which isn’t on this Mac yet. Desk can install it.`;
+      return `Signing in needs ${CLI_NAME[login.plan]}, which isn’t on this computer yet. Desk can install it.`;
     }
     if (provider.connected) {
       return confirming ? `${names(usedBy)} ${usedBy.length === 1 ? "uses" : "use"} it. Disconnect anyway?` : null;
@@ -139,7 +139,7 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
 
   const action = (() => {
     if (provider.connected) {
-      // Plans connected before this Mac could list providers sign in again
+      // Plans connected before this computer could list providers sign in again
       // rather than disconnect.
       if (fallback) return <PlanLoginAction login={login} label="Reconnect" signal={false} />;
       if (confirming) {

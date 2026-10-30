@@ -53,7 +53,7 @@ describe("an agent's abilities", () => {
     expect(abilitiesOf(`[self_learning]\nmax_rounds = 10\n`).learn).toBe(false);
   });
 
-  it("read lessons as on only when both halves are, and angles within what this Mac runs at once", () => {
+  it("read lessons as on only when both halves are, and angles within what this computer runs at once", () => {
     expect(abilitiesOf(`[memory]\nlesson_inject = false\n`).lessons).toBe(false);
     expect(abilitiesOf(`[advisor.fanout]\nmax_lenses = 8\n`).angles).toBe(3);
     expect(abilitiesOf(`[advisor]\ncc_effort = "low"\n`).advisorEffort).toBe("high");

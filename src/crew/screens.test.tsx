@@ -198,7 +198,7 @@ describe("Files", () => {
     render(<AgentFiles agent={agent} />);
     await screen.findByDisplayValue("# Soul");
     fireEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByText(/Earlier versions aren’t kept on this Mac yet/)).toBeTruthy();
+    expect(await screen.findByText(/Earlier versions aren’t kept on this computer yet/)).toBeTruthy();
   });
 });
 

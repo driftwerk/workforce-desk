@@ -150,7 +150,7 @@ describe("a hub link", () => {
     await vi.waitFor(() => expect(unavailable).toHaveBeenCalledWith("legacy"));
   });
 
-  it("is given up when the hub takes this Mac for nobody", async () => {
+  it("is given up when the hub takes this computer for nobody", async () => {
     const unavailable = vi.fn();
     vi.stubGlobal(
       "fetch",

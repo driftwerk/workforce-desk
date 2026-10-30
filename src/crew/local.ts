@@ -93,7 +93,7 @@ const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: st
   await hub.saveIdentityFile(id, file, change(text));
 };
 
-/** A new agent on this Mac, thinking with `brain`, with its files written
+/** A new agent on this computer, thinking with `brain`, with its files written
  *  from its name and what it's for. */
 export async function createLocalAgent(
   hub: DeskHub,

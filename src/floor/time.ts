@@ -15,7 +15,7 @@ export const since = (iso: string | null | undefined, now = Date.now()): string 
   return d === 1 ? "1 day" : `${d} days`;
 };
 
-/** "10:24", in this Mac's time. */
+/** "10:24", in this computer's time. */
 export const clock = (iso: string | number | Date): string => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -27,7 +27,7 @@ const startOfDay = (t: number): number => {
   return d.getTime();
 };
 
-/** The start of the day `at` is in, in this Mac's time. */
+/** The start of the day `at` is in, in this computer's time. */
 export const startOfLocalDay = (at: Date | number = Date.now()): Date => new Date(startOfDay(new Date(at).getTime()));
 
 /** The next local midnight after `at`. */

@@ -7,26 +7,26 @@ export interface PlanSource {
   label: string;
   local: boolean;
   usage: UsageView;
-  /** The hub's clock less this Mac's. */
+  /** The hub's clock less this computer's. */
   offset: number;
 }
 
 /** One plan account's card: its freshest reading wherever it came from; a
- *  login with none yet; or, on this Mac, no sign-in at all. */
+ *  login with none yet; or, on this computer, no sign-in at all. */
 export interface PlanCard {
   key: string;
   kind: PlanKind;
   plan: string | null;
-  /** Where its reading came from: "this Mac", or a remote hub's name. */
+  /** Where its reading came from: "this computer", or a remote hub's name. */
   where: string;
   state: "reading" | "no-reading" | "signed-out";
-  /** In this Mac's time. */
+  /** In this computer's time. */
   reading: PlanReading | null;
 }
 
 export const KINDS: readonly PlanKind[] = ["claude", "chatgpt"];
 
-const whereOf = (s: PlanSource): string => (s.local ? "this Mac" : s.label);
+const whereOf = (s: PlanSource): string => (s.local ? "this computer" : s.label);
 
 const shifted = (r: PlanReading, offset: number): PlanReading => ({
   ...r,
@@ -44,7 +44,7 @@ interface Seen {
  *  account through several logins are one card, the freshest shown); a
  *  reading that names no account joins the only card of its kind, else has
  *  its own; a kind with no reading has a card while some login of it is
- *  signed in, or on this Mac while none is. */
+ *  signed in, or on this computer while none is. */
 export const plans = (sources: readonly PlanSource[]): PlanCard[] => {
   const seen: Seen[] = sources.flatMap((s) =>
     s.usage.readings.map((r) => ({ reading: shifted(r, s.offset), where: whereOf(s), from: `${s.hubId}:${r.where}` })),
@@ -74,7 +74,7 @@ export const plans = (sources: readonly PlanSource[]): PlanCard[] => {
   const empty = KINDS.filter((kind) => !cards.some((c) => c.kind === kind)).flatMap((kind): PlanCard[] => {
     const signedIn = sources.find((s) => s.usage.logins.some((l) => l.kind === kind && l.signedIn));
     if (signedIn) return [{ key: `${kind}@none`, kind, plan: null, where: whereOf(signedIn), state: "no-reading", reading: null }];
-    return sources.some((s) => s.local) ? [{ key: `${kind}@out`, kind, plan: null, where: "this Mac", state: "signed-out", reading: null }] : [];
+    return sources.some((s) => s.local) ? [{ key: `${kind}@out`, kind, plan: null, where: "this computer", state: "signed-out", reading: null }] : [];
   });
   return [...cards, ...empty].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind));
 };

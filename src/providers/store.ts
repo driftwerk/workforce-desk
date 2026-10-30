@@ -36,7 +36,7 @@ interface ProvidersState {
   disconnect: (hub: DeskHub, id: string) => Promise<void>;
 }
 
-/** What agents on this Mac can think with, shared by every screen that
+/** What agents on this computer can think with, shared by every screen that
  *  shows it. */
 export const useProviders = create<ProvidersState>((set, get) => ({
   providers: [],

@@ -33,7 +33,7 @@ interface Card {
 const cardsFor = (custom: readonly ThemeSpec[], systemDark: boolean): Card[] => [
   { id: "night", spec: NIGHT, label: "Night", sub: "Default dark" },
   { id: "day", spec: DAY, label: "Day", sub: "Default light" },
-  { id: "system", spec: systemDark ? NIGHT : DAY, label: "Match system", sub: "Night or Day with macOS" },
+  { id: "system", spec: systemDark ? NIGHT : DAY, label: "Match system", sub: "Night or Day with your system" },
   ...allThemes(custom)
     .filter((t) => t.id !== "night" && t.id !== "day")
     .map((t) => ({ id: t.id, spec: t, label: t.name, sub: isBuiltin(t.id) ? "Built in" : `Yours · ${t.id}.toml` })),
@@ -304,7 +304,7 @@ export function Appearance() {
                 Duplicate
               </button>
               <button type="button" className="btn" onClick={() => revealThemes().catch(fail)}>
-                Show in Finder
+                Show in folder
               </button>
             </div>
             <span className="small faint">Import reads VS Code, Ghostty, iTerm2 and base16 themes.</span>

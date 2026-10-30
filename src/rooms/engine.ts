@@ -365,7 +365,7 @@ export function answerPrompt(roomId: string, draftId: string, requestId: string,
 
 const DELETED_KEY = `${ROOMS_PREFIX}deleted`;
 /** How many deleted rooms Desk remembers, to tell their late messages from
- *  another Mac's rooms'. */
+ *  another computer's rooms'. */
 const DELETED_KEPT = 500;
 
 const deletedRooms = (): ReadonlySet<string> => {
@@ -384,7 +384,7 @@ const roomOfHub = (): DeskHub => {
   return hub;
 };
 
-/** Drains your conversations on every paired hub into this Mac's rooms. */
+/** Drains your conversations on every paired hub into this computer's rooms. */
 export const drainer = new Drainer({
   read: readConversation,
   post: async (roomId, m) => {

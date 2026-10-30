@@ -9,7 +9,7 @@ export const at = (min: number, from = NOW): string => new Date(from - min * 60_
 
 export const hub = (id: string, over: Partial<HubAccount> = {}): HubAccount => ({
   id,
-  label: id === "local" ? "This Mac" : `Hub ${id}`,
+  label: id === "local" ? "This computer" : `Hub ${id}`,
   url: `http://${id}.test`,
   local: id === "local",
   token: `t-${id}`,

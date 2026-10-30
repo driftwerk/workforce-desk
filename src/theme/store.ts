@@ -5,7 +5,7 @@ import { cssVariables, derive, type Theme, type ThemeSpec } from "./tokens";
 export type ThemeChoice = string | "system";
 
 /** The three looks the sidebar always offers: Auto (Night or Day with
- *  macOS), Night and Day. Every other theme is picked from the chooser. */
+ *  the system), Night and Day. Every other theme is picked from the chooser. */
 export const MODES = ["system", "night", "day"] as const;
 export type Mode = (typeof MODES)[number];
 

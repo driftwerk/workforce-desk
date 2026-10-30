@@ -18,7 +18,7 @@ export interface HubFloor {
   state: "loading" | "ready" | "failed" | "unsupported";
   floor: FloorView | null;
   usage: UsageView | null;
-  /** The hub's clock less this Mac's, from `asOf` when it was read. */
+  /** The hub's clock less this computer's, from `asOf` when it was read. */
   offset: number;
   /** The last read failed; what's shown is from `at`. */
   stale: boolean;
@@ -178,13 +178,13 @@ const supported = (): string[] =>
 
 const everyHub = (): string[] => useChat.getState().hubs.map((h) => h.id);
 
-/** The events of this Mac's hub after which its floor may differ. */
+/** The events of this computer's hub after which its floor may differ. */
 const MOVES = new Set<DeskEvent["type"]>(["snapshot", "session", "removed", "activity"]);
 
 /** The floor kept in step with the hubs: read when a hub is added or
  *  paired again (one removed is dropped), when its link says the floor
  *  changed (see `floorHeard`), when Desk comes forward (asking again of hubs
- *  that had none), again at midnight for the new day, and on this Mac's hub
+ *  that had none), again at midnight for the new day, and on this computer's hub
  *  whenever its events say a session or the crew moved. */
 export const watchFloor = (): (() => void) => {
   const sync = (hubs: readonly HubAccount[], before: readonly HubAccount[]) => {

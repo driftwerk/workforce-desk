@@ -26,7 +26,7 @@ const said = (id: string, mark: HubMessage["mark"], from = "agent", text = id): 
 const where = { hubId: "dw", agentId: "allan", channel, rooms: { [MINE]: room }, deleted: new Set([GONE]) };
 
 describe("where a drained message goes", () => {
-  it("puts answers and deliveries in this Mac's room and thread, a deleted room's back to the hub, and leaves the rest", () => {
+  it("puts answers and deliveries in this computer's room and thread, a deleted room's back to the hub, and leaves the rest", () => {
     const plan = placements(
       [
         said("u1", { room: MINE }, "user"),

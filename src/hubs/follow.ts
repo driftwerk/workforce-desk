@@ -18,7 +18,7 @@ import { activeConversations } from "./surface";
 // deserves; on every floor or usage signal, the hub's floor is read.
 
 /** How far before Desk last looked it looks again: the hub's clock and
- *  this Mac's need not agree. */
+ *  this computer's need not agree. */
 export const SINCE_MARGIN_MS = 5 * 60_000;
 
 const seenKey = (hubId: string) => `${DRAIN_PREFIX}${hubId}.seen`;

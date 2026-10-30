@@ -125,7 +125,7 @@ const readAll = (order: string[]): Record<string, Grid> => {
   return grids;
 };
 
-/** A grid key someone else changed — the hub (another Mac, or after a
+/** A grid key someone else changed — the hub (another computer, or after a
  *  restart) or another of Desk's windows; null when it was removed. */
 export const heardGrid = (key: string, value: unknown): void => {
   if (key === INDEX_KEY) {

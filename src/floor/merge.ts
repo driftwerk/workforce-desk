@@ -26,8 +26,8 @@ export interface Merged {
   more: { done: number; lanes: number };
 }
 
-/** A hub's time in this Mac's, as `toISOString` writes it (so times from
- *  every hub compare as text): `offset` is the hub's clock less this Mac's. */
+/** A hub's time in this computer's, as `toISOString` writes it (so times from
+ *  every hub compare as text): `offset` is the hub's clock less this computer's. */
 export const shift = (iso: string, offset: number): string => new Date(Date.parse(iso) - offset).toISOString();
 const shiftOrNull = (iso: string | null, offset: number): string | null => (iso === null ? null : shift(iso, offset));
 
@@ -45,7 +45,7 @@ const whoKey = (hubId: string, w: Work | Lane): string => `${hubId}/${w.who.kind
 
 const ZERO: Merged = { needs: [], working: [], done: [], lanes: [], counts: { working: 0, needsYou: 0, doneToday: 0 }, more: { done: 0, lanes: 0 } };
 
-/** Every hub's floor as one, in this Mac's time; hubs that have none (yet,
+/** Every hub's floor as one, in this computer's time; hubs that have none (yet,
  *  or at all) add nothing, and one that couldn't be reached last time adds
  *  what it said before. */
 export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readonly HubAccount[]): Merged => {

@@ -398,7 +398,7 @@ export interface FloorView {
 
 export type PlanKind = "claude" | "chatgpt";
 
-/** Whose sign-in a reading is from: this Mac's CLI, or a login in the hub's vault. */
+/** Whose sign-in a reading is from: this computer's CLI, or a login in the hub's vault. */
 export type PlanWhere = "mac" | "hub";
 
 export interface PlanWindow {

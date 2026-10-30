@@ -1,7 +1,7 @@
 // What Desk restores, by key (`ui.main`, `window.main.<arrangement>`, and
 // later grids and terminals): kept in Desk's own file at once and on the
 // hub's Desk state store shortly after, so it comes back after a hub
-// restart, a quit, a crash or a restart of the Mac.
+// restart, a quit, a crash or a restart of the computer.
 //
 // The file (written by the native side, atomically) is what Desk reads
 // before it has a hub, and all it has while the hub has no state store; once
@@ -216,7 +216,7 @@ export class DeskStateStore {
     if (this.hub !== hub) return;
     this.hubHas = "yes";
     const theirs = new Map(remote.map((r) => [r.key, r]));
-    // What only this Mac has (everything, the first time) goes to the hub.
+    // What only this computer has (everything, the first time) goes to the hub.
     for (const [key, e] of this.entries) {
       const r = theirs.get(key);
       if (e.dirty || !r) this.pending.add(key);

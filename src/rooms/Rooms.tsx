@@ -203,7 +203,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // What the hub reports stands in until the providers list says more.
   const brainSubtitle =
     local && brain && provider && !fallback
-      ? [hub?.label ?? "This Mac", brainLine(brain, provider)].join(" · ")
+      ? [hub?.label ?? "This computer", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
   const subtitle = overseeing && tab === "chat" ? overseeingLine(roster, agent, overview, sessions, overseeing) : brainSubtitle;
@@ -218,7 +218,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
   // Who sent a message on is the hub's to say; where it doesn't, its
-  // wording tells, on this Mac, where the overseer is (under the name it
+  // wording tells, on this computer, where the overseer is (under the name it
   // had then).
   const crewNames = local ? roster.filter((a) => a.hubId === agent.hubId).flatMap((a) => [a.name, a.id]) : [];
   const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;

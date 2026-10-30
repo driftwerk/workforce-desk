@@ -73,7 +73,7 @@ describe("the plan cards", () => {
     );
     render(<PlanCards />);
     const claude = card("Claude plan usage");
-    expect(within(claude).getByText("Max · this Mac")).toBeTruthy();
+    expect(within(claude).getByText("Max · this computer")).toBeTruthy();
     expect(within(claude).getByText(`as of ${clock(at(1))}`)).toBeTruthy();
     expect(within(claude).getByText("40%").className).toBe("plan-ok");
     expect(within(claude).getByText(`resets ${clock(later(148))} · in 2h 28m`)).toBeTruthy();
@@ -123,11 +123,11 @@ describe("the plan cards", () => {
     expect(within(card("ChatGPT plan usage")).getByText("No reading yet. It shows after Codex next answers on this plan.")).toBeTruthy();
   });
 
-  it("offer sign-in on this Mac when no plan of a kind is, and nothing for a remote hub", async () => {
+  it("offer sign-in on this computer when no plan of a kind is, and nothing for a remote hub", async () => {
     show(usage({ logins: [] }));
     render(<PlanCards />);
     const claude = card("Claude plan usage");
-    expect(within(claude).getByText("Not signed in on this Mac, so there’s no usage to show.")).toBeTruthy();
+    expect(within(claude).getByText("Not signed in on this computer, so there’s no usage to show.")).toBeTruthy();
     await act(async () => fireEvent.click(within(claude).getByRole("button", { name: "Sign in to Claude" })));
     expect(startLogin).toHaveBeenCalledWith("claude");
     expect(within(card("ChatGPT plan usage")).getByRole("button", { name: "Sign in to ChatGPT" })).toBeTruthy();

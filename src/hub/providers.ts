@@ -1,4 +1,4 @@
-/** What an agent on this Mac can think with, as the hub's
+/** What an agent on this computer can think with, as the hub's
  *  `GET /api/desk/providers` lists it. */
 
 export type ProviderGroup = "plan" | "key" | "local";
@@ -51,7 +51,7 @@ export interface Provider {
 export const GROUPS: { id: ProviderGroup; label: string }[] = [
   { id: "plan", label: "Your plans" },
   { id: "key", label: "API keys" },
-  { id: "local", label: "On this Mac" },
+  { id: "local", label: "On this computer" },
 ];
 
 export const EFFORTS: Record<string, { name: string; short: string; long: string }> = {

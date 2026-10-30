@@ -193,7 +193,7 @@ const fixtures: Fixture[] = [
     group: "plan",
     description: "Your Pro or Max subscription",
     connected: true,
-    connect: { kind: "login", fields: [], hint: "Sign in with your Claude account. Desk keeps the login on this Mac." },
+    connect: { kind: "login", fields: [], hint: "Sign in with your Claude account. Desk keeps the login on this computer." },
     models: claudeModels(),
     efforts: CLAUDE_EFFORTS,
     defaultEffort: "medium",
@@ -204,7 +204,7 @@ const fixtures: Fixture[] = [
     group: "plan",
     description: "Your Plus or Pro subscription",
     connected: false,
-    connect: { kind: "login", fields: [], hint: "Sign in with your ChatGPT account. Desk keeps the login on this Mac." },
+    connect: { kind: "login", fields: [], hint: "Sign in with your ChatGPT account. Desk keeps the login on this computer." },
     models: [
       { id: "gpt-6-astra", name: "GPT-6 Astra", description: "Most capable — for hard, long-running work", default: false },
       { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", description: "Strong all-rounder", default: true },
@@ -335,7 +335,7 @@ const fixtures: Fixture[] = [
     id: "ollama",
     name: "Ollama",
     group: "local",
-    description: "Models running on this Mac",
+    description: "Models running on this computer",
     connected: false,
     connect: {
       kind: "probe",
@@ -389,7 +389,7 @@ export async function devHub<T>(method: string, path: string, body?: unknown): P
       // Ollama "starts" on the second look.
       probes += 1;
       p.connected = probes > 1;
-      if (p.connected) p.models = [{ id: "qwen3:32b", name: "qwen3:32b", description: "On this Mac · 20 GB", default: true }];
+      if (p.connected) p.models = [{ id: "qwen3:32b", name: "qwen3:32b", description: "On this computer · 20 GB", default: true }];
       else p.connect.hint = "Still not running. Start Ollama, then check again.";
     } else {
       const missing = p.connect.fields.find((f) => !f.label.includes("optional") && !fields[f.name]?.trim());

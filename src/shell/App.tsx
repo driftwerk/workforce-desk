@@ -81,7 +81,7 @@ export function App() {
 
   useEffect(watchFloor, []);
 
-  // Agents on this Mac still greeting with the hub's WELCOME.md get Desk's.
+  // Agents on this computer still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);
   const localIds = useChat((s) =>
     s.roster

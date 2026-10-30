@@ -90,7 +90,7 @@ export function ThemeSwitcher({ onSettings }: { onSettings: () => void }) {
             role="radio"
             aria-checked={choice === id}
             tabIndex={i === (checked < 0 ? 0 : checked) ? 0 : -1}
-            title={id === "system" ? "Night or Day, with macOS" : undefined}
+            title={id === "system" ? "Night or Day, with your system" : undefined}
             onClick={() => setChoice(id)}
             onKeyDown={(e) => radioKeys(e, MODE_NAMES, checked, ([next]) => setChoice(next))}
           >

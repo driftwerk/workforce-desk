@@ -40,7 +40,7 @@ describe("plan cards", () => {
 
   it("are two for two accounts of one kind, each said where", () => {
     const cards = plans([source("local", { readings: [reading()] }), source("b", { readings: [reading({ account: "acct-2", where: "hub" })] })]);
-    expect(cards.filter((c) => c.kind === "claude").map((c) => c.where)).toEqual(["this Mac", "Hub b"]);
+    expect(cards.filter((c) => c.kind === "claude").map((c) => c.where)).toEqual(["this computer", "Hub b"]);
   });
 
   it("put a reading with no account with the only card of its kind, else on its own", () => {
@@ -56,7 +56,7 @@ describe("plan cards", () => {
     expect(two.filter((c) => c.kind === "claude")).toHaveLength(3);
   });
 
-  it("wait for a reading while signed in, and offer sign-in on this Mac only", () => {
+  it("wait for a reading while signed in, and offer sign-in on this computer only", () => {
     const signedIn = plans([source("b", { logins: [{ kind: "chatgpt", where: "hub", signedIn: true }] })]);
     expect(signedIn).toEqual([expect.objectContaining({ kind: "chatgpt", state: "no-reading", where: "Hub b" })]);
     const local = plans([source("local", { logins: [{ kind: "chatgpt", where: "mac", signedIn: false }], readings: [reading()] })]);
@@ -67,7 +67,7 @@ describe("plan cards", () => {
     expect(plans([source("b", { logins: [{ kind: "chatgpt", where: "hub", signedIn: false }] })])).toEqual([]);
   });
 
-  it("show a hub's times in this Mac's clock", () => {
+  it("show a hub's times in this computer's clock", () => {
     const [card] = plans([source("b", { readings: [reading({ where: "hub" })] }, { offset: 60_000 })]);
     expect(card!.reading!.observedAt).toBe(at(2));
     expect(card!.reading!.windows[0]!.resetsAt).toBe(later(147));

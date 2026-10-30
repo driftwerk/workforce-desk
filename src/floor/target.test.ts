@@ -14,7 +14,7 @@ describe("where a need or a turn opens", () => {
       expect(targetOf({ who: agent("scout"), place }, "b", rooms)).toEqual({ kind: "agent", key: "b/scout" });
   });
 
-  it("opens a room this Mac has, at its thread, and the DM for a room it doesn't", () => {
+  it("opens a room this computer has, at its thread, and the DM for a room it doesn't", () => {
     expect(targetOf({ who: agent("scout"), place: { kind: "room", room: "r1", thread: "m-9" } }, "local", rooms)).toEqual({
       kind: "room",
       roomId: "r1",
@@ -25,7 +25,7 @@ describe("where a need or a turn opens", () => {
       key: "b/scout",
     });
     expect(placeLabel({ kind: "room", room: "r1", thread: null }, rooms)).toBe("in Launch");
-    expect(placeLabel({ kind: "room", room: "elsewhere", thread: null }, rooms)).toBe("in a room on another Mac");
+    expect(placeLabel({ kind: "room", room: "elsewhere", thread: null }, rooms)).toBe("in a room on another computer");
   });
 
   it("opens Slack where the turn was", () => {

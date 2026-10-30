@@ -36,7 +36,7 @@ describe("every hub's floor as one", () => {
     expect(m.more).toEqual({ done: 2, lanes: 1 });
   });
 
-  it("shows a hub's times in this Mac's clock", () => {
+  it("shows a hub's times in this computer's clock", () => {
     const m = merged(
       {
         b: ready(

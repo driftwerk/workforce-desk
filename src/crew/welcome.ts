@@ -7,7 +7,7 @@ const HUB_WELCOME =
   "If memory/ is empty, just introduce yourself based on your identity.\n" +
   "Keep it to 2-3 sentences. Don't mention or apologise about empty files.\n";
 
-/** The WELCOME.md agents on this Mac start with: a greeting that fits how
+/** The WELCOME.md agents on this computer start with: a greeting that fits how
  *  long it's been since you last spoke. */
 export const DESK_WELCOME = `# WELCOME.md — Dynamic Session Start Greeting
 

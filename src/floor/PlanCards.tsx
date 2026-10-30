@@ -120,13 +120,13 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
   );
 }
 
-/** No plan of this kind signed in on this Mac: sign in here. */
+/** No plan of this kind signed in on this computer: sign in here. */
 function SignIn({ kind }: { kind: PlanKind }) {
   const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
   const login = usePlanLogin(kind, () => local && ask([local]));
   return (
     <div className="plan-signin">
-      <p className="muted small">Not signed in on this Mac, so there’s no usage to show.</p>
+      <p className="muted small">Not signed in on this computer, so there’s no usage to show.</p>
       <PlanLoginAction login={login} label={`Sign in to ${NAME[kind]}`} />
       {login.status && (
         <span className={`small ${login.failed ? "state-blocked" : "muted"}`} role="status">

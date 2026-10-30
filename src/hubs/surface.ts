@@ -51,14 +51,14 @@ export const decideApproval = async (hub: HubAccount, requestId: string, choice:
   return ((await res.json()) as { status: Decided }).status;
 };
 
-/** Unpairs this device from `hub`, so what it set up for rooms on this Mac
+/** Unpairs this device from `hub`, so what it set up for rooms on this computer
  *  goes to your DM instead. A hub too old to have the route, or one that
  *  can't be reached, is left as it is. */
 export const revokeSelf = async (hub: HubAccount): Promise<void> => {
   try {
     const res = await call(hub, "POST", "/api/pair/device/revoke-self");
-    if (!res.ok && !absent(res)) console.warn(`${hub.label} didn't unpair this Mac: ${(await refusal(res)).message}`);
+    if (!res.ok && !absent(res)) console.warn(`${hub.label} didn't unpair this computer: ${(await refusal(res)).message}`);
   } catch (e) {
-    console.warn(`couldn't reach ${hub.label} to unpair this Mac:`, e);
+    console.warn(`couldn't reach ${hub.label} to unpair this computer:`, e);
   }
 };

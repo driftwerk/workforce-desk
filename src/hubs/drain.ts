@@ -6,13 +6,13 @@ import { roomChannel } from "../rooms/routing";
 
 // Draining a Desk conversation: everything a hub saved in one of your
 // conversations since Desk last looked, read by cursor and put where it
-// belongs. An agent's answer or delivery for one of this Mac's rooms is
+// belongs. An agent's answer or delivery for one of this computer's rooms is
 // posted into it, keyed by the message it is so posting it twice is a
-// no-op; one for a room this Mac deleted goes back to the hub to land in
+// no-op; one for a room this computer deleted goes back to the hub to land in
 // your DM; a DM's is read again where it's shown.
 
 /** The key a message an agent said on a hub is posted under, the same one
- *  the hub's own posts into this Mac's rooms use. */
+ *  the hub's own posts into this computer's rooms use. */
 export const sourceKey = (hubId: string, agentId: string, messageId: string): string => `${hubId}/${agentId}/${messageId}`;
 
 /** Where Desk keeps how far it has drained a conversation. */
@@ -31,14 +31,14 @@ export interface Where {
   hubId: string;
   agentId: string;
   channel: string;
-  /** This Mac's rooms, by id. */
+  /** This computer's rooms, by id. */
   rooms: Record<string, Room>;
-  /** Rooms this Mac deleted. */
+  /** Rooms this computer deleted. */
   deleted: ReadonlySet<string>;
 }
 
 /** Where each of `messages` goes. What you said is in the room already, and
- *  a message for a room this Mac doesn't have (another Mac's) or that
+ *  a message for a room this computer doesn't have (another computer's) or that
  *  names no room is left alone. */
 export const placements = (messages: readonly HubMessage[], at: Where): Placement[] =>
   messages.map((message): Placement => {

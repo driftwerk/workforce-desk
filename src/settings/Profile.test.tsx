@@ -7,7 +7,7 @@ import { PNG_BYTES } from "../pictures/testing";
 import { Profile } from "./Profile";
 
 const hub = (id: string, label: string, local = false): HubAccount => ({ id, label, url: `https://${id}.example`, local, token: `t-${id}` });
-const HUBS = [hub("local", "This Mac", true), hub("dw", "Driftwerk"), hub("acme", "Acme"), hub("lab", "Lab")];
+const HUBS = [hub("local", "This computer", true), hub("dw", "Driftwerk"), hub("acme", "Acme"), hub("lab", "Lab")];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /** Each hub as it knows you (none: this computer's doesn't), refusing
@@ -43,7 +43,7 @@ describe("your Profile", () => {
     const dw = await screen.findByRole("article", { name: "Driftwerk" });
     expect(await within(dw).findByText("From Slack (Acme Slack)")).toBeTruthy();
     expect(within(await screen.findByRole("article", { name: "Acme" })).getByText("No picture")).toBeTruthy();
-    expect(within(screen.getByRole("article", { name: "This Mac" })).getByText(/Connect to This Mac as yourself/)).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "This computer" })).getByText(/Connect to This computer as yourself/)).toBeTruthy();
   });
 
   it("uses one picture everywhere it may, saying where it couldn't", async () => {

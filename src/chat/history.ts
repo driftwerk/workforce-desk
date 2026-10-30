@@ -155,7 +155,7 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
 const LOOK_BACK = 50;
 
 /** How much earlier than a live message the hub's copy of it may say it
- *  was (the hub's clock and this Mac's need not agree). */
+ *  was (the hub's clock and this computer's need not agree). */
 const SKEW_MS = 2 * 60_000;
 
 /** Whether the hub's `k` could be the live `m`: it says the same, and isn't

@@ -36,7 +36,7 @@ export interface Abilities {
 export type AdvisorEffort = "medium" | "high" | "max";
 export type KnowHow = "off" | "shadow" | "on";
 
-/** At most this many Claude Code runs at once on this Mac (Desk Helper's
+/** At most this many Claude Code runs at once on this computer (Desk Helper's
  *  `hub_max_concurrent_cc`): more angles than that would wait on each other. */
 export const MAX_ANGLES = 3;
 

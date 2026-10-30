@@ -249,7 +249,7 @@ export class DeskHub {
     this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, systemPrompt === undefined ? { name } : { name, system_prompt: systemPrompt });
   /** Chooses a picture for an agent here (null: none); the one it shows after. */
   setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => sendPicture(this.conn, agentPicturePath(id), image);
-  /** What agents on this Mac can think with, connected or not. */
+  /** What agents on this computer can think with, connected or not. */
   providers = async (): Promise<Provider[]> =>
     (await this.desk<{ providers: Provider[] }>("GET", "/api/desk/providers")).providers;
   /** Connects a provider with its fields (keys, an address); answers with

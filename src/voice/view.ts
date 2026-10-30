@@ -42,7 +42,7 @@ export const pillView = (
       return {
         agent: null,
         title: "Getting voice ready",
-        detail: `${Math.round(s.progress * 100)}% · a one-time download, kept on this Mac`,
+        detail: `${Math.round(s.progress * 100)}% · a one-time download, kept on this computer`,
         step: null,
         progress: s.progress,
       };

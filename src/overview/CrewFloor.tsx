@@ -42,7 +42,7 @@ interface FloorGroup {
 const NOT_WAITING: Partial<Record<OverviewItem["state"], OverviewItem["state"]>> = { needs_you: "idle" };
 
 /** Every session Desk knows, grouped as the Floor always has, with the crew's
- *  agents beside them in the matching group. With `needs` (this Mac's hub's
+ *  agents beside them in the matching group. With `needs` (this computer's hub's
  *  floor), an item needs you iff it has an open need. */
 export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyMap<ItemKey, number> | null = null, hubId: string | null = null): FloorGroup[] => {
   const groups = new Map<string, FloorGroup>(ORDER.map((title) => [title, { title, agents: [], sessions: [] }]));

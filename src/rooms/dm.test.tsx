@@ -159,7 +159,7 @@ describe("a DM turn the overseer sent on", () => {
     expect(document.querySelectorAll(".msg-via")).toHaveLength(0);
   });
 
-  it("is only looked for on this Mac, where the overseer is", () => {
+  it("is only looked for on this computer, where the overseer is", () => {
     show(history({ messages: [msg("h1", "user", "Allan asks: is this you?", "2026-10-28T09:00:00Z")] }));
     expect(heads()).toEqual(["You"]);
     expect(texts()).toEqual(["Allan asks: is this you?"]);

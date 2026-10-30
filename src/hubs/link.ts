@@ -20,7 +20,7 @@ export interface Delivered {
   spoken: boolean;
 }
 
-/** Why a hub has no link for Desk: it is too old to have one, or this Mac
+/** Why a hub has no link for Desk: it is too old to have one, or this computer
  *  is paired to it as nobody (`link_requires_identity`). */
 export type Unlinked = "legacy" | "unlinked";
 
@@ -46,7 +46,7 @@ export const linkUrl = (hub: HubAccount): string => {
 };
 
 /** Why a link that wouldn't open didn't: the route is missing, the hub
- *  takes this Mac for nobody, or neither (try again). A socket can't say
+ *  takes this computer for nobody, or neither (try again). A socket can't say
  *  how its upgrade was refused, so the hub is asked over HTTP. */
 export const probeLink = async (hub: HubAccount): Promise<Unlinked | null> => {
   try {

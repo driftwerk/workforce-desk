@@ -21,7 +21,7 @@ export function RestoreBanner() {
       <div className="restore-head">
         <span className="restore-text">
           <b>
-            {restore.length} session{restore.length === 1 ? " was" : "s were"} open when your Mac stopped
+            {restore.length} session{restore.length === 1 ? " was" : "s were"} open when your computer stopped
           </b>
           <span className="muted small">Each one resumes the same conversation in its own folder.</span>
         </span>

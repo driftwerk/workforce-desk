@@ -246,7 +246,7 @@ export function HowTheyRemember({ agent, ago }: { agent: Agent; ago: (at: string
       </div>
       <Saving status={status} />
       <p className="ability-sub ability-note">
-        Remembering and tidying use your Claude plan, with a quicker model than their own. Memories stay on this Mac.
+        Remembering and tidying use your Claude plan, with a quicker model than their own. Memories stay on this computer.
       </p>
     </section>
   );
@@ -277,7 +277,7 @@ export function HowTheyWork({ agent }: { agent: Agent }) {
   const commitAngles = () => {
     const n = Number(angles.text.trim());
     if (!/^\d+$/.test(angles.text.trim()) || n < 1 || n > MAX_ANGLES) {
-      setAngles({ ...angles, problem: `Use 1 to ${MAX_ANGLES}: that’s as many as run at once on this Mac.` });
+      setAngles({ ...angles, problem: `Use 1 to ${MAX_ANGLES}: that’s as many as run at once on this computer.` });
       return;
     }
     if (n !== v.angles) update((x) => ({ ...x, angles: n }));

@@ -258,7 +258,7 @@ export function Sidebar({
         </div>
         <VoicePill />
         <You />
-        <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This Mac" : "Starting…"}</span>
+        <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This computer" : "Starting…"}</span>
         <ThemeSwitcher onSettings={onSettings} />
       </div>
     </nav>

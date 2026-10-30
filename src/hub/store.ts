@@ -29,7 +29,7 @@ interface DeskState {
   openId: string | null;
   view: View;
   error: string | null;
-  /** A detached grid's window, which leaves telling macOS of sessions'
+  /** A detached grid's window, which leaves telling the system of sessions'
    *  changes, and handing Desk's groups to the hub, to the main window. */
   detached: boolean;
   /** With `notify: false`, this is a detached grid's window. */
