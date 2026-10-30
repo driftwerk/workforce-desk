@@ -92,7 +92,7 @@ export function Terminal({
     const el = host.current;
     const turns = ["mousedown", "focus", "paste"] as const;
     for (const t of turns) el.addEventListener(t, turnedHere, true);
-    // Desk's own shortcuts (⌘T, ⌘N, ⌘,) reach Desk, not the shell.
+    // Desk's own shortcuts (New terminal, New session, Settings) reach Desk, not the shell.
     x.attachCustomKeyEventHandler((e) => {
       const keys = useSettings.getState().keys;
       const desks = (Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, keys[id]));

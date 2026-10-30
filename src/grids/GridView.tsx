@@ -146,7 +146,7 @@ export function GridName({ grid, className }: { grid: Grid; className: string })
   );
 }
 
-/** "New terminal ⌘T". */
+/** "New terminal", with its shortcut. */
 export function NewTerminalButton({ gridId }: { gridId: string }) {
   const keys = useSettings((s) => s.keys.newTerminal);
   return (
@@ -282,9 +282,9 @@ function PresetStrip({ gridId }: { gridId: string }) {
 
 
 /** The keys for filling grid `gridId` (while `enabled`: the grid is in
- *  sight): ⌘⇧↩ (as set in Settings) gives the focused pane the whole grid
- *  or gives it back; Esc gives it back, unless it was typed into a
- *  terminal, whose Esc is its own. */
+ *  sight): Fill the grid's shortcut (as set in Settings) gives the focused
+ *  pane the whole grid or gives it back; Esc gives it back, unless it was
+ *  typed into a terminal, whose Esc is its own. */
 export function useFillKeys(gridId: string | null, enabled: boolean) {
   useAppShortcut("fillPane", () => gridId && toggleFill(gridId), enabled && !!gridId);
   const filled = useGrids((s) => (gridId ? filledPane(s, gridId) : null));

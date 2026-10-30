@@ -521,7 +521,7 @@ export const newTerminal = (gridId: string): void => {
   else if (changePanes(gridId, (panes) => place(panes, { id, content }))) setFocus(gridId, id);
 };
 
-/** ⌘T in the main window: a new terminal in the grid the Grids view shows,
+/** New terminal's shortcut in the main window: a new terminal in the grid the Grids view shows,
  *  or in a new grid when it shows none. */
 export const newTerminalHere = (): void => newTerminal(shownGrid(get())?.id ?? createGrid());
 
