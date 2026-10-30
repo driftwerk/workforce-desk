@@ -345,6 +345,12 @@ export class DeskHub {
     const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${id}/messages`, m);
     return { message: body, created: status === 201 || (!!m.source && !body.source) };
   };
+  /** Posts thread message `id` to its room's timeline; `created` is false
+   *  when it was posted there already, and the copy then is the first. */
+  copyToRoom = async (roomId: string, id: string): Promise<{ message: RoomMessage; created: boolean }> => {
+    const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${roomId}/messages/${encodeURIComponent(id)}/copy`);
+    return { message: body, created: status === 201 };
+  };
   /** What's unread of this computer's places. */
   unread = (): Promise<UnreadSummary> => this.call("GET", "/api/desk/unread");
   /** Every read point this computer's hub keeps. */

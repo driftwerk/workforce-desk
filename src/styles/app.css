@@ -2014,3 +2014,47 @@ button.thread-bar:hover {
 .msg-steps[open] > summary {
   margin-bottom: 6px;
 }
+
+/* ── Message actions and notes ──────────────────────────────────────────── */
+
+.room-msg {
+  position: relative;
+}
+.msg-actions {
+  position: absolute;
+  top: -10px;
+  right: 0;
+  display: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  z-index: 1;
+}
+.room-msg:hover > .msg-actions,
+.room-msg:focus-within > .msg-actions {
+  display: flex;
+}
+.msg-action {
+  border: 0;
+  background: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--muted);
+}
+.msg-action:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.msg-note {
+  margin-left: 6px;
+}
+.also-in-room {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  color: var(--muted);
+}

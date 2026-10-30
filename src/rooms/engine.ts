@@ -2,7 +2,7 @@ import { BUSY, Conversation, type ConversationState, type Turn } from "../chat/c
 import { readConversation } from "../chat/history";
 import { useChat } from "../chat/store";
 import { FEATURES, type Attachment, type DeskSpeaker, type DeskTurn, type HubAccount, type PermissionChoice } from "../chat/types";
-import type { DeskHub } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMemberRef, RoomMessage } from "../hub/types";
 import { Drainer, sourceKey } from "../hubs/drain";
@@ -589,7 +589,13 @@ async function bringIn(desk: DeskHub, room: Room, text: string): Promise<Room> {
 /** You say something in a room: anyone it names who isn't in the room is
  *  brought in, its files are sent to each member it addresses, it is
  *  kept, then each of them is asked. */
-export async function say(room: Room, text: string, threadId: string | null, files: readonly File[] = []): Promise<void> {
+export async function say(
+  room: Room,
+  text: string,
+  threadId: string | null,
+  files: readonly File[] = [],
+  opts: { alsoInRoom?: boolean } = {},
+): Promise<void> {
   const hub = useDesk.getState().hub;
   if (!hub || (!text.trim() && !files.length)) return;
   // What you say shows where you are, after the newest; an ask is told of
@@ -600,7 +606,9 @@ export async function say(room: Room, text: string, threadId: string | null, fil
     .catch(() => undefined);
   const here = await bringIn(hub, room, text);
   const { roster, hubs } = useChat.getState();
-  await speak(hub, here, text, threadId, files, addressees(text, here.members, roster, here.defaultMember, undefined, hubs));
+  await speak(hub, here, text, threadId, files, addressees(text, here.members, roster, here.defaultMember, undefined, hubs), {
+    alsoInRoom: !!threadId && opts.alsoInRoom,
+  });
 }
 
 /** You filled in a form an agent posted in a room: your answer is kept
@@ -610,7 +618,41 @@ export async function answerForm(room: Room, form: RoomMessage, answer: string):
   const hub = useDesk.getState().hub;
   const author = memberOf(form.author);
   if (!hub || !author) return;
-  await speak(hub, room, answer, form.threadId, [], [author], form.id);
+  await speak(hub, room, answer, form.threadId, [], [author], { inReplyTo: form.id });
+}
+
+/** Asks again what an answer answered, of the member who answered it, in
+ *  the same place; the files went with the first ask and are still in the
+ *  member's conversation. */
+export async function askAgain(room: Room, answer: RoomMessage): Promise<void> {
+  const member = memberOf(answer.author);
+  const hub = useDesk.getState().hub;
+  if (!member || !answer.inReplyTo || !hub) return;
+  let asked = useDesk.getState().timelines[room.id]?.find((m) => m.id === answer.inReplyTo);
+  if (!asked) {
+    try {
+      asked = await hub.roomMessage(room.id, answer.inReplyTo);
+    } catch (e) {
+      throw e instanceof HubError && e.status === 404 ? new Error("The message it answered was deleted.") : e;
+    }
+  }
+  const by = memberOf(asked.author);
+  ask(room, member, {
+    text: asked.content,
+    threadId: answer.threadId,
+    hop: asked.author === "you" ? 0 : asked.hop + 1,
+    speaker: by ? { kind: "agent", name: displayName(by) } : { kind: "person" },
+    message: asked.id,
+    attachments: [],
+  });
+}
+
+/** Posts thread message `m` to its room's timeline. */
+export async function postToRoom(room: Room, m: RoomMessage): Promise<void> {
+  const hub = useDesk.getState().hub;
+  if (!hub) return;
+  const posted = await hub.copyToRoom(room.id, m.id);
+  useDesk.getState().keep(posted.message, posted.created);
 }
 
 /** What you said in `here`, kept and asked of `to`, each sent the files. */
@@ -621,7 +663,7 @@ async function speak(
   threadId: string | null,
   files: readonly File[],
   to: RoomMemberRef[],
-  inReplyTo?: string,
+  opts: { inReplyTo?: string; alsoInRoom?: boolean } = {},
 ): Promise<void> {
   if (files.length && !to.length) throw new Error("Mention someone in the room to send the files to.");
   const sent = await Promise.all(
@@ -636,7 +678,8 @@ async function speak(
     content: text,
     threadId,
     attachments: sent[0] ?? [],
-    ...(inReplyTo ? { inReplyTo } : {}),
+    ...(opts.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
+    ...(opts.alsoInRoom ? { alsoInRoom: true } : {}),
   });
   useDesk.getState().keep(posted.message, posted.created);
   to.forEach((m, i) =>
@@ -655,6 +698,19 @@ export async function closeRoom(room: Room): Promise<void> {
       return hub ? closeConversation(hub, m.agent, roomChannel(room)) : Promise.resolve();
     }),
   );
+}
+
+/** Takes member `m` out of `room`: what it's answering there is stopped
+ *  and what it was asked is cancelled first, so no late answer arrives to be
+ *  refused once it has left. */
+export async function removeMember(room: Room, m: RoomMemberRef): Promise<void> {
+  const hub = useDesk.getState().hub;
+  if (!hub) return;
+  const key = memberKey(m);
+  for (const a of [...asks.values()]) if (a.roomId === room.id && memberKey(a.member) === key && a.state === "queued") cancelAsk(room.id, a.id);
+  for (const d of useDesk.getState().roomDrafts[room.id] ?? []) if (d.member === key && d.state === "live") stop(room.id, d.id);
+  const updated = await hub.updateRoom(room.id, { members: room.members.filter((x) => memberKey(x) !== key) });
+  useDesk.setState((s) => ({ rooms: { ...s.rooms, [updated.id]: updated } }));
 }
 
 /** Closes conversations for rooms or members that are gone, and those on a

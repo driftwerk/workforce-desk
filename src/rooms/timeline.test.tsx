@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomDraft } from "../hub/store";
 import type { RoomMessage } from "../hub/types";
@@ -272,5 +272,49 @@ describe("what's unread in a room", () => {
     fireEvent.click(c, { altKey: true });
     await vi.waitFor(() => expect(putReads).toHaveBeenCalledWith([{ place: "room:r1", point: readTo(four[1]!), mark: "set" }]));
     expect(container.querySelector(".new-divider")?.nextElementSibling?.getAttribute("data-row")).toBe("c");
+  });
+});
+
+describe("acting on a message", () => {
+  const now = Date.now();
+  const asked = msg("q", now - 2000, { author: "you", content: "Which branch?" });
+  const answer = msg("a", now - 1000, { content: "Main.\nShip it.", inReplyTo: "q" });
+
+  it("asks someone about it from the bar: its quote and an @ go into the composer", async () => {
+    useDesk.setState({ timelines: { r1: [asked, answer] } });
+    render(<RoomView room={room} />);
+    const row = screen.getAllByRole("toolbar", { name: "Message actions" })[1]!;
+    fireEvent.click(within(row).getByRole("button", { name: "Ask…" }));
+    const box = screen.getByRole("combobox") as HTMLTextAreaElement;
+    await vi.waitFor(() => expect(box.value).toBe("> **Allan:** \n> Main.\n> Ship it.\n\n@"));
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("opens every action as a menu on Shift+F10", () => {
+    useDesk.setState({ timelines: { r1: [asked, answer] } });
+    const { container } = render(<Timeline room={room} thread={null} />);
+    const row = container.querySelector<HTMLElement>('[data-row="a"]')!;
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent?.replace(/T$|Alt\+click$/, ""))).toEqual([
+      "Reply in thread",
+      "Copy text",
+      "Ask…",
+      "Copy link",
+      "Ask again",
+      "Mark unread from here",
+      "Message Allan",
+      "Remove from room",
+    ]);
+  });
+
+  it("says where your answer went, and that a copy came from a thread", () => {
+    useDesk.setState({
+      timelines: { r1: [answer, msg("mine", now - 500, { author: "you", inReplyTo: "a" }), msg("c", now, { copyOf: "r9" })] },
+    });
+    render(<Timeline room={room} thread={null} />);
+    expect(screen.getByText("Sent to Allan")).toBeTruthy();
+    expect(screen.getByText(/↳ from a thread/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View thread" })).toBeTruthy();
   });
 });

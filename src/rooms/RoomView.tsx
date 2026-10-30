@@ -35,7 +35,17 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
   // Escape closes the list until you type on.
   const [dismissed, setDismissed] = useState<number | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
-  useFocusRequest(threadId ? `room:${room.id}/${threadId}` : `room:${room.id}`, field);
+  // Ask… on a message: its quote and an @ are added to what's typed, with
+  // the mention list open.
+  useFocusRequest(threadId ? `room:${room.id}/${threadId}` : `room:${room.id}`, field, (text) => {
+    const next = draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text;
+    setDraft(next);
+    setCaret(next.length);
+    setDismissed(null);
+    requestAnimationFrame(() => field.current?.setSelectionRange(next.length, next.length));
+  });
+  // A thread reply can go to the room's timeline too; never kept between sends.
+  const [alsoInRoom, setAlsoInRoom] = useState(false);
   const listId = useId();
 
   const typing = mentionAt(draft, caret);
@@ -67,7 +77,9 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
     setDraft("");
     setCaret(0);
     setSending(true);
-    say(room, text, threadId, picked)
+    const also = alsoInRoom;
+    setAlsoInRoom(false);
+    say(room, text, threadId, picked, { alsoInRoom: also })
       .then(() => files.sent(picked))
       .catch((err: unknown) => {
         setDraft(text);
@@ -156,6 +168,11 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
       <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length)}>
         {sending ? "Sending…" : "Send"}
       </button>
+      {threadId && (
+        <label className="also-in-room small">
+          <input type="checkbox" checked={alsoInRoom} onChange={(e) => setAlsoInRoom(e.target.checked)} /> Also send to the room
+        </label>
+      )}
     </form>
   );
 }

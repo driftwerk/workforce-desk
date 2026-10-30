@@ -16,6 +16,11 @@ import { useUnread } from "../unread/summary";
 import { Draft } from "./Draft";
 import { answerForm } from "./engine";
 import { Message } from "./Message";
+import { actionsFor, type ActionId } from "./actions";
+import { MessageActions, menuEntries, runAction } from "./MessageActions";
+import { Menu } from "../ui/Menu";
+import { openTarget } from "../shell/navigate";
+import { below, isMenuKey } from "../groups/rows";
 import { ThreadBar } from "./ThreadBar";
 import { useAuthor } from "./names";
 import { memberOf } from "./routing";
@@ -62,16 +67,51 @@ const NO_AUTHORS: string[] = [];
  *  answered to that agent, where the form is. Rendered again only when it
  *  changes, not as an answer streams in below it. */
 export const RoomMessageView = memo(function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; name: string; home?: string }) {
+  const author = useAuthor();
+  // Where your answer went: the agent whose message it answers.
+  const to = useDesk((s) => (m.author === "you" && m.inReplyTo ? s.timelines[room.id]?.find((x) => x.id === m.inReplyTo)?.author : undefined));
+  const toName = to && memberOf(to) ? author(to).name : null;
+  // Locked only once the answer is kept and asked; a send that failed
+  // unlocks it.
   const submitForm = useCallback(
-    (summary: string, values: Record<string, unknown>): boolean => {
-      if (!memberOf(m.author)) return false;
-      void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
-      return true;
-    },
+    (summary: string, values: Record<string, unknown>): Promise<boolean> =>
+      !memberOf(m.author)
+        ? Promise.resolve(false)
+        : answerForm(room, m, formAnswer(summary, values)).then(
+            () => true,
+            (e: unknown) => {
+              useDesk.getState().fail(e);
+              return false;
+            },
+          ),
     [room, m],
   );
   const message = useMemo(() => asChat(m), [m]);
   const member = useMemo(() => memberOf(m.author), [m.author]);
+  const roomId = room.id;
+  const { copyOf, postedToRoom } = m;
+  const chips = useMemo(
+    () => (
+      <>
+        {toName && <span className="chip msg-note">Sent to {toName}</span>}
+        {copyOf !== undefined && (
+          <span className="small faint msg-note">
+            ↳ from a thread
+            {copyOf && (
+              <>
+                {" · "}
+                <button type="button" className="link small" onClick={() => openTarget({ kind: "room", roomId, threadId: null, messageId: copyOf })}>
+                  View thread
+                </button>
+              </>
+            )}
+          </span>
+        )}
+        {postedToRoom && <span className="chip msg-note">Also in the room</span>}
+      </>
+    ),
+    [toName, copyOf, postedToRoom, roomId],
+  );
   return (
     <Message
       message={message}
@@ -80,6 +120,8 @@ export const RoomMessageView = memo(function RoomMessageView({ room, m, name, ho
       home={home}
       origin={member ?? undefined}
       steps={m.steps}
+      answered={m.answered}
+      chips={chips}
       onSubmitForm={submitForm}
     />
   );
@@ -270,16 +312,21 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     return () => void jumpers.delete(key);
   }, [key, jump]);
 
-  // Alt+click: unread from here.
-  const unreadHere = (e: MouseEvent, m: RoomMessage) => {
-    if (!e.altKey) return;
-    e.preventDefault();
-    e.stopPropagation();
+  const unreadFromHere = (m: RoomMessage) => {
     const i = messages.findIndex((x) => x.id === m.id);
     const p = unreadFrom(m, i > 0 ? messages[i - 1]! : null);
     void markUnread(readPlace, p);
     setDivider(key, p);
   };
+  // Alt+click: unread from here.
+  const unreadHere = (e: MouseEvent, m: RoomMessage) => {
+    if (!e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    unreadFromHere(m);
+  };
+  const run = (id: ActionId, m: RoomMessage) => runAction(id, room, m, { thread, name: author(m.author).name, markUnread: () => unreadFromHere(m) });
+  const [menu, setMenu] = useState<{ m: RoomMessage; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const divider = dividerBefore(messages, readAtOpen);
   const unreadNow = (m: RoomMessage) => countsAsUnread(m) && (!readNow || after(m, readNow.at));
 
@@ -337,6 +384,11 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     } else if (!thread && e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       setRoomThread(room.id, row.dataset.row!);
+    } else if (isMenuKey(e)) {
+      const m = messages.find((x) => x.id === row.dataset.row);
+      if (!m) return;
+      e.preventDefault();
+      setMenu({ m, at: below(row), from: row });
     }
   };
 
@@ -369,7 +421,26 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
             const a = author(m.author);
             const dayLine = dayBefore(m);
             const home = memberOf(m.author) ? a.home : undefined;
-            const row = { "data-row": m.id, "data-unread": unreadNow(m) ? "" : undefined, tabIndex: m.id === tabTo ? 0 : -1, onClickCapture: (e: MouseEvent) => unreadHere(e, m) };
+            const row = {
+              "data-row": m.id,
+              "data-unread": unreadNow(m) ? "" : undefined,
+              tabIndex: m.id === tabTo ? 0 : -1,
+              onClickCapture: (e: MouseEvent) => unreadHere(e, m),
+              onContextMenu: (e: MouseEvent) => {
+                if (typing(e.target)) return;
+                e.preventDefault();
+                setMenu({ m, at: { x: e.clientX, y: e.clientY }, from: e.currentTarget as HTMLElement });
+              },
+            };
+            const bar = (
+              <MessageActions
+                room={room}
+                m={m}
+                thread={thread}
+                onRun={(id) => run(id, m)}
+                onMore={(from) => setMenu({ m, at: below(from), from })}
+              />
+            );
             const fresh = m.id === divider && (
               <div className="new-divider" role="separator" aria-label="New messages">
                 <span>New</span>
@@ -382,6 +453,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
                   {fresh}
                   <div className="room-msg" {...row}>
                     <RoomMessageView room={room} m={m} name={a.name} home={home} />
+                    {bar}
                   </div>
                 </Fragment>
               );
@@ -393,6 +465,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
                 {fresh}
                 <div className="room-msg" {...row}>
                   <RoomMessageView room={room} m={m} name={a.name} home={home} />
+                  {bar}
                   <ThreadBar
                     room={room.id}
                     parent={m}
@@ -428,6 +501,17 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
           )}
         </div>
       </div>
+      {menu && (
+        <Menu
+          label="Message actions"
+          at={menu.at}
+          entries={menuEntries(actionsFor(menu.m, { inThread: !!thread, room, name: author(menu.m.author).name }), (id) => run(id, menu.m))}
+          onClose={(refocus) => {
+            if (refocus) menu.from?.focus();
+            setMenu(null);
+          }}
+        />
+      )}
       {shownPill && (
         <button type="button" className="jump-pill" title="Jump to new messages" aria-live="polite" onClick={() => void jump()}>
           {pillText(shownPill)} <span aria-hidden="true">{shownPill.dir === "up" ? "↑" : "↓"}</span>

@@ -137,3 +137,15 @@ describe("a reply arriving", () => {
     expect(again[0]!.replyAuthors).toEqual(["dw/allan", "dw/sarah", "local/scout"]);
   });
 });
+
+describe("what arrives says of others", () => {
+  it("locks a form you answered, and shows a thread message as also in the room once its copy comes", () => {
+    const form = msg("f", 0, { author: "local/allan" });
+    const reply = msg("r", 1, { author: "local/allan", threadId: "p" });
+    let t = arrived([form, reply], msg("ans", 2, { author: "you", inReplyTo: "f" }));
+    expect(t.find((m) => m.id === "f")?.answered).toBe(true);
+    t = arrived(t, msg("c", 3, { author: "local/allan", copyOf: "r" }));
+    expect(t.find((m) => m.id === "r")?.postedToRoom).toBe(true);
+    expect(arrived([form], msg("x", 4, { author: "local/allan", inReplyTo: "f" }))[0]!.answered).toBeUndefined();
+  });
+});

@@ -138,7 +138,15 @@ export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
 export const arrived = (timeline: RoomMessage[], message: RoomMessage, created = true): RoomMessage[] => {
   const fresh = created && !!message.threadId && !timeline.some((m) => m.id === message.id);
   const merged = merge(timeline, [message]);
-  return fresh ? merged.map((m) => (m.id === message.threadId ? counted(m, message) : m)) : merged;
+  const answered = message.author === "you" ? message.inReplyTo : null;
+  return merged.map((m) => {
+    let next = fresh && m.id === message.threadId ? counted(m, message) : m;
+    // A copy posted to the room shows on its original; your answer to a
+    // form locks it, as the hub reads them back.
+    if (m.id === message.copyOf && !m.postedToRoom) next = { ...next, postedToRoom: true };
+    if (m.id === answered && !m.answered) next = { ...next, answered: true };
+    return next;
+  });
 };
 
 /** `timeline` with thread `threadId` read: its parent counts the replies

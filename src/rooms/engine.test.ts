@@ -13,7 +13,8 @@ vi.mock("../restore/boot", () => ({
 const { useChat } = await import("../chat/store");
 const { emptyConversation } = await import("../chat/conversation");
 const { useDesk } = await import("../hub/store");
-const { say, answerForm, prune, closeRoom, retry, stop, cancelAsk, stopAll, stopTarget, RECONNECT_GRACE_MS } = await import("./engine");
+const { say, answerForm, prune, closeRoom, retry, stop, cancelAsk, stopAll, stopTarget, askAgain, postToRoom, removeMember, RECONNECT_GRACE_MS } =
+  await import("./engine");
 const { MAX_HOPS } = await import("./routing");
 
 const ROOM_ID = "6f1c2a4e-0b7d-4c55-9a51-3d2e8f9b1c07";
@@ -572,4 +573,59 @@ describe("asking a room's members", () => {
 });
 
 type RoomDraft = import("../hub/store").RoomDraft;
+
+describe("acting on a room's messages", () => {
+  it("asks again what an answer answered, of who answered it, fetching it when it isn't loaded", async () => {
+    const asked = { id: "q1", roomId: ROOM_ID, threadId: "t1", author: "you", content: "@allan is CI green?", hop: 0, createdAt: "" };
+    const roomMessage = vi.fn(async () => asked);
+    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage } as never }));
+    await askAgain(room, { id: "a1", roomId: ROOM_ID, threadId: "t1", author: "dw/allan", content: "Yes.", hop: 0, createdAt: "", inReplyTo: "q1" });
+    expect(roomMessage).toHaveBeenCalledWith(ROOM_ID, "q1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    expect(allan.chats[0]).toMatchObject({ content: "@allan is CI green?", desk: { message: "q1", hop: 0, speaker: { kind: "person" }, place: { thread: "t1" } } });
+  });
+
+  it("says so when what an answer answered was deleted", async () => {
+    const { HubError } = await import("../hub/client");
+    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage: vi.fn(async () => Promise.reject(new HubError(404, "gone"))) } as never }));
+    await expect(askAgain(room, { id: "a1", roomId: ROOM_ID, threadId: null, author: "dw/allan", content: "", hop: 0, createdAt: "", inReplyTo: "q1" })).rejects.toThrow(
+      "The message it answered was deleted.",
+    );
+  });
+
+  it("keeps a thread message's copy in the room, and shows the original as also in it", async () => {
+    const reply = { id: "r1", roomId: ROOM_ID, threadId: "t1", author: "dw/allan", content: "Shipped.", hop: 0, createdAt: "" };
+    const copyToRoom = vi.fn(async () => ({ message: { ...reply, id: "c1", threadId: null, hop: MAX_HOPS, copyOf: "r1" }, created: true }));
+    useDesk.setState((s) => ({ hub: { ...s.hub!, copyToRoom } as never, timelines: { [ROOM_ID]: [reply] } }));
+    await postToRoom(room, reply);
+    const timeline = useDesk.getState().timelines[ROOM_ID]!;
+    expect(timeline.find((m) => m.id === "c1")).toMatchObject({ copyOf: "r1", threadId: null });
+    expect(timeline.find((m) => m.id === "r1")?.postedToRoom).toBe(true);
+  });
+
+  it("posts a thread reply to the room too when asked, and only from a thread", async () => {
+    const seen: unknown[] = [];
+    useDesk.setState((s) => ({ hub: { ...s.hub!, post: async (_r: string, m: Posted) => (seen.push(m), { message: { ...m, id: "x", roomId: ROOM_ID, threadId: m.threadId ?? null, hop: 0, createdAt: "" }, created: true }) } as never }));
+    await say(room, "noted", "t1", [], { alsoInRoom: true });
+    await say(room, "noted", null, [], { alsoInRoom: true });
+    expect(seen).toEqual([expect.objectContaining({ threadId: "t1", alsoInRoom: true }), expect.not.objectContaining({ alsoInRoom: true })]);
+  });
+
+  it("stops a member's answer before taking it out of the room", async () => {
+    const updates: unknown[] = [];
+    useDesk.setState((s) => ({
+      hub: { ...s.hub!, updateRoom: async (id: string, patch: { members: typeof room.members }) => (updates.push(patch), { ...useDesk.getState().rooms[id]!, ...patch }) } as never,
+    }));
+    await say(room, "@allan one", "t1");
+    await say(room, "@allan two", "t2");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    await removeMember(room, { hub: "dw", agent: "allan" });
+    expect(allan.sent.filter((m) => m.type === "cancel")).toHaveLength(1);
+    expect(drafts().map((d) => d.state)).toEqual(["stopped"]);
+    expect(updates).toEqual([{ members: [{ hub: "local", agent: "scout" }] }]);
+    expect(allan.chats).toHaveLength(1);
+  });
+});
 type RoomDraftState = RoomDraft["state"];
