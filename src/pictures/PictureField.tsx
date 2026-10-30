@@ -22,8 +22,8 @@ export const refusalOf = async (file: File): Promise<string | null> => {
 };
 
 /** Someone's picture and where it came from, with choosing one (framed
- *  square), going back to their Slack picture, or removing the chosen one,
- *  where they can be changed. */
+ *  square), and letting the chosen one go (back to their Slack picture,
+ *  where they have one), where they can be changed. */
 export function PictureField({
   name,
   person = false,
@@ -46,6 +46,9 @@ export function PictureField({
   const [problem, setProblem] = useState<string | null>(null);
   const noteId = useId();
   const chosen = picture?.source === "chosen";
+  // Without the chosen one, the Slack picture shows if there is one: so
+  // there, letting the chosen one go is going back to it.
+  const slackBehind = picture?.slack != null;
 
   const unchoose = async () => {
     if (!onSet) return;
@@ -75,14 +78,9 @@ export function PictureField({
               <button type="button" className="btn" disabled={busy} onClick={() => input.current?.click()}>
                 Choose a picture…
               </button>
-              {chosen && picture?.slack != null && (
-                <button type="button" className="btn" disabled={busy} onClick={() => void unchoose()}>
-                  Use the Slack picture
-                </button>
-              )}
               {chosen && (
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void unchoose()}>
-                  Remove
+                <button type="button" className={`btn ${slackBehind ? "" : "btn-ghost"}`} disabled={busy} onClick={() => void unchoose()}>
+                  {slackBehind ? "Use the Slack picture" : "Remove"}
                 </button>
               )}
             </span>

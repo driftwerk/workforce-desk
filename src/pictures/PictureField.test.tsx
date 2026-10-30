@@ -16,7 +16,7 @@ describe("a picture's settings", () => {
     expect(pictureNote(chosen(true), new Date("2026-10-30T09:05:00Z"))).toBe("Chosen 5 minutes ago");
   });
 
-  it("offer the Slack picture back only while a chosen one overrides it, and Remove whenever one is chosen", async () => {
+  it("offer the Slack picture back while a chosen one overrides it, and Remove while there's none behind it", async () => {
     const onSet = vi.fn(() => Promise.resolve());
     const { rerender } = render(<PictureField name="Allan" picture={slack} src={null} onSet={onSet} />);
     expect(screen.getByRole("button", { name: "Choose a picture…" })).toBeTruthy();
@@ -26,7 +26,7 @@ describe("a picture's settings", () => {
     rerender(<PictureField name="Allan" picture={chosen(true)} src={null} onSet={onSet} />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use the Slack picture" })));
     expect(onSet).toHaveBeenLastCalledWith(null);
-    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
 
     rerender(<PictureField name="Allan" picture={{ ...chosen(true), slack: "" }} src={null} onSet={onSet} />);
     expect(screen.getByRole("button", { name: "Use the Slack picture" })).toBeTruthy();
