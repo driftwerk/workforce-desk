@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 use eyre::{Result, eyre};
 
 use super::gate::Speaking;
