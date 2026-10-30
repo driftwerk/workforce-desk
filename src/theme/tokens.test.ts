@@ -1,6 +1,7 @@
+import { differenceEuclidean, oklch } from "culori";
 import { describe, expect, it } from "vitest";
-import { DAY, HARBOUR, NIGHT } from "./builtin";
-import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS, monoStack } from "./tokens";
+import { BUILTIN, DAY, HARBOUR, NIGHT } from "./builtin";
+import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS, monoStack, type ThemeSpec } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 
 describe("themes", () => {
@@ -99,5 +100,75 @@ describe("a theme file from before chats and code had sizes", () => {
     expect(() => parseTheme("x", old.replace("size = 16", "size = 16\nchat_size = nan"))).toThrow(ThemeError);
     expect(() => parseTheme("x", old.replace("size = 16", "size = 16\ncode_size = \"big\""))).toThrow("[type].code_size must be a number from 9 to 22");
     expect(() => parseTheme("x", old.replace("size = 16", "size = 30"))).toThrow("[type].size must be a number from 10 to 22");
+  });
+});
+
+describe("state colours", () => {
+  const STATES = ["working", "blocked", "done", "ansiRed", "ansiGreen", "ansiCyan"] as const;
+  /** What `derive` gave every dark and every light theme before they followed its text. */
+  const BEFORE = {
+    dark: { working: "#7DB8FF", blocked: "#FFB547", done: "#6EE7A8", ansiRed: "#FF8A7A", ansiGreen: "#A6E37A", ansiCyan: "#8FD8E8" },
+    light: { working: "#1D5FD1", blocked: "#A85A00", done: "#17803F", ansiRed: "#B42318", ansiGreen: "#3F7A12", ansiCyan: "#0E7490" },
+  };
+  const distance = differenceEuclidean("oklab");
+  const DARK_BLUE: ThemeSpec = { ...NIGHT, id: "dark-blue", name: "Dark Blue", background: "#050812", signal: "#00A3D7", text: "#AFB1AD", overrides: {} };
+  /** A built-in's colours as `derive` makes them, with its text and none of its designed colours. */
+  const derivedOnly = (t: ThemeSpec) => derive({ ...t, text: t.overrides.text, overrides: {} });
+
+  const readable = (t: ThemeSpec) => {
+    const { colors: c } = derive(t);
+    for (const k of STATES) {
+      for (const ground of [c.bg, c.surface, c.sunken]) {
+        expect(contrast(c[k], ground), `${t.id}: ${k} ${c[k]} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    expect(contrast(c.onBlocked, c.blocked), `${t.id}: onBlocked`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(c.blocked, c.blockedSoft), `${t.id}: blocked on blockedSoft`).toBeGreaterThanOrEqual(4.5);
+  };
+
+  it("dim with a theme's grey text, and still read", () => {
+    const c = derive(DARK_BLUE).colors;
+    for (const k of STATES) {
+      expect(oklch(c[k])!.l, `${k} ${c[k]}`).toBeLessThan(oklch(BEFORE.dark[k])!.l - 0.1);
+      expect(Math.abs(oklch(c[k])!.h! - oklch(BEFORE.dark[k])!.h!), `${k} keeps its hue`).toBeLessThan(6);
+    }
+    expect(c.working).not.toBe("#7DB8FF");
+    readable(DARK_BLUE);
+    // The states stay told apart.
+    expect(new Set([c.working, c.blocked, c.done]).size).toBe(3);
+    expect(Math.min(distance(c.working, c.blocked), distance(c.blocked, c.done), distance(c.working, c.done))).toBeGreaterThan(0.15);
+  });
+
+  it("on Desk's own text, or text near it, are close to what they were", () => {
+    expect(STATES.map((k) => derive({ ...DARK_BLUE, text: undefined }).colors[k])).toEqual(STATES.map((k) => BEFORE.dark[k]));
+    for (const t of BUILTIN) {
+      const d = derivedOnly(t);
+      for (const k of STATES) {
+        const before = BEFORE[d.dark ? "dark" : "light"][k];
+        expect(distance(d.colors[k], before), `${t.id}: ${k} ${d.colors[k]} against ${before}`).toBeLessThan(0.03);
+      }
+      readable({ ...t, text: t.overrides.text, overrides: {} });
+    }
+  });
+
+  it("leave the built-ins' designed colours as they are", () => {
+    for (const t of BUILTIN) {
+      const c = derive(t).colors;
+      for (const k of [...STATES, "onBlocked", "blockedSoft"] as const) expect(c[k], `${t.id}: ${k}`).toBe(t.overrides[k]);
+    }
+  });
+
+  it("give way to the theme's own", () => {
+    const t = { ...DARK_BLUE, overrides: { working: "#7DB8FF", ansiRed: "#FF0000" } };
+    expect([derive(t).colors.working, derive(t).colors.ansiRed]).toEqual(["#7DB8FF", "#FF0000"]);
+  });
+
+  it("darken less with a light theme's grey text, and still read", () => {
+    const light: ThemeSpec = { ...DAY, id: "slate", text: "#4A4D52", overrides: {} };
+    const c = derive(light).colors;
+    expect(derive(light).dark).toBe(false);
+    for (const k of STATES) expect(oklch(c[k])!.l, `${k} ${c[k]}`).toBeGreaterThan(oklch(derivedOnly(DAY).colors[k])!.l - 0.001);
+    readable(light);
+    expect(c.onBlocked).toBe("#FFFFFF");
   });
 });
