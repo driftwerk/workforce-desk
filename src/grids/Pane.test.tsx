@@ -61,6 +61,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const grid = () => useGrids.getState().grids[MAIN_GRID]!;
+const paneOf = (sessionId: string) => grid().panes.find((p) => p.content?.kind === "session" && p.content.sessionId === sessionId)!;
+/** Lays the main grid out again with pane `keep` focused, so it stays. */
+const layOutFrom = (keep: string, preset: Parameters<typeof layOut>[1]) =>
+  act(() => {
+    useGrids.setState((s) => ({ focus: { ...s.focus, [MAIN_GRID]: keep } }));
+    layOut(MAIN_GRID, preset);
+  });
 const canvas = () => render(<Grid />);
 function Grid() {
   const g = useGrids((s) => s.grids[MAIN_GRID]!);
@@ -227,7 +234,7 @@ describe("a session renamed in Desk", () => {
     deliver(MAIN_GRID, sess("s1"));
     deliver(MAIN_GRID, sess("s3"));
     canvas();
-    act(() => layOut(MAIN_GRID, "halves"));
+    layOutFrom(paneOf("s0").id, "halves");
     // The header.
     const pane = screen.getByRole("region", { name: "date picker" });
     expect(within(pane).getByText("date picker")).toBeTruthy();
@@ -258,11 +265,7 @@ describe("a session renamed in Desk", () => {
     deliver(MAIN_GRID, sess("s1"));
     deliver(MAIN_GRID, sess("s2"));
     canvas();
-    const s1 = grid().panes.find((p) => p.content && (p.content as { sessionId: string }).sessionId === "s1")!;
-    act(() => {
-      useGrids.setState((s) => ({ focus: { ...s.focus, [MAIN_GRID]: s1.id } }));
-      layOut(MAIN_GRID, "one");
-    });
+    layOutFrom(paneOf("s1").id, "one");
     const tray = screen.getByRole("region", { name: "Parked (1)" });
     expect(within(tray).getByRole("button", { name: "date picker" })).toBeTruthy();
     expect(within(tray).getByRole("button", { name: "Remove date picker from grid" })).toBeTruthy();
