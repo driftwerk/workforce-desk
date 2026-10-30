@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type Ref } from "react";
 import { useChat } from "../chat/store";
-import { hasFloor, type FloorNeed } from "../floor/merge";
+import type { FloorNeed } from "../floor/merge";
 import { NeedRow } from "../floor/NeedRow";
 import { useMinute } from "../floor/RightNow";
 import { useWhoName } from "../floor/Row";
-import { useFloor, useNeeds, type Answered } from "../floor/store";
+import { useFloor, useLocalFloor, useNeeds, type Answered } from "../floor/store";
 import { clock } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
@@ -109,13 +109,11 @@ export function ActivityRail({
   closeRef?: Ref<HTMLButtonElement>;
 }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
-  const feed = useOverview((s) => s.feeds[filter]);
-  const { loadActivity, loadEarlier } = useOverview();
   const shown: ActivityFilter = filter === "manager" && !managerName ? "all" : filter;
-  const floorOn = hasFloor(
-    useFloor((s) => s.hubs),
-    useChat((s) => s.hubs),
-  );
+  const feed = useOverview((s) => s.feeds[shown]);
+  const loadActivity = useOverview((s) => s.loadActivity);
+  const loadEarlier = useOverview((s) => s.loadEarlier);
+  const floorOn = useLocalFloor();
   const needs = useNeeds();
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id);
   const now = useMinute();

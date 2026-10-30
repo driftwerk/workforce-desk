@@ -4,7 +4,7 @@ import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
-import { useFloor, useMerged, useNeedCounts } from "../floor/store";
+import { useLocalFloor, useMerged, useNeedCounts } from "../floor/store";
 import { Today } from "../floor/Today";
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
 import { sortedSessions, useDesk } from "../hub/store";
@@ -73,8 +73,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
   const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
-  const onFloor = useFloor((s) => !!localId && s.hubs[localId]?.state === "ready");
-  const anyFloor = useFloor((s) => Object.values(s.hubs).some((h) => h.state === "ready"));
+  const onFloor = useLocalFloor();
   const merged = useMerged();
   const needs = useNeedCounts();
   const now = useMinute();
@@ -83,7 +82,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
     const g = groups.find((x) => x.title === title);
     return (g?.agents.length ?? 0) + (g?.sessions.length ?? 0);
   };
-  const counts = anyFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
+  const counts = onFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
   const scroller = useSavedScroll<HTMLDivElement>("floor");
   const brief =
     overview.brief && manager?.agentId ? (

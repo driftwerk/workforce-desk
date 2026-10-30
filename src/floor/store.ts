@@ -265,6 +265,13 @@ export const useFloorTick = (on: boolean): void => {
   }, [on]);
 };
 
+/** Whether this computer's hub has a floor: with an older one, the Floor
+ *  and Activity stay as they were. */
+export const useLocalFloor = (): boolean => {
+  const localId = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  return useFloor((s) => !!localId && s.hubs[localId]?.state === "ready");
+};
+
 /** Every hub's floor as one. */
 export const useMerged = (): Merged => {
   const hubs = useFloor((s) => s.hubs);

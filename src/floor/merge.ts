@@ -72,7 +72,3 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     done: all.done.sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? "")),
   };
 };
-
-/** Whether any hub has a floor to show. */
-export const hasFloor = (hubs: Readonly<Record<string, HubFloor>>, hubList: readonly HubAccount[]): boolean =>
-  hubList.some((h) => hubs[h.id]?.state === "ready");

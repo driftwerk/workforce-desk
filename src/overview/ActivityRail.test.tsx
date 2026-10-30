@@ -104,6 +104,16 @@ describe("Activity with the floor", () => {
     expect(within(rail()).queryByRole("button", { name: "Allow" })).toBeNull();
   });
 
+  it("keeps the log's own Needs you while this computer's hub has no floor, whatever other hubs have", async () => {
+    useFloor.setState((s) => ({ hubs: { ...s.hubs, local: { ...s.hubs.local!, state: "unsupported", floor: null } } }));
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
+    const tab = within(rail()).getByRole("radio", { name: /Needs you/ });
+    expect(within(tab).queryByText("1")).toBeNull();
+    fireEvent.click(tab);
+    expect(await within(rail()).findByRole("list", { name: "Activity: Needs you" })).toBeTruthy();
+    expect(within(rail()).queryByRole("list", { name: "Still waiting on you" })).toBeNull();
+  });
+
   it("replies where the question was asked, its composer focused", () => {
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
