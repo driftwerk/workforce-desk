@@ -58,6 +58,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -78,7 +79,8 @@ describe("Activity with the floor", () => {
     expect(within(rail()).getByText("Only what’s still waiting on you. Answered or expired items leave this list.")).toBeTruthy();
   });
 
-  it("allows in place, and drops what was answered on the next read", async () => {
+  it("allows in place, and drops what was answered on the read that follows", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     hubs.local!.decide = () => {
       hubs.local!.floor = view();
       return 204;
@@ -87,6 +89,7 @@ describe("Activity with the floor", () => {
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
     await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
     expect(hubs.local!.decided).toEqual([{ at: { kind: "session", sessionId: "s-1", approvalId: "wait:t1:ap-2" }, choice: "allow" }]);
+    await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
     await act(() => useFloor.getState().load("local"));
     expect(within(rail()).queryByText("Run npm test?")).toBeNull();
     expect(within(within(rail()).getByRole("radio", { name: /Needs you/ })).getByText("1")).toBeTruthy();
