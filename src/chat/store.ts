@@ -130,19 +130,25 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   }));
 };
 
-/** You on `hub`, if it knows you. */
-const fetchMe = async (hub: HubAccount): Promise<Me | null> => {
+/** You on `hub`: null when it doesn't know you, undefined when it
+ *  couldn't say (unreachable, or failing). */
+const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
   try {
     const res = await hubFetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+    if (res.status >= 500) return undefined;
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
     const body = (await res.json()) as { id?: unknown; display_name?: unknown; picture?: unknown };
     if (typeof body.id !== "string") return null;
     const name = typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
     return { id: body.id, name, picture: pictureOf(body.picture) };
   } catch {
-    return null;
+    return undefined;
   }
 };
+
+/** Each hub's count of pictures you've set there, so a read of you that
+ *  began before one doesn't put the old picture back. */
+const mySets = new Map<string, number>();
 
 const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: Agent; hub: HubAccount } | null => {
   const agent = s.roster.find((a) => agentKey(a) === key);
@@ -198,21 +204,24 @@ export const useChat = create<ChatStore>((set, get) => ({
   refreshMe: async (hubId) => {
     const hub = get().hubs.find((h) => h.id === hubId);
     if (!hub) return;
+    const sets = mySets.get(hubId) ?? 0;
     const me = await fetchMe(hub);
-    if (!get().hubs.some((h) => h.id === hubId)) return;
+    if (me === undefined || (mySets.get(hubId) ?? 0) !== sets || !get().hubs.some((h) => h.id === hubId)) return;
     set((s) => {
       const { [hubId]: _was, ...others } = s.me;
       return { me: me ? { ...others, [hubId]: me } : others };
     });
   },
-  setPicture: (who, picture) =>
+  setPicture: (who, picture) => {
+    if ("me" in who) mySets.set(who.me, (mySets.get(who.me) ?? 0) + 1);
     set((s) =>
       "agent" in who
         ? { roster: s.roster.map((a) => (agentKey(a) === who.agent ? { ...a, picture } : a)) }
         : s.me[who.me]
           ? { me: { ...s.me, [who.me]: { ...s.me[who.me]!, picture } } }
           : s,
-    ),
+    );
+  },
   conversations: {},
   histories: {},
   activeAgent: null,

@@ -56,4 +56,17 @@ describe("your Profile", () => {
     expect(useChat.getState().me.lab!.picture?.version).toBe("lab-2");
     expect(useChat.getState().me.acme!.picture).toBeNull();
   });
+
+  it("keeps you on a workspace that can't be reached for a moment, and the picture you set over a read under way", async () => {
+    await vi.waitFor(() => expect(useChat.getState().me.dw).toBeTruthy());
+    hubs.mockImplementationOnce(() => Promise.reject(new TypeError("Failed to fetch")));
+    await act(() => useChat.getState().refreshMe("dw"));
+    expect(useChat.getState().me.dw!.id).toBe("u-dw");
+
+    const picture = { version: "d9", source: "chosen" as const, at: "", slack: null };
+    const read = useChat.getState().refreshMe("dw");
+    useChat.getState().setPicture({ me: "dw" }, picture);
+    await act(() => read);
+    expect(useChat.getState().me.dw!.picture).toEqual(picture);
+  });
 });
