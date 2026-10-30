@@ -177,12 +177,12 @@ const RemoveIcon = () => (
   </svg>
 );
 
-/** One pane: its header (state, name, what it is, its options, and taking
- *  it off the grid) and what it holds — a session, a conversation, a
- *  terminal, or nothing yet. Its header drags it. */
 /** The whole grid, for a pane filling it. */
 const WHOLE: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
+/** One pane: its header (state, name, what it is, its options, and taking
+ *  it off the grid) and what it holds — a session, a conversation, a
+ *  terminal, or nothing yet. Its header drags it. */
 export function GridPane({
   gridId,
   pane,
