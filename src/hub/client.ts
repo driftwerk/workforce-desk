@@ -177,6 +177,9 @@ export const deskCall = async <T>(conn: HubConnection, method: string, path: str
   }
 };
 
+/** The most messages one read of a room or thread returns. */
+export const ROOM_PAGE = 100;
+
 export class DeskHub {
   constructor(private readonly conn: HubConnection) {}
 
@@ -297,8 +300,9 @@ export class DeskHub {
     patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null },
   ): Promise<Room> => this.call("PATCH", `/api/desk/rooms/${id}`, patch);
   deleteRoom = (id: string): Promise<void> => this.call("DELETE", `/api/desk/rooms/${id}`);
+  /** A room's newest messages (of one thread, when named), at most a page. */
   roomMessages = (id: string, thread?: string): Promise<RoomMessage[]> =>
-    this.call("GET", `/api/desk/rooms/${id}/messages${thread ? `?thread=${thread}` : ""}`);
+    this.call("GET", `/api/desk/rooms/${id}/messages?${new URLSearchParams({ limit: String(ROOM_PAGE), ...(thread ? { thread } : {}) })}`);
   /** Keeps a message in a room; `created` is false when one with its
    *  source was kept already (a hub that keeps no sources keeps it anew). */
   post = async (id: string, m: NewRoomMessage): Promise<{ message: RoomMessage; created: boolean }> => {

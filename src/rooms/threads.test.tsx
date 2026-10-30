@@ -17,7 +17,8 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 const { useChat } = await import("../chat/store");
-const { merge, threadRead, useDesk } = await import("../hub/store");
+const { arrived, merge, threadRead, useDesk } = await import("../hub/store");
+const { ROOM_PAGE } = await import("../hub/client");
 const { useUi } = await import("../shell/ui");
 const { RoomView, ThreadPanel } = await import("./RoomView");
 
@@ -119,16 +120,22 @@ describe("a room's thread links", () => {
 });
 
 describe("a timeline's reply counts", () => {
-  it("leave the hub's count alone when the parent comes with its replies, and count from loaded replies when a thread is read", () => {
-    const parent = message("a", { replyCount: 2 });
+  it("leave the hub's count alone as a timeline is read, and count from loaded replies when a whole thread is read", () => {
     const replies = [reply("x", "a", "2026-10-30T10:30:00Z"), reply("y", "a", "2026-10-30T10:40:00Z")];
-    expect(merge([], [parent, ...replies]).find((m) => m.id === "a")?.replyCount).toBe(2);
-    const read = threadRead(merge([message("a", { replyCount: 5 })], replies), "a");
+    expect(merge([message("a", { replyCount: 2 })], replies).find((m) => m.id === "a")?.replyCount).toBe(2);
+    const read = threadRead(merge([message("a", { replyCount: 5 })], replies), "a", true);
     expect(read.find((m) => m.id === "a")).toMatchObject({ replyCount: 2, lastReplyAt: "2026-10-30T10:40:00Z" });
   });
 
+  it("keep the hub's count of a thread longer than the page read of it", () => {
+    const parent = message("a", { replyCount: 250, lastReplyAt: "2026-10-30T12:00:00Z" });
+    const page = Array.from({ length: ROOM_PAGE }, (_, i) => reply(`p${i}`, "a", `2026-10-30T11:${String(i % 60).padStart(2, "0")}:00Z`));
+    const read = threadRead(merge([parent], page), "a", false);
+    expect(read.find((m) => m.id === "a")).toMatchObject({ replyCount: 250, lastReplyAt: "2026-10-30T12:00:00Z" });
+  });
+
   it("leave a parent from a hub that counts none to the replies loaded", () => {
-    const merged = merge([message("a")], [reply("x", "a", "2026-10-30T10:30:00Z")]);
-    expect(merged.find((m) => m.id === "a")?.replyCount).toBeUndefined();
+    const heard = arrived([message("a")], reply("x", "a", "2026-10-30T10:30:00Z"));
+    expect(heard.find((m) => m.id === "a")?.replyCount).toBeUndefined();
   });
 });
