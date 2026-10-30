@@ -10,6 +10,8 @@ pub mod install;
 #[cfg(unix)]
 pub mod process;
 pub mod redact;
+// A Unix login shell's environment: on Windows the CLIs run inside WSL.
+#[cfg(unix)]
 pub mod shell;
 
 use std::path::{Path, PathBuf};
