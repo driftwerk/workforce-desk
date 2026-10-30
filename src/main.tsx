@@ -16,6 +16,7 @@ import { App } from "./shell/App";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/overview.css";
+import "./styles/floor.css";
 import "./styles/grids.css";
 import "./styles/panels.css";
 import "./styles/attachments.css";

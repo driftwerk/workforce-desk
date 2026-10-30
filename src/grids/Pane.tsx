@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
+import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
@@ -51,7 +52,7 @@ export interface Label {
   name: string;
   meta: string;
   /** Its dot: a session's state, or none. */
-  state: SessionState | null;
+  state: Look | null;
   /** A session started in this terminal that Desk tracks. */
   tracked: Session | null;
   /** The session to answer for, if it's asking. */
@@ -92,8 +93,8 @@ export function usePaneLabel(content: PaneContent | null): Label {
   if (session) {
     return {
       name,
-      meta: `${ENGINE[session.engine]} · ${STATE_LABEL[session.state]}`,
-      state: session.state,
+      meta: `${ENGINE[session.engine]} · ${statusOf(session, STATE_LABEL)}`,
+      state: lookOf(session),
       tracked,
       asking: session.pending ? session : null,
       cwd: content.kind === "terminal" ? home(info?.cwd ?? content.cwd) : null,
@@ -459,7 +460,7 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuE
   const replace: MenuEntry[] = [
     { kind: "item", label: "New terminal", kbd: shortcutLabel(keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[s.state], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
+    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
   ];

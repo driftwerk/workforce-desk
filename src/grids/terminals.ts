@@ -68,11 +68,11 @@ const problemOf = (e: unknown): string =>
 
 let pluginDirs: Promise<string | null> | null = null;
 
-/** What Desk adds to a terminal's environment: its Claude Code plugin
- *  folder, which the hub joins to any the person already loads (the hub has
- *  no way to find it itself). The hub adds the terminal's id, the token its
- *  hooks present and where they post. */
-export const terminalEnv = async (): Promise<Record<string, string>> => {
+/** What Desk adds to a terminal's or a session's environment: its Claude
+ *  Code plugin folder, which the hub joins to any the person already loads
+ *  (the hub has no way to find it itself). The hub adds the terminal's id,
+ *  the token its hooks present and where they post. */
+export const pluginEnv = async (): Promise<Record<string, string>> => {
   const dir = await (pluginDirs ??= claudePluginDir().catch(() => null));
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
@@ -89,7 +89,7 @@ export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | nu
     if (!hub || !writes(gridId)) return;
     try {
       const where = cwd || (inApp ? await homeDir().catch(() => "/") : "/");
-      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await terminalEnv() });
+      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await pluginEnv() });
       setProblem(pane, null);
       remember(info);
       setTerminal(gridId, pane, info.id, info.cwd);

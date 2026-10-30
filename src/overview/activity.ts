@@ -1,4 +1,4 @@
-import type { ActivityEvent, ActivityFilter, ActivityKind, ActivityParty } from "../hub/types";
+import type { ActivityEvent, ActivityFilter, ActivityKind, ActivityParty, Need } from "../hub/types";
 
 /** Kinds the "Needs you" filter shows. */
 const NEEDS_YOU = new Set<ActivityKind>(["needs_you", "question"]);
@@ -73,4 +73,41 @@ export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>>
       { text: text.slice(at + other.name.length) },
     ].filter((p) => p.text !== ""),
   };
+};
+
+/** What became of an event that needed the person. */
+export type NeedState = { open: true } | { open: false; at: string | null; how: string };
+
+/** Whether an open need is what an event asked: the approval it waits on,
+ *  or a question from the same agent or session. */
+const isNeedOf = (e: ActivityEvent, n: Pick<Need, "id" | "kind" | "who">): boolean =>
+  !!e.subject &&
+  n.who.id === e.subject.id &&
+  (e.kind === "needs_you" ? !!e.approvalId && n.id.startsWith("wait:") && n.id.endsWith(`:${e.approvalId}`) : n.id.startsWith("question:"));
+
+const RESOLVED_BY = new Set<ActivityKind>(["approved", "denied", "answered"]);
+
+const howResolved = (e: ActivityEvent): string => {
+  const by = e.actor.kind === "you" ? "you" : e.actor.name;
+  return e.kind === "approved" ? `allowed by ${by}` : e.kind === "denied" ? `denied by ${by}` : "answered in its terminal";
+};
+
+/** For every event in `events` that needed the person: still open (one of
+ *  `needs`, this hub's open needs), or resolved — by the later event that
+ *  answered its approval (when, and how), else no longer waiting. Only a
+ *  subject's latest question can be its open one. */
+export const needStates = (events: readonly ActivityEvent[], needs: readonly Pick<Need, "id" | "kind" | "who">[]): Map<string, NeedState> => {
+  const latestQuestion = new Map<string, ActivityEvent>();
+  for (const e of events)
+    if (e.kind === "question" && e.subject && (latestQuestion.get(e.subject.id)?.at ?? "") < e.at) latestQuestion.set(e.subject.id, e);
+  return new Map(
+    events
+      .filter((e) => NEEDS_YOU.has(e.kind))
+      .map((e): [string, NeedState] => {
+        const current = e.kind === "needs_you" || (e.subject && latestQuestion.get(e.subject.id)?.id === e.id);
+        if (current && needs.some((n) => isNeedOf(e, n))) return [e.id, { open: true }];
+        const answer = e.approvalId ? events.find((a) => a.approvalId === e.approvalId && RESOLVED_BY.has(a.kind) && a.at >= e.at && a.id !== e.id) : undefined;
+        return [e.id, answer ? { open: false, at: answer.at, how: howResolved(answer) } : { open: false, at: null, how: "no longer waiting" }];
+      }),
+  );
 };

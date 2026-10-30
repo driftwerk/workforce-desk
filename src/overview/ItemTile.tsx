@@ -5,7 +5,8 @@ import { useDesk } from "../hub/store";
 import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/types";
 import { Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { since } from "./overview";
+import { backgroundLine } from "../floor/background";
+import { since } from "../floor/time";
 import { localKey, openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 
@@ -29,8 +30,10 @@ export const stateLine = (item: OverviewItem, now = Date.now()): string => {
         ]
       : item.state === "quiet"
         ? ["working", `quiet ${since(item.lastActivity ?? item.since, now)}`]
-        : item.state === "working"
-          ? ["working", item.origin === "external" ? "other terminal" : since(item.since, now)]
+        : item.state === "working" && item.background
+          ? [backgroundLine(item.background, now)]
+          : item.state === "working"
+            ? ["working", item.origin === "external" ? "other terminal" : since(item.since, now)]
           : [item.state === "done" ? "done" : item.state, since(item.since, now) && `${since(item.since, now)} ago`];
   return parts.filter(Boolean).join(" · ");
 };
@@ -51,7 +54,7 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
   const named = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
   const item = named === listed.name ? listed : { ...listed, name: named };
   const session = useDesk((s) => (item.kind === "session" ? s.sessions[item.id] : undefined));
-  const tone = item.state === "quiet" ? "working" : item.state;
+  const tone = item.state === "working" && item.background ? "background" : item.state === "quiet" ? "working" : item.state;
   const opens = useOpens(item);
   if (item.state === "done") return <DoneTile item={item} opens={opens} />;
   return (
@@ -83,7 +86,7 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
 function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; opens: boolean }) {
   const inner = (
     <>
-      <Mark name={item.name} engine={item.kind === "session" ? (item.engine ?? undefined) : undefined} state={RING[item.state]} />
+      <Mark name={item.name} engine={item.kind === "session" ? (item.engine ?? undefined) : undefined} state={tone === "background" ? tone : RING[item.state]} />
       <span className="tile-name">
         <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{item.name}</span>
         <span className={`tile-state ov-state-${tone}`}>{stateLine(item)}</span>

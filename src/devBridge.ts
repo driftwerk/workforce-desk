@@ -3,6 +3,7 @@
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
 // Only reachable from development builds.
 
+import { HubError } from "./hub/client";
 import { deskListeners } from "./hub/store";
 
 const params = (() => {
@@ -367,7 +368,7 @@ let probes = 0;
 export async function devHub<T>(method: string, path: string, body?: unknown): Promise<T> {
   await new Promise((r) => setTimeout(r, 250));
   const answer = (v: unknown) => structuredClone(v) as T;
-  const crew = crewRoute(method, path);
+  const crew = crewRoute(method, path) ?? floorRoute(method, path, body);
   if (crew) return answer(crew.answer);
   const state = stateRoute(method, path, body);
   if (state) return answer(state.answer);
@@ -424,6 +425,7 @@ const WEB = party("session", "s-web", "acme-web", "claude");
 const E7 = party("session", "s-e7", "workforce-e7", "claude");
 const OSS = party("session", "s-oss", "open-sourcing", "codex");
 const SHADOW = party("session", "s-shadow", "dw-676-read-shadow", "claude");
+const HERALD = party("agent", "herald", "Herald");
 
 const items: Item[] = [
   {
@@ -477,7 +479,7 @@ const items: Item[] = [
   },
   { ...SHADOW, kind: "session", state: "done", task: "Read shadow for memories", detail: "Merged. Session closed.", since: ago(44) },
   {
-    ...party("agent", "herald", "Herald"),
+    ...HERALD,
     kind: "agent",
     state: "done",
     task: "Morning triage",
@@ -640,3 +642,119 @@ export const devConversation = (
           at: ago(0.3),
         },
       ];
+
+// ── The floor and the plans' usage, until the hub has them ─────────────────
+// Needs, work and today's lanes for the same crew; Allow answers a need once
+// (a second answer is the hub's 409).
+
+type Need = import("./hub/types").Need;
+type Work = import("./hub/types").Work;
+type Who = import("./hub/types").Who;
+
+const who = (p: Party): Who => ({ kind: p.kind === "session" ? "session" : "agent", id: p.id, name: p.name, engine: p.engine ?? null });
+
+const floorNeeds: Need[] = [
+  {
+    id: "wait:t-web:ap-web",
+    kind: "approval",
+    who: who(WEB),
+    ask: "Run npm install @acme/ds@4.2.0?",
+    options: null,
+    since: ago(6),
+    place: { kind: "session" },
+    answer: { kind: "decide", at: { kind: "session", sessionId: "s-web", approvalId: "ap-web" } },
+  },
+  {
+    id: "question:t-scout",
+    kind: "question",
+    who: who(SCOUT),
+    ask: "Should I deploy main or release/4.2 to staging?",
+    options: ["main", "release/4.2"],
+    since: ago(3),
+    place: { kind: "dm" },
+    answer: { kind: "reply" },
+  },
+];
+
+const work = (p: Party, what: string, since: number, ended: number | null, over: Partial<Work> = {}): Work => ({
+  who: who(p),
+  what,
+  place: p.kind === "session" ? { kind: "session" } : { kind: "dm" },
+  since: ago(since),
+  heardAt: ago(ended ?? 1),
+  endedAt: ended === null ? null : ago(ended),
+  outcome: ended === null ? null : "finished",
+  background: null,
+  ...over,
+});
+
+const floorWorking: Work[] = [
+  work(LEDGER, "● aws.cost_explorer", 2, null),
+  work(OSS, "Writing the README for the public repo", 72, null, { background: { count: 2, since: ago(6) } }),
+  work(E7, "● Bash cargo nextest run -p workforce-desk", 28, null),
+];
+
+const floorDone: Work[] = [
+  work(HERALD, "3 issues labelled, 1 assigned to you.", 170, 150),
+  work(LEDGER, "Compared yesterday’s spend with the last 30 days.", 260, 230, { outcome: "finished" }),
+];
+
+const span = (kind: "working" | "waiting" | "background", from: number, to: number | null) => ({ kind, from: ago(from), to: to === null ? null : ago(to) });
+
+function floorRoute(method: string, path: string, body: unknown): { answer: unknown } | null {
+  const url = new URL(path, "http://preview");
+  const route = `${method} ${url.pathname}`;
+  if (route === "GET /api/desk/floor") {
+    return {
+      answer: {
+        asOf: new Date().toISOString(),
+        needs: floorNeeds,
+        working: floorWorking,
+        done: floorDone,
+        lanes: [
+          { who: who(WEB), spans: [span("working", 40, 6), span("waiting", 6, null)] },
+          { who: who(SCOUT), spans: [span("working", 20, 3), span("waiting", 3, null)] },
+          { who: who(LEDGER), spans: [span("working", 260, 230), span("working", 2, null)] },
+          { who: who(OSS), spans: [span("working", 72, 6), span("background", 6, null)] },
+          { who: who(E7), spans: [span("working", 28, null)] },
+          { who: who(HERALD), spans: [span("working", 170, 150)] },
+        ],
+        counts: { working: floorWorking.length, needsYou: floorNeeds.length, doneToday: floorDone.length },
+        more: { done: 0, lanes: 0 },
+      },
+    };
+  }
+  if (route === "GET /api/desk/usage") {
+    const resets = (min: number) => new Date(Date.now() + min * 60_000).toISOString();
+    return {
+      answer: {
+        asOf: new Date().toISOString(),
+        logins: [
+          { kind: "claude", where: "mac", signedIn: true },
+          { kind: "chatgpt", where: "mac", signedIn: false },
+        ],
+        readings: [
+          {
+            kind: "claude",
+            where: "mac",
+            account: "preview-account",
+            plan: "max",
+            windows: [
+              { usedPercent: 62, resetsAt: resets(148), minutes: 300 },
+              { usedPercent: 38, resetsAt: resets(4 * 24 * 60), minutes: 10_080 },
+            ],
+            observedAt: ago(1),
+          },
+        ],
+      },
+    };
+  }
+  if (route === "POST /api/desk/needs/decide") {
+    const at = JSON.stringify((body as { at?: unknown } | undefined)?.at);
+    const i = floorNeeds.findIndex((n) => n.answer.kind === "decide" && JSON.stringify(n.answer.at) === at);
+    if (i < 0) throw new HubError(409, "already_answered");
+    floorNeeds.splice(i, 1);
+    return { answer: undefined };
+  }
+  return null;
+}

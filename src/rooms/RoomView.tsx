@@ -14,6 +14,7 @@ import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
+import { useFocusRequest } from "../shell/focus";
 
 const asChat = (m: RoomMessage): ChatMessage => ({
   id: m.id,
@@ -54,6 +55,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
   // Escape closes the list until you type on.
   const [dismissed, setDismissed] = useState<number | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  useFocusRequest(threadId ? `room:${room.id}/${threadId}` : `room:${room.id}`, field);
   const listId = useId();
 
   const typing = mentionAt(draft, caret);

@@ -135,42 +135,57 @@ const wsUrl = (base: string, path: string, token: string): string => {
   return u.toString();
 };
 
+/** One call to a hub's API, as `conn`: its status and JSON answer (none
+ *  for a 204), and a `HubError` for a refusal or a route the hub doesn't
+ *  have. */
+export const hubRequest = async <T>(
+  conn: HubConnection,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: T }> => {
+  const res = await hubFetch(new URL(path, conn.url), {
+    method,
+    headers: {
+      authorization: `Bearer ${conn.token}`,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw await refusal(res);
+  if (res.status === 204) return { status: res.status, body: undefined as T };
+  // A hub without this route answers with its web page, not a 404.
+  if (!(res.headers.get("content-type") ?? "").includes("json")) {
+    throw new HubError(404, NO_ROUTE);
+  }
+  return { status: res.status, body: (await res.json()) as T };
+};
+
+/** One call to a hub's API, as `conn`: its JSON answer, nothing for a 204. */
+export const hubCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
+  (await hubRequest<T>(conn, method, path, body)).body;
+
+/** A Desk route; in the browser preview, the dev bridge answers the ones
+ *  the running hub doesn't have yet. */
+export const deskCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> => {
+  try {
+    return await hubCall<T>(conn, method, path, body);
+  } catch (e) {
+    if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
+    const { devHub } = await import("../devBridge");
+    return devHub<T>(method, path, body);
+  }
+};
+
 export class DeskHub {
   constructor(private readonly conn: HubConnection) {}
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
-    const res = await hubFetch(new URL(path, this.conn.url), {
-      method,
-      headers: {
-        authorization: `Bearer ${this.conn.token}`,
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!res.ok) throw await refusal(res);
-    if (res.status === 204) return { status: res.status, body: undefined as T };
-    // A hub without this route answers with its web page, not a 404.
-    if (!(res.headers.get("content-type") ?? "").includes("json")) {
-      throw new HubError(404, NO_ROUTE);
-    }
-    return { status: res.status, body: (await res.json()) as T };
-  }
+  private request = <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
+    hubRequest<T>(this.conn, method, path, body);
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    return (await this.request<T>(method, path, body)).body;
-  }
+  private call = <T>(method: string, path: string, body?: unknown): Promise<T> => hubCall<T>(this.conn, method, path, body);
 
-  /** A Desk route; in the browser preview, the dev bridge answers the ones
-   *  the running hub doesn't have yet. */
-  private async desk<T>(method: string, path: string, body?: unknown): Promise<T> {
-    try {
-      return await this.call<T>(method, path, body);
-    } catch (e) {
-      if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
-      const { devHub } = await import("../devBridge");
-      return devHub<T>(method, path, body);
-    }
-  }
+  private desk = <T>(method: string, path: string, body?: unknown): Promise<T> => deskCall<T>(this.conn, method, path, body);
 
   private async text(path: string): Promise<string> {
     const res = await hubFetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });

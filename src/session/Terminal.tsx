@@ -2,7 +2,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
+import { trackedIn } from "../grids/terminals";
 import { useDesk } from "../hub/store";
+import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, type ShortcutId } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
@@ -26,6 +28,8 @@ export function Terminal({
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const hub = useDesk((s) => s.hub);
+  const session = useDesk((s) => sessionId ?? trackedIn(s.sessions, terminalId ?? null)?.id ?? null);
+  useFocusRequest(session && `session:${session}`, term);
   const theme = useTheme();
   /** Shown while another viewer is the one typing into this terminal. */
   const [viewing, setViewing] = useState(false);

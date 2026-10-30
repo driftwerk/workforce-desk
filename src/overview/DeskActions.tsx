@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { DeskExtras, Engine } from "../hub/types";
 import { plainError } from "../ui/plainError";
-import { since } from "./overview";
+import { since } from "../floor/time";
 import { openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 
