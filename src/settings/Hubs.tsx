@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
 import { PairHub } from "../hubs/PairHub";
 import { whoAmI, type Who } from "../hubs/pairing";
+import { revokeSelf } from "../hubs/surface";
 import { useDesk } from "../hub/store";
 import { hubAccounts, removeHub } from "../platform";
 
@@ -32,9 +33,10 @@ export function Hubs() {
     };
   }, [tokens]);
 
-  const remove = async (id: string) => {
+  const remove = async (hub: HubAccount) => {
     try {
-      await removeHub(id);
+      await revokeSelf(hub);
+      await removeHub(hub.id);
       setHubs(await hubAccounts());
     } catch (e) {
       fail(e);
@@ -68,7 +70,7 @@ export function Hubs() {
                     Connect as you
                   </button>
                 )}
-                <button type="button" className="btn" onClick={() => void remove(h.id)}>
+                <button type="button" className="btn" onClick={() => void remove(h)}>
                   Disconnect
                 </button>
                 {anonymous && (

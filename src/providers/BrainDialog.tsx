@@ -138,7 +138,7 @@ export function BrainDialog({
                 note={
                   provider.connect.kind === "probe"
                     ? "Its models appear here once Desk finds it."
-                    : "Saved in this Mac’s vault. Its models appear here once it connects."
+                    : "Saved in this computer’s vault. Its models appear here once it connects."
                 }
               />
             </div>

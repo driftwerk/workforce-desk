@@ -13,6 +13,7 @@ import { applyEdit, isBuiltin, uniqueId } from "./editing";
 vi.mock("../platform", () => ({
   writeTheme: vi.fn(() => Promise.resolve()),
   revealThemes: vi.fn(() => Promise.resolve()),
+  systemFonts: vi.fn(() => Promise.resolve(["Georgia", "Menlo"])),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ readTextFile: vi.fn(), writeTextFile: vi.fn() }));

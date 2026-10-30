@@ -84,7 +84,7 @@ const arrange = () => {
 };
 
 describe("grids, kept", () => {
-  it("come back from the hub on a Mac that kept nothing: grids, panes, what they hold, window mode and monitor", async () => {
+  it("come back from the hub on a computer that kept nothing: grids, panes, what they hold, window mode and monitor", async () => {
     const hub = fakeHub();
     const first = await started(fakeFile(), hub);
     startGrids(first, { kind: "main" }, bus);
@@ -117,7 +117,7 @@ describe("grids, kept", () => {
     expect(useGrids.getState().grids).toEqual(before);
   });
 
-  it("take a change another Mac made, through the hub", async () => {
+  it("take a change another computer made, through the hub", async () => {
     const hub = fakeHub();
     const store = await started(fakeFile(), hub);
     startGrids(store, { kind: "main" }, bus);
@@ -164,7 +164,7 @@ describe("grids, kept", () => {
     expect(useGrids.getState().order).toEqual([b, MAIN_GRID, c]);
   });
 
-  it("stay at none once every one is deleted, after a restart here or on another Mac; Main is made only the first time", async () => {
+  it("stay at none once every one is deleted, after a restart here or on another computer; Main is made only the first time", async () => {
     const file = fakeFile();
     const hub = fakeHub();
     const first = await started(file, hub);
@@ -187,7 +187,7 @@ describe("grids, kept", () => {
     startGrids(await started(fakeFile(file.entries), null), { kind: "main" }, bus);
     expect(useGrids.getState().order).toEqual([]);
 
-    // A Mac that never had grids gets Main.
+    // A computer that never had grids gets Main.
     blankState();
     startGrids(await started(fakeFile(), fakeHub()), { kind: "main" }, bus);
     expect(useGrids.getState().order).toEqual([MAIN_GRID]);

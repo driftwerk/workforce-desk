@@ -19,7 +19,7 @@ import {
 export const CLI_NAME: Record<PlanName, string> = { claude: "Claude Code", chatgpt: "Codex" };
 
 /** A plan's one-click sign-in through its own page in the browser —
- *  installing its CLI first when this Mac doesn't have it. */
+ *  installing its CLI first when this computer doesn't have it. */
 export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void) {
   const fail = useDesk((s) => s.fail);
   const [progress, setProgress] = useState<LoginProgress | null>(null);
@@ -93,7 +93,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     failed: progress?.state === "failed" || install?.state === "failed",
     busy,
     installing,
-    /** False when the plan's CLI isn't on this Mac yet. */
+    /** False when the plan's CLI isn't on this computer yet. */
     installed,
     install: () => {
       if (!plan) return;

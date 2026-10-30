@@ -202,7 +202,7 @@ export function VoiceDialog({
               >
                 <span className="provider-text">
                   <b>{vp.name}</b>
-                  <span>{vp.keyPath ? "Cloud voices" : "On this Mac"}</span>
+                  <span>{vp.keyPath ? "Cloud voices" : "On this computer"}</span>
                 </span>
                 {vp.id === start.provider && <span className="provider-status on">In use</span>}
               </button>

@@ -126,7 +126,7 @@ describe("the saved look", () => {
     expect(chooser().textContent).toContain("Acme Dusk");
   });
 
-  it("an older file with neither keeps following macOS", async () => {
+  it("an older file with neither keeps following the system", async () => {
     vi.mocked(loadSettings).mockResolvedValue(saved("system"));
     await useSettings.getState().load();
     expect(useThemeStore.getState()).toMatchObject({ choice: "system", pick: "harbour" });

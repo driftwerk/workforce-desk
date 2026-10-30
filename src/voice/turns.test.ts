@@ -41,7 +41,7 @@ describe("spoken turns", () => {
   it("hands a cloud model's request to the agent and its answer back as a tool result", () => {
     const turns = new Turns();
     turns.heard({ agent: "Atlas", text: "what failed overnight?", callId: "fc-1" });
-    expect(useChat.getState().send).toHaveBeenCalledWith(key, "what failed overnight?");
+    expect(useChat.getState().send).toHaveBeenCalledWith(key, "what failed overnight?", { spoken: true });
     vi.advanceTimersByTime(3_000);
     expect(calls("voice_speak")).toHaveLength(0);
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("**Two** tests failed.") } }));

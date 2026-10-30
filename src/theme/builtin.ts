@@ -1,6 +1,13 @@
 import type { ThemeSpec } from "./tokens";
 
-const FONTS = { display: "Bricolage Grotesque Variable", ui: "Figtree Variable", mono: "Geist Mono Variable", size: 14 };
+const FONTS = {
+  display: "Bricolage Grotesque Variable",
+  ui: "Figtree Variable",
+  mono: "Geist Mono Variable",
+  size: 14,
+  chatSize: 14,
+  codeSize: 12.5,
+};
 
 const builtin = (spec: Omit<ThemeSpec, "fonts" | "density" | "corners">): ThemeSpec => ({
   ...spec,

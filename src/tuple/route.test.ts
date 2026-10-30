@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../chat/types";
-import { callPrompt, pickAgent } from "./route";
+import { callLines, callPrompt, callTurn, pickAgent } from "./route";
 
 const roster: Agent[] = [
   { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
@@ -20,5 +20,19 @@ describe("tuple routing", () => {
     expect(pickAgent("nobody", roster, null)).toBeNull();
     expect(pickAgent(null, roster, roster[0]!)?.id).toBe("atlas");
     expect(pickAgent(null, roster, null)?.id).toBe("scout");
+  });
+
+  it("asks a hub that takes structured turns from the call, with who said what", () => {
+    expect(callLines(["Kate: the build is red", "no speaker here"])).toEqual([
+      { from: "Kate", text: "the build is red" },
+      { from: "Call", text: "no speaker here" },
+    ]);
+    expect(callTurn(["Kate: the build is red"])).toEqual({
+      place: { kind: "call" },
+      speaker: { kind: "person" },
+      hop: 0,
+      context: [{ from: "Kate", text: "the build is red" }],
+      spoken: false,
+    });
   });
 });

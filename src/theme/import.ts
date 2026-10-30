@@ -2,6 +2,7 @@ import { formatHex, parse } from "culori";
 import { DAY, NIGHT } from "./builtin";
 import { ThemeError, parseTheme, slug } from "./toml";
 import { contrast, derive, luminance, mix, type Palette, type ThemeSpec } from "./tokens";
+import { baseName } from "../ui/paths";
 
 export type ThemeFormat = "vscode" | "ghostty" | "iterm" | "base16" | "desk";
 
@@ -33,7 +34,6 @@ const BY_EXTENSION: Record<string, ThemeFormat> = {
   ghostty: "ghostty",
 };
 
-const baseName = (fileName: string): string => fileName.split(/[\\/]/).pop() ?? fileName;
 
 const stem = (fileName: string): string => baseName(fileName).replace(/\.[^.]+$/, "").trim() || "Imported";
 

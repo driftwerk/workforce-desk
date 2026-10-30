@@ -113,7 +113,7 @@ export function Help() {
       <div className="setting-card">
         <span className="card-text">
           <b>Remove Desk’s data</b>
-          <span>Stops Desk Helper and, if you choose, deletes your agents, sessions and logins from this Mac.</span>
+          <span>Stops Desk Helper and, if you choose, deletes your agents, sessions and logins from this computer.</span>
         </span>
         <button type="button" className="btn btn-danger" disabled={!inApp} onClick={() => setRemoving(true)}>
           Remove Desk’s data…
@@ -159,7 +159,7 @@ function RemoveData({ onClose }: { onClose: () => void }) {
         <label className="check-row">
           <input type="checkbox" checked={everything} onChange={(e) => setEverything(e.target.checked)} />
           <span>
-            Also delete everything Desk keeps on this Mac: your agents, their memories and files, sessions, settings, and the
+            Also delete everything Desk keeps on this computer: your agents, their memories and files, sessions, settings, and the
             logins and keys saved in your keychain. This can’t be undone.
           </span>
         </label>

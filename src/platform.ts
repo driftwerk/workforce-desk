@@ -1,8 +1,8 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
-import type { HubAccount } from "./chat/types";
+import type { Attachment, HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
 import type { DeskGroup, Ungrouped } from "./groups/model";
 import type { HubConnection } from "./hub/client";
@@ -98,6 +98,9 @@ export const saveSettings = (settings: Settings): Promise<void> => invoke("setti
 
 export const themeFiles = (): Promise<ThemeFile[]> => invoke("themes_list");
 
+/** The font families installed on this computer, sorted. */
+export const systemFonts = (): Promise<string[]> => invoke("fonts_list");
+
 export const writeTheme = (id: string, source: string): Promise<void> => invoke("themes_write", { id, source });
 
 export const revealThemes = (): Promise<void> => invoke("themes_reveal");
@@ -160,6 +163,69 @@ export const saveHub = (label: string, url: string, token: string): Promise<{ id
 
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
 
+// ── Files in conversations ────────────────────────────────────────────────
+// Their bytes come through Desk's native side, which holds each hub's
+// token: the page never puts a token in a URL. The browser preview, which
+// has no native side, asks the hub directly.
+
+/** Where a file of agent `agent` on hub `hub` is shown from: an image's
+ *  `src`, a player's (which seeks by range). Desk's `deskfile:` scheme is
+ *  served where the webview serves it: `deskfile://localhost/` on macOS and
+ *  Linux, `http://deskfile.localhost/` on Windows. */
+export const fileUrl = (hub: HubAccount, agent: string, artifact: string): string =>
+  preview
+    ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(hub.token)}`
+    : `${convertFileSrc("", "deskfile")}${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
+
+/** Opens a file in the app this computer opens its kind with. */
+export const openFile = (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<void> =>
+  preview ? Promise.resolve(void window.open(fileUrl(hub, agent, artifact), "_blank", "noopener")) : invoke("attachment_open", { hub: hub.id, agent, artifact, filename });
+
+/** `name` as a file's name on any system: no folders, none of the
+ *  characters Windows refuses, no trailing dots or spaces, and none of the
+ *  names it keeps for devices. */
+export const safeFilename = (name: string): string => {
+  const base = (name.split(/[/\\]/).pop() ?? "")
+    .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/, "");
+  return !base || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(base) ? `_${base}` : base;
+};
+
+/** Asks where to save a file, and saves it there; false when the person
+ *  thought better of it. */
+export const saveFileAs = async (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<boolean> => {
+  if (preview) {
+    const a = Object.assign(document.createElement("a"), { href: fileUrl(hub, agent, artifact), download: filename });
+    a.click();
+    return true;
+  }
+  const path = await save({ defaultPath: safeFilename(filename) });
+  if (!path) return false;
+  await invoke("attachment_save", { hub: hub.id, agent, artifact, path });
+  return true;
+};
+
+/** Uploads `file` to agent `agent`'s conversation on `channel`, as the hub
+ *  then describes it. Throws what the hub said when it refused. */
+export const uploadFile = async (hub: HubAccount, agent: string, channel: string, file: File): Promise<Attachment> => {
+  if (preview) {
+    const url = new URL(`/api/agents/${encodeURIComponent(agent)}/attachments`, hub.url);
+    url.search = new URLSearchParams({ channel, filename: file.name }).toString();
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${hub.token}` }, body: file });
+    const body = (await res.json().catch(() => ({}))) as Attachment & { error?: string };
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    return body;
+  }
+  return tauriInvoke<Attachment>("attachment_upload", new Uint8Array(await file.arrayBuffer()), {
+    headers: {
+      "x-desk-hub": encodeURIComponent(hub.id),
+      "x-desk-agent": encodeURIComponent(agent),
+      "x-desk-channel": encodeURIComponent(channel),
+      "x-desk-filename": encodeURIComponent(file.name),
+    },
+  });
+};
+
 export interface TupleRequest {
   agent: string | null;
   text: string;
@@ -197,7 +263,7 @@ export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): 
     f(plan, progress as LoginProgress);
   });
 
-/** Desk Helper — what keeps the agents and sessions on this Mac running —
+/** Desk Helper — what keeps the agents and sessions on this computer running —
  *  as a login item. */
 export type HelperStatus =
   | { state: "running" }
@@ -212,7 +278,7 @@ export const openLoginItems = (): Promise<void> => invoke("helper_open_login_ite
 
 export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
 
-/** Whether the CLI a plan signs in with (`claude`, `codex`) is on this Mac. */
+/** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
 export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
 /** Runs its official installer; progress arrives through `onInstallProgress`. */
 export const installCli = (plan: PlanName): Promise<void> => invoke("cli_install", { plan });

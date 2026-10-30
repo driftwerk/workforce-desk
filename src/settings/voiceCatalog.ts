@@ -89,8 +89,8 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
   {
     id: "kokoro",
     name: "Kokoro",
-    blurb: "Runs on this Mac — free and private, no key needed.",
-    models: [{ id: "kokoro-v1_0", name: "Kokoro v1.0", note: "On this Mac" }],
+    blurb: "Runs on this computer — free and private, no key needed.",
+    models: [{ id: "kokoro-v1_0", name: "Kokoro v1.0", note: "On this computer" }],
     voices: "engine",
   },
   {

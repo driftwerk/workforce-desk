@@ -1,5 +1,6 @@
 import { RichMarkdown } from "@workforce/rich";
 import { useState } from "react";
+import { backgroundLine, backgroundOf, lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -9,11 +10,16 @@ import { Mark } from "../ui/Mark";
 import { sessionAction } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
+import { homeShort } from "../ui/paths";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
-const where = (s: Session): string =>
-  [ENGINE[s.engine], s.branch ? `branch ${s.branch}` : s.cwd.replace(/^\/Users\/[^/]+/, "~")].join(" · ");
+const where = (s: Session): string => {
+  const background = backgroundOf(s);
+  return [ENGINE[s.engine], s.branch ? `branch ${s.branch}` : homeShort(s.cwd), background && backgroundLine(background)]
+    .filter(Boolean)
+    .join(" · ");
+};
 
 export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open } = useDesk();
@@ -33,7 +39,7 @@ export function SessionCard({ session }: { session: Session }) {
       onClose={() => open(null)}
       title={
         <>
-          <Mark name={name} engine={session.engine} state={session.state} />
+          <Mark name={name} engine={session.engine} state={lookOf(session)} />
           <span className="session-title">
             <span className="mono">{name}</span>
             <span className="faint small">{where(session)}</span>

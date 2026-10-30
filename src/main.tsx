@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { deskReady } from "./platform";
 import { GridWindow } from "./grids/GridWindow";
 import { GRID_PREFIX } from "./grids/storage";
+import { DRAIN_PREFIX } from "./hubs/drain";
 import { detachedGrid } from "./grids/windows";
 import { deskState, restoreBeforeRender } from "./restore/boot";
 import { keepFileDrafts } from "./restore/drafts";
@@ -15,8 +16,10 @@ import { App } from "./shell/App";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/overview.css";
+import "./styles/floor.css";
 import "./styles/grids.css";
 import "./styles/panels.css";
+import "./styles/attachments.css";
 
 /** Shows the window once the restored shell has been committed. (Not on an
  *  animation frame: a hidden window's page never gets one.) */
@@ -27,9 +30,11 @@ function Ready() {
   return null;
 }
 
-// Grids and the rooms' order are kept with the rest of what Desk restores.
+// Grids, the rooms' order and how far each conversation has been drained
+// are kept with the rest of what Desk restores.
 void deskState.register(GRID_PREFIX);
 void deskState.register(ROOMS_PREFIX);
+void deskState.register(DRAIN_PREFIX);
 
 // A detached grid's window shows that grid alone (see grids/GridWindow).
 const grid = detachedGrid();

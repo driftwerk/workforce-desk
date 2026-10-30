@@ -45,10 +45,21 @@ export interface ThemeSpec {
   signal: string;
   text?: string;
   overrides: Partial<Palette>;
-  fonts: { display: string; ui: string; mono: string; size: number };
+  /** `size` is the interface's; chats and documents have `chatSize`, code
+   *  and terminals `codeSize`. */
+  fonts: { display: string; ui: string; mono: string; size: number; chatSize: number; codeSize: number };
   density: Density;
   corners: Corners;
 }
+
+export type SizeRole = "size" | "chatSize" | "codeSize";
+
+/** The sizes a theme may give each kind of text, in px. */
+export const SIZE_RANGES: Record<SizeRole, readonly [number, number]> = {
+  size: [10, 22],
+  chatSize: [10, 24],
+  codeSize: [9, 22],
+};
 
 export interface Theme {
   spec: ThemeSpec;
@@ -140,6 +151,9 @@ const kebab = (token: string): string => token.replace(/[A-Z]/g, (c) => `-${c.to
 
 export const RADII: Record<Corners, number> = { sharp: 4, soft: 14, round: 22 };
 
+/** The CSS font stack code and terminals are drawn in. */
+export const monoStack = (spec: ThemeSpec): string => `"${spec.fonts.mono}", ui-monospace, monospace`;
+
 export const cssVariables = (theme: Theme): Record<string, string> => {
   const { colors, spec } = theme;
   const r = RADII[spec.corners];
@@ -147,8 +161,10 @@ export const cssVariables = (theme: Theme): Record<string, string> => {
     ...Object.fromEntries(TOKENS.map((t) => [`--${kebab(t)}`, colors[t]])),
     "--font-display": `"${spec.fonts.display}", system-ui, sans-serif`,
     "--font-ui": `"${spec.fonts.ui}", system-ui, sans-serif`,
-    "--font-mono": `"${spec.fonts.mono}", ui-monospace, monospace`,
+    "--font-mono": monoStack(spec),
     "--font-size": `${spec.fonts.size}px`,
+    "--font-size-chat": `${spec.fonts.chatSize}px`,
+    "--font-size-code": `${spec.fonts.codeSize}px`,
     "--radius": `${r}px`,
     "--radius-lg": `${r + 6}px`,
     "--radius-sm": `${Math.max(4, r - 4)}px`,

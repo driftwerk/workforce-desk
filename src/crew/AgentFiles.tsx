@@ -228,7 +228,7 @@ function HistoryDialog({
       (e: unknown) =>
         setProblem(
           e instanceof HubError && e.status === 503
-            ? "Earlier versions aren’t kept on this Mac yet, so there’s nothing to go back to."
+            ? "Earlier versions aren’t kept on this computer yet, so there’s nothing to go back to."
             : `Desk couldn’t load the history. ${plainError(e)}`,
         ),
     );

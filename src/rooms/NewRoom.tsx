@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { useDesk } from "../hub/store";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 
 export function NewRoom({ onClose }: { onClose: () => void }) {
   const { roster, hubs } = useChat();
@@ -42,7 +42,7 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
               return (
                 <label key={k} className="side-row">
                   <input type="checkbox" checked={picked.includes(k)} onChange={() => toggle(k)} />
-                  <Mark name={a.name} size="sm" />
+                  <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
                   <span className="display crew-name">{a.name}</span>
                   <span className="faint small">{hubs.find((h) => h.id === a.hubId)?.label}</span>
                   <input

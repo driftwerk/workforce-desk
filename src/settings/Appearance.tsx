@@ -6,8 +6,9 @@ import { importTheme } from "../theme/import";
 import { allThemes, resolveTheme, useThemeStore } from "../theme/store";
 import { serializeTheme } from "../theme/toml";
 import { contrastChecks, cssVariables, derive, isHex, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
-import { applyEdit, BACKGROUNDS, copyOf, DERIVED, FONTS, isBuiltin, SIGNALS, upsert, withOverride, type Swatch } from "./editing";
+import { applyEdit, BACKGROUNDS, copyOf, DERIVED, isBuiltin, SIGNALS, upsert, withOverride, type Swatch } from "./editing";
 import { exportThemeFile, pickThemeFile } from "./files";
+import { TypeSettings } from "./TypeSettings";
 
 const SAVE_DELAY = 300;
 
@@ -22,12 +23,6 @@ const CORNERS: readonly [Corners, string][] = [
   ["round", "Round"],
 ];
 
-const FONT_ROLES = [
-  ["display", "Names"],
-  ["ui", "Interface"],
-  ["mono", "Terminal"],
-] as const;
-
 interface Card {
   id: string;
   spec: ThemeSpec;
@@ -38,7 +33,7 @@ interface Card {
 const cardsFor = (custom: readonly ThemeSpec[], systemDark: boolean): Card[] => [
   { id: "night", spec: NIGHT, label: "Night", sub: "Default dark" },
   { id: "day", spec: DAY, label: "Day", sub: "Default light" },
-  { id: "system", spec: systemDark ? NIGHT : DAY, label: "Match system", sub: "Night or Day with macOS" },
+  { id: "system", spec: systemDark ? NIGHT : DAY, label: "Match system", sub: "Night or Day with your system" },
   ...allThemes(custom)
     .filter((t) => t.id !== "night" && t.id !== "day")
     .map((t) => ({ id: t.id, spec: t, label: t.name, sub: isBuiltin(t.id) ? "Built in" : `Yours · ${t.id}.toml` })),
@@ -193,23 +188,7 @@ export function Appearance() {
             </span>
           </div>
 
-          <div className="font-fields">
-            {FONT_ROLES.map(([role, label]) => (
-              <label key={role} className="field">
-                <span>{label}</span>
-                <input
-                  list="desk-fonts"
-                  value={spec.fonts[role]}
-                  onChange={(e) => edit({ fonts: { ...spec.fonts, [role]: e.target.value } })}
-                />
-              </label>
-            ))}
-            <datalist id="desk-fonts">
-              {FONTS.map((f) => (
-                <option key={f} value={f} />
-              ))}
-            </datalist>
-          </div>
+          <TypeSettings spec={spec} onEdit={edit} />
 
           <div className="shape-row">
             <Segmented label="Density" options={DENSITIES} value={spec.density} onPick={(density) => edit({ density })} />
@@ -325,7 +304,7 @@ export function Appearance() {
                 Duplicate
               </button>
               <button type="button" className="btn" onClick={() => revealThemes().catch(fail)}>
-                Show in Finder
+                Show in folder
               </button>
             </div>
             <span className="small faint">Import reads VS Code, Ghostty, iTerm2 and base16 themes.</span>

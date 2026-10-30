@@ -210,7 +210,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             <h3>What {name} keeps track of</h3>
             <div className="oversee-card">
               <Check
-                label="Crew on this Mac"
+                label="Crew on this computer"
                 sub="What each is working on, questions to you, finished work"
                 checked={o.track.crew}
                 onChange={(v) => update((x) => ({ ...x, track: { ...x.track, crew: v } }))}

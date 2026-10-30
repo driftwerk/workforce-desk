@@ -1,7 +1,9 @@
 import { create } from "zustand";
+import { shownState } from "../floor/background";
 import { notificationFor, notify } from "../shell/notify";
-import type { Working } from "../chat/conversation";
-import { DeskHub, type HubConnection } from "./client";
+import type { Prompt, Working } from "../chat/conversation";
+import type { Attachment, ToolCall } from "../chat/types";
+import { DeskHub, ROOM_PAGE, type HubConnection } from "./client";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
 /** The main window's views: the Floor, Rooms, and Grids. */
@@ -18,13 +20,18 @@ interface DeskState {
   activeRoom: string | null;
   /** Agent messages in rooms you aren't looking at. */
   unread: Record<string, number>;
-  /** Members answering in each room right now, by member key. */
-  roomWorking: Record<string, Record<string, Working>>;
-  setRoomWorking: (roomId: string, member: string, working: Working | null) => void;
+  /** Answers on their way in each room, oldest first, by room id. */
+  roomDrafts: Record<string, RoomDraft[]>;
+  putDraft: (roomId: string, draft: RoomDraft) => void;
+  dropDraft: (roomId: string, id: string) => void;
+  /** A message kept in a room just now, shown at once. */
+  /** Keeps a message posted to a room; one the hub had already (`created`
+   *  false) is counted on its thread already. */
+  keep: (message: RoomMessage, created?: boolean) => void;
   openId: string | null;
   view: View;
   error: string | null;
-  /** A detached grid's window, which leaves telling macOS of sessions'
+  /** A detached grid's window, which leaves telling the system of sessions'
    *  changes, and handing Desk's groups to the hub, to the main window. */
   detached: boolean;
   /** With `notify: false`, this is a detached grid's window. */
@@ -42,14 +49,76 @@ interface DeskState {
   clearError: () => void;
 }
 
+/** A member's answer to something said in a room, while it's on its way:
+ *  what it has said so far and is doing, until it is posted. */
+export interface RoomDraft {
+  /** The ask it answers. */
+  id: string;
+  /** Who is answering (`hub/agent`). */
+  member: string;
+  threadId: string | null;
+  text: string;
+  working: Working | null;
+  tools: ToolCall[];
+  attachments: Attachment[];
+  prompts: Prompt[];
+  /** `queued`: waiting for the member's answer in another thread;
+   *  `connecting`: waiting for the member's conversation to open; `busy`:
+   *  waiting for the member to finish something elsewhere. */
+  state: "queued" | "connecting" | "busy" | "live" | "stalled" | "interrupted" | "failed";
+  error?: string;
+  /** What its answer is posted under, once the hub has said its id. */
+  source?: string;
+}
+
+/** Drafts once `posted` is in the room: the one it answered is done. */
+const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Record<string, RoomDraft[]> => {
+  const here = drafts[posted.roomId];
+  if (!posted.source || !here?.some((d) => d.source === posted.source)) return drafts;
+  return { ...drafts, [posted.roomId]: here.filter((d) => d.source !== posted.source) };
+};
+
 /** Others listening to the events socket (the overview, Activity). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
+
+const later = (a: string | null | undefined, b: string): string => (a && a.localeCompare(b) > 0 ? a : b);
+
+/** `parent` with one more reply, `reply`, counted; a parent from a hub that
+ *  counts none is left to the replies loaded. */
+const counted = (parent: RoomMessage, reply: RoomMessage): RoomMessage =>
+  parent.replyCount === undefined
+    ? parent
+    : { ...parent, replyCount: parent.replyCount + 1, lastReplyAt: later(parent.lastReplyAt, reply.createdAt) };
 
 /** Messages by id, oldest first. */
 export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
   const byId = new Map(a.map((m) => [m.id, m]));
   for (const m of b) byId.set(m.id, m);
   return [...byId.values()].sort((x, y) => x.createdAt.localeCompare(y.createdAt));
+};
+
+/** `timeline` with `message`, kept as it happened: a reply new to the
+ *  timeline counts on its parent, unless the hub had it already (`created`
+ *  false); one already in it, by id, does not. */
+export const arrived = (timeline: RoomMessage[], message: RoomMessage, created = true): RoomMessage[] => {
+  const fresh = created && !!message.threadId && !timeline.some((m) => m.id === message.id);
+  const merged = merge(timeline, [message]);
+  return fresh ? merged.map((m) => (m.id === message.threadId ? counted(m, message) : m)) : merged;
+};
+
+/** `timeline` with thread `threadId` read: its parent counts the replies
+ *  loaded once they are all of them (`whole`, the read came back short of a
+ *  page), and never fewer than the hub counted while some may be unread. */
+export const threadRead = (timeline: RoomMessage[], threadId: string, whole: boolean): RoomMessage[] => {
+  const replies = timeline.filter((m) => m.threadId === threadId);
+  const last = replies.at(-1)?.createdAt ?? null;
+  return timeline.map((m) => {
+    if (m.id !== threadId) return m;
+    if (whole) return { ...m, replyCount: replies.length, lastReplyAt: last };
+    return m.replyCount === undefined
+      ? m
+      : { ...m, replyCount: Math.max(m.replyCount, replies.length), lastReplyAt: last ? later(m.lastReplyAt, last) : m.lastReplyAt };
+  });
 };
 
 const applyRooms = (rooms: Record<string, Room>, e: DeskEvent): Record<string, Room> => {
@@ -91,12 +160,27 @@ export const useDesk = create<DeskState>((set, get) => ({
   timelines: {},
   activeRoom: null,
   unread: {},
-  roomWorking: {},
-  setRoomWorking: (roomId, member, working) =>
+  roomDrafts: {},
+  putDraft: (roomId, draft) =>
     set((s) => {
-      const { [member]: _was, ...others } = s.roomWorking[roomId] ?? {};
-      return { roomWorking: { ...s.roomWorking, [roomId]: working ? { ...others, [member]: working } : others } };
+      const here = s.roomDrafts[roomId] ?? [];
+      const at = here.findIndex((d) => d.id === draft.id);
+      const next = at < 0 ? [...here, draft] : here.map((d, i) => (i === at ? draft : d));
+      return { roomDrafts: { ...s.roomDrafts, [roomId]: next } };
     }),
+  dropDraft: (roomId, id) =>
+    set((s) =>
+      s.roomDrafts[roomId]?.some((d) => d.id === id)
+        ? { roomDrafts: { ...s.roomDrafts, [roomId]: s.roomDrafts[roomId]!.filter((d) => d.id !== id) } }
+        : s,
+    ),
+  keep: (message, created = true) =>
+    set((s) => ({
+      timelines: s.timelines[message.roomId]
+        ? { ...s.timelines, [message.roomId]: arrived(s.timelines[message.roomId]!, message, created) }
+        : s.timelines,
+      roomDrafts: answered(s.roomDrafts, message),
+    })),
   openId: null,
   view: "floor",
   loaded: false,
@@ -108,15 +192,17 @@ export const useDesk = create<DeskState>((set, get) => ({
     return hub.events(
       (e) => {
         if (e.type === "session" && !get().detached) {
-          const n = notificationFor(get().sessions[e.session.id]?.state, e.session);
+          const was = get().sessions[e.session.id];
+          const n = notificationFor(was && shownState(was), e.session);
           if (n) void notify(n);
         }
         set((s) => ({
           rooms: applyRooms(s.rooms, e),
           timelines:
             e.type === "roomMessage" && s.timelines[e.message.roomId]
-              ? { ...s.timelines, [e.message.roomId]: merge(s.timelines[e.message.roomId]!, [e.message]) }
+              ? { ...s.timelines, [e.message.roomId]: arrived(s.timelines[e.message.roomId]!, e.message) }
               : s.timelines,
+          roomDrafts: e.type === "roomMessage" ? answered(s.roomDrafts, e.message) : s.roomDrafts,
           // A room gone while Desk was closed is no longer open; one the hub
           // still has stays open through its restart.
           activeRoom:
@@ -174,7 +260,8 @@ export const useDesk = create<DeskState>((set, get) => ({
     if (!hub) return;
     try {
       const replies = await hub.roomMessages(roomId, threadId);
-      set((s) => ({ timelines: { ...s.timelines, [roomId]: merge(s.timelines[roomId] ?? [], replies) } }));
+      const whole = replies.length < ROOM_PAGE;
+      set((s) => ({ timelines: { ...s.timelines, [roomId]: threadRead(merge(s.timelines[roomId] ?? [], replies), threadId, whole) } }));
     } catch (e) {
       get().fail(e);
     }
@@ -196,5 +283,5 @@ const RANK: Record<Session["state"], number> = {
 
 export const sortedSessions = (sessions: Record<string, Session>): Session[] =>
   Object.values(sessions).sort(
-    (a, b) => RANK[a.state] - RANK[b.state] || b.updatedAt.localeCompare(a.updatedAt),
+    (a, b) => RANK[shownState(a)] - RANK[shownState(b)] || b.updatedAt.localeCompare(a.updatedAt),
   );

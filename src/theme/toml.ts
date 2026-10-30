@@ -1,6 +1,6 @@
 import { parse, stringify } from "smol-toml";
 import { BUILTIN } from "./builtin";
-import { TOKENS, isHex, type Corners, type Density, type Palette, type ThemeSpec, type Token } from "./tokens";
+import { SIZE_RANGES, TOKENS, isHex, type Corners, type Density, type Palette, type SizeRole, type ThemeSpec, type Token } from "./tokens";
 
 export class ThemeError extends Error {}
 
@@ -28,6 +28,17 @@ const oneOf = <T extends string>(where: string, v: unknown, allowed: readonly T[
 
 const isToken = (k: string): k is Token => (TOKENS as readonly string[]).includes(k);
 
+/** Each size's key under `[type]`. */
+const SIZE_KEYS: Record<SizeRole, string> = { size: "size", chatSize: "chat_size", codeSize: "code_size" };
+
+const sizeOf = (type: Table, role: SizeRole): number | undefined => {
+  const v = type[SIZE_KEYS[role]];
+  const [min, max] = SIZE_RANGES[role];
+  if (v === undefined) return undefined;
+  if (typeof v !== "number" || !(v >= min && v <= max)) throw new ThemeError(`[type].${SIZE_KEYS[role]} must be a number from ${min} to ${max}`);
+  return v;
+};
+
 export const parseTheme = (id: string, source: string): ThemeSpec => {
   let doc: Table;
   try {
@@ -43,9 +54,9 @@ export const parseTheme = (id: string, source: string): ThemeSpec => {
     if (!isToken(k)) throw new ThemeError(`[colors.override] has unknown colour "${k}"`);
     overrides[k] = color(`[colors.override].${k}`, v);
   }
-  const size = type.size;
-  if (size !== undefined && (typeof size !== "number" || size < 10 || size > 22))
-    throw new ThemeError("[type].size must be a number from 10 to 22");
+  // A theme from before chats and code had sizes of their own looks as it
+  // did: its chats at its one size, its code at Desk's.
+  const size = sizeOf(type, "size") ?? DEFAULTS.fonts.size;
   return {
     id,
     name: str(doc.name) ?? id,
@@ -57,7 +68,9 @@ export const parseTheme = (id: string, source: string): ThemeSpec => {
       display: str(type.display) ?? DEFAULTS.fonts.display,
       ui: str(type.ui) ?? DEFAULTS.fonts.ui,
       mono: str(type.mono) ?? DEFAULTS.fonts.mono,
-      size: typeof size === "number" ? size : DEFAULTS.fonts.size,
+      size,
+      chatSize: sizeOf(type, "chatSize") ?? size,
+      codeSize: sizeOf(type, "codeSize") ?? DEFAULTS.fonts.codeSize,
     },
     density: oneOf("[shape].density", shape.density, DENSITIES, "cozy"),
     corners: oneOf("[shape].corners", shape.corners, CORNERS, "soft"),
@@ -72,7 +85,12 @@ export const serializeTheme = (spec: ThemeSpec): string => {
     stringify({
       name: spec.name,
       colors,
-      type: spec.fonts,
+      type: {
+        display: spec.fonts.display,
+        ui: spec.fonts.ui,
+        mono: spec.fonts.mono,
+        ...Object.fromEntries((Object.keys(SIZE_KEYS) as SizeRole[]).map((role) => [SIZE_KEYS[role], spec.fonts[role]])),
+      },
       shape: { density: spec.density, corners: spec.corners },
     }) + "\n"
   );

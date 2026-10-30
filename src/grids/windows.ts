@@ -47,7 +47,7 @@ export const thisWindow = (): string => (inApp ? getCurrentWindow().label : "mai
 export const detachedGrid = (): string | null => gridOfLabel(thisWindow());
 
 /** How long the main window waits for the hub before making a first grid,
- *  so a Mac with an empty file takes the grids the hub already has. */
+ *  so a computer with an empty file takes the grids the hub already has. */
 const FIRST_GRID_WAIT_MS = 3000;
 
 const hubAnswered = async (ms: number) => {

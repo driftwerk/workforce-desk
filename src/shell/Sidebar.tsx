@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { GridsSection } from "../grids/Grids";
 import { SortList, SortRow } from "../groups/rows";
 import { arranged, forgetRoom, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
+import { closeRoom } from "../rooms/engine";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
@@ -13,7 +14,11 @@ import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 import { Confirm } from "../ui/Confirm";
 import { Menu } from "../ui/Menu";
+import { YouMark } from "../ui/Mark";
+import { useYou } from "../pictures/who";
+import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { Badge } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
@@ -53,6 +58,18 @@ function useScrollEdges(): (el: HTMLElement | null) => void {
   }, []);
 }
 
+/** You, as Desk shows you: opens your Profile. */
+function You() {
+  const { name } = useYou(null);
+  if (!name) return null;
+  return (
+    <button type="button" className="side-you" title="Your picture, in Settings → Profile" onClick={() => useUi.getState().openSettings("profile")}>
+      <YouMark hub={null} size="sm" />
+      <span className="side-you-name">{name}</span>
+    </button>
+  );
+}
+
 /** The sidebar: Ask anyone and the views always at the top; the rooms or
  *  grids and the groups scrolling between; new session, new crew member,
  *  Settings, voice and the look always at the bottom. */
@@ -75,10 +92,14 @@ export function Sidebar({
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
   const roomsById = useDesk((s) => s.rooms);
-  /** Deletes a room on the hub, and here at once (the hub says so too). */
+  /** Deletes a room on the hub, and here at once (the hub says so too).
+   *  Its members' hubs are told first, so what was set up there reaches
+   *  your DM instead. */
   const deleteRoom = async (id: string) => {
-    const { hub } = useDesk.getState();
+    const { hub, rooms } = useDesk.getState();
     if (!hub) throw new Error("Desk isn't connected to its hub.");
+    const room = rooms[id];
+    if (room) await closeRoom(room);
     await hub.deleteRoom(id);
     useDesk.setState((s) => {
       const { [id]: _gone, ...rest } = s.rooms;
@@ -176,7 +197,7 @@ export function Sidebar({
                       onNudge={(by) => nudgeRoomBy(id, by)}
                       onMenu={(at, from) => setRoomMenu({ id, at, from })}
                     >
-                      {(unread[id] ?? 0) > 0 && <span className="badge">{unread[id]}</span>}
+                      {(unread[id] ?? 0) > 0 && <Badge count={unread[id]!} says={`${unread[id]} unread`} />}
                     </SortRow>
                   );
                 }}
@@ -237,7 +258,8 @@ export function Sidebar({
           </button>
         </div>
         <VoicePill />
-        <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This Mac" : "Starting…"}</span>
+        <You />
+        <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This computer" : "Starting…"}</span>
         <ThemeSwitcher onSettings={onSettings} />
       </div>
     </nav>

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -12,6 +12,7 @@ import type { GridStorage } from "./storage";
 import { dropPane } from "./drag";
 import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
+import { servePictures } from "../pictures/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -60,6 +61,13 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const grid = () => useGrids.getState().grids[MAIN_GRID]!;
+const paneOf = (sessionId: string) => grid().panes.find((p) => p.content?.kind === "session" && p.content.sessionId === sessionId)!;
+/** Lays the main grid out again with pane `keep` focused, so it stays. */
+const layOutFrom = (keep: string, preset: Parameters<typeof layOut>[1]) =>
+  act(() => {
+    useGrids.setState((s) => ({ focus: { ...s.focus, [MAIN_GRID]: keep } }));
+    layOut(MAIN_GRID, preset);
+  });
 const canvas = () => render(<Grid />);
 function Grid() {
   const g = useGrids((s) => s.grids[MAIN_GRID]!);
@@ -226,7 +234,7 @@ describe("a session renamed in Desk", () => {
     deliver(MAIN_GRID, sess("s1"));
     deliver(MAIN_GRID, sess("s3"));
     canvas();
-    act(() => layOut(MAIN_GRID, "halves"));
+    layOutFrom(paneOf("s0").id, "halves");
     // The header.
     const pane = screen.getByRole("region", { name: "date picker" });
     expect(within(pane).getByText("date picker")).toBeTruthy();
@@ -257,11 +265,7 @@ describe("a session renamed in Desk", () => {
     deliver(MAIN_GRID, sess("s1"));
     deliver(MAIN_GRID, sess("s2"));
     canvas();
-    const s1 = grid().panes.find((p) => p.content && (p.content as { sessionId: string }).sessionId === "s1")!;
-    act(() => {
-      useGrids.setState((s) => ({ focus: { ...s.focus, [MAIN_GRID]: s1.id } }));
-      layOut(MAIN_GRID, "one");
-    });
+    layOutFrom(paneOf("s1").id, "one");
     const tray = screen.getByRole("region", { name: "Parked (1)" });
     expect(within(tray).getByRole("button", { name: "date picker" })).toBeTruthy();
     expect(within(tray).getByRole("button", { name: "Remove date picker from grid" })).toBeTruthy();
@@ -283,5 +287,20 @@ describe("an agent's pane", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Agent settings" }));
     expect(useChat.getState().activeAgent).toBe("local/scout");
     expect(useUi.getState().agentTabs["local/scout"]).toBe("settings");
+  });
+
+  it("shows the agent's picture in its header, beside the dot that says what they're doing", async () => {
+    vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
+    servePictures(() => new Response(JSON.stringify({ messages: [], more: false }), { headers: { "content-type": "application/json" } }));
+    useChat.setState({
+      roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "slack", at: "" } }],
+      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    });
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+    canvas();
+    const head = screen.getByRole("region", { name: "Scout" }).querySelector(".gpane-head")!;
+    await waitFor(() => expect(head.querySelector(".mark img")).toBeTruthy());
+    expect(head.querySelector(".dot")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });

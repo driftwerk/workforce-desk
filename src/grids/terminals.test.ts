@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Session, TerminalInfo } from "../hub/types";
-import { describeTerminal, heardTerminals, terminalEnv, trackedIn, useTerminals } from "./terminals";
+import { describeTerminal, heardTerminals, pluginEnv, trackedIn, useTerminals } from "./terminals";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -35,7 +35,7 @@ describe("grid terminals", () => {
   });
 
   it("carry Desk's plugin folder, and leave the hooks' token to the hub", async () => {
-    const env = await terminalEnv();
+    const env = await pluginEnv();
     expect(env).toEqual({ CLAUDE_CODE_PLUGIN_DIRS: "/Applications/Desk.app/Contents/Resources/claude-plugin" });
   });
 

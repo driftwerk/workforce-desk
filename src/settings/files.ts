@@ -2,6 +2,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { serializeTheme } from "../theme/toml";
 import type { ThemeSpec } from "../theme/tokens";
+import { baseName } from "../ui/paths";
 
 export interface PickedFile {
   name: string;
@@ -12,7 +13,7 @@ export interface PickedFile {
 export const pickThemeFile = async (): Promise<PickedFile | null> => {
   const path = await open({ title: "Import a theme", multiple: false, directory: false });
   if (typeof path !== "string") return null;
-  return { name: path.split("/").pop() ?? path, source: await readTextFile(path) };
+  return { name: baseName(path), source: await readTextFile(path) };
 };
 
 export const exportThemeFile = async (spec: ThemeSpec): Promise<void> => {

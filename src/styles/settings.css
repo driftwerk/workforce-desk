@@ -237,18 +237,174 @@ legend.set-label {
   color: var(--signal-soft-text);
 }
 
-.font-fields {
+.type-settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px 28px;
+}
+@media (min-width: 1180px) {
+  .type-settings {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  }
+  .type-preview {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+}
+.font-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.font-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.font-picker > .field-label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.font-face-button {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  text-align: left;
 }
-.font-fields .field > span:first-child {
-  font-size: 12px;
+.font-face-button:hover {
+  border-color: var(--handle-active);
 }
-.font-fields .field input {
+.font-sample {
+  flex: none;
+  width: 34px;
+  font-size: 18px;
+  color: var(--signal-soft-text);
+}
+.font-name {
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.35);
+}
+.font-search {
   padding: 8px 10px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  outline: none;
+}
+.font-search:focus-visible {
+  border-color: var(--signal);
+}
+.font-count {
+  padding: 0 4px;
+}
+.font-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.font-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+.font-opt.active {
+  background: var(--signal-soft);
+}
+.font-opt[aria-selected="true"] .font-name {
+  font-weight: 650;
+}
+.font-tag {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.font-none {
+  display: block;
+  padding: 7px 9px;
+}
+.size-rows {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr auto;
+  gap: 10px 14px;
+  align-items: center;
+}
+.size-rows input[type="range"] {
+  accent-color: var(--signal);
+  min-width: 0;
+}
+.size-number {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.size-number input {
+  width: 58px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  text-align: center;
+}
+.type-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.type-preview-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.type-preview pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--term-text);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .shape-row {
@@ -584,4 +740,25 @@ legend.set-label {
 .shortcut-keys.recording {
   border-color: var(--signal);
   color: var(--signal);
+}
+
+.profile-hubs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+.profile-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.profile-hub-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
 }

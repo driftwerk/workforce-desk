@@ -32,12 +32,11 @@ fn command(program: &str, args: &[&str]) -> Option<String> {
     (out.status.success() && !s.is_empty()).then_some(s)
 }
 
-/// The Mac's owner as macOS and git know them.
+/// The computer's owner as its system and git know them.
 pub fn person() -> Person {
-    let user = std::env::var("USER").unwrap_or_else(|_| "you".into());
-    let host = command("scutil", &["--get", "ComputerName"]).unwrap_or_else(|| "this Mac".into());
+    let host = desk_core::computer_name().unwrap_or_else(|| "this computer".into());
     Person {
-        display_name: command("id", &["-F"]).unwrap_or(user),
+        display_name: desk_core::person_name().unwrap_or_else(|| "you".into()),
         email: command("git", &["config", "--global", "user.email"]),
         device_name: format!("Desk on {host}"),
     }

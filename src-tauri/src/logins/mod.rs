@@ -126,7 +126,7 @@ impl Logins {
         report: Report,
     ) -> eyre::Result<Running> {
         let program = find_program("claude", &env)
-            .ok_or_else(|| eyre::eyre!("Claude Code isn't installed on this Mac"))?;
+            .ok_or_else(|| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         // Wide, so the token is never wrapped across lines.
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -209,7 +209,7 @@ impl Logins {
         report: Report,
     ) -> eyre::Result<Running> {
         let program = find_program("codex", &env)
-            .ok_or_else(|| eyre::eyre!("Codex isn't installed on this Mac"))?;
+            .ok_or_else(|| eyre::eyre!("Codex isn't installed on this computer"))?;
         let home = private_dir(&paths.root.join("codex-login"))?;
         env.insert("CODEX_HOME".into(), home.to_string_lossy().into_owned());
         let mut child = Command::new(program)

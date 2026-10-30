@@ -1,31 +1,53 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
+import { formAnswer } from "../chat/forms";
 import { useChat } from "../chat/store";
-import { agentKey, type Agent } from "../chat/types";
-import { useDesk } from "../hub/store";
+import { agentKey, type Agent, type ChatMessage } from "../chat/types";
+import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
-import { Mark } from "../ui/Mark";
-import { WorkingRow } from "../chat/WorkingRow";
+import { AgentMark } from "../ui/Mark";
+import { Draft } from "./Draft";
 import { Message } from "./Message";
-import { say } from "./engine";
+import { answerForm, say } from "./engine";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
-import { memberKey } from "./routing";
+import { memberKey, memberOf } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
+import { useFocusRequest } from "../shell/focus";
 
-const asChat = (m: RoomMessage) => ({
+const asChat = (m: RoomMessage): ChatMessage => ({
   id: m.id,
-  role: m.author === "you" ? ("user" as const) : m.author === "desk" ? ("system" as const) : ("assistant" as const),
+  role: m.author === "you" ? "user" : m.author === "desk" ? "system" : "assistant",
   content: m.content,
   at: m.createdAt,
-  status: "complete" as const,
+  status: "complete",
   tools: [],
+  ...(m.delivery ? { delivery: m.delivery } : {}),
+  ...(m.requestId ? { requestId: m.requestId } : {}),
+  ...(m.attachments?.length ? { attachments: m.attachments } : {}),
 });
 
-function Composer({ room, threadId, placeholder }: { room: Room; threadId: string | null; placeholder: string }) {
+/** The drafts on their way, by thread (the main timeline's under null),
+ *  but not one whose answer is in already. */
+const draftsByThread = (drafts: readonly RoomDraft[], all: readonly RoomMessage[]): Map<string | null, RoomDraft[]> => {
+  const posted = new Set(all.flatMap((m) => m.source ?? []));
+  const by = new Map<string | null, RoomDraft[]>();
+  for (const d of drafts) if (!(d.source && posted.has(d.source))) by.set(d.threadId, [...(by.get(d.threadId) ?? []), d]);
+  return by;
+};
+
+/** Whether a draft's member is answering now, not waiting or stopped. */
+const answering = (d: RoomDraft): boolean => d.state === "live" || d.state === "stalled";
+
+/** Files dropped anywhere on a room or thread go with its next message. */
+type Files = ReturnType<typeof usePendingFiles>;
+
+function Composer({ room, threadId, placeholder, files }: { room: Room; threadId: string | null; placeholder: string; files: Files }) {
   const fail = useDesk((s) => s.fail);
-  const { roster, hubs } = useChat();
+  const roster = useChat((s) => s.roster);
+  const hubs = useChat((s) => s.hubs);
   // Kept per room and thread until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.room(room.id, threadId));
   const [caret, setCaret] = useState(0);
@@ -33,6 +55,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
   // Escape closes the list until you type on.
   const [dismissed, setDismissed] = useState<number | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  useFocusRequest(threadId ? `room:${room.id}/${threadId}` : `room:${room.id}`, field);
   const listId = useId();
 
   const typing = mentionAt(draft, caret);
@@ -54,19 +77,27 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
     });
   };
 
+  const [sending, setSending] = useState(false);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft;
-    if (!text.trim()) return;
+    const picked = files.files;
+    if ((!text.trim() && !picked.length) || sending) return;
     setDraft("");
     setCaret(0);
-    say(room, text, threadId).catch((err) => {
-      setDraft(text);
-      fail(err);
-    });
+    setSending(true);
+    say(room, text, threadId, picked)
+      .then(() => files.sent(picked))
+      .catch((err: unknown) => {
+        setDraft(text);
+        if (picked.length) files.setProblem(err instanceof Error ? err.message : String(err));
+        else fail(err);
+      })
+      .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-mentions" onSubmit={submit}>
+    <form className="composer composer-mentions composer-files" onSubmit={submit}>
+      <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
       {open && (
         <ul className="mention-menu" role="listbox" id={listId} aria-label="Mention someone">
           {options.map((a, i) => (
@@ -82,7 +113,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
               }}
               onMouseEnter={() => setActive(i)}
             >
-              <Mark name={a.name} size="sm" />
+              <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
               <b>{a.name}</b>
               <span className="faint small">
                 {home(a)}
@@ -92,6 +123,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
           ))}
         </ul>
       )}
+      <AttachButton onFiles={files.add} disabled={sending} />
       <textarea
         ref={field}
         rows={1}
@@ -132,8 +164,8 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
           if (e.key === "Enter" && !e.shiftKey) submit(e);
         }}
       />
-      <button type="submit" className="btn btn-signal" disabled={!draft.trim()}>
-        Send
+      <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length)}>
+        {sending ? "Sending…" : "Send"}
       </button>
     </form>
   );
@@ -141,17 +173,16 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
 
 /** Who wrote `key` (`hub/agent`), and where they live. */
 function useAuthor(): (key: string) => { name: string; home: string } {
-  const { roster, hubs } = useChat();
+  const roster = useChat((s) => s.roster);
+  const hubs = useChat((s) => s.hubs);
   return (key: string) => {
-    const [hub, agent] = key.split("/");
+    const m = memberOf(key);
     return {
-      name: roster.find((a) => a.hubId === hub && a.id === agent)?.name ?? agent ?? key,
-      home: hubs.find((h) => h.id === hub)?.label ?? hub ?? key,
+      name: roster.find((a) => a.hubId === m?.hub && a.id === m.agent)?.name ?? m?.agent ?? key,
+      home: hubs.find((h) => h.id === m?.hub)?.label ?? m?.hub ?? key,
     };
   };
 }
-
-const noForms = () => false;
 
 /** The thread open in the room Rooms shows, while its first message is
  *  loaded: it opens as a column on the right. */
@@ -162,11 +193,39 @@ export function useOpenThread(): { room: Room; thread: string } | null {
   return room && thread && loaded ? { room, thread } : null;
 }
 
+const NO_DRAFTS: RoomDraft[] = [];
+const NO_MESSAGES: RoomMessage[] = [];
+
+/** A room message as the room shows it; a form an agent posted in it is
+ *  answered to that agent, where the form is. */
+function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; name: string; home?: string }) {
+  const submitForm = (summary: string, values: Record<string, unknown>): boolean => {
+    if (!memberOf(m.author)) return false;
+    void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
+    return true;
+  };
+  const member = memberOf(m.author);
+  return (
+    <Message
+      message={asChat(m)}
+      author={name}
+      authorKey={member ? m.author : undefined}
+      home={home}
+      origin={member ?? undefined}
+      onSubmitForm={submitForm}
+    />
+  );
+}
+
 /** A room's thread: its first message, the replies, and a reply box. */
 export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
-  const all = useDesk((s) => s.timelines[room.id]) ?? [];
+  const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
+  const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const setRoomThread = useUi((u) => u.setRoomThread);
   const author = useAuthor();
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
+  const shown = useMemo(() => draftsByThread(drafts, all).get(thread) ?? NO_DRAFTS, [drafts, all, thread]);
   const parent = all.find((m) => m.id === thread);
   if (!parent) return null;
   const replies = all.filter((m) => m.threadId === thread);
@@ -178,20 +237,29 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
       onClose={() => setRoomThread(room.id, null)}
       title={<b className="display rpanel-name">Thread</b>}
     >
-      <div className="room-scroll">
-        <Message message={asChat(parent)} author={author(parent.author).name} onSubmitForm={noForms} />
-        {replies.map((m) => (
-          <Message key={m.id} message={asChat(m)} author={author(m.author).name} onSubmitForm={noForms} />
-        ))}
+      <div className="thread-body drop-target" {...drop.handlers}>
+        <div className="room-scroll">
+          <RoomMessageView room={room} m={parent} name={author(parent.author).name} />
+          {replies.map((m) => (
+            <RoomMessageView key={m.id} room={room} m={m} name={author(m.author).name} />
+          ))}
+          {shown.map((d) => (
+            <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
+          ))}
+        </div>
+        <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" files={files} />
+        {drop.dragging && <DropOverlay to="the thread" />}
       </div>
-      <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
     </SidePanel>
   );
 }
 
 export function RoomView({ room }: { room: Room }) {
-  const { timelines, openThread } = useDesk();
-  const working = useDesk((s) => s.roomWorking[room.id]) ?? {};
+  const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
+  const openThread = useDesk((s) => s.openThread);
+  const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
   // The open thread, per room (and across launches): shown beside, as a
   // column of its own.
   const thread = useUi((u) => u.roomThreads[room.id] ?? null);
@@ -200,17 +268,19 @@ export function RoomView({ room }: { room: Room }) {
   const connected = useDesk((s) => s.connected);
   const scroller = useAnchoredScroll<HTMLDivElement>(`room:${room.id}`);
   const end = useRef<HTMLDivElement>(null);
-  const all = timelines[room.id] ?? [];
-  const main = all.filter((m) => !m.threadId);
+  const main = useMemo(() => all.filter((m) => !m.threadId), [all]);
   const replies = useMemo(() => {
     const by = new Map<string, RoomMessage[]>();
     for (const m of all) if (m.threadId) by.set(m.threadId, [...(by.get(m.threadId) ?? []), m]);
     return by;
   }, [all]);
 
+  const byThread = useMemo(() => draftsByThread(drafts, all), [drafts, all]);
+  const shownDrafts = byThread.get(null) ?? NO_DRAFTS;
+  const draftText = shownDrafts.map((d) => d.text.length).join();
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
-  }, [main.length, Object.keys(working).length]);
+  }, [main.length, shownDrafts.length, draftText]);
   // A thread put back on launch, or open while the hub restarted: its
   // replies are read (again).
   useEffect(() => {
@@ -220,14 +290,14 @@ export function RoomView({ room }: { room: Room }) {
   const author = useAuthor();
 
   return (
-    <main className="room" aria-label={`Room ${room.name}`}>
+    <main className="room drop-target" aria-label={`Room ${room.name}`} {...drop.handlers}>
       <header className="room-head">
         <span className="room-title">
           <span className="room-title-row">
             <h1 className="display-lg">{room.name}</h1>
             <span className="member-stack">
               {room.members.map((m) => (
-                <Mark key={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
+                <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
               ))}
             </span>
           </span>
@@ -240,10 +310,14 @@ export function RoomView({ room }: { room: Room }) {
       <div ref={scroller} className="room-scroll">
         {main.map((m) => {
           const a = author(m.author);
-          const n = replies.get(m.id)?.length ?? 0;
+          const n = m.replyCount ?? replies.get(m.id)?.length ?? 0;
+          const there = thread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
+          const names = (ds: RoomDraft[]) => [...new Set(ds.map((d) => author(d.member).name))];
+          const replying = names(there.filter(answering));
+          const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted"));
           return (
             <div key={m.id} className="room-msg">
-              <Message message={asChat(m)} author={a.name} home={m.author.includes("/") ? a.home : undefined} onSubmitForm={noForms} />
+              <RoomMessageView room={room} m={m} name={a.name} home={memberOf(m.author) ? a.home : undefined} />
               <button
                 type="button"
                 className="link small thread-link"
@@ -251,11 +325,17 @@ export function RoomView({ room }: { room: Room }) {
               >
                 {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
               </button>
+              {replying.length > 0 && (
+                <span className="small faint thread-replying">
+                  {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
+                </span>
+              )}
+              {stopped.length > 0 && <span className="small state-blocked thread-replying">{stopped.join(", ")} couldn’t answer</span>}
             </div>
           );
         })}
-        {Object.entries(working).map(([key, w]) => (
-          <WorkingRow key={key} name={author(key).name} working={w} />
+        {shownDrafts.map((d) => (
+          <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
         ))}
         <div ref={end} />
       </div>
@@ -263,7 +343,9 @@ export function RoomView({ room }: { room: Room }) {
         room={room}
         threadId={null}
         placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
+        files={files}
       />
+      {drop.dragging && <DropOverlay to={room.name} />}
     </main>
   );
 }

@@ -12,7 +12,7 @@ import { newAgentBrain, type Brain } from "./brain";
 import { createLocalAgent, setAgentVoice } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
-/** A new agent on this Mac: a name and what they're for, with how they
+/** A new agent on this computer: a name and what they're for, with how they
  *  think and sound starting on Desk's defaults. */
 export function NewCrew({ onClose }: { onClose: () => void }) {
   const { hub, fail, openRoom } = useDesk();
@@ -95,7 +95,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
             </p>
           </div>
           <footer className="dialog-foot">
-            <span className="dialog-foot-note faint">Runs on This Mac</span>
+            <span className="dialog-foot-note faint">Runs on this computer</span>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>

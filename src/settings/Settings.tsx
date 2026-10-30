@@ -4,6 +4,7 @@ import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
+import { Profile } from "./Profile";
 import { Providers } from "./Providers";
 import { Shortcuts } from "./Shortcuts";
 import { Voices } from "./Voices";
@@ -43,6 +44,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
           Back to desk <kbd>esc</kbd>
         </button>
       </nav>
+      {section === "profile" && <Profile />}
       {section === "appearance" && <Appearance />}
       {section === "hubs" && <Hubs />}
       {section === "providers" && <Providers />}

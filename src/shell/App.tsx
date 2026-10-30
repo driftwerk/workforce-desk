@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
+import { watchFloor } from "../floor/store";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
@@ -11,6 +12,7 @@ import { useSettings } from "../settings/store";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
+import { useHubLinks } from "../hubs/follow";
 import { prune } from "../rooms/engine";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
@@ -47,9 +49,11 @@ export function App() {
   const [newRoom, setNewRoom] = useState(false);
   const [newCrew, setNewCrew] = useState(false);
   const rooms = useDesk((s) => s.rooms);
+  const hubs = useChat((s) => s.hubs);
   useEffect(() => {
-    prune(rooms);
-  }, [rooms]);
+    prune(rooms, hubs);
+  }, [rooms, hubs]);
+  useHubLinks();
   const settings = useUi((u) => u.settings !== null);
   const { openSettings, closeSettings } = useUi.getState();
   const setHubs = useChat((s) => s.setHubs);
@@ -75,7 +79,9 @@ export function App() {
     };
   }, []);
 
-  // Agents on this Mac still greeting with the hub's WELCOME.md get Desk's.
+  useEffect(watchFloor, []);
+
+  // Agents on this computer still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);
   const localIds = useChat((s) =>
     s.roster
@@ -163,7 +169,7 @@ export function App() {
       label: "Thread",
       element: (
         <ErrorBoundary name="thread">
-          <ThreadPanel room={thread.room} thread={thread.thread} />
+          <ThreadPanel key={`${thread.room.id}/${thread.thread}`} room={thread.room} thread={thread.thread} />
         </ErrorBoundary>
       ),
     });

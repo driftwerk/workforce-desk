@@ -1,7 +1,7 @@
 // The order the sidebar lists rooms in, as the person dragged them: kept
 // under `rooms.order` in Desk's restore store (in Desk's own file at once,
 // on the hub shortly after), so it's the same after a restart and on
-// another Mac. Rooms it doesn't name yet — new ones — come after, oldest
+// another computer. Rooms it doesn't name yet — new ones — come after, oldest
 // first; rooms the hub no longer has drop out of it.
 
 import { create } from "zustand";

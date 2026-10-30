@@ -361,6 +361,16 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
             ),
         ]),
     );
+    // A job or workflow made in Desk that needs the person's approval asks
+    // them in Desk, where they decide it; nothing else is routed without
+    // `[permissions]` rules.
+    doc.insert(
+        "approvals".into(),
+        table(&[
+            ("enabled", Value::Boolean(true)),
+            ("backend", s("postgres")),
+        ]),
+    );
     // Local agents may run on the person's ChatGPT plan as well as Claude's.
     doc.insert(
         "subscription".into(),
@@ -491,6 +501,14 @@ mod tests {
         assert_eq!(
             doc["pairing"]["device_pairing_enabled"].as_bool(),
             Some(true)
+        );
+        assert_eq!(doc["approvals"]["enabled"].as_bool(), Some(true));
+        assert_eq!(doc["approvals"]["backend"].as_str(), Some("postgres"));
+        assert!(
+            doc.get("permissions")
+                .and_then(|p| p.get("enabled"))
+                .is_none(),
+            "the permission cascade stays off"
         );
     }
 

@@ -3,13 +3,16 @@ import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type 
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
+import { lookOf, statusOf } from "../floor/background";
+import { useNeedCounts } from "../floor/store";
 import { useGrids } from "../grids/store";
-import { addToGrid as placeInGrid, reveal } from "../grids/windows";
-import { openAgent, openAgentSettings } from "../rooms/AgentPanel";
+import { addToGrid as placeInGrid } from "../grids/windows";
+import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
-import { Mark } from "../ui/Mark";
+import { openTarget, targetOfItem } from "../shell/navigate";
+import { AgentMark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
 import {
@@ -29,6 +32,7 @@ import {
   type Layout,
   type Shown,
 } from "./model";
+import { Badge, needsYou } from "../ui/Badge";
 import { useSessionNames } from "./names";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
@@ -79,11 +83,12 @@ const GROUP_ACCEPTS = ["item", "group"];
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
  *  One that's showing in a grid is shown there when clicked. */
 export function SidebarGroups() {
-  const { sessions, openId, open, view, activeRoom } = useDesk();
+  const { sessions, openId, view, activeRoom } = useDesk();
   const { roster, hubs, activeAgent, panelAgent } = useChat();
   const layout = useLayout();
   const { groups } = layout;
   const names = useSessionNames();
+  const needs = useNeedCounts();
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const gridOrder = useGrids((s) => s.order);
   const allGrids = useGrids((s) => s.grids);
@@ -173,8 +178,8 @@ export function SidebarGroups() {
 
   /** Opens it as always; or, when it's showing in a grid, shows it there. */
   const openItem = (item: Item) => {
-    if (item.kind === "agent") openAgent(agentKey(item.agent));
-    else if (!reveal({ kind: "session", sessionId: item.session.id })) open(item.session.id);
+    const target = targetOfItem(item.key);
+    if (target) openTarget(target);
   };
 
   /** Puts it in grid `gridId` (its first empty pane, else beside the
@@ -325,6 +330,7 @@ export function SidebarGroups() {
             dropAfter={drop?.kind === "group" && drop.before === null && g.id === groups.at(-1)?.id && dragging?.kind === "group"}
             dropInside={drop?.kind === "item" && drop.group === g.id && drop.before === null && dragging?.kind === "item"}
             dragging={dragging}
+            count={g.items.reduce((n, key) => n + (needs.get(key) ?? 0), 0)}
             editing={editing?.kind === "group" && editing.id === g.id}
             register={register}
             onToggle={() => collapseGroup(g.id, !g.collapsed)}
@@ -345,6 +351,7 @@ export function SidebarGroups() {
                   key={key}
                   item={item}
                   name={nameOf(item)}
+                  count={needs.get(key) ?? 0}
                   hint={`${hint}-${item.kind}`}
                   lineBefore={lineBefore}
                   on={
@@ -363,7 +370,7 @@ export function SidebarGroups() {
                         ? "overseer"
                         : hubLabel(item.agent.hubId)
                   }
-                  title={item.kind === "agent" ? describeAgent(item.agent, hubLabel(item.agent.hubId)) : `${ENGINE[item.session.engine]} · ${STATE[item.session.state]}`}
+                  title={item.kind === "agent" ? describeAgent(item.agent, hubLabel(item.agent.hubId)) : `${ENGINE[item.session.engine]} · ${statusOf(item.session, STATE)}`}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
                   onOpen={() => !justDragged.current && openItem(item)}
@@ -391,7 +398,7 @@ export function SidebarGroups() {
           const item = items.get(id);
           return item ? (
             <DragChip mono={item.kind === "session"}>
-              {item.kind === "session" ? <span className={`dot dot-${item.session.state}`} /> : <Mark name={item.agent.name} size="sm" />}
+              {item.kind === "session" ? <span className={`dot dot-${lookOf(item.session)}`} /> : <AgentMark agent={agentKey(item.agent)} name={item.agent.name} size="sm" />}
               {nameOf(item)}
             </DragChip>
           ) : null;
@@ -416,6 +423,7 @@ function GroupSection({
   dropAfter,
   dropInside,
   dragging,
+  count,
   editing,
   register,
   onToggle,
@@ -431,6 +439,8 @@ function GroupSection({
   dropAfter: boolean;
   dropInside: boolean;
   dragging: { kind: "item" | "group"; id: string } | null;
+  /** How many needs wait on its items. */
+  count: number;
   editing: boolean;
   register: (id: string, el: HTMLElement | null) => void;
   onToggle: () => void;
@@ -518,6 +528,7 @@ function GroupSection({
               </span>
               <span className="grp-name">{group.name}</span>
               <span className="grp-count">{group.items.length}</span>
+              {!open && count > 0 && <Badge count={count} says={needsYou(count)} />}
             </button>
           )}
           {!fixed && (
@@ -550,6 +561,7 @@ function GroupSection({
 function ItemRow({
   item,
   name,
+  count,
   hint,
   lineBefore,
   on,
@@ -565,6 +577,7 @@ function ItemRow({
 }: {
   item: Item;
   name: string;
+  count: number;
   hint: string;
   lineBefore: boolean;
   on: boolean;
@@ -579,6 +592,7 @@ function ItemRow({
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
+  const unread = useChat((s) => (item.kind === "agent" ? (s.dmUnread[agentKey(item.agent)] ?? 0) : 0));
   return (
     <SortRow
       id={item.key}
@@ -587,7 +601,7 @@ function ItemRow({
       lineBefore={lineBefore}
       on={on}
       editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
-      lead={session ? <span className={`dot dot-${session.state}`} aria-hidden="true" /> : <Mark name={name} size="sm" />}
+      lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${lookOf(item.session)}`} aria-hidden="true" />}
       name={name}
       nameClass={session ? "mono" : "display"}
       meta={<span className={`gi-meta small ${session?.state === "blocked" ? "state-blocked" : "faint"}`}>{meta}</span>}
@@ -599,6 +613,9 @@ function ItemRow({
       onStartRename={session ? onStartRename : undefined}
       onNudge={onNudge}
       onMenu={onMenu}
-    />
+    >
+      {count > 0 && <Badge count={count} says={needsYou(count)} />}
+      {unread > 0 && <Badge count={unread} says={`${unread} unread`} />}
+    </SortRow>
   );
 }

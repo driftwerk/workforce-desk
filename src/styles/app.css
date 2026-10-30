@@ -296,6 +296,26 @@ button {
 .side-foot > span {
   padding: 0 8px;
 }
+.side-you {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+.side-you:hover {
+  background: var(--raised);
+}
+.side-you-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
 .side-actions {
   display: flex;
   flex-direction: column;
@@ -495,10 +515,15 @@ button {
   border: 2px solid var(--idle);
 }
 .dot-working,
-.dot-starting {
+.dot-starting,
+.dot-background {
   border-color: var(--working);
   background: var(--working);
   animation: desk-breathe 1.8s ease-in-out infinite;
+}
+.dot-background {
+  background: color-mix(in srgb, var(--working) 40%, transparent);
+  animation-duration: 3.6s;
 }
 .dot-blocked,
 .dot-interrupted {
@@ -519,9 +544,39 @@ button {
 .mark-face {
   display: grid;
   place-items: center;
+  overflow: hidden;
   color: #161714;
   font-family: var(--font-display);
   font-weight: 700;
+}
+.mark-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.mark-xs {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+}
+.mark-xs .mark-face {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+.mark-xl {
+  width: 104px;
+  height: 104px;
+  border-radius: 30px;
+  border-width: 3px;
+}
+.mark-xl .mark-face {
+  width: 92px;
+  height: 92px;
+  border-radius: 26px;
+  font-size: 34px;
 }
 .mark-sm {
   width: 30px;
@@ -557,15 +612,25 @@ button {
   border-radius: 11px;
   font-size: 14px;
 }
-.ring-working {
+.ring-working,
+.ring-background {
   border-color: var(--working);
   animation: desk-glow 1.8s ease-in-out infinite;
+}
+.ring-background {
+  border-color: color-mix(in srgb, var(--working) 55%, transparent);
+  animation-duration: 3.6s;
 }
 .ring-blocked {
   border-color: var(--blocked);
 }
 .ring-done {
   border-color: var(--done);
+}
+/* After every size's corners: people are round at any size. */
+.mark-person,
+.mark-person .mark-face {
+  border-radius: 50%;
 }
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
@@ -579,7 +644,8 @@ button {
   min-height: 38px;
   white-space: nowrap;
 }
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -674,13 +740,17 @@ button {
 }
 .tile-working,
 .tile-starting,
-.ov-tile-working {
+.ov-tile-working,
+.tile-background,
+.ov-tile-background {
   position: relative;
   border-color: transparent;
 }
 .tile-working::before,
 .tile-starting::before,
-.ov-tile-working::before {
+.ov-tile-working::before,
+.tile-background::before,
+.ov-tile-background::before {
   content: "";
   position: absolute;
   inset: -1px;
@@ -694,6 +764,11 @@ button {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: desk-flow 3s linear infinite;
+}
+.tile-background::before,
+.ov-tile-background::before {
+  opacity: 0.5;
+  animation-duration: 6s;
 }
 .tile-open {
   display: flex;
@@ -807,17 +882,6 @@ button {
   display: flex;
   gap: 12px;
 }
-.msg-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: var(--raised);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-display);
-  font-weight: 700;
-  flex: none;
-}
 .msg-body {
   display: flex;
   flex-direction: column;
@@ -827,8 +891,13 @@ button {
 }
 .msg-text {
   margin: 0;
+  font-size: var(--font-size-chat);
   line-height: 1.55;
   white-space: pre-wrap;
+}
+.msg-text pre code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
 }
 .msg-text.rich {
   white-space: normal;
@@ -1143,6 +1212,10 @@ button {
   align-self: flex-start;
   margin-left: 46px;
 }
+.thread-replying {
+  align-self: flex-start;
+  margin-left: 46px;
+}
 .thread-panel {
   background: var(--surface);
 }
@@ -1151,6 +1224,26 @@ button {
 }
 .dm-panel {
   background: var(--surface);
+}
+
+/* ── Delivered messages and answers on their way ───────────────────────── */
+
+.msg-delivery {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--signal-soft-text);
+  background: var(--signal-soft);
+  border-color: transparent;
+}
+.draft-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+.draft-note:empty {
+  display: none;
 }
 
 .badge {
@@ -1249,10 +1342,14 @@ button {
   }
   .dot-working,
   .dot-starting,
+  .dot-background,
   .ring-working,
+  .ring-background,
   .tile-working::before,
   .tile-starting::before,
-  .ov-tile-working::before {
+  .ov-tile-working::before,
+  .tile-background::before,
+  .ov-tile-background::before {
     animation: none;
   }
 }

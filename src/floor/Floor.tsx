@@ -3,6 +3,7 @@ import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
+import { useFloorTick } from "./store";
 import { RestoreBanner } from "./RestoreBanner";
 import { GROUPS, Tile } from "./SessionTile";
 import { useSavedScroll } from "../restore/scroll";
@@ -26,6 +27,7 @@ const REFRESH_MS = 60_000;
 export function Floor({ onNewSession }: { onNewSession: () => void }) {
   const hub = useDesk((s) => s.hub);
   const overview = useOverview((s) => s.overview);
+  useFloorTick(true);
   useEffect(() => {
     if (!hub) return;
     const { loadOverview, loadManager } = useOverview.getState();

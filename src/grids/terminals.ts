@@ -17,6 +17,7 @@ import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session, TerminalInfo } from "../hub/types";
 import { claudePluginDir, inApp, programsUnder } from "../platform";
+import { baseName } from "../ui/paths";
 import type { Pane, PaneContent } from "./engine";
 import { newId } from "./model";
 import { setAskingCheck, setTerminal, useGrids, writes } from "./store";
@@ -68,11 +69,11 @@ const problemOf = (e: unknown): string =>
 
 let pluginDirs: Promise<string | null> | null = null;
 
-/** What Desk adds to a terminal's environment: its Claude Code plugin
- *  folder, which the hub joins to any the person already loads (the hub has
- *  no way to find it itself). The hub adds the terminal's id, the token its
- *  hooks present and where they post. */
-export const terminalEnv = async (): Promise<Record<string, string>> => {
+/** What Desk adds to a terminal's or a session's environment: its Claude
+ *  Code plugin folder, which the hub joins to any the person already loads
+ *  (the hub has no way to find it itself). The hub adds the terminal's id,
+ *  the token its hooks present and where they post. */
+export const pluginEnv = async (): Promise<Record<string, string>> => {
   const dir = await (pluginDirs ??= claudePluginDir().catch(() => null));
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
@@ -89,7 +90,7 @@ export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | nu
     if (!hub || !writes(gridId)) return;
     try {
       const where = cwd || (inApp ? await homeDir().catch(() => "/") : "/");
-      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await terminalEnv() });
+      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await pluginEnv() });
       setProblem(pane, null);
       remember(info);
       setTerminal(gridId, pane, info.id, info.cwd);
@@ -179,7 +180,7 @@ const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "tcsh", "ksh", "log
  *  (Codex is recognised here, by its process). */
 export const describeTerminal = (info: TerminalInfo | undefined, programs: string[] | undefined) => {
   const [first, ...rest] = programs ?? [];
-  const shell = first ?? info?.shell.split("/").pop() ?? "zsh";
+  const shell = first ?? (info && baseName(info.shell)) ?? "zsh";
   const running = rest.find((p) => !SHELLS.has(p)) ?? null;
   return { shell, running, codex: rest.some((p) => /^codex\b/.test(p)), claude: rest.some((p) => p === "claude") };
 };

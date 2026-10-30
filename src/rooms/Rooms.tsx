@@ -1,9 +1,13 @@
+import { formAnswer } from "../chat/forms";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
+import { uploadAll } from "../attachments/upload";
+import { PromptCard } from "../chat/Approvals";
 import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
-import { agentKey, describeAgent } from "../chat/types";
+import { agentKey, describeAgent, DESK_DM } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
 import { AgentSettings } from "../crew/AgentSettings";
@@ -11,7 +15,7 @@ import { brainLine } from "../crew/brain";
 import { dirtyFiles, useDrafts } from "../crew/files";
 import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { relayedOf } from "../chat/relayed";
@@ -21,6 +25,7 @@ import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent } from "../chat/types";
 import type { OversightLevel, Overview, Session } from "../hub/types";
+import { useFocusRequest } from "../shell/focus";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -45,10 +50,12 @@ export function Rooms() {
   const activeRoom = useDesk((s) => s.activeRoom);
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
   const loaded = useDesk((s) => s.loaded);
-  if (room) return <RoomView room={room} />;
+  const activeAgent = useChat((s) => s.activeAgent);
+  // Each keyed by what it shows, so nothing typed or picked for one shows in another.
+  if (room) return <RoomView key={room.id} room={room} />;
   // A room put back on launch shows once the hub says what rooms it has.
   if (activeRoom && !loaded) return <Waiting />;
-  return <DirectMessage />;
+  return <DirectMessage key={activeAgent ?? ""} />;
 }
 
 /** In place of a room or DM that's open but not loaded yet: not the empty
@@ -68,7 +75,8 @@ const TABS: { id: Tab; label: string }[] = [
 /** A DM: the one Rooms shows, or with `agent`, that agent's in a grid pane
  *  or the side panel — the conversation alone, under its own header. */
 export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
-  const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm } = useChat();
+  const { activeAgent: shownInRooms, roster, hubs, me, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } =
+    useChat();
   const activeAgent = inPane ?? shownInRooms;
   const agent = roster.find((a) => agentKey(a) === activeAgent);
   const convo = activeAgent ? conversations[activeAgent] : undefined;
@@ -90,8 +98,13 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const rosterRead = useChat((s) => s.rosterRead);
   const rosterErrors = useChat((s) => s.rosterErrors);
   const [leaving, setLeaving] = useState<Tab | null>(null);
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
+  const [sending, setSending] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  useFocusRequest(activeAgent ? `agent:${activeAgent}` : null, composer);
   const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
   const scrollerRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -117,7 +130,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   useEffect(() => {
     if (tab === "chat") toEnd();
-  }, [convo?.messages, convo?.working?.step, tab, toEnd]);
+  }, [convo?.messages, convo?.working?.step, convo?.prompts.length, tab, toEnd]);
+  // Shown: what was delivered into it isn't unread any more.
+  useEffect(() => {
+    if (activeAgent && tab === "chat") seenDm(activeAgent);
+  }, [activeAgent, tab, history?.messages, seenDm]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -136,7 +153,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   const submitForm = useCallback(
     (summary: string, values: Record<string, unknown>) =>
-      !!activeAgent && send(activeAgent, `${summary}\n\n\`\`\`json\n${JSON.stringify(values, null, 2)}\n\`\`\``),
+      !!activeAgent && send(activeAgent, formAnswer(summary, values)),
     [activeAgent, send],
   );
 
@@ -164,7 +181,22 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (send(activeAgent, draft)) setDraft("");
+    const picked = files.files;
+    if (sending || (!draft.trim() && !picked.length)) return;
+    if (!picked.length) {
+      if (send(activeAgent, draft)) setDraft("");
+      return;
+    }
+    if (!hub) return;
+    setSending(true);
+    uploadAll(hub, agent.id, DESK_DM, picked)
+      .then((attachments) => {
+        if (!send(activeAgent, draft, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        setDraft("");
+        files.sent(picked);
+      })
+      .catch((err: unknown) => files.setProblem(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSending(false));
   };
   const unsaved = dirtyFiles(drafts, activeAgent);
   const go = (next: Tab) => setAgentTab(activeAgent, next);
@@ -173,7 +205,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // What the hub reports stands in until the providers list says more.
   const brainSubtitle =
     local && brain && provider && !fallback
-      ? [hub?.label ?? "This Mac", brainLine(brain, provider)].join(" · ")
+      ? [hub?.label ?? "This computer", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
   const subtitle = overseeing && tab === "chat" ? overseeingLine(roster, agent, overview, sessions, overseeing) : brainSubtitle;
@@ -188,17 +220,22 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
   // Who sent a message on is the hub's to say; where it doesn't, its
-  // wording tells, on this Mac, where the overseer is (under the name it
+  // wording tells, on this computer, where the overseer is (under the name it
   // had then).
   const crewNames = local ? roster.filter((a) => a.hubId === agent.hubId).flatMap((a) => [a.name, a.id]) : [];
   const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;
-  const sentOn = { local, crew: crewNames, overseer: overseerName, person: people[agent.hubId] ?? null };
+  const sentOn = { local, crew: crewNames, overseer: overseerName, person: me[agent.hubId]?.name ?? null };
 
+  const chat = tab !== "settings" && !(tab === "files" && local);
   return (
-    <Root className={inPane ? "room room-in-pane" : "room"} aria-label={`Conversation with ${agent.name}`}>
+    <Root
+      className={`${inPane ? "room room-in-pane" : "room"} drop-target`}
+      aria-label={`Conversation with ${agent.name}`}
+      {...(chat ? drop.handlers : {})}
+    >
       {!inPane && (
         <header className="room-head">
-          <Mark name={agent.name} size="lg" />
+          <AgentMark agent={agentKey(agent)} name={agent.name} size="lg" />
           <span className="room-title">
             <h1 className="display-lg">{agent.name}</h1>
             <span className="faint small">
@@ -284,16 +321,25 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 key={m.id}
                 message={m}
                 author={agent.name}
+                authorKey={agentKey(agent)}
+                youOn={agent.hubId}
                 home={hub?.label}
                 relayed={relayedOf(m, sentOn)}
+                origin={{ hub: agent.hubId, agent: agent.id }}
                 onSubmitForm={submitForm}
               />
             ))}
-            {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
+            {convo.prompts.map((p) => (
+              <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
+            ))}
+            {convo.working && !answering && <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />
           </div>
-          <form className="composer" onSubmit={submit}>
+          <form className="composer composer-files" onSubmit={submit}>
+            <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+            <AttachButton onFiles={files.add} disabled={sending} />
             <textarea
+              ref={composer}
               rows={1}
               value={draft}
               placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
@@ -307,11 +353,16 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 Stop
               </button>
             ) : (
-              <button type="submit" className="btn btn-signal" disabled={!draft.trim() || !convo.connected}>
-                Send
+              <button
+                type="submit"
+                className="btn btn-signal"
+                disabled={sending || (!draft.trim() && !files.pending.length) || !convo.connected}
+              >
+                {sending ? "Sending…" : "Send"}
               </button>
             )}
           </form>
+          {drop.dragging && <DropOverlay to={agent.name} />}
         </>
       )}
       {leaving && (

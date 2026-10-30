@@ -61,7 +61,7 @@ beforeEach(() => {
   for (const k of Object.keys(file)) delete file[k];
   for (const { key } of deskState.list("draft.")) deskState.remove(key);
   useChat.setState({ hubs: [], roster: [] });
-  useDesk.setState({ rooms: { r1: room }, timelines: { r1: [] }, roomWorking: {}, hub: null, connected: false });
+  useDesk.setState({ rooms: { r1: room }, timelines: { r1: [] }, roomDrafts: {}, hub: null, connected: false });
   useUi.setState({ roomThreads: {}, anchors: {}, agentFiles: {} });
   useDrafts.setState({ drafts: {} });
 });

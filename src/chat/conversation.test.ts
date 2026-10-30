@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { emptyConversation, finishedAnswers, reduce, wsUrl, type ConversationState } from "./conversation";
-import type { ServerMessage } from "./types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { FakeSocket } from "../testing/sockets";
+import {
+  Conversation,
+  disconnected,
+  emptyConversation,
+  finishedAnswers,
+  reduce,
+  statusOf,
+  wsUrl,
+  type ConversationState,
+} from "./conversation";
+import type { DeskTurn, HubAccount, ServerMessage } from "./types";
 
 const run = (msgs: ServerMessage[], from: ConversationState = emptyConversation()) => msgs.reduce(reduce, from);
 
@@ -86,6 +96,8 @@ describe("conversation", () => {
     expect(url.searchParams.get("rich")).toBe("tables,charts,forms,maps,diagrams,images");
     const room = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan", "desk:release"));
     expect(room.searchParams.get("channel")).toBe("desk:release");
+    expect(url.searchParams.get("desk")).toBe("1");
+    expect(url.searchParams.get("accept")).toBe("*/*");
   });
 
   it("keeps what an overseer's answer offers to act on, whichever copy of the answer carries it", () => {
@@ -105,7 +117,7 @@ describe("conversation", () => {
     expect(theirs.unprompted).toBe(true);
     expect(run([{ type: "stream_start" }, { type: "stream_delta", content: "Green." }], theirs).unprompted).toBe(true);
     expect(run([{ type: "message", content: "Green." }], theirs)).toMatchObject({ unprompted: false, working: null });
-    const yours = run([{ type: "typing" }], { ...emptyConversation(), working: { since: 0, step: "Sending" } });
+    const yours = run([{ type: "typing" }], { ...emptyConversation(), working: { since: 0, at: 0, phase: "sending", step: "Sending" } });
     expect(yours.unprompted).toBe(false);
     expect(run([{ type: "message", content: "An answer the socket repeats" }]).unprompted).toBe(false);
   });
@@ -140,5 +152,140 @@ describe("conversation", () => {
     expect(run([{ type: "user_message", content: "  ", id: "h1" }]).messages).toEqual([]);
     // A hub that sends no id or author still shows it.
     expect(run([{ type: "user_message", content: "Atlas asks: go" }]).messages[0]).toMatchObject({ role: "user", sentOn: true });
+  });
+});
+
+const declared: ServerMessage = { type: "connected", session_id: "s1", features: ["desk.place", "desk.stream", "desk.deliveries"] };
+const stamp = (type: string, more: Partial<ServerMessage> = {}): ServerMessage => ({ type, turn_ref: "t1", id: "r1", ...more });
+
+describe("a Desk connection's turns", () => {
+  it("folds a streamed answer into the draft of its turn, by ref", () => {
+    const s = run([declared, stamp("typing"), stamp("stream_start"), stamp("stream_delta", { content: "Two " }), stamp("stream_delta", { content: "left." })]);
+    expect(s.turns.t1).toMatchObject({ ref: "t1", replyId: "r1", text: "Two left.", state: "live", acked: true });
+    expect(s.turns.t1!.working).toMatchObject({ phase: "writing", step: "Writing" });
+    const ended = run([stamp("stream_end"), stamp("turn_end")], s);
+    expect(ended.turns.t1).toMatchObject({ state: "ended", replyId: "r1", working: null });
+    expect(ended.working).toBeNull();
+  });
+
+  it("knows the message its answer will be from the first frame that names it, and a turn that saved nothing", () => {
+    expect(run([declared, stamp("typing")]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("tool_start", { content: "bash" })]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("typing"), stamp("tool_end", { id: undefined })]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("typing"), stamp("turn_end", { id: undefined })]).turns.t1!.replyId).toBeNull();
+  });
+
+  it("says what a turn waits on: thinking for so long, a tool, a rate limit counting down, a model switch", () => {
+    const thinking = run([declared, stamp("typing")]).turns.t1!.working!;
+    expect(statusOf(thinking, thinking.at + 1_000)).toBe("Thinking");
+    expect(statusOf(thinking, thinking.at + 12_000)).toBe("Thinking · 12s");
+    const tool = run([declared, stamp("tool_start", { content: "linear.search: open issues" })]).turns.t1!.working!;
+    expect(statusOf(tool, tool.at)).toBe("linear.search — open issues");
+    const limited = run([declared, stamp("typing"), stamp("rate_limited", { content: "rate-limited, retry #1 in 30s" })]).turns.t1!.working!;
+    expect(statusOf(limited, limited.at + 4_000)).toBe("Retrying (rate limited) · 26s");
+    const failover = run([declared, stamp("typing"), stamp("slow_model_failover", { content: "gpt-x produced nothing for 45s — switching model" })]);
+    expect(failover.turns.t1!.working!.step).toBe("Switching model (gpt-x was silent)");
+    expect(failover.working!.step).toBe("Switching model (gpt-x was silent)");
+  });
+
+  it("picks a turn up again from its snapshot after a reconnect, without repeating what streamed", () => {
+    const before = run([declared, stamp("stream_start"), stamp("stream_delta", { content: "Part one. " })]);
+    const dropped = disconnected(before);
+    expect(dropped.turns.t1!.state).toBe("stalled");
+    const back = run(
+      [
+        declared,
+        stamp("turn_snapshot", { status: "writing", since: "2026-10-30T10:00:00Z", text: "Part one. Part two. " }),
+        stamp("stream_delta", { content: "Part three." }),
+      ],
+      dropped,
+    );
+    expect(back.turns.t1).toMatchObject({ state: "live", text: "Part one. Part two. Part three." });
+    expect(back.messages.filter((m) => m.role === "assistant").map((m) => [m.id, m.content])).toEqual([["r1", "Part one. Part two. Part three."]]);
+  });
+
+  it("keeps one answer when the hub sends it whole after streaming it, by its id", () => {
+    const s = run([declared, stamp("stream_start"), stamp("stream_delta", { content: "Done." }), stamp("stream_end"), stamp("message", { content: "Done." }), stamp("turn_end")]);
+    expect(s.messages.map((m) => [m.id, m.content, m.status])).toEqual([["r1", "Done.", "complete"]]);
+  });
+
+  it("shows a delivery pushed while a turn runs without ending the turn", () => {
+    const live = run([declared, stamp("typing")]);
+    const s = reduce(live, { type: "message", content: "🔔 Reminder: stand-up", id: "d1" });
+    expect(s.working).not.toBeNull();
+    expect(s.messages.at(-1)).toMatchObject({ id: "d1", content: "🔔 Reminder: stand-up", status: "complete" });
+  });
+
+  it("puts a turn's files on its answer and its draft", () => {
+    const file = { filename: "chart.png", mime_type: "image/png", artifact_id: "art_1", size: 9, width: 2, height: 1 };
+    const s = run([declared, stamp("typing"), stamp("image", { content: "the chart", attachments: [file] }), stamp("stream_start"), stamp("stream_delta", { content: "Here." })]);
+    const shown = { artifact_id: "art_1", media_type: "image/png", filename: "chart.png", size: 9, width: 2, height: 1 };
+    expect(s.turns.t1!.attachments).toEqual([shown]);
+    expect(s.messages.filter((m) => m.role === "assistant")).toEqual([expect.objectContaining({ id: "r1", content: "Here.", attachments: [shown] })]);
+  });
+
+  it("holds a permission prompt until it is answered or its turn ends", () => {
+    const prompt = stamp("permission_prompt", {
+      request_id: "q1",
+      tool_name: "slack.send",
+      content: 'Posts outside Desk, to slack #ops: "deploy done"',
+      prompt_options: { allow_once: true, deny_once: true, allow_always: true, deny_always: true },
+    });
+    const s = run([declared, stamp("typing"), prompt, prompt]);
+    expect(s.prompts).toEqual([
+      { requestId: "q1", tool: "slack.send", content: 'Posts outside Desk, to slack #ops: "deploy done"', options: prompt.prompt_options, turnRef: "t1" },
+    ]);
+    expect(reduce(s, stamp("turn_end")).prompts).toEqual([]);
+  });
+
+  it("counts a follow-up the hub took into the live turn, and says a busy refusal plainly", () => {
+    expect(run([declared, { type: "injected", content: "Follow-up absorbed into active run" }]).absorbed).toBe(1);
+    const busy = run([declared, stamp("error", { content: "busy" })]);
+    expect(busy.turns.t1).toMatchObject({ state: "failed", error: "busy" });
+    expect(busy.messages.at(-1)!.content).toMatch(/still answering/);
+  });
+});
+
+describe("sending on a Desk connection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const hub: HubAccount = { id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" };
+  const turn: DeskTurn = { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: true };
+  const open = async (connected: ServerMessage) => {
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const c = new Conversation(hub, "scout", () => {});
+    const socket = FakeSocket.find("/ws", "scout")!;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(c.send("too soon")).toBe(false);
+    socket.receive(connected);
+    return { c, socket };
+  };
+
+  it("sends the turn, a ref and that it answers approvals to a hub that takes them", async () => {
+    const { c, socket } = await open(declared);
+    const file = { artifact_id: "art_1", media_type: "application/pdf", filename: "q3.pdf", size: 9 };
+    const sent = c.send("what's open?", { turn, legacy: "[old] what's open?", attachments: [file] });
+    expect(sent && sent.turnRef).toMatch(/^[0-9a-f-]{36}$/);
+    expect(socket.chats[0]).toMatchObject({
+      content: "what's open?",
+      desk: turn,
+      turn_ref: sent && sent.turnRef,
+      answers_approvals: true,
+      attachments: [{ filename: "q3.pdf", mime_type: "application/pdf", artifact_id: "art_1" }],
+    });
+    expect(c.current.messages.at(-1)).toMatchObject({ role: "user", attachments: [file] });
+  });
+
+  it("sends an older hub today's frame, in the words it understands", async () => {
+    const { c, socket } = await open({ type: "connected", session_id: "s1" });
+    expect(c.send("what's open?", { turn, legacy: "[old] what's open?" })).toEqual({ turnRef: null });
+    expect(socket.chats[0]).toEqual({ type: "chat", content: "[old] what's open?", session_id: "s1", channel: "desk", agent_id: "scout" });
+  });
+
+  it("answers a prompt on the socket and stops showing it", async () => {
+    const { c, socket } = await open(declared);
+    socket.receive(stamp("permission_prompt", { request_id: "q1", content: "x" }));
+    expect(c.answer("q1", "allow_always")).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({ type: "permission_response", request_id: "q1", choice: "allow_always" });
+    expect(c.current.prompts).toEqual([]);
   });
 });

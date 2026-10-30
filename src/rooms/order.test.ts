@@ -90,7 +90,7 @@ describe("the rooms' order", () => {
     expect(ids()).toEqual(["b", "a", "c"]);
   });
 
-  it("is kept on the hub and comes back after a restart, on this Mac or another", async () => {
+  it("is kept on the hub and comes back after a restart, on this computer or another", async () => {
     const hub = fakeHub();
     const file = fakeFile();
     const first = await started(file, hub);
@@ -102,7 +102,7 @@ describe("the rooms' order", () => {
     stop();
     expect(hub.kept.get(ROOM_ORDER_KEY)).toEqual({ order: ["c", "b", "a"] });
 
-    // Another Mac, which kept nothing.
+    // Another computer, which kept nothing.
     useRoomOrder.setState({ order: [] });
     const other = restore(await started(fakeFile(), hub), roomOrder);
     expect(ids()).toEqual(["c", "b", "a"]);

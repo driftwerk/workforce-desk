@@ -1,3 +1,4 @@
+import type { Attachment, DeliveryKind } from "../chat/types";
 import type { Layout } from "../groups/model";
 
 export type Engine = "claude" | "codex";
@@ -13,6 +14,13 @@ export type SessionState =
   | "closed";
 
 export type Origin = "desk" | "external";
+
+/** Sub-agents or background shells a turn started that still run after
+ *  its main turn ended: until they finish, it isn't done. */
+export interface Background {
+  count: number;
+  since: string;
+}
 
 export interface PendingApproval {
   id: string;
@@ -47,6 +55,8 @@ export interface Session {
   displayName?: string | null;
   /** The sidebar group it's in, as the hub has the layout. */
   group?: { id: string; name: string } | null;
+  /** Background work still running after its turn ended; absent from older hubs. */
+  background?: Background | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +69,9 @@ export interface NewSession {
   worktree?: string;
   prompt?: string;
   approvals?: "desk" | "terminal";
+  /** Added to the session's environment, as for a terminal: Desk's Claude
+   *  Code plugin folder, joined by the hub to the person's own. */
+  env?: Record<string, string>;
 }
 
 /** A login shell the hub hosts for one of Desk's grid panes. */
@@ -107,6 +120,9 @@ export interface Room {
   id: string;
   slug: string;
   name: string;
+  /** The channel its agents' conversations are on, frozen when it was
+   *  made; an older hub doesn't say (`desk:<slug>`). */
+  channel?: string;
   members: RoomMemberRef[];
   defaultMember: string | null;
   createdAt: string;
@@ -122,6 +138,31 @@ export interface RoomMessage {
   content: string;
   hop: number;
   createdAt: string;
+  /** Its files, each naming the hub and agent whose store holds it. */
+  attachments?: Attachment[];
+  /** The agent's session message it is: `<hub>/<agent>/<message id>`. */
+  source?: string;
+  /** Why it was delivered outside a turn. */
+  delivery?: DeliveryKind;
+  /** The routed approval an `approval` delivery asks you to decide, on
+   *  the hub of its author. */
+  requestId?: string;
+  /** On a main-timeline message, how many replies its thread has, and
+   *  when the last came; absent from a hub that doesn't count them. */
+  replyCount?: number;
+  lastReplyAt?: string | null;
+}
+
+/** A room message to keep. */
+export interface NewRoomMessage {
+  author: string;
+  content: string;
+  threadId?: string | null;
+  hop?: number;
+  attachments?: Attachment[];
+  source?: string;
+  delivery?: DeliveryKind;
+  requestId?: string;
 }
 
 export type DeskEvent =
@@ -221,6 +262,9 @@ export interface OverviewItem {
   lastActivity?: string | null;
   approval?: { id: string; summary: string } | null;
   question?: { text: string; options?: string[] | null } | null;
+  /** Background work still running after its turn ended (the item is then
+   *  working); absent from older hubs. */
+  background?: Background | null;
 }
 
 export interface Brief {
@@ -229,9 +273,15 @@ export interface Brief {
   by: { id: string; name: string };
 }
 
+export interface Counts {
+  working: number;
+  needsYou: number;
+  doneToday: number;
+}
+
 export interface Overview {
   brief: Brief | null;
-  counts: { working: number; needsYou: number; doneToday: number };
+  counts: Counts;
   items: OverviewItem[];
 }
 
@@ -256,4 +306,121 @@ export interface Suggestion {
 export interface DeskExtras {
   approvals?: { sessionId: string; approvalId: string; summary: string }[];
   suggestions?: { id: string; text: string; state: Suggestion["state"] }[];
+}
+
+// ── The floor: open needs, work, today's lanes, plan usage ───────────────
+
+/** Where a turn, and anything it asks, can be found. */
+export type Place =
+  | { kind: "dm" }
+  | { kind: "room"; room: string; thread: string | null }
+  | { kind: "call" }
+  | { kind: "session" }
+  | { kind: "slack"; team: string | null; channel: string; thread: string | null }
+  | { kind: "elsewhere" };
+
+/** What a need's Allow answers, passed back to the hub as it gave it. */
+export type DecideRef =
+  | { kind: "session"; sessionId: string; approvalId: string }
+  | { kind: "prompt"; agentId: string; sessionId: string; requestId: string }
+  | { kind: "routed"; requestId: string };
+
+/** How a need can be answered in place: allowed or denied, only in the
+ *  session's terminal, or by replying where it was asked. */
+export type Answer = { kind: "decide"; at: DecideRef } | { kind: "terminal" } | { kind: "reply" };
+
+/** An agent (its id) or a Desk session (its id) on a hub. */
+export interface Who {
+  kind: "agent" | "session";
+  id: string;
+  name: string;
+  engine: Engine | null;
+}
+
+export type NeedKind = "approval" | "question";
+
+/** Something still waiting on the person. */
+export interface Need {
+  id: string;
+  kind: NeedKind;
+  who: Who;
+  ask: string;
+  options: string[] | null;
+  since: string;
+  place: Place;
+  answer: Answer;
+}
+
+export type Outcome = "finished" | "asked" | "failed" | "stopped" | "limit" | "interrupted";
+
+/** A turn running now, or one that ended. */
+export interface Work {
+  who: Who;
+  what: string;
+  place: Place;
+  since: string;
+  heardAt: string;
+  endedAt: string | null;
+  outcome: Outcome | null;
+  /** Its main turn ended but work it started still runs; absent from older hubs. */
+  background?: Background | null;
+}
+
+/** `background`: the main turn was idle while work it started ran. */
+export type SpanKind = "working" | "waiting" | "background";
+
+export interface Span {
+  kind: SpanKind;
+  from: string;
+  /** Null: still going. */
+  to: string | null;
+}
+
+/** One agent's or session's day. */
+export interface Lane {
+  who: Who;
+  spans: Span[];
+}
+
+/** `GET /api/desk/floor`. */
+export interface FloorView {
+  asOf: string;
+  /** Oldest first. */
+  needs: Need[];
+  working: Work[];
+  /** The last 24 hours, latest first. */
+  done: Work[];
+  lanes: Lane[];
+  counts: Counts;
+  /** How many the hub left out of `done` and `lanes`. */
+  more: { done: number; lanes: number };
+}
+
+export type PlanKind = "claude" | "chatgpt";
+
+/** Whose sign-in a reading is from: this computer's CLI, or a login in the hub's vault. */
+export type PlanWhere = "mac" | "hub";
+
+export interface PlanWindow {
+  usedPercent: number;
+  resetsAt: string | null;
+  /** Its length: 300 for the 5-hour window, 10 080 for the weekly one. */
+  minutes: number;
+}
+
+export interface PlanReading {
+  kind: PlanKind;
+  where: PlanWhere;
+  /** The same for every reading of one account, wherever it was made. */
+  account: string | null;
+  plan: string | null;
+  windows: PlanWindow[];
+  observedAt: string;
+}
+
+/** `GET /api/desk/usage`. */
+export interface UsageView {
+  asOf: string;
+  logins: { kind: PlanKind; where: PlanWhere; signedIn: boolean }[];
+  readings: PlanReading[];
 }

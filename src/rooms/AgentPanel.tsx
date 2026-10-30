@@ -5,7 +5,7 @@ import { reveal } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { DirectMessage } from "./Rooms";
 
 /** Shows your DM with agent `key` in Rooms. */
@@ -51,7 +51,7 @@ export function AgentPanel({ agent }: { agent: Agent }) {
       onClose={close}
       title={
         <>
-          <Mark name={agent.name} />
+          <AgentMark agent={key} name={agent.name} />
           <span className="session-title">
             <b className="display">{agent.name}</b>
             <span className="faint small">{describeAgent(agent, hub?.label ?? agent.hubId)}</span>

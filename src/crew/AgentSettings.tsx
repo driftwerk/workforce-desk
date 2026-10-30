@@ -13,6 +13,8 @@ import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from
 import { AGENT_FILES, ago, useDrafts } from "./files";
 import { purposeOf, renameAgentFiles, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { useUi } from "../shell/ui";
+import { PictureField } from "../pictures/PictureField";
+import { useAgentImage } from "../pictures/who";
 import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
@@ -83,7 +85,8 @@ function SectionLinks() {
 function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefined; local: boolean }) {
   const desk = useDesk((s) => s.hub);
   const refreshDrafts = useDrafts((s) => s.refresh);
-  const { rename, refreshRoster } = useChat();
+  const { rename, refreshRoster, setPicture } = useChat();
+  const src = useAgentImage(agentKey(agent));
   const [saved, setSaved] = useState<string | null>(null);
   const [purpose, setPurpose] = useState("");
   // The name as saved, kept while a rename is in flight so it can go back.
@@ -175,6 +178,22 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   return (
     <section id="about" className="agent-section" aria-labelledby="about-head">
       <h2 id="about-head">About</h2>
+      <div className="field-stack">
+        <span className="field-label">Picture</span>
+        <PictureField
+          name={agent.name}
+          picture={agent.picture}
+          src={src}
+          onSet={
+            local && desk
+              ? async (image) => {
+                  setPicture({ agent: agentKey(agent) }, await desk.setAgentPicture(agent.id, image));
+                  void refreshRoster();
+                }
+              : undefined
+          }
+        />
+      </div>
       <label className="field-stack">
         <span className="field-label">Name</span>
         {local ? (

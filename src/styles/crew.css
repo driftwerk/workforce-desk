@@ -693,7 +693,7 @@ button.card-icon:hover:not(:disabled) {
   background: var(--sunken);
   color: var(--term-text);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-chat);
   line-height: 1.65;
   tab-size: 2;
 }
@@ -869,4 +869,67 @@ button.card-icon:hover:not(:disabled) {
 .add-voice-open {
   align-self: flex-start;
   margin-top: 8px;
+}
+
+/* ── Pictures ───────────────────────────────────────────────────────────── */
+
+.picture-field {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.picture-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.picture-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.picture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.crop-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.crop-view {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28%;
+  background: var(--sunken);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-view:active {
+  cursor: grabbing;
+}
+.crop-round {
+  border-radius: 50%;
+}
+.crop-view img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+}
+.crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 280px;
+}
+.crop-zoom input {
+  flex: 1;
+  accent-color: var(--signal);
 }

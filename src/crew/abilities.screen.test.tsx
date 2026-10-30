@@ -84,7 +84,7 @@ describe("How they remember", () => {
       expect(toggle(name).getAttribute("aria-checked")).toBe("true");
     }
     expect(within(remember).queryByRole("button", { name: "Back to Desk’s defaults" })).toBeNull();
-    expect(within(remember).getByText(/Memories stay on this Mac/)).toBeTruthy();
+    expect(within(remember).getByText(/Memories stay on this computer/)).toBeTruthy();
 
     await act(async () => fireEvent.click(toggle("Learns from mistakes")));
     await waitFor(() => expect(doc().memory).toEqual({ lesson_extract: false, lesson_inject: false }));

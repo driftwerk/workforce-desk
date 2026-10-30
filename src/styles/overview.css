@@ -217,6 +217,15 @@
   flex-direction: column;
   gap: 10px;
 }
+.activity-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.crew-floor-body > .stage-dock {
+  padding: 12px 10px 0 0;
+}
 .activity-head h2 {
   margin: 0;
   font-size: 16px;

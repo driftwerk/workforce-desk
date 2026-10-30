@@ -40,7 +40,7 @@ export const resumePairing = (): void => {
 };
 
 /** An email to offer: the last one Desk asked for a code with, else yours
- *  on any hub Desk knows (this Mac's first). */
+ *  on any hub Desk knows (this computer's first). */
 const knownEmail = async (): Promise<string | null> => {
   const remembered = lastEmail(deskState);
   if (remembered) return remembered;

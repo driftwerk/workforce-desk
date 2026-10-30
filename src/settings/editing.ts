@@ -50,17 +50,6 @@ export const DERIVED: readonly [Token, string][] = [
   ["handleActive", "drag handle, active"],
 ];
 
-export const FONTS = [
-  "Bricolage Grotesque Variable",
-  "Figtree Variable",
-  "Geist Mono Variable",
-  "SF Pro",
-  "Helvetica Neue",
-  "Avenir Next",
-  "SF Mono",
-  "Menlo",
-] as const;
-
 export const isBuiltin = (id: string): boolean => BUILTIN.some((b) => b.id === id);
 
 export const uniqueId = (name: string, taken: readonly string[]): string => {

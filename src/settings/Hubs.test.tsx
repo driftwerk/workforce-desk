@@ -180,4 +180,17 @@ describe("Connect a workspace", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("unpairs this computer from a workspace before it forgets it", async () => {
+    const asked: string[] = [];
+    hubsAnswer({
+      "/api/me": () => json({ display_name: "Kings", email: "k@example.com" }),
+      "/api/pair/device/revoke-self": () => (asked.push("revoke-self"), json({ revoked: true })),
+    });
+    const { removeHub } = await import("../platform");
+    vi.mocked(removeHub).mockImplementation(async () => void asked.push("removed"));
+    render(<Hubs />);
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(asked).toEqual(["revoke-self", "removed"]));
+  });
 });

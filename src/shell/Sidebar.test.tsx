@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { createGrid, startGrids, useGrids } from "../grids/store";
+import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { Room } from "../hub/types";
 import { useRoomOrder } from "../rooms/order";
@@ -10,6 +11,7 @@ import { useSettings } from "../settings/store";
 import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
 import { Sidebar, scrollEdges } from "./Sidebar";
 import { useUi } from "./ui";
+import { servePictures } from "../pictures/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -236,9 +238,21 @@ describe("rooms in the sidebar", () => {
 });
 
 describe("deleting from the sidebar", () => {
-  it("deletes a room from its ⋯ menu once you confirm", async () => {
-    const deleteRoom = vi.fn(() => Promise.resolve());
-    const room = { id: "r1", name: "Launch", members: [] } as unknown as ReturnType<typeof useDesk.getState>["rooms"][string];
+  it("deletes a room from its ⋯ menu once you confirm, telling its members' hubs first", async () => {
+    const closed: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: URL | string, init?: RequestInit) => {
+        closed.push(`${new URL(u).pathname} ${String(init?.body)}`);
+        return new Response("{}", { headers: { "content-type": "application/json" } });
+      }),
+    );
+    useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" }] });
+    const deleteRoom = vi.fn(() => {
+      expect(closed).toEqual(['/api/desk/conversations/allan/close {"channel":"desk:r1-channel","undelivered":[]}']);
+      return Promise.resolve();
+    });
+    const room = { id: "r1", name: "Launch", slug: "launch", channel: "desk:r1-channel", members: [{ hub: "dw", agent: "allan" }] } as unknown as Room;
     useDesk.setState({ view: "rooms", rooms: { r1: room }, activeRoom: "r1", hub: { deleteRoom } as never });
     useRoomOrder.setState({ order: ["r1"] });
     sidebar();
@@ -250,6 +264,7 @@ describe("deleting from the sidebar", () => {
     expect(useDesk.getState().rooms).toEqual({});
     expect(useDesk.getState().activeRoom).toBeNull();
     expect(useRoomOrder.getState().order).not.toContain("r1");
+    vi.unstubAllGlobals();
   });
 
   it("deletes a grid, even the last one, leaving none: the Grids section keeps its + and says so", () => {
@@ -270,5 +285,23 @@ describe("deleting from the sidebar", () => {
     fireEvent.click(within(grids).getByRole("button", { name: "New grid" }));
     expect(useGrids.getState().order).toHaveLength(1);
     expect(within(grids).queryByText("No grids yet")).toBeNull();
+  });
+
+  it("shows agents with their pictures, and you round at the bottom, opening your Profile", async () => {
+    servePictures();
+    const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+    useChat.setState({
+      hubs: [local],
+      roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "chosen", at: "" } }],
+      me: { local: { id: "u1", name: "Sam", picture: { version: "m1", source: "chosen", at: "" } } },
+    });
+    const { container } = sidebar();
+    const groups = within(container.querySelector(".side-scroll") as HTMLElement).getByRole("region", { name: "Groups" });
+    await vi.waitFor(() => expect(within(groups).getByText("Scout").closest(".gi-wrap")!.querySelector(".mark img")).toBeTruthy());
+    const you = screen.getByRole("button", { name: /Sam/ });
+    await vi.waitFor(() => expect(you.querySelector(".mark-person img")).toBeTruthy());
+    fireEvent.click(you);
+    expect(useUi.getState().settings).toBe("profile");
+    vi.unstubAllGlobals();
   });
 });

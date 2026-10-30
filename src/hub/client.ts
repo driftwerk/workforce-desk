@@ -7,6 +7,7 @@ import type {
   Decision,
   DeskEvent,
   Manager,
+  NewRoomMessage,
   NewSession,
   NewTerminal,
   Overview,
@@ -18,6 +19,7 @@ import type {
   TerminalInfo,
 } from "./types";
 import { hubFetch } from "./net";
+import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
 
 export interface HubConnection {
   url: string;
@@ -112,7 +114,7 @@ export class HubError extends Error {
 /** What a hub said when it refused: its JSON `error` when it gives one,
  *  else a plain-text body as written (never JSON or a web page), else the
  *  status line. */
-const refusal = async (res: Response): Promise<HubError> => {
+export const refusal = async (res: Response): Promise<HubError> => {
   const text = (await res.text().catch(() => "")).trim();
   let message = text.startsWith("<") ? "" : text;
   try {
@@ -127,6 +129,19 @@ const refusal = async (res: Response): Promise<HubError> => {
   return new HubError(res.status, message || res.statusText || "The hub refused that.");
 };
 
+/** Chooses `image` as the picture at `path` on a hub (null: chooses none,
+ *  so its Slack picture, if any, shows again); the picture shown after. */
+export const sendPicture = async (conn: HubConnection, path: string, image: Blob | null): Promise<Picture | null> => {
+  const res = await hubFetch(new URL(path, conn.url), {
+    method: image ? "PUT" : "DELETE",
+    headers: { authorization: `Bearer ${conn.token}`, ...(image ? { "content-type": image.type || "application/octet-stream" } : {}) },
+    body: image ?? undefined,
+  });
+  if (!res.ok) throw await refusal(res);
+  if (!(res.headers.get("content-type") ?? "").includes("json")) throw new HubError(404, NO_ROUTE);
+  return pictureOf(((await res.json()) as { picture?: unknown }).picture);
+};
+
 const wsUrl = (base: string, path: string, token: string): string => {
   const u = new URL(path, base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
@@ -134,38 +149,60 @@ const wsUrl = (base: string, path: string, token: string): string => {
   return u.toString();
 };
 
+/** One call to a hub's API, as `conn`: its status and JSON answer (none
+ *  for a 204), and a `HubError` for a refusal or a route the hub doesn't
+ *  have. */
+export const hubRequest = async <T>(
+  conn: HubConnection,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: T }> => {
+  const res = await hubFetch(new URL(path, conn.url), {
+    method,
+    headers: {
+      authorization: `Bearer ${conn.token}`,
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw await refusal(res);
+  if (res.status === 204) return { status: res.status, body: undefined as T };
+  // A hub without this route answers with its web page, not a 404.
+  if (!(res.headers.get("content-type") ?? "").includes("json")) {
+    throw new HubError(404, NO_ROUTE);
+  }
+  return { status: res.status, body: (await res.json()) as T };
+};
+
+/** One call to a hub's API, as `conn`: its JSON answer, nothing for a 204. */
+export const hubCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
+  (await hubRequest<T>(conn, method, path, body)).body;
+
+/** A Desk route; in the browser preview, the dev bridge answers the ones
+ *  the running hub doesn't have yet. */
+export const deskCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> => {
+  try {
+    return await hubCall<T>(conn, method, path, body);
+  } catch (e) {
+    if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
+    const { devHub } = await import("../devBridge");
+    return devHub<T>(method, path, body);
+  }
+};
+
+/** The most messages one read of a room or thread returns. */
+export const ROOM_PAGE = 100;
+
 export class DeskHub {
   constructor(private readonly conn: HubConnection) {}
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await hubFetch(new URL(path, this.conn.url), {
-      method,
-      headers: {
-        authorization: `Bearer ${this.conn.token}`,
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!res.ok) throw await refusal(res);
-    if (res.status === 204) return undefined as T;
-    // A hub without this route answers with its web page, not a 404.
-    if (!(res.headers.get("content-type") ?? "").includes("json")) {
-      throw new HubError(404, NO_ROUTE);
-    }
-    return (await res.json()) as T;
-  }
+  private request = <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
+    hubRequest<T>(this.conn, method, path, body);
 
-  /** A Desk route; in the browser preview, the dev bridge answers the ones
-   *  the running hub doesn't have yet. */
-  private async desk<T>(method: string, path: string, body?: unknown): Promise<T> {
-    try {
-      return await this.call<T>(method, path, body);
-    } catch (e) {
-      if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
-      const { devHub } = await import("../devBridge");
-      return devHub<T>(method, path, body);
-    }
-  }
+  private call = <T>(method: string, path: string, body?: unknown): Promise<T> => hubCall<T>(this.conn, method, path, body);
+
+  private desk = <T>(method: string, path: string, body?: unknown): Promise<T> => deskCall<T>(this.conn, method, path, body);
 
   private async text(path: string): Promise<string> {
     const res = await hubFetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });
@@ -210,7 +247,9 @@ export class DeskHub {
   /** A new name and, for agents Desk made, the instructions that say it. */
   renameAgent = (id: string, name: string, systemPrompt?: string): Promise<unknown> =>
     this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, systemPrompt === undefined ? { name } : { name, system_prompt: systemPrompt });
-  /** What agents on this Mac can think with, connected or not. */
+  /** Chooses a picture for an agent here (null: none); the one it shows after. */
+  setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => sendPicture(this.conn, agentPicturePath(id), image);
+  /** What agents on this computer can think with, connected or not. */
   providers = async (): Promise<Provider[]> =>
     (await this.desk<{ providers: Provider[] }>("GET", "/api/desk/providers")).providers;
   /** Connects a provider with its fields (keys, an address); answers with
@@ -277,10 +316,15 @@ export class DeskHub {
     patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null },
   ): Promise<Room> => this.call("PATCH", `/api/desk/rooms/${id}`, patch);
   deleteRoom = (id: string): Promise<void> => this.call("DELETE", `/api/desk/rooms/${id}`);
+  /** A room's newest messages (of one thread, when named), at most a page. */
   roomMessages = (id: string, thread?: string): Promise<RoomMessage[]> =>
-    this.call("GET", `/api/desk/rooms/${id}/messages${thread ? `?thread=${thread}` : ""}`);
-  post = (id: string, m: { author: string; content: string; threadId?: string | null; hop?: number }): Promise<RoomMessage> =>
-    this.call("POST", `/api/desk/rooms/${id}/messages`, m);
+    this.call("GET", `/api/desk/rooms/${id}/messages?${new URLSearchParams({ limit: String(ROOM_PAGE), ...(thread ? { thread } : {}) })}`);
+  /** Keeps a message in a room; `created` is false when one with its
+   *  source was kept already (a hub that keeps no sources keeps it anew). */
+  post = async (id: string, m: NewRoomMessage): Promise<{ message: RoomMessage; created: boolean }> => {
+    const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${id}/messages`, m);
+    return { message: body, created: status === 201 || (!!m.source && !body.source) };
+  };
   search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
     this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
 

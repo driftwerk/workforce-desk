@@ -2,13 +2,12 @@ import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { DeskExtras, Engine } from "../hub/types";
 import { plainError } from "../ui/plainError";
-import { since } from "./overview";
+import { since } from "../floor/time";
 import { openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
+import { homeShort } from "../ui/paths";
 
 const ENGINE: Record<Engine, string> = { claude: "Claude Code", codex: "Codex" };
-
-const home = (cwd: string): string => cwd.replace(/^\/Users\/[^/]+/, "~");
 
 type Approval = NonNullable<DeskExtras["approvals"]>[number];
 type Mentioned = NonNullable<DeskExtras["suggestions"]>[number];
@@ -39,7 +38,7 @@ function InlineApproval({ approval }: { approval: Approval }) {
   // Still waiting: the session says so, or (a session Desk doesn't list) the overview does.
   const waiting = session ? !!pending : !!item;
   const meta = pending
-    ? [`Waiting ${since(pending.since)}`, `${ENGINE[session!.engine]} in ${home(session!.cwd)}`].join(" · ")
+    ? [`Waiting ${since(pending.since)}`, `${ENGINE[session!.engine]} in ${homeShort(session!.cwd)}`].join(" · ")
     : item
       ? [`Waiting ${since(item.since)}`, item.engine ? ENGINE[item.engine] : null].filter(Boolean).join(" · ")
       : null;

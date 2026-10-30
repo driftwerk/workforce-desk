@@ -3,6 +3,7 @@ import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
+import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
@@ -21,6 +22,8 @@ import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, s
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
+import { AgentMark } from "../ui/Mark";
+import { baseName, homeShort } from "../ui/paths";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -53,7 +56,7 @@ export interface Label {
   name: string;
   meta: string;
   /** Its dot: a session's state, or none. */
-  state: SessionState | null;
+  state: Look | null;
   /** A session started in this terminal that Desk tracks. */
   tracked: Session | null;
   /** The session to answer for, if it's asking. */
@@ -62,8 +65,8 @@ export interface Label {
   mono: boolean;
 }
 
-const home = (path: string | null | undefined): string | null => (path ? path.replace(/^\/Users\/[^/]+/, "~") : null);
-const folder = (path: string | null | undefined): string | null => path?.split("/").filter(Boolean).pop() ?? null;
+const home = (path: string | null | undefined): string | null => (path ? homeShort(path) : null);
+const folder = (path: string | null | undefined): string | null => (path ? baseName(path) : null);
 
 /** Each pane's header, from what it holds. */
 export function usePaneLabel(content: PaneContent | null): Label {
@@ -94,8 +97,8 @@ export function usePaneLabel(content: PaneContent | null): Label {
   if (session) {
     return {
       name,
-      meta: `${ENGINE[session.engine]} · ${STATE_LABEL[session.state]}`,
-      state: session.state,
+      meta: `${ENGINE[session.engine]} · ${statusOf(session, STATE_LABEL)}`,
+      state: lookOf(session),
       tracked,
       asking: session.pending ? session : null,
       cwd: content.kind === "terminal" ? home(info?.cwd ?? content.cwd) : null,
@@ -174,12 +177,12 @@ const RemoveIcon = () => (
   </svg>
 );
 
-/** One pane: its header (state, name, what it is, its options, and taking
- *  it off the grid) and what it holds — a session, a conversation, a
- *  terminal, or nothing yet. Its header drags it. */
 /** The whole grid, for a pane filling it. */
 const WHOLE: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
+/** One pane: its header (state, name, what it is, its options, and taking
+ *  it off the grid) and what it holds — a session, a conversation, a
+ *  terminal, or nothing yet. Its header drags it. */
 export function GridPane({
   gridId,
   pane,
@@ -224,6 +227,7 @@ export function GridPane({
       <div className="gpane-box">
         <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={pane.content ? "Drag to move" : undefined} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
+          {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
           <span className={`gpane-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
           {label.meta && <span className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>{label.meta}</span>}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
@@ -391,7 +395,7 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
     );
   }
   if (c.kind === "terminal") return <TerminalBody gridId={gridId} pane={pane.id} content={c} />;
-  if (c.kind === "agent") return <DirectMessage agent={c.agent} />;
+  if (c.kind === "agent") return <DirectMessage key={c.agent} agent={c.agent} />;
   return <SessionPane id={c.sessionId} />;
 }
 
@@ -456,7 +460,7 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
   const replace: MenuEntry[] = [
     { kind: "item", label: "New terminal", kbd: shortcutLabel(keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[s.state], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
+    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
   ];

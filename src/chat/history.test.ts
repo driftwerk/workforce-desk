@@ -1,21 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyConversation, type ConversationState } from "./conversation";
-import { covered, fetchHistory, prepend, withHistory } from "./history";
+import { covered, cursorIn, fetchHistory, prepend, readConversation, withHistory } from "./history";
 import { useChat } from "./store";
 import type { ChatMessage, HubAccount } from "./types";
 
 /** The DMs opened, to tell what they hear and see what they're told. */
-const opened = vi.hoisted(() => [] as { change: (s: ConversationState) => void; dropped: Set<string>[] }[]);
+const opened = vi.hoisted(
+  () => [] as { change: (s: ConversationState) => void; dropped: Set<string>[]; sent: unknown[][]; forgotten: string[] }[],
+);
 
 vi.mock("./conversation", async (original) => ({
   ...(await original<typeof import("./conversation")>()),
   Conversation: class {
     dropped: Set<string>[] = [];
+    sent: unknown[][] = [];
+    forgotten: string[] = [];
     constructor(_hub: unknown, _agent: unknown, readonly change: (s: ConversationState) => void) {
       opened.push(this);
     }
-    send() {
-      return true;
+    send(...args: unknown[]) {
+      this.sent.push(args);
+      return { turnRef: "t1" };
+    }
+    forget(ref: string) {
+      this.forgotten.push(ref);
     }
     drop(ids: Set<string>) {
       this.dropped.push(ids);
@@ -101,6 +109,30 @@ describe("reading a DM's history", () => {
     expect("author" in page!.messages[3]!).toBe(false);
   });
 
+  it("reads where a message was delivered, its files (as the hub's own, whatever they claim), and a room's page after a message", async () => {
+    const file = { artifact_id: "art_1", media_type: "application/pdf", filename: "q3.pdf", size: 9, thumbnail_url: null };
+    answer(() =>
+      json({
+        messages: [
+          { id: "h1", from: "agent", text: "🔔 Reminder: stand-up", mark: { delivery: "reminder" } },
+          { id: "h2", from: "agent", text: "", mark: { delivery: "approval", request_id: "q1" } },
+          { id: "file:art_1", from: "agent", text: "", attachments: [{ ...file, hub: "local", agent: "overseer" }] },
+          { id: "h3", from: "agent", text: "" },
+        ],
+        more: false,
+      }),
+    );
+    const page = await fetchHistory(hub, "scout");
+    expect(page!.messages.map((m) => [m.id, m.delivery, m.requestId, m.attachments])).toEqual([
+      ["h1", "reminder", undefined, undefined],
+      ["h2", "approval", "q1", undefined],
+      ["file:art_1", undefined, undefined, [file]],
+    ]);
+    answer(() => json({ messages: [], more: false }));
+    await readConversation(hub, "scout", { channel: "desk:6f1c", after: "m4" });
+    expect(Object.fromEntries(fetched.at(-1)!.searchParams)).toEqual({ limit: "200", channel: "desk:6f1c", after: "m4" });
+  });
+
   it("asks for the page before a message", async () => {
     answer(() => json({ messages: [], more: false }));
     await fetchHistory(hub, "scout", "h1");
@@ -170,6 +202,18 @@ describe("the live messages the hub's copy now shows", () => {
   const before = "2026-10-28T10:00:00.000Z";
   const at = "2026-10-28T09:59:00.000Z";
 
+  it("are known by their id on a hub that streams answers by it, never by what they say", () => {
+    const kept = [msg("h1", "user", "status?"), msg("r1", "assistant", "Green.")];
+    const live = [msg("m-1", "user", "status?"), msg("r9", "assistant", "Green."), msg("r1", "assistant", "Green.")];
+    expect([...covered(kept, live, before, true)].sort()).toEqual(["m-1", "r1"]);
+    expect([...covered(kept, live.slice(0, 2), before)].sort()).toEqual(["m-1", "r9"]);
+  });
+
+  it("are paged from a message of the transcript, never a file of its own", () => {
+    const page = [msg("file:a", "assistant", ""), msg("h1", "user", "x"), msg("h2", "assistant", "y"), msg("file:b", "assistant", "")];
+    expect([cursorIn(page, "first"), cursorIn(page, "last"), cursorIn([page[0]!], "last")]).toEqual(["h1", "h2", undefined]);
+  });
+
   it("are the ones it has, matched in order from the end", () => {
     const kept = [
       msg("h1", "user", "hi", at),
@@ -196,6 +240,32 @@ describe("the live messages the hub's copy now shows", () => {
 
 describe("a DM's history in the store", () => {
   const agent = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
+
+  it("sends a DM turn, spoken when said aloud, with its files", async () => {
+    answer(() => json({ messages: [], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const file = { artifact_id: "art_1", media_type: "text/plain", filename: "a.txt", size: 1 };
+    expect(useChat.getState().send("local/scout", "status?", { spoken: true, attachments: [file] })).toBe(true);
+    expect(dm.sent.at(-1)).toEqual([
+      "status?",
+      { turn: { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: true }, attachments: [file] },
+    ]);
+  });
+
+  it("reads it again once a turn ends, then forgets the turn", async () => {
+    answer(() => json({ messages: [{ id: "r1", from: "agent", text: "Green." }], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    const reads = fetched.length;
+    const ended = { ref: "t1", replyId: "r1", text: "Green.", working: null, tools: [], attachments: [], state: "ended" as const, acked: true };
+    dm.change({ ...emptyConversation(), connected: true, turns: { t1: ended } });
+    dm.change({ ...emptyConversation(), connected: true, turns: { t1: ended } });
+    await vi.waitFor(() => expect(dm.forgotten).toEqual(["t1"]));
+    expect(fetched.length).toBe(reads + 1);
+  });
 
   beforeEach(() => {
     useChat.setState({ hubs: [hub], roster: [agent], conversations: {}, histories: {}, activeAgent: null });
@@ -253,7 +323,7 @@ describe("a DM's history in the store", () => {
         more: false,
       }),
     );
-    dm.change({ ...live, working: { since: 0, step: "Writing" }, unprompted: true });
+    dm.change({ ...live, working: { since: 0, at: 0, phase: "writing", step: "Writing" }, unprompted: true });
     expect(fetched).toHaveLength(1);
     dm.change(live);
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]!.messages.map((m) => m.id)).toEqual(["h1", "h2", "h3", "h4"]));
@@ -266,8 +336,8 @@ describe("a DM's history in the store", () => {
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
     const dm = opened.at(-1)!;
     const live: ConversationState = { ...emptyConversation(), connected: true };
-    dm.change({ ...live, working: { since: 0, step: "Thinking" }, unprompted: true });
-    dm.change({ ...live, working: { since: 0, step: "Thinking" }, unprompted: false });
+    dm.change({ ...live, working: { since: 0, at: 0, phase: "thinking", step: "Thinking" }, unprompted: true });
+    dm.change({ ...live, working: { since: 0, at: 0, phase: "thinking", step: "Thinking" }, unprompted: false });
     dm.change(live);
     await new Promise((r) => setTimeout(r, 0));
     expect(fetched).toHaveLength(1);
@@ -281,29 +351,31 @@ describe("a DM's history in the store", () => {
     await vi.waitFor(() => expect(useChat.getState().histories["dw/scout"]?.state).toBe("ready"));
     const dm = opened.at(-1)!;
     const live: ConversationState = { ...emptyConversation(), connected: true };
-    dm.change({ ...live, working: { since: 0, step: "Writing" }, unprompted: true });
+    dm.change({ ...live, working: { since: 0, at: 0, phase: "writing", step: "Writing" }, unprompted: true });
     dm.change(live);
     await vi.waitFor(() => expect(fetched).toHaveLength(2));
     useChat.getState().forget("dw/scout");
   });
 
-  it("knows your name on this Mac's hub, to know a suggestion you said yes to", async () => {
+  it("knows who you are on each hub that says, with your picture there", async () => {
     answer((u) =>
-      u.pathname === "/api/me" ? json({ display_name: " Sam " }) : json({ agents: [{ id: "scout", name: "Scout" }] }),
+      u.pathname === "/api/me"
+        ? json({ id: u.host === "dw.example" ? "u-dw" : "u-local", display_name: " Sam ", picture: { version: "v1", source: "slack", at: "2026-10-30T09:00:00Z", slack: "Acme" } })
+        : json({ agents: [{ id: "scout", name: "Scout" }] }),
     );
-    useChat.setState({ people: {} });
+    useChat.setState({ me: {} });
     useChat.getState().setHubs([hub, { ...hub, id: "dw", url: "https://dw.example", local: false }]);
-    await vi.waitFor(() => expect(useChat.getState().people).toEqual({ local: "Sam" }));
-    expect(fetched.filter((u) => u.pathname === "/api/me").map((u) => u.host)).toEqual(["127.0.0.1:4100"]);
+    await vi.waitFor(() => expect(Object.keys(useChat.getState().me).sort()).toEqual(["dw", "local"]));
+    expect(useChat.getState().me.dw).toEqual({ id: "u-dw", name: "Sam", picture: { version: "v1", source: "slack", at: "2026-10-30T09:00:00Z", slack: "Acme" } });
   });
 
-  it("does without your name where the hub won't say it", async () => {
+  it("does without you where the hub won't say who you are", async () => {
     answer((u) => (u.pathname === "/api/me" ? json({ error: "no" }, 404) : json({ agents: [] })));
-    useChat.setState({ people: {} });
+    useChat.setState({ me: {} });
     useChat.getState().setHubs([hub]);
     await vi.waitFor(() => expect(fetched.some((u) => u.pathname === "/api/me")).toBe(true));
     await new Promise((r) => setTimeout(r, 0));
-    expect(useChat.getState().people).toEqual({});
+    expect(useChat.getState().me).toEqual({});
   });
 
   it("isn't read again after a turn you started", async () => {
@@ -312,7 +384,7 @@ describe("a DM's history in the store", () => {
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
     const dm = opened.at(-1)!;
     const live: ConversationState = { ...emptyConversation(), connected: true };
-    dm.change({ ...live, working: { since: 0, step: "Sending" } });
+    dm.change({ ...live, working: { since: 0, at: 0, phase: "sending", step: "Sending" } });
     dm.change(live);
     await new Promise((r) => setTimeout(r, 0));
     expect(fetched).toHaveLength(1);

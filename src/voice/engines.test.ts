@@ -13,7 +13,7 @@ describe("voice engines", () => {
   });
 
   it("say where speech goes", () => {
-    expect(voiceEngine("cascade").privacy).toContain("on this Mac");
+    expect(voiceEngine("cascade").privacy).toContain("on this computer");
     expect(voiceEngine("gpt-live").privacy).toContain("OpenAI");
     expect(voiceEngine("gemini-live").privacy).toContain("Google");
     expect(new Set(VOICE_ENGINES.map((e) => e.id)).size).toBe(VOICE_ENGINES.length);

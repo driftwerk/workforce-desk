@@ -1,0 +1,263 @@
+/* ── Files in conversations ─────────────────────────────────────────────── */
+
+.atts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.att {
+  max-width: 520px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.att-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.att-title {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.att-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.att-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.att-btn {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--raised);
+}
+.att-problem {
+  flex-basis: 100%;
+}
+
+.att-badge {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  font: 700 10px var(--font-mono);
+  color: var(--muted);
+  background: var(--raised);
+}
+.att-badge-sm {
+  width: 28px;
+  height: 28px;
+  font-size: 9px;
+}
+.att-badge-doc {
+  color: var(--blocked);
+  background: color-mix(in srgb, var(--blocked) 16%, var(--surface));
+}
+.att-badge-sheet {
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 16%, var(--surface));
+}
+.att-badge-slides {
+  color: var(--signal-soft-text);
+  background: var(--signal-soft);
+}
+.att-badge-media {
+  color: var(--working);
+  background: color-mix(in srgb, var(--working) 16%, var(--surface));
+}
+
+.att-figure {
+  margin: 0;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.att-image {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  cursor: zoom-in;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.att-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+.att-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 44px 32px 32px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.att-zoom-bar {
+  width: min(100%, 960px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.att-zoom-image {
+  min-height: 0;
+  flex: 1;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: var(--radius);
+}
+
+.att-pdf {
+  display: flex;
+}
+.att-page {
+  flex: none;
+  width: 118px;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 10px;
+  box-sizing: border-box;
+  background: var(--raised);
+  border-right: 1px solid var(--border);
+}
+.att-page img {
+  margin: -12px -10px;
+  width: calc(100% + 20px);
+  height: calc(100% + 24px);
+  object-fit: cover;
+  object-position: top;
+}
+.att-line {
+  height: 4px;
+  width: 85%;
+  border-radius: 2px;
+  background: var(--border);
+}
+.att-line-head {
+  height: 7px;
+  width: 70%;
+  background: var(--faint);
+}
+.att-line-short {
+  width: 60%;
+}
+.att-line-figure {
+  height: 30px;
+  width: 100%;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--working) 22%, var(--raised));
+}
+.att-pdf-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.att-pdf-body .att-title {
+  flex: none;
+}
+
+.att-video {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  background: var(--sunken);
+}
+.att-audio {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 12px 12px 0;
+}
+
+/* ── Sending files ──────────────────────────────────────────────────────── */
+
+.composer-files {
+  flex-wrap: wrap;
+}
+.composer-attach {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 2px;
+}
+.pending-files {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pending-file {
+  max-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
+}
+.pending-file .att-name {
+  font-size: 12.5px;
+}
+.pending-problem {
+  flex-basis: 100%;
+}
+
+.drop-target {
+  position: relative;
+}
+.thread-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--signal);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  pointer-events: none;
+}
+.drop-overlay-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}

@@ -70,7 +70,7 @@ export const relayedTurn = (
 
 /** Where `m` came from, if the overseer sent it on. Who said it is taken
  *  from the hub where it says (`m.author`); where it doesn't (an older hub,
- *  or a message kept before), and only on this Mac (`local`), from its
+ *  or a message kept before), and only on this computer (`local`), from its
  *  wording. */
 export const relayedOf = (
   m: ChatMessage,

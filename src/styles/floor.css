@@ -1,0 +1,291 @@
+/* The Floor's Right now, plan and Today cards, and the needs Activity
+   answers in place. Every colour comes from the theme's tokens. */
+
+.floor-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.floor-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.floor-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.floor-card-head .floor-time {
+  margin-left: auto;
+}
+.floor-time {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Right now ──────────────────────────────────────────────────────────── */
+
+.right-now-summary {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.right-now-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.right-now-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.right-now-col .ov-label {
+  margin-bottom: 4px;
+}
+.floor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.floor-item:hover {
+  background: var(--raised);
+  border-color: var(--border);
+}
+.floor-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.floor-item-head b {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.floor-item-head .floor-time {
+  margin-left: auto;
+}
+.floor-item-what {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.floor-stale,
+.floor-stale .floor-item-what {
+  color: var(--faint);
+}
+.floor-stale .dot {
+  opacity: 0.55;
+}
+.dot-failed {
+  border-color: var(--ansi-red);
+}
+
+/* ── Needs, answered in Activity ────────────────────────────────────────── */
+
+.activity-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+}
+.floor-need-acts {
+  border: 1px solid color-mix(in srgb, var(--blocked) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--blocked-soft);
+  padding-bottom: 8px;
+}
+.floor-need-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 10px;
+}
+.floor-need-buttons .btn {
+  min-height: 28px;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.floor-answered {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.ev-open .ev-reason {
+  color: var(--blocked);
+}
+.ev-resolved .ev-text {
+  color: var(--muted);
+}
+
+/* ── Plans ──────────────────────────────────────────────────────────────── */
+
+.plan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+.plan-window {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-window-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.plan-window-head .floor-time {
+  margin-left: auto;
+}
+/* Taken a little toward the text, so they read on a card's surface. */
+.plan-ok,
+.floor-card .ov-label.state-done {
+  color: color-mix(in srgb, var(--done) 85%, var(--text));
+}
+.plan-high,
+.floor-card .ov-label.state-blocked {
+  color: color-mix(in srgb, var(--blocked) 85%, var(--text));
+}
+.plan-full {
+  color: var(--ansi-red);
+}
+.plan-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--sunken);
+}
+.plan-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 5px;
+}
+.plan-fill-ok {
+  background: var(--done);
+}
+.plan-fill-high {
+  background: var(--blocked);
+}
+.plan-fill-full {
+  background: var(--ansi-red);
+}
+.plan-pace {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+}
+.plan-signin {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.plan-signin p {
+  margin: 0;
+}
+
+/* ── Today ──────────────────────────────────────────────────────────────── */
+
+.today-legend {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+.today-key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+.today-grid {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: center;
+}
+.today-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.today-lane {
+  position: relative;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.today-span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+}
+.span-working {
+  background: var(--working);
+}
+.span-waiting {
+  background: var(--blocked);
+}
+.span-background {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--working) 55%, transparent) 0 4px,
+    color-mix(in srgb, var(--working) 20%, transparent) 4px 8px
+  );
+}
+.today-now {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  right: 0;
+  width: 2px;
+  background: var(--signal);
+}
+.today-axis {
+  position: relative;
+  height: 16px;
+}
+.today-axis span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.today-axis .today-now-label {
+  right: 0;
+  transform: none;
+  color: var(--text);
+}
