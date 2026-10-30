@@ -1,9 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import type { SpanKind } from "../hub/types";
 import type { FloorLane } from "./merge";
-import { useWhoName } from "./Row";
+import { useWho, useWhoName } from "./Row";
 import { useFloor, useMerged } from "./store";
-import { axis, box, LANE_CAP, ordered, type Axis } from "./timeline";
+import { asWho, axis, box, LANE_CAP, ordered, type Axis } from "./timeline";
 import { clock } from "./time";
 
 const WHAT: Record<SpanKind, string> = { working: "working", waiting: "waited on you", background: "background work" };
@@ -14,9 +14,13 @@ export function Today({ now }: { now: number }) {
   const day = useFloor((s) => s.day);
   const [expanded, setExpanded] = useState(false);
   const grid = useId();
+  const whoOf = useWho();
   useEffect(() => setExpanded(false), [day]);
   const lanes = ordered(
-    m.lanes.filter((l) => l.spans.some((s) => s.to === null || Date.parse(s.to) >= day)),
+    asWho(
+      m.lanes.filter((l) => l.spans.some((s) => s.to === null || Date.parse(s.to) >= day)),
+      whoOf,
+    ),
     m.needs,
     m.working,
   );
