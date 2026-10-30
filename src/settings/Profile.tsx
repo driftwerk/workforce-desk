@@ -4,6 +4,7 @@ import type { HubAccount, Me } from "../chat/types";
 import { sendPicture } from "../hub/client";
 import { pictureRefusal, spreadPicture, spreadSaid } from "../pictures/everywhere";
 import { PictureField } from "../pictures/PictureField";
+import { refOf } from "../pictures/who";
 import { imageBlob, MY_PICTURE, useImage } from "../pictures/pictures";
 import { Mark } from "../ui/Mark";
 
@@ -35,7 +36,7 @@ export function Profile() {
 
 function HubPicture({ hub, me, others }: { hub: HubAccount; me: Me | undefined; others: HubAccount[] }) {
   const setPicture = useChat((s) => s.setPicture);
-  const src = useImage(me?.picture ? { hubId: hub.id, conn: hub, path: MY_PICTURE, version: me.picture.version } : null);
+  const src = useImage(refOf(hub, MY_PICTURE, me?.picture?.version));
   const [said, setSaid] = useState<string | null>(null);
   const [spreading, setSpreading] = useState(false);
 

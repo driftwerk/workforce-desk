@@ -21,7 +21,8 @@ export const youOn = (hubs: readonly HubAccount[], me: Readonly<Record<string, M
   return local && mine ? { hub: local, me: mine } : null;
 };
 
-const refOf = (hub: HubAccount, path: string, version: string | undefined): ImageRef | null =>
+/** Where `path` of `hub` is, in `version`; none without a version. */
+export const refOf = (hub: HubAccount, path: string, version: string | undefined): ImageRef | null =>
   version ? { hubId: hub.id, conn: hub, path, version } : null;
 
 /** Agent `key`'s picture, once read. */
