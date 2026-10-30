@@ -121,8 +121,8 @@ export function SortRow({
   onStartRename?: () => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
-  /** The pointer came onto it. */
-  onHover?: () => void;
+  /** The pointer came onto it (true), or left it (false). */
+  onHover?: (over: boolean) => void;
   /** After the name and meta: a badge. */
   children?: ReactNode;
 }) {
@@ -152,7 +152,8 @@ export function SortRow({
             aria-current={on ? "true" : undefined}
             {...data}
             onClick={onOpen}
-            onPointerEnter={onHover}
+            onPointerEnter={() => onHover?.(true)}
+            onPointerLeave={() => onHover?.(false)}
             onDoubleClick={(e) => {
               if (!onStartRename) return;
               e.preventDefault();

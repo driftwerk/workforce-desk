@@ -5,8 +5,8 @@ import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { lookOf, statusOf } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
-import { flashPanes, shownGrid, useGrids } from "../grids/store";
-import { placesOf } from "../grids/where";
+import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
+import { itemOf, placesOf } from "../grids/where";
 import { addToGrid as placeInGrid } from "../grids/windows";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
@@ -79,6 +79,10 @@ const newId = (): string =>
 
 const GROUP_ACCEPTS = ["item", "group"];
 
+/** How long the pointer rests on a row before its panes are pointed out,
+ *  so passing over rows on the way somewhere doesn't flash each. */
+export const HOVER_MS = 150;
+
 /** Groups of agents and sessions, kept by the hub (or, on a hub that can't,
  *  by Desk), with Ungrouped last. Drag to
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
@@ -96,7 +100,7 @@ export function SidebarGroups() {
   const gridOrder = useGrids((s) => s.order);
   const allGrids = useGrids((s) => s.grids);
   const shownId = useGrids((s) => shownGrid(s)?.id ?? null);
-  const focusedPane = useGrids((s) => (shownId ? s.focus[shownId] : undefined));
+  const focusedPane = useGrids((s) => (shownId ? s.grids[shownId]?.panes.find((p) => p.id === s.focus[shownId]) : undefined));
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -113,13 +117,10 @@ export function SidebarGroups() {
   const present = [...items.keys()];
   const shown = resolve(layout, present);
 
-  /** The panes showing `key` in the grid the Grids view shows (see
-   *  `placesOf`); none in any other view. */
-  const panesHere = (key: ItemKey): string[] =>
-    view === "grids" && shownId
-      ? placesOf({ order: gridOrder, grids: allGrids }, sessions, key).flatMap((p) => (p.gridId === shownId && !p.parked ? [p.paneId] : []))
-      : [];
-  const inFocus = focusedPane ? (present.find((key) => panesHere(key).includes(focusedPane)) ?? null) : null;
+  // The item the focused pane of the grid the Grids view shows is (see
+  // `itemOf`), while that pane is laid out; none in any other view.
+  const focusedItem = view === "grids" && focusedPane?.rect ? itemOf(sessions, focusedPane.content) : null;
+  const inFocus = focusedItem && items.has(focusedItem) ? focusedItem : null;
 
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
   const nameOf = (item: Item | undefined): string =>
@@ -160,11 +161,25 @@ export function SidebarGroups() {
     el.scrollIntoView?.({ block: "nearest" });
   });
 
-  /** Points out, for a moment, the panes showing `key` in the grid shown. */
+  /** Points out, for a moment, the panes showing `key` (see `placesOf`) in
+   *  sight in the grid the Grids view shows, as things are by then. */
   const pointOut = (key: ItemKey) => {
-    const panes = panesHere(key);
-    if (shownId && panes.length && !dragging) flashPanes(shownId, panes);
+    const s = useGrids.getState();
+    const gridId = useDesk.getState().view === "grids" ? shownGrid(s)?.id : undefined;
+    if (!gridId) return;
+    // A pane filling the grid hides the rest.
+    const filled = filledPane(s, gridId);
+    const panes = placesOf(s, useDesk.getState().sessions, key).flatMap((p) => (p.gridId === gridId && !p.parked && (!filled || p.paneId === filled) ? [p.paneId] : []));
+    if (panes.length) flashPanes(gridId, panes);
   };
+  const resting = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** The pointer came onto `key`'s row, or left it (null): its panes are
+   *  pointed out once it has rested there a moment. */
+  const hover = (key: ItemKey | null) => {
+    clearTimeout(resting.current);
+    resting.current = key && !dragging ? setTimeout(() => pointOut(key), HOVER_MS) : undefined;
+  };
+  useEffect(() => () => clearTimeout(resting.current), []);
 
   /** After a change: where focus goes, and what a screen reader hears. */
   const after = (focus?: string, say?: string) => {
@@ -315,6 +330,7 @@ export function SidebarGroups() {
       onDragStart={(e) => {
         const s = e.operation.source;
         if (s) setDragging({ kind: s.type === "group" ? "group" : "item", id: String(s.id) });
+        hover(null);
         // An agent or session can also be dropped on a grid's pane.
         const content = s && s.type !== "group" ? contentOfItem(String(s.id)) : null;
         if (content) startGridDrag(content, nameOf(items.get(String(s!.id))));
@@ -413,7 +429,10 @@ export function SidebarGroups() {
                   title={item.kind === "agent" ? describeAgent(item.agent, hubLabel(item.agent.hubId)) : `${ENGINE[item.session.engine]} · ${statusOf(item.session, STATE)}`}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
-                  onOpen={() => !justDragged.current && openItem(item)}
+                  onOpen={() => {
+                    hover(null);
+                    if (!justDragged.current) openItem(item);
+                  }}
                   onStartRename={() => startRename(item)}
                   onRename={(name) => {
                     setEditing(null);
@@ -422,7 +441,7 @@ export function SidebarGroups() {
                   }}
                   onNudge={(by) => nudge(key, by)}
                   onMenu={(at, from) => setMenu({ kind: "item", key, at, from })}
-                  onHover={() => pointOut(key)}
+                  onHover={(over) => hover(over ? key : null)}
                 />
               );
             })}
@@ -635,7 +654,7 @@ function ItemRow({
   onRename: (name: string | null) => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
-  onHover: () => void;
+  onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
   const unread = useChat((s) => (item.kind === "agent" ? (s.dmUnread[agentKey(item.agent)] ?? 0) : 0));

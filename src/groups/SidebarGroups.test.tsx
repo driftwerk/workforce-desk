@@ -10,10 +10,10 @@ import { SessionCard } from "../session/SessionCard";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { closeContent } from "../grids/terminals";
-import { createGrid, deleteGrid, deliver, layOut, setActive, setFocus, startGrids, useGrids } from "../grids/store";
+import { createGrid, deleteGrid, deliver, layOut, setActive, setFocus, startGrids, toggleFill, useGrids } from "../grids/store";
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
-import { SidebarGroups } from "./SidebarGroups";
+import { HOVER_MS, SidebarGroups } from "./SidebarGroups";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -403,18 +403,39 @@ describe("sessions and agents in grids", () => {
       expect(useSettings.getState().groups.find((g) => g.id === "acme")!.collapsed).toBe(false);
     });
 
-    it("points out its panes in the grid shown when hovered", () => {
-      layOut(MAIN_GRID, "halves");
-      deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
-      deliver(MAIN_GRID, { kind: "terminal", terminalId: "t2" });
-      useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, live: true, terminalId: "t2" } } }));
-      groups();
-      fireEvent.pointerEnter(row("web-release"));
-      expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneIds: [paneOf(MAIN_GRID, "s2"), paneOf(MAIN_GRID, "t2")] });
-      // One in no pane here points out nothing.
-      useGrids.setState({ flash: null });
-      fireEvent.pointerEnter(row("Ada"));
-      expect(useGrids.getState().flash).toBeNull();
+    it("points out its panes in the grid shown once the pointer rests on it", () => {
+      vi.useFakeTimers();
+      try {
+        layOut(MAIN_GRID, "halves");
+        deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+        deliver(MAIN_GRID, { kind: "terminal", terminalId: "t2" });
+        useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, live: true, terminalId: "t2" } } }));
+        groups();
+        const rest = () => act(() => void vi.advanceTimersByTime(HOVER_MS));
+        fireEvent.pointerEnter(row("web-release"));
+        act(() => void vi.advanceTimersByTime(HOVER_MS - 1));
+        expect(useGrids.getState().flash).toBeNull();
+        rest();
+        expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneIds: [paneOf(MAIN_GRID, "s2"), paneOf(MAIN_GRID, "t2")] });
+        // Passing over a row on the way somewhere points out nothing.
+        useGrids.setState({ flash: null });
+        fireEvent.pointerEnter(row("web-release"));
+        fireEvent.pointerLeave(row("web-release"));
+        rest();
+        expect(useGrids.getState().flash).toBeNull();
+        // While a pane fills the grid, only that one is in sight.
+        act(() => toggleFill(MAIN_GRID, paneOf(MAIN_GRID, "t2")));
+        fireEvent.pointerEnter(row("web-release"));
+        rest();
+        expect(useGrids.getState().flash?.paneIds).toEqual([paneOf(MAIN_GRID, "t2")]);
+        // One in no pane here points out nothing.
+        useGrids.setState({ flash: null });
+        fireEvent.pointerEnter(row("Ada"));
+        rest();
+        expect(useGrids.getState().flash).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });
