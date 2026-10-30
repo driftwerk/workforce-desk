@@ -22,7 +22,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
   const stopped = draft.state === "interrupted" || draft.state === "failed";
   const note = draft.state === "failed" ? draft.error : NOTE[draft.state];
   return (
-    <article className="msg msg-assistant msg-draft" aria-live="polite" aria-label={`${name}’s answer on its way`}>
+    <article className="msg msg-assistant msg-draft" aria-busy={!stopped} aria-label={`${name}’s answer on its way`}>
       <AgentMark agent={draft.member} name={name} state={stopped ? undefined : "working"} />
       <div className="msg-body">
         <span className="msg-head">
@@ -39,20 +39,18 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
           <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(roomId, draft.id, p.requestId, choice)} />
         ))}
         {draft.working && draft.state === "live" && <StatusLine working={draft.working} />}
-        {note && (
-          <span className={stopped ? "small state-blocked draft-note" : "small faint draft-note"} role={stopped ? "alert" : undefined}>
-            {note}
-            {stopped && (
-              <>
-                {" "}
-                <button type="button" className="link small" onClick={() => retry(roomId, draft.id)}>
-                  Retry
-                </button>{" "}
-                <button type="button" className="link small" onClick={() => dismiss(roomId, draft.id)}>
-                  Dismiss
-                </button>
-              </>
-            )}
+        <span className="small faint draft-note" role="status">
+          {!stopped && note}
+        </span>
+        {stopped && (
+          <span className="small state-blocked draft-note" role="alert">
+            {note}{" "}
+            <button type="button" className="link small" onClick={() => retry(roomId, draft.id)}>
+              Retry
+            </button>{" "}
+            <button type="button" className="link small" onClick={() => dismiss(roomId, draft.id)}>
+              Dismiss
+            </button>
           </span>
         )}
       </div>

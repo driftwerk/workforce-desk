@@ -128,6 +128,11 @@ describe("answers on their way in a room", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retried).toEqual(["a2"]);
     expect(screen.getAllByText("done")).toHaveLength(1);
+    const [live, cut] = screen.getAllByRole("article", { name: "Scout’s answer on its way" });
+    expect(live!.getAttribute("aria-busy")).toBe("true");
+    expect(live!.getAttribute("aria-live")).toBeNull();
+    expect(cut!.getAttribute("aria-busy")).toBe("false");
+    expect(screen.getByRole("alert").textContent).toMatch(/^Interrupted/);
   });
 });
 

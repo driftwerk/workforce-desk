@@ -1241,6 +1241,9 @@ button {
   align-items: baseline;
   gap: 4px;
 }
+.draft-note:empty {
+  display: none;
+}
 
 .badge {
   min-width: 18px;
