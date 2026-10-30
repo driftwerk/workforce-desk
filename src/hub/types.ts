@@ -147,6 +147,10 @@ export interface RoomMessage {
   /** The routed approval an `approval` delivery asks you to decide, on
    *  the hub of its author. */
   requestId?: string;
+  /** On a main-timeline message, how many replies its thread has, and
+   *  when the last came; absent from a hub that doesn't count them. */
+  replyCount?: number;
+  lastReplyAt?: string | null;
 }
 
 /** A room message to keep. */

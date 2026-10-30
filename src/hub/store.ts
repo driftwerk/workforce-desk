@@ -77,11 +77,36 @@ const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Rec
 /** Others listening to the events socket (the overview, Activity). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
 
-/** Messages by id, oldest first. */
+const later = (a: string | null | undefined, b: string): string => (a && a.localeCompare(b) > 0 ? a : b);
+
+/** `parent` with one more reply, `reply`, counted; a parent from a hub that
+ *  counts none is left to the replies loaded. */
+const counted = (parent: RoomMessage, reply: RoomMessage): RoomMessage =>
+  parent.replyCount === undefined
+    ? parent
+    : { ...parent, replyCount: parent.replyCount + 1, lastReplyAt: later(parent.lastReplyAt, reply.createdAt) };
+
+/** Messages by id, oldest first. A reply new to the timeline is counted on
+ *  its parent, unless the parent came with it, as the hub counted it then. */
 export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
   const byId = new Map(a.map((m) => [m.id, m]));
+  const arriving = new Set(b.map((m) => m.id));
+  const fresh = b.filter((m) => m.threadId && !byId.has(m.id) && !arriving.has(m.threadId));
   for (const m of b) byId.set(m.id, m);
+  for (const reply of fresh) {
+    const parent = byId.get(reply.threadId!);
+    if (parent) byId.set(parent.id, counted(parent, reply));
+  }
   return [...byId.values()].sort((x, y) => x.createdAt.localeCompare(y.createdAt));
+};
+
+/** `timeline` with thread `threadId` read in full: its parent counts the
+ *  replies loaded. */
+export const threadRead = (timeline: RoomMessage[], threadId: string): RoomMessage[] => {
+  const replies = timeline.filter((m) => m.threadId === threadId);
+  return timeline.map((m) =>
+    m.id === threadId ? { ...m, replyCount: replies.length, lastReplyAt: replies.at(-1)?.createdAt ?? null } : m,
+  );
 };
 
 const applyRooms = (rooms: Record<string, Room>, e: DeskEvent): Record<string, Room> => {
@@ -223,7 +248,7 @@ export const useDesk = create<DeskState>((set, get) => ({
     if (!hub) return;
     try {
       const replies = await hub.roomMessages(roomId, threadId);
-      set((s) => ({ timelines: { ...s.timelines, [roomId]: merge(s.timelines[roomId] ?? [], replies) } }));
+      set((s) => ({ timelines: { ...s.timelines, [roomId]: threadRead(merge(s.timelines[roomId] ?? [], replies), threadId) } }));
     } catch (e) {
       get().fail(e);
     }

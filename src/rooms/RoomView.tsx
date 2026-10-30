@@ -297,7 +297,8 @@ export function RoomView({ room }: { room: Room }) {
       <div ref={scroller} className="room-scroll">
         {main.map((m) => {
           const a = author(m.author);
-          const n = replies.get(m.id)?.length ?? 0;
+          const n = m.replyCount ?? replies.get(m.id)?.length ?? 0;
+          const replying = thread === m.id ? [] : [...new Set(draftsIn(drafts, all, m.id).map((d) => author(d.member).name))];
           return (
             <div key={m.id} className="room-msg">
               <RoomMessageView room={room} m={m} name={a.name} home={m.author.includes("/") ? a.home : undefined} />
@@ -308,6 +309,11 @@ export function RoomView({ room }: { room: Room }) {
               >
                 {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
               </button>
+              {replying.length > 0 && (
+                <span className="small faint thread-replying">
+                  {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
+                </span>
+              )}
             </div>
           );
         })}

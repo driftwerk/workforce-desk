@@ -1162,6 +1162,10 @@ button {
   align-self: flex-start;
   margin-left: 46px;
 }
+.thread-replying {
+  align-self: flex-start;
+  margin-left: 46px;
+}
 .thread-panel {
   background: var(--surface);
 }
