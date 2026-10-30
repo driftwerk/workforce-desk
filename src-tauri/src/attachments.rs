@@ -186,6 +186,7 @@ impl Files {
                 out.write_all(&chunk).await?;
             }
             out.flush().await?;
+            quarantine(&partial);
             tokio::fs::rename(&partial, dest).await
         }
         .await;
@@ -196,6 +197,26 @@ impl Files {
         Ok(())
     }
 }
+
+/// Marks a file fetched from a hub as downloaded from elsewhere, as
+/// browsers do, so macOS treats what could run in it as untrusted; a volume
+/// that keeps no such marks still gets the file.
+#[cfg(target_os = "macos")]
+fn quarantine(path: &Path) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Err(e) = xattr::set(
+        path,
+        "com.apple.quarantine",
+        format!("0081;{now:x};Desk;").as_bytes(),
+    ) {
+        tracing::warn!(error = %e, "a downloaded file couldn't be marked quarantined");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn quarantine(_: &Path) {}
 
 /// A response with no body.
 fn empty(status: http::StatusCode) -> http::Response<Vec<u8>> {
@@ -584,6 +605,17 @@ mod tests {
             partial_path(Path::new("/tmp/x/report.pdf")),
             PathBuf::from("/tmp/x/.report.pdf.desk-download")
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_downloaded_file_is_quarantined() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.command");
+        std::fs::write(&path, "echo hi").unwrap();
+        quarantine(&path);
+        let mark = xattr::get(&path, "com.apple.quarantine").unwrap().unwrap();
+        assert!(String::from_utf8(mark).unwrap().ends_with(";Desk;"));
     }
 
     #[test]

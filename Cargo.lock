@@ -1015,6 +1015,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "xattr",
  "zip",
 ]
 
