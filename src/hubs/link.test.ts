@@ -21,6 +21,12 @@ vi.mock("../rooms/engine", () => ({
 }));
 vi.mock("../shell/notify", () => ({ notify: async (n: { title: string; body: string }) => void notified.push(n) }));
 vi.mock("../voice/useVoice", () => ({ readAloud: (_agent: unknown, text: string) => void spoken.push(text) }));
+const floor = vi.hoisted(() => ({ heard: [] as [string, string[]][], unheard: [] as string[], asked: [] as string[][] }));
+vi.mock("../floor/store", () => ({
+  floorHeard: (hubId: string, features: ReadonlySet<string>) => void floor.heard.push([hubId, [...features]]),
+  floorUnheard: (hubId: string) => void floor.unheard.push(hubId),
+  ask: (hubIds: readonly string[]) => void floor.asked.push([...hubIds]),
+}));
 
 const { HubLink, linkUrl } = await import("./link");
 const { followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
@@ -43,6 +49,9 @@ beforeEach(() => {
   sinces.length = 0;
   said.messages = [];
   conversations = [];
+  floor.heard.length = 0;
+  floor.unheard.length = 0;
+  floor.asked.length = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (u: URL | string) => {
@@ -65,6 +74,15 @@ beforeEach(() => {
 afterEach(() => {
   followHubs([]);
   vi.unstubAllGlobals();
+});
+
+const events = (over: Partial<import("./link").LinkEvents> = {}): import("./link").LinkEvents => ({
+  hello: vi.fn(),
+  delivered: vi.fn(),
+  changed: vi.fn(),
+  closed: vi.fn(),
+  unavailable: vi.fn(),
+  ...over,
 });
 
 const link = async () => {
@@ -126,7 +144,7 @@ describe("a hub link", () => {
   it("is given up on a hub too old to have one, until it is paired again", async () => {
     const unavailable = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
-    new HubLink(hub, { hello: vi.fn(), delivered: vi.fn(), unavailable });
+    new HubLink(hub, events({ unavailable }));
     const s = FakeSocket.find("/ws/desk")!;
     s.drop();
     await vi.waitFor(() => expect(unavailable).toHaveBeenCalledWith("legacy"));
@@ -138,7 +156,7 @@ describe("a hub link", () => {
       "fetch",
       vi.fn(async (u: URL | string) => (new URL(u).pathname === "/api/me" ? new Response("", { status: 401 }) : new Response("", { status: 400 }))),
     );
-    new HubLink(hub, { hello: vi.fn(), delivered: vi.fn(), unavailable });
+    new HubLink(hub, events({ unavailable }));
     FakeSocket.find("/ws/desk")!.drop();
     await vi.waitFor(() => expect(unavailable).toHaveBeenCalledWith("unlinked"));
   });
@@ -146,7 +164,7 @@ describe("a hub link", () => {
   it("reconnects after a link that was open drops", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
     const unavailable = vi.fn();
-    new HubLink(hub, { hello: vi.fn(), delivered: vi.fn(), unavailable });
+    new HubLink(hub, events({ unavailable }));
     await Promise.resolve();
     FakeSocket.find("/ws/desk")!.drop();
     await Promise.resolve();
@@ -154,6 +172,37 @@ describe("a hub link", () => {
     expect(FakeSocket.opened.filter((s) => s.url.includes("/ws/desk"))).toHaveLength(2);
     expect(unavailable).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it("reads the hub's floor on its hello and on each signal, and stops counting on it once the link drops", async () => {
+    const s = await link();
+    s.receive({ type: "hello", features: ["desk.deliveries", "desk.floor", "desk.usage"] });
+    expect(floor.heard).toEqual([["dw", ["desk.deliveries", "desk.floor", "desk.usage"]]]);
+    s.receive({ type: "floor_changed" });
+    s.receive({ type: "usage_changed" });
+    s.receive({ type: "something_else" });
+    expect(floor.asked).toEqual([["dw"], ["dw"]]);
+    s.drop();
+    expect(floor.unheard).toEqual(["dw"]);
+  });
+
+  it("says which change a signal is, and that a link once open dropped", async () => {
+    const changed = vi.fn();
+    const closed = vi.fn();
+    new HubLink(hub, events({ changed, closed }));
+    const s = FakeSocket.find("/ws/desk")!;
+    await Promise.resolve();
+    s.receive({ type: "usage_changed" });
+    s.receive({ type: "floor_changed" });
+    expect(changed.mock.calls).toEqual([["usage"], ["floor"]]);
+    s.drop();
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops counting on a hub's link when the hub is no longer followed", async () => {
+    await link();
+    followHubs([]);
+    expect(floor.unheard).toEqual(["dw"]);
   });
 
   it("looks back a little before when it last looked", () => {

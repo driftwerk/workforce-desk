@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
-import type { HubAccount } from "../chat/types";
+import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { deskListeners } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
@@ -39,6 +39,8 @@ interface FloorStore {
   /** Why an answer didn't go through, by need key. */
   problems: Record<string, string>;
   answered: Record<string, Answered>;
+  /** Hubs whose link is up and says when their floor changes. */
+  heard: Record<string, true>;
   /** The start of the person's day the floor was last read for. */
   day: number;
   /** Reads a hub's floor and usage; a read asked for while one runs follows it. */
@@ -100,6 +102,7 @@ export const useFloor = create<FloorStore>((set) => {
     deciding: {},
     problems: {},
     answered: {},
+    heard: {},
     day: startOfLocalDay().getTime(),
     load: (hubId) => {
       const now = running.get(hubId);
@@ -179,9 +182,10 @@ const everyHub = (): string[] => useChat.getState().hubs.map((h) => h.id);
 const MOVES = new Set<DeskEvent["type"]>(["snapshot", "session", "removed", "activity"]);
 
 /** The floor kept in step with the hubs: read when a hub is added or
- *  paired again (one removed is dropped), when Desk comes forward (asking
- *  again of hubs that had none), again at midnight for the new day, and on
- *  this Mac's hub whenever its events say a session or the crew moved. */
+ *  paired again (one removed is dropped), when its link says the floor
+ *  changed (see `floorHeard`), when Desk comes forward (asking again of hubs
+ *  that had none), again at midnight for the new day, and on this Mac's hub
+ *  whenever its events say a session or the crew moved. */
 export const watchFloor = (): (() => void) => {
   const sync = (hubs: readonly HubAccount[], before: readonly HubAccount[]) => {
     const changed = hubs
@@ -201,6 +205,7 @@ export const watchFloor = (): (() => void) => {
         deciding: without(s.deciding, (k) => gone(k) || fresh(k)),
         problems: without(s.problems, (k) => gone(k) || fresh(k)),
         answered: without(s.answered, (k) => gone(k) || fresh(k)),
+        heard: without(s.heard, gone),
       };
     });
     ask(changed);
@@ -231,11 +236,36 @@ export const watchFloor = (): (() => void) => {
   };
 };
 
-/** Reads the floor every minute while `on`. */
+/** A hub's link said hello. One that says when its floor changes is read
+ *  now and then on its word; one that had no floor is asked again. */
+export const floorHeard = (hubId: string, features: ReadonlySet<string>): void => {
+  if (!features.has(FEATURES.floor)) return floorUnheard(hubId);
+  useFloor.setState((s) => ({
+    heard: { ...s.heard, [hubId]: true },
+    hubs: s.hubs[hubId]?.state === "unsupported" ? { ...s.hubs, [hubId]: blank() } : s.hubs,
+  }));
+  ask([hubId]);
+};
+
+/** A hub's link is down: its floor is read on the minute until it's back. */
+export const floorUnheard = (hubId: string): void => {
+  if (useFloor.getState().heard[hubId]) useFloor.setState((s) => ({ heard: without(s.heard, (k) => k === hubId) }));
+};
+
+/** The hubs the minute's read is for: those whose link isn't saying when
+ *  their floor changes, and those with work running, whose progress is
+ *  never signalled. */
+const unheard = (): string[] => {
+  const { heard, hubs } = useFloor.getState();
+  return supported().filter((id) => !heard[id] || (hubs[id]?.floor?.working.length ?? 0) > 0);
+};
+
+/** Reads the floor every minute while `on`, of the hubs whose links don't
+ *  keep it. */
 export const useFloorTick = (on: boolean): void => {
   useEffect(() => {
     if (!on) return;
-    const t = setInterval(() => ask(supported()), TICK_MS);
+    const t = setInterval(() => ask(unheard()), TICK_MS);
     return () => clearInterval(t);
   }, [on]);
 };

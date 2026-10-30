@@ -94,6 +94,10 @@ export const FEATURES = {
   stream: "desk.stream",
   /** The hub link and draining conversations by cursor. */
   deliveries: "desk.deliveries",
+  /** The hub link says when the person's floor changes. */
+  floor: "desk.floor",
+  /** The hub link says when the person's plan usage changes. */
+  usage: "desk.usage",
 } as const;
 
 export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice";

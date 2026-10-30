@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { textOf, type HubMessage } from "../chat/history";
 import { useChat } from "../chat/store";
 import { DESK_DM, type DeliveryKind, type HubAccount } from "../chat/types";
+import { floorHeard, floorUnheard, ask as readFloor } from "../floor/store";
 import { deskState } from "../restore/boot";
 import { drainer } from "../rooms/engine";
 import { notify } from "../shell/notify";
@@ -12,8 +13,9 @@ import { activeConversations } from "./surface";
 
 // Desk's links to its hubs: one per paired hub, from the main window only.
 // On every `hello` (a link opened, or opened again) each conversation that
-// changed since Desk last looked is drained; on every delivery, its own
-// conversation is, and you're told of it as its kind deserves.
+// changed since Desk last looked is drained, and the floor read; on every
+// delivery, its own conversation is, and you're told of it as its kind
+// deserves; on every floor or usage signal, the hub's floor is read.
 
 /** How far before Desk last looked it looks again: the hub's clock and
  *  this Mac's need not agree. */
@@ -75,6 +77,7 @@ export function followHubs(hubs: readonly HubAccount[]) {
     if (now && now.token === link.hub.token && now.url === link.hub.url) continue;
     link.close();
     links.delete(id);
+    floorUnheard(id);
   }
   for (const hub of hubs) {
     if (links.has(hub.id) || unlinked.get(hub.id)?.token === hub.token) continue;
@@ -82,8 +85,13 @@ export function followHubs(hubs: readonly HubAccount[]) {
     links.set(
       hub.id,
       new HubLink(hub, {
-        hello: (features) => void caughtUp(hub, features),
+        hello: (features) => {
+          floorHeard(hub.id, features);
+          void caughtUp(hub, features);
+        },
         delivered: (d) => void arrived(hub, d),
+        changed: () => readFloor([hub.id]),
+        closed: () => floorUnheard(hub.id),
         unavailable: (why) => {
           links.get(hub.id)?.close();
           links.delete(hub.id);

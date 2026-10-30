@@ -4,9 +4,10 @@ import { whoAmI } from "./pairing";
 
 // The hub link: one socket per paired hub (`/ws/desk`), over which the hub
 // says one of your conversations gained a message outside a live turn — a
-// reminder, a job's answer, a workflow's step. Nothing rides it but the
-// signal: the conversation is drained by cursor, on every `hello` (whatever
-// changed while the link was down) and on every delivery.
+// reminder, a job's answer, a workflow's step — and that your floor or your
+// plans' usage changed. Nothing rides it but the signal: the conversation is
+// drained by cursor, and the floor read again, on every `hello` (whatever
+// changed while the link was down) and on every signal.
 
 /** A message a hub delivered into one of your conversations. */
 export interface Delivered {
@@ -23,9 +24,17 @@ export interface Delivered {
  *  is paired to it as nobody (`link_requires_identity`). */
 export type Unlinked = "legacy" | "unlinked";
 
+/** What a hub says changed of yours, beyond your conversations. */
+export type Changed = "floor" | "usage";
+
+const CHANGED: Record<string, Changed> = { floor_changed: "floor", usage_changed: "usage" };
+
 export interface LinkEvents {
   hello: (features: ReadonlySet<string>) => void;
   delivered: (d: Delivered) => void;
+  changed: (what: Changed) => void;
+  /** The link dropped: until its next `hello`, nothing it would say is heard. */
+  closed: () => void;
   unavailable: (why: Unlinked) => void;
 }
 
@@ -101,10 +110,13 @@ export class HubLink {
       if (m.type === "hello") this.events.hello(new Set(m.features ?? []));
       const d = m.type === "desk_delivered" ? delivered(m) : null;
       if (d) this.events.delivered(d);
+      const changed = CHANGED[m.type];
+      if (changed) this.events.changed(changed);
     };
     ws.onclose = () => {
       clearInterval(this.ping);
       if (this.closed) return;
+      if (opened) this.events.closed();
       void (opened ? Promise.resolve(null) : this.probe(this.hub)).then((why) => {
         if (this.closed) return;
         if (why) return this.events.unavailable(why);

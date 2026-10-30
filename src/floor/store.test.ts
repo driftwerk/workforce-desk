@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { localIso } from "../hub/floor";
-import { SETTLE_MS, TICK_MS, useFloor, useFloorTick, watchFloor } from "./store";
-import { agent, approval, fakeFetch, fakeHub, hub, need, view, type FakeHub } from "./testing";
+import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, watchFloor } from "./store";
+import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
 import { renderHook } from "@testing-library/react";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
@@ -22,7 +22,7 @@ beforeEach(() => {
     b: fakeHub({ floor: view({ needs: [need("q-1", agent("scout"))] }) }),
   };
   vi.stubGlobal("fetch", fakeFetch(hubs));
-  useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
+  useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {}, heard: {} });
   useChat.setState({ hubs: [] });
   stop = watchFloor();
 });
@@ -83,6 +83,55 @@ describe("the floor's store", () => {
     await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
     expect(floorOf("b")?.stale).toBe(false);
     unmount();
+  });
+
+  it("reads a hub whose link keeps its floor on its word, and on the minute only while its work runs or its link is down", async () => {
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    floorHeard("b", new Set(["desk.floor"]));
+    await settle();
+    expect(hubs.b!.days).toHaveLength(2);
+    const { unmount } = renderHook(() => useFloorTick(true));
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(hubs.b!.days).toHaveLength(2);
+    hubs.b!.floor = view({ working: [work(agent("scout"))] });
+    floorHeard("b", new Set(["desk.floor"]));
+    await settle();
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(hubs.b!.days).toHaveLength(4);
+    hubs.b!.floor = view();
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(hubs.b!.days).toHaveLength(5);
+    floorUnheard("b");
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(hubs.b!.days).toHaveLength(6);
+    unmount();
+  });
+
+  it("asks a hub without a floor again when its link says it has one, and not when it says nothing of it", async () => {
+    hubs.b!.floor = null;
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    expect(floorOf("b")?.state).toBe("unsupported");
+    floorHeard("b", new Set(["desk.deliveries"]));
+    await settle();
+    expect(hubs.b!.days).toHaveLength(1);
+    expect(useFloor.getState().heard).toEqual({});
+    hubs.b!.floor = view({ needs: [need("q-2", agent("scout"))] });
+    floorHeard("b", new Set(["desk.deliveries", "desk.floor"]));
+    expect(floorOf("b")?.state).toBe("loading");
+    await settle();
+    expect(floorOf("b")?.floor?.needs.map((n) => n.id)).toEqual(["q-2"]);
+  });
+
+  it("forgets a removed hub's link", async () => {
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    floorHeard("b", new Set(["desk.floor"]));
+    useChat.setState({ hubs: [] });
+    expect(useFloor.getState().heard).toEqual({});
+    await settle();
   });
 
   it("says a hub failed when it never answered", async () => {
