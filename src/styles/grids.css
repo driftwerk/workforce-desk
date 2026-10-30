@@ -199,6 +199,10 @@
 .gpane-fill {
   flex: 1;
 }
+.gpane-act {
+  flex: none;
+  padding: 0 6px;
+}
 .gpane-cwd {
   min-width: 0;
   max-width: 40%;
@@ -236,9 +240,6 @@
 .pane-note p {
   margin: 0;
   max-width: 260px;
-}
-.gpane-actions {
-  padding: 0 12px 12px;
 }
 .gpane-box > .approval {
   margin: 0 8px 8px;

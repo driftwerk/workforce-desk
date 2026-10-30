@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
@@ -7,6 +8,7 @@ import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
+import { sessionAction, type SessionAction } from "../session/actions";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { Terminal } from "../session/Terminal";
@@ -204,7 +206,9 @@ export function GridPane({
   const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneId === pane.id ? s.flash.n : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
-  const entries = usePaneMenu(gridId, pane, remove);
+  const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
+  const action = session ? sessionAction(session) : null;
+  const entries = usePaneMenu(gridId, pane, action, remove);
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
@@ -248,6 +252,11 @@ export function GridPane({
                 <FocusIcon />
               </button>
             )
+          )}
+          {action && (
+            <button type="button" className="link small gpane-act" onClick={action.run}>
+              {action.label}
+            </button>
           )}
           <button
             type="button"
@@ -389,7 +398,6 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
 
 function SessionPane({ id }: { id: string }) {
   const session = useDesk((s) => s.sessions[id]);
-  const { hub, fail } = useDesk();
   if (!session) {
     return (
       <div className="gpane-empty">
@@ -397,18 +405,7 @@ function SessionPane({ id }: { id: string }) {
       </div>
     );
   }
-  return (
-    <>
-      <SessionBody session={session} autoFocus={false} />
-      {!session.live && session.origin === "desk" && (
-        <div className="gpane-actions">
-          <button type="button" className="btn btn-ghost" onClick={() => hub?.resume(session.id).catch(fail)}>
-            Resume
-          </button>
-        </div>
-      )}
-    </>
-  );
+  return <SessionBody session={session} autoFocus={false} />;
 }
 
 function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string; content: Extract<PaneContent, { kind: "terminal" }> }) {
@@ -443,7 +440,7 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
 }
 
 /** A pane's options: close, replace, move to another grid. */
-function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuEntry[] {
+function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | null, onClose: () => void): MenuEntry[] {
   const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   // Selected as they're kept (a list made in the selector would be new on
@@ -483,9 +480,12 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuE
         ]
       : []),
   ];
+  const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    ...(action ? [{ kind: "item" as const, label: action.label, onSelect: action.run }] : []),
+    ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     { kind: "separator" },
     { kind: "item", label: removeLabel(pane), onSelect: onClose },
   ];

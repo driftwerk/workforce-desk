@@ -210,6 +210,14 @@ describe("the DM beside the Floor", () => {
     expect(useChat.getState()).toMatchObject({ activeAgent: "local/scout", panelAgent: null });
   });
 
+  it("opens the agent's Settings in Rooms", () => {
+    const p = opened();
+    fireEvent.click(p.getByRole("button", { name: "Settings" }));
+    expect(useDesk.getState().view).toBe("rooms");
+    expect(useChat.getState()).toMatchObject({ activeAgent: "local/scout", panelAgent: null });
+    expect(useUi.getState().agentTabs["local/scout"]).toBe("settings");
+  });
+
   it("focuses to fill the main area, and closes", () => {
     const p = opened();
     fireEvent.click(p.getByRole("button", { name: "Focus this conversation" }));
@@ -233,5 +241,16 @@ describe("the DM beside the Floor", () => {
     opened();
     act(() => useChat.getState().forget("local/scout"));
     expect(useChat.getState().panelAgent).toBeNull();
+  });
+});
+
+describe("an agent's Settings from the sidebar", () => {
+  it("is in the agent's right-click menu", () => {
+    render(<Desk />);
+    fireEvent.contextMenu(row("Scout"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    expect(useDesk.getState().view).toBe("rooms");
+    expect(useChat.getState().activeAgent).toBe("local/scout");
+    expect(useUi.getState().agentTabs["local/scout"]).toBe("settings");
   });
 });
