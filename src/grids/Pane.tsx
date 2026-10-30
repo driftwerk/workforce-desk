@@ -8,7 +8,7 @@ import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
-import { sessionAction, type SessionAction } from "../session/actions";
+import { approvalsSwitchable, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { Terminal } from "../session/Terminal";
@@ -32,6 +32,7 @@ export const STATE_LABEL: Record<SessionState, string> = {
   starting: "starting",
   working: "working",
   blocked: "needs you",
+  asking: "needs you · asked",
   done: "done",
   idle: "idle",
   interrupted: "interrupted",
@@ -101,7 +102,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
       meta: `${ENGINE[session.engine]} · ${statusOf(session, STATE_LABEL)}`,
       state: lookOf(session),
       tracked,
-      asking: session.pending ? session : null,
+      asking: session.pending || session.state === "asking" ? session : null,
       cwd: content.kind === "terminal" ? home(info?.cwd ?? content.cwd) : null,
       mono: true,
     };
@@ -225,8 +226,8 @@ export function GridPane({
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
-  const action = session ? sessionAction(session) : null;
-  const entries = usePaneMenu(gridId, pane, action, remove);
+  const actions = session ? sessionActions(session) : [];
+  const entries = usePaneMenu(gridId, pane, actions, session ?? null, remove);
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
@@ -287,11 +288,11 @@ export function GridPane({
               </button>
             )
           )}
-          {action && (
-            <button type="button" className="link small gpane-act" onClick={action.run}>
-              {action.label}
+          {actions.map((a) => (
+            <button key={a.label} type="button" className="link small gpane-act" onClick={a.run}>
+              {a.label}
             </button>
-          )}
+          ))}
           <button
             type="button"
             className="icon-btn-sm"
@@ -474,7 +475,7 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
 }
 
 /** A pane's options: close, replace, move to another grid. */
-function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | null, onClose: () => void): MenuEntry[] {
+function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], session: Session | null, onClose: () => void): MenuEntry[] {
   const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   // Selected as they're kept (a list made in the selector would be new on
@@ -536,7 +537,17 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
     ...swap,
-    ...(action ? [{ kind: "item" as const, label: action.label, onSelect: action.run }] : []),
+    ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+    ...(session && approvalsSwitchable(session)
+      ? [
+          {
+            kind: "item" as const,
+            label: "Answer approvals in Desk",
+            checked: session.approvals === "desk",
+            onSelect: () => setApprovalsInDesk(session, session.approvals !== "desk"),
+          },
+        ]
+      : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     { kind: "separator" },
     { kind: "item", label: removeLabel(pane, hosted), onSelect: onClose },

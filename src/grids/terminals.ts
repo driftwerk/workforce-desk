@@ -192,9 +192,15 @@ export const trackedIn = (sessions: Record<string, Session>, id: string | null):
 export const sessionIn = (sessions: Record<string, Session>, content: PaneContent | null): Session | null =>
   content?.kind === "session" ? (sessions[content.sessionId] ?? null) : content?.kind === "terminal" ? trackedIn(sessions, content.terminalId) : null;
 
-/** The panes whose session is waiting on an approval. */
+/** The panes whose session is waiting on the person: on an approval, or on
+ *  what its turn ended asking. */
 export const askingIn = (panes: readonly Pane[], sessions: Record<string, Session> = useDesk.getState().sessions): string[] =>
-  panes.filter((p) => sessionIn(sessions, p.content)?.pending).map((p) => p.id);
+  panes
+    .filter((p) => {
+      const s = sessionIn(sessions, p.content);
+      return !!s?.pending || s?.state === "asking";
+    })
+    .map((p) => p.id);
 
 /** The Desk terminal `content` keeps open: a terminal's own, or the one a
  *  session runs in, while the hub still has it. */

@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { createPortal } from "react-dom";
 
 export type MenuEntry =
-  | { kind: "item"; label: string; kbd?: string; onSelect?: () => void; submenu?: MenuEntry[] }
+  /** `checked`: a setting it turns on or off, shown ticked while on. */
+  | { kind: "item"; label: string; kbd?: string; checked?: boolean; onSelect?: () => void; submenu?: MenuEntry[] }
   | { kind: "separator" };
 
 const MARGIN = 8;
@@ -86,10 +87,10 @@ function MenuList({
   }, [at, beside]);
 
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    ref.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
   }, []);
 
-  const items = () => [...(ref.current?.querySelectorAll<HTMLElement>(':scope > [role="menuitem"]') ?? [])];
+  const items = () => [...(ref.current?.querySelectorAll<HTMLElement>(':scope > [role^="menuitem"]') ?? [])];
 
   const openSub = (index: number, el: HTMLElement, focus: boolean) => setSub({ index, rect: el.getBoundingClientRect(), focus });
 
@@ -154,7 +155,8 @@ function MenuList({
           <button
             key={i}
             type="button"
-            role="menuitem"
+            role={entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={entry.checked}
             className="menu-item"
             data-index={i}
             tabIndex={-1}
@@ -169,6 +171,11 @@ function MenuList({
           >
             <span className="menu-label">{entry.label}</span>
             {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
+            {entry.checked && (
+              <span className="menu-kbd" aria-hidden="true">
+                ✓
+              </span>
+            )}
             {entry.submenu && (
               <span className="menu-kbd" aria-hidden="true">
                 ▸

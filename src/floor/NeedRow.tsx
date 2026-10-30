@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
+import type { Session } from "../hub/types";
+import { toolName } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote } from "./Row";
@@ -23,6 +25,22 @@ const useFocusKept = () => {
  *  or a DM beside the Floor); in Activity it can also be answered there. */
 export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: number; actions?: boolean }) {
   const rooms = useDesk((s) => s.rooms);
+  // A session on this computer whose turn ended asking: what Desk read, and
+  // what answers it here.
+  const asking = useDesk((s): Session | null => {
+    const session = need.local && need.who.kind === "session" ? s.sessions[need.who.id] : undefined;
+    return session?.state === "asking" && session.asked ? session : null;
+  });
+  const [acting, setActing] = useState(false);
+  const act = (what: "allowAsked" | "dismissAsked") => () => {
+    const { hub, fail } = useDesk.getState();
+    if (!asking || !hub || acting) return;
+    setActing(true);
+    hub[what](asking.id)
+      .catch(fail)
+      .finally(() => setActing(false));
+  };
+  const denied = asking?.asked?.denied ?? null;
   const deciding = useFloor((s) => s.deciding[need.key]);
   const problem = useFloor((s) => s.problems[need.key]);
   const stale = useStaleNote(need);
@@ -42,6 +60,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       >
         {need.ask}
         {where && <span className="faint"> · {where}</span>}
+        {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
       </FloorRow>
       {actions && (
         <span className="floor-need-buttons">
@@ -55,6 +74,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               onClick={() => !deciding && void useFloor.getState().decide(need.hubId, need, "allow")}
             >
               {deciding ? "Allowed…" : "Allow"}
+            </button>
+          )}
+          {denied?.allowable && (
+            <button type="button" className="btn btn-signal" disabled={need.stale || acting} title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined} onClick={act("allowAsked")}>
+              Allow {toolName(denied.tool)} for this session and continue
             </button>
           )}
           {target && need.answer.kind === "reply" && (
@@ -71,6 +95,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               onClick={() => openTarget(target, { reply: need.answer.kind === "terminal" })}
             >
               Open
+            </button>
+          )}
+          {asking && (
+            <button type="button" className="btn" disabled={need.stale || acting} onClick={act("dismissAsked")}>
+              Dismiss
             </button>
           )}
           <span className="sr-only" role="status">

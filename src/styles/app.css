@@ -1031,6 +1031,14 @@ button {
 .session-where .link {
   flex: none;
 }
+.session-approvals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
 .session-goal input,
 .goal-text {
   width: 100%;

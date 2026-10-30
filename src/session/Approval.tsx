@@ -1,10 +1,61 @@
+import { useState } from "react";
 import { useDesk } from "../hub/store";
 import type { Decision, Session } from "../hub/types";
+import { requestFocus } from "../shell/focus";
+
+/** "Bash(cargo test)" → "Bash". */
+export const toolName = (tool: string): string => tool.split("(")[0]?.trim() || tool;
+
+/** What a session's turn ended asking the person, with what answers it here:
+ *  allowing the tool auto mode refused and carrying on, replying in its
+ *  terminal, or leaving it be. */
+export function Asked({ session, compact = false }: { session: Session; compact?: boolean }) {
+  const { hub, fail } = useDesk();
+  const [busy, setBusy] = useState(false);
+  const asked = session.asked;
+  if (session.state !== "asking" || !asked) return null;
+  const denied = asked.denied;
+  const run = (act: "allowAsked" | "dismissAsked") => () => {
+    if (busy || !hub) return;
+    setBusy(true);
+    hub[act](session.id)
+      .catch(fail)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={compact ? "approval approval-compact" : "approval"} role="group" aria-label={`${session.name} asked`}>
+      <span className="approval-text">
+        <b>Needs you · asked</b>
+        <span>{asked.ask}</span>
+        {!compact && (denied?.detail || asked.why) && <span className="faint">{denied?.detail ? `${denied.detail} · ${denied.reason}` : asked.why}</span>}
+      </span>
+      <button type="button" className="btn btn-ghost" disabled={busy} onClick={run("dismissAsked")}>
+        Dismiss
+      </button>
+      {!compact && (
+        <button type="button" className="btn btn-ghost" onClick={() => requestFocus(`session:${session.id}`)}>
+          Reply…
+        </button>
+      )}
+      {denied?.allowable && (
+        <button
+          type="button"
+          className="btn btn-blocked"
+          disabled={busy}
+          title={denied.detail ? `Only ${denied.detail}, until the session ends` : "Until the session ends"}
+          onClick={run("allowAsked")}
+        >
+          Allow {toolName(denied.tool)} for this session and continue
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {
   const { hub, fail, open } = useDesk();
   const pending = session.pending;
-  if (!pending) return null;
+  if (!pending) return <Asked session={session} compact={compact} />;
   if (!pending.answerable) {
     return (
       <div className={compact ? "approval approval-compact" : "approval"}>

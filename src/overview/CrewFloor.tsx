@@ -51,7 +51,7 @@ export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyM
   const sessionGroup = (s: Session): string | undefined => {
     if (!needs) return GROUPS.find((g) => g.match(s))?.title;
     if (needs.has(sessionItem(s.id))) return "Needs you";
-    return GROUPS.find((g) => g.title !== "Needs you" && g.match(s))?.title ?? (s.state === "blocked" ? "Working" : undefined);
+    return GROUPS.find((g) => g.title !== "Needs you" && g.match(s))?.title ?? (s.state === "blocked" ? "Working" : s.state === "asking" ? "Recently done and idle" : undefined);
   };
   for (const s of all) {
     // An agent's turn is its agent's, on its tile; only one waiting on you

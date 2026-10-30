@@ -24,14 +24,14 @@ describe("Desk's Claude Code plugin hooks", () => {
         "SessionEnd",
       ].sort(),
     );
-    for (const [event, [entry]] of Object.entries(events)) {
-      expect(entry.hooks[0].args[0], event).toBe("${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh");
+    for (const [event, entries] of Object.entries(events)) {
+      expect(entries[0]?.hooks[0]?.args[0], event).toBe("${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh");
     }
   });
 
   it("tells the hub of every tool auto mode refused, so a turn stuck on one isn't done", () => {
-    const [denied] = events.PermissionDenied;
-    expect(denied.matcher).toBe("*");
-    expect(denied.hooks[0].timeout).toBe(10);
+    const denied = events.PermissionDenied?.[0];
+    expect(denied?.matcher).toBe("*");
+    expect(denied?.hooks[0]?.timeout).toBe(10);
   });
 });

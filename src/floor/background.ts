@@ -27,4 +27,8 @@ export const shownState = (s: Pick<Session, "state" | "background">): SessionSta
  *  `tile-…`); background work is drawn as working's quieter kin. */
 export type Look = SessionState | "background";
 
-export const lookOf = (s: Pick<Session, "state" | "background">): Look => (backgroundOf(s) ? "background" : s.state);
+export const lookOf = (s: Pick<Session, "state" | "background">): Look =>
+  backgroundOf(s) ? "background" : s.state === "asking" ? "blocked" : s.state;
+
+/** Waiting on the person: on a request, or on what its turn ended asking. */
+export const waitsOnYou = (s: Pick<Session, "state">): boolean => s.state === "blocked" || s.state === "asking";

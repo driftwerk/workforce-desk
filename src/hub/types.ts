@@ -7,6 +7,9 @@ export type SessionState =
   | "starting"
   | "working"
   | "blocked"
+  /** Its turn ended waiting on the person: a tool auto mode refused, or a
+   *  reply that asks them something. */
+  | "asking"
   | "done"
   | "idle"
   | "interrupted"
@@ -29,6 +32,28 @@ export interface PendingApproval {
   since: string;
   /** False when the terminal is the one asking. */
   answerable: boolean;
+}
+
+/** A tool auto mode refused in the turn a session stopped on. */
+export interface Denied {
+  /** Its label: "Bash(security find-generic-password …)". */
+  tool: string;
+  detail: string;
+  /** Why auto mode refused it: "[Credential Exploration]". */
+  reason: string;
+  /** Whether Desk can allow it for the session: a classifier's verdict,
+   *  not a safety check only the person can pass in the terminal. */
+  allowable: boolean;
+}
+
+/** Why a session's turn is waiting on the person. */
+export interface Asked {
+  /** What it needs: "Stopped: Bash was not allowed", or its question. */
+  ask: string;
+  /** Why Desk read it so: "asked you to choose between 2 options". */
+  why: string;
+  options: string[] | null;
+  denied: Denied | null;
 }
 
 export interface Session {
@@ -57,6 +82,8 @@ export interface Session {
   group?: { id: string; name: string } | null;
   /** Background work still running after its turn ended; absent from older hubs. */
   background?: Background | null;
+  /** While it is asking: what, and why Desk read it so; absent from older hubs. */
+  asked?: Asked | null;
   createdAt: string;
   updatedAt: string;
 }

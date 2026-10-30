@@ -224,6 +224,13 @@ export class DeskHub {
   update = (id: string, patch: { name?: string; goal?: string; approvals?: "desk" | "terminal" }): Promise<Session> =>
     this.call("PATCH", `/api/desk/sessions/${id}`, patch);
   stop = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/stop`);
+  /** Esc in its terminal: ends the turn it is working on, and nothing else. */
+  interrupt = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/interrupt`);
+  /** Allows the tool auto mode refused for the rest of the session, and
+   *  tells it to carry on. */
+  allowAsked = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/asked/allow`);
+  /** Leaves what it asked unanswered: it is done. */
+  dismissAsked = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/asked/dismiss`);
   resume = (id: string, prompt?: string): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/resume`, { prompt });
   forget = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${id}`);
