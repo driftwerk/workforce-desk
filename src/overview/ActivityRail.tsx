@@ -66,9 +66,10 @@ const EMPTY: Record<ActivityFilter, string> = {
 
 /** A need answered elsewhere before Desk's answer got there. */
 function AnsweredRow({ answered }: { answered: Answered }) {
-  const name = useWhoName(answered.need.who);
+  const local = useChat((s) => s.hubs.some((h) => h.id === answered.hubId && h.local));
+  const name = useWhoName({ who: answered.need.who, local });
   return (
-    <div className="floor-need floor-answered" role="status">
+    <div className="floor-need floor-answered" role="listitem">
       <span className="floor-item-what">
         <b>{name}</b> · {answered.need.ask}
       </span>
@@ -77,20 +78,27 @@ function AnsweredRow({ answered }: { answered: Answered }) {
   );
 }
 
-/** What still needs you, on every hub, answered in place. */
+/** What still needs you, on every hub, answered in place; focus left by a
+ *  row that goes lands on the list. */
 function OpenNeeds({ needs, now }: { needs: readonly FloorNeed[]; now: number }) {
   const answered = useFloor((s) => s.answered);
+  const elsewhere = Object.keys(answered).length;
   return (
-    <div className="activity-needs" role="list" aria-label="Still waiting on you">
-      {needs.map((n) => (
-        <div key={n.key} role="listitem">
-          <NeedRow need={n} now={now} actions />
-        </div>
-      ))}
-      {Object.entries(answered).map(([key, a]) => (
-        <AnsweredRow key={key} answered={a} />
-      ))}
-    </div>
+    <>
+      <div className="activity-needs" role="list" aria-label="Still waiting on you" tabIndex={-1}>
+        {needs.map((n) => (
+          <div key={n.key} role="listitem">
+            <NeedRow need={n} now={now} actions />
+          </div>
+        ))}
+        {Object.entries(answered).map(([key, a]) => (
+          <AnsweredRow key={key} answered={a} />
+        ))}
+      </div>
+      <span className="sr-only" role="status">
+        {elsewhere ? `${elsewhere} already answered elsewhere` : ""}
+      </span>
+    </>
   );
 }
 

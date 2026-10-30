@@ -2,10 +2,12 @@ import type { HubAccount } from "../chat/types";
 import type { Counts, Lane, Need, Span, Work } from "../hub/types";
 import type { HubFloor } from "./store";
 
-/** Which hub an item came from, its key across hubs, and whether that hub
- *  could be reached the last time it was read. */
+/** Which hub an item came from (and whether it's this computer's), its key
+ *  across hubs, and whether that hub could be reached the last time it was
+ *  read. */
 export interface Tagged {
   hubId: string;
+  local: boolean;
   key: string;
   stale: boolean;
 }
@@ -54,7 +56,7 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     const f = hubs[hub.id];
     const view = f?.state === "ready" ? f.floor : null;
     if (!f || !view) return m;
-    const tag = { hubId: hub.id, stale: f.stale };
+    const tag = { hubId: hub.id, local: hub.local, stale: f.stale };
     return {
       needs: [...m.needs, ...view.needs.map((n) => ({ ...n, since: shift(n.since, f.offset), ...tag, key: `${hub.id}/${n.id}` }))],
       working: [...m.working, ...view.working.map((w) => ({ ...work(w, f.offset), ...tag, key: `${whoKey(hub.id, w)}@${w.since}` }))],

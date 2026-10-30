@@ -1,6 +1,6 @@
-import type { Need, Work } from "../hub/types";
 import { backgroundTasks } from "./background";
-import type { Merged } from "./merge";
+import type { FloorNeed, FloorWork, Merged } from "./merge";
+import { nameOf } from "./needs";
 
 const NUMBERS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 
@@ -14,23 +14,20 @@ const some = (parts: string[]): string => {
 
 const quoted = (text: string): string => `“${text.replace(/[.?!]+$/, "")}”`;
 
-const nameOf = (who: Need["who"], names: Readonly<Record<string, string>>): string =>
-  (who.kind === "session" ? names[who.id] : undefined) ?? who.name;
-
 /** "Run npm test?" as what someone wants: "wants to run npm test". */
 const wants = (ask: string): string => `wants to ${ask.charAt(0).toLowerCase()}${ask.slice(1).replace(/\?+$/, "")}`;
 
-const need = (n: Need, names: Readonly<Record<string, string>>): string =>
-  `${nameOf(n.who, names)} ${n.kind === "approval" ? wants(n.ask) : `asks ${quoted(n.ask)}`}`;
+const need = (n: FloorNeed, names: Readonly<Record<string, string>>): string =>
+  `${nameOf(n, names)} ${n.kind === "approval" ? wants(n.ask) : `asks ${quoted(n.ask)}`}`;
 
-const doing = (w: Work, names: Readonly<Record<string, string>>): string => {
-  const who = nameOf(w.who, names);
+const doing = (w: FloorWork, names: Readonly<Record<string, string>>): string => {
+  const who = nameOf(w, names);
   if (w.background) return `${who} is waiting on ${backgroundTasks(w.background)}`;
   return w.what.startsWith("● ") ? `${who} is running ${w.what.slice(2)}` : `${who} is working on ${quoted(w.what)}`;
 };
 
-const ended = (w: Work, names: Readonly<Record<string, string>>): string => {
-  const who = nameOf(w.who, names);
+const ended = (w: FloorWork, names: Readonly<Record<string, string>>): string => {
+  const who = nameOf(w, names);
   return w.outcome === "failed"
     ? `${who} failed on ${quoted(w.what)}`
     : w.outcome === "limit"

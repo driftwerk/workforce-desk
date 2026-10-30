@@ -63,7 +63,7 @@ export function Today({ now }: { now: number }) {
 }
 
 function LaneRow({ lane, axis: a }: { lane: FloorLane; axis: Axis }) {
-  const name = useWhoName(lane.who);
+  const name = useWhoName(lane);
   return (
     <>
       <span className={`today-name ${lane.who.kind === "session" ? "mono" : ""}`} title={name}>

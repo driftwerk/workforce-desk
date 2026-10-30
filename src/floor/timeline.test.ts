@@ -10,6 +10,7 @@ const lane = (id: string, spans: FloorLane["spans"], hubId = "local"): FloorLane
   who: agent(id),
   spans,
   hubId,
+  local: hubId === "local",
   key: `${hubId}/agent:${id}`,
   stale: false,
 });
@@ -55,8 +56,8 @@ describe("today's lanes", () => {
       lane("working", [{ kind: "working", from: "2026-10-29T10:00:00Z", to: null }]),
       lane("asking", [{ kind: "working", from: "2026-10-29T08:00:00Z", to: "2026-10-29T09:00:00Z" }]),
     ];
-    const needs = [{ hubId: "local", key: "k", stale: false, who: agent("asking") }];
-    const working = [{ hubId: "local", key: "w", stale: false, who: agent("working") }];
+    const needs = [{ hubId: "local", local: true, key: "k", stale: false, who: agent("asking") }];
+    const working = [{ hubId: "local", local: true, key: "w", stale: false, who: agent("working") }];
     expect(ordered(lanes, needs, working).map((l) => l.who.id)).toEqual(["asking", "working", "done-late", "done-early"]);
     expect(
       ordered([lane("s", [{ kind: "waiting", from: "2026-10-29T08:00:00Z", to: null }]), ...lanes.slice(0, 1)], [], []).map((l) => l.who.id),

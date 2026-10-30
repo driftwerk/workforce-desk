@@ -66,7 +66,7 @@ const without = <V>(record: Record<string, V>, drop: (key: string, v: V) => bool
 
 const ofHub = (hubId: string) => (key: string) => key.startsWith(`${hubId}/`);
 
-export const useFloor = create<FloorStore>((set) => {
+export const useFloor = create<FloorStore>((set, get) => {
   const put = (hubId: string, f: (was: HubFloor) => HubFloor) => set((s) => ({ hubs: { ...s.hubs, [hubId]: f(s.hubs[hubId] ?? blank()) } }));
 
   const read = async (hubId: string): Promise<void> => {
@@ -129,6 +129,7 @@ export const useFloor = create<FloorStore>((set) => {
       const hub = accountOf(hubId);
       if (!hub || need.answer.kind !== "decide") return;
       const key = `${hubId}/${need.id}`;
+      if (get().deciding[key]) return;
       set((s) => ({ deciding: { ...s.deciding, [key]: choice }, problems: without(s.problems, (k) => k === key) }));
       try {
         await floorOf(hub).decide(need.answer.at, choice);

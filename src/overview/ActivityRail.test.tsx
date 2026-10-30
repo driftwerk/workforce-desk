@@ -114,6 +114,41 @@ describe("Activity with the floor", () => {
     expect(within(rail()).queryByRole("list", { name: "Still waiting on you" })).toBeNull();
   });
 
+  it("keeps focus on Allow while it's answering, and answers once however often it's pressed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let answer = (_: Response) => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL, init?: RequestInit) =>
+        init?.method === "POST" ? new Promise<Response>((r) => (answer = r)) : fakeFetch(hubs)(input, init),
+      ),
+    );
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
+    fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
+    const allow = within(rail()).getByRole("button", { name: "Allow" });
+    allow.focus();
+    await act(async () => fireEvent.click(allow));
+    await act(async () => fireEvent.click(allow));
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(allow.textContent).toBe("Allowed…");
+    expect(allow.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(allow);
+    expect(within(rail()).getAllByRole("status").map((r) => r.textContent)).toContain("Allowed");
+    await act(async () => answer(new Response(null, { status: 204 })));
+    await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
+  });
+
+  it("puts focus on the list when what it was on was answered elsewhere", async () => {
+    hubs.local!.decide = () => 409;
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
+    fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
+    const allow = within(rail()).getByRole("button", { name: "Allow" });
+    allow.focus();
+    await act(async () => fireEvent.click(allow));
+    expect(document.activeElement).toBe(within(rail()).getByRole("list", { name: "Still waiting on you" }));
+    expect(within(rail()).getByText("1 already answered elsewhere")).toBeTruthy();
+  });
+
   it("replies where the question was asked, its composer focused", () => {
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
@@ -122,19 +157,13 @@ describe("Activity with the floor", () => {
   });
 
   it("puts what's open above everything that happened, each past request marked with what became of it", async () => {
-    useFloor.setState((s) => ({
-      hubs: {
-        ...s.hubs,
-        local: ready(
-          view({
-            needs: [
-              { ...approval("wait:t1:ap-2", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm test?" }) },
-              need("question:t2", session("s-1", "acme-web"), { ask: "Which one?" }),
-            ],
-          }),
-        ),
-      },
-    }));
+    hubs.local!.floor = view({
+      needs: [
+        approval("wait:t1:ap-2", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm test?" }),
+        need("question:t2", session("s-1", "acme-web"), { ask: "Which one?" }),
+      ],
+    });
+    useFloor.setState((s) => ({ hubs: { ...s.hubs, local: ready(structuredClone(hubs.local!.floor!)) } }));
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     const list = await within(rail()).findByRole("list", { name: "Activity: All" });
     const open = within(rail()).getByRole("list", { name: "Still waiting on you" });

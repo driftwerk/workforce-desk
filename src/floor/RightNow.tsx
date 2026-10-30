@@ -97,7 +97,8 @@ function Column({ label, tone, empty, rows, more = 0 }: { label: string; tone: s
  *  ("16:20 · 48m": when it ended, how long it took). */
 function WorkRow({ work, now }: { work: FloorWork; now: number }) {
   const rooms = useDesk((s) => s.rooms);
-  const open = () => openTarget(targetOf(work, work.hubId, rooms));
+  const target = targetOf(work, rooms);
+  const open = target ? () => openTarget(target) : undefined;
   if (work.endedAt === null) {
     const heard = since(work.heardAt, now);
     return (

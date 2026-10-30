@@ -4,7 +4,7 @@ import { sentence } from "./summary";
 import { NOW, agent, approval, at, need, session, work } from "./testing";
 
 const day = Date.parse("2026-10-29T00:00:00Z");
-const tag = <T>(x: T) => ({ ...x, hubId: "local", key: Math.random().toString(), stale: false });
+const tag = <T>(x: T) => ({ ...x, hubId: "local", local: true, key: Math.random().toString(), stale: false });
 const m = (over: Partial<Pick<Merged, "needs" | "working" | "done">>): Pick<Merged, "needs" | "working" | "done"> => ({
   needs: [],
   working: [],
