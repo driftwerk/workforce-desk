@@ -1,4 +1,4 @@
-import type { Need, Work } from "../hub/types";
+import type { Need, Span, Who, Work } from "../hub/types";
 import type { FloorLane, Tagged } from "./merge";
 
 /** Lanes shown before "Show N more". */
@@ -44,6 +44,44 @@ export const box = (span: { from: string; to: string | null }, a: Axis): { left:
   const to = Math.max(from, Math.min(a.to, span.to === null ? a.to : Date.parse(span.to)));
   const width = Math.max(MIN_WIDTH, ((to - from) / length) * 100);
   return { left: Math.min(((from - a.from) / length) * 100, 100 - width), width };
+};
+
+const endOf = (s: Span): number => (s.to === null ? Number.POSITIVE_INFINITY : Date.parse(s.to));
+
+/** `spans` in order, those of a kind that overlap or touch made one. */
+const joined = (spans: readonly Span[]): Span[] => {
+  const out: Span[] = [];
+  const last = new Map<Span["kind"], number>();
+  for (const s of [...spans].sort((a, b) => Date.parse(a.from) - Date.parse(b.from))) {
+    const i = last.get(s.kind);
+    const had = i === undefined ? undefined : out[i];
+    if (i === undefined || !had || endOf(had) < Date.parse(s.from)) {
+      last.set(s.kind, out.push(s) - 1);
+    } else if (endOf(s) > endOf(had)) {
+      out[i] = { ...had, to: s.to };
+    }
+  }
+  return out;
+};
+
+/** `lanes` as `whoOf` has whose each is: one that turns out to be an
+ *  agent's (a session its turn ran as) goes in that agent's lane, which
+ *  keeps its own name. */
+export const asWho = (lanes: readonly FloorLane[], whoOf: (lane: FloorLane) => Who): FloorLane[] => {
+  const by = new Map<string, { lane: FloorLane; own: boolean }>();
+  for (const l of lanes) {
+    const who = whoOf(l);
+    const own = who.kind === l.who.kind && who.id === l.who.id;
+    const key = own ? l.key : `${l.hubId}/${who.kind}:${who.id}`;
+    const had = by.get(key);
+    by.set(
+      key,
+      had
+        ? { lane: { ...had.lane, who: had.own || !own ? had.lane.who : who, spans: joined([...had.lane.spans, ...l.spans]) }, own: had.own || own }
+        : { lane: { ...l, who, key }, own },
+    );
+  }
+  return [...by.values()].map((x) => x.lane);
 };
 
 type Whom = Tagged & Pick<Need | Work, "who">;

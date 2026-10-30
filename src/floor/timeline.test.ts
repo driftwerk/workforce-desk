@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FloorLane } from "./merge";
-import { axis, box, LANE_CAP, ordered } from "./timeline";
+import { asWho, axis, box, LANE_CAP, ordered } from "./timeline";
 import { agent, session } from "./testing";
 
 beforeAll(() => void vi.stubEnv("TZ", "Europe/London"));
@@ -64,5 +64,29 @@ describe("today's lanes", () => {
     ).toEqual(["s", "done-early"]);
     expect(session("x").kind).toBe("session");
     expect(LANE_CAP).toBe(8);
+  });
+
+  it("put a session an agent's turn ran as in that agent's lane, spans of a kind joined where they meet", () => {
+    const turn: FloorLane = { ...lane("t", []), who: session("t", "at-dm-d4774cbb6c89-2e"), key: "local/session:t" };
+    const lanes = [
+      { ...turn, spans: [{ kind: "working" as const, from: "2026-10-29T09:01:00Z", to: "2026-10-29T09:30:00Z" }, { kind: "waiting" as const, from: "2026-10-29T09:30:00Z", to: null }] },
+      lane("scout", [
+        { kind: "working", from: "2026-10-29T09:00:00Z", to: "2026-10-29T09:20:00Z" },
+        { kind: "working", from: "2026-10-29T11:00:00Z", to: "2026-10-29T11:10:00Z" },
+      ]),
+      lane("other", [{ kind: "working", from: "2026-10-29T10:00:00Z", to: null }]),
+    ];
+    const folded = asWho(lanes, (l) => (l.who.id === "t" ? agent("scout", "") : l.who));
+    expect(folded.map((l) => [l.key, l.who.name])).toEqual([
+      ["local/agent:scout", "scout"],
+      ["local/agent:other", "other"],
+    ]);
+    expect(folded[0]!.spans).toEqual([
+      { kind: "working", from: "2026-10-29T09:00:00Z", to: "2026-10-29T09:30:00Z" },
+      { kind: "waiting", from: "2026-10-29T09:30:00Z", to: null },
+      { kind: "working", from: "2026-10-29T11:00:00Z", to: "2026-10-29T11:10:00Z" },
+    ]);
+    expect(asWho([turn], () => agent("scout", "Scout"))[0]).toMatchObject({ key: "local/agent:scout", who: { kind: "agent", name: "Scout" } });
+    expect(asWho(lanes, (l) => l.who)).toEqual(lanes);
   });
 });
