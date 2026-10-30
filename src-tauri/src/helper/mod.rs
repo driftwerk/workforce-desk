@@ -28,6 +28,8 @@ use mac::Helper;
 #[cfg(windows)]
 use windows::Helper;
 
+// Windows' helper is a development stand-in until it runs Desk in WSL.
+#[cfg_attr(windows, allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Status {
@@ -37,9 +39,9 @@ pub enum Status {
     /// starts at login (or, on macOS, hasn't allowed it yet).
     NeedsApproval,
     NotRegistered,
-    /// macOS only: running from the disk image or Downloads (macOS runs such
-    /// apps from a randomised read-only copy), where a login item would
-    /// vanish.
+    /// Running from the disk image or Downloads (macOS runs such apps from a
+    /// randomised read-only copy), where a login item would vanish.
+    #[cfg(target_os = "macos")]
     MoveToApplications,
     /// A development run: the supervisor is started by hand.
     Development,
@@ -61,6 +63,7 @@ impl Status {
     /// Why the helper can't run, in the person's words, when it can't.
     pub fn blocked(&self) -> Option<String> {
         match self {
+            #[cfg(target_os = "macos")]
             Status::MoveToApplications => {
                 Some("Move Desk to your Applications folder, then open it from there.".into())
             }
@@ -94,6 +97,7 @@ pub fn login(backend: &Backend) -> impl Login {
 
 /// A development run, which manages nothing: `DESK_HOME` set, unless
 /// `DESK_REGISTER_HELPER=1`.
+#[cfg(unix)]
 fn development() -> bool {
     std::env::var_os("DESK_HOME").is_some()
         && std::env::var("DESK_REGISTER_HELPER").as_deref() != Ok("1")
@@ -108,16 +112,25 @@ mod tests {
         assert!(Status::Running.blocked().is_none());
         assert!(Status::Development.blocked().is_none());
         assert!(Status::NotRegistered.blocked().is_none());
-        let why = Status::MoveToApplications.blocked().unwrap();
-        assert!(why.contains("Applications"));
         assert!(
             Status::NeedsApproval
                 .blocked()
                 .unwrap()
                 .contains(STARTUP_SETTINGS)
         );
-        for s in [Status::MoveToApplications, Status::NeedsApproval] {
-            assert!(!s.blocked().unwrap().to_lowercase().contains("workforce"));
-        }
+        assert!(
+            !Status::NeedsApproval
+                .blocked()
+                .unwrap()
+                .to_lowercase()
+                .contains("workforce")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_mac_app_run_from_its_disk_image_is_told_to_move() {
+        let why = Status::MoveToApplications.blocked().unwrap();
+        assert!(why.contains("Applications") && !why.to_lowercase().contains("workforce"));
     }
 }
