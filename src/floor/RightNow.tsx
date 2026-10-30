@@ -53,33 +53,42 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
       </div>
       {brief ?? <p className="right-now-summary">{sentence(m, day, names)}</p>}
       <div className="right-now-cols">
-        <Column label={`Needs you · ${m.needs.length}`} tone="blocked" empty="Nothing is waiting on you.">
-          {m.needs.map((n) => (
+        <Column
+          label={`Needs you · ${m.needs.length}`}
+          tone="blocked"
+          empty="Nothing is waiting on you."
+          rows={m.needs.map((n) => (
             <NeedRow key={n.key} need={n} now={now} />
           ))}
-        </Column>
-        <Column label={`Working · ${m.working.length}`} tone="working" empty="Nothing is running.">
-          {m.working.map((w) => (
+        />
+        <Column
+          label={`Working · ${m.working.length}`}
+          tone="working"
+          empty="Nothing is running."
+          rows={m.working.map((w) => (
             <WorkRow key={w.key} work={w} now={now} />
           ))}
-        </Column>
-        <Column label="Done · last 24 hours" tone="done" empty="Nothing has finished since yesterday.">
-          {m.done.map((w) => (
+        />
+        <Column
+          label="Done · last 24 hours"
+          tone="done"
+          empty="Nothing has finished since yesterday."
+          rows={m.done.map((w) => (
             <WorkRow key={w.key} work={w} now={now} />
           ))}
-          {m.more.done > 0 && <p className="faint small">and {m.more.done} more</p>}
-        </Column>
+          more={m.more.done}
+        />
       </div>
     </section>
   );
 }
 
-function Column({ label, tone, empty, children }: { label: string; tone: string; empty: string; children: ReactNode[] | ReactNode }) {
-  const rows = ([] as ReactNode[]).concat(children).filter(Boolean);
+function Column({ label, tone, empty, rows, more = 0 }: { label: string; tone: string; empty: string; rows: ReactNode[]; more?: number }) {
   return (
     <div className="right-now-col" role="group" aria-label={label}>
       <h3 className={`ov-label state-${tone}`}>{label}</h3>
       {rows.length ? rows : <p className="faint small">{empty}</p>}
+      {more > 0 && <p className="faint small">and {more} more</p>}
     </div>
   );
 }

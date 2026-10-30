@@ -83,6 +83,14 @@ describe("Right now", () => {
     expect(done.querySelector(".dot-failed")).toBeTruthy();
   });
 
+  it("says so in each column with nothing in it", () => {
+    useFloor.setState({ hubs: { local: ready(view()) } });
+    render(<RightNow brief={null} />);
+    expect(within(screen.getByRole("group", { name: "Needs you · 0" })).getByText("Nothing is waiting on you.")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Working · 0" })).getByText("Nothing is running.")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Done · last 24 hours" })).getByText("Nothing has finished since yesterday.")).toBeTruthy();
+  });
+
   it("marks what an unreachable hub said last, and says since when", () => {
     render(<RightNow brief={null} />);
     const scout = within(screen.getByRole("group", { name: "Needs you · 2" })).getAllByRole("button")[0]!;
