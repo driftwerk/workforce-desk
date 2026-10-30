@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { decideApproval, type Decided } from "../hubs/surface";
 import { plainError } from "../ui/plainError";
 import type { Prompt } from "./conversation";
@@ -19,7 +19,11 @@ export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (ch
       <span className="dm-action-text">
         <span>{prompt.content || `Use ${prompt.tool}`}</span>
         <span className="small muted">Waiting for you{prompt.tool ? ` · ${prompt.tool}` : ""}</span>
-        {problem && <span className="small state-blocked">{problem}</span>}
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
+          </span>
+        )}
       </span>
       <span className="dm-action-buttons">
         {options.allow_once && (
@@ -49,14 +53,22 @@ const DECIDED: Record<Decided, string> = {
 };
 
 /** An approval a scheduled run or workflow is waiting on, delivered to the
- *  conversation it was set up in: decided here on its hub. */
+ *  conversation it was set up in: decided here on its hub. Decided from
+ *  its buttons, focus moves to what became of it. */
 export function RoutedApproval({ hubId, requestId }: { hubId: string; requestId: string }) {
   const hub = useChat((s) => s.hubs.find((h) => h.id === hubId));
   const [decided, setDecided] = useState<Decided | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const group = useRef<HTMLDivElement>(null);
+  const result = useRef<HTMLSpanElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (decided && refocus.current) result.current?.focus();
+  }, [decided]);
   const decide = async (choice: PermissionChoice) => {
     if (!hub) return;
+    refocus.current = !!group.current?.contains(document.activeElement);
     setBusy(true);
     setProblem(null);
     try {
@@ -67,16 +79,16 @@ export function RoutedApproval({ hubId, requestId }: { hubId: string; requestId:
     setBusy(false);
   };
   return (
-    <div className="dm-action dm-approval" role="group" aria-label="Approval">
+    <div ref={group} className="dm-action dm-approval" role="group" aria-label="Approval">
       <span className="dm-action-text">
-        {decided ? (
-          <span className={decided === "approved" ? "small state-done" : "small faint"} role="status">
-            {DECIDED[decided]}
+        <span ref={result} tabIndex={-1} className={`small ${decided === "approved" ? "state-done" : decided ? "faint" : "muted"}`} role="status">
+          {decided ? DECIDED[decided] : hub ? "Waiting for your answer" : "Its workspace isn’t connected to Desk any more."}
+        </span>
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
           </span>
-        ) : (
-          <span className="small muted">{hub ? "Waiting for your answer" : "Its workspace isn’t connected to Desk any more."}</span>
         )}
-        {problem && <span className="small state-blocked">{problem}</span>}
       </span>
       {!decided && hub && (
         <span className="dm-action-buttons">
