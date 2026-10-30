@@ -2,6 +2,7 @@ import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
+import { DEFAULT_HOST, useHost } from "../shell/host";
 import { defaultShortcuts } from "./keys";
 import { settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
 
@@ -89,5 +90,29 @@ describe("shortcuts in Desk", () => {
     act(() => useShortcuts.setState({ recording: true }));
     press({ code: "KeyJ", key: "j", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["windows", "linux"] as const)("on %s, leave Ctrl and a letter to a terminal pane and run on Ctrl+Shift there", (platform) => {
+    useHost.setState({ ...DEFAULT_HOST, platform });
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(platform) });
+    const pane = document.body.appendChild(document.createElement("div"));
+    pane.setAttribute("data-terminal", "");
+    const field = pane.appendChild(document.createElement("textarea"));
+    const pressIn = (el: Element, init: KeyboardEventInit) =>
+      act(() => void el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init })));
+    const session = vi.fn();
+    const settings = vi.fn();
+    renderHook(() => useAppShortcut("newSession", session));
+    renderHook(() => useAppShortcut("settings", settings));
+    pressIn(field, { code: "KeyN", key: "n", ctrlKey: true });
+    expect(session).not.toHaveBeenCalled();
+    pressIn(field, { code: "KeyN", key: "N", ctrlKey: true, shiftKey: true });
+    expect(session).toHaveBeenCalledTimes(1);
+    pressIn(field, { code: "Comma", key: ",", ctrlKey: true });
+    expect(settings).toHaveBeenCalledTimes(1);
+    pressIn(document.body, { code: "KeyN", key: "n", ctrlKey: true });
+    expect(session).toHaveBeenCalledTimes(2);
+    pane.remove();
+    useHost.setState(DEFAULT_HOST);
   });
 });

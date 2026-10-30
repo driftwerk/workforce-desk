@@ -225,6 +225,30 @@ export const pluginKeys = (accel: string, platform: Platform = platformNow()): s
   return [...MODIFIERS.filter((m) => p.mods.has(m)).map((m) => (m === "Primary" ? PRIMARY[platform] : m)), p.key].join("+");
 };
 
+/** The keys a shortcut takes in a terminal pane. A shell reads Ctrl and a
+ *  letter itself (Ctrl+N, Ctrl+T and Ctrl+S are readline's next-history,
+ *  transpose and forward search), so on Windows and Linux one of Desk's
+ *  that is Ctrl and a letter takes Shift as well there, as Windows
+ *  Terminal, GNOME Terminal and VS Code's terminal do: Ctrl+N goes to the
+ *  shell, Ctrl+Shift+N to Desk. On macOS ⌘ never reaches the shell, so the
+ *  keys are the same everywhere. */
+export const terminalKeys = (accel: string, platform: Platform = platformNow()): string => {
+  const p = parse(accel, platform);
+  if (!p) return accel;
+  if (platform !== "macos" && p.mods.has("Primary") && !p.mods.has("Shift") && /^[A-Z]$/.test(p.key)) p.mods.add("Shift");
+  return write(p);
+};
+
+/** Where a shortcut is pressed: anywhere in Desk, or in a terminal pane. */
+type Place = "desk" | "terminal";
+
+/** Shortcut `id`'s keys in each place: one that works from any app has the
+ *  same keys in a terminal. */
+const keysByPlace = (id: ShortcutId, accel: string, platform: Platform): Record<Place, string | null> => {
+  const desk = normalize(accel, platform);
+  return { desk, terminal: desk && !isGlobal(id) ? terminalKeys(desk, platform) : desk };
+};
+
 const modifierLabels = (mods: Set<Modifier>, platform: Platform): string[] =>
   MODIFIER_LABELS[platform].filter(([m]) => mods.has(m)).map(([, label]) => label);
 
@@ -399,9 +423,14 @@ export const usable = (stored: string | undefined | null, id: ShortcutId, platfo
 /** Why `accel` can't be `id`'s when Desk's shortcuts are `keys`: another
  *  of Desk's own already has it. */
 export const clash = (keys: Record<ShortcutId, string>, id: ShortcutId, accel: string, platform: Platform = platformNow()): string | null => {
-  const n = normalize(accel, platform);
-  const other = SHORTCUT_IDS.find((o) => o !== id && normalize(keys[o], platform) === n);
-  return other ? `${shortcutLabel(accel, platform)} is already ${SHORTCUT_NAMES[other]} — choose another` : null;
+  const mine = keysByPlace(id, accel, platform);
+  const others = SHORTCUT_IDS.filter((o) => o !== id).map((o) => [o, keysByPlace(o, keys[o], platform)] as const);
+  const other = others.find(([, k]) => k.desk === mine.desk)?.[0];
+  if (other) return `${shortcutLabel(accel, platform)} is already ${SHORTCUT_NAMES[other]} — choose another`;
+  const inTerminal = others.find(([, k]) => k.terminal === mine.terminal)?.[0];
+  return inTerminal
+    ? `In a terminal, ${shortcutLabel(mine.terminal!, platform)} is already ${SHORTCUT_NAMES[inTerminal]} — choose another`
+    : null;
 };
 
 /** Desk's shortcuts from the chosen ones (saved by id, only where they
@@ -423,16 +452,18 @@ export const resolve = (
   }
   const keysOf = (): Record<ShortcutId, string> =>
     Object.fromEntries(SHORTCUT_IDS.map((id) => [id, kept[id] ?? defaults[id]])) as Record<ShortcutId, string>;
-  // Defaults never clash with each other, so dropping choices one at a time
-  // — the later of two choices, or a choice over a default — ends clean.
+  // Defaults never clash with each other, in Desk or in a terminal, so
+  // dropping choices one at a time — the later of two choices, or a choice
+  // over a default — ends clean.
   for (;;) {
     const keys = keysOf();
     const seen = new Map<string, ShortcutId>();
     let drop: ShortcutId | null = null;
     for (const id of SHORTCUT_IDS) {
-      const first = seen.get(keys[id]);
+      const places = Object.entries(keysByPlace(id, keys[id], platform)).map(([place, k]) => `${place} ${k}`);
+      const first = places.map((p) => seen.get(p)).find((o) => o !== undefined);
       if (first === undefined) {
-        seen.set(keys[id], id);
+        for (const p of places) seen.set(p, id);
         continue;
       }
       drop = kept[id] !== undefined ? id : first;

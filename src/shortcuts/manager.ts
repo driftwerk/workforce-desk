@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { inApp } from "../platform";
 import { useSettings } from "../settings/store";
-import { matches, pluginKeys, shortcutLabel, SHORTCUTS, type GlobalShortcutId, type ShortcutId } from "./keys";
+import { matches, pluginKeys, shortcutLabel, SHORTCUTS, terminalKeys, type GlobalShortcutId, type ShortcutId } from "./keys";
 
 export type ShortcutStatus = { state: "off" } | { state: "ready" } | { state: "taken"; message: string };
 
@@ -65,8 +65,13 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
   }, [id, wanted]);
 }
 
+/** Whether a key press was made in a terminal pane (Terminal marks its
+ *  host `data-terminal`): a shell reads keys there first. */
+const inTerminal = (e: Event): boolean => e.target instanceof Element && e.target.closest("[data-terminal]") !== null;
+
 /** Runs `onPress` when shortcut `id`'s keys are pressed while Desk is in
- *  front, unless `enabled` is false or a shortcut is being recorded. */
+ *  front — in a terminal pane, the keys it takes there — unless `enabled`
+ *  is false or a shortcut is being recorded. */
 export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true) {
   const handler = useRef(onPress);
   handler.current = onPress;
@@ -75,7 +80,7 @@ export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = tr
   useEffect(() => {
     if (!enabled || recording) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || !matches(e, keys)) return;
+      if (e.repeat || !matches(e, inTerminal(e) ? terminalKeys(keys) : keys)) return;
       e.preventDefault();
       handler.current();
     };

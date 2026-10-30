@@ -8,6 +8,7 @@ import {
   scopeOf,
   SHORTCUTS,
   shortcutLabel,
+  terminalKeys,
   warning,
   type ShortcutId,
 } from "../shortcuts/keys";
@@ -69,11 +70,17 @@ export function ShortcutField({ id }: { id: ShortcutId }) {
   }, [recording, id, keys, setShortcut]);
 
   const caution = warning(value);
+  const inTerminal = isGlobal(id) ? value : terminalKeys(value);
   return (
     <div className="setting-card">
       <span className="card-text">
         <b>{spec.name}</b>
         <span>{spec.about}</span>
+        {inTerminal !== value && (
+          <span className="faint">
+            In a terminal: <kbd>{shortcutLabel(inTerminal)}</kbd> (the shell keeps {shortcutLabel(value)})
+          </span>
+        )}
         {reason ? (
           <span className="state-blocked" role="alert">
             {reason}

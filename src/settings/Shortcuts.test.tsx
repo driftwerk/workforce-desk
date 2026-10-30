@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_HOST, useHost } from "../shell/host";
 import { defaultShortcuts } from "../shortcuts/keys";
 import { useShortcuts } from "../shortcuts/manager";
 import { Calls } from "./Calls";
@@ -30,6 +31,22 @@ describe("Keyboard shortcuts", () => {
     expect(recorder("Settings").textContent).toBe("⌘,");
     expect(recorder("Save a file").textContent).toBe("⌘S");
     expect(screen.queryByRole("button", { name: /^Reset to/ })).toBeNull();
+  });
+
+  it("says the keys a shortcut takes in a terminal, where the shell keeps Ctrl and a letter", () => {
+    render(<Shortcuts />);
+    expect(screen.queryByText(/In a terminal/)).toBeNull();
+    cleanup();
+    useHost.setState({ ...DEFAULT_HOST, platform: "linux" });
+    useSettings.setState({ keys: defaultShortcuts("linux") });
+    render(<Shortcuts />);
+    expect(recorder("New session").textContent).toBe("Ctrl+N");
+    expect(screen.getAllByText(/In a terminal/).map((e) => e.textContent)).toEqual([
+      "In a terminal: Ctrl+Shift+N (the shell keeps Ctrl+N)",
+      "In a terminal: Ctrl+Shift+T (the shell keeps Ctrl+T)",
+      "In a terminal: Ctrl+Shift+S (the shell keeps Ctrl+S)",
+    ]);
+    useHost.setState(DEFAULT_HOST);
   });
 
   it("records a combo and shows it where Calls mentions it", () => {

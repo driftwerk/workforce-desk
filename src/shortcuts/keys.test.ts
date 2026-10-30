@@ -9,7 +9,9 @@ import {
   pressed,
   refusal,
   resolve,
+  SHORTCUT_IDS,
   shortcutLabel,
+  terminalKeys,
   usable,
   warning,
   type KeyPress,
@@ -208,6 +210,33 @@ describe("shortcut keys on Windows and Linux", () => {
     expect(refusal("Control+Alt+T", "global", "linux")).toBe("Your desktop uses Ctrl+Alt+T for opening a terminal — choose another");
     expect(refusal("Super+Space", "global", "linux")).toMatch(/input sources/);
     expect(refusal("Shift+Control+Z", "app", "linux")).toBe("Ctrl+Shift+Z is Redo — choose another");
+  });
+
+  it("leave Ctrl and a letter to a terminal's shell, and take Ctrl+Shift there instead", () => {
+    for (const platform of ["windows", "linux"] as const) {
+      const d = defaultShortcuts(platform);
+      expect(terminalKeys(d.newSession, platform)).toBe("Primary+Shift+N");
+      expect(terminalKeys(d.newTerminal, platform)).toBe("Primary+Shift+T");
+      expect(terminalKeys(d.saveFile, platform)).toBe("Primary+Shift+S");
+      expect(terminalKeys(d.fillPane, platform)).toBe("Primary+Shift+Enter");
+      expect(terminalKeys(d.settings, platform)).toBe("Primary+Comma");
+      expect(shortcutLabel(terminalKeys(d.newSession, platform), platform)).toBe("Ctrl+Shift+N");
+      expect(matches(press("KeyN", { ctrlKey: true }), terminalKeys(d.newSession, platform), platform)).toBe(false);
+      expect(matches(press("KeyN", { ctrlKey: true, shiftKey: true }), terminalKeys(d.newSession, platform), platform)).toBe(true);
+      // Every default has keys of its own in a terminal too.
+      expect(resolve({}, platform).keys).toEqual(d);
+      for (const id of SHORTCUT_IDS) expect(clash(d, id, d[id], platform)).toBeNull();
+    }
+    expect(terminalKeys("Primary+N", "macos")).toBe("Primary+N");
+    expect(terminalKeys("Control+Alt+J", "linux")).toBe("Primary+Alt+Shift+J");
+  });
+
+  it("refuse keys that would be another shortcut's in a terminal", () => {
+    const d = defaultShortcuts("linux");
+    expect(clash(d, "fillPane", "Control+Shift+T", "linux")).toBe("In a terminal, Ctrl+Shift+T is already New terminal — choose another");
+    expect(clash(d, "newSession", "Control+K", "linux")).toBe("In a terminal, Ctrl+Shift+K is already Ask anyone — choose another");
+    expect(clash(defaultShortcuts("macos"), "fillPane", "Shift+Super+T", "macos")).toBeNull();
+    expect(resolve({ fillPane: "Control+Shift+T" }, "linux").chosen).toEqual({});
   });
 
   it("keep a Mac's ⌃ choice as Ctrl, the command key here", () => {

@@ -13,7 +13,7 @@ import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { Terminal } from "../session/Terminal";
 import { useSettings } from "../settings/store";
-import { shortcutLabel } from "../shortcuts/keys";
+import { shortcutLabel, terminalKeys } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
@@ -457,8 +457,10 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
   const names = useSessionNames();
   const shown = sortedSessions(sessions).filter((s) => s.state !== "closed");
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
+  // A pane showing a terminal takes the keys it takes there.
+  const inShell = pane.content?.kind === "terminal" || pane.content?.kind === "session";
   const replace: MenuEntry[] = [
-    { kind: "item", label: "New terminal", kbd: shortcutLabel(keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
+    { kind: "item", label: "New terminal", kbd: shortcutLabel(inShell ? terminalKeys(keys) : keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
     ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
