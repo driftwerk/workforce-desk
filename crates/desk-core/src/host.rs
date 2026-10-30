@@ -160,24 +160,6 @@ impl Host {
         })
     }
 
-    /// How a backend path is shown: `~/dev/acme-web` for one in the home
-    /// inside WSL, `C:\Users\Sarah\dev` for one on a Windows drive, and
-    /// natively as it is.
-    pub fn display_path(&self, backend: &str) -> String {
-        let Host::Wsl(w) = self else {
-            return backend.to_string();
-        };
-        if w.on_drive(backend).is_some() {
-            return self.host_path(backend).to_string_lossy().into_owned();
-        }
-        let home = w.home.trim_end_matches('/');
-        match backend.strip_prefix(home) {
-            Some("") => "~".into(),
-            Some(rest) if rest.starts_with('/') => format!("~{rest}"),
-            _ => backend.to_string(),
-        }
-    }
-
     /// The host of the process reading `env`: inside WSL when WSL says so
     /// (it sets `WSL_DISTRO_NAME` in every process it starts).
     pub fn running_here(env: &BTreeMap<String, String>) -> Host {
@@ -283,6 +265,12 @@ mod tests {
                 "{windows}"
             );
         }
+        assert_eq!(
+            Host::Native
+                .backend_path(Path::new("/Users/sarah/dev"))
+                .as_deref(),
+            Some("/Users/sarah/dev")
+        );
     }
 
     #[test]
@@ -336,32 +324,6 @@ mod tests {
         assert_eq!(
             host.host_path("/mnt/c/x"),
             PathBuf::from(r"\\wsl.localhost\Ubuntu\mnt\c\x")
-        );
-    }
-
-    #[test]
-    fn paths_are_shown_the_way_the_person_knows_them() {
-        let host = ubuntu();
-        assert_eq!(
-            host.display_path("/home/sarah/dev/acme-web"),
-            "~/dev/acme-web"
-        );
-        assert_eq!(host.display_path("/home/sarah"), "~");
-        assert_eq!(host.display_path("/home/sarahs/x"), "/home/sarahs/x");
-        assert_eq!(
-            host.display_path("/mnt/c/Users/Sarah/dev"),
-            r"C:\Users\Sarah\dev"
-        );
-        assert_eq!(host.display_path("/opt/tools"), "/opt/tools");
-        assert_eq!(
-            Host::Native.display_path("/Users/sarah/dev"),
-            "/Users/sarah/dev"
-        );
-        assert_eq!(
-            Host::Native
-                .backend_path(Path::new("/Users/sarah/dev"))
-                .as_deref(),
-            Some("/Users/sarah/dev")
         );
     }
 
