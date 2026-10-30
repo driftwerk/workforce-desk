@@ -1797,3 +1797,59 @@ button {
   gap: 6px;
   align-items: center;
 }
+
+/* ── Room timelines: days, jumps, older windows ────────────────────────── */
+
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.room-msg:focus {
+  outline: none;
+}
+.room-msg:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+.day-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -6px 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.day-divider::before,
+.day-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+.msg-flash {
+  border-radius: var(--radius-sm);
+  animation: msg-flash 2s ease-out;
+}
+@keyframes msg-flash {
+  from {
+    background: var(--signal-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-flash {
+    animation: none;
+    background: var(--signal-soft);
+  }
+}
+.timeline-older {
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+}

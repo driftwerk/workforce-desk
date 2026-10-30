@@ -5,23 +5,12 @@ import { NeedRow } from "../floor/NeedRow";
 import { useMinute } from "../floor/RightNow";
 import { useWhoName } from "../floor/Row";
 import { useFloor, useLocalFloor, useNeeds, type Answered } from "../floor/store";
-import { clock } from "../floor/time";
+import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
 import { lineOf, needStates, toneOf, type NeedState } from "./activity";
 import { useOverview } from "./store";
-
-const dayOf = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-};
 
 /** "allowed by you 16:31", "no longer waiting". */
 const resolvedText = (state: Extract<NeedState, { open: false }>): string => (state.at ? `${state.how} ${clock(state.at)}` : state.how);
@@ -167,8 +156,8 @@ export function ActivityRail({
       ) : (
         <ol className="ev-list" aria-label={`Activity: ${options[current]?.label ?? "All"}`}>
           {events.map((e, i) => {
-            const day = dayOf(e.at);
-            const heading = day !== "Today" && day !== (i > 0 ? dayOf(events[i - 1]!.at) : "Today");
+            const day = dayName(e.at);
+            const heading = day !== "Today" && day !== (i > 0 ? dayName(events[i - 1]!.at) : "Today");
             return [
               heading && (
                 <li key={`day-${e.id}`} className="ev-day">

@@ -3,8 +3,9 @@ import { shownState } from "../floor/background";
 import { notificationFor, notify } from "../shell/notify";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
-import { DeskHub, ROOM_PAGE, type HubConnection } from "./client";
+import { DeskHub, HubError, ROOM_PAGE, type HubConnection } from "./client";
 import { byTime, later } from "../rooms/time";
+import { afterPage, inWindow, isLive, placeKey, type PageDir, type PlaceKey, type Window } from "../rooms/window";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
 /** The main window's views: the Floor, Rooms, and Grids. */
@@ -18,6 +19,19 @@ interface DeskState {
   rooms: Record<string, Room>;
   /** Loaded timelines (main and threads), by room id. */
   timelines: Record<string, RoomMessage[]>;
+  /** What of each place (a room's main timeline, a thread) is loaded
+   *  without a gap, by place key; a place without one shows all it has. */
+  windows: Record<PlaceKey, Window>;
+  /** A place whose page is being read, or failed to be, by place key. */
+  paging: Record<PlaceKey, "loading" | "failed">;
+  /** Reads a page of a place and widens (or moves) its window to it; one
+   *  read of a place at a time, the next waiting for it. */
+  page: (roomId: string, thread: string | null, dir: PageDir) => Promise<void>;
+  /** Loads what's around message `id` of a room, its thread's too for a
+   *  reply; which thread it's in, or null when the message is gone. */
+  reveal: (roomId: string, id: string) => Promise<{ thread: string | null } | null>;
+  /** Back to a place's newest messages, unless it shows them already. */
+  toNewest: (roomId: string, thread: string | null) => Promise<void>;
   activeRoom: string | null;
   /** Agent messages in rooms you aren't looking at. */
   unread: Record<string, number>;
@@ -98,12 +112,20 @@ export const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessag
 /** Others listening to the events socket (the overview, Activity). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
 
+/** The latest three to reply, `author` now first. */
+const repliers = (was: readonly string[] | undefined, author: string): string[] => [author, ...(was ?? []).filter((a) => a !== author)].slice(0, 3);
+
 /** `parent` with one more reply, `reply`, counted; a parent from a hub that
  *  counts none is left to the replies loaded. */
 const counted = (parent: RoomMessage, reply: RoomMessage): RoomMessage =>
   parent.replyCount === undefined
     ? parent
-    : { ...parent, replyCount: parent.replyCount + 1, lastReplyAt: later(parent.lastReplyAt, reply.createdAt) };
+    : {
+        ...parent,
+        replyCount: parent.replyCount + 1,
+        lastReplyAt: later(parent.lastReplyAt, reply.createdAt),
+        replyAuthors: repliers(parent.replyAuthors, reply.author),
+      };
 
 /** Messages by id, oldest first. */
 export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
@@ -166,6 +188,18 @@ const apply = (sessions: Record<string, Session>, e: DeskEvent): Record<string, 
   }
 };
 
+/** What a page in direction `dir` asks the hub for; null when the window
+ *  already reaches that end. */
+const queryFor = (w: Window | undefined, dir: PageDir): { before?: string; after?: string; around?: string } | null => {
+  if (dir === "newest") return {};
+  if (dir === "older") return !w ? {} : w.older.kind === "at" ? { before: w.older.id } : null;
+  if (dir === "newer") return w?.newer.kind === "at" ? { after: w.newer.id } : null;
+  return { around: dir.around };
+};
+
+/** Reads of each place under way, so the next waits for the last. */
+const reading = new Map<PlaceKey, Promise<void>>();
+
 export const useDesk = create<DeskState>((set, get) => ({
   hub: null,
   connected: false,
@@ -173,6 +207,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   restore: [],
   rooms: {},
   timelines: {},
+  windows: {},
+  paging: {},
   activeRoom: null,
   unread: {},
   roomDrafts: {},
@@ -251,35 +287,81 @@ export const useDesk = create<DeskState>((set, get) => ({
   setView: (view) => set({ view }),
   openRoom: async (id) => {
     set((s) => ({ activeRoom: id, view: "rooms", unread: id ? { ...s.unread, [id]: 0 } : s.unread }));
-    const hub = get().hub;
-    if (!id || !hub || get().timelines[id]) return;
-    try {
-      const main = await hub.roomMessages(id);
-      set((s) => ({ timelines: { ...s.timelines, [id]: merge(s.timelines[id] ?? [], main) } }));
-    } catch (e) {
-      get().fail(e);
-    }
+    if (!id || !get().hub || get().windows[id]) return;
+    await get()
+      .page(id, null, "newest")
+      .catch((e: unknown) => get().fail(e));
   },
   reloadRoom: async (id) => {
-    const hub = get().hub;
-    if (!hub) return;
-    try {
-      const main = await hub.roomMessages(id);
-      set((s) => ({ timelines: { ...s.timelines, [id]: merge(s.timelines[id] ?? [], main) } }));
-    } catch {
-      /* Shown as it was; read again when the hub is back. */
-    }
+    if (!isLive(get().windows[id])) return;
+    await get()
+      .page(id, null, "newest")
+      .catch(() => {
+        /* Shown as it was; read again when the hub is back. */
+      });
   },
   openThread: async (roomId, threadId) => {
+    // A thread jumped back into stays where it was.
+    if (!isLive(get().windows[placeKey(roomId, threadId)])) return;
+    await get()
+      .page(roomId, threadId, "newest")
+      .catch((e: unknown) => get().fail(e));
+  },
+  page: (roomId, thread, dir) => {
+    const key = placeKey(roomId, thread);
+    const read = async () => {
+      const hub = get().hub;
+      const q = queryFor(get().windows[key], dir);
+      if (!hub || !q) return;
+      set((s) => ({ paging: { ...s.paging, [key]: "loading" } }));
+      try {
+        const page = await hub.roomMessages(roomId, { ...(thread ? { thread } : {}), ...q, limit: ROOM_PAGE });
+        set((s) => {
+          const window = afterPage(s.windows[key], dir, page, ROOM_PAGE);
+          const merged = merge(s.timelines[roomId] ?? [], page);
+          // A thread's loaded replies are its count only once they're all of it.
+          const whole = window.older.kind === "start" && window.newer.kind === "end";
+          const { [key]: _done, ...paging } = s.paging;
+          return {
+            timelines: { ...s.timelines, [roomId]: thread ? threadRead(merged, thread, whole) : merged },
+            windows: { ...s.windows, [key]: window },
+            paging,
+          };
+        });
+      } catch (e) {
+        set((s) => ({ paging: { ...s.paging, [key]: "failed" } }));
+        throw e;
+      }
+    };
+    const run = (reading.get(key) ?? Promise.resolve()).catch(() => undefined).then(read);
+    reading.set(key, run);
+    void run.finally(() => reading.get(key) === run && reading.delete(key)).catch(() => undefined);
+    return run;
+  },
+  reveal: async (roomId, id) => {
     const hub = get().hub;
-    if (!hub) return;
-    try {
-      const replies = await hub.roomMessages(roomId, threadId);
-      const whole = replies.length < ROOM_PAGE;
-      set((s) => ({ timelines: { ...s.timelines, [roomId]: threadRead(merge(s.timelines[roomId] ?? [], replies), threadId, whole) } }));
-    } catch (e) {
-      get().fail(e);
+    if (!hub) return null;
+    const find = () => get().timelines[roomId]?.find((m) => m.id === id);
+    let m = find();
+    if (!m) {
+      try {
+        m = await hub.roomMessage(roomId, id);
+      } catch (e) {
+        if (e instanceof HubError && (e.status === 404 || e.status === 400)) return null;
+        throw e;
+      }
     }
+    const thread = m.threadId ?? null;
+    const showing = (x: RoomMessage | undefined, place: string | null) => !!x && inWindow(x, get().windows[placeKey(roomId, place)]);
+    if (thread) {
+      const parent = get().timelines[roomId]?.find((x) => x.id === thread);
+      if (!showing(parent, null)) await get().page(roomId, null, { around: thread });
+    }
+    if (!showing(find(), thread)) await get().page(roomId, thread, { around: id });
+    return { thread };
+  },
+  toNewest: async (roomId, thread) => {
+    if (!isLive(get().windows[placeKey(roomId, thread)])) await get().page(roomId, thread, "newest");
   },
   fail: (e) => set({ error: e instanceof Error ? e.message : String(e) }),
   clearError: () => set({ error: null }),

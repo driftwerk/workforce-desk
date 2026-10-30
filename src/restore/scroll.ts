@@ -51,7 +51,7 @@ export function useSavedScroll<T extends HTMLElement>(pane: string): (el: T | nu
 }
 
 /** Within this of the newest message counts as at it. */
-const AT_NEWEST_PX = 80;
+export const AT_NEWEST_PX = 80;
 /** How long a found anchor is held against the pane sticking to its newest
  *  message as the conversation finishes loading. */
 const HOLD_MS = 1500;
@@ -134,4 +134,55 @@ export function useAnchoredScroll<T extends HTMLElement>(pane: string | null): (
     },
     [pane],
   );
+}
+
+/** Keeps a conversation's pane at its newest message while it's there:
+ *  content growing (a message, a streamed word, an image loading) scrolls
+ *  it to the end only when it was at the end before, and only while `live`.
+ *  Someone scrolled up is never moved. `pane` is the scrolling element and
+ *  `list` what grows inside it; `follow` runs after each render. */
+export function useFollowEnd(live: boolean, startAtEnd: boolean) {
+  const atEnd = useRef(startAtEnd);
+  const liveNow = useRef(live);
+  liveNow.current = live;
+  const el = useRef<HTMLElement | null>(null);
+  const follow = useCallback(() => {
+    const node = el.current;
+    if (node && atEnd.current && liveNow.current) node.scrollTop = node.scrollHeight;
+  }, []);
+  const offScroll = useRef<(() => void) | null>(null);
+  const pane = useCallback(
+    (node: HTMLElement | null) => {
+      offScroll.current?.();
+      offScroll.current = null;
+      el.current = node;
+      if (!node) return;
+      const onScroll = () => (atEnd.current = node.scrollHeight - node.scrollTop - node.clientHeight <= AT_NEWEST_PX);
+      node.addEventListener("scroll", onScroll, { passive: true });
+      offScroll.current = () => node.removeEventListener("scroll", onScroll);
+      follow();
+    },
+    [follow],
+  );
+  const observer = useRef<ResizeObserver | null>(null);
+  const list = useCallback(
+    (node: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      if (!node || typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(follow);
+      observer.current.observe(node);
+    },
+    [follow],
+  );
+  useEffect(
+    () => () => {
+      offScroll.current?.();
+      observer.current?.disconnect();
+    },
+    [],
+  );
+  /** Whether the pane is at its newest message now; false lets go of it. */
+  const setAtEnd = useCallback((v: boolean) => (atEnd.current = v), []);
+  return { pane, list, follow, setAtEnd, atEnd };
 }

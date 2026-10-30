@@ -54,6 +54,9 @@ interface UiState {
   panelFocus: PanelFocus | null;
   /** The Floor's Activity list is open, not docked as a tab. */
   activityOpen: boolean;
+  /** A message just jumped to, shown flashing for a moment. */
+  flash: { id: string; at: number } | null;
+  setFlash: (id: string | null) => void;
   setActivityOpen: (open: boolean) => void;
   /** Kind `kind`'s width; null puts back its default. */
   setPanelWidth: (kind: PanelKind, width: number | null) => void;
@@ -84,6 +87,8 @@ export const useUi = create<UiState>((set) => ({
   panelWidths: {},
   panelFocus: null,
   activityOpen: true,
+  flash: null,
+  setFlash: (id) => set({ flash: id ? { id, at: Date.now() } : null }),
   setActivityOpen: (activityOpen) => set((s) => (s.activityOpen === activityOpen ? s : { activityOpen })),
   setPanelWidth: (kind, width) =>
     set((s) => {

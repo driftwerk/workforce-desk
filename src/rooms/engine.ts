@@ -13,6 +13,7 @@ import { backoff } from "../hub/socket";
 import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
 import { addressees, contextFor, MAX_HOPS, memberKey, memberOf, relay, roomChannel } from "./routing";
+import { newestRun, ofPlace, placeKey } from "./window";
 
 // Asking a room's members. Each member answers on a conversation of its own
 // for the room (`room.channel` on its hub), one ask at a time across the
@@ -170,6 +171,15 @@ function pump(key: string) {
   send(next);
 }
 
+/** What an ask in `thread` of room `roomId` may be told of: the place's
+ *  newest unbroken run, and its thread's first message. */
+const placeSoFar = (roomId: string, thread: string | null) => {
+  const { timelines, windows } = useDesk.getState();
+  const timeline = timelines[roomId] ?? [];
+  const run = newestRun(ofPlace(timeline, thread), windows[placeKey(roomId, thread)]);
+  return thread ? [...timeline.filter((m) => m.id === thread), ...run] : run;
+};
+
 /** Sends ask `a` once its member's conversation takes it, on the line its
  *  room has for the member then (one paired again meanwhile is a new one). */
 function send(a: Ask) {
@@ -191,7 +201,7 @@ function send(a: Ask) {
       place: { kind: "room", room: here.id, name: here.name, ...(a.threadId ? { thread: a.threadId } : {}) },
       speaker: a.speaker,
       hop: a.hop,
-      context: contextFor(useDesk.getState().timelines[here.id] ?? [], memberKey(a.member), a.threadId, a.message, nameOf),
+      context: contextFor(placeSoFar(here.id, a.threadId), memberKey(a.member), a.threadId, a.message, nameOf),
       message: a.message,
       spoken: false,
     };
@@ -582,6 +592,12 @@ async function bringIn(desk: DeskHub, room: Room, text: string): Promise<Room> {
 export async function say(room: Room, text: string, threadId: string | null, files: readonly File[] = []): Promise<void> {
   const hub = useDesk.getState().hub;
   if (!hub || (!text.trim() && !files.length)) return;
+  // What you say shows where you are, after the newest; an ask is told of
+  // that run only.
+  await useDesk
+    .getState()
+    .toNewest(room.id, threadId)
+    .catch(() => undefined);
   const here = await bringIn(hub, room, text);
   const { roster, hubs } = useChat.getState();
   await speak(hub, here, text, threadId, files, addressees(text, here.members, roster, here.defaultMember, undefined, hubs));

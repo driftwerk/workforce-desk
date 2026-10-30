@@ -99,11 +99,23 @@ describe("going to a target", () => {
   it("opens a thread older than the room's latest messages at the thread", async () => {
     const reply = { ...message("m-r"), threadId: "m-old" };
     useDesk.setState({
-      hub: { roomMessages: vi.fn(async (_: string, thread?: string) => (thread === "m-old" ? [reply] : [])) } as never,
+      hub: { roomMessages: vi.fn(async (_: string, q?: { thread?: string }) => (q?.thread === "m-old" ? [reply] : [])) } as never,
     });
     openTarget({ kind: "room", roomId: "r1", threadId: "m-old" }, { reply: true });
     await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-old"));
     expect(useUi.getState().roomThreads).toEqual({ r1: "m-old" });
+  });
+
+  it("opens a room at a message, in its thread when it's a reply, and flashes it", async () => {
+    const reveal = vi.fn(async (_room: string, id: string) => (id === "m-reply" ? { thread: "m-1" } : null));
+    const fail = vi.fn();
+    useDesk.setState({ reveal, fail } as never);
+    openTarget({ kind: "room", roomId: "r1", threadId: null, messageId: "m-reply" }, { reply: true });
+    await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));
+    expect(useUi.getState().roomThreads).toEqual({ r1: "m-1" });
+    expect(useUi.getState().flash).toMatchObject({ id: "m-reply" });
+    openTarget({ kind: "room", roomId: "r1", threadId: null, messageId: "m-gone" });
+    await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("That message isn’t there any more."));
   });
 
   it("opens Slack in the browser", () => {

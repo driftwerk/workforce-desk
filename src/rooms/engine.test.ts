@@ -119,6 +119,7 @@ beforeEach(() => {
   useDesk.setState({
     rooms: { [ROOM_ID]: room },
     timelines: { [ROOM_ID]: [] },
+    windows: {},
     roomDrafts: {},
     hub: {
       post: async (roomId: string, m: Posted) => {
@@ -171,6 +172,23 @@ describe("asking a room's members", () => {
     });
     expect(typeof chat.turn_ref).toBe("string");
     expect(drafts()).toMatchObject([{ member: "dw/allan", threadId: "root", state: "live" }]);
+  });
+
+  it("tells an ask only the newest unbroken run of its place, never across a gap", async () => {
+    const at = (sec: number) => new Date(Date.UTC(2026, 9, 27, 9, 0, sec)).toISOString();
+    useDesk.setState({
+      timelines: {
+        [ROOM_ID]: [
+          { id: "old", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "Before the gap", hop: 0, createdAt: at(1) },
+          { id: "new", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "After it", hop: 0, createdAt: at(5) },
+        ],
+      },
+      windows: { [ROOM_ID]: { older: { kind: "at", id: "new", at: at(5) }, newer: { kind: "end" } } },
+    });
+    await say(room, "@allan which?", null);
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    expect((allan.chats[0]!.desk as { context: unknown[] }).context).toEqual([{ from: "Scout (agent)", text: "After it" }]);
   });
 
   it("answers a form in a thread to the agent that posted it, there, and its answer lands in the thread", async () => {

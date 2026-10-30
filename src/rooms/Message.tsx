@@ -22,6 +22,11 @@ const time = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
+const fullTime = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? undefined : d.toLocaleString([], { dateStyle: "full", timeStyle: "short" });
+};
+
 /** A message, rendered again only when what it's given changes: so those
  *  who show it keep what they give it the same. */
 export const Message = memo(function Message({
@@ -76,7 +81,7 @@ export const Message = memo(function Message({
             </>
           )}
           {badge && <span className="chip msg-delivery">{badge}</span>}{" "}
-          <span className="faint small">
+          <span className="faint small" title={fullTime(message.at)}>
             {home ? `${home} · ` : ""}
             {time(message.at)}
           </span>
