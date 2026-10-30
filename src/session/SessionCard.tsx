@@ -6,6 +6,7 @@ import type { Session } from "../hub/types";
 import { PutInGrid } from "../grids/PutInGrid";
 import { SidePanel } from "../panels/Stage";
 import { Mark } from "../ui/Mark";
+import { sessionAction } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 
@@ -17,6 +18,7 @@ const where = (s: Session): string =>
 export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open } = useDesk();
   const name = useSessionName(session.id, session.name);
+  const action = sessionAction(session);
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
   const saveGoal = () => {
@@ -40,16 +42,10 @@ export function SessionCard({ session }: { session: Session }) {
       }
       actions={
         <>
-          {session.live ? (
-            <button type="button" className="link" onClick={() => hub?.stop(session.id).catch(fail)}>
-              Stop
+          {action && (
+            <button type="button" className="link" onClick={action.run}>
+              {action.label}
             </button>
-          ) : (
-            session.origin === "desk" && (
-              <button type="button" className="link" onClick={() => hub?.resume(session.id).catch(fail)}>
-                Resume
-              </button>
-            )
           )}
           <PutInGrid content={{ kind: "session", sessionId: session.id }} label="Put this session in a grid" onShown={() => open(null)} />
         </>

@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
+vi.mock("../session/Terminal", () => ({ Terminal: () => null }));
 
 const session = (id: string, name: string, more: Partial<Session> = {}): Session => ({
   id,
@@ -97,6 +98,51 @@ describe("a pane's header", () => {
     expect(closeTerminal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(closeTerminal).toHaveBeenCalledWith("t1");
+  });
+});
+
+describe("a session's pane", () => {
+  const stop = vi.fn(() => Promise.resolve());
+  const resume = vi.fn(() => Promise.resolve());
+  const shown = (more: Partial<Session>) => {
+    useDesk.setState((s) => ({ hub: { closeTerminal, stop, resume } as never, sessions: { ...s.sessions, s0: { ...s.sessions.s0!, ...more } } }));
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    canvas();
+    return screen.getByRole("region", { name: "task-0" });
+  };
+  const fromMenu = (pane: HTMLElement, label: string) => {
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: label }));
+  };
+  beforeEach(() => {
+    stop.mockClear();
+    resume.mockClear();
+  });
+
+  it("resumes one Desk started that has stopped, from its header or its options", () => {
+    const pane = shown({ state: "interrupted" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Resume" }));
+    fromMenu(pane, "Resume");
+    expect(resume).toHaveBeenCalledTimes(2);
+    expect(resume).toHaveBeenCalledWith("s0");
+    expect(within(pane).queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("stops one that is running, from its header or its options", () => {
+    const pane = shown({ live: true, state: "working" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Stop" }));
+    fromMenu(pane, "Stop");
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledWith("s0");
+    expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();
+  });
+
+  it("offers neither for one running in another terminal", () => {
+    const pane = shown({ origin: "external" });
+    expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
   });
 });
 
