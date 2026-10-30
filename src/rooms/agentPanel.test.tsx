@@ -160,7 +160,7 @@ describe("an agent clicked on the Floor", () => {
     render(<Desk />);
     fireEvent.click(row("Ada"));
     expect(useDesk.getState().view).toBe("grids");
-    expect(useGrids.getState().flash?.paneId).toBe(useGrids.getState().grids[MAIN_GRID]!.panes.find((p) => p.content?.kind === "agent")!.id);
+    expect(useGrids.getState().flash?.paneIds).toEqual([useGrids.getState().grids[MAIN_GRID]!.panes.find((p) => p.content?.kind === "agent")!.id]);
     expect(useChat.getState()).toMatchObject({ panelAgent: null, activeAgent: null });
   });
 

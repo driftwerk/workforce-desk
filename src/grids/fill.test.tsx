@@ -177,7 +177,7 @@ describe("Put in grid", () => {
     const panes = useGrids.getState().grids[MAIN_GRID]!.panes;
     expect(panes.filter((p) => p.rect).map((p) => p.content)).toEqual([sess("s0"), sess("s1")]);
     expect(useDesk.getState()).toMatchObject({ view: "grids", openId: null });
-    expect(useGrids.getState().flash?.paneId).toBe(panes.find((p) => p.content?.kind === "session" && p.content.sessionId === "s1")!.id);
+    expect(useGrids.getState().flash?.paneIds).toEqual([panes.find((p) => p.content?.kind === "session" && p.content.sessionId === "s1")!.id]);
   });
 
   it("makes a new grid for it", () => {

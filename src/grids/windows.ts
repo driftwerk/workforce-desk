@@ -21,20 +21,21 @@ import { deskState } from "../restore/boot";
 import { findContent, laidOut, type PaneContent } from "./engine";
 import { gridOfLabel, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
+import { itemOf, shownAt, type Place } from "./where";
 import { useDesk } from "../hub/store";
 import {
   createGrid,
   deliver,
   filledPane,
-  flashPane,
+  flashPanes,
   heardGrid,
   renameGrid,
   setActive,
   setFocus,
   setOpen,
   setPlacement,
-  showing,
   startGrids,
+  swapInPane,
   unfill,
   useGrids,
   type Role,
@@ -189,14 +190,18 @@ export const focusGridWindow = async (id: string): Promise<void> => {
 };
 
 /** Focuses and points out the pane showing `content` in grid `gridId`, in
- *  this window; false when it isn't laid out there. */
-const pointOut = (gridId: string, content: PaneContent): boolean => {
+ *  this window: a parked one is swapped back into the layout first, here,
+ *  as this window writes the grid. False when it isn't in the grid, or
+ *  can't be laid out. */
+export const pointOut = (gridId: string, content: PaneContent): boolean => {
+  const there = findContent(useGrids.getState().grids[gridId]?.panes ?? [], content);
+  if (!there || (!there.rect && !swapInPane(gridId, there.id))) return false;
   const p = findContent(laidOut(useGrids.getState().grids[gridId]?.panes ?? []), content);
   if (!p) return false;
   // Another pane filling the grid would hide it.
   if (filledPane(useGrids.getState(), gridId) !== p.id) unfill(gridId);
   setFocus(gridId, p.id);
-  flashPane(gridId, p.id);
+  flashPanes(gridId, [p.id]);
   return true;
 };
 
@@ -224,16 +229,25 @@ export const revealIn = (gridId: string, content: PaneContent): boolean => {
 };
 
 /** Shows where `content` is in a grid, if it's in one that can be seen (see
- *  `showing`). A session started in a grid's terminal is shown by that
+ *  `shownAt`). A session started in a grid's terminal is shown by that
  *  terminal's pane. False when it's in neither, so it's opened as usual. */
 export const reveal = (content: PaneContent): boolean => {
-  const grids = useGrids.getState();
-  const terminalId = content.kind === "session" ? useDesk.getState().sessions[content.sessionId]?.terminalId : null;
-  for (const c of terminalId ? [content, { kind: "terminal" as const, terminalId }] : [content]) {
-    const at = showing(grids, c);
-    if (at) return revealIn(at.gridId, c);
-  }
-  return false;
+  const sessions = useDesk.getState().sessions;
+  const item = itemOf(sessions, content);
+  const at = item && shownAt(useGrids.getState(), sessions, item);
+  return at ? revealIn(at.gridId, at.content) : false;
+};
+
+/** Takes the person to `place` (see `placesOf`): a grid whose monitor is
+ *  away is shown in the main window again, as its sidebar row does; then
+ *  it's shown as `revealIn` shows it (a parked pane swapped back in by the
+ *  window that writes its grid). */
+export const goTo = (place: Place): boolean => {
+  const s = useGrids.getState();
+  const g = s.grids[place.gridId];
+  if (!g) return false;
+  if (isAway(g, s.open)) bringBack(g.id);
+  return revealIn(place.gridId, place.content);
 };
 
 /** Puts `content` in grid `gridId` (its first empty pane, else beside the

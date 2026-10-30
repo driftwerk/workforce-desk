@@ -20,7 +20,7 @@ import { claudePluginDir, inApp, programsUnder } from "../platform";
 import { baseName } from "../ui/paths";
 import type { Pane, PaneContent } from "./engine";
 import { newId } from "./model";
-import { setAskingCheck, setTerminal, useGrids, writes } from "./store";
+import { setAskingCheck, setTerminal, setTerminalCheck, useGrids, writes } from "./store";
 
 interface TerminalsState {
   /** Terminals as the hub last said. */
@@ -197,5 +197,15 @@ export const sessionIn = (sessions: Record<string, Session>, content: PaneConten
 export const askingIn = (panes: readonly Pane[], sessions: Record<string, Session> = useDesk.getState().sessions): string[] =>
   panes.filter((p) => sessionIn(sessions, p.content)?.pending).map((p) => p.id);
 
+/** The Desk terminal `content` keeps open: a terminal's own, or the one a
+ *  session runs in, while the hub still has it. */
+export const terminalOf = (content: PaneContent): string | null => {
+  if (content.kind === "terminal") return content.terminalId;
+  const id = content.kind === "session" ? useDesk.getState().sessions[content.sessionId]?.terminalId : null;
+  return id && useTerminals.getState().byId[id] ? id : null;
+};
+
 // A smaller layout keeps these first.
 setAskingCheck((panes) => askingIn(panes));
+// A terminal replaced or shown as its session is kept, not lost.
+setTerminalCheck(terminalOf);

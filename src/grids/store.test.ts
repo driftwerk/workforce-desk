@@ -11,7 +11,6 @@ import {
   renameGrid,
   setAskingCheck,
   setFocus,
-  showing,
   startGrids,
   swapInPane,
   undoFor,
@@ -132,20 +131,6 @@ describe("a smaller layout", () => {
 });
 
 describe("grids from the sidebar", () => {
-  it("finds a session where it can be seen, laid out, not parked or in a window that's closed", () => {
-    nine();
-    const other = createGrid();
-    deliver(other, sess("x"));
-    expect(showing(useGrids.getState(), sess("s3"))).toEqual({ gridId: MAIN_GRID, paneId: pane(sess("s3")).id });
-    expect(showing(useGrids.getState(), sess("x"))).toEqual({ gridId: other, paneId: pane(sess("x"), other).id });
-    useGrids.setState((s) => ({ grids: { ...s.grids, [other]: { ...s.grids[other]!, placement: { kind: "window", mode: "fill", monitor: null } } } }));
-    expect(showing(useGrids.getState(), sess("x"))).toBeNull();
-    useGrids.setState({ open: { [other]: true } });
-    expect(showing(useGrids.getState(), sess("x"))?.gridId).toBe(other);
-    layOut(MAIN_GRID, "one");
-    expect(showing(useGrids.getState(), sess("s3"))).toBeNull();
-  });
-
   it("renames a grid here, or asks the window that writes it", () => {
     renameGrid(MAIN_GRID, "  Release ");
     expect(useGrids.getState().grids[MAIN_GRID]!.name).toBe("Release");

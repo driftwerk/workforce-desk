@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
@@ -17,8 +17,9 @@ import { shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
-import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
-import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
+import { nameParts } from "./head";
+import { findContent, parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
+import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
@@ -121,16 +122,21 @@ export function usePaneLabel(content: PaneContent | null): Label {
 
 /** Taking pane `pane` out of the grid: a session or a conversation just
  *  leaves it (nothing ends); a terminal with something still running in it
- *  asks first, as closing it ends that. */
+ *  asks first, as closing it ends that. A session shown in place of the
+ *  terminal it runs in, where no other pane shows that terminal, is that
+ *  terminal here: it closes with the pane. */
 function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: () => void; dialog: ReactNode } {
   const [confirm, setConfirm] = useState(false);
-  const running = useTerminals((s) =>
-    pane.content?.kind === "terminal" && pane.content.terminalId ? describeTerminal(s.byId[pane.content.terminalId], s.programs[pane.content.terminalId]).running : null,
-  );
+  const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
+  const terminalId = pane.content?.kind === "terminal" ? pane.content.terminalId : hosted;
+  const running = useTerminals((s) => (terminalId ? describeTerminal(s.byId[terminalId], s.programs[terminalId]).running : null));
+  const shown = useDesk((s) => (hosted && pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined));
+  const inIt = label.tracked ?? (shown?.live ? shown : null);
+  const close = () => closePane(gridId, pane.id, (c) => closeContent(hosted ? { kind: "terminal", terminalId: hosted } : c));
   const remove = () => {
-    const busy = pane.content?.kind === "terminal" && (label.tracked || running);
+    const busy = (pane.content?.kind === "terminal" || hosted) && (inIt || running);
     if (busy) setConfirm(true);
-    else closePane(gridId, pane.id, closeContent);
+    else close();
   };
   const dialog = confirm && (
     <Dialog
@@ -141,7 +147,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
             <h1 id={id} className="display-md">
               Close this terminal?
             </h1>
-            <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
+            <p>{inIt ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
           </span>
           <CloseButton onClose={() => setConfirm(false)} />
         </header>
@@ -156,7 +162,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
           className="btn btn-danger"
           onClick={() => {
             setConfirm(false);
-            closePane(gridId, pane.id, closeContent);
+            close();
           }}
         >
           Close terminal
@@ -167,15 +173,25 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
   return { remove, dialog };
 }
 
-/** What removing a pane is called: a terminal closes; anything else only
- *  leaves the grid. */
-const removeLabel = (pane: PaneData): string => (pane.content?.kind === "terminal" ? "Close terminal" : pane.content ? "Remove from grid" : "Close pane");
+/** What removing a pane is called: a terminal closes (and a session shown
+ *  in place of its terminal, see `hostedBy`); anything else only leaves the
+ *  grid. */
+const removeLabel = (pane: PaneData, hosted: string | null): string =>
+  pane.content?.kind === "terminal" || hosted ? "Close terminal" : pane.content ? "Remove from grid" : "Close pane";
 
 const RemoveIcon = () => (
   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
     <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
   </svg>
 );
+
+/** A pane header's tooltip: all it says, however much of it shows, and
+ *  that it drags. */
+const headTitle = (label: Label, held: boolean): string | undefined => {
+  if (!held) return undefined;
+  const says = [label.name, label.meta, label.tracked && "Tracked — on the Floor", label.cwd].filter(Boolean).join(" · ");
+  return `${says}\nDrag to move`;
+};
 
 /** The whole grid, for a pane filling it. */
 const WHOLE: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
@@ -205,7 +221,7 @@ export function GridPane({
   const movingPane = useGridDrag((s) => !!s.item?.from);
   const swapping = useGridDrag((s) => !!s.item?.from?.parked);
   const lifted = useGridDrag((s) => s.item?.from?.gridId === gridId && s.item.from.paneId === pane.id);
-  const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneId === pane.id ? s.flash.n : 0));
+  const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneIds.includes(pane.id) ? s.flash.n : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
@@ -214,25 +230,40 @@ export function GridPane({
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
+  const [start, end] = nameParts(label.name);
+  const said = useId();
   return (
     <section
       className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
       style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}
+      // What a narrow header no longer shows, still said.
+      aria-describedby={[label.meta && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
       data-drop-pane={pane.id}
       data-grid={gridId}
       onPointerDownCapture={() => setFocus(gridId, pane.id)}
       onFocusCapture={() => setFocus(gridId, pane.id)}
     >
       <div className="gpane-box">
-        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={pane.content ? "Drag to move" : undefined} onPointerDown={handle.onPointerDown}>
+        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
           {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
-          <span className={`gpane-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
-          {label.meta && <span className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>{label.meta}</span>}
+          <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
+            <span className="gpane-name-start">{start}</span>
+            {end && <span className="gpane-name-end">{end}</span>}
+          </span>
+          {label.meta && (
+            <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
+              {label.meta}
+            </span>
+          )}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
           <span className="gpane-fill" />
-          {label.cwd && <span className="gpane-cwd mono">{label.cwd}</span>}
+          {label.cwd && (
+            <span id={`${said}-cwd`} className="gpane-cwd mono">
+              {label.cwd}
+            </span>
+          )}
           {fill && fill !== "hidden" ? (
             <>
               <span className="gpane-waiting">
@@ -484,12 +515,28 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
       : []),
   ];
   const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
+  // A tracked terminal shows as its session, and back: the same terminal
+  // either way, so nothing starts or stops.
+  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, pane.content.terminalId) : null;
+  const ranIn = pane.content?.kind === "session" ? (sessions[pane.content.sessionId]?.terminalId ?? null) : null;
+  const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));
+  // A pane of its own in another grid: one here would be a second.
+  const terminalElsewhere = useGrids(
+    (s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], { kind: "terminal", terminalId: ranIn })),
+  );
+  const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
+  const swap: MenuEntry[] = tracked
+    ? [{ kind: "item", label: "Show as session", onSelect: () => put({ kind: "session", sessionId: tracked.id }) }]
+    : terminal && !terminalElsewhere
+      ? [{ kind: "item", label: "Show the terminal", onSelect: () => put({ kind: "terminal", terminalId: terminal.id, cwd: terminal.cwd }) }]
+      : [];
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    ...swap,
     ...(action ? [{ kind: "item" as const, label: action.label, onSelect: action.run }] : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     { kind: "separator" },
-    { kind: "item", label: removeLabel(pane), onSelect: onClose },
+    { kind: "item", label: removeLabel(pane, hosted), onSelect: onClose },
   ];
 }

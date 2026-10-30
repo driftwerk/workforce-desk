@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
-import type { Session } from "../hub/types";
+import type { Session, TerminalInfo } from "../hub/types";
 import { useSettings } from "../settings/store";
 import type { PaneContent } from "./engine";
 import { useChat } from "../chat/store";
@@ -10,7 +10,7 @@ import { GridCanvas, LayoutUndo } from "./GridView";
 import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { dropPane } from "./drag";
-import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
+import { createGrid, deliver, layOut, replacePane, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
 import { servePictures } from "../pictures/testing";
 
@@ -94,6 +94,19 @@ describe("a pane's header", () => {
     expect(closeTerminal).not.toHaveBeenCalled();
   });
 
+  it("cuts a long name in the middle, and still says it all in its tooltip and to a screen reader", () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s0: { ...s.sessions.s0!, name: "checkout-redirect-loop-7f3a" } } }));
+    deliver(MAIN_GRID, sess("s0"));
+    canvas();
+    const pane = screen.getByRole("region", { name: "checkout-redirect-loop-7f3a" });
+    const head = pane.querySelector(".gpane-head")!;
+    expect(head.querySelector(".gpane-name-start")!.textContent).toBe("checkout-redirect-l");
+    expect(head.querySelector(".gpane-name-end")!.textContent).toBe("oop-7f3a");
+    expect(head.getAttribute("title")).toBe("checkout-redirect-loop-7f3a · Claude Code · idle\nDrag to move");
+    const described = pane.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)!.textContent);
+    expect(described).toEqual(["Claude Code · idle"]);
+  });
+
   it("asks before closing a terminal with something still running", () => {
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
@@ -151,6 +164,92 @@ describe("a session's pane", () => {
     expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();
     fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
     expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
+  });
+});
+
+describe("a tracked terminal shown as its session", () => {
+  const term: PaneContent = { kind: "terminal", terminalId: "t1" };
+  const info = (live = true): TerminalInfo => ({ id: "t1", name: "", cwd: "/tmp/api", envKeys: [], shell: "/bin/zsh", state: live ? "running" : "exited", live, exitCode: null, createdAt: "", updatedAt: "" });
+  /** s0 is Claude Code started by hand in terminal t1, laid out beside s1. */
+  const tracked = (more: Partial<Session> = {}) => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s0: { ...s.sessions.s0!, live: true, state: "working", terminalId: "t1", ...more } } }));
+    useTerminals.setState({ byId: { t1: info() } });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, term);
+    deliver(MAIN_GRID, sess("s1"));
+    canvas();
+  };
+  const options = (name: string) => {
+    fireEvent.click(within(screen.getByRole("region", { name })).getByRole("button", { name: "Pane options" }));
+    return screen.getAllByRole("menuitem").map((m) => m.firstChild?.textContent);
+  };
+  const choose = (label: string) => act(() => fireEvent.click(screen.getByRole("menuitem", { name: label })));
+  const showAsSession = () => {
+    options("task-0");
+    choose("Show as session");
+  };
+
+  it("swaps the pane to the session and back, the same terminal throughout, nothing parked or closed", () => {
+    tracked();
+    const pane = grid().panes.find((p) => p.content?.kind === "terminal")!;
+    expect(options("task-0")).toContain("Show as session");
+    choose("Show as session");
+    expect(grid().panes.find((p) => p.id === pane.id)!.content).toEqual(sess("s0"));
+    expect(grid().panes.filter((p) => !p.rect)).toHaveLength(0);
+    expect(useDesk.getState().sessions.s0!.terminalId).toBe("t1");
+
+    expect(options("task-0")).toContain("Show the terminal");
+    choose("Show the terminal");
+    expect(grid().panes.find((p) => p.id === pane.id)!.content).toEqual({ kind: "terminal", terminalId: "t1", cwd: "/tmp/api" });
+    expect(grid().panes.filter((p) => !p.rect)).toHaveLength(0);
+    expect(closeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("offers each only where it applies", () => {
+    tracked();
+    // A session pane that never ran in a Desk terminal, and an untracked terminal.
+    expect(options("task-1")).not.toContain("Show the terminal");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(options("task-0")).not.toContain("Show the terminal");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s0: { ...s.sessions.s0!, live: false } } })));
+    const plain = screen.getAllByRole("region").find((r) => r.dataset.dropPane && within(r).queryByText(/Terminal/))!;
+    fireEvent.click(within(plain).getByRole("button", { name: "Pane options" }));
+    expect(screen.queryByRole("menuitem", { name: "Show as session" })).toBeNull();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    // Shown as its session after Claude Code has exited, its shell still runs: it can go back.
+    act(() => replacePane(MAIN_GRID, grid().panes.find((p) => p.content?.kind === "terminal")!.id, sess("s0")));
+    expect(options("task-0")).toContain("Show the terminal");
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    // Once the shell has ended too, there's no terminal to go back to.
+    act(() => useTerminals.setState({ byId: { t1: info(false) } }));
+    expect(options("task-0")).not.toContain("Show the terminal");
+  });
+
+  it("doesn't show the terminal where it would be a second pane of it, as its own pane is in another grid", () => {
+    tracked();
+    showAsSession();
+    const other = createGrid();
+    act(() => deliver(other, term));
+    expect(options("task-0")).not.toContain("Show the terminal");
+  });
+
+  it("closes the terminal with the session's pane, when no other pane shows it", () => {
+    tracked();
+    showAsSession();
+    fireEvent.click(within(screen.getByRole("region", { name: "task-0" })).getByRole("button", { name: "Remove from grid" }));
+    expect(screen.getByText("task-0 is still running in it, and stops when it closes.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
+    expect(closeTerminal).toHaveBeenCalledWith("t1");
+  });
+
+  it("parks the terminal when the session's pane is given something else", () => {
+    tracked();
+    showAsSession();
+    const pane = grid().panes.find((p) => p.content?.kind === "session" && p.content.sessionId === "s0")!;
+    act(() => replacePane(MAIN_GRID, pane.id, sess("s2")));
+    expect(grid().panes.find((p) => !p.rect)!.content).toMatchObject(term);
+    expect(closeTerminal).not.toHaveBeenCalled();
   });
 });
 

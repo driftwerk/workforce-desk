@@ -54,15 +54,15 @@ export interface Undo {
   parked: number;
 }
 
-/** A pane to point out for a moment: `n` counts, so the same pane can be
+/** Panes to point out for a moment: `n` counts, so the same ones can be
  *  pointed out again. */
 export interface Flash {
   gridId: string;
-  paneId: string;
+  paneIds: string[];
   n: number;
 }
 
-interface GridsState {
+export interface GridsState {
   ready: boolean;
   role: Role;
   order: string[];
@@ -104,6 +104,14 @@ let askingIn: (panes: readonly Pane[]) => string[] = () => [];
 
 export const setAskingCheck = (f: (panes: readonly Pane[]) => string[]): void => {
   askingIn = f;
+};
+
+/** The Desk terminal content keeps open: a terminal's own, or the one a
+ *  session runs in (the hub's sessions know; see terminals.ts). */
+let terminalOf: (c: PaneContent) => string | null = (c) => (c.kind === "terminal" ? c.terminalId : null);
+
+export const setTerminalCheck = (f: (c: PaneContent) => string | null): void => {
+  terminalOf = f;
 };
 
 const get = () => useGrids.getState();
@@ -208,9 +216,9 @@ export const setFocus = (gridId: string, pane: string, again = false): void => {
 const touch = (gridId: string, pane: string) =>
   changePanes(gridId, (panes) => (panes.some((p) => p.id === pane) ? panes.map((p) => (p.id === pane ? { ...p, lastActive: Date.now() } : p)) : null));
 
-/** Points pane `pane` out for a moment. */
-export const flashPane = (gridId: string, paneId: string): void =>
-  useGrids.setState((s) => ({ flash: { gridId, paneId, n: (s.flash?.n ?? 0) + 1 } }));
+/** Points panes `paneIds` out for a moment. */
+export const flashPanes = (gridId: string, paneIds: string[]): void =>
+  useGrids.setState((s) => ({ flash: { gridId, paneIds, n: (s.flash?.n ?? 0) + 1 } }));
 
 /** Pointing out `n` is over (so a grid shown again doesn't do it again). */
 export const flashDone = (n: number): void => void (get().flash?.n === n && useGrids.setState({ flash: null }));
@@ -382,11 +390,31 @@ const focusContent = (gridId: string, content: PaneContent) => {
   if (p) setFocus(gridId, p.id);
 };
 
+/** Whether a pane of grid `gridId` (as `panes`, there) or of another grid
+ *  shows terminal `id`: its own pane, or a session's that runs in it. */
+const showsTerminal = (gridId: string, panes: readonly Pane[], id: string, s: GridsState = get()): boolean =>
+  s.order.some((g) => (g === gridId ? panes : (s.grids[g]?.panes ?? [])).some((p) => p.content && terminalOf(p.content) === id));
+
 /** What a pane held before something else took its place: a terminal
- *  parks (it keeps running, and comes back when there's room); a session
- *  or a conversation just leaves the grid. */
-const keepReplaced = (panes: Pane[], old: PaneContent | null | undefined): Pane[] =>
-  old?.kind === "terminal" && old.terminalId ? [...panes, { id: paneId(), rect: null, content: old }] : panes;
+ *  parks (it keeps running, and comes back when there's room), and so does
+ *  the terminal a session it showed runs in, unless a pane still shows it
+ *  (a session shown in place of its terminal, or the other way round). A
+ *  session or a conversation just leaves the grid. */
+const keepReplaced = (gridId: string, panes: Pane[], old: PaneContent | null | undefined): Pane[] => {
+  const id = old && terminalOf(old);
+  if (!old || !id || showsTerminal(gridId, panes, id)) return panes;
+  return [...panes, { id: paneId(), rect: null, content: old.kind === "terminal" ? old : { kind: "terminal", terminalId: id } }];
+};
+
+/** The Desk terminal only pane `pane` keeps open, as it shows a session in
+ *  place of the terminal that session runs in: closing the pane closes it
+ *  too, as closing the terminal's own pane would. */
+export const hostedBy = (gridId: string, pane: string, s: GridsState = get()): string | null => {
+  const panes = s.grids[gridId]?.panes ?? [];
+  const content = panes.find((p) => p.id === pane)?.content;
+  const id = content?.kind === "session" ? terminalOf(content) : null;
+  return id && !showsTerminal(gridId, panes.filter((p) => p.id !== pane), id, s) ? id : null;
+};
 
 /** `content` out of the grid if it's there, unless it's in pane `but`. */
 const takeOut = (panes: Pane[], content: PaneContent, but: string): Pane[] => {
@@ -403,7 +431,7 @@ export const dropOnPane = (gridId: string, target: string, zone: Side | "center"
   changePanes(gridId, (all) => {
     if (zone === "center") {
       const old = all.find((p) => p.id === target)?.content;
-      return keepReplaced(replace(takeOut(all, content, target), target, content), old);
+      return keepReplaced(gridId, replace(takeOut(all, content, target), target, content), old);
     }
     const done = split(all, target, zone, { id: paneId(), content });
     return done && takeOut(done, content, done.at(-1)!.id);
@@ -439,7 +467,7 @@ export const replacePane = (gridId: string, pane: string, content: PaneContent |
   changePanes(gridId, (panes) => {
     const old = panes.find((x) => x.id === pane)?.content;
     const moved = content ? takeOut(panes, content, pane) : panes;
-    return keepReplaced(replace(moved, pane, content), old);
+    return keepReplaced(gridId, replace(moved, pane, content), old);
   });
   setFocus(gridId, pane);
 };
@@ -464,20 +492,6 @@ export const swapInPane = (gridId: string, pane: string): boolean => {
   const done = changePanes(gridId, (panes) => swapIn(panes, pane, askingIn(panes), paneId));
   if (done) setFocus(gridId, pane, true);
   return done;
-};
-
-/** The grid and pane showing `content` where it can be seen: a grid in
- *  the main window, or in a window of its own that's open (the grid shown
- *  in the main window first). Parked panes don't count. */
-export const showing = (s: GridsState, content: PaneContent): { gridId: string; paneId: string } | null => {
-  const ids = s.active ? [s.active, ...s.order.filter((id) => id !== s.active)] : s.order;
-  for (const id of ids) {
-    const g = s.grids[id];
-    if (!g || (g.placement.kind === "window" && !s.open[id])) continue;
-    const p = findContent(laidOut(g.panes), content);
-    if (p) return { gridId: id, paneId: p.id };
-  }
-  return null;
 };
 
 /** Moves pane `paneId`'s content to grid `to` (its pane here closes). */

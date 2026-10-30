@@ -7,7 +7,7 @@ import { Confirm } from "../ui/Confirm";
 import { SortList, SortRow } from "../groups/rows";
 import { useGridDrag } from "./drag";
 import { closeGridWindow } from "../platform";
-import { createGrid, deleteGrid, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, shownGrid, useGrids } from "./store";
+import { createGrid, deleteGrid, hostedBy, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, shownGrid, useGrids } from "./store";
 import { closeContent } from "./terminals";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
@@ -86,11 +86,14 @@ export function GridsSection() {
     // Its monitor is away: shown here until it's back (or for good).
     else bringBack(g.id);
   };
-  // Its own window closes first, so it can't write the grid back.
+  // Its own window closes first, so it can't write the grid back. The
+  // terminals only its sessions' panes keep open close with it.
   const removeGrid = (g: Grid) => {
     if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
     setOpen(g.id, false);
+    const hosted = hostedIn(g);
     deleteGrid(g.id, closeContent);
+    for (const terminalId of hosted) closeContent({ kind: "terminal", terminalId });
   };
   /** An empty grid goes at once; one holding anything asks first. */
   const askToRemove = (g: Grid) => (g.panes.some((p) => p.content) ? setDeleting(g.id) : removeGrid(g));
@@ -197,17 +200,22 @@ export function GridsSection() {
           onConfirm={() => removeGrid(grids[deleting]!)}
           onClose={() => setDeleting(null)}
         >
-          <p className="muted">{deleteNote(grids[deleting]!)}</p>
+          <p className="muted">{deleteNote(grids[deleting]!, hostedIn(grids[deleting]!).length)}</p>
         </Confirm>
       )}
     </div>
   );
 }
 
-/** What deleting a grid does to what's in it. */
-export const deleteNote = (g: Grid): string => {
-  const terminals = g.panes.filter((p) => p.content?.kind === "terminal").length;
-  const others = g.panes.filter((p) => p.content && p.content.kind !== "terminal").length;
+/** The terminals grid `g`'s session panes keep open, shown in place of
+ *  the terminals they run in (see `hostedBy`). */
+const hostedIn = (g: Grid): string[] => g.panes.flatMap((p) => hostedBy(g.id, p.id) ?? []);
+
+/** What deleting a grid does to what's in it; `hosted` of its sessions
+ *  are shown in place of the terminals they run in, which close with it. */
+export const deleteNote = (g: Grid, hosted = 0): string => {
+  const terminals = g.panes.filter((p) => p.content?.kind === "terminal").length + hosted;
+  const others = g.panes.filter((p) => p.content && p.content.kind !== "terminal").length - hosted;
   const parts = [];
   if (others) parts.push(`Its ${others === 1 ? "session or agent stays" : `${others} sessions and agents stay`} where ${others === 1 ? "it is" : "they are"}, just off this grid.`);
   if (terminals) parts.push(`${terminals === 1 ? "Its terminal closes" : `Its ${terminals} terminals close`}, with anything running in ${terminals === 1 ? "it" : "them"}.`);
