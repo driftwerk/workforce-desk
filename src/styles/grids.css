@@ -154,6 +154,7 @@
   border-style: dashed;
 }
 .gpane-head {
+  container: gpane-head / inline-size;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -171,14 +172,24 @@
 .dot-none {
   border-color: var(--border);
 }
+/* The name gives way last, and then in the middle: its start is cut short,
+   its end stays. */
 .gpane-name {
   flex: 0 1 auto;
+  display: flex;
   min-width: 0;
   font-weight: 600;
   font-size: 12.5px;
   white-space: nowrap;
+}
+.gpane-name-start {
+  min-width: 1.5em;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.gpane-name-end {
+  flex: none;
+  white-space: pre;
 }
 .gpane-meta {
   flex: none;
@@ -213,6 +224,24 @@
   text-overflow: ellipsis;
   direction: rtl;
   text-align: left;
+}
+/* As the header narrows, the rest gives way before the name: where a
+   terminal is, then what the pane is, then the badge (the widths are
+   HEAD_DROPS, in head.ts). */
+@container gpane-head (max-width: 560px) {
+  .gpane-cwd {
+    display: none;
+  }
+}
+@container gpane-head (max-width: 440px) {
+  .gpane-meta {
+    display: none;
+  }
+}
+@container gpane-head (max-width: 340px) {
+  .gpane-badge {
+    display: none;
+  }
 }
 .gpane-body {
   flex: 1;

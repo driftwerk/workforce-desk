@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type CSSProperties, type ReactNode } from "react";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
@@ -17,6 +17,7 @@ import { shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
+import { nameParts } from "./head";
 import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
@@ -184,6 +185,14 @@ const RemoveIcon = () => (
   </svg>
 );
 
+/** A pane header's tooltip: all it says, however much of it shows, and
+ *  that it drags. */
+const headTitle = (label: Label, held: boolean): string | undefined => {
+  if (!held) return undefined;
+  const says = [label.name, label.meta, label.tracked && "Tracked — on the Floor", label.cwd].filter(Boolean).join(" · ");
+  return `${says}\nDrag to move`;
+};
+
 /** The whole grid, for a pane filling it. */
 const WHOLE: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
 
@@ -221,25 +230,40 @@ export function GridPane({
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
+  const [start, end] = nameParts(label.name);
+  const said = useId();
   return (
     <section
       className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
       style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}
+      // What a narrow header no longer shows, still said.
+      aria-describedby={[label.meta && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
       data-drop-pane={pane.id}
       data-grid={gridId}
       onPointerDownCapture={() => setFocus(gridId, pane.id)}
       onFocusCapture={() => setFocus(gridId, pane.id)}
     >
       <div className="gpane-box">
-        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={pane.content ? "Drag to move" : undefined} onPointerDown={handle.onPointerDown}>
+        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
           {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
-          <span className={`gpane-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
-          {label.meta && <span className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>{label.meta}</span>}
+          <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
+            <span className="gpane-name-start">{start}</span>
+            {end && <span className="gpane-name-end">{end}</span>}
+          </span>
+          {label.meta && (
+            <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
+              {label.meta}
+            </span>
+          )}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
           <span className="gpane-fill" />
-          {label.cwd && <span className="gpane-cwd mono">{label.cwd}</span>}
+          {label.cwd && (
+            <span id={`${said}-cwd`} className="gpane-cwd mono">
+              {label.cwd}
+            </span>
+          )}
           {fill && fill !== "hidden" ? (
             <>
               <span className="gpane-waiting">

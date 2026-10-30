@@ -94,6 +94,19 @@ describe("a pane's header", () => {
     expect(closeTerminal).not.toHaveBeenCalled();
   });
 
+  it("cuts a long name in the middle, and still says it all in its tooltip and to a screen reader", () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s0: { ...s.sessions.s0!, name: "checkout-redirect-loop-7f3a" } } }));
+    deliver(MAIN_GRID, sess("s0"));
+    canvas();
+    const pane = screen.getByRole("region", { name: "checkout-redirect-loop-7f3a" });
+    const head = pane.querySelector(".gpane-head")!;
+    expect(head.querySelector(".gpane-name-start")!.textContent).toBe("checkout-redirect-l");
+    expect(head.querySelector(".gpane-name-end")!.textContent).toBe("oop-7f3a");
+    expect(head.getAttribute("title")).toBe("checkout-redirect-loop-7f3a · Claude Code · idle\nDrag to move");
+    const described = pane.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)!.textContent);
+    expect(described).toEqual(["Claude Code · idle"]);
+  });
+
   it("asks before closing a terminal with something still running", () => {
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
