@@ -1,10 +1,27 @@
 import { useState } from "react";
 import { useDesk } from "../hub/store";
-import type { Decision, Session } from "../hub/types";
+import type { Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
 
 /** "Bash(cargo test)" → "Bash". */
 export const toolName = (tool: string): string => tool.split("(")[0]?.trim() || tool;
+
+/** What allowing a refused tool allows, as its button says: one command,
+ *  file or URL where the tool has one (the hub allows just that), else the
+ *  whole tool. */
+export const allowLabel = (denied: Denied): string => {
+  const name = toolName(denied.tool);
+  const what = !denied.detail
+    ? name
+    : ["Bash", "PowerShell", "Monitor"].includes(name)
+      ? "this command"
+      : ["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"].includes(name)
+        ? "this file"
+        : name === "WebFetch"
+          ? "this URL"
+          : name;
+  return `Allow ${what} for this session and continue`;
+};
 
 /** What a session's turn ended asking the person, with what answers it here:
  *  allowing the tool auto mode refused and carrying on, replying in its
@@ -45,7 +62,7 @@ export function Asked({ session, compact = false }: { session: Session; compact?
           title={denied.detail ? `Only ${denied.detail}, until the session ends` : "Until the session ends"}
           onClick={run("allowAsked")}
         >
-          Allow {toolName(denied.tool)} for this session and continue
+          {allowLabel(denied)}
         </button>
       )}
     </div>

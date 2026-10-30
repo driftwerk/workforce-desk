@@ -9,6 +9,7 @@ import { useDesk } from "../hub/store";
 import type { Asked, Session } from "../hub/types";
 import { notificationFor } from "../shell/notify";
 import { sessionActions } from "./actions";
+import { allowLabel } from "./Approval";
 import { SessionCard } from "./SessionCard";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -99,7 +100,7 @@ describe("a session that stopped to ask", () => {
     expect(asked.textContent).toContain("Needs you · asked");
     expect(asked.textContent).toContain("Stopped: Bash was not allowed");
     expect(asked.textContent).toContain("[Credential Exploration]");
-    fireEvent.click(within(asked).getByRole("button", { name: "Allow Bash for this session and continue" }));
+    fireEvent.click(within(asked).getByRole("button", { name: "Allow this command for this session and continue" }));
     expect(hub.allowAsked).toHaveBeenCalledWith("s1");
     await act(() => Promise.resolve());
     fireEvent.click(within(asked).getByRole("button", { name: "Dismiss" }));
@@ -130,11 +131,17 @@ describe("a session that stopped to ask", () => {
     const n = { ...need("question:t1", who("s1", "keychain-check"), { ask: denied.ask }), hubId: "local", local: true, key: "local/question:t1", stale: false };
     render(<NeedRow need={n} now={Date.now()} actions />);
     expect(screen.getByText(/auto mode refused Bash/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Allow Bash for this session and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow this command for this session and continue" }));
     expect(hub.allowAsked).toHaveBeenCalledWith("s1");
     await act(() => Promise.resolve());
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(hub.dismissAsked).toHaveBeenCalledWith("s1");
+  });
+
+  it("names what an allow allows: the one call where the tool has one, else the tool", () => {
+    expect(allowLabel(denied.denied!)).toBe("Allow this command for this session and continue");
+    expect(allowLabel({ ...denied.denied!, tool: "Edit(src/a.rs)", detail: "src/a.rs" })).toBe("Allow this file for this session and continue");
+    expect(allowLabel({ ...denied.denied!, tool: "workforce · memory_recall", detail: "" })).toBe("Allow workforce · memory_recall for this session and continue");
   });
 
   it("notifies as needing you", () => {

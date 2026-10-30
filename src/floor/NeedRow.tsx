@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
-import { toolName } from "../session/Approval";
+import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote } from "./Row";
@@ -78,7 +78,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
           )}
           {denied?.allowable && (
             <button type="button" className="btn btn-signal" disabled={need.stale || acting} title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined} onClick={act("allowAsked")}>
-              Allow {toolName(denied.tool)} for this session and continue
+              {allowLabel(denied)}
             </button>
           )}
           {target && need.answer.kind === "reply" && (
