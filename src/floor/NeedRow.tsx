@@ -53,7 +53,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               title={stale}
               onClick={() => !deciding && void useFloor.getState().decide(need.hubId, need, "allow")}
             >
-              {deciding === "allow" ? "Allowed…" : deciding === "deny" ? "Denied…" : "Allow"}
+              {deciding ? "Allowed…" : "Allow"}
             </button>
           )}
           {target && need.answer.kind === "reply" && (
@@ -73,7 +73,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             </button>
           )}
           <span className="sr-only" role="status">
-            {deciding === "allow" ? "Allowed" : deciding === "deny" ? "Denied" : ""}
+            {deciding ? "Allowed" : ""}
           </span>
           {problem && (
             <span className="small state-blocked" role="alert">
