@@ -263,7 +263,7 @@ pub fn bounded_range(range: &str) -> String {
         .filter(|(start, end)| !start.is_empty() && !end.contains(','))
         .and_then(|(start, end)| {
             let start: u64 = start.trim().parse().ok()?;
-            let last = start + RANGE_CHUNK - 1;
+            let last = start.checked_add(RANGE_CHUNK - 1)?;
             let end = match end.trim() {
                 "" => last,
                 end => end.parse::<u64>().ok()?.min(last),
@@ -536,7 +536,13 @@ mod tests {
             bounded_range("bytes=100-999999999"),
             format!("bytes=100-{}", 100 + mb2)
         );
-        for kept in ["bytes=-500", "bytes=0-1,5-9", "items=0-1", "bytes=x-"] {
+        for kept in [
+            "bytes=-500",
+            "bytes=0-1,5-9",
+            "items=0-1",
+            "bytes=x-",
+            "bytes=18446744073709551615-",
+        ] {
             assert_eq!(bounded_range(kept), kept);
         }
     }
