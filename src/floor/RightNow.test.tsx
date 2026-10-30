@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
-import type { Room } from "../hub/types";
+import type { Room, Session } from "../hub/types";
 import { openTarget } from "../shell/navigate";
 import { RightNow } from "./RightNow";
 import { useFloor } from "./store";
@@ -112,6 +112,28 @@ describe("Right now", () => {
     );
     expect(rows[0]!.textContent).toContain(`working · updated ${clock(at(3))}`);
     expect(screen.queryByText(/Herald/)).toBeNull();
+  });
+
+  it("folds a session an agent's turn ran as into that agent's one entry, by its name", () => {
+    const cwd = "/Users/me/Library/Application Support/Desk/hub/data/agents/scout/projects/_agent-turn/work/session/at-dm-d4774cbb6c89";
+    useDesk.setState({ sessions: { "s-9": { id: "s-9", engine: "claude", name: "at-dm-d4774cbb6c89", cwd, origin: "external" } as Session } });
+    useChat.setState({ roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: "claude-code", isDefault: false }] });
+    useFloor.setState({
+      hubs: {
+        local: ready(
+          view({
+            working: [work(session("s-9", "at-dm-d4774cbb6c89"), { heardAt: at(1) })],
+            done: [work(agent("scout", "Scout"), { what: "Checked the spend.", endedAt: at(30), outcome: "finished" })],
+          }),
+        ),
+      },
+    });
+    render(<RightNow brief={null} />);
+    const rows = within(screen.getByRole("group", { name: "What’s happening" })).getAllByRole("button");
+    expect(rows.map((r) => r.querySelector("b")!.textContent)).toEqual(["Scout"]);
+    expect(screen.getByText(/^Scout is under way\./)).toBeTruthy();
+    fireEvent.click(rows[0]!);
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" });
   });
 
   it("says plainly what a hub without gists sent, its identifiers dropped", () => {

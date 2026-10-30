@@ -14,7 +14,7 @@ import { backgroundTasks } from "./background";
 import { happening, type FloorEntry } from "./happening";
 import type { Merged } from "./merge";
 import { NeedRow } from "./NeedRow";
-import { FloorRow } from "./Row";
+import { FloorRow, useWho } from "./Row";
 import { useMerged } from "./store";
 import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
 import { targetOf } from "./target";
@@ -45,7 +45,7 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
   const m = useMerged();
   const now = useMinute();
   const names = useSessionNames();
-  const entries = happening(m, now);
+  const entries = happening(m, now, useWho());
   const paragraph = useParagraph(m, entries, names);
   return (
     <section className="floor-card right-now" aria-label="Right now">
