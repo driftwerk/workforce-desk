@@ -38,12 +38,13 @@ describe("shortcut keys on macOS", () => {
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
       saveFile: "Primary+S",
+      stopAnswer: "Primary+Period",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
-    expect(new Set(Object.values(MAC)).size).toBe(7);
+    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
   it("warns about ⌥Space, which launchers take, without refusing it", () => {

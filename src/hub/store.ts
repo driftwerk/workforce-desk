@@ -58,6 +58,14 @@ export interface RoomDraft {
   /** Who is answering (`hub/agent`). */
   member: string;
   threadId: string | null;
+  /** The room message it answers. */
+  asked: string;
+  /** When it was asked, or sent once it was (ms). */
+  since: number;
+  /** When its conversation dropped, while it's stalled. */
+  stalledSince?: number;
+  /** How many later asks its live turn took in. */
+  took?: number;
   text: string;
   working: Working | null;
   tools: ToolCall[];
@@ -65,18 +73,26 @@ export interface RoomDraft {
   prompts: Prompt[];
   /** `queued`: waiting for the member's answer in another thread;
    *  `connecting`: waiting for the member's conversation to open; `busy`:
-   *  waiting for the member to finish something elsewhere. */
-  state: "queued" | "connecting" | "busy" | "live" | "stalled" | "interrupted" | "failed";
+   *  waiting for the member to finish something elsewhere; `stopped`: you
+   *  stopped it. */
+  state: "queued" | "connecting" | "busy" | "live" | "stalled" | "stopped" | "interrupted" | "failed";
   error?: string;
   /** What its answer is posted under, once the hub has said its id. */
   source?: string;
 }
 
+/** Whether `posted` is the answer `d` was waiting for: its source, or for
+ *  one you stopped, an answer by its member to what it was asked (a turn
+ *  that ended just before the stop reached the hub). */
+const answers = (posted: RoomMessage, d: RoomDraft): boolean =>
+  (!!posted.source && d.source === posted.source) ||
+  (d.state === "stopped" && !!posted.inReplyTo && posted.inReplyTo === d.asked && posted.author === d.member);
+
 /** Drafts once `posted` is in the room: the one it answered is done. */
-const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Record<string, RoomDraft[]> => {
+export const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Record<string, RoomDraft[]> => {
   const here = drafts[posted.roomId];
-  if (!posted.source || !here?.some((d) => d.source === posted.source)) return drafts;
-  return { ...drafts, [posted.roomId]: here.filter((d) => d.source !== posted.source) };
+  if (!here?.some((d) => answers(posted, d))) return drafts;
+  return { ...drafts, [posted.roomId]: here.filter((d) => !answers(posted, d)) };
 };
 
 /** Others listening to the events socket (the overview, Activity). */

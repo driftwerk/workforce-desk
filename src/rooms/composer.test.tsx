@@ -8,10 +8,14 @@ vi.mock("@workforce/rich", () => ({
 
 const said: string[] = [];
 const retried: string[] = [];
+const stopped: string[] = [];
 vi.mock("./engine", () => ({
   say: vi.fn(async (_room: unknown, text: string) => void said.push(text)),
   prune: () => {},
   retry: (_room: string, id: string) => void retried.push(id),
+  stop: (_room: string, id: string) => void stopped.push(`stop ${id}`),
+  cancelAsk: (_room: string, id: string) => void stopped.push(`cancel ${id}`),
+  stopAll: () => void stopped.push("all"),
   dismiss: () => {},
   answerPrompt: () => true,
   answerForm: vi.fn(async () => {}),
@@ -110,7 +114,7 @@ describe("answers on their way in a room", () => {
       options: { allow_once: true, deny_once: true, allow_always: true, deny_always: true },
       turnRef: "t1",
     };
-    const draft = { member: "local/scout", threadId: null, tools: [], attachments: [], prompts: [], error: undefined };
+    const draft = { member: "local/scout", threadId: null, asked: "q1", since: Date.now(), tools: [], attachments: [], prompts: [], error: undefined };
     useDesk.setState({
       roomDrafts: {
         r1: [
@@ -133,6 +137,33 @@ describe("answers on their way in a room", () => {
     expect(live!.getAttribute("aria-live")).toBeNull();
     expect(cut!.getAttribute("aria-busy")).toBe("false");
     expect(screen.getByRole("alert").textContent).toMatch(/^Interrupted/);
+  });
+
+  it("offers Stop on a live answer, Cancel on a queued one, Stop all when two are live, and Retry on a stopped one", () => {
+    stopped.length = 0;
+    const draft = { member: "local/scout", threadId: null, asked: "q1", since: Date.now(), tools: [], attachments: [], prompts: [], text: "", working: null };
+    useDesk.setState({
+      roomDrafts: {
+        r1: [
+          { ...draft, id: "a1", state: "live" },
+          { ...draft, id: "a2", state: "live" },
+          { ...draft, id: "a3", state: "queued" },
+          { ...draft, id: "a4", state: "stalled" },
+          { ...draft, id: "a5", state: "stopped", took: 1 },
+        ],
+      },
+      timelines: { r1: [] },
+    });
+    render(<RoomView room={room} />);
+    const stops = screen.getAllByRole("button", { name: "Stop" });
+    expect(stops).toHaveLength(2);
+    fireEvent.click(stops[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop all (2)" }));
+    expect(stopped).toEqual(["stop a1", "cancel a3", "all"]);
+    expect(screen.getByRole("alert").textContent).toMatch(/^Stopped by you · it had taken in 1 more message/);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retried).toContain("a5");
   });
 });
 

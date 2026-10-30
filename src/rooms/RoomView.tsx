@@ -8,7 +8,7 @@ import type { Room, RoomMessage } from "../hub/types";
 import { AgentMark } from "../ui/Mark";
 import { Draft } from "./Draft";
 import { Message } from "./Message";
-import { answerForm, say } from "./engine";
+import { answerForm, say, stopAll } from "./engine";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
 import { memberKey, memberOf } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -99,7 +99,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
       .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-mentions composer-files" onSubmit={submit}>
+    <form className="composer composer-mentions composer-files" onSubmit={submit} data-composer="">
       <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
       {open && (
         <ul className="mention-menu" role="listbox" id={listId} aria-label="Mention someone">
@@ -292,6 +292,7 @@ export function RoomView({ room }: { room: Room }) {
   }, [all]);
 
   const byThread = useMemo(() => draftsByThread(drafts, all), [drafts, all]);
+  const liveCount = drafts.filter((d) => d.state === "live").length;
   const shownDrafts = byThread.get(null) ?? NO_DRAFTS;
   const draftText = shownDrafts.map((d) => d.text.length).join();
   useEffect(() => {
@@ -322,6 +323,13 @@ export function RoomView({ room }: { room: Room }) {
             {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
           </span>
         </span>
+        {liveCount >= 2 && (
+          <span className="room-head-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => stopAll(room.id)}>
+              Stop all ({liveCount})
+            </button>
+          </span>
+        )}
       </header>
       <div ref={scroller} className="room-scroll">
         {main.map((m) => {
@@ -330,7 +338,7 @@ export function RoomView({ room }: { room: Room }) {
           const there = thread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
           const names = (ds: RoomDraft[]) => [...new Set(ds.map((d) => author(d.member).name))];
           const replying = names(there.filter(answering));
-          const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted"));
+          const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted" || d.state === "stopped"));
           return (
             <div key={m.id} className="room-msg">
               <RoomMessageView room={room} m={m} name={a.name} home={memberOf(m.author) ? a.home : undefined} />

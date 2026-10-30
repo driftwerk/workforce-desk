@@ -53,6 +53,8 @@ const draft = (threadId: string): RoomDraft => ({
   id: "ask-1",
   member: "local/scout",
   threadId,
+  asked: "q1",
+  since: 0,
   text: "",
   working: null,
   tools: [],

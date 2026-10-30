@@ -1785,3 +1785,15 @@ button {
   cursor: text;
   word-break: break-all;
 }
+
+.draft-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.room-head-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

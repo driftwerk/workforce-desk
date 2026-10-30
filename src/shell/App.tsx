@@ -13,7 +13,7 @@ import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/ma
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { useHubLinks } from "../hubs/follow";
-import { prune } from "../rooms/engine";
+import { prune, stop, stopTarget } from "../rooms/engine";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
 import { resumePairing } from "../hubs/PairHub";
@@ -39,6 +39,22 @@ import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
+
+/** Stops the answer nearest: in the open room, the open thread's when focus
+ *  is in it, else the room's newest live one; else the open DM's turn. */
+const stopNearest = () => {
+  const desk = useDesk.getState();
+  if (desk.view !== "rooms") return;
+  const room = desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
+  if (room) {
+    const inThread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room.id] ?? null) : null;
+    const draft = stopTarget(desk.roomDrafts[room.id] ?? [], inThread);
+    if (draft) stop(room.id, draft.id);
+    return;
+  }
+  const chat = useChat.getState();
+  if (chat.activeAgent && chat.conversations[chat.activeAgent]?.working) chat.cancel(chat.activeAgent);
+};
 
 /** How often the agents every workspace lists are read again. */
 const ROSTER_EVERY_MS = 60_000;
@@ -167,6 +183,7 @@ export function App() {
     newTerminalHere();
   });
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
+  useAppShortcut("stopAnswer", stopNearest, true, { fromFields: false });
 
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");

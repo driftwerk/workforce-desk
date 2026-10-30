@@ -39,6 +39,9 @@ interface Ask {
   sentAt: number;
   /** How many times the hub has refused it as busy since it was asked. */
   refusals: number;
+  /** The room messages of later asks its live turn took in, oldest first:
+   *  they die with it when it's stopped. */
+  took: string[];
   /** `sending`: waiting for its member's conversation to take it; `held`:
    *  failed or interrupted, until it is asked again or let be. */
   state: "queued" | "sending" | "sent" | "settling" | "held";
@@ -87,19 +90,29 @@ const nameOf = (author: string): string => {
 
 const failed = (e: unknown) => useDesk.getState().fail(e);
 
-const draftOf = (a: Ask, patch: Partial<RoomDraft> = {}): RoomDraft => ({
-  id: a.id,
-  member: memberKey(a.member),
-  threadId: a.threadId,
-  text: "",
-  working: null,
-  tools: [],
-  attachments: [],
-  prompts: [],
-  state: "queued",
-  ...useDesk.getState().roomDrafts[a.roomId]?.find((d) => d.id === a.id),
-  ...patch,
-});
+const draftOf = (a: Ask, patch: Partial<RoomDraft> = {}): RoomDraft => {
+  const was = useDesk.getState().roomDrafts[a.roomId]?.find((d) => d.id === a.id);
+  const next: RoomDraft = {
+    id: a.id,
+    member: memberKey(a.member),
+    threadId: a.threadId,
+    asked: a.message,
+    since: a.sentAt || Date.now(),
+    text: "",
+    working: null,
+    tools: [],
+    attachments: [],
+    prompts: [],
+    state: "queued",
+    ...was,
+    ...patch,
+    took: a.took.length,
+  };
+  if (a.sentAt) next.since = a.sentAt;
+  if (next.state !== "stalled") delete next.stalledSince;
+  else next.stalledSince ??= Date.now();
+  return next;
+};
 
 const show = (a: Ask, patch: Partial<RoomDraft>) => useDesk.getState().putDraft(a.roomId, draftOf(a, patch));
 
@@ -199,8 +212,19 @@ function send(a: Ask) {
 }
 
 /** Asks member `m` of `room` something said in it. */
-function ask(room: Room, m: RoomMemberRef, what: Omit<Ask, "id" | "roomId" | "member" | "ref" | "replyId" | "sentAt" | "refusals" | "state">) {
-  const a: Ask = { ...what, id: crypto.randomUUID(), roomId: room.id, member: m, ref: null, replyId: null, sentAt: 0, refusals: 0, state: "queued" };
+function ask(room: Room, m: RoomMemberRef, what: Omit<Ask, "id" | "roomId" | "member" | "ref" | "replyId" | "sentAt" | "refusals" | "took" | "state">) {
+  const a: Ask = {
+    ...what,
+    id: crypto.randomUUID(),
+    roomId: room.id,
+    member: m,
+    ref: null,
+    replyId: null,
+    sentAt: 0,
+    refusals: 0,
+    took: [],
+    state: "queued",
+  };
   asks.set(a.id, a);
   show(a, { state: "queued" });
   pump(lineKey(room, m));
@@ -218,8 +242,10 @@ function heard(key: string, convo: Conversation, state: ConversationState) {
   if (state.absorbed > line.absorbed) {
     // Taken into the live turn: its answer answers both.
     const unheard = on.filter((a) => a.ref && !state.turns[a.ref]?.acked);
+    const into = on.find((a) => a.ref && state.turns[a.ref]?.acked);
     unheard.slice(0, state.absorbed - line.absorbed).forEach((a) => {
       line.convo.forget(a.ref!);
+      if (into && !into.took.includes(a.message)) into.took.push(a.message);
       done(a);
     });
     line.absorbed = state.absorbed;
@@ -376,18 +402,91 @@ async function recheck(key: string, droppedAt: number) {
   pump(key);
 }
 
-/** Asks again what an interrupted or failed draft was asked. */
+/** Asks again what an interrupted, failed or stopped draft was asked. A
+ *  stopped one that had taken in later asks asks the newest of them, whose
+ *  context carries the rest. */
 export function retry(roomId: string, draftId: string) {
   const a = asks.get(draftId);
   const room = useDesk.getState().rooms[roomId];
   if (!a || !room) return;
   if (a.ref) lines.get(lineKey(room, a.member))?.convo.forget(a.ref);
+  const newest = a.took.at(-1);
+  const taken = newest ? useDesk.getState().timelines[roomId]?.find((m) => m.id === newest) : undefined;
+  if (taken) {
+    a.message = taken.id;
+    a.text = taken.content;
+    a.hop = taken.author === "you" ? 0 : taken.hop + 1;
+  }
+  a.took = [];
   a.ref = null;
   a.refusals = 0;
+  a.sentAt = 0;
   a.state = "queued";
-  show(a, { state: "queued", text: "", working: null, tools: [], attachments: [], prompts: [], error: undefined, source: undefined });
+  show(a, {
+    state: "queued",
+    asked: a.message,
+    since: Date.now(),
+    text: "",
+    working: null,
+    tools: [],
+    attachments: [],
+    prompts: [],
+    error: undefined,
+    source: undefined,
+  });
   pump(lineKey(room, a.member));
 }
+
+/** Stops a live answer: its turn is cancelled, what it said is kept as
+ *  stopped, and the member's next ask (another thread's) is sent. */
+export function stop(roomId: string, draftId: string): void {
+  const a = asks.get(draftId);
+  const draft = useDesk.getState().roomDrafts[roomId]?.find((d) => d.id === draftId);
+  const key = a && lineOf(a);
+  const line = key ? lines.get(key) : undefined;
+  if (!a || !key || !line || a.state !== "sent" || draft?.state !== "live") return;
+  line.convo.cancel();
+  if (a.ref) line.convo.forget(a.ref);
+  a.ref = null;
+  a.state = "held";
+  show(a, { state: "stopped", working: null, prompts: [] });
+  // The gateway reads the cancel and waits for the turn to settle before it
+  // reads the next frame on this socket, so the next ask goes after it; one
+  // still settling is refused as busy and queued again.
+  pump(key);
+}
+
+/** Takes a queued ask out; the live one is left alone. */
+export function cancelAsk(roomId: string, draftId: string): void {
+  const a = asks.get(draftId);
+  if (!a || a.roomId !== roomId || a.state !== "queued") return;
+  asks.delete(a.id);
+  useDesk.getState().dropDraft(roomId, a.id);
+}
+
+/** Every live answer in the room stopped, and every queued one cancelled,
+ *  so the queue doesn't start the next the moment one ends. */
+export function stopAll(roomId: string): void {
+  // Queued ones first: stopping a live answer sends its member's next ask.
+  for (const a of [...asks.values()]) if (a.roomId === roomId && a.state === "queued") cancelAsk(roomId, a.id);
+  const drafts = useDesk.getState().roomDrafts[roomId] ?? [];
+  for (const d of drafts) if (d.state === "live") stop(roomId, d.id);
+}
+
+/** The live answer focus is nearest: in the open thread when focus is in
+ *  it, else the room's newest live one. */
+export const stopTarget = (drafts: readonly RoomDraft[], thread: string | null): RoomDraft | null => {
+  const live = drafts.filter((d) => d.state === "live");
+  return (thread !== null ? live.filter((d) => d.threadId === thread).at(-1) : undefined) ?? live.at(-1) ?? null;
+};
+
+// A held ask whose draft went (its answer arrived after all, or the room
+// did) is let be.
+useDesk.subscribe((s, prev) => {
+  if (s.roomDrafts === prev.roomDrafts) return;
+  for (const a of [...asks.values()])
+    if (a.state === "held" && !s.roomDrafts[a.roomId]?.some((d) => d.id === a.id)) asks.delete(a.id);
+});
 
 /** Leaves a failed draft be. */
 export function dismiss(roomId: string, draftId: string) {

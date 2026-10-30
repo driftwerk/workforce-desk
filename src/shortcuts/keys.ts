@@ -48,6 +48,13 @@ export const SHORTCUTS = [
   },
   { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Primary+Comma", scope: "app" },
   { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Primary+S", scope: "app" },
+  {
+    id: "stopAnswer",
+    name: "Stop an answer",
+    about: "Stops the answer being written in the room or DM you’re in: the open thread’s first.",
+    keys: "Primary+Period",
+    scope: "app",
+  },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];
