@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSessionNames } from "../groups/names";
 import { useDesk } from "../hub/store";
-import { inApp } from "../platform";
+import { inApp, openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { CHECK_EVERY_MS, isLive, isWorking, useUpdates } from "./store";
 
@@ -39,6 +39,17 @@ export function UpdateNotice() {
     // `go` reads the sessions current at this render.
   }, [waiting, state.phase, working.length]);
 
+  if (state.phase === "available")
+    return (
+      <div className="update-notice" role="status">
+        <span>A new version of Desk is out: Desk {state.version}.</span>
+        {state.download && (
+          <button type="button" className="btn btn-signal" onClick={() => openUrl(state.download!)}>
+            Download
+          </button>
+        )}
+      </div>
+    );
   if (state.phase !== "ready" && state.phase !== "installing") return null;
   const installing = state.phase === "installing";
   return (

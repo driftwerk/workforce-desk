@@ -5,6 +5,9 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+/* Room for macOS's title bar, which overlays the content. */
+:root[data-platform="macos"] .grids {
   padding-top: 28px;
 }
 .grids-none,
@@ -550,11 +553,15 @@ body.gsplitting-h * {
   align-items: center;
   gap: 10px;
   height: 40px;
-  padding: 0 10px 0 84px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex: none;
   user-select: none;
+}
+/* Room for macOS's traffic lights, drawn over the head. */
+:root[data-platform="macos"] .gwin-head {
+  padding-left: 84px;
 }
 .gwin-title {
   margin: 0;

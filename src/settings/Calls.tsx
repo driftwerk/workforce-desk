@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { onTupleStatus, subscribe, type TupleStatus } from "../platform";
+import { onTupleStatus, subscribe, tupleAvailable, type TupleStatus } from "../platform";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VOICE_ENGINES, voiceEngine } from "../voice/engines";
 import { useSettings } from "./store";
@@ -8,7 +8,11 @@ export function Calls() {
   const { tuple, voice, voiceEngine: engineId, keys, set } = useSettings();
   const engine = voiceEngine(engineId);
   const [status, setStatus] = useState<TupleStatus>({ state: "off" });
+  const [hasTuple, setHasTuple] = useState(false);
   useEffect(() => subscribe(onTupleStatus(setStatus)), []);
+  useEffect(() => {
+    void tupleAvailable().then(setHasTuple, () => setHasTuple(false));
+  }, []);
   return (
     <section className="settings-pane" aria-label="Calls">
       <h1 className="display-lg">Calls and voice</h1>
@@ -33,17 +37,19 @@ export function Calls() {
           </div>
         </div>
       )}
-      <label className="toggle-row">
-        <input type="checkbox" checked={tuple} onChange={(e) => set({ tuple: e.target.checked })} />
-        <span>
-          <b>Ask agents from Tuple calls</b>
-          <span className="muted small">
-            Say an agent’s name on a call (“Atlas, what failed overnight?”) or type to it in Tuple’s chat. Only your own
-            requests count; what others say is passed on as context. Answers appear over the call.
+      {hasTuple && (
+        <label className="toggle-row">
+          <input type="checkbox" checked={tuple} onChange={(e) => set({ tuple: e.target.checked })} />
+          <span>
+            <b>Ask agents from Tuple calls</b>
+            <span className="muted small">
+              Say an agent’s name on a call (“Atlas, what failed overnight?”) or type to it in Tuple’s chat. Only your own
+              requests count; what others say is passed on as context. Answers appear over the call.
+            </span>
           </span>
-        </span>
-      </label>
-      {tuple && (
+        </label>
+      )}
+      {hasTuple && tuple && (
         <p className="small">
           {status.state === "following" && <span className="state-done">Following your calls</span>}
           {status.state === "unavailable" && <span className="state-blocked">Tuple isn’t reachable: {status.reason}</span>}

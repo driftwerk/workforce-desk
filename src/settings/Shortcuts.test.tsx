@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
+import { defaultShortcuts } from "../shortcuts/keys";
 import { useShortcuts } from "../shortcuts/manager";
 import { Calls } from "./Calls";
 import { Shortcuts } from "./Shortcuts";
@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
 
 beforeEach(() => {
-  useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS, loaded: false });
+  useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), loaded: false });
   useShortcuts.setState({ status: { pushToTalk: { state: "off" }, ask: { state: "off" } }, recording: false });
 });
 
@@ -56,7 +56,7 @@ describe("Keyboard shortcuts", () => {
     keys({ code: "KeyC", metaKey: true });
     expect(screen.getByRole("alert").textContent).toBe("⌘C is Copy — choose another");
     keys({ code: "KeyJ", metaKey: true });
-    expect(keysOf().newSession).toBe("Super+J");
+    expect(keysOf().newSession).toBe("Primary+J");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -89,7 +89,7 @@ describe("Keyboard shortcuts", () => {
     fireEvent.click(recorder("Save a file"));
     keys({ code: "KeyN", metaKey: true });
     expect(screen.getByRole("alert").textContent).toBe("⌘N is already New session — choose another");
-    expect(keysOf().saveFile).toBe("Super+S");
+    expect(keysOf().saveFile).toBe("Primary+S");
   });
 
   it("lets you choose ⌥Space, saying launchers often take it", () => {

@@ -145,8 +145,12 @@ jobs:
         run: |
           triple=$(rustc -vV | sed -n 's/^host: //p')
           ext=$([ "$RUNNER_OS" = Windows ] && echo .exe || true)
+          case "$RUNNER_OS" in
+            Linux) names=(desk-helper desk-agents desk-memory) ;;
+            *) names=("Desk Helper" "Desk Agents" "Desk Memory") ;;
+          esac
           mkdir -p binaries
-          for name in "Desk Helper" "Desk Agents" "Desk Memory"; do
+          for name in "${names[@]}"; do
             touch "binaries/$name-$triple$ext"
             chmod +x "binaries/$name-$triple$ext"
           done

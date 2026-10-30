@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { inApp } from "../platform";
 import { useSettings } from "../settings/store";
-import { matches, shortcutLabel, SHORTCUTS, type GlobalShortcutId, type ShortcutId } from "./keys";
+import { matches, pluginKeys, shortcutLabel, SHORTCUTS, type GlobalShortcutId, type ShortcutId } from "./keys";
 
 export type ShortcutStatus = { state: "off" } | { state: "ready" } | { state: "taken"; message: string };
 
@@ -22,7 +22,7 @@ export const useShortcuts = create<ShortcutStore>(() => ({
 const setStatus = (id: GlobalShortcutId, s: ShortcutStatus) =>
   useShortcuts.setState((store) => ({ status: { ...store.status, [id]: s } }));
 
-/** What the person reads when macOS or another app has the keys: which
+/** What the person reads when the system or another app has the keys: which
  *  shortcut it is, and the keys it couldn't get. */
 export const takenMessage = (id: GlobalShortcutId, accel: string): string => {
   const name = SHORTCUTS.find((s) => s.id === id)?.name ?? "A shortcut";
@@ -49,7 +49,7 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
     let held = false;
     void enqueue(async () => {
       try {
-        await register(wanted, (e) => handler.current(e));
+        await register(pluginKeys(wanted), (e) => handler.current(e));
         held = true;
         setStatus(id, { state: "ready" });
       } catch (e) {
@@ -59,7 +59,7 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
     });
     return () =>
       void enqueue(async () => {
-        if (held) await unregister(wanted).catch((e) => console.warn(`global shortcut ${wanted}: ${String(e)}`));
+        if (held) await unregister(pluginKeys(wanted)).catch((e) => console.warn(`global shortcut ${wanted}: ${String(e)}`));
         setStatus(id, { state: "off" });
       });
   }, [id, wanted]);

@@ -1,0 +1,24 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": [
+      "appimage",
+      "deb"
+    ],
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/desk-helper",
+      "binaries/desk-agents",
+      "binaries/desk-memory"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libasound2t64 | libasound2",
+          "procps",
+          "curl"
+        ]
+      }
+    }
+  }
+}

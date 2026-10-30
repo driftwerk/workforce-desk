@@ -34,6 +34,7 @@ import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
 import { dragWindow } from "../ui/drag";
+import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
 
@@ -55,6 +56,7 @@ export function App() {
   }, [rooms, hubs]);
   useHubLinks();
   const settings = useUi((u) => u.settings !== null);
+  const platform = useHost((h) => h.platform);
   const { openSettings, closeSettings } = useUi.getState();
   const setHubs = useChat((s) => s.setHubs);
   const loadSettings = useSettings((s) => s.load);
@@ -198,9 +200,10 @@ export function App() {
   }
   return (
     <div className="app">
-      {/* The window has no title bar (traffic lights overlay the content), so
-          this strip is what moves it. */}
-      <div className="titlebar" onMouseDown={dragWindow} />
+      {/* On macOS the window has no title bar (traffic lights overlay the
+          content), so this strip is what moves it; elsewhere the system's
+          title bar does. */}
+      {platform === "macos" && <div className="titlebar" onMouseDown={dragWindow} />}
       {settings ? (
         <ErrorBoundary name="settings">
           <Settings onClose={closeSettings} />

@@ -20,8 +20,6 @@ mod config;
 #[cfg(unix)]
 mod holder;
 #[cfg(unix)]
-mod install;
-#[cfg(unix)]
 mod memory;
 #[cfg(unix)]
 mod model;

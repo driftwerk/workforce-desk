@@ -3,13 +3,15 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
 import type { DeskEvent, Session } from "../hub/types";
 import { deskListeners, useDesk } from "../hub/store";
-import { resumeLater, takeResume } from "../platform";
+import { resumeLater, takeResume, updating } from "../platform";
 
 /** How often Desk looks for a new version while it runs. */
 export const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 
 export type UpdatePhase =
   | { phase: "idle" }
+  /** Out, for an install its package manager updates: downloaded by hand. */
+  | { phase: "available"; version: string; download: string | null }
   | { phase: "downloading"; version: string }
   | { phase: "ready"; version: string }
   | { phase: "installing"; version: string };
@@ -38,6 +40,11 @@ export const useUpdates = create<Updates>((set, get) => ({
     if (get().state.phase !== "idle") return;
     const update = await check();
     if (!update) return;
+    const how = await updating();
+    if (!how.byItself) {
+      set({ state: { phase: "available", version: update.version, download: how.download } });
+      return;
+    }
     set({ update, state: { phase: "downloading", version: update.version } });
     try {
       await update.download();

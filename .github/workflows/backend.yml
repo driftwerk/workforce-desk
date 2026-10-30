@@ -1,0 +1,94 @@
+name: Linux backend
+
+# The backend Desk runs on Linux and inside WSL — Desk Helper, the hub at
+# hub.ref and the memory store at vellev.ref — built in debug and run end to
+# end by scripts/backend-smoke.sh. On changes to what it is built from, and
+# nightly for what hub.ref and vellev.ref bring.
+
+on:
+  pull_request:
+    paths:
+      - crates/desk-hubd/**
+      - crates/desk-core/**
+      - hub.ref
+      - vellev.ref
+      - scripts/**
+      - .github/workflows/backend.yml
+  push:
+    branches: [main]
+    paths:
+      - crates/desk-hubd/**
+      - crates/desk-core/**
+      - hub.ref
+      - vellev.ref
+      - scripts/**
+      - .github/workflows/backend.yml
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-linux:
+    name: Linux backend smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      # The embedded-Postgres build script calls the GitHub API.
+      GITHUB_TOKEN: ${{ github.token }}
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          path: desk
+          persist-credentials: false
+      - name: Read the hub and vellev refs
+        id: refs
+        run: |
+          echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+          echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.refs.outputs.hub }}
+          path: workforce-public-desk
+          persist-credentials: false
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: driftwerk/vellev
+          ref: ${{ steps.refs.outputs.vellev }}
+          path: vellev
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: |
+            desk -> target
+            workforce-public-desk -> target
+            vellev -> target
+          key: hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build Desk Helper
+        working-directory: desk
+        run: cargo build --locked -p desk-hubd
+      - name: Build the hub
+        working-directory: workforce-public-desk
+        run: cargo build --locked -p workforce-cli --bin workforce
+      - name: Build the memory store
+        working-directory: vellev
+        run: cargo build --locked -p vellev
+      - name: Smoke test
+        run: |
+          bin="$RUNNER_TEMP/backend"
+          mkdir -p "$bin"
+          cp desk/target/debug/desk-hubd "$bin/desk-helper"
+          cp workforce-public-desk/target/debug/workforce "$bin/desk-agents"
+          cp vellev/target/debug/vellev "$bin/desk-memory"
+          desk/scripts/backend-smoke.sh "$bin"

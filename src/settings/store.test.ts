@@ -24,7 +24,7 @@ describe("settings", () => {
     vi.mocked(loadSettings).mockResolvedValue(older);
     await useSettings.getState().load();
     expect(useSettings.getState()).toMatchObject({ voice: true, shortcuts: {} });
-    expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Shift+Space", ask: "Control+Shift+K", settings: "Super+Comma" });
+    expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Shift+Space", ask: "Control+Shift+K", settings: "Primary+Comma" });
   });
 
   it("a shortcut macOS keeps, or Desk can't read, loads as the default", async () => {
@@ -41,9 +41,9 @@ describe("settings", () => {
     useSettings.getState().setShortcut("ask", "Control+Shift+K");
     useSettings.getState().setShortcut("newSession", "Super+J");
     expect(saveSettings).toHaveBeenLastCalledWith(
-      expect.objectContaining({ voice: true, shortcuts: { pushToTalk: "Control+Alt+K", newSession: "Super+J" } }),
+      expect.objectContaining({ voice: true, shortcuts: { pushToTalk: "Control+Alt+K", newSession: "Primary+J" } }),
     );
-    expect(useSettings.getState().keys).toMatchObject({ ask: "Control+Shift+K", newSession: "Super+J" });
+    expect(useSettings.getState().keys).toMatchObject({ ask: "Control+Shift+K", newSession: "Primary+J" });
   });
 });
 

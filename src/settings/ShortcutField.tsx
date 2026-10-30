@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   clash,
-  DEFAULT_SHORTCUTS,
+  defaultShortcuts,
   isGlobal,
   pressed,
   refusal,
@@ -21,6 +21,7 @@ export function ShortcutField({ id }: { id: ShortcutId }) {
   const spec = SHORTCUTS.find((s) => s.id === id)!;
   const keys = useSettings((s) => s.keys);
   const value = keys[id];
+  const fallback = defaultShortcuts()[id];
   const setShortcut = useSettings((s) => s.setShortcut);
   const status = useShortcuts((s) => (isGlobal(id) ? s.status[id] : null));
   const [recording, setRecording] = useState(false);
@@ -87,9 +88,9 @@ export function ShortcutField({ id }: { id: ShortcutId }) {
           caution && <span className="state-working">{caution}</span>
         )}
       </span>
-      {!recording && value !== DEFAULT_SHORTCUTS[id] && (
-        <button type="button" className="link small" onClick={() => take(DEFAULT_SHORTCUTS[id])}>
-          Reset to {shortcutLabel(DEFAULT_SHORTCUTS[id])}
+      {!recording && value !== fallback && (
+        <button type="button" className="link small" onClick={() => take(fallback)}>
+          Reset to {shortcutLabel(fallback)}
         </button>
       )}
       <button

@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use desk_core::Paths;
 use desk_core::backend::Backend;
 use desk_core::host::Host;
+use helper::Login;
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
@@ -60,7 +61,7 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
                 });
             }
             // Say at once when Desk Helper can't start, rather than wait.
-            if let Some(why) = helper::status().blocked() {
+            if let Some(why) = helper::login(&backend).status().blocked() {
                 return Err(why);
             }
             if Instant::now() > deadline {
@@ -127,6 +128,7 @@ fn themes_write(app: State<'_, App>, id: String, source: String) -> CommandResul
     files::write_theme(&app.paths.themes(), &id, &source).map_err(text)
 }
 
+/// Opens the themes folder in the system's file manager.
 #[tauri::command]
 fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<()> {
     use tauri_plugin_opener::OpenerExt;
@@ -183,9 +185,16 @@ fn tuple_disable(tuple: State<'_, tuple::Tuple>) {
 
 #[tauri::command]
 async fn tuple_reply(agent: String, answer: String) -> CommandResult<()> {
-    desk_tuple::notify(&tuple::binary(), &agent, &answer)
+    let tuple = desk_tuple::binary().ok_or("Tuple isn't installed on this computer")?;
+    desk_tuple::notify(&tuple, &agent, &answer)
         .await
         .map_err(text)
+}
+
+/// Whether this computer has Tuple: Settings offers it only then.
+#[tauri::command]
+fn tuple_available() -> bool {
+    desk_tuple::binary().is_some()
 }
 
 #[tauri::command]
@@ -215,18 +224,24 @@ fn login_cancel(logins: State<'_, logins::Logins>, plan: logins::Plan) {
 /// Where Desk Helper stands, as Settings → Help shows it. Registers it
 /// again first if it was found unregistered (the person may have removed it).
 #[tauri::command]
-fn helper_status(app: State<'_, App>) -> helper::Status {
-    let mut status = helper::status();
-    if status == helper::Status::NotRegistered {
-        status = helper::ensure(&app.paths);
-    }
+async fn helper_status(app: State<'_, App>) -> CommandResult<helper::Status> {
+    let backend = app.backend.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        let login = helper::login(&backend);
+        match login.status() {
+            helper::Status::NotRegistered => login.ensure(),
+            status => status,
+        }
+    })
+    .await
+    .map_err(text)?;
     *app.helper.lock().expect("helper") = status.clone();
-    status
+    Ok(status)
 }
 
 #[tauri::command]
-fn helper_open_login_items() {
-    helper::open_login_items();
+fn helper_open_login_items(app: State<'_, App>) {
+    helper::login(&app.backend).open_settings();
 }
 
 /// Off the main thread: finding the CLI reads the login shell's PATH.
@@ -252,7 +267,7 @@ async fn report_save(app: State<'_, App>, path: PathBuf, about: String) -> Comma
     let (paths, backend) = (app.paths.clone(), app.backend.clone());
     let helper = format!("{:?}", *app.helper.lock().expect("helper"));
     tauri::async_runtime::spawn_blocking(move || {
-        let about = format!("{about}\nmacOS {}\nDesk Helper: {helper}\n", os_version());
+        let about = format!("{about}\n{}\nDesk Helper: {helper}\n", os_version());
         let known = support::known_secrets(&paths, &backend);
         support::write_report(&paths, &backend.paths, &known, &about, &path)
     })
@@ -261,12 +276,15 @@ async fn report_save(app: State<'_, App>, path: PathBuf, about: String) -> Comma
     .map_err(text)
 }
 
+/// The system and its version, as a report says it ("macOS 15.1").
 fn os_version() -> String {
-    std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+    let system = match tauri_plugin_os::platform() {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    };
+    format!("{system} {}", tauri_plugin_os::version())
 }
 
 /// Stops Desk Helper and takes it out of what starts at login; with
@@ -438,6 +456,21 @@ async fn programs_under(pid: u32) -> CommandResult<Vec<String>> {
         .map_err(text)
 }
 
+/// How this install of Desk gets a new version.
+#[tauri::command]
+fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<updates::Updating> {
+    let exe = std::env::current_exe().map_err(text)?;
+    let env = std::env::vars().collect();
+    let install = desk_core::install::Install::of(&exe, &env, &app.backend.paths);
+    let endpoint = handle
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u["endpoints"][0].as_str().map(str::to_string));
+    Ok(updates::updating(&install, endpoint.as_deref()))
+}
+
 #[tauri::command]
 fn resume_later(app: State<'_, App>, ids: Vec<String>) -> CommandResult<()> {
     updates::resume_later(&app.paths, &ids).map_err(text)
@@ -482,12 +515,18 @@ pub fn run() {
     // A workspace build can give reqwest rustls without a crypto provider
     // (postgresql_embedded asks for that); every client shares this one.
     let _ = rustls::crypto::ring::default_provider().install_default();
+    // `Desk.AppImage --helper`: what the AppImage's login service runs.
+    #[cfg(target_os = "linux")]
+    if std::env::args().any(|a| a == "--helper") {
+        std::process::exit(helper::run_bundled());
+    }
     if let Ok(paths) = Paths::new() {
         init_logging(&paths);
-        // `Desk --unregister-helper`: takes Desk Helper out of Login Items
-        // and stops it, for uninstall scripts and for testing a build.
+        // `Desk --unregister-helper`: takes Desk Helper out of what starts
+        // at login and stops it, for uninstall scripts and for testing a
+        // build.
         if std::env::args().any(|a| a == "--unregister-helper") {
-            let code = match helper::unregister(&paths) {
+            let code = match helper::login(&Backend::native(paths.clone())).unregister() {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("Couldn't remove Desk Helper: {e}");
@@ -526,12 +565,12 @@ pub fn run() {
                 .expect("frames")
                 .insert("main".into(), main);
             app.manage(store);
-            // The installed app makes Desk Helper its login item; a
+            // The installed app makes Desk Helper start at login; a
             // development run talks to a supervisor started by hand.
-            let helper = helper::ensure(&paths);
+            let backend = Backend::native(paths.clone());
+            let helper = helper::login(&backend).ensure();
             tracing::info!(?helper, version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
-            let backend = Backend::native(paths.clone());
             app.manage(voice::Voice::new(&paths, backend.clone()));
             app.manage(attachments::Files::new(paths.clone(), backend.clone()));
             app.manage(App {
@@ -557,6 +596,7 @@ pub fn run() {
             tuple_enable,
             tuple_disable,
             tuple_reply,
+            tuple_available,
             login_start,
             login_code,
             login_cancel,
@@ -566,6 +606,7 @@ pub fn run() {
             cli_install,
             report_save,
             data_remove,
+            updating,
             resume_later,
             resume_take,
             desk_state_load,

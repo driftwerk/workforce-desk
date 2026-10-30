@@ -8,7 +8,7 @@ import { useDesk } from "../hub/store";
 import type { Room } from "../hub/types";
 import { useRoomOrder } from "../rooms/order";
 import { useSettings } from "../settings/store";
-import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
+import { defaultShortcuts } from "../shortcuts/keys";
 import { Sidebar, scrollEdges } from "./Sidebar";
 import { useUi } from "./ui";
 import { servePictures } from "../pictures/testing";
@@ -29,7 +29,7 @@ const memory = (): GridStorage =>
 beforeEach(() => {
   kept.clear();
   useRoomOrder.setState({ order: [] });
-  useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS, groups: [], sessionNames: {} });
+  useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
   useDesk.setState({ view: "floor", rooms: {}, sessions: {} });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });

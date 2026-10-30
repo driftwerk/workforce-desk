@@ -11,6 +11,7 @@ use desk_core::host::Host;
 use desk_core::{Paths, device_token_account, read_ports};
 use eyre::{Context, Result};
 
+use crate::helper::Login;
 use crate::hubs::app_secrets;
 
 /// The logs a report carries, newest part of each: the app's own, and the
@@ -178,7 +179,7 @@ fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
 /// terminals) and deletes the backend's folder and secrets, then the app's.
 /// Nothing is deleted while the helper is still running.
 pub fn remove(paths: &Paths, backend: &Backend, everything: bool) -> Result<()> {
-    crate::helper::unregister(paths)?;
+    crate::helper::login(backend).unregister()?;
     if !everything {
         return Ok(());
     }

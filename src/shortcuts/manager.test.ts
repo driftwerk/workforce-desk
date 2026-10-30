@@ -2,7 +2,7 @@ import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
-import { DEFAULT_SHORTCUTS } from "./keys";
+import { defaultShortcuts } from "./keys";
 import { settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -75,7 +75,7 @@ describe("shortcuts in Desk", () => {
   const press = (init: KeyboardEventInit) => act(() => void window.dispatchEvent(new KeyboardEvent("keydown", init)));
 
   it("run on the configured keys only, and not while one is being recorded", () => {
-    useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS });
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts() });
     const onPress = vi.fn();
     renderHook(() => useAppShortcut("newSession", onPress));
     press({ code: "KeyN", key: "n", metaKey: true });

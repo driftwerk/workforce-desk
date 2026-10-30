@@ -1,10 +1,11 @@
-//! How this Desk Helper was installed, which says what an update replaces
-//! under it, so it can stop and let the new one start.
+//! How Desk was installed: which says what an update replaces under Desk
+//! Helper (so it stops and lets the new one start), how the system starts
+//! the helper at login, and whether the app updates itself.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use desk_core::Paths;
+use crate::Paths;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Install {

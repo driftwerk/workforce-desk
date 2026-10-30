@@ -85,11 +85,13 @@ export function Help() {
         <span className="card-text">
           <b>Desk {version}</b>
           <span>
-            {update.phase === "downloading"
-              ? `Downloading Desk ${update.version}…`
-              : update.phase === "ready"
-                ? `Desk ${update.version} is ready — restart to update.`
-                : (checked ?? "Desk updates itself.")}
+            {update.phase === "available"
+              ? `Desk ${update.version} is out. Your package manager installs it, or download it from the releases page.`
+              : update.phase === "downloading"
+                ? `Downloading Desk ${update.version}…`
+                : update.phase === "ready"
+                  ? `Desk ${update.version} is ready — restart to update.`
+                  : (checked ?? "Desk updates itself.")}
           </span>
         </span>
         <button type="button" className="btn" disabled={!inApp || update.phase !== "idle"} onClick={() => void checkNow()}>
@@ -108,6 +110,18 @@ export function Help() {
           </button>
         )}
       </div>
+
+      {platform === "linux" && (
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Grid windows on Wayland</b>
+            <span>
+              A grid in a window of its own opens on its monitor, but on Wayland the desktop decides where on it, so it may not be
+              where you left it.
+            </span>
+          </span>
+        </div>
+      )}
 
       <div className="setting-card">
         <span className="card-text">

@@ -4,7 +4,7 @@ import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { SessionCard } from "../session/SessionCard";
 import { useSettings } from "../settings/store";
-import { choose, DEFAULT_SHORTCUTS, resolve, SHORTCUTS } from "../shortcuts/keys";
+import { choose, defaultShortcuts, resolve, SHORTCUTS } from "../shortcuts/keys";
 import type { PaneContent } from "./engine";
 import { GridCanvas, useFillKeys } from "./GridView";
 import { gridKey, MAIN_GRID } from "./model";
@@ -55,7 +55,7 @@ beforeEach(() => {
   for (let i = 0; i < 4; i++) sessions[`s${i}`] = session(`s${i}`, `task-${i}`);
   useDesk.setState({ sessions, hub: { closeTerminal: vi.fn() } as never, openId: null, view: "floor" });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
-  useSettings.setState({ keys: DEFAULT_SHORTCUTS });
+  useSettings.setState({ keys: defaultShortcuts() });
 });
 afterEach(cleanup);
 
@@ -150,9 +150,9 @@ describe("filling the grid", () => {
   });
 
   it("has its shortcut in Settings → Shortcuts, which can be changed", () => {
-    expect(SHORTCUTS.find((s) => s.id === "fillPane")).toMatchObject({ name: "Fill the grid", keys: "Shift+Super+Enter", scope: "app" });
+    expect(SHORTCUTS.find((s) => s.id === "fillPane")).toMatchObject({ name: "Fill the grid", keys: "Shift+Primary+Enter", scope: "app" });
     const chosen = choose({}, "fillPane", "Control+Super+F12");
-    expect(resolve(chosen).keys.fillPane).toBe("Control+Super+F12");
+    expect(resolve(chosen).keys.fillPane).toBe("Primary+Control+F12");
     useSettings.setState({ keys: resolve(chosen).keys });
     four();
     render(<Grid />);
