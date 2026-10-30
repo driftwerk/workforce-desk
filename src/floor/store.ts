@@ -26,10 +26,12 @@ export interface HubFloor {
 }
 
 /** A need answered elsewhere before Desk's answer reached the hub: gone
- *  from the floor, said once until the hub is read again. */
+ *  from the floor, said once until the hub is read again by a read begun
+ *  after `read`, the last one begun when Desk heard. */
 export interface Answered {
   hubId: string;
   need: Need;
+  read: number;
 }
 
 interface FloorStore {
@@ -56,6 +58,8 @@ const sameAccount = (a: HubAccount | undefined, b: HubAccount | undefined): bool
 
 const running = new Map<string, Promise<void>>();
 const again = new Set<string>();
+/** How many reads of each hub's floor have begun. */
+const begun = new Map<string, number>();
 
 const without = <V>(record: Record<string, V>, drop: (key: string, v: V) => boolean): Record<string, V> =>
   Object.fromEntries(Object.entries(record).filter(([k, v]) => !drop(k, v)));
@@ -69,6 +73,8 @@ export const useFloor = create<FloorStore>((set) => {
     const hub = accountOf(hubId);
     if (!hub) return;
     const day = startOfLocalDay();
+    const nth = (begun.get(hubId) ?? 0) + 1;
+    begun.set(hubId, nth);
     const api = floorOf(hub);
     const [floor, usage] = await Promise.allSettled([api.floor(day).then((view) => ({ view, receivedAt: Date.now() })), api.usage()]);
     if (!sameAccount(accountOf(hubId), hub)) return;
@@ -84,7 +90,7 @@ export const useFloor = create<FloorStore>((set) => {
         ...s.hubs,
         [hubId]: {
           state: "ready",
-          floor: view,
+          floor: { ...view, needs: view.needs.filter((n) => !((s.answered[`${hubId}/${n.id}`]?.read ?? 0) >= nth)) },
           usage: usage.status === "fulfilled" ? usage.value : missing(usage.reason) ? null : (s.hubs[hubId]?.usage ?? null),
           offset: Date.parse(view.asOf) - receivedAt,
           stale: false,
@@ -93,7 +99,7 @@ export const useFloor = create<FloorStore>((set) => {
       },
       deciding: without(s.deciding, (k) => ofHub(hubId)(k) && !listed.has(k)),
       problems: without(s.problems, (k) => ofHub(hubId)(k) && !listed.has(k)),
-      answered: without(s.answered, ofHub(hubId)),
+      answered: without(s.answered, (k, a) => ofHub(hubId)(k) && a.read < nth),
     }));
   };
 
@@ -130,19 +136,8 @@ export const useFloor = create<FloorStore>((set) => {
       } catch (e) {
         set((s) => ({ deciding: without(s.deciding, (k) => k === key) }));
         if (e instanceof HubError && e.status === 409) {
-          put(hubId, (was) =>
-            was.floor
-              ? {
-                  ...was,
-                  floor: {
-                    ...was.floor,
-                    needs: was.floor.needs.filter((n) => n.id !== need.id),
-                    counts: { ...was.floor.counts, needsYou: Math.max(0, was.floor.counts.needsYou - 1) },
-                  },
-                }
-              : was,
-          );
-          set((s) => ({ answered: { ...s.answered, [key]: { hubId, need } } }));
+          put(hubId, (was) => (was.floor ? { ...was, floor: { ...was.floor, needs: was.floor.needs.filter((n) => n.id !== need.id) } } : was));
+          set((s) => ({ answered: { ...s.answered, [key]: { hubId, need, read: begun.get(hubId) ?? 0 } } }));
         } else set((s) => ({ problems: { ...s.problems, [key]: plainError(e) } }));
       }
     },

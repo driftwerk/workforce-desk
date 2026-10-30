@@ -22,6 +22,7 @@ export interface Merged {
   /** Latest ended first. */
   done: FloorWork[];
   lanes: FloorLane[];
+  /** The hubs' own, but for what needs you: how many `needs` there are. */
   counts: Counts;
   more: { done: number; lanes: number };
 }
@@ -59,16 +60,13 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
       working: [...m.working, ...view.working.map((w) => ({ ...work(w, f.offset), ...tag, key: `${whoKey(hub.id, w)}@${w.since}` }))],
       done: [...m.done, ...view.done.map((w) => ({ ...work(w, f.offset), ...tag, key: `${whoKey(hub.id, w)}@${w.since}` }))],
       lanes: [...m.lanes, ...view.lanes.map((l) => ({ ...l, spans: l.spans.map((s) => span(s, f.offset)), ...tag, key: whoKey(hub.id, l) }))],
-      counts: {
-        working: m.counts.working + view.counts.working,
-        needsYou: m.counts.needsYou + view.counts.needsYou,
-        doneToday: m.counts.doneToday + view.counts.doneToday,
-      },
+      counts: { ...m.counts, working: m.counts.working + view.counts.working, doneToday: m.counts.doneToday + view.counts.doneToday },
       more: { done: m.more.done + view.more.done, lanes: m.more.lanes + view.more.lanes },
     };
   }, ZERO);
   return {
     ...all,
+    counts: { ...all.counts, needsYou: all.needs.length },
     needs: all.needs.sort((a, b) => a.since.localeCompare(b.since)),
     working: all.working.sort((a, b) => b.since.localeCompare(a.since)),
     done: all.done.sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? "")),

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { localIso } from "../hub/floor";
+import { merged } from "./merge";
 import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, watchFloor } from "./store";
 import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
 import { renderHook } from "@testing-library/react";
@@ -172,9 +173,35 @@ describe("the floor's store", () => {
     hubs.local!.decide = () => 409;
     await useFloor.getState().decide("local", floorOf("local")!.floor!.needs[0]!, "allow");
     expect(floorOf("local")?.floor?.needs).toEqual([]);
-    expect(floorOf("local")?.floor?.counts.needsYou).toBe(0);
+    expect(merged(useFloor.getState().hubs, useChat.getState().hubs).counts.needsYou).toBe(0);
     expect(Object.keys(useFloor.getState().answered)).toEqual(["local/ap-1"]);
     expect(useFloor.getState().deciding).toEqual({});
+  });
+
+  it("doesn't bring back a need answered elsewhere from a read begun before it heard", async () => {
+    useChat.setState({ hubs: [hub("local")] });
+    await settle();
+    const n = floorOf("local")!.floor!.needs[0]!;
+    const plain = fakeFetch(hubs);
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const res = await plain(input, init);
+        if (new URL(input).pathname === "/api/desk/floor") await held;
+        return res;
+      }),
+    );
+    const before = useFloor.getState().load("local");
+    hubs.local!.decide = () => 409;
+    await useFloor.getState().decide("local", n, "allow");
+    release();
+    await before;
+    expect(floorOf("local")?.floor?.needs).toEqual([]);
+    expect(Object.keys(useFloor.getState().answered)).toEqual(["local/ap-1"]);
+    await useFloor.getState().load("local");
+    expect(useFloor.getState().answered).toEqual({});
   });
 
   it("says plainly why an answer didn't go through, and keeps the need", async () => {
