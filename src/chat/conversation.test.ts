@@ -168,6 +168,13 @@ describe("a Desk connection's turns", () => {
     expect(ended.working).toBeNull();
   });
 
+  it("knows the message its answer will be from the first frame that names it, and a turn that saved nothing", () => {
+    expect(run([declared, stamp("typing")]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("tool_start", { content: "bash" })]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("typing"), stamp("tool_end", { id: undefined })]).turns.t1!.replyId).toBe("r1");
+    expect(run([declared, stamp("typing"), stamp("turn_end", { id: undefined })]).turns.t1!.replyId).toBeNull();
+  });
+
   it("says what a turn waits on: thinking for so long, a tool, a rate limit counting down, a model switch", () => {
     const thinking = run([declared, stamp("typing")]).turns.t1!.working!;
     expect(statusOf(thinking, thinking.at + 1_000)).toBe("Thinking");

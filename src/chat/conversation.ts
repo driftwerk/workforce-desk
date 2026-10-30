@@ -271,7 +271,6 @@ const newTurn = (ref: string, now: number): Turn => ({
 /** One frame of turn `ref` folded into its draft. */
 const foldTurn = (turns: Record<string, Turn>, ref: string, msg: ServerMessage, now: number): Record<string, Turn> => {
   const t = turns[ref] ?? newTurn(ref, now);
-  const replyId = msg.id ?? t.replyId;
   const step = doing(msg);
   const working = step ? moved(t.working, step, now) : t.working;
   const next = ((): Turn => {
@@ -283,28 +282,30 @@ const foldTurn = (turns: Record<string, Turn>, ref: string, msg: ServerMessage, 
         return { ...t, working, tools: t.tools.map((x, j) => (j === i ? { ...x, done: true } : x)) };
       }
       case "stream_start":
-        return { ...t, working, replyId };
+        return { ...t, working };
       case "stream_delta":
         return { ...t, text: t.text + (msg.content ?? "") };
       case "stream_discard":
         return { ...t, text: "", working: moved(t.working, doing({ type: "typing" })!, now) };
       case "stream_end":
-        return { ...t, replyId, working: null };
+        return { ...t, working: null };
       case "message":
-        return { ...t, replyId, text: msg.content ?? t.text, working: null };
+        return { ...t, text: msg.content ?? t.text, working: null };
       case "image":
-        return { ...t, replyId, attachments: withFiles(t.attachments, framed(msg)) };
+        return { ...t, attachments: withFiles(t.attachments, framed(msg)) };
       case "turn_snapshot":
-        return { ...t, replyId, text: msg.text ?? "", working: snapshotWorking(msg, now), state: "live" };
+        return { ...t, text: msg.text ?? "", working: snapshotWorking(msg, now), state: "live" };
       case "turn_end":
-        return { ...t, replyId: msg.id ?? null, working: null, state: "ended" };
+        return { ...t, working: null, state: "ended" };
       case "error":
         return { ...t, working: null, state: "failed", error: msg.error ?? msg.content ?? "Something went wrong" };
       default:
         return step ? { ...t, working } : t;
     }
   })();
-  return { ...turns, [ref]: { ...next, acked: true } };
+  // A turn's end says what it saved, null for nothing; every other frame
+  // may name the message its answer is.
+  return { ...turns, [ref]: { ...next, replyId: msg.type === "turn_end" ? (msg.id ?? null) : (msg.id ?? t.replyId), acked: true } };
 };
 
 const step = (s: ConversationState, msg: ServerMessage, now: number): Working | null => {
