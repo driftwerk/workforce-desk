@@ -3,6 +3,7 @@ import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { PutInGrid } from "../grids/PutInGrid";
 import { reveal } from "../grids/windows";
 import { useDesk } from "../hub/store";
+import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
 import { Mark } from "../ui/Mark";
 import { DirectMessage } from "./Rooms";
@@ -11,6 +12,14 @@ import { DirectMessage } from "./Rooms";
 const openInRooms = (key: string): void => {
   void useDesk.getState().openRoom(null);
   useChat.getState().openDm(key);
+};
+
+/** Opens agent `key`'s Settings, in Rooms. */
+export const openAgentSettings = (key: string): void => {
+  const chat = useChat.getState();
+  if (chat.panelAgent === key) chat.setPanelAgent(null);
+  useUi.getState().setAgentTab(key, "settings");
+  openInRooms(key);
 };
 
 /** Opens your DM with agent `key`: where it shows in a grid, if it does;
@@ -51,6 +60,9 @@ export function AgentPanel({ agent }: { agent: Agent }) {
       }
       actions={
         <>
+          <button type="button" className="link" onClick={() => openAgentSettings(key)}>
+            Settings
+          </button>
           <button
             type="button"
             className="link"

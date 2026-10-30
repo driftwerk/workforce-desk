@@ -5,7 +5,7 @@ import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { useGrids } from "../grids/store";
 import { addToGrid as placeInGrid, reveal } from "../grids/windows";
-import { openAgent } from "../rooms/AgentPanel";
+import { openAgent, openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
@@ -228,6 +228,7 @@ export function SidebarGroups() {
         : []),
       { kind: "separator" },
       { kind: "item", label: "Open", onSelect: () => openItem(item) },
+      ...(item.kind === "agent" ? [{ kind: "item" as const, label: "Settings", onSelect: () => openAgentSettings(agentKey(item.agent)) }] : []),
     ];
   };
 

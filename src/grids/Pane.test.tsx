@@ -4,6 +4,8 @@ import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import type { PaneContent } from "./engine";
+import { useChat } from "../chat/store";
+import { useUi } from "../shell/ui";
 import { GridCanvas, LayoutUndo } from "./GridView";
 import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
@@ -217,5 +219,23 @@ describe("a session renamed in Desk", () => {
     const tray = screen.getByRole("region", { name: "Parked (1)" });
     expect(within(tray).getByRole("button", { name: "date picker" })).toBeTruthy();
     expect(within(tray).getByRole("button", { name: "Remove date picker from grid" })).toBeTruthy();
+  });
+});
+
+describe("an agent's pane", () => {
+  it("opens the agent's Settings from its options", () => {
+    vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
+    useChat.setState({
+      roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false }],
+      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      activeAgent: null,
+    });
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+    canvas();
+    const pane = screen.getByRole("region", { name: "Scout" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Agent settings" }));
+    expect(useChat.getState().activeAgent).toBe("local/scout");
+    expect(useUi.getState().agentTabs["local/scout"]).toBe("settings");
   });
 });

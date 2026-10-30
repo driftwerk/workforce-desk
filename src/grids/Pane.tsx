@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
@@ -482,9 +483,11 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): MenuE
         ]
       : []),
   ];
+  const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     { kind: "separator" },
     { kind: "item", label: removeLabel(pane), onSelect: onClose },
   ];
