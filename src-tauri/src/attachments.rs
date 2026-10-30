@@ -166,6 +166,8 @@ impl Files {
             )
             .header(header::CONTENT_LENGTH, body.len())
             .header(header::CACHE_CONTROL, "private, max-age=3600")
+            .header(header::CONTENT_SECURITY_POLICY, "sandbox")
+            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
             .body(body)
             .unwrap_or_else(|_| empty(http::StatusCode::BAD_GATEWAY))
     }
