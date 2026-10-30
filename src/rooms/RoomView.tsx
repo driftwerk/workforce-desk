@@ -17,9 +17,6 @@ import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
 import { useFocusRequest } from "../shell/focus";
 
-/** A room message's author's agent key (`hub/agent`), for a member's. */
-const agentAuthor = (author: string): string | undefined => (author.includes("/") ? author : undefined);
-
 const asChat = (m: RoomMessage): ChatMessage => ({
   id: m.id,
   role: m.author === "you" ? "user" : m.author === "desk" ? "system" : "assistant",
@@ -32,26 +29,25 @@ const asChat = (m: RoomMessage): ChatMessage => ({
   ...(m.attachments?.length ? { attachments: m.attachments } : {}),
 });
 
-/** Where a room message's files are, unless a file says (and where a
- *  routed approval it asks you is decided): its author's hub and agent. */
-const homeOf = (m: RoomMessage) => {
-  const [hub, agent] = m.author.split("/");
-  return hub && agent ? { hub, agent } : undefined;
+/** The drafts on their way, by thread (the main timeline's under null),
+ *  but not one whose answer is in already. */
+const draftsByThread = (drafts: readonly RoomDraft[], all: readonly RoomMessage[]): Map<string | null, RoomDraft[]> => {
+  const posted = new Set(all.flatMap((m) => m.source ?? []));
+  const by = new Map<string | null, RoomDraft[]>();
+  for (const d of drafts) if (!(d.source && posted.has(d.source))) by.set(d.threadId, [...(by.get(d.threadId) ?? []), d]);
+  return by;
 };
 
-/** The drafts on their way in `threadId` (the main timeline when null),
- *  but not one whose answer is in already. */
-const draftsIn = (drafts: readonly RoomDraft[], all: readonly RoomMessage[], threadId: string | null): RoomDraft[] => {
-  const posted = new Set(all.flatMap((m) => m.source ?? []));
-  return drafts.filter((d) => d.threadId === threadId && !(d.source && posted.has(d.source)));
-};
+/** Whether a draft's member is answering now, not waiting or stopped. */
+const answering = (d: RoomDraft): boolean => d.state === "live" || d.state === "stalled";
 
 /** Files dropped anywhere on a room or thread go with its next message. */
 type Files = ReturnType<typeof usePendingFiles>;
 
 function Composer({ room, threadId, placeholder, files }: { room: Room; threadId: string | null; placeholder: string; files: Files }) {
   const fail = useDesk((s) => s.fail);
-  const { roster, hubs } = useChat();
+  const roster = useChat((s) => s.roster);
+  const hubs = useChat((s) => s.hubs);
   // Kept per room and thread until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.room(room.id, threadId));
   const [caret, setCaret] = useState(0);
@@ -177,12 +173,13 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
 
 /** Who wrote `key` (`hub/agent`), and where they live. */
 function useAuthor(): (key: string) => { name: string; home: string } {
-  const { roster, hubs } = useChat();
+  const roster = useChat((s) => s.roster);
+  const hubs = useChat((s) => s.hubs);
   return (key: string) => {
-    const [hub, agent] = key.split("/");
+    const m = memberOf(key);
     return {
-      name: roster.find((a) => a.hubId === hub && a.id === agent)?.name ?? agent ?? key,
-      home: hubs.find((h) => h.id === hub)?.label ?? hub ?? key,
+      name: roster.find((a) => a.hubId === m?.hub && a.id === m.agent)?.name ?? m?.agent ?? key,
+      home: hubs.find((h) => h.id === m?.hub)?.label ?? m?.hub ?? key,
     };
   };
 }
@@ -197,6 +194,7 @@ export function useOpenThread(): { room: Room; thread: string } | null {
 }
 
 const NO_DRAFTS: RoomDraft[] = [];
+const NO_MESSAGES: RoomMessage[] = [];
 
 /** A room message as the room shows it; a form an agent posted in it is
  *  answered to that agent, where the form is. */
@@ -206,13 +204,14 @@ function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; 
     void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
     return true;
   };
+  const member = memberOf(m.author);
   return (
     <Message
       message={asChat(m)}
       author={name}
-      authorKey={agentAuthor(m.author)}
+      authorKey={member ? m.author : undefined}
       home={home}
-      origin={homeOf(m)}
+      origin={member ?? undefined}
       onSubmitForm={submitForm}
     />
   );
@@ -220,12 +219,13 @@ function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; 
 
 /** A room's thread: its first message, the replies, and a reply box. */
 export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
-  const all = useDesk((s) => s.timelines[room.id]) ?? [];
+  const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const setRoomThread = useUi((u) => u.setRoomThread);
   const author = useAuthor();
   const files = usePendingFiles();
   const drop = useFileDrop(files.add);
+  const shown = useMemo(() => draftsByThread(drafts, all).get(thread) ?? NO_DRAFTS, [drafts, all, thread]);
   const parent = all.find((m) => m.id === thread);
   if (!parent) return null;
   const replies = all.filter((m) => m.threadId === thread);
@@ -243,7 +243,7 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
           {replies.map((m) => (
             <RoomMessageView key={m.id} room={room} m={m} name={author(m.author).name} />
           ))}
-          {draftsIn(drafts, all, thread).map((d) => (
+          {shown.map((d) => (
             <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
           ))}
         </div>
@@ -255,7 +255,8 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
 }
 
 export function RoomView({ room }: { room: Room }) {
-  const { timelines, openThread } = useDesk();
+  const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
+  const openThread = useDesk((s) => s.openThread);
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const files = usePendingFiles();
   const drop = useFileDrop(files.add);
@@ -267,15 +268,15 @@ export function RoomView({ room }: { room: Room }) {
   const connected = useDesk((s) => s.connected);
   const scroller = useAnchoredScroll<HTMLDivElement>(`room:${room.id}`);
   const end = useRef<HTMLDivElement>(null);
-  const all = timelines[room.id] ?? [];
-  const main = all.filter((m) => !m.threadId);
+  const main = useMemo(() => all.filter((m) => !m.threadId), [all]);
   const replies = useMemo(() => {
     const by = new Map<string, RoomMessage[]>();
     for (const m of all) if (m.threadId) by.set(m.threadId, [...(by.get(m.threadId) ?? []), m]);
     return by;
   }, [all]);
 
-  const shownDrafts = draftsIn(drafts, all, null);
+  const byThread = useMemo(() => draftsByThread(drafts, all), [drafts, all]);
+  const shownDrafts = byThread.get(null) ?? NO_DRAFTS;
   const draftText = shownDrafts.map((d) => d.text.length).join();
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
@@ -310,10 +311,13 @@ export function RoomView({ room }: { room: Room }) {
         {main.map((m) => {
           const a = author(m.author);
           const n = m.replyCount ?? replies.get(m.id)?.length ?? 0;
-          const replying = thread === m.id ? [] : [...new Set(draftsIn(drafts, all, m.id).map((d) => author(d.member).name))];
+          const there = thread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
+          const names = (ds: RoomDraft[]) => [...new Set(ds.map((d) => author(d.member).name))];
+          const replying = names(there.filter(answering));
+          const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted"));
           return (
             <div key={m.id} className="room-msg">
-              <RoomMessageView room={room} m={m} name={a.name} home={m.author.includes("/") ? a.home : undefined} />
+              <RoomMessageView room={room} m={m} name={a.name} home={memberOf(m.author) ? a.home : undefined} />
               <button
                 type="button"
                 className="link small thread-link"
@@ -326,6 +330,7 @@ export function RoomView({ room }: { room: Room }) {
                   {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
                 </span>
               )}
+              {stopped.length > 0 && <span className="small state-blocked thread-replying">{stopped.join(", ")} couldn’t answer</span>}
             </div>
           );
         })}

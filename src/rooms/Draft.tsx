@@ -5,6 +5,7 @@ import { StatusLine, ToolChips } from "../chat/WorkingRow";
 import type { RoomDraft } from "../hub/store";
 import { AgentMark } from "../ui/Mark";
 import { answerPrompt, dismiss, retry } from "./engine";
+import { memberOf } from "./routing";
 
 /** What a draft says when it isn't going: why, and what can be done. */
 const NOTE: Partial<Record<RoomDraft["state"], string>> = {
@@ -18,7 +19,7 @@ const NOTE: Partial<Record<RoomDraft["state"], string>> = {
 /** A member's answer on its way: what it has said so far, what it is
  *  doing, what it asks you first; once it can't go on, why, to ask again. */
 export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraft; name: string }) {
-  const [hub, agent] = draft.member.split("/");
+  const home = memberOf(draft.member) ?? undefined;
   const stopped = draft.state === "interrupted" || draft.state === "failed";
   const note = draft.state === "failed" ? draft.error : NOTE[draft.state];
   return (
@@ -34,7 +35,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
             <RichMarkdown text={draft.text} streaming={!stopped} />
           </div>
         )}
-        <Attachments files={draft.attachments} home={hub && agent ? { hub, agent } : undefined} />
+        <Attachments files={draft.attachments} home={home} />
         {draft.prompts.map((p) => (
           <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(roomId, draft.id, p.requestId, choice)} />
         ))}

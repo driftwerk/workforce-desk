@@ -117,6 +117,13 @@ describe("a room's thread links", () => {
     render(<ThreadPanel room={room} thread="bb" />);
     expect(screen.getByLabelText("Scout’s answer on its way")).toBeTruthy();
   });
+
+  it("say who couldn't answer in a closed thread, and not that they're replying while they wait or after", () => {
+    useDesk.setState({ roomDrafts: { r1: [{ ...draft("bb"), state: "failed", error: "The model gave up." }, { ...draft("a"), id: "ask-2", state: "queued" }] } });
+    render(<RoomView room={room} />);
+    expect(screen.queryByText(/replying…/)).toBeNull();
+    expect(screen.getByText("Scout couldn’t answer")).toBeTruthy();
+  });
 });
 
 describe("a timeline's reply counts", () => {
