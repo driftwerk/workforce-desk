@@ -68,7 +68,7 @@ fn offline(code: Option<i32>) -> bool {
 fn failure(plan: Plan, code: Option<i32>, last: &str) -> String {
     if offline(code) {
         return format!(
-            "Couldn't download {}. Check this Mac is online and try again.",
+            "Couldn't download {}. Check this computer is online and try again.",
             plan.cli_name()
         );
     }
@@ -194,7 +194,7 @@ mod tests {
     fn failures_are_said_plainly() {
         assert_eq!(
             failure(Plan::Claude, Some(6), "curl: (6) Could not resolve host"),
-            "Couldn't download Claude Code. Check this Mac is online and try again."
+            "Couldn't download Claude Code. Check this computer is online and try again."
         );
         assert_eq!(
             failure(Plan::Chatgpt, Some(1), "  Unsupported architecture  "),
