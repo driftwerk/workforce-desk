@@ -307,23 +307,34 @@ pub fn forwarded(headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
     .collect()
 }
 
-/// `name` as a file name of its own: no folders, no hidden or control
-/// characters; `file` when nothing is left.
+/// The names Windows keeps for its devices, whatever their extension.
+const RESERVED_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// `name` as a file name of its own on any system: no folders, no
+/// characters Windows refuses or control characters, not hidden, not ending
+/// in a dot or a space, never a device's name, at most 200 characters;
+/// `file` when nothing is left.
 pub fn safe_filename(name: &str) -> String {
-    let kept: String = name
+    let refused = |c: char| c.is_control() || "<>:\"/\\|?*".contains(c);
+    let replaced: String = name
         .chars()
-        .map(|c| {
-            if c == '/' || c == '\\' || c == ':' || c.is_control() {
-                '_'
-            } else {
-                c
-            }
-        })
+        .map(|c| if refused(c) { '_' } else { c })
         .collect();
-    let kept = kept.trim().trim_start_matches('.').trim();
-    match kept {
+    let trimmed = |s: &str| {
+        s.trim()
+            .trim_start_matches('.')
+            .trim_end_matches(['.', ' '])
+            .to_string()
+    };
+    let kept = trimmed(&trimmed(&replaced).chars().take(200).collect::<String>());
+    let stem = kept.split('.').next().unwrap_or_default().trim_end();
+    match kept.as_str() {
         "" => "file".into(),
-        name => name.chars().take(200).collect(),
+        _ if RESERVED_NAMES.contains(&stem.to_ascii_uppercase().as_str()) => format!("_{kept}"),
+        _ => kept,
     }
 }
 
@@ -596,6 +607,17 @@ mod tests {
         assert_eq!(safe_filename(".hidden"), "hidden");
         assert_eq!(safe_filename(" a:b\n"), "a_b_");
         assert_eq!(safe_filename(".."), "file");
+        assert_eq!(safe_filename("a<b>c\"d|e?f*g.txt"), "a_b_c_d_e_f_g.txt");
+        assert_eq!(safe_filename("..\\..\\x"), "_.._x");
+        assert_eq!(safe_filename("report. . "), "report");
+        assert_eq!(safe_filename("CON"), "_CON");
+        assert_eq!(safe_filename("nul.txt"), "_nul.txt");
+        assert_eq!(safe_filename("lpt9 .tar.gz"), "_lpt9 .tar.gz");
+        assert_eq!(safe_filename("console.log"), "console.log");
+        assert_eq!(
+            safe_filename(&format!("{}. x", "a".repeat(199))),
+            "a".repeat(199)
+        );
         assert_eq!(
             partial_path(Path::new("/tmp/x/report.pdf")),
             PathBuf::from("/tmp/x/.report.pdf.desk-download")
