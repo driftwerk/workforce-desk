@@ -1,0 +1,30 @@
+[package]
+name = "desk-wsl"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+description = "Desk on Windows runs its backend inside WSL: finding a distro, installing the backend there, and Desk Helper.exe, which keeps it running"
+
+[[bin]]
+name = "desk-wsl-helper"
+path = "src/bin/desk-wsl-helper.rs"
+
+# A stand-in for wsl.exe that answers from a scenario file, for the tests.
+[[bin]]
+name = "fake-wsl"
+path = "src/bin/fake-wsl.rs"
+test = false
+
+[dependencies]
+desk-core = { workspace = true }
+eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

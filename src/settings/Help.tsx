@@ -2,8 +2,19 @@ import { getVersion } from "@tauri-apps/api/app";
 import { save } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
 import { useEffect, useState } from "react";
-import { helperStatus, inApp, openLoginItems, removeDeskData, saveReport, type HelperStatus } from "../platform";
-import { useHost, type Platform } from "../shell/host";
+import {
+  fixWslForwarding,
+  helperStatus,
+  inApp,
+  openLoginItems,
+  removeDeskData,
+  saveReport,
+  wslBackendVersion,
+  type HelperStatus,
+} from "../platform";
+import { useSetup } from "../setup/store";
+import { problemText } from "../setup/wsl";
+import { useHost, type BackendHost, type Platform } from "../shell/host";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useUpdates } from "../updates/store";
 
@@ -28,6 +39,12 @@ export const helperLine = (s: HelperStatus | null, platform: Platform): string =
       return "Move Desk to your Applications folder, then open it from there.";
     case "development":
       return "Started by hand (a development build).";
+    case "no-wsl":
+      return `${problemText(s.problem)}.`;
+    case "starting":
+      return "Starting…";
+    case "port-unreachable":
+      return "Running in WSL, but Windows can’t reach it.";
     case "failed":
       return s.message;
   }
@@ -36,8 +53,56 @@ export const helperLine = (s: HelperStatus | null, platform: Platform): string =
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Settings → Help: the version, a report to send, and removing Desk. */
+/** Settings → Help on Windows: the distro Desk runs in, the backend's
+ *  version there, and setting Desk up (again, or in another distro). */
+function WhereDeskRuns({ host, helper }: { host: BackendHost | null; helper: HelperStatus | null }) {
+  const show = useSetup((s) => s.show);
+  const [version, setVersion] = useState<string | null>(null);
+  const [fixing, setFixing] = useState<string | null>(null);
+  const distro = host?.kind === "wsl" ? host.distro : null;
+  useEffect(() => {
+    if (distro) void wslBackendVersion().then(setVersion, () => setVersion(null));
+  }, [distro]);
+  const fix = async () => {
+    if (!distro) return;
+    setFixing("Restarting WSL…");
+    try {
+      await fixWslForwarding(distro);
+      setFixing("Fixed. Windows reaches Desk again.");
+    } catch (e) {
+      setFixing(errorText(e));
+    }
+  };
+  return (
+    <div className="setting-card">
+      <span className="card-text">
+        <b>Where Desk runs</b>
+        <span>
+          {distro
+            ? `${distro} (WSL 2)${version ? ` · Desk ${version} there` : ""}. Moving to another Linux sets Desk up afresh there; what Desk keeps in ${distro} stays where it is.`
+            : "Not set up yet: this computer’s agents and sessions run in Linux, inside WSL."}
+        </span>
+        {helper?.state === "port-unreachable" && (
+          <span className="state-blocked">
+            WSL isn’t passing Desk’s port to Windows. Turning on <code>localhostForwarding=true</code> in <code>[wsl2]</code> of
+            .wslconfig fixes it, and restarts WSL. {fixing}
+          </span>
+        )}
+      </span>
+      {helper?.state === "port-unreachable" && (
+        <button type="button" className="btn" onClick={() => void fix()}>
+          Fix it and restart WSL
+        </button>
+      )}
+      <button type="button" className="btn" onClick={show}>
+        {distro ? "Use another Linux…" : "Set up…"}
+      </button>
+    </div>
+  );
+}
+
 export function Help() {
-  const { platform, keys } = useHost();
+  const { platform, keys, host } = useHost();
   const openStartup = OPEN_STARTUP[platform];
   const [version, setVersion] = useState("");
   const [helper, setHelper] = useState<HelperStatus | null>(null);
@@ -110,6 +175,8 @@ export function Help() {
           </button>
         )}
       </div>
+
+      {platform === "windows" && <WhereDeskRuns host={host} helper={helper} />}
 
       {platform === "linux" && (
         <div className="setting-card">

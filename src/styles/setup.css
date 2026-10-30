@@ -1,0 +1,183 @@
+/* ── Windows' first run: Desk set up inside WSL ─────────────────────────── */
+
+.wsl-setup {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.wsl-rail {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 34px 28px;
+  border-right: 1px solid var(--border);
+}
+.wsl-rail .link {
+  margin-top: auto;
+  align-self: flex-start;
+}
+.wsl-rail-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.wsl-rail-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  color: var(--muted);
+}
+.wsl-rail-steps li.current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wsl-tick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.current > .wsl-tick,
+.wsl-step.running > .wsl-tick {
+  background: var(--signal);
+  color: var(--on-signal);
+}
+.done > .wsl-tick {
+  color: var(--done);
+}
+.wsl-step.failed > .wsl-tick,
+.wsl-step.blocked > .wsl-tick {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+
+.wsl-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 34px 40px;
+  overflow-y: auto;
+}
+.wsl-measure {
+  max-width: 560px;
+}
+
+.wsl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 640px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.wsl-card code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.wsl-config {
+  white-space: pre;
+}
+.wsl-warn {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
+}
+.wsl-warn > b {
+  color: var(--blocked);
+}
+
+.wsl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.wsl-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+.wsl-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--text);
+  text-align: left;
+}
+.wsl-option.on {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+}
+.wsl-option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.wsl-option-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wsl-radio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--faint);
+  border-radius: 50%;
+}
+.wsl-option.on .wsl-radio {
+  border-color: var(--signal);
+  background: radial-gradient(circle, var(--signal) 45%, transparent 50%);
+}
+.wsl-tag {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wsl-steps {
+  padding: 6px 18px;
+  list-style: none;
+}
+.wsl-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+.wsl-step.waiting {
+  color: var(--muted);
+}

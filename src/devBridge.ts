@@ -146,7 +146,14 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     case "hub_connection":
       return answer({ url: need("hub"), token: need("admin") });
     case "host_info":
-      return answer({ ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform });
+      // Windows before its setup: no backend yet.
+      return answer(
+        params.platform === "windows"
+          ? { ...DEFAULT_HOST, platform: "windows", host: null, keys: "Credential Manager" }
+          : { ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform },
+      );
+    case "wsl_detect":
+      return answer(WSL_FIXTURE);
     case "hubs_list":
       return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, token: need("device") }]);
     case "settings_load":
@@ -167,6 +174,26 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       throw new Error(`${cmd} is only available in the Desk app`);
   }
 }
+
+// ── WSL, for Windows' first run in the preview ─────────────────────────────
+
+const probe = (glibc: string) => ({
+  arch: "x86_64",
+  kernel: "6.6.36.6-microsoft-standard-WSL2",
+  user: "sarah",
+  home: "/home/sarah",
+  automount: "/mnt/",
+  glibc,
+});
+
+const WSL_FIXTURE = {
+  problem: null,
+  distros: [
+    { distro: { name: "Ubuntu-24.04", state: "Running", version: 2, default: true }, probe: probe("2.39"), problem: null },
+    { distro: { name: "Debian", state: "Stopped", version: 2, default: false }, probe: probe("2.36"), problem: null },
+    { distro: { name: "Ubuntu-20.04", state: "Stopped", version: 1, default: false }, probe: null, problem: { kind: "wsl1", distro: "Ubuntu-20.04" } },
+  ],
+};
 
 // ── Providers, until the hub has them ──────────────────────────────────────
 // Answers `/api/desk/providers` (see hub/client.ts `desk`) while the running

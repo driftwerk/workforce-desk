@@ -3,14 +3,14 @@
 //! with what it prints passed on line by line.
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
-use desk_core::shell::{find_program, login_env, with_local_bin, without_claude_markers};
+use desk_core::backend::Backend;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::{Plan, scan};
+use super::{Plan, cli, scan};
 
 impl Plan {
     /// The CLI a plan signs in with.
@@ -38,10 +38,10 @@ impl Plan {
     }
 }
 
-/// Whether the plan's CLI can be found: on the login PATH or in
-/// `~/.local/bin`, where both installers put it.
-pub fn installed(plan: Plan) -> bool {
-    find_program(plan.program(), &login_env()).is_some()
+/// Whether the plan's CLI can be found where the backend runs: on the
+/// login PATH or in `~/.local/bin`, where both installers put it.
+pub fn installed(backend: &Backend, plan: Plan) -> bool {
+    cli::installed(backend, plan.program())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -91,7 +91,7 @@ pub struct Installs {
 impl Installs {
     /// Runs the installer in the background; progress arrives as
     /// `cli-install` events.
-    pub fn start(&self, app: &AppHandle, plan: Plan) -> Result<(), String> {
+    pub fn start(&self, app: &AppHandle, backend: Backend, plan: Plan) -> Result<(), String> {
         {
             let mut running = self.running.lock().expect("installs");
             if running.contains(&plan) {
@@ -105,17 +105,14 @@ impl Installs {
                 let _ = app.emit("cli-install", Event { plan, progress });
             }
         };
-        let env = with_local_bin(without_claude_markers(login_env()));
         let script = format!("set -o pipefail; {}", plan.installer());
-        let spawned = Command::new("/bin/bash")
-            .args(["-c", &script])
-            .env_clear()
-            .envs(&env)
-            .current_dir(env.get("HOME").map_or("/", String::as_str))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
+        let spawned = cli::installer(&backend, &script).and_then(|c| {
+            Ok(c.command()
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?)
+        });
         let mut child = match spawned {
             Ok(c) => c,
             Err(e) => {
@@ -166,7 +163,7 @@ impl Installs {
             running.lock().expect("installs").retain(|p| *p != plan);
             let last = last.lock().expect("last").clone();
             report(match status {
-                Ok(s) if s.success() && installed(plan) => Progress::Done,
+                Ok(s) if s.success() && installed(&backend, plan) => Progress::Done,
                 Ok(s) if s.success() => Progress::Failed {
                     message: format!(
                         "{} installed, but Desk can't find it. Open a new terminal, run `{} --version`, then try again.",

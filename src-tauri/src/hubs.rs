@@ -62,9 +62,10 @@ pub fn app_secrets(paths: &Paths) -> Result<Secrets> {
     Secrets::for_host(paths, &Host::Native)
 }
 
-pub fn accounts(paths: &Paths, backend: &Backend) -> Result<Vec<HubAccount>> {
+pub fn accounts(paths: &Paths, backend: Option<&Backend>) -> Result<Vec<HubAccount>> {
     let mut out = Vec::new();
-    if let Some(c) = backend.connection()?
+    if let Some(backend) = backend
+        && let Some(c) = backend.connection()?
         && let Some(token) = c.device_token
     {
         out.push(HubAccount {

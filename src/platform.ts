@@ -273,6 +273,9 @@ export type HelperStatus =
   | { state: "not-registered" }
   | { state: "move-to-applications" }
   | { state: "development" }
+  | { state: "no-wsl"; problem: WslProblem }
+  | { state: "starting" }
+  | { state: "port-unreachable" }
   | { state: "failed"; message: string };
 
 export const helperStatus = (): Promise<HelperStatus> => invoke("helper_status");
@@ -304,6 +307,64 @@ export interface Updating {
   download: string | null;
 }
 export const updating = (): Promise<Updating> => invoke("updating");
+
+/** Why Desk can't run in WSL here, or in one distro (see crates/desk-wsl). */
+export type WslProblem =
+  | { kind: "not_installed" }
+  | { kind: "no_distro" }
+  | { kind: "wsl1"; distro: string }
+  | { kind: "arch"; found: string }
+  | { kind: "old_linux"; glibc: string }
+  | { kind: "root_user"; distro: string };
+
+export interface WslDistro {
+  name: string;
+  state: string;
+  version: number;
+  default: boolean;
+}
+
+/** What a WSL 2 distro said it is. */
+export interface WslProbe {
+  arch: string;
+  kernel: string;
+  user: string;
+  home: string;
+  automount: string;
+  glibc: string;
+}
+
+export interface WslFound {
+  distro: WslDistro;
+  probe: WslProbe | null;
+  problem: WslProblem | null;
+}
+
+export interface WslDetection {
+  problem: WslProblem | null;
+  distros: WslFound[];
+}
+
+export type SetupStep = "copy" | "check" | "start" | "reach" | "startup";
+export type SetupState = "running" | "done" | "failed" | "blocked";
+export interface SetupEvent {
+  step: SetupStep;
+  state: SetupState;
+  note: string | null;
+}
+
+/** WSL on this Windows computer and its distros. */
+export const detectWsl = (): Promise<WslDetection> => invoke("wsl_detect");
+/** Installs WSL and Ubuntu as an administrator; Windows then restarts. */
+export const installWsl = (): Promise<void> => invoke("wsl_install");
+export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_convert", { distro });
+/** Sets Desk up in `distro`; progress arrives through `onWslSetup`. */
+export const setUpInWsl = (distro: string): Promise<void> => invoke("wsl_setup", { distro });
+/** Turns on WSL's localhost forwarding and restarts WSL. */
+export const fixWslForwarding = (distro: string): Promise<void> => invoke("wsl_fix_forwarding", { distro });
+/** The backend's version inside WSL; null when it isn't there. */
+export const wslBackendVersion = (): Promise<string | null> => invoke("wsl_installed");
+export const onWslSetup = (f: (e: SetupEvent) => void): Promise<() => void> => listen<SetupEvent>("wsl-setup", (e) => f(e.payload));
 
 /** Sessions to resume once Desk has restarted into an update. */
 export const resumeLater = (ids: string[]): Promise<void> => invoke("resume_later", { ids });

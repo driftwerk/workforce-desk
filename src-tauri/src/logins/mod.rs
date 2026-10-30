@@ -4,18 +4,17 @@
 //! where their agents on this computer read it. The token never reaches the
 //! page.
 
+mod cli;
 pub mod install;
 mod scan;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 
 use desk_core::backend::Backend;
-use desk_core::shell::{find_program, login_env, with_local_bin, without_claude_markers};
-use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{ChildKiller, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -108,24 +107,18 @@ impl Logins {
         self.cancel(plan);
         let report = reporter(app, plan);
         report(Progress::Starting);
-        let env = with_local_bin(without_claude_markers(login_env()));
         let running = match plan {
-            Plan::Claude => self.start_claude(backend, env, report),
-            Plan::Chatgpt => self.start_chatgpt(backend, env, report),
+            Plan::Claude => self.start_claude(backend, report),
+            Plan::Chatgpt => self.start_chatgpt(backend, report),
         }
         .map_err(|e| e.to_string())?;
         self.running.lock().expect("logins").insert(plan, running);
         Ok(())
     }
 
-    fn start_claude(
-        &self,
-        backend: Backend,
-        env: std::collections::BTreeMap<String, String>,
-        report: Report,
-    ) -> eyre::Result<Running> {
-        let program = find_program("claude", &env)
-            .ok_or_else(|| eyre::eyre!("Claude Code isn't installed on this computer"))?;
+    fn start_claude(&self, backend: Backend, report: Report) -> eyre::Result<Running> {
+        let cli = cli::cli(&backend, Plan::Claude.program(), &["setup-token"], &[])
+            .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         // Wide, so the token is never wrapped across lines.
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -135,18 +128,9 @@ impl Logins {
                 pixel_height: 0,
             })
             .map_err(|e| eyre::eyre!("{e}"))?;
-        let mut cmd = CommandBuilder::new(program);
-        cmd.arg("setup-token");
-        cmd.env_clear();
-        for (k, v) in &env {
-            cmd.env(k, v);
-        }
-        if let Some(home) = env.get("HOME") {
-            cmd.cwd(home);
-        }
         let mut child = pair
             .slave
-            .spawn_command(cmd)
+            .spawn_command(cli.pty())
             .map_err(|e| eyre::eyre!("{e}"))?;
         drop(pair.slave);
         let killer = child.clone_killer();
@@ -201,24 +185,22 @@ impl Logins {
         Ok(Running::Claude { writer, killer })
     }
 
-    fn start_chatgpt(
-        &self,
-        backend: Backend,
-        mut env: std::collections::BTreeMap<String, String>,
-        report: Report,
-    ) -> eyre::Result<Running> {
-        let program = find_program("codex", &env)
-            .ok_or_else(|| eyre::eyre!("Codex isn't installed on this computer"))?;
-        let home = private_dir(&backend.paths.root.join("codex-login"))?;
-        env.insert("CODEX_HOME".into(), home.to_string_lossy().into_owned());
-        let mut child = Command::new(program)
-            .arg("login")
-            .env_clear()
-            .envs(&env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+    fn start_chatgpt(&self, backend: Backend, report: Report) -> eyre::Result<Running> {
+        if !cli::installed(&backend, Plan::Chatgpt.program()) {
+            eyre::bail!("Codex isn't installed on this computer");
+        }
+        let (home, codex_home) = cli::private_dir(&backend, "codex-login")?;
+        let mut child = cli::cli(
+            &backend,
+            Plan::Chatgpt.program(),
+            &["login"],
+            &[("CODEX_HOME", &codex_home)],
+        )?
+        .command()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
         let streams = [
             child
                 .stdout
@@ -307,16 +289,4 @@ impl Logins {
             None => {}
         }
     }
-}
-
-/// A fresh folder only this user can read.
-fn private_dir(path: &Path) -> eyre::Result<PathBuf> {
-    let _ = std::fs::remove_dir_all(path);
-    std::fs::create_dir_all(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(path.to_path_buf())
 }

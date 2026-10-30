@@ -14,9 +14,14 @@ use eyre::{Context, Result};
 use crate::helper::Login;
 use crate::hubs::app_secrets;
 
-/// The logs a report carries, newest part of each: the app's own, and the
-/// backend's.
-const APP_LOGS: [&str; 2] = ["desk.log", "desk.log.1"];
+/// The logs a report carries, newest part of each: the app's own (with
+/// Windows' Desk Helper.exe), and the backend's.
+const APP_LOGS: [&str; 4] = [
+    "desk.log",
+    "desk.log.1",
+    "desk-helper.log",
+    "desk-helper.log.1",
+];
 const BACKEND_LOGS: [&str; 8] = [
     "desk-hubd.log",
     "desk-hubd.log.1",
@@ -42,11 +47,9 @@ fn remote_accounts(paths: &Paths) -> Vec<String> {
 /// app reads anyway (the hub's gateway token and Desk's device tokens).
 /// Desk Helper's other secrets stay unread so the keychain doesn't ask;
 /// the patterns catch them by shape and by name.
-pub fn known_secrets(paths: &Paths, backend: &Backend) -> Vec<String> {
+pub fn known_secrets(paths: &Paths, backend: Option<&Backend>) -> Vec<String> {
     let local = backend
-        .connection()
-        .ok()
-        .flatten()
+        .and_then(|b| b.connection().ok().flatten())
         .map(|c| [Some(c.admin_token), c.device_token])
         .into_iter()
         .flatten()
@@ -123,7 +126,7 @@ fn tail(path: &Path, max: u64) -> Result<String> {
 /// what was running.
 pub fn write_report(
     paths: &Paths,
-    backend: &Paths,
+    backend: Option<&Paths>,
     known: &[String],
     about: &str,
     to: &Path,
@@ -135,10 +138,11 @@ pub fn write_report(
         .unix_permissions(0o600);
     zip.start_file("about.txt", opts)?;
     zip.write_all(desk_core::redact::redact(about, known).as_bytes())?;
-    let logs = APP_LOGS
-        .iter()
-        .map(|name| (paths, name))
-        .chain(BACKEND_LOGS.iter().map(|name| (backend, name)));
+    let logs = APP_LOGS.iter().map(|name| (paths, name)).chain(
+        backend
+            .into_iter()
+            .flat_map(|b| BACKEND_LOGS.iter().map(move |name| (b, name))),
+    );
     for (root, name) in logs {
         let path = root.logs().join(name);
         if !path.is_file() {
@@ -178,15 +182,19 @@ fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
 /// `everything`, also ends the PTY holder (and with it the hub's
 /// terminals) and deletes the backend's folder and secrets, then the app's.
 /// Nothing is deleted while the helper is still running.
-pub fn remove(paths: &Paths, backend: &Backend, everything: bool) -> Result<()> {
-    crate::helper::login(backend).unregister()?;
+pub fn remove(paths: &Paths, backend: Option<&Backend>, everything: bool) -> Result<()> {
+    if let Some(backend) = backend {
+        crate::helper::login(backend).unregister()?;
+    }
     if !everything {
         return Ok(());
     }
-    wait_stopped(&backend.paths, Duration::from_secs(40))?;
     // Read before the backend's half: natively it shares the app's folder.
     let remote = remote_accounts(paths);
-    remove_backend(backend)?;
+    if let Some(backend) = backend {
+        wait_stopped(&backend.paths, Duration::from_secs(40))?;
+        remove_backend(backend)?;
+    }
     let secrets = app_secrets(paths)?;
     for a in remote {
         secrets.delete_account(&a)?;
@@ -221,7 +229,7 @@ mod tests {
         .unwrap();
         let out = dir.path().join("report.zip");
         let known = vec![token.to_string()];
-        write_report(&paths, &paths, &known, "Desk 0.1.0", &out).unwrap();
+        write_report(&paths, Some(&paths), &known, "Desk 0.1.0", &out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
         assert!(names.contains(&"about.txt".to_string()));
@@ -252,7 +260,7 @@ mod tests {
             .unwrap();
         }
         let out = dir.path().join("report.zip");
-        write_report(&app, &backend, &[], "Desk", &out).unwrap();
+        write_report(&app, Some(&backend), &[], "Desk", &out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         let read = |zip: &mut zip::ZipArchive<std::fs::File>, name: &str| {
             let mut text = String::new();

@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use desk_core::backend::Check;
 use desk_core::host::Host;
 use desk_core::{Paths, Secrets, backend, process};
 use eyre::{Context, Result};
-use serde::Serialize;
 
 /// What the helper was started to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,36 +90,6 @@ pub fn remove_everything(paths: &Paths, env: &BTreeMap<String, String>) -> Resul
         eyre::bail!("Desk Helper (process {pid}) is still running; stop it first");
     }
     backend::remove_everything(paths, &Secrets::for_host(paths, &Host::running_here(env))?)
-}
-
-/// `--check`: whether the backend can run here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Check {
-    pub ok: bool,
-    /// The C library's version on Linux with glibc.
-    pub glibc: Option<String>,
-    pub arch: String,
-    /// Whether a port can be opened on 127.0.0.1.
-    pub loopback: bool,
-    /// Whether Desk's folder is on a Linux filesystem, not a Windows drive
-    /// WSL mounts (where Postgres and the PTY holder can't work).
-    pub root_on_ext4: bool,
-}
-
-impl Check {
-    pub fn of(glibc: Option<String>, arch: &str, loopback: bool, root_on_ext4: bool) -> Check {
-        let ok = glibc.as_deref().is_none_or(backend::glibc_supported)
-            && matches!(arch, "x86_64" | "aarch64")
-            && loopback
-            && root_on_ext4;
-        Check {
-            ok,
-            glibc,
-            arch: arch.into(),
-            loopback,
-            root_on_ext4,
-        }
-    }
 }
 
 /// The 9p filesystem WSL 2 mounts Windows drives with.

@@ -1,20 +1,27 @@
-//! What Desk's grid terminals need from this computer: where Desk's Claude Code
-//! plugin is (its hooks, which register a `claude` started in one of them
-//! with the hub), and what is running in one (Codex is recognised this way,
-//! by its process, not tracked).
+//! What Desk's grid terminals need from where they run: where Desk's Claude
+//! Code plugin is (its hooks, which register a `claude` started in one of
+//! them with the hub), and what is running in one (Codex is recognised this
+//! way, by its process, not tracked).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
+use desk_core::host::Host;
 use tauri::Manager;
 
-/// Desk's Claude Code plugin folder, shipped in the app's resources.
-pub fn plugin_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
-    let dir = app.path().resource_dir().ok()?.join("claude-plugin");
-    dir.join("hooks")
-        .join("hooks.json")
-        .is_file()
-        .then_some(dir)
+/// Desk's Claude Code plugin folder as the terminals' shells name it:
+/// shipped in the app's resources, or inside WSL, installed beside the
+/// backend.
+pub fn plugin_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>, host: &Host) -> Option<String> {
+    match host {
+        Host::Native => {
+            let dir = app.path().resource_dir().ok()?.join("claude-plugin");
+            dir.join("hooks")
+                .join("hooks.json")
+                .is_file()
+                .then(|| dir.to_string_lossy().into_owned())
+        }
+        Host::Wsl(w) => Some(format!("{}/current/claude-plugin", w.bin())),
+    }
 }
 
 /// One process as `ps` lists it.
@@ -65,10 +72,12 @@ pub fn under(all: &[Process], pid: u32) -> Vec<String> {
     out
 }
 
-/// What's running in a terminal whose shell is `pid`, shell first.
-pub fn programs_under(pid: u32) -> eyre::Result<Vec<String>> {
-    let out = std::process::Command::new("ps")
-        .args(["-Ao", "pid=,ppid=,comm="])
+/// What's running in a terminal whose shell is `pid` (on `host`), shell
+/// first.
+pub fn programs_under(host: &Host, pid: u32) -> eyre::Result<Vec<String>> {
+    let out = host
+        .invocation("ps", &["-Ao", "pid=,ppid=,comm="])
+        .command()
         .output()?;
     if !out.status.success() {
         eyre::bail!("ps failed: {}", String::from_utf8_lossy(&out.stderr).trim());
@@ -115,9 +124,10 @@ mod tests {
         assert!(under(&all, 9999).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn this_process_is_found() {
-        let names = programs_under(std::process::id()).unwrap();
+        let names = programs_under(&Host::Native, std::process::id()).unwrap();
         assert!(!names.is_empty());
     }
 }

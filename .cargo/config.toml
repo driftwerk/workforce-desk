@@ -3,3 +3,8 @@
 # launch installs it from the binary with no network. Keep it on major 18:
 # a different major can't open the data directories Desk already made.
 POSTGRESQL_VERSION = "=18.6.1"
+
+# The speech libraries (sherpa-onnx) for Windows are built against the
+# static C runtime; the rest of Desk links it the same way.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

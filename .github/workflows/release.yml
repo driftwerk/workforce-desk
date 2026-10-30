@@ -6,6 +6,9 @@ name: Release
 #     signed with the Developer ID, the app and the disk image notarized and
 #     stapled;
 #   - Linux (x86_64): an AppImage, which updates itself, and a .deb;
+#   - Windows (x86_64): the per-user NSIS installer, which updates itself,
+#     and an MSI for managed installs, carrying the Linux backend Desk
+#     installs into WSL; Authenticode-signed only when WINDOWS_SIGNING is on;
 # then publishes them with the signed updater artifacts (latest.json) as a
 # GitHub release. See docs/RELEASING.md.
 
@@ -404,32 +407,153 @@ jobs:
           path: desk/backend-linux-x86_64/
           if-no-files-found: error
 
+  windows:
+    needs: [version, linux-x86_64]
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out Desk
+        uses: actions/checkout@v7
+        with:
+          path: desk
+
+      - name: Read the hub ref
+        id: hub
+        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the hub at hub.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.hub.outputs.ref }}
+          path: workforce-public-desk
+          token: ${{ secrets.HUB_REPO_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set the version
+        working-directory: desk
+        run: scripts/set-version.sh "${{ needs.version.outputs.version }}"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            desk/package-lock.json
+            workforce-public-desk/packages/rich/package-lock.json
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desk -> target
+          cache-on-failure: true
+
+      - name: Read the sherpa-onnx version
+        id: sherpa
+        run: echo "version=$(desk/scripts/sherpa-onnx.sh version)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: sherpa-onnx-${{ steps.sherpa.outputs.version }}-${{ runner.os }}-x86_64
+
+      - name: Speech libraries
+        working-directory: desk
+        run: scripts/sherpa-onnx.sh prepare --release
+
+      - name: Build the rich renderers
+        working-directory: workforce-public-desk/packages/rich
+        run: npm ci && npm run build
+
+      - name: Install Desk's packages
+        working-directory: desk
+        run: npm ci
+
+      # The Linux backend the installers carry, which Desk installs into WSL.
+      - uses: actions/download-artifact@v7
+        with:
+          name: backend-linux-x86_64
+          path: desk/src-tauri/resources/backend/linux-x86_64
+
+      - name: Build Desk Helper.exe
+        working-directory: desk
+        run: |
+          cargo build --release --locked -p desk-wsl --bin desk-wsl-helper
+          mkdir -p src-tauri/binaries
+          cp target/release/desk-wsl-helper.exe "src-tauri/binaries/Desk Helper-x86_64-pc-windows-msvc.exe"
+
+      # Authenticode through Azure Trusted Signing, when the WINDOWS_SIGNING
+      # variable is on: the app, Desk Helper.exe and the installers. Off,
+      # the builds are unsigned and SmartScreen warns on first run.
+      - name: Build the installers
+        working-directory: desk
+        env:
+          ENDPOINT: https://github.com/${{ env.RELEASES_REPO }}/releases/latest/download/latest.json
+          SIGNING: ${{ vars.WINDOWS_SIGNING }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          config=$(jq -n --arg endpoint "$ENDPOINT" '{plugins: {updater: {endpoints: [$endpoint]}}}')
+          if [ "$SIGNING" = true ]; then
+            cargo install --locked trusted-signing-cli
+            sign="trusted-signing-cli -e $TRUSTED_SIGNING_ENDPOINT -a $TRUSTED_SIGNING_ACCOUNT -c $TRUSTED_SIGNING_PROFILE -d Desk %1"
+            config=$(jq --arg sign "$sign" '.bundle.windows.signCommand = $sign' <<<"$config")
+          fi
+          npx tauri build --bundles nsis,msi --config "$config"
+
+      - name: Collect
+        working-directory: desk
+        run: |
+          out="${{ github.workspace }}/out"
+          mkdir -p "$out"
+          cp target/release/bundle/nsis/*-setup.exe target/release/bundle/nsis/*-setup.exe.sig \
+            target/release/bundle/msi/*.msi "$out/"
+          ls -la "$out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x86_64
+          path: out/
+          if-no-files-found: error
+
   publish:
-    needs: [version, macos, linux-x86_64]
+    needs: [version, macos, linux-x86_64, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
         with:
-          pattern: "{macos,linux-x86_64}"
+          pattern: "{macos,linux-x86_64,windows-x86_64}"
           path: out
           merge-multiple: true
 
       # One latest.json for every system's updater: the universal app for
-      # both Macs, the AppImage for Linux.
+      # both Macs, the AppImage for Linux, the NSIS installer for Windows.
       - name: latest.json
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           base="https://github.com/$RELEASES_REPO/releases/download/v$VERSION"
           appimage=$(basename out/*.AppImage)
+          setup=$(basename out/*-setup.exe)
           jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION" \
             --arg mac "$base/Desk.app.tar.gz" --arg mac_sig "$(cat out/Desk.app.tar.gz.sig)" \
-            --arg linux "$base/$appimage" --arg linux_sig "$(cat "out/$appimage.sig")" '{
+            --arg linux "$base/$appimage" --arg linux_sig "$(cat "out/$appimage.sig")" \
+            --arg windows "$base/$setup" --arg windows_sig "$(cat "out/$setup.sig")" '{
               version: $v, notes: $notes, pub_date: $date,
               platforms: {
                 "darwin-aarch64": { signature: $mac_sig, url: $mac },
                 "darwin-x86_64": { signature: $mac_sig, url: $mac },
-                "linux-x86_64": { signature: $linux_sig, url: $linux }
+                "linux-x86_64": { signature: $linux_sig, url: $linux },
+                "windows-x86_64": { signature: $windows_sig, url: $windows }
               }
             }' > out/latest.json
           jq '.platforms | keys' out/latest.json

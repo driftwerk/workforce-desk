@@ -109,6 +109,10 @@ impl Paths {
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
     }
+    /// The backend the app uses, where setup chose one (WSL on Windows).
+    pub fn backend_host(&self) -> PathBuf {
+        self.root.join("backend.json")
+    }
     /// Which store this folder's secrets are in, once chosen.
     pub fn keys(&self) -> PathBuf {
         self.root.join("keys.toml")

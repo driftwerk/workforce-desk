@@ -58,9 +58,19 @@ hub keeps memories in SQLite; then it moves them into the store, once.
      `Desk_<version>_amd64.deb`;
    - the `backend-linux-x86_64` workflow artifact (the three programs and
      the Claude Code plugin), which Desk on Windows installs inside WSL.
-5. The `publish` job writes one `latest.json` (`darwin-aarch64`,
-   `darwin-x86_64` and `linux-x86_64`) and publishes everything to a GitHub
-   release.
+5. The `windows` job builds on Windows, once the Linux job is done:
+   - `Desk Helper.exe` (`crates/desk-wsl`), which keeps the backend running
+     inside the person's WSL distro from sign-in;
+   - the per-user NSIS installer with its updater `.sig`, and an `.msi` for
+     managed installs. Both carry the `backend-linux-x86_64` artifact, which
+     Desk installs into WSL on first run and after each update.
+
+   Windows builds are unsigned unless the `WINDOWS_SIGNING` variable is
+   `true`: SmartScreen then warns on first run. With it on, Azure Trusted
+   Signing signs the app, `Desk Helper.exe` and the installers.
+6. The `publish` job writes one `latest.json` (`darwin-aarch64`,
+   `darwin-x86_64`, `linux-x86_64` and `windows-x86_64`) and publishes
+   everything to a GitHub release.
 
 Installed copies check `latest.json` on launch and every four hours. They
 download the update in the background and offer **Restart to update**. A
@@ -89,10 +99,13 @@ you can add the same values here.
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the contents of `~/.tauri/desk-updater.key.password` |
 | `HUB_REPO_TOKEN` | optional: only if `driftwerk/workforce` is ever private — a token that can read it (fine-grained, Contents: read) |
 | `RELEASES_TOKEN` | *(optional)* a token that can write releases to `RELEASES_REPO` when it isn't this repo |
+| `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` | *(only with `WINDOWS_SIGNING`)* the Azure app that may sign with Trusted Signing |
 
 | Variable | What |
 | --- | --- |
 | `RELEASES_REPO` | *(optional)* `owner/name` to publish releases to. Defaults to this repo. |
+| `WINDOWS_SIGNING` | *(optional)* `true` to sign Windows builds with Azure Trusted Signing. Off by default. |
+| `TRUSTED_SIGNING_ENDPOINT`, `TRUSTED_SIGNING_ACCOUNT`, `TRUSTED_SIGNING_PROFILE` | *(only with `WINDOWS_SIGNING`)* the Trusted Signing account and certificate profile |
 
 The updater and the download link fetch release assets without logging in, so
 releases must live in a repository people can read. While this repo is private,

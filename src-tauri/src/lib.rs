@@ -12,6 +12,7 @@ mod terminals;
 mod tuple;
 mod updates;
 mod voice;
+mod wsl;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -28,10 +29,33 @@ use tauri::{Emitter, Manager, State};
 struct App {
     /// The app's own folder: settings, hubs, themes, its log.
     paths: Paths,
-    /// Where the hub and its helper run, and their folder.
-    backend: Backend,
+    /// Where the hub and its helper run, and their folder; none on Windows
+    /// until Desk is set up inside WSL.
+    backend: Option<Backend>,
     helper: Mutex<helper::Status>,
     _themes: Mutex<Option<notify::RecommendedWatcher>>,
+}
+
+/// What a command that needs the backend says when Windows has none yet.
+const NOT_SET_UP: &str =
+    "Desk runs this computer's agents inside Linux, with WSL: finish setting it up first.";
+
+impl App {
+    fn backend(&self) -> CommandResult<Backend> {
+        self.backend.clone().ok_or_else(|| NOT_SET_UP.to_string())
+    }
+}
+
+/// The backend on this computer: in the app's own folder on macOS and
+/// Linux; on Windows, inside the WSL distro setup chose, once it has.
+fn backend_of(paths: &Paths) -> eyre::Result<Option<Backend>> {
+    if !cfg!(windows) {
+        return Ok(Some(Backend::native(paths.clone())));
+    }
+    Ok(match desk_core::backend::read_host(paths)? {
+        Some(Host::Wsl(w)) => Some(Backend::wsl(w)),
+        Some(Host::Native) | None => None,
+    })
 }
 
 #[derive(Serialize)]
@@ -50,7 +74,7 @@ fn text<E: std::fmt::Display>(e: E) -> String {
 /// creating them, so this waits for both.
 #[tauri::command]
 async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
-    let backend = app.backend.clone();
+    let backend = app.backend()?;
     tauri::async_runtime::spawn_blocking(move || {
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
@@ -83,8 +107,8 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
 struct HostInfo {
     /// `macos`, `linux` or `windows`.
     platform: &'static str,
-    /// Where the backend runs.
-    host: Host,
+    /// Where the backend runs; none on Windows until Desk is set up in WSL.
+    host: Option<Host>,
     computer_name: Option<String>,
     /// Where the backend keeps its secrets, as Help names it.
     keys: &'static str,
@@ -92,15 +116,16 @@ struct HostInfo {
 
 #[tauri::command]
 async fn host_info(app: State<'_, App>) -> CommandResult<HostInfo> {
-    let backend = app.backend.clone();
+    let (paths, backend) = (app.paths.clone(), app.backend.clone());
     tauri::async_runtime::spawn_blocking(move || {
+        let keys = match &backend {
+            Some(b) => desk_core::Secrets::for_host(&b.paths, &b.host),
+            None => desk_core::Secrets::for_host(&paths, &Host::Native),
+        };
         Ok(HostInfo {
             platform: std::env::consts::OS,
-            keys: desk_core::Secrets::for_host(&backend.paths, &backend.host)
-                .map_err(text)?
-                .store()
-                .name(),
-            host: backend.host,
+            keys: keys.map_err(text)?.store().name(),
+            host: backend.map(|b| b.host),
             computer_name: desk_core::computer_name(),
         })
     })
@@ -143,7 +168,7 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
 #[tauri::command]
 async fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> {
     let (paths, backend) = (app.paths.clone(), app.backend.clone());
-    tauri::async_runtime::spawn_blocking(move || hubs::accounts(&paths, &backend))
+    tauri::async_runtime::spawn_blocking(move || hubs::accounts(&paths, backend.as_ref()))
         .await
         .map_err(text)?
         .map_err(text)
@@ -199,7 +224,7 @@ fn tuple_available() -> bool {
 
 #[tauri::command]
 async fn login_start(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
-    let backend = app.state::<App>().backend.clone();
+    let backend = app.state::<App>().backend()?;
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<logins::Logins>().start(&app, backend, plan)
     })
@@ -227,6 +252,9 @@ fn login_cancel(logins: State<'_, logins::Logins>, plan: logins::Plan) {
 async fn helper_status(app: State<'_, App>) -> CommandResult<helper::Status> {
     let backend = app.backend.clone();
     let status = tauri::async_runtime::spawn_blocking(move || {
+        let Some(backend) = backend else {
+            return helper::Status::NotRegistered;
+        };
         let login = helper::login(&backend);
         match login.status() {
             helper::Status::NotRegistered => login.ensure(),
@@ -241,21 +269,26 @@ async fn helper_status(app: State<'_, App>) -> CommandResult<helper::Status> {
 
 #[tauri::command]
 fn helper_open_login_items(app: State<'_, App>) {
-    helper::login(&app.backend).open_settings();
+    if let Some(backend) = &app.backend {
+        helper::login(backend).open_settings();
+    }
 }
 
 /// Off the main thread: finding the CLI reads the login shell's PATH.
 #[tauri::command]
-async fn cli_installed(plan: logins::Plan) -> CommandResult<bool> {
-    tauri::async_runtime::spawn_blocking(move || logins::install::installed(plan))
+async fn cli_installed(app: State<'_, App>, plan: logins::Plan) -> CommandResult<bool> {
+    let backend = app.backend()?;
+    tauri::async_runtime::spawn_blocking(move || logins::install::installed(&backend, plan))
         .await
         .map_err(text)
 }
 
 #[tauri::command]
 async fn cli_install(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+    let backend = app.state::<App>().backend()?;
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<logins::install::Installs>().start(&app, plan)
+        app.state::<logins::install::Installs>()
+            .start(&app, backend, plan)
     })
     .await
     .map_err(text)?
@@ -267,24 +300,46 @@ async fn report_save(app: State<'_, App>, path: PathBuf, about: String) -> Comma
     let (paths, backend) = (app.paths.clone(), app.backend.clone());
     let helper = format!("{:?}", *app.helper.lock().expect("helper"));
     tauri::async_runtime::spawn_blocking(move || {
-        let about = format!("{about}\n{}\nDesk Helper: {helper}\n", os_version());
-        let known = support::known_secrets(&paths, &backend);
-        support::write_report(&paths, &backend.paths, &known, &about, &path)
+        let about = format!(
+            "{about}\n{}\nDesk Helper: {helper}\n",
+            os_version(backend.as_ref())
+        );
+        let known = support::known_secrets(&paths, backend.as_ref());
+        support::write_report(
+            &paths,
+            backend.as_ref().map(|b| &b.paths),
+            &known,
+            &about,
+            &path,
+        )
     })
     .await
     .map_err(text)?
     .map_err(text)
 }
 
-/// The system and its version, as a report says it ("macOS 15.1").
-fn os_version() -> String {
+/// The system and its version, as a report says it ("macOS 15.1"), and
+/// with WSL the distro and its kernel.
+fn os_version(backend: Option<&Backend>) -> String {
     let system = match tauri_plugin_os::platform() {
         "macos" => "macOS",
         "windows" => "Windows",
         "linux" => "Linux",
         other => other,
     };
-    format!("{system} {}", tauri_plugin_os::version())
+    let os = format!("{system} {}", tauri_plugin_os::version());
+    match backend.map(|b| &b.host) {
+        Some(host @ Host::Wsl(w)) => {
+            let kernel = host
+                .invocation("uname", &["-r"])
+                .command()
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            format!("{os}\nWSL: {} (kernel {kernel})", w.distro)
+        }
+        Some(Host::Native) | None => os,
+    }
 }
 
 /// Stops Desk Helper and takes it out of what starts at login; with
@@ -292,10 +347,12 @@ fn os_version() -> String {
 #[tauri::command]
 async fn data_remove(app: State<'_, App>, everything: bool) -> CommandResult<()> {
     let (paths, backend) = (app.paths.clone(), app.backend.clone());
-    tauri::async_runtime::spawn_blocking(move || support::remove(&paths, &backend, everything))
-        .await
-        .map_err(text)?
-        .map_err(text)
+    tauri::async_runtime::spawn_blocking(move || {
+        support::remove(&paths, backend.as_ref(), everything)
+    })
+    .await
+    .map_err(text)?
+    .map_err(text)
 }
 
 /// Everything Desk keeps to restore (its own copy; the hub has the same).
@@ -440,17 +497,21 @@ fn grid_monitors(app: tauri::AppHandle) -> Vec<grid_windows::MonitorInfo> {
     grid_windows::monitors(&app)
 }
 
-/// Desk's Claude Code plugin folder, for the shells of grid terminals; none
-/// when this build doesn't have it.
+/// Desk's Claude Code plugin folder, for the shells of grid terminals, as
+/// the backend names it; none when this build doesn't have it.
 #[tauri::command]
-fn claude_plugin_dir(app: tauri::AppHandle) -> Option<String> {
-    terminals::plugin_dir(&app).map(|p| p.to_string_lossy().into_owned())
+fn claude_plugin_dir(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+) -> CommandResult<Option<String>> {
+    Ok(terminals::plugin_dir(&handle, &app.backend()?.host))
 }
 
 /// What's running in a terminal whose shell is `pid`, shell first.
 #[tauri::command]
-async fn programs_under(pid: u32) -> CommandResult<Vec<String>> {
-    tauri::async_runtime::spawn_blocking(move || terminals::programs_under(pid))
+async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<String>> {
+    let backend = app.backend()?;
+    tauri::async_runtime::spawn_blocking(move || terminals::programs_under(&backend.host, pid))
         .await
         .map_err(text)?
         .map_err(text)
@@ -461,7 +522,7 @@ async fn programs_under(pid: u32) -> CommandResult<Vec<String>> {
 fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<updates::Updating> {
     let exe = std::env::current_exe().map_err(text)?;
     let env = std::env::vars().collect();
-    let install = desk_core::install::Install::of(&exe, &env, &app.backend.paths);
+    let install = desk_core::install::Install::of(&exe, &env, &app.paths);
     let endpoint = handle
         .config()
         .plugins
@@ -526,7 +587,12 @@ pub fn run() {
         // at login and stops it, for uninstall scripts and for testing a
         // build.
         if std::env::args().any(|a| a == "--unregister-helper") {
-            let code = match helper::login(&Backend::native(paths.clone())).unregister() {
+            let unregistered = match backend_of(&paths) {
+                Ok(Some(backend)) => helper::login(&backend).unregister(),
+                Ok(None) => Ok(()),
+                Err(e) => Err(e),
+            };
+            let code = match unregistered {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("Couldn't remove Desk Helper: {e}");
@@ -565,19 +631,30 @@ pub fn run() {
                 .expect("frames")
                 .insert("main".into(), main);
             app.manage(store);
-            // The installed app makes Desk Helper start at login; a
-            // development run talks to a supervisor started by hand.
-            let backend = Backend::native(paths.clone());
-            let helper = helper::login(&backend).ensure();
-            tracing::info!(?helper, version = %app.package_info().version, "Desk starting");
+            let backend = backend_of(&paths)?;
+            tracing::info!(host = ?backend.as_ref().map(|b| &b.host), version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths, backend.clone()));
             app.manage(attachments::Files::new(paths.clone(), backend.clone()));
             app.manage(App {
                 paths,
                 backend,
-                helper: Mutex::new(helper),
+                helper: Mutex::new(helper::Status::Starting),
                 _themes: Mutex::new(Some(watcher)),
+            });
+            // The installed app makes Desk Helper start at login (on Windows
+            // it also installs the backend it carries into WSL, which takes
+            // a while): off the main thread. A development run talks to a
+            // supervisor started by hand.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let app = handle.state::<App>();
+                let status = match &app.backend {
+                    Some(backend) => helper::login(backend).ensure(),
+                    None => helper::Status::NotRegistered,
+                };
+                tracing::info!(?status, "Desk Helper");
+                *app.helper.lock().expect("helper") = status;
             });
             Ok(())
         })
@@ -638,7 +715,13 @@ pub fn run() {
             voice::voice_kokoro_voices,
             voice::voice_engine_voices,
             voice::voice_lookup,
-            voice::voice_status
+            voice::voice_status,
+            wsl::wsl_detect,
+            wsl::wsl_install,
+            wsl::wsl_convert,
+            wsl::wsl_setup,
+            wsl::wsl_fix_forwarding,
+            wsl::wsl_installed
         ])
         .build(tauri::generate_context!())
         .expect("Desk failed to start")

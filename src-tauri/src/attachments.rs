@@ -54,13 +54,15 @@ impl std::fmt::Display for Failure {
 /// or one turns a token away, and the client every request shares.
 pub struct Files {
     paths: Paths,
-    backend: Backend,
+    /// Where the local hub runs; none until Desk has one (Windows before
+    /// WSL is set up).
+    backend: Option<Backend>,
     client: reqwest::Client,
     hubs: Mutex<Option<Arc<Vec<HubAccount>>>>,
 }
 
 impl Files {
-    pub fn new(paths: Paths, backend: Backend) -> Self {
+    pub fn new(paths: Paths, backend: Option<Backend>) -> Self {
         Self {
             paths,
             backend,
@@ -79,7 +81,7 @@ impl Files {
         if let Some(hubs) = kept.as_ref() {
             return Ok(hubs.clone());
         }
-        let read = Arc::new(hubs::accounts(&self.paths, &self.backend)?);
+        let read = Arc::new(hubs::accounts(&self.paths, self.backend.as_ref())?);
         *kept = Some(read.clone());
         Ok(read)
     }
