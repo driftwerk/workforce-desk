@@ -182,7 +182,11 @@ export function BriefCard({
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void pause()}>
             {busy ? "Pausing…" : "Pause oversight"}
           </button>
-          {problem && <span className="small state-blocked">{problem}</span>}
+          {problem && (
+            <span className="small state-blocked" role="alert">
+              {problem}
+            </span>
+          )}
         </div>
       </div>
     </section>
@@ -199,7 +203,11 @@ export function PausedNote({ who, onResumed }: { who: { id: string; name: string
       <button type="button" className="btn" onClick={() => setOverseeing(who.id, true).then(onResumed, (e: unknown) => setProblem(plainError(e)))}>
         Turn back on
       </button>
-      {problem && <span className="small state-blocked">{problem}</span>}
+      {problem && (
+        <span className="small state-blocked" role="alert">
+          {problem}
+        </span>
+      )}
     </section>
   );
 }
