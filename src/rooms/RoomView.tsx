@@ -87,7 +87,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
     setCaret(0);
     setSending(true);
     say(room, text, threadId, picked)
-      .then(() => files.clear())
+      .then(() => files.sent(picked))
       .catch((err: unknown) => {
         setDraft(text);
         if (picked.length) files.setProblem(err instanceof Error ? err.message : String(err));

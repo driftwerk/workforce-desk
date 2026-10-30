@@ -185,6 +185,9 @@ describe("sending files", () => {
         <button type="button" onClick={() => onSend(files.files.map((f) => f.name))}>
           Send
         </button>
+        <button type="button" onClick={() => files.sent(files.files.slice(0, 1))}>
+          Sent the first
+        </button>
         {drop.dragging && <DropOverlay to="Allan" />}
       </div>
     );
@@ -205,6 +208,15 @@ describe("sending files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove contract-draft.pdf" }));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(sent).toEqual([["notes.txt"]]);
+  });
+
+  it("lets go only of the files a message took, keeping one picked while it went", () => {
+    const { container } = render(<Box onSend={() => {}} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["a"], "first.pdf"), new File(["b"], "later.txt")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Sent the first" }));
+    expect(screen.queryByText("first.pdf")).toBeNull();
+    expect(screen.getByText("later.txt")).toBeTruthy();
   });
 
   it("leaves a drag of something other than files alone", () => {

@@ -193,7 +193,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       .then((attachments) => {
         if (!send(activeAgent, draft, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         setDraft("");
-        files.clear();
+        files.sent(picked);
       })
       .catch((err: unknown) => files.setProblem(err instanceof Error ? err.message : String(err)))
       .finally(() => setSending(false));

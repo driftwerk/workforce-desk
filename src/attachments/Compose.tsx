@@ -22,14 +22,18 @@ export const adding = (have: readonly Pending[], files: readonly File[], id: () 
 };
 
 /** The files you've picked or dropped for your next message, and what was
- *  wrong with any that couldn't be. */
+ *  wrong with any that couldn't be; `sent` lets go of those a message took,
+ *  keeping any picked while it went. */
 export function usePendingFiles() {
   const [state, setState] = useState<{ pending: Pending[]; problem: string | null }>({ pending: [], problem: null });
   const add = useCallback((files: readonly File[]) => setState((s) => adding(s.pending, files, () => crypto.randomUUID())), []);
   const remove = useCallback((id: string) => setState((s) => ({ ...s, pending: s.pending.filter((p) => p.id !== id) })), []);
-  const clear = useCallback(() => setState({ pending: [], problem: null }), []);
+  const sent = useCallback(
+    (files: readonly File[]) => setState((s) => ({ pending: s.pending.filter((p) => !files.includes(p.file)), problem: null })),
+    [],
+  );
   const setProblem = useCallback((problem: string | null) => setState((s) => ({ ...s, problem })), []);
-  return { ...state, files: state.pending.map((p) => p.file), add, remove, clear, setProblem };
+  return { ...state, files: state.pending.map((p) => p.file), add, remove, sent, setProblem };
 }
 
 /** 📎: picks files for your next message. */
