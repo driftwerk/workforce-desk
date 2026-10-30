@@ -68,6 +68,16 @@ describe("going to a target", () => {
     expect(useUi.getState().roomThreads).toEqual({});
   });
 
+  it("opens a thread older than the room's latest messages at the thread", async () => {
+    const reply = { ...message("m-r"), threadId: "m-old" };
+    useDesk.setState({
+      hub: { roomMessages: vi.fn(async (_: string, thread?: string) => (thread === "m-old" ? [reply] : [])) } as never,
+    });
+    openTarget({ kind: "room", roomId: "r1", threadId: "m-old" }, { reply: true });
+    await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-old"));
+    expect(useUi.getState().roomThreads).toEqual({ r1: "m-old" });
+  });
+
   it("opens Slack in the browser", () => {
     openTarget({ kind: "slack", url: "https://slack.com/app_redirect?channel=C1" });
     expect(openUrl).toHaveBeenCalledWith("https://slack.com/app_redirect?channel=C1");

@@ -33,10 +33,14 @@ export const focusKeyOf = (t: Target): string | null => {
 const openRoom = async (roomId: string, threadId: string | null): Promise<boolean> => {
   const desk = useDesk.getState();
   await desk.openRoom(roomId);
-  // A thread that's gone leaves the room's main timeline showing.
-  const thread = threadId && useDesk.getState().timelines[roomId]?.some((m) => m.id === threadId) ? threadId : null;
+  const known = () => !!threadId && !!useDesk.getState().timelines[roomId]?.some((m) => m.id === threadId || m.threadId === threadId);
+  // A thread older than the room's latest page is read before it's taken
+  // for gone; one that's gone leaves the room's main timeline showing.
+  const seen = known();
+  if (threadId && !seen) await desk.openThread(roomId, threadId);
+  const thread = known() ? threadId : null;
   useUi.getState().setRoomThread(roomId, thread);
-  if (thread) await desk.openThread(roomId, thread);
+  if (thread && seen) await desk.openThread(roomId, thread);
   return thread === threadId;
 };
 
