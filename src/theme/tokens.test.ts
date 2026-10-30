@@ -96,6 +96,7 @@ describe("a theme file from before chats and code had sizes", () => {
 
   it("refuses sizes out of range", () => {
     expect(() => parseTheme("x", old.replace("size = 16", "size = 16\nchat_size = 40"))).toThrow(ThemeError);
+    expect(() => parseTheme("x", old.replace("size = 16", "size = 16\nchat_size = nan"))).toThrow(ThemeError);
     expect(() => parseTheme("x", old.replace("size = 16", "size = 16\ncode_size = \"big\""))).toThrow("[type].code_size must be a number from 9 to 22");
     expect(() => parseTheme("x", old.replace("size = 16", "size = 30"))).toThrow("[type].size must be a number from 10 to 22");
   });

@@ -35,7 +35,7 @@ const sizeOf = (type: Table, role: SizeRole): number | undefined => {
   const v = type[SIZE_KEYS[role]];
   const [min, max] = SIZE_RANGES[role];
   if (v === undefined) return undefined;
-  if (typeof v !== "number" || v < min || v > max) throw new ThemeError(`[type].${SIZE_KEYS[role]} must be a number from ${min} to ${max}`);
+  if (typeof v !== "number" || !(v >= min && v <= max)) throw new ThemeError(`[type].${SIZE_KEYS[role]} must be a number from ${min} to ${max}`);
   return v;
 };
 
