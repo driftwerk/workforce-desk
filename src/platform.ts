@@ -1,4 +1,4 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
@@ -169,15 +169,27 @@ export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { 
 // has no native side, asks the hub directly.
 
 /** Where a file of agent `agent` on hub `hub` is shown from: an image's
- *  `src`, a player's (which seeks by range). */
+ *  `src`, a player's (which seeks by range). Desk's `deskfile:` scheme is
+ *  served where the webview serves it: `deskfile://localhost/` on macOS and
+ *  Linux, `http://deskfile.localhost/` on Windows. */
 export const fileUrl = (hub: HubAccount, agent: string, artifact: string): string =>
   preview
     ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(hub.token)}`
-    : `deskfile://localhost/${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
+    : `${convertFileSrc("", "deskfile")}${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
 
 /** Opens a file in the app this computer opens its kind with. */
 export const openFile = (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<void> =>
   preview ? Promise.resolve(void window.open(fileUrl(hub, agent, artifact), "_blank", "noopener")) : invoke("attachment_open", { hub: hub.id, agent, artifact, filename });
+
+/** `name` as a file's name on any system: no folders, none of the
+ *  characters Windows refuses, no trailing dots or spaces, and none of the
+ *  names it keeps for devices. */
+export const safeFilename = (name: string): string => {
+  const base = (name.split(/[/\\]/).pop() ?? "")
+    .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
+    .replace(/[. ]+$/, "");
+  return !base || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(base) ? `_${base}` : base;
+};
 
 /** Asks where to save a file, and saves it there; false when the person
  *  thought better of it. */
@@ -187,7 +199,7 @@ export const saveFileAs = async (hub: HubAccount, agent: string, artifact: strin
     a.click();
     return true;
   }
-  const path = await save({ defaultPath: filename });
+  const path = await save({ defaultPath: safeFilename(filename) });
   if (!path) return false;
   await invoke("attachment_save", { hub: hub.id, agent, artifact, path });
   return true;
