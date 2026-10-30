@@ -90,7 +90,7 @@ export const useFloor = create<FloorStore>((set, get) => {
         ...s.hubs,
         [hubId]: {
           state: "ready",
-          floor: { ...view, needs: view.needs.filter((n) => !((s.answered[`${hubId}/${n.id}`]?.read ?? 0) >= nth)) },
+          floor: { ...view, needs: view.needs.filter((n) => (s.answered[`${hubId}/${n.id}`]?.read ?? 0) < nth) },
           usage: usage.status === "fulfilled" ? usage.value : missing(usage.reason) ? null : (s.hubs[hubId]?.usage ?? null),
           offset: Date.parse(view.asOf) - receivedAt,
           stale: false,
