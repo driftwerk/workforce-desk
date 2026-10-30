@@ -130,16 +130,16 @@ pub fn on_windows_drive(root: &Path, filesystem: Option<i64>) -> bool {
     root.starts_with(desk_core::host::DEFAULT_AUTOMOUNT) || filesystem == Some(V9FS_MAGIC)
 }
 
+// `statfs`'s `f_type` is i64, i32 or u32 by architecture.
 #[cfg(target_os = "linux")]
+#[allow(clippy::unnecessary_cast)]
 fn filesystem(path: &Path) -> Option<i64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
     // SAFETY: a NUL-terminated path and a buffer statfs fills.
     let found = unsafe { libc::statfs(path.as_ptr(), fs.as_mut_ptr()) } == 0;
-    // SAFETY: statfs filled it. Its `f_type` is i64, i32 or u32 by
-    // architecture.
-    #[allow(clippy::unnecessary_cast)]
+    // SAFETY: statfs filled it.
     found.then(|| unsafe { fs.assume_init() }.f_type as i64)
 }
 
