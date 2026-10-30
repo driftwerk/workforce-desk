@@ -1,6 +1,7 @@
 // `ui.main`: what the main window shows — Floor or Rooms, the room or DM
 // that's open, the session card, the DM beside the Floor, the right-hand
-// panels' widths and the one focused, the settings page and its section,
+// panels' widths and the one focused, whether the Floor's Activity list is
+// open or docked, the settings page and its section,
 // each agent's tab and the panes' scroll positions. Dialogs aren't kept: they
 // reopen on nothing.
 
@@ -39,6 +40,8 @@ export interface MainUi {
   panelWidths: Partial<Record<PanelKind, number>>;
   /** The panel filling the main area, and the one beside it. */
   panelFocus: PanelFocus | null;
+  /** The Floor's Activity list is open (false: docked as a tab). */
+  activity: boolean;
 }
 
 export const DEFAULT_UI: MainUi = {
@@ -57,6 +60,7 @@ export const DEFAULT_UI: MainUi = {
   anchors: {},
   panelWidths: {},
   panelFocus: null,
+  activity: true,
 };
 
 const TABS: readonly string[] = ["chat", "settings", "files"];
@@ -105,6 +109,7 @@ export const sanitize = (raw: unknown): MainUi => {
       ),
     ),
     panelFocus: focusOf(o.panelFocus),
+    activity: o.activity !== false,
   };
 };
 
@@ -128,6 +133,7 @@ export const capture = (): MainUi => {
     anchors: ui.anchors,
     panelWidths: ui.panelWidths,
     panelFocus: ui.panelFocus,
+    activity: ui.activityOpen,
   };
 };
 
@@ -146,6 +152,7 @@ export const apply = (ui: MainUi): void => {
     anchors: ui.anchors,
     panelWidths: ui.panelWidths,
     panelFocus: ui.panelFocus,
+    activityOpen: ui.activity,
   });
   if (ui.room) void useDesk.getState().reloadRoom(ui.room);
   if (ui.dm) useChat.getState().reopenDm();

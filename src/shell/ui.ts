@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { PanelKind } from "../panels/layout";
 
 export const SETTINGS_SECTIONS = {
+  profile: "Profile",
   appearance: "Appearance",
   hubs: "Workspaces",
   providers: "Providers",
@@ -50,6 +51,9 @@ interface UiState {
   panelWidths: Partial<Record<PanelKind, number>>;
   /** The panel filling the main area, else null. */
   panelFocus: PanelFocus | null;
+  /** The Floor's Activity list is open, not docked as a tab. */
+  activityOpen: boolean;
+  setActivityOpen: (open: boolean) => void;
   /** Kind `kind`'s width; null puts back its default. */
   setPanelWidth: (kind: PanelKind, width: number | null) => void;
   /** Panel `kind` fills the main area; what was beside it stays docked. */
@@ -78,6 +82,8 @@ export const useUi = create<UiState>((set) => ({
   anchors: {},
   panelWidths: {},
   panelFocus: null,
+  activityOpen: true,
+  setActivityOpen: (activityOpen) => set((s) => (s.activityOpen === activityOpen ? s : { activityOpen })),
   setPanelWidth: (kind, width) =>
     set((s) => {
       if (s.panelWidths[kind] === (width ?? undefined)) return s;

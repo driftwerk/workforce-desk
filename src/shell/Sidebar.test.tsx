@@ -10,6 +10,8 @@ import { useSettings } from "../settings/store";
 import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
 import { Sidebar, scrollEdges } from "./Sidebar";
 import { useUi } from "./ui";
+import { useChat } from "../chat/store";
+import { servePictures } from "../pictures/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -270,5 +272,23 @@ describe("deleting from the sidebar", () => {
     fireEvent.click(within(grids).getByRole("button", { name: "New grid" }));
     expect(useGrids.getState().order).toHaveLength(1);
     expect(within(grids).queryByText("No grids yet")).toBeNull();
+  });
+
+  it("shows agents with their pictures, and you round at the bottom, opening your Profile", async () => {
+    servePictures();
+    const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+    useChat.setState({
+      hubs: [local],
+      roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "chosen", at: "" } }],
+      me: { local: { id: "u1", name: "Sam", picture: { version: "m1", source: "chosen", at: "" } } },
+    });
+    const { container } = sidebar();
+    const groups = within(container.querySelector(".side-scroll") as HTMLElement).getByRole("region", { name: "Groups" });
+    await vi.waitFor(() => expect(within(groups).getByText("Scout").closest(".gi-wrap")!.querySelector(".mark img")).toBeTruthy());
+    const you = screen.getByRole("button", { name: /Sam/ });
+    await vi.waitFor(() => expect(you.querySelector(".mark-person img")).toBeTruthy());
+    fireEvent.click(you);
+    expect(useUi.getState().settings).toBe("profile");
+    vi.unstubAllGlobals();
   });
 });

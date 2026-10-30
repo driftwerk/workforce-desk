@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
@@ -253,5 +253,33 @@ describe("Renaming in Settings", () => {
     expect(await screen.findByText(/Renamed, but their files still say Ledger/)).toBeTruthy();
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
     expect(name.value).toBe("Penny");
+  });
+});
+
+describe("A picture in About", () => {
+  const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+  const remote = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t" };
+  const slack = { version: "s1", source: "slack" as const, at: "", slack: "Acme" };
+
+  it("of an agent here, goes back to its Slack picture, and the roster shows what the hub now shows", async () => {
+    const setAgentPicture = vi.fn(() => Promise.resolve(slack));
+    const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false, picture: { ...slack, version: "c1", source: "chosen" } };
+    useDesk.setState({ hub: fakeHub({ setAgentPicture } as Partial<DeskHub>) });
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
+    render(<AgentSettings agent={agent} hub={local} onOpenFiles={() => {}} />);
+    const about = screen.getByRole("region", { name: "About" });
+    expect(within(about).getByText(/^Chosen/)).toBeTruthy();
+    await act(async () => fireEvent.click(within(about).getByRole("button", { name: "Use the Slack picture" })));
+    expect(setAgentPicture).toHaveBeenCalledWith("ledger", null);
+    expect(useChat.getState().roster[0]!.picture).toEqual(slack);
+  });
+
+  it("of an agent on another workspace, is shown as it has it, not changed here", () => {
+    const agent: Agent = { hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false, picture: slack };
+    useChat.setState({ hubs: [local, remote], roster: [agent] });
+    render(<AgentSettings agent={agent} hub={remote} onOpenFiles={() => {}} />);
+    const about = screen.getByRole("region", { name: "About" });
+    expect(within(about).getByText("From Slack (Acme)")).toBeTruthy();
+    expect(within(about).queryByRole("button", { name: "Choose a picture…" })).toBeNull();
   });
 });

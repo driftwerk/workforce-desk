@@ -1,6 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@workforce/rich", () => ({
+  RichHostProvider: ({ children }: { children: unknown }) => children,
+  RichMarkdown: ({ text }: { text: string }) => text,
+}));
+
 const said: string[] = [];
 vi.mock("./engine", () => ({
   say: vi.fn(async (_room: unknown, text: string) => void said.push(text)),
@@ -86,5 +91,37 @@ describe("the room composer's @ list", () => {
   it("says plainly what @ does", () => {
     render(<RoomView room={room} />);
     expect(screen.getByPlaceholderText("Message release — @ someone to ask them, or to bring them in")).toBeTruthy();
+  });
+});
+
+describe("pictures in a room", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("show members in the header, each agent's messages and the @ list, and you as Desk shows you", async () => {
+    const { servePictures } = await import("../pictures/testing");
+    const fetch = servePictures();
+    const pic = (version: string) => ({ version, source: "chosen" as const, at: "" });
+    useChat.setState((s) => ({
+      roster: s.roster.map((a) => ({ ...a, picture: pic(`${a.id}-1`) })),
+      me: { local: { id: "u-local", name: "Sam", picture: null }, dw: { id: "u-dw", name: "Sam", picture: pic("d1") } },
+    }));
+    const at = "2026-10-30T09:00:00Z";
+    useDesk.setState({
+      timelines: {
+        r1: [
+          { id: "m1", roomId: "r1", threadId: null, author: "you", content: "Status?", hop: 0, createdAt: at },
+          { id: "m2", roomId: "r1", threadId: null, author: "local/scout", content: "Green.", hop: 0, createdAt: at },
+        ],
+      },
+    });
+    const { container } = render(<RoomView room={room} />);
+    await vi.waitFor(() => expect(container.querySelector(".member-stack .mark img")).toBeTruthy());
+    const [mine, theirs] = [...container.querySelectorAll(".msg")];
+    await vi.waitFor(() => expect(theirs!.querySelector(".mark img")).toBeTruthy());
+    await vi.waitFor(() => expect(mine!.querySelector(".mark-person img")).toBeTruthy());
+    // This computer's account has none yet: the first connected workspace's picture.
+    expect(fetch.mock.calls.map(([u]) => String(u))).toContain("https://dw/api/me/picture");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "@", selectionStart: 1, selectionEnd: 1 } });
+    await vi.waitFor(() => expect(screen.getAllByRole("option").every((o) => o.querySelector(".mark img"))).toBe(true));
   });
 });

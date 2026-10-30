@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
 import { covered, fetchHistory, prepend } from "./history";
-import { agentKey, type Agent, type ChatMessage, type HubAccount } from "./types";
+import { agentKey, type Agent, type ChatMessage, type HubAccount, type Me } from "./types";
 import { hubFetch } from "../hub/net";
+import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
 export interface History {
@@ -23,9 +24,13 @@ interface ChatStore {
   hubs: HubAccount[];
   roster: Agent[];
   rosterErrors: Record<string, string>;
-  /** Your name on each hub that says it (this Mac's), by hub id: how the
-   *  hub words a suggestion you said yes to. */
-  people: Record<string, string>;
+  /** You on each hub that knows you (your name there words a suggestion you
+   *  said yes to; your picture there shows you in its places), by hub id. */
+  me: Record<string, Me>;
+  /** Reads who you are on `hubId` again (after your picture changed elsewhere). */
+  refreshMe: (hubId: string) => Promise<void>;
+  /** Shows the picture an agent or you now have, until the hub is read again. */
+  setPicture: (who: { agent: string } | { me: string }, picture: Picture | null) => void;
   conversations: Record<string, ConversationState>;
   /** Each open DM's earlier messages, by agent key. */
   histories: Record<string, History>;
@@ -71,7 +76,7 @@ const live = new Map<string, Conversation>();
 const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
 
 interface AgentsResponse {
-  agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean }[];
+  agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean; picture?: unknown }[];
 }
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
@@ -85,16 +90,19 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
     model: a.model ?? null,
     provider: a.provider ?? null,
     isDefault: a.default ?? false,
+    picture: pictureOf(a.picture),
   }));
 };
 
-/** Your name on `hub`, if it says. */
-const fetchPerson = async (hub: HubAccount): Promise<string | null> => {
+/** You on `hub`, if it knows you. */
+const fetchMe = async (hub: HubAccount): Promise<Me | null> => {
   try {
     const res = await hubFetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
-    const body = (await res.json()) as { display_name?: unknown };
-    return typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
+    const body = (await res.json()) as { id?: unknown; display_name?: unknown; picture?: unknown };
+    if (typeof body.id !== "string") return null;
+    const name = typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
+    return { id: body.id, name, picture: pictureOf(body.picture) };
   } catch {
     return null;
   }
@@ -137,7 +145,25 @@ export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
   rosterErrors: {},
-  people: {},
+  me: {},
+  refreshMe: async (hubId) => {
+    const hub = get().hubs.find((h) => h.id === hubId);
+    if (!hub) return;
+    const me = await fetchMe(hub);
+    if (!get().hubs.some((h) => h.id === hubId)) return;
+    set((s) => {
+      const { [hubId]: _was, ...others } = s.me;
+      return { me: me ? { ...others, [hubId]: me } : others };
+    });
+  },
+  setPicture: (who, picture) =>
+    set((s) =>
+      "agent" in who
+        ? { roster: s.roster.map((a) => (agentKey(a) === who.agent ? { ...a, picture } : a)) }
+        : s.me[who.me]
+          ? { me: { ...s.me, [who.me]: { ...s.me[who.me]!, picture } } }
+          : s,
+    ),
   conversations: {},
   histories: {},
   activeAgent: null,
@@ -162,14 +188,18 @@ export const useChat = create<ChatStore>((set, get) => ({
       histories: Object.fromEntries(Object.entries(s.histories).filter(([key]) => hubs.some((h) => key.startsWith(`${h.id}/`)))),
       // On a hub that isn't paired any more, the side panel's agent is gone.
       panelAgent: hubs.some((h) => s.panelAgent?.startsWith(`${h.id}/`)) ? s.panelAgent : null,
+      // Who you are on a hub reached with another token is read again.
+      me: Object.fromEntries(
+        Object.entries(s.me).filter(([id]) => {
+          const now = hubs.find((h) => h.id === id);
+          const was = before.find((h) => h.id === id);
+          return now && was && now.token === was.token && now.url === was.url;
+        }),
+      ),
     }));
     for (const key of reopen) ensure(key);
     void get().refreshRoster();
-    // The overseer, and so its suggestions, are on this Mac.
-    for (const hub of hubs.filter((h) => h.local && !(h.id in get().people)))
-      void fetchPerson(hub).then((name) => {
-        if (name && get().hubs.some((h) => h.id === hub.id)) set((s) => ({ people: { ...s.people, [hub.id]: name } }));
-      });
+    for (const hub of hubs.filter((h) => !(h.id in get().me))) void get().refreshMe(hub.id);
   },
   refreshRoster: async () => {
     const results = await Promise.allSettled(get().hubs.map(fetchAgents));

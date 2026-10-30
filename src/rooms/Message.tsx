@@ -4,7 +4,7 @@ import { openUrl } from "../platform";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
-import { Mark } from "../ui/Mark";
+import { AgentMark, Mark, YouMark } from "../ui/Mark";
 
 const time = (iso: string) => {
   const d = new Date(iso);
@@ -14,12 +14,19 @@ const time = (iso: string) => {
 export function Message({
   message,
   author,
+  authorKey,
+  youOn = null,
   home,
   relayed,
   onSubmitForm,
 }: {
   message: ChatMessage;
   author: string;
+  /** The author's agent key, when an agent wrote it. */
+  authorKey?: string;
+  /** The hub whose places this is in (null or none: Desk's own), whose
+   *  picture of you shows on what you said. */
+  youOn?: string | null;
   home?: string;
   /** A turn the overseer sent on, shown as from it (or from you, saying yes
    *  to it), not as something you typed. */
@@ -38,7 +45,7 @@ export function Message({
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
   return (
     <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`} data-message-id={message.id}>
-      {you ? <span className="msg-avatar">K</span> : <Mark name={fromOverseer ? relayed.overseer : author} />}
+      {you ? <YouMark hub={youOn} /> : fromOverseer || !authorKey ? <Mark name={fromOverseer ? relayed.overseer : author} /> : <AgentMark agent={authorKey} name={author} />}
       <div className="msg-body">
         <span className="msg-head">
           <b className="display">{name}</b>{" "}

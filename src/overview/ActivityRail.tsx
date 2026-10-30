@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Ref } from "react";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
@@ -53,8 +53,16 @@ const EMPTY: Record<ActivityFilter, string> = {
 };
 
 /** What happened on the crew, newest first, as it happens: everything, what
- *  needed you, or what the overseer did. */
-export function ActivityRail({ managerName }: { managerName: string | null }) {
+ *  needed you, or what the overseer did. Closing it docks it as a tab. */
+export function ActivityRail({
+  managerName,
+  onClose,
+  closeRef,
+}: {
+  managerName: string | null;
+  onClose: () => void;
+  closeRef?: Ref<HTMLButtonElement>;
+}) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const feed = useOverview((s) => s.feeds[filter]);
   const { loadActivity, loadEarlier } = useOverview();
@@ -76,9 +84,16 @@ export function ActivityRail({ managerName }: { managerName: string | null }) {
   return (
     <aside className="activity" aria-labelledby="activity-head">
       <div className="activity-head">
-        <h2 id="activity-head" className="display">
-          Activity
-        </h2>
+        <div className="activity-title">
+          <h2 id="activity-head" className="display">
+            Activity
+          </h2>
+          <button ref={closeRef} type="button" className="icon-btn-sm" aria-label="Close Activity" title="Close (it waits on the right)" onClick={onClose}>
+            <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+              <path d="M3 3l8 8M11 3l-8 8" />
+            </svg>
+          </button>
+        </div>
         <div className="seg activity-filter" role="radiogroup" aria-label="Show">
           {options.map((o, i) => (
             <button

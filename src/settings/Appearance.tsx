@@ -6,8 +6,9 @@ import { importTheme } from "../theme/import";
 import { allThemes, resolveTheme, useThemeStore } from "../theme/store";
 import { serializeTheme } from "../theme/toml";
 import { contrastChecks, cssVariables, derive, isHex, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
-import { applyEdit, BACKGROUNDS, copyOf, DERIVED, FONTS, isBuiltin, SIGNALS, upsert, withOverride, type Swatch } from "./editing";
+import { applyEdit, BACKGROUNDS, copyOf, DERIVED, isBuiltin, SIGNALS, upsert, withOverride, type Swatch } from "./editing";
 import { exportThemeFile, pickThemeFile } from "./files";
+import { TypeSettings } from "./TypeSettings";
 
 const SAVE_DELAY = 300;
 
@@ -21,12 +22,6 @@ const CORNERS: readonly [Corners, string][] = [
   ["soft", "Soft"],
   ["round", "Round"],
 ];
-
-const FONT_ROLES = [
-  ["display", "Names"],
-  ["ui", "Interface"],
-  ["mono", "Terminal"],
-] as const;
 
 interface Card {
   id: string;
@@ -193,23 +188,7 @@ export function Appearance() {
             </span>
           </div>
 
-          <div className="font-fields">
-            {FONT_ROLES.map(([role, label]) => (
-              <label key={role} className="field">
-                <span>{label}</span>
-                <input
-                  list="desk-fonts"
-                  value={spec.fonts[role]}
-                  onChange={(e) => edit({ fonts: { ...spec.fonts, [role]: e.target.value } })}
-                />
-              </label>
-            ))}
-            <datalist id="desk-fonts">
-              {FONTS.map((f) => (
-                <option key={f} value={f} />
-              ))}
-            </datalist>
-          </div>
+          <TypeSettings spec={spec} onEdit={edit} />
 
           <div className="shape-row">
             <Segmented label="Density" options={DENSITIES} value={spec.density} onPick={(density) => edit({ density })} />

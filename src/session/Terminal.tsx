@@ -6,6 +6,7 @@ import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, type ShortcutId } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
+import { monoStack } from "../theme/tokens";
 import { xtermTheme } from "../theme/xterm";
 import { Viewer } from "./viewer";
 
@@ -25,6 +26,7 @@ export function Terminal({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
+  const viewerRef = useRef<Viewer | null>(null);
   const hub = useDesk((s) => s.hub);
   const theme = useTheme();
   /** Shown while another viewer is the one typing into this terminal. */
@@ -33,8 +35,8 @@ export function Terminal({
   useEffect(() => {
     if (!host.current || !hub || !(sessionId || terminalId)) return;
     const x = new XTerm({
-      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono"),
-      fontSize: 12.5,
+      fontFamily: monoStack(theme.spec),
+      fontSize: theme.spec.fonts.codeSize,
       lineHeight: 1.35,
       cursorBlink: true,
       allowProposedApi: false,
@@ -59,6 +61,7 @@ export function Terminal({
       send: (c) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(c)),
       role: (active) => setViewing(!active),
     });
+    viewerRef.current = viewer;
     const inPane = () => !!host.current && host.current.contains(document.activeElement);
     ws.onopen = () => viewer.opened(inPane());
     ws.onmessage = (m) => {
@@ -102,6 +105,7 @@ export function Terminal({
       ws.close();
       x.dispose();
       term.current = null;
+      viewerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- theme changes are applied below without reconnecting
   }, [hub, sessionId, terminalId]);
@@ -109,6 +113,17 @@ export function Terminal({
   useEffect(() => {
     if (term.current) term.current.options.theme = xtermTheme(theme);
   }, [theme]);
+
+  // A new size or face changes how many columns and rows fit.
+  const fontFamily = monoStack(theme.spec);
+  const fontSize = theme.spec.fonts.codeSize;
+  useEffect(() => {
+    const x = term.current;
+    if (!x || (x.options.fontFamily === fontFamily && x.options.fontSize === fontSize)) return;
+    x.options.fontFamily = fontFamily;
+    x.options.fontSize = fontSize;
+    viewerRef.current?.boxChanged();
+  }, [fontFamily, fontSize]);
 
   return (
     <div className="terminal-frame">

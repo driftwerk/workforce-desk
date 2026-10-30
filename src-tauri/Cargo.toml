@@ -19,6 +19,7 @@ desk-tuple = { path = "../crates/desk-tuple" }
 desk-voice = { path = "../crates/desk-voice" }
 tokio = { workspace = true }
 eyre = { workspace = true }
+fontdb = "0.24.0"
 notify = "8.2.1"
 portable-pty = "0.9.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

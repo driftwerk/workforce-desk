@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/types";
-import { Mark } from "../ui/Mark";
+import { AgentMark, Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { since } from "./overview";
 import { localKey, openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
@@ -83,7 +83,11 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
 function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; opens: boolean }) {
   const inner = (
     <>
-      <Mark name={item.name} engine={item.kind === "session" ? (item.engine ?? undefined) : undefined} state={RING[item.state]} />
+      {item.kind === "agent" ? (
+        <AgentMark agent={localKey(item.id) ?? ""} name={item.name} state={RING[item.state]} />
+      ) : (
+        <Mark name={item.name} engine={item.engine ?? undefined} state={RING[item.state]} />
+      )}
       <span className="tile-name">
         <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{item.name}</span>
         <span className={`tile-state ov-state-${tone}`}>{stateLine(item)}</span>

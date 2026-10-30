@@ -212,6 +212,17 @@ body.rpanel-resizing * {
   font-size: 12px;
   font-weight: 600;
 }
+.dock-tab:has(.dock-badge) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dock-badge {
+  writing-mode: horizontal-tb;
+  transform: rotate(180deg);
+  background: var(--blocked);
+  color: var(--on-blocked);
+}
 .dock-tab:hover {
   background: var(--raised);
   color: var(--text);

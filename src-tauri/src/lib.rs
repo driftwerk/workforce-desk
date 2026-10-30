@@ -1,4 +1,5 @@
 mod files;
+mod fonts;
 mod frame;
 mod grid_windows;
 mod helper;
@@ -493,6 +494,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             hub_connection,
+            fonts::fonts_list,
             settings_load,
             settings_save,
             themes_list,

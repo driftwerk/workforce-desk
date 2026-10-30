@@ -3,10 +3,11 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyConversation } from "../chat/conversation";
 import { useChat, type History } from "../chat/store";
-import type { ChatMessage } from "../chat/types";
+import type { ChatMessage, Me } from "../chat/types";
 import { useDesk } from "../hub/store";
 import { useOverview } from "../overview/store";
 import { Rooms } from "./Rooms";
+import { servePictures } from "../pictures/testing";
 
 // The rich renderer is its own package (with its own React); plain text
 // stands in for it here.
@@ -85,12 +86,12 @@ describe("a DM turn the overseer sent on", () => {
   const atlas = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: true };
   const scout = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
 
-  const showLocal = (messages: ChatMessage[], live: ChatMessage[] = [], people: Record<string, string> = {}) => {
+  const showLocal = (messages: ChatMessage[], live: ChatMessage[] = [], me: Record<string, Me> = {}) => {
     useOverview.setState({ manager: { agentId: "atlas", level: "act" } });
     useChat.setState({
       hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
       roster: [atlas, scout],
-      people,
+      me,
       activeAgent: "local/scout",
       conversations: { "local/scout": { ...emptyConversation(), connected: true, messages: live } },
       histories: { "local/scout": history({ messages }) },
@@ -135,7 +136,7 @@ describe("a DM turn the overseer sent on", () => {
   });
 
   it("shows a suggestion you said yes to, worded with your name, as yours through the overseer", () => {
-    showLocal([{ ...msg("h1", "user", "Sam asks: Restart the stuck build.", "2026-10-28T09:00:00Z"), author: byYou }], [], { local: "Sam" });
+    showLocal([{ ...msg("h1", "user", "Sam asks: Restart the stuck build.", "2026-10-28T09:00:00Z"), author: byYou }], [], { local: { id: "u1", name: "Sam", picture: null } });
     expect(heads()).toEqual(["You"]);
     expect(texts()).toEqual(["Restart the stuck build."]);
     expect(screen.getByText("via Atlas")).toBeTruthy();
@@ -164,4 +165,33 @@ describe("a DM turn the overseer sent on", () => {
     expect(texts()).toEqual(["Allan asks: is this you?"]);
   });
 });
+});
+
+describe("pictures in a DM", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("show the agent, and you as their workspace has you, round", async () => {
+    const fetch = servePictures();
+    const pic = (version: string) => ({ version, source: "chosen" as const, at: "" });
+    useChat.setState({
+      hubs: [
+        { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" },
+        { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t-dw" },
+      ],
+      roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false, picture: pic("a1") }],
+      me: { local: { id: "u-local", name: "Sam", picture: pic("l1") }, dw: { id: "u-dw", name: "Sam", picture: pic("d1") } },
+      activeAgent: "dw/allan",
+      conversations: { "dw/allan": { ...emptyConversation(), connected: true } },
+      histories: { "dw/allan": history({ messages: [msg("h1", "user", "Status?", "2026-10-28T09:00:00Z"), msg("h2", "assistant", "Green.", "2026-10-28T09:00:05Z")] }) },
+    });
+    render(<Rooms />);
+    const [mine, theirs] = [...document.querySelectorAll(".msg")];
+    await vi.waitFor(() => expect(theirs!.querySelector(".mark img")).toBeTruthy());
+    await vi.waitFor(() => expect(mine!.querySelector(".mark-person img")).toBeTruthy());
+    expect(document.querySelector(".room-head .mark img")).toBeTruthy();
+    const asked = fetch.mock.calls.map(([u]) => String(u));
+    expect(asked).toContain("https://dw.example/api/me/picture");
+    expect(asked).toContain("https://dw.example/api/agents/allan/picture");
+    expect(asked).not.toContain("http://127.0.0.1:1/api/me/picture");
+  });
 });

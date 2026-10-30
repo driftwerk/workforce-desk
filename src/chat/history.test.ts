@@ -287,23 +287,25 @@ describe("a DM's history in the store", () => {
     useChat.getState().forget("dw/scout");
   });
 
-  it("knows your name on this Mac's hub, to know a suggestion you said yes to", async () => {
+  it("knows who you are on each hub that says, with your picture there", async () => {
     answer((u) =>
-      u.pathname === "/api/me" ? json({ display_name: " Sam " }) : json({ agents: [{ id: "scout", name: "Scout" }] }),
+      u.pathname === "/api/me"
+        ? json({ id: u.host === "dw.example" ? "u-dw" : "u-local", display_name: " Sam ", picture: { version: "v1", source: "slack", at: "2026-10-30T09:00:00Z", slack: "Acme" } })
+        : json({ agents: [{ id: "scout", name: "Scout" }] }),
     );
-    useChat.setState({ people: {} });
+    useChat.setState({ me: {} });
     useChat.getState().setHubs([hub, { ...hub, id: "dw", url: "https://dw.example", local: false }]);
-    await vi.waitFor(() => expect(useChat.getState().people).toEqual({ local: "Sam" }));
-    expect(fetched.filter((u) => u.pathname === "/api/me").map((u) => u.host)).toEqual(["127.0.0.1:4100"]);
+    await vi.waitFor(() => expect(Object.keys(useChat.getState().me).sort()).toEqual(["dw", "local"]));
+    expect(useChat.getState().me.dw).toEqual({ id: "u-dw", name: "Sam", picture: { version: "v1", source: "slack", at: "2026-10-30T09:00:00Z", slack: "Acme" } });
   });
 
-  it("does without your name where the hub won't say it", async () => {
+  it("does without you where the hub won't say who you are", async () => {
     answer((u) => (u.pathname === "/api/me" ? json({ error: "no" }, 404) : json({ agents: [] })));
-    useChat.setState({ people: {} });
+    useChat.setState({ me: {} });
     useChat.getState().setHubs([hub]);
     await vi.waitFor(() => expect(fetched.some((u) => u.pathname === "/api/me")).toBe(true));
     await new Promise((r) => setTimeout(r, 0));
-    expect(useChat.getState().people).toEqual({});
+    expect(useChat.getState().me).toEqual({});
   });
 
   it("isn't read again after a turn you started", async () => {

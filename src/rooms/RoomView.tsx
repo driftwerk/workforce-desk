@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { say } from "./engine";
@@ -13,6 +13,9 @@ import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
+
+/** A room message's author's agent key (`hub/agent`), for a member's. */
+const agentAuthor = (author: string): string | undefined => (author.includes("/") ? author : undefined);
 
 const asChat = (m: RoomMessage) => ({
   id: m.id,
@@ -82,7 +85,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
               }}
               onMouseEnter={() => setActive(i)}
             >
-              <Mark name={a.name} size="sm" />
+              <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
               <b>{a.name}</b>
               <span className="faint small">
                 {home(a)}
@@ -179,9 +182,9 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
       title={<b className="display rpanel-name">Thread</b>}
     >
       <div className="room-scroll">
-        <Message message={asChat(parent)} author={author(parent.author).name} onSubmitForm={noForms} />
+        <Message message={asChat(parent)} author={author(parent.author).name} authorKey={agentAuthor(parent.author)} onSubmitForm={noForms} />
         {replies.map((m) => (
-          <Message key={m.id} message={asChat(m)} author={author(m.author).name} onSubmitForm={noForms} />
+          <Message key={m.id} message={asChat(m)} author={author(m.author).name} authorKey={agentAuthor(m.author)} onSubmitForm={noForms} />
         ))}
       </div>
       <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
@@ -227,7 +230,7 @@ export function RoomView({ room }: { room: Room }) {
             <h1 className="display-lg">{room.name}</h1>
             <span className="member-stack">
               {room.members.map((m) => (
-                <Mark key={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
+                <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
               ))}
             </span>
           </span>
@@ -243,7 +246,7 @@ export function RoomView({ room }: { room: Room }) {
           const n = replies.get(m.id)?.length ?? 0;
           return (
             <div key={m.id} className="room-msg">
-              <Message message={asChat(m)} author={a.name} home={m.author.includes("/") ? a.home : undefined} onSubmitForm={noForms} />
+              <Message message={asChat(m)} author={a.name} authorKey={agentAuthor(m.author)} home={m.author.includes("/") ? a.home : undefined} onSubmitForm={noForms} />
               <button
                 type="button"
                 className="link small thread-link"
@@ -255,7 +258,7 @@ export function RoomView({ room }: { room: Room }) {
           );
         })}
         {Object.entries(working).map(([key, w]) => (
-          <WorkingRow key={key} name={author(key).name} working={w} />
+          <WorkingRow key={key} agent={key} name={author(key).name} working={w} />
         ))}
         <div ref={end} />
       </div>

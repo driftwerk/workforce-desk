@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -12,6 +12,7 @@ import type { GridStorage } from "./storage";
 import { dropPane } from "./drag";
 import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
+import { servePictures } from "../pictures/testing";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -283,5 +284,20 @@ describe("an agent's pane", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Agent settings" }));
     expect(useChat.getState().activeAgent).toBe("local/scout");
     expect(useUi.getState().agentTabs["local/scout"]).toBe("settings");
+  });
+
+  it("shows the agent's picture in its header, beside the dot that says what they're doing", async () => {
+    vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
+    servePictures(() => new Response(JSON.stringify({ messages: [], more: false }), { headers: { "content-type": "application/json" } }));
+    useChat.setState({
+      roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "slack", at: "" } }],
+      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    });
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+    canvas();
+    const head = screen.getByRole("region", { name: "Scout" }).querySelector(".gpane-head")!;
+    await waitFor(() => expect(head.querySelector(".mark img")).toBeTruthy());
+    expect(head.querySelector(".dot")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });

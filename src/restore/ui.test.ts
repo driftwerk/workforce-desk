@@ -46,6 +46,7 @@ const saved: MainUi = {
   anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
   panelWidths: { session: 640 },
   panelFocus: { kind: "session", beside: "thread" },
+  activity: false,
 };
 
 const room = (id: string) => ({ id, name: id, members: [] }) as unknown as Room;
@@ -75,7 +76,7 @@ const latest = () => FakeSocket.all.at(-1)!;
 const reset = () => {
   useDesk.setState({ view: "floor", activeRoom: null, openId: null, rooms: {}, sessions: {}, connected: false, hub: null, loaded: false });
   useChat.setState({ activeAgent: null, panelAgent: null, hubs: [], roster: [], rosterErrors: {}, rosterRead: false });
-  useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {}, panelWidths: {}, panelFocus: null });
+  useUi.setState({ settings: null, agentTabs: {}, scroll: {}, agentFiles: {}, roomThreads: {}, anchors: {}, panelWidths: {}, panelFocus: null, activityOpen: true });
   useGrids.setState({ active: null });
 };
 
@@ -98,6 +99,7 @@ describe("ui.main", () => {
         roomThreads: { r: "", s: "m1" },
         panelAgent: 4,
         anchors: { "dm:a": { id: "m1", offset: 4 }, "dm:b": { id: 2, offset: 0 }, "dm:c": "x" },
+        activity: "docked",
         future: true,
       }),
     ).toEqual({
@@ -122,6 +124,7 @@ describe("ui.main", () => {
       anchors: { "dm:local/scout": { id: "m3", offset: -12 } },
       panelWidths: { session: 640 },
       panelFocus: { kind: "session", beside: "thread" },
+      activityOpen: false,
     });
     useGrids.setState({ active: "g2" });
     const ui = capture();

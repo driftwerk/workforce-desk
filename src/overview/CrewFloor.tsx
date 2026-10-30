@@ -1,13 +1,15 @@
 import { RichMarkdown } from "@workforce/rich";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { setAgentOversight } from "../crew/oversight";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Brief, Overview, OverviewItem, Session } from "../hub/types";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
+import { DockStrip, DockTab } from "../panels/DockTab";
+import { useUi } from "../shell/ui";
 import { ActivityRail } from "./ActivityRail";
 import { ItemTile } from "./ItemTile";
 import { clock } from "./overview";
@@ -69,6 +71,21 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const working = count("Working");
   const needsYou = count("Needs you");
   const scroller = useSavedScroll<HTMLDivElement>("floor");
+  const activityOpen = useUi((s) => s.activityOpen);
+  const tab = useRef<HTMLButtonElement>(null);
+  const railClose = useRef<HTMLButtonElement>(null);
+  /** Where focus goes once Activity has opened or docked, when a key or
+   *  click here did it. */
+  const handOff = useRef(false);
+  useEffect(() => {
+    if (!handOff.current) return;
+    handOff.current = false;
+    (activityOpen ? railClose : tab).current?.focus();
+  }, [activityOpen]);
+  const showActivity = (open: boolean) => {
+    handOff.current = true;
+    useUi.getState().setActivityOpen(open);
+  };
 
   return (
     <main className="crew-floor" aria-label="Floor">
@@ -105,7 +122,21 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
             <Group key={g.title} group={g} />
           ))}
         </div>
-        {activitySupport !== "no" && <ActivityRail managerName={managerName} />}
+        {activitySupport !== "no" &&
+          (activityOpen ? (
+            <ActivityRail managerName={managerName} closeRef={railClose} onClose={() => showActivity(false)} />
+          ) : (
+            <DockStrip label="Docked">
+              <DockTab
+                buttonRef={tab}
+                label="Activity"
+                count={needsYou}
+                ariaLabel={needsYou ? `Open Activity, ${needsYou} need${needsYou === 1 ? "s" : ""} you` : "Open Activity"}
+                title="Open Activity"
+                onClick={() => showActivity(true)}
+              />
+            </DockStrip>
+          ))}
       </div>
     </main>
   );
@@ -172,7 +203,7 @@ function BriefCard({
   };
   return (
     <section className="brief" aria-label={`${name}’s brief`}>
-      <Mark name={name} />
+      <AgentMark agent={localKey(managerId) ?? ""} name={name} />
       <div className="brief-body">
         <span className="brief-head">
           <b>{name}</b>
