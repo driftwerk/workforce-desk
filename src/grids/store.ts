@@ -62,7 +62,7 @@ export interface Flash {
   n: number;
 }
 
-interface GridsState {
+export interface GridsState {
   ready: boolean;
   role: Role;
   order: string[];
@@ -464,20 +464,6 @@ export const swapInPane = (gridId: string, pane: string): boolean => {
   const done = changePanes(gridId, (panes) => swapIn(panes, pane, askingIn(panes), paneId));
   if (done) setFocus(gridId, pane, true);
   return done;
-};
-
-/** The grid and pane showing `content` where it can be seen: a grid in
- *  the main window, or in a window of its own that's open (the grid shown
- *  in the main window first). Parked panes don't count. */
-export const showing = (s: GridsState, content: PaneContent): { gridId: string; paneId: string } | null => {
-  const ids = s.active ? [s.active, ...s.order.filter((id) => id !== s.active)] : s.order;
-  for (const id of ids) {
-    const g = s.grids[id];
-    if (!g || (g.placement.kind === "window" && !s.open[id])) continue;
-    const p = findContent(laidOut(g.panes), content);
-    if (p) return { gridId: id, paneId: p.id };
-  }
-  return null;
 };
 
 /** Moves pane `paneId`'s content to grid `to` (its pane here closes). */

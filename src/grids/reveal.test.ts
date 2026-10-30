@@ -24,7 +24,7 @@ describe("showing a session from the sidebar", () => {
   it("finds a claude started in a grid's terminal by that terminal's pane", () => {
     const grid = createGrid();
     deliver(grid, { kind: "terminal", terminalId: "t1" });
-    useDesk.setState({ sessions: { s1: { id: "s1", terminalId: "t1" } as unknown as Session } });
+    useDesk.setState({ sessions: { s1: { id: "s1", terminalId: "t1", live: true } as unknown as Session } });
 
     expect(reveal({ kind: "session", sessionId: "s1" })).toBe(true);
     expect(useDesk.getState().view).toBe("grids");

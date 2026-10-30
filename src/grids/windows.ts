@@ -21,6 +21,7 @@ import { deskState } from "../restore/boot";
 import { findContent, laidOut, type PaneContent } from "./engine";
 import { gridOfLabel, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
+import { itemOf, shownAt } from "./where";
 import { useDesk } from "../hub/store";
 import {
   createGrid,
@@ -33,7 +34,6 @@ import {
   setFocus,
   setOpen,
   setPlacement,
-  showing,
   startGrids,
   unfill,
   useGrids,
@@ -224,16 +224,13 @@ export const revealIn = (gridId: string, content: PaneContent): boolean => {
 };
 
 /** Shows where `content` is in a grid, if it's in one that can be seen (see
- *  `showing`). A session started in a grid's terminal is shown by that
+ *  `shownAt`). A session started in a grid's terminal is shown by that
  *  terminal's pane. False when it's in neither, so it's opened as usual. */
 export const reveal = (content: PaneContent): boolean => {
-  const grids = useGrids.getState();
-  const terminalId = content.kind === "session" ? useDesk.getState().sessions[content.sessionId]?.terminalId : null;
-  for (const c of terminalId ? [content, { kind: "terminal" as const, terminalId }] : [content]) {
-    const at = showing(grids, c);
-    if (at) return revealIn(at.gridId, c);
-  }
-  return false;
+  const sessions = useDesk.getState().sessions;
+  const item = itemOf(sessions, content);
+  const at = item && shownAt(useGrids.getState(), sessions, item);
+  return at ? revealIn(at.gridId, at.content) : false;
 };
 
 /** Puts `content` in grid `gridId` (its first empty pane, else beside the
