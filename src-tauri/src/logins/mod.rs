@@ -1,7 +1,8 @@
 //! Connecting a plan in one click: Desk runs the real CLI's own sign-in as
 //! the person — `claude setup-token`, or `codex login` in a throwaway Codex
 //! home so it never touches their own `codex` login — and saves the result
-//! where their agents on this Mac read it. The token never reaches the page.
+//! where their agents on this computer read it. The token never reaches the
+//! page.
 
 pub mod install;
 mod scan;
@@ -12,8 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+use desk_core::backend::Backend;
 use desk_core::shell::{find_program, login_env, with_local_bin, without_claude_markers};
-use desk_core::{Paths, Secret, SecretStore, Secrets, read_ports};
 use portable_pty::{ChildKiller, CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -76,17 +77,15 @@ fn reporter(app: &AppHandle, plan: Plan) -> Report {
     })
 }
 
-/// Saves a login where the agents on this Mac read it.
-fn save(paths: &Paths, plan: Plan, value: &str) -> eyre::Result<()> {
-    let ports =
-        read_ports(&paths.hub_state())?.ok_or_else(|| eyre::eyre!("Desk is still starting"))?;
-    let token = Secrets::for_paths(paths)
-        .get(Secret::GatewayToken)?
+/// Saves a login where the agents on this computer read it.
+fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
+    let hub = backend
+        .connection()?
         .ok_or_else(|| eyre::eyre!("Desk is still starting"))?;
-    let url = format!("{}/api/vault/{}", ports.gateway_url(), plan.vault_path());
+    let url = format!("{}/api/vault/{}", hub.gateway_url, plan.vault_path());
     let res = reqwest::blocking::Client::new()
         .post(url)
-        .bearer_auth(token)
+        .bearer_auth(hub.admin_token)
         .json(&serde_json::json!({ "value": value }))
         .send()?;
     if !res.status().is_success() {
@@ -105,14 +104,14 @@ fn tail(text: &str) -> String {
 }
 
 impl Logins {
-    pub fn start(&self, app: &AppHandle, paths: Paths, plan: Plan) -> Result<(), String> {
+    pub fn start(&self, app: &AppHandle, backend: Backend, plan: Plan) -> Result<(), String> {
         self.cancel(plan);
         let report = reporter(app, plan);
         report(Progress::Starting);
         let env = with_local_bin(without_claude_markers(login_env()));
         let running = match plan {
-            Plan::Claude => self.start_claude(paths, env, report),
-            Plan::Chatgpt => self.start_chatgpt(paths, env, report),
+            Plan::Claude => self.start_claude(backend, env, report),
+            Plan::Chatgpt => self.start_chatgpt(backend, env, report),
         }
         .map_err(|e| e.to_string())?;
         self.running.lock().expect("logins").insert(plan, running);
@@ -121,7 +120,7 @@ impl Logins {
 
     fn start_claude(
         &self,
-        paths: Paths,
+        backend: Backend,
         env: std::collections::BTreeMap<String, String>,
         report: Report,
     ) -> eyre::Result<Running> {
@@ -176,7 +175,7 @@ impl Logins {
                 }
                 if let Some(token) = scan::claude_token(&text) {
                     report(Progress::Saving);
-                    report(match save(&paths, Plan::Claude, &token) {
+                    report(match save(&backend, Plan::Claude, &token) {
                         Ok(()) => Progress::Done,
                         Err(e) => Progress::Failed {
                             message: e.to_string(),
@@ -204,13 +203,13 @@ impl Logins {
 
     fn start_chatgpt(
         &self,
-        paths: Paths,
+        backend: Backend,
         mut env: std::collections::BTreeMap<String, String>,
         report: Report,
     ) -> eyre::Result<Running> {
         let program = find_program("codex", &env)
             .ok_or_else(|| eyre::eyre!("Codex isn't installed on this computer"))?;
-        let home = private_dir(&paths.root.join("codex-login"))?;
+        let home = private_dir(&backend.paths.root.join("codex-login"))?;
         env.insert("CODEX_HOME".into(), home.to_string_lossy().into_owned());
         let mut child = Command::new(program)
             .arg("login")
@@ -270,7 +269,7 @@ impl Logins {
             report(match (status.success(), auth) {
                 (true, Ok(auth)) => {
                     report(Progress::Saving);
-                    match save(&paths, Plan::Chatgpt, &auth) {
+                    match save(&backend, Plan::Chatgpt, &auth) {
                         Ok(()) => Progress::Done,
                         Err(e) => Progress::Failed {
                             message: e.to_string(),
@@ -312,9 +311,12 @@ impl Logins {
 
 /// A fresh folder only this user can read.
 fn private_dir(path: &Path) -> eyre::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::remove_dir_all(path);
     std::fs::create_dir_all(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
     Ok(path.to_path_buf())
 }

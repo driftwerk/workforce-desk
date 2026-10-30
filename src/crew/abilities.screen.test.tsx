@@ -16,7 +16,7 @@ vi.mock("../platform", async (original) => ({
 }));
 
 const ledger: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
-const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
 const START = `[llm]\nprovider = "claude-code"\n`;
 
 let file = START;

@@ -1,7 +1,7 @@
 //! The local hub's memory store: a vellev node ("Desk Memory" in the app
-//! bundle) kept running beside the hub as Postgres is. Loopback only, on a
-//! port Desk chose, with a key Desk keeps in the keychain; its data in
-//! Desk's folder on this Mac, its commit pointer in Desk's own Postgres (a
+//! bundle, `desk-memory` on Linux) kept running beside the hub as Postgres
+//! is. Loopback only, on a port Desk chose, with a key Desk keeps with its
+//! other secrets; its data in Desk's folder on this computer, its commit pointer in Desk's own Postgres (a
 //! database of its own), and the embedding model Desk Helper fetched for it.
 
 use std::collections::BTreeMap;
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths};
+use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths, process};
 use eyre::{Context, Result, bail};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
@@ -27,7 +27,8 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 /// The store: `--memory <path>`, else the one beside this binary ("Desk
-/// Memory" in the app bundle, `vellev` in a development build), else
+/// Memory" in the app bundle, `desk-memory` on Linux, `vellev` in a
+/// development build), else
 /// `vellev` on PATH. `None` when there is none: memories then stay in the
 /// hub's SQLite.
 pub fn binary() -> Option<PathBuf> {
@@ -122,7 +123,7 @@ pub fn env(
     set(&mut env, "VELLEV_LOCAL_MODEL", crate::model::MODEL.into());
     set(&mut env, "VELLEV_API_KEYS", key.into());
     set(&mut env, "VELLEV_TENANTS", MEMORY_TENANT.into());
-    // A day to restore to is plenty on one Mac, and keeps what a restore
+    // A day to restore to is plenty on one computer, and keeps what a restore
     // needs from piling up on its disk.
     set(&mut env, "VELLEV_RESTORE_WINDOW_SECS", "86400".into());
     set(&mut env, "HF_ENDPOINT", "http://127.0.0.1:9".into());
@@ -142,7 +143,10 @@ fn spawn(binary: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result
     ] {
         std::fs::create_dir_all(&dir)?;
     }
-    let log = crate::append_log(&paths.logs().join("memory.log"), crate::LOG_LIMIT)?;
+    let log = crate::supervise::append_log(
+        &paths.logs().join("memory.log"),
+        crate::supervise::LOG_LIMIT,
+    )?;
     let child = Command::new(binary)
         .arg("serve")
         .current_dir(paths.memory())
@@ -175,37 +179,28 @@ pub async fn stop_leftover(paths: &Paths, binary: &Path) {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let running = |pid: u32| async move {
-        Command::new("ps")
-            .args(["-p", &pid.to_string(), "-o", "comm="])
-            .output()
+        tokio::task::spawn_blocking(move || process::command_of(pid))
             .await
             .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|comm| !comm.is_empty())
+            .flatten()
     };
-    let Some(comm) = running(pid).await else {
-        return;
-    };
-    if name.is_empty() || !comm.ends_with(&name) {
+    if !running(pid)
+        .await
+        .is_some_and(|comm| process::is_program(&comm, &name))
+    {
         return;
     }
     tracing::warn!(
         pid,
         "stopping the memory store an earlier Desk Helper left running"
     );
-    let _ = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status()
-        .await;
+    let _ = process::terminate(pid);
     let deadline = Instant::now() + STOP_GRACE;
     while Instant::now() < deadline && running(pid).await.is_some() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     if running(pid).await.is_some() {
-        let _ = Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status()
-            .await;
+        let _ = process::kill(pid);
     }
 }
 
@@ -237,7 +232,7 @@ impl Node {
                 };
                 tokio::select! {
                     _ = stopping.changed() => {
-                        crate::stop(&mut child, STOP_GRACE).await;
+                        crate::supervise::stop(&mut child, STOP_GRACE).await;
                         let _ = std::fs::remove_file(pidfile(&paths));
                         return;
                     }

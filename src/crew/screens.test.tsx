@@ -204,7 +204,7 @@ describe("Files", () => {
 
 describe("Renaming in Settings", () => {
   const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
-  const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
 
   const renderSettings = (hub: DeskHub) => {
     useDesk.setState({ hub });
@@ -257,7 +257,7 @@ describe("Renaming in Settings", () => {
 });
 
 describe("A picture in About", () => {
-  const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
   const remote = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t" };
   const slack = { version: "s1", source: "slack" as const, at: "", slack: "Acme" };
 

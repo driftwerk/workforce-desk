@@ -452,7 +452,7 @@ impl Recent {
     }
 }
 
-/// Kokoro v1.0 on this Mac, in any of its English voices.
+/// Kokoro v1.0 on this computer, in any of its English voices.
 pub struct Speaker {
     tts: std::sync::Mutex<OfflineTts>,
     rate: u32,

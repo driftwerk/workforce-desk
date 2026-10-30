@@ -89,7 +89,7 @@ describe("a DM turn the overseer sent on", () => {
   const showLocal = (messages: ChatMessage[], live: ChatMessage[] = [], me: Record<string, Me> = {}) => {
     useOverview.setState({ manager: { agentId: "atlas", level: "act" } });
     useChat.setState({
-      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
       roster: [atlas, scout],
       me,
       activeAgent: "local/scout",
@@ -211,7 +211,7 @@ describe("pictures in a DM", () => {
     const pic = (version: string) => ({ version, source: "chosen" as const, at: "" });
     useChat.setState({
       hubs: [
-        { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" },
+        { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
         { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t-dw" },
       ],
       roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false, picture: pic("a1") }],

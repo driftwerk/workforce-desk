@@ -3,18 +3,25 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
 import { useEffect, useState } from "react";
 import { helperStatus, inApp, openLoginItems, removeDeskData, saveReport, type HelperStatus } from "../platform";
+import { useHost, type Platform } from "../shell/host";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useUpdates } from "../updates/store";
 
+/** Where each system lists what starts at login. */
+export const STARTUP: Record<Platform, string> = { macos: "Login Items", windows: "Startup apps", linux: "your session’s autostart" };
+
+/** The button that opens it, where Desk can open it. */
+const OPEN_STARTUP: Record<Platform, string | null> = { macos: "Open Login Items", windows: "Open Startup apps", linux: null };
+
 /** What the helper's state means, in the person's words. */
-export const helperLine = (s: HelperStatus | null): string => {
+export const helperLine = (s: HelperStatus | null, platform: Platform): string => {
   switch (s?.state) {
     case undefined:
       return "…";
     case "running":
       return "Running. It keeps your agents and sessions going while this window is closed.";
     case "needs-approval":
-      return "Turned off in Login Items, so your agents stop when Desk quits.";
+      return `Turned off in ${STARTUP[platform]}, so your agents stop when Desk quits.`;
     case "not-registered":
       return "Not set up yet.";
     case "move-to-applications":
@@ -30,6 +37,8 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
 
 /** Settings → Help: the version, a report to send, and removing Desk. */
 export function Help() {
+  const { platform, keys } = useHost();
+  const openStartup = OPEN_STARTUP[platform];
   const [version, setVersion] = useState("");
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [report, setReport] = useState<string | null>(null);
@@ -91,13 +100,20 @@ export function Help() {
       <div className="setting-card">
         <span className="card-text">
           <b>Desk Helper</b>
-          <span className={helper?.state === "running" ? undefined : "state-blocked"}>{helperLine(helper)}</span>
+          <span className={helper?.state === "running" ? undefined : "state-blocked"}>{helperLine(helper, platform)}</span>
         </span>
-        {helper?.state === "needs-approval" && (
+        {helper?.state === "needs-approval" && openStartup && (
           <button type="button" className="btn" onClick={() => void openLoginItems()}>
-            Open Login Items
+            {openStartup}
           </button>
         )}
+      </div>
+
+      <div className="setting-card">
+        <span className="card-text">
+          <b>Keys</b>
+          <span>Desk keeps your agents’ logins and keys in {keys}.</span>
+        </span>
       </div>
 
       <div className="setting-card">
@@ -120,12 +136,12 @@ export function Help() {
         </button>
       </div>
 
-      {removing && <RemoveData onClose={() => setRemoving(false)} />}
+      {removing && <RemoveData platform={platform} keys={keys} onClose={() => setRemoving(false)} />}
     </section>
   );
 }
 
-function RemoveData({ onClose }: { onClose: () => void }) {
+function RemoveData({ platform, keys, onClose }: { platform: Platform; keys: string; onClose: () => void }) {
   const [everything, setEverything] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -149,7 +165,7 @@ function RemoveData({ onClose }: { onClose: () => void }) {
             <h1 id={id} className="display-lg">
               Remove Desk’s data
             </h1>
-            <p>Desk Helper stops and leaves Login Items, so no agent or session keeps running. Desk quits when it’s done.</p>
+            <p>Desk Helper stops and leaves {STARTUP[platform]}, so no agent or session keeps running. Desk quits when it’s done.</p>
           </span>
           <CloseButton onClose={onClose} />
         </header>
@@ -160,7 +176,7 @@ function RemoveData({ onClose }: { onClose: () => void }) {
           <input type="checkbox" checked={everything} onChange={(e) => setEverything(e.target.checked)} />
           <span>
             Also delete everything Desk keeps on this computer: your agents, their memories and files, sessions, settings, and the
-            logins and keys saved in your keychain. This can’t be undone.
+            logins and keys saved in {keys}. This can’t be undone.
           </span>
         </label>
         {problem && (

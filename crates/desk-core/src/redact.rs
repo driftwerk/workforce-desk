@@ -1,7 +1,7 @@
-//! Takes secrets out of text before it leaves the Mac — the logs a person
-//! saves into a report. The patterns are the hub's own (`common::redact`),
-//! but a match is replaced whole: nothing of a secret, not even its first
-//! characters, is kept.
+//! Takes secrets out of text before it leaves this computer — the logs a
+//! person saves into a report. The patterns are the hub's own
+//! (`common::redact`), but a match is replaced whole: nothing of a secret,
+//! not even its first characters, is kept.
 
 use std::sync::LazyLock;
 

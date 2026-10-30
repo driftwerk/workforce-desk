@@ -13,6 +13,7 @@ import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
 import { followRooms, roomOrder, ROOMS_PREFIX } from "./rooms/order";
 import { App } from "./shell/App";
+import { loadHost } from "./shell/host";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/overview.css";
@@ -41,7 +42,9 @@ const grid = detachedGrid();
 
 // What was open is put back before the shell first renders, and the window
 // (made hidden, where it was) is shown once it has: no default view first.
-void restoreBeforeRender(grid ? [] : [mainUi, roomOrder]).then(() => {
+// What this computer is (its platform, where the backend runs) is read then
+// too, so every screen words itself for it from the start.
+void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder]), loadHost().catch(() => undefined)]).then(() => {
   // A detached grid has no drafts of its own to keep, nor rooms.
   if (!grid) {
     keepFileDrafts();

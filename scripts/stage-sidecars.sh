@@ -1,6 +1,6 @@
 #!/bin/sh
 # Development sidecars: builds desk-hubd, the hub and its memory store
-# (vellev) for this Mac and puts them where Tauri expects them,
+# (vellev) for this computer and puts them where Tauri expects them,
 # src-tauri/binaries/<name>-<target triple>, under the names the app bundle
 # uses ("Desk Helper", "Desk Agents", "Desk Memory").
 # Release builds use scripts/build-sidecars.sh instead.

@@ -7,7 +7,7 @@ import { forgetImages, imageUrl, pictureOf, type Picture } from "./pictures";
 import { servePictures } from "./testing";
 import { youOn } from "./who";
 
-const LOCAL: HubAccount = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t-local" };
+const LOCAL: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t-local" };
 const DW: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t-dw" };
 const ACME: HubAccount = { id: "acme", label: "Acme", url: "https://acme.example", local: false, token: "t-acme" };
 const pic = (version: string, source: Picture["source"] = "chosen"): Picture => ({ version, source, at: "2026-10-30T09:00:00Z", slack: null });

@@ -16,7 +16,8 @@ use crate::Paths;
 pub const PROTOCOL: u32 = 1;
 /// The variable the holder reads its token from.
 pub const TOKEN_ENV: &str = "WORKFORCE_PTY_HOLDER_TOKEN";
-/// macOS keeps a unix socket's path in 104 bytes, its NUL included.
+/// macOS keeps a unix socket's path in 104 bytes, its NUL included (Linux
+/// in 108).
 const MAX_SOCKET: usize = 103;
 
 impl Paths {
@@ -69,21 +70,17 @@ pub fn stop(socket: &Path, within: Duration) -> Result<bool> {
         return Ok(false);
     }
     let path = pid_file(socket);
-    let pid: i32 = std::fs::read_to_string(&path)
+    let pid: u32 = std::fs::read_to_string(&path)
         .with_context(|| format!("reading {}", path.display()))?
         .trim()
         .parse()
         .with_context(|| format!("reading {}", path.display()))?;
-    if pid <= 1 {
-        eyre::bail!("{} names process {pid}", path.display());
-    }
-    // SAFETY: kill has no memory preconditions.
-    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
-        let e = std::io::Error::last_os_error();
-        if e.raw_os_error() != Some(libc::ESRCH) {
-            return Err(e).context("stopping the PTY holder");
-        }
-    }
+    crate::process::terminate(pid).with_context(|| {
+        format!(
+            "stopping the PTY holder ({} names process {pid})",
+            path.display()
+        )
+    })?;
     let deadline = Instant::now() + within;
     while answers(socket) {
         if Instant::now() > deadline {

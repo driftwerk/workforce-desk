@@ -4,7 +4,7 @@ import { handle, insertMention, mentionAt, mentionFor, parseMentions, resolveMen
 
 const agent = (hubId: string, id: string, name: string): Agent => ({ hubId, id, name, model: null, provider: null, isDefault: false });
 const hubs: HubAccount[] = [
-  { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" },
+  { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
   { id: "workforce-example-com", label: "Driftwerk", url: "https://workforce.example.com", local: false, token: "t" },
 ];
 const roster = [

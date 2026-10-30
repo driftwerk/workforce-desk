@@ -1,4 +1,4 @@
-//! What Desk's grid terminals need from this Mac: where Desk's Claude Code
+//! What Desk's grid terminals need from this computer: where Desk's Claude Code
 //! plugin is (its hooks, which register a `claude` started in one of them
 //! with the hub), and what is running in one (Codex is recognised this way,
 //! by its process, not tracked).
@@ -26,7 +26,7 @@ pub struct Process {
     pub name: String,
 }
 
-/// `ps -axo pid=,ppid=,comm=`: two numbers, then the command, which can
+/// `ps -Ao pid=,ppid=,comm=`: two numbers, then the command, which can
 /// contain spaces.
 pub fn parse_ps(text: &str) -> Vec<Process> {
     text.lines()
@@ -68,7 +68,7 @@ pub fn under(all: &[Process], pid: u32) -> Vec<String> {
 /// What's running in a terminal whose shell is `pid`, shell first.
 pub fn programs_under(pid: u32) -> eyre::Result<Vec<String>> {
     let out = std::process::Command::new("ps")
-        .args(["-axo", "pid=,ppid=,comm="])
+        .args(["-Ao", "pid=,ppid=,comm="])
         .output()?;
     if !out.status.success() {
         eyre::bail!("ps failed: {}", String::from_utf8_lossy(&out.stderr).trim());

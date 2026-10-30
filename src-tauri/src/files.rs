@@ -81,7 +81,7 @@ pub struct Settings {
     /// Agents can be asked from Tuple calls.
     #[serde(default)]
     pub tuple: bool,
-    /// How new agents on this Mac think; unset means whichever plan is
+    /// How new agents on this computer think; unset means whichever plan is
     /// connected.
     #[serde(default)]
     pub new_agent: Option<BrainChoice>,

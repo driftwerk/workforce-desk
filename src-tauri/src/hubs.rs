@@ -1,8 +1,10 @@
 //! The hubs Desk talks to. The list lives in `hubs.json`; each hub's
-//! paired-device token lives in the keychain. The local hub is always
+//! paired-device token lives with the app's secrets. The local hub is always
 //! first, once `desk-hubd` has paired Desk with it.
 
-use desk_core::{LOCAL_HUB_ID, Paths, Secrets, device_token_account, read_ports};
+use desk_core::backend::Backend;
+use desk_core::host::Host;
+use desk_core::{LOCAL_HUB_ID, Paths, Secrets, device_token_account};
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 
@@ -54,22 +56,28 @@ pub fn id_for(url: &str) -> Result<String> {
         .collect())
 }
 
-pub fn accounts(paths: &Paths) -> Result<Vec<HubAccount>> {
+/// The app's own secrets (remote hubs' device tokens), kept on this
+/// computer wherever the backend runs.
+pub fn app_secrets(paths: &Paths) -> Result<Secrets> {
+    Secrets::for_host(paths, &Host::Native)
+}
+
+pub fn accounts(paths: &Paths, backend: &Backend) -> Result<Vec<HubAccount>> {
     let mut out = Vec::new();
-    if let (Some(ports), Some(token)) = (
-        read_ports(&paths.hub_state())?,
-        Secrets::for_paths(paths).get_account(&device_token_account(LOCAL_HUB_ID))?,
-    ) {
+    if let Some(c) = backend.connection()?
+        && let Some(token) = c.device_token
+    {
         out.push(HubAccount {
             id: LOCAL_HUB_ID.into(),
             label: desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
-            url: ports.gateway_url(),
+            url: c.gateway_url,
             local: true,
             token,
         });
     }
+    let secrets = app_secrets(paths)?;
     for r in read_records(paths)? {
-        if let Some(token) = Secrets::for_paths(paths).get_account(&device_token_account(&r.id))? {
+        if let Some(token) = secrets.get_account(&device_token_account(&r.id))? {
             out.push(HubAccount {
                 id: r.id,
                 label: r.label,
@@ -87,7 +95,7 @@ pub fn accounts(paths: &Paths) -> Result<Vec<HubAccount>> {
 /// is: the id comes from the host, so it — and every grid, group and DM
 /// that names its agents — stays the same, and so does its place.
 pub fn save(paths: &Paths, label: &str, url: &str, token: &str) -> Result<HubRecord> {
-    save_with(&Secrets::for_paths(paths), paths, label, url, token)
+    save_with(&app_secrets(paths)?, paths, label, url, token)
 }
 
 fn save_with(
@@ -128,7 +136,7 @@ pub fn remove(paths: &Paths, id: &str) -> Result<()> {
         .filter(|r| r.id != id)
         .collect();
     write_records(paths, &records)?;
-    Secrets::for_paths(paths).delete_account(&device_token_account(id))
+    app_secrets(paths)?.delete_account(&device_token_account(id))
 }
 
 #[cfg(test)]
@@ -152,7 +160,7 @@ mod tests {
     fn pairing_an_address_again_replaces_its_token_in_place() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
-        let secrets = Secrets::File(desk_core::FileSecrets::new(&paths));
+        let secrets = Secrets::of(&paths, desk_core::KeyStore::File);
         let token = |id: &str| secrets.get_account(&device_token_account(id)).unwrap();
         save_with(&secrets, &paths, "Acme", "https://a.example.com", "first").unwrap();
         save_with(&secrets, &paths, "Other", "https://b.example.com", "other").unwrap();

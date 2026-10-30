@@ -1,5 +1,5 @@
 //! Installing Claude Code or Codex when a plan's sign-in needs it and this
-//! Mac doesn't have it: each one's official installer, run as the person,
+//! computer doesn't have it: each one's official installer, run as the person,
 //! with what it prints passed on line by line.
 
 use std::io::{BufRead, BufReader};

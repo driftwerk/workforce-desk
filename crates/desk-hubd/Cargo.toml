@@ -6,9 +6,12 @@ license-file.workspace = true
 publish.workspace = true
 description = "Keeps Desk's local workforce hub running: Postgres, config, secrets, restarts"
 
-[dependencies]
+# Only on macOS and Linux: on Windows Desk runs the Linux build inside WSL,
+# and this crate is a stub that says so.
+[target.'cfg(unix)'.dependencies]
 desk-core = { workspace = true }
 eyre = { workspace = true }
+libc = { workspace = true }
 postgresql_embedded = { workspace = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json"] }

@@ -1,18 +1,22 @@
 //! Settings → Help: a report of recent logs the person can save and send,
-//! and removing everything Desk keeps on this Mac.
+//! and removing everything Desk keeps on this computer.
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::TcpListener;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use desk_core::{LOCAL_HUB_ID, Paths, Secret, Secrets, device_token_account, read_ports};
+use desk_core::backend::Backend;
+use desk_core::host::Host;
+use desk_core::{Paths, device_token_account, read_ports};
 use eyre::{Context, Result};
 
-/// The logs a report carries, newest part of each.
-const LOGS: [&str; 10] = [
-    "desk.log",
-    "desk.log.1",
+use crate::hubs::app_secrets;
+
+/// The logs a report carries, newest part of each: the app's own, and the
+/// backend's.
+const APP_LOGS: [&str; 2] = ["desk.log", "desk.log.1"];
+const BACKEND_LOGS: [&str; 8] = [
     "desk-hubd.log",
     "desk-hubd.log.1",
     "hub.log",
@@ -24,7 +28,7 @@ const LOGS: [&str; 10] = [
 ];
 const TAIL: u64 = 4 * 1024 * 1024;
 
-/// The device tokens for remote hubs: keychain items the app made itself.
+/// The device tokens for remote hubs: the app's own secrets.
 fn remote_accounts(paths: &Paths) -> Vec<String> {
     crate::hubs::read_records(paths)
         .unwrap_or_default()
@@ -37,52 +41,65 @@ fn remote_accounts(paths: &Paths) -> Vec<String> {
 /// app reads anyway (the hub's gateway token and Desk's device tokens).
 /// Desk Helper's other secrets stay unread so the keychain doesn't ask;
 /// the patterns catch them by shape and by name.
-pub fn known_secrets(paths: &Paths) -> Vec<String> {
-    let secrets = Secrets::for_paths(paths);
-    let mut accounts = vec![
-        Secret::GatewayToken.account().to_string(),
-        device_token_account(LOCAL_HUB_ID),
-    ];
-    accounts.extend(remote_accounts(paths));
-    accounts
-        .iter()
-        .filter_map(|a| secrets.get_account(a).ok().flatten())
-        .collect()
+pub fn known_secrets(paths: &Paths, backend: &Backend) -> Vec<String> {
+    let local = backend
+        .connection()
+        .ok()
+        .flatten()
+        .map(|c| [Some(c.admin_token), c.device_token])
+        .into_iter()
+        .flatten()
+        .flatten();
+    let remote = app_secrets(paths)
+        .map(|secrets| {
+            remote_accounts(paths)
+                .iter()
+                .filter_map(|a| secrets.get_account(a).ok().flatten())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    local.chain(remote).collect()
 }
 
-/// Deletes Desk Helper's keychain items by running it with
-/// `--forget-secrets` (the keychain lets the binary that made them delete
-/// them without asking), then the app's own.
-fn forget_secrets(paths: &Paths) -> Result<()> {
-    let helper = std::env::current_exe()?
+/// Runs Desk Helper with `--remove-everything`: it stops the PTY holder,
+/// forgets the backend's secrets (the keychain lets the binary that made
+/// them delete them without asking) and deletes the backend's folder. A
+/// development run, with no helper beside the app, does the same itself.
+fn remove_backend(backend: &Backend) -> Result<()> {
+    let beside = std::env::current_exe()?
         .parent()
         .map(|d| d.join(desk_core::HELPER_EXECUTABLE))
         .filter(|p| p.is_file());
-    let secrets = Secrets::for_paths(paths);
-    match helper {
-        Some(helper) => {
-            let out = std::process::Command::new(helper)
-                .arg("--forget-secrets")
-                .output()?;
-            if !out.status.success() {
-                eyre::bail!(
-                    "Desk Helper couldn't remove its keychain items: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
-                );
-            }
-        }
-        // A development run: the same secrets, in a file or the keychain.
-        None => {
-            for s in Secret::ALL {
-                secrets.delete_account(s.account())?;
-            }
-            secrets.delete_account(&device_token_account(LOCAL_HUB_ID))?;
-        }
-    }
-    for a in remote_accounts(paths) {
-        secrets.delete_account(&a)?;
+    let invocation = match (&backend.host, beside) {
+        (Host::Wsl(w), _) => backend
+            .host
+            .invocation(&w.helper(), &["--remove-everything"]),
+        (Host::Native, Some(helper)) => backend
+            .host
+            .invocation(&helper.to_string_lossy(), &["--remove-everything"]),
+        (Host::Native, None) => return remove_here(backend),
+    };
+    let out = invocation.command().output()?;
+    if !out.status.success() {
+        eyre::bail!(
+            "Desk Helper couldn't remove what it keeps: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn remove_here(backend: &Backend) -> Result<()> {
+    desk_core::backend::remove_everything(
+        &backend.paths,
+        &desk_core::Secrets::for_host(&backend.paths, &backend.host)?,
+    )
+}
+
+#[cfg(not(unix))]
+fn remove_here(_: &Backend) -> Result<()> {
+    eyre::bail!("Desk Helper is missing from this install of Desk")
 }
 
 /// The last `max` bytes of a file, from the start of a line.
@@ -100,9 +117,16 @@ fn tail(path: &Path, max: u64) -> Result<String> {
     })
 }
 
-/// A zip of the recent logs, every secret — `known` values and anything
-/// shaped like one — taken out, plus what was running.
-pub fn write_report(paths: &Paths, known: &[String], about: &str, to: &Path) -> Result<()> {
+/// A zip of the recent logs from the app's folder and the backend's, every
+/// secret — `known` values and anything shaped like one — taken out, plus
+/// what was running.
+pub fn write_report(
+    paths: &Paths,
+    backend: &Paths,
+    known: &[String],
+    about: &str,
+    to: &Path,
+) -> Result<()> {
     let file = std::fs::File::create(to).with_context(|| format!("saving {}", to.display()))?;
     let mut zip = zip::ZipWriter::new(file);
     let opts = zip::write::SimpleFileOptions::default()
@@ -110,8 +134,12 @@ pub fn write_report(paths: &Paths, known: &[String], about: &str, to: &Path) -> 
         .unix_permissions(0o600);
     zip.start_file("about.txt", opts)?;
     zip.write_all(desk_core::redact::redact(about, known).as_bytes())?;
-    for name in LOGS {
-        let path = paths.logs().join(name);
+    let logs = APP_LOGS
+        .iter()
+        .map(|name| (paths, name))
+        .chain(BACKEND_LOGS.iter().map(|name| (backend, name)));
+    for (root, name) in logs {
+        let path = root.logs().join(name);
         if !path.is_file() {
             continue;
         }
@@ -123,8 +151,8 @@ pub fn write_report(paths: &Paths, known: &[String], about: &str, to: &Path) -> 
     Ok(())
 }
 
-/// Waits for the hub, its Postgres and its memory store to let go of their
-/// ports.
+/// Waits for the hub, its Postgres and its memory store (in the backend's
+/// folder `paths`) to let go of their ports.
 fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
     let Some(ports) = read_ports(&paths.hub_state())? else {
         return Ok(());
@@ -137,7 +165,7 @@ fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
     {
         if Instant::now() > deadline {
             eyre::bail!(
-                "Desk Helper is still running. Quit it (or restart your Mac) and try again."
+                "Desk Helper is still running. Quit it (or restart this computer) and try again."
             );
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -145,18 +173,23 @@ fn wait_stopped(paths: &Paths, within: Duration) -> Result<()> {
     Ok(())
 }
 
-/// Stops Desk Helper and takes it out of Login Items; with `everything`,
-/// also ends the PTY holder (and with it the hub's terminals) and deletes
-/// Desk's folder and its keychain items. Nothing is deleted while the
-/// helper is still running.
-pub fn remove(paths: &Paths, everything: bool) -> Result<()> {
+/// Stops Desk Helper and takes it out of what starts at login; with
+/// `everything`, also ends the PTY holder (and with it the hub's
+/// terminals) and deletes the backend's folder and secrets, then the app's.
+/// Nothing is deleted while the helper is still running.
+pub fn remove(paths: &Paths, backend: &Backend, everything: bool) -> Result<()> {
     crate::helper::unregister(paths)?;
     if !everything {
         return Ok(());
     }
-    wait_stopped(paths, Duration::from_secs(40))?;
-    desk_core::holder::stop(&paths.pty_socket(), Duration::from_secs(10))?;
-    forget_secrets(paths)?;
+    wait_stopped(&backend.paths, Duration::from_secs(40))?;
+    // Read before the backend's half: natively it shares the app's folder.
+    let remote = remote_accounts(paths);
+    remove_backend(backend)?;
+    let secrets = app_secrets(paths)?;
+    for a in remote {
+        secrets.delete_account(&a)?;
+    }
     match std::fs::remove_dir_all(&paths.root) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -187,7 +220,7 @@ mod tests {
         .unwrap();
         let out = dir.path().join("report.zip");
         let known = vec![token.to_string()];
-        write_report(&paths, &known, "Desk 0.1.0", &out).unwrap();
+        write_report(&paths, &paths, &known, "Desk 0.1.0", &out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
         assert!(names.contains(&"about.txt".to_string()));
@@ -200,6 +233,36 @@ mod tests {
             .unwrap();
         assert!(hub.contains("INFO started"));
         assert!(!hub.contains("sk-ant") && !hub.contains(token), "{hub}");
+    }
+
+    #[test]
+    fn a_report_reads_each_log_from_its_own_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, backend) = (
+            Paths::at(dir.path().join("app")),
+            Paths::at(dir.path().join("wsl")),
+        );
+        for (root, name) in [(&app, "desk.log"), (&backend, "hub.log"), (&app, "hub.log")] {
+            std::fs::create_dir_all(root.logs()).unwrap();
+            std::fs::write(
+                root.logs().join(name),
+                format!("from {}\n", root.root.display()),
+            )
+            .unwrap();
+        }
+        let out = dir.path().join("report.zip");
+        write_report(&app, &backend, &[], "Desk", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let read = |zip: &mut zip::ZipArchive<std::fs::File>, name: &str| {
+            let mut text = String::new();
+            zip.by_name(name)
+                .unwrap()
+                .read_to_string(&mut text)
+                .unwrap();
+            text
+        };
+        assert!(read(&mut zip, "logs/desk.log").contains("app"));
+        assert!(read(&mut zip, "logs/hub.log").contains("wsl"));
     }
 
     #[test]

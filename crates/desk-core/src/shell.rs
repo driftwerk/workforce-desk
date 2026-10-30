@@ -1,6 +1,6 @@
-//! The environment a terminal would have. launchd and Finder start Desk's
-//! processes with almost none of it, so `claude`, `codex`, nvm and Homebrew
-//! wouldn't be found.
+//! The environment a terminal would have. launchd, systemd and the desktop
+//! start Desk's processes with almost none of it, so `claude`, `codex`, nvm
+//! and Homebrew wouldn't be found.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -13,8 +13,66 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// The login shell's environment, or this process's own when the shell
 /// can't be read in time.
 pub fn login_env() -> BTreeMap<String, String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = login_shell(
+        std::env::var("SHELL").ok().as_deref(),
+        account_shell().as_deref(),
+        |p| std::path::Path::new(p).is_file(),
+    );
     read(&shell).unwrap_or_else(|| std::env::vars().collect())
+}
+
+/// The shell when neither `$SHELL` nor the account names one.
+const FALLBACK_SHELL: &str = if cfg!(target_os = "macos") {
+    "/bin/zsh"
+} else {
+    "/bin/sh"
+};
+
+/// The person's login shell: `$SHELL` when it is a file, else the one their
+/// account names, else the system's own.
+pub fn login_shell(
+    shell: Option<&str>,
+    account: Option<&str>,
+    is_file: impl Fn(&str) -> bool,
+) -> String {
+    [shell, account]
+        .into_iter()
+        .flatten()
+        .find(|s| is_file(s))
+        .unwrap_or(FALLBACK_SHELL)
+        .to_string()
+}
+
+/// The shell in a `getent passwd` line (its last field).
+pub fn passwd_shell(line: &str) -> Option<String> {
+    let shell = line.trim().split(':').nth(6)?.trim();
+    (!shell.is_empty()).then(|| shell.to_string())
+}
+
+/// The shell in `dscl . -read /Users/<user> UserShell`'s answer.
+pub fn dscl_shell(text: &str) -> Option<String> {
+    let shell = text.trim().strip_prefix("UserShell:")?.trim();
+    (!shell.is_empty()).then(|| shell.to_string())
+}
+
+/// The shell the person's account names.
+fn account_shell() -> Option<String> {
+    let user = std::env::var("USER").ok()?;
+    let read = |program: &str, args: &[&str]| {
+        let out = Command::new(program).args(args).output().ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    if cfg!(target_os = "macos") {
+        read(
+            "dscl",
+            &[".", "-read", &format!("/Users/{user}"), "UserShell"],
+        )
+        .and_then(|t| dscl_shell(&t))
+    } else {
+        read("getent", &["passwd", &user]).and_then(|t| passwd_shell(&t))
+    }
 }
 
 fn read(shell: &str) -> Option<BTreeMap<String, String>> {
@@ -116,6 +174,30 @@ mod tests {
         assert_eq!(env["EQ"], "a=b");
         assert_eq!(env.len(), 3);
         assert!(parse_env(b"no marker").is_none());
+    }
+
+    #[test]
+    fn the_login_shell_is_shell_then_the_accounts_then_the_systems() {
+        let exists = |p: &str| ["/bin/zsh", "/usr/bin/fish"].contains(&p);
+        assert_eq!(
+            login_shell(Some("/usr/bin/fish"), Some("/bin/zsh"), exists),
+            "/usr/bin/fish"
+        );
+        assert_eq!(
+            login_shell(Some("/gone/bash"), Some("/bin/zsh"), exists),
+            "/bin/zsh"
+        );
+        assert_eq!(login_shell(None, Some("/gone"), exists), FALLBACK_SHELL);
+        assert_eq!(
+            passwd_shell("sarah:x:1000:1000:Sarah Lee:/home/sarah:/usr/bin/fish\n").as_deref(),
+            Some("/usr/bin/fish")
+        );
+        assert_eq!(passwd_shell("sarah:x:1000:1000::/home/sarah:"), None);
+        assert_eq!(
+            dscl_shell("UserShell: /bin/zsh\n").as_deref(),
+            Some("/bin/zsh")
+        );
+        assert_eq!(dscl_shell("No such key: UserShell"), None);
     }
 
     #[test]

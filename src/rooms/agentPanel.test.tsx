@@ -87,7 +87,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
   useChat.setState({
     hubs: [
-      { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" },
+      { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
       { id: "remote", label: "Office", url: "http://127.0.0.1:2", local: false, token: "t" },
     ],
     roster: [agent("local", "scout", "Scout"), agent("remote", "ada", "Ada")],

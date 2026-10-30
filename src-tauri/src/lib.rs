@@ -18,12 +18,17 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use desk_core::{Paths, Secret, SecretStore, Secrets};
+use desk_core::Paths;
+use desk_core::backend::Backend;
+use desk_core::host::Host;
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
 struct App {
+    /// The app's own folder: settings, hubs, themes, its log.
     paths: Paths,
+    /// Where the hub and its helper run, and their folder.
+    backend: Backend,
     helper: Mutex<helper::Status>,
     _themes: Mutex<Option<notify::RecommendedWatcher>>,
 }
@@ -44,18 +49,14 @@ fn text<E: std::fmt::Display>(e: E) -> String {
 /// creating them, so this waits for both.
 #[tauri::command]
 async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
-    let paths = app.paths.clone();
+    let backend = app.backend.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
-            let ports = desk_core::read_ports(&paths.hub_state()).map_err(text)?;
-            let token = Secrets::for_paths(&paths)
-                .get(Secret::GatewayToken)
-                .map_err(text)?;
-            if let (Some(ports), Some(token)) = (ports, token) {
+            if let Some(c) = backend.connection().map_err(text)? {
                 return Ok(HubConnection {
-                    url: ports.gateway_url(),
-                    token,
+                    url: c.gateway_url,
+                    token: c.admin_token,
                 });
             }
             // Say at once when Desk Helper can't start, rather than wait.
@@ -70,6 +71,37 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
             }
             std::thread::sleep(Duration::from_millis(500));
         }
+    })
+    .await
+    .map_err(text)?
+}
+
+/// What the page needs to know about this computer, read once at start.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HostInfo {
+    /// `macos`, `linux` or `windows`.
+    platform: &'static str,
+    /// Where the backend runs.
+    host: Host,
+    computer_name: Option<String>,
+    /// Where the backend keeps its secrets, as Help names it.
+    keys: &'static str,
+}
+
+#[tauri::command]
+async fn host_info(app: State<'_, App>) -> CommandResult<HostInfo> {
+    let backend = app.backend.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(HostInfo {
+            platform: std::env::consts::OS,
+            keys: desk_core::Secrets::for_host(&backend.paths, &backend.host)
+                .map_err(text)?
+                .store()
+                .name(),
+            host: backend.host,
+            computer_name: desk_core::computer_name(),
+        })
     })
     .await
     .map_err(text)?
@@ -107,8 +139,12 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
 }
 
 #[tauri::command]
-fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> {
-    hubs::accounts(&app.paths).map_err(text)
+async fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> {
+    let (paths, backend) = (app.paths.clone(), app.backend.clone());
+    tauri::async_runtime::spawn_blocking(move || hubs::accounts(&paths, &backend))
+        .await
+        .map_err(text)?
+        .map_err(text)
 }
 
 #[tauri::command]
@@ -154,9 +190,9 @@ async fn tuple_reply(agent: String, answer: String) -> CommandResult<()> {
 
 #[tauri::command]
 async fn login_start(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
-    let paths = app.state::<App>().paths.clone();
+    let backend = app.state::<App>().backend.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<logins::Logins>().start(&app, paths, plan)
+        app.state::<logins::Logins>().start(&app, backend, plan)
     })
     .await
     .map_err(text)?
@@ -213,12 +249,12 @@ async fn cli_install(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult
 /// Saves a zip of recent logs, every secret taken out, at `path`.
 #[tauri::command]
 async fn report_save(app: State<'_, App>, path: PathBuf, about: String) -> CommandResult<()> {
-    let paths = app.paths.clone();
+    let (paths, backend) = (app.paths.clone(), app.backend.clone());
     let helper = format!("{:?}", *app.helper.lock().expect("helper"));
     tauri::async_runtime::spawn_blocking(move || {
         let about = format!("{about}\nmacOS {}\nDesk Helper: {helper}\n", os_version());
-        let known = support::known_secrets(&paths);
-        support::write_report(&paths, &known, &about, &path)
+        let known = support::known_secrets(&paths, &backend);
+        support::write_report(&paths, &backend.paths, &known, &about, &path)
     })
     .await
     .map_err(text)?
@@ -233,12 +269,12 @@ fn os_version() -> String {
         .unwrap_or_default()
 }
 
-/// Stops Desk Helper and removes it from Login Items; with `everything`,
-/// deletes Desk's folder and keychain items too.
+/// Stops Desk Helper and takes it out of what starts at login; with
+/// `everything`, deletes Desk's folders and secrets too.
 #[tauri::command]
 async fn data_remove(app: State<'_, App>, everything: bool) -> CommandResult<()> {
-    let paths = app.paths.clone();
-    tauri::async_runtime::spawn_blocking(move || support::remove(&paths, everything))
+    let (paths, backend) = (app.paths.clone(), app.backend.clone());
+    tauri::async_runtime::spawn_blocking(move || support::remove(&paths, &backend, everything))
         .await
         .map_err(text)?
         .map_err(text)
@@ -495,10 +531,12 @@ pub fn run() {
             let helper = helper::ensure(&paths);
             tracing::info!(?helper, version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
-            app.manage(voice::Voice::new(&paths));
-            app.manage(attachments::Files::new(paths.clone()));
+            let backend = Backend::native(paths.clone());
+            app.manage(voice::Voice::new(&paths, backend.clone()));
+            app.manage(attachments::Files::new(paths.clone(), backend.clone()));
             app.manage(App {
                 paths,
+                backend,
                 helper: Mutex::new(helper),
                 _themes: Mutex::new(Some(watcher)),
             });
@@ -507,6 +545,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hub_connection,
             fonts::fonts_list,
+            host_info,
             settings_load,
             settings_save,
             themes_list,

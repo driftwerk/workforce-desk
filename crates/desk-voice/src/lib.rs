@@ -4,14 +4,13 @@
 //! was said to an agent is the app's job.
 
 pub mod address;
+pub mod audio;
 pub mod cascade;
 pub mod conversation;
 pub mod decode;
 pub mod hub;
 pub mod keywords;
 pub mod lookup;
-#[cfg(target_os = "macos")]
-pub mod mac;
 pub mod models;
 pub mod realtime;
 pub mod resample;
@@ -48,7 +47,7 @@ impl EngineKind {
         serde_json::from_value(serde_json::Value::String(name.to_string())).unwrap_or_default()
     }
 
-    /// The models it runs on this Mac.
+    /// The models it runs on this computer.
     pub fn models(self) -> &'static [&'static models::Model] {
         match self {
             EngineKind::Cascade => &models::ALL,
@@ -132,7 +131,7 @@ pub trait VoiceEngine: Send + Sync {
 pub type AudioIn = Box<dyn Fn(&[f32], u32) + Send + Sync>;
 
 /// Where speech is played. Playback must go through the same audio unit
-/// that captures, so echo cancellation hears it.
+/// that captures, so echo cancellation (or, without one, the gate) hears it.
 pub trait AudioOut: Send + Sync {
     /// Queue mono `samples` after whatever is already playing; `done` runs
     /// once they have played or playback is stopped.
