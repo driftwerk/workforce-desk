@@ -93,7 +93,11 @@
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.floor-stale {
+.floor-stale,
+.floor-stale .floor-item-what {
+  color: var(--faint);
+}
+.floor-stale .dot {
   opacity: 0.55;
 }
 .dot-failed {
@@ -163,11 +167,14 @@
 .plan-window-head .floor-time {
   margin-left: auto;
 }
-.plan-ok {
-  color: var(--done);
+/* Taken a little toward the text, so they read on a card's surface. */
+.plan-ok,
+.floor-card .ov-label.state-done {
+  color: color-mix(in srgb, var(--done) 85%, var(--text));
 }
-.plan-high {
-  color: var(--blocked);
+.plan-high,
+.floor-card .ov-label.state-blocked {
+  color: color-mix(in srgb, var(--blocked) 85%, var(--text));
 }
 .plan-full {
   color: var(--ansi-red);
