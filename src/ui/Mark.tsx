@@ -12,7 +12,7 @@ const RING: Partial<Record<Look, string>> = {
 };
 
 export const initialsFor = (name: string, engine?: string): string =>
-  engine === "claude" ? "cc" : engine === "codex" ? "cx" : (name[0] ?? "?").toUpperCase();
+  engine === "claude" ? "cc" : engine === "codex" ? "cx" : ([...name.trim()][0] ?? "?").toUpperCase();
 
 export type MarkSize = "xs" | "sm" | "md" | "lg" | "xl";
 

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import type { HubAccount, Me } from "../chat/types";
-import { AgentMark, Mark, YouMark } from "../ui/Mark";
+import { AgentMark, initialsFor, Mark, YouMark } from "../ui/Mark";
 import { forgetImages, imageUrl, pictureOf, type Picture } from "./pictures";
 import { servePictures } from "./testing";
 import { youOn } from "./who";
@@ -28,6 +28,12 @@ describe("a mark", () => {
     expect(container.querySelector("img")!.getAttribute("src")).toBe("blob:allan");
     expect(container.textContent).toBe("");
     expect(container.querySelector(".mark")!.className).toContain("ring-working");
+  });
+
+  it("takes a whole first character for its letter, past any space", () => {
+    expect(initialsFor("🦊 Fox")).toBe("🦊");
+    expect(initialsFor("  sarah")).toBe("S");
+    expect(initialsFor("")).toBe("?");
   });
 
   it("falls back to the letter when the picture won't load", () => {
