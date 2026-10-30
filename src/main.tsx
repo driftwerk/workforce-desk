@@ -18,6 +18,7 @@ import "./styles/crew.css";
 import "./styles/overview.css";
 import "./styles/grids.css";
 import "./styles/panels.css";
+import "./styles/attachments.css";
 
 /** Shows the window once the restored shell has been committed. (Not on an
  *  animation frame: a hidden window's page never gets one.) */

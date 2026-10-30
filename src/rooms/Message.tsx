@@ -1,5 +1,6 @@
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { useMemo } from "react";
+import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
 import { openUrl } from "../platform";
 import type { Relayed } from "../chat/relayed";
@@ -32,9 +33,10 @@ export function Message({
   message: ChatMessage;
   author: string;
   home?: string;
-  /** The hub and agent of the conversation it is in: where an approval it
-   *  asks for is decided. */
-  origin?: { hub: string; agent: string };
+  /** The hub and agent of the conversation it is in: where its files are,
+   *  unless a file names its own, and where an approval it asks for is
+   *  decided. */
+  origin?: FileHome;
   /** A turn the overseer sent on, shown as from it (or from you, saying yes
    *  to it), not as something you typed. */
   relayed?: Relayed | null;
@@ -88,6 +90,7 @@ export function Message({
             </div>
           </RichHostProvider>
         )}
+        {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}
         {message.delivery === "approval" && message.requestId && origin && (
           <RoutedApproval hubId={origin.hub} requestId={message.requestId} />

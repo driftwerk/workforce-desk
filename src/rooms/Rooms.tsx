@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
+import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
 import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
-import { agentKey, describeAgent } from "../chat/types";
+import { agentKey, describeAgent, DESK_DM } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
 import { AgentSettings } from "../crew/AgentSettings";
@@ -92,6 +94,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const rosterRead = useChat((s) => s.rosterRead);
   const rosterErrors = useChat((s) => s.rosterErrors);
   const [leaving, setLeaving] = useState<Tab | null>(null);
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
+  const [sending, setSending] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
@@ -170,7 +175,22 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (send(activeAgent, draft)) setDraft("");
+    const picked = files.files;
+    if (sending || (!draft.trim() && !picked.length)) return;
+    if (!picked.length) {
+      if (send(activeAgent, draft)) setDraft("");
+      return;
+    }
+    if (!hub) return;
+    setSending(true);
+    uploadAll(hub, agent.id, DESK_DM, picked)
+      .then((attachments) => {
+        if (!send(activeAgent, draft, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        setDraft("");
+        files.clear();
+      })
+      .catch((err: unknown) => files.setProblem(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSending(false));
   };
   const unsaved = dirtyFiles(drafts, activeAgent);
   const go = (next: Tab) => setAgentTab(activeAgent, next);
@@ -200,8 +220,13 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;
   const sentOn = { local, crew: crewNames, overseer: overseerName, person: people[agent.hubId] ?? null };
 
+  const chat = tab !== "settings" && !(tab === "files" && local);
   return (
-    <Root className={inPane ? "room room-in-pane" : "room"} aria-label={`Conversation with ${agent.name}`}>
+    <Root
+      className={`${inPane ? "room room-in-pane" : "room"} drop-target`}
+      aria-label={`Conversation with ${agent.name}`}
+      {...(chat ? drop.handlers : {})}
+    >
       {!inPane && (
         <header className="room-head">
           <Mark name={agent.name} size="lg" />
@@ -302,7 +327,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />
           </div>
-          <form className="composer" onSubmit={submit}>
+          <form className="composer composer-files" onSubmit={submit}>
+            <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+            <AttachButton onFiles={files.add} disabled={sending} />
             <textarea
               rows={1}
               value={draft}
@@ -317,11 +344,16 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 Stop
               </button>
             ) : (
-              <button type="submit" className="btn btn-signal" disabled={!draft.trim() || !convo.connected}>
-                Send
+              <button
+                type="submit"
+                className="btn btn-signal"
+                disabled={sending || (!draft.trim() && !files.pending.length) || !convo.connected}
+              >
+                {sending ? "Sending…" : "Send"}
               </button>
             )}
           </form>
+          {drop.dragging && <DropOverlay to={agent.name} />}
         </>
       )}
       {leaving && (

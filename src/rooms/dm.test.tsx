@@ -167,9 +167,20 @@ describe("a DM turn the overseer sent on", () => {
 });
 
 describe("what's delivered into a DM", () => {
-  it("badges a reminder and asks a prompt's choices", () => {
-    show(history({ messages: [{ ...msg("h1", "assistant", "🔔 Reminder: stand-up", "2026-10-28T09:00:00Z"), delivery: "reminder" }] }));
+  it("badges a reminder, shows a delivered file, and asks a prompt's choices", () => {
+    show(
+      history({
+        messages: [
+          { ...msg("h1", "assistant", "🔔 Reminder: stand-up", "2026-10-28T09:00:00Z"), delivery: "reminder" },
+          {
+            ...msg("h2", "assistant", "", "2026-10-28T09:01:00Z"),
+            attachments: [{ artifact_id: "art_1", media_type: "application/zip", filename: "logs.zip", size: 2048 }],
+          },
+        ],
+      }),
+    );
     expect(screen.getByText("Reminder")).toBeTruthy();
+    expect(screen.getByText("logs.zip")).toBeTruthy();
     const prompt = {
       requestId: "q1",
       tool: "slack.send",

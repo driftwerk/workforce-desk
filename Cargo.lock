@@ -984,6 +984,7 @@ dependencies = [
 name = "desk"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "desk-core",
  "desk-tuple",
  "desk-voice",
@@ -992,6 +993,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "percent-encoding",
  "plist",
  "portable-pty",
  "reqwest 0.13.5",

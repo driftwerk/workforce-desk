@@ -1,8 +1,8 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
-import type { HubAccount } from "./chat/types";
+import type { Attachment, HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
 import type { DeskGroup, Ungrouped } from "./groups/model";
 import type { HubConnection } from "./hub/client";
@@ -159,6 +159,57 @@ export const saveHub = (label: string, url: string, token: string): Promise<{ id
   invoke("hubs_save", { label, url, token });
 
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
+
+// ── Files in conversations ────────────────────────────────────────────────
+// Their bytes come through Desk's native side, which holds each hub's
+// token: the page never puts a token in a URL. The browser preview, which
+// has no native side, asks the hub directly.
+
+/** Where a file of agent `agent` on hub `hub` is shown from: an image's
+ *  `src`, a player's (which seeks by range). */
+export const fileUrl = (hub: HubAccount, agent: string, artifact: string): string =>
+  preview
+    ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(hub.token)}`
+    : `deskfile://localhost/${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
+
+/** Opens a file in the app this Mac opens its kind with. */
+export const openFile = (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<void> =>
+  preview ? Promise.resolve(void window.open(fileUrl(hub, agent, artifact), "_blank", "noopener")) : invoke("attachment_open", { hub: hub.id, agent, artifact, filename });
+
+/** Asks where to save a file, and saves it there; false when the person
+ *  thought better of it. */
+export const saveFileAs = async (hub: HubAccount, agent: string, artifact: string, filename: string): Promise<boolean> => {
+  if (preview) {
+    const a = Object.assign(document.createElement("a"), { href: fileUrl(hub, agent, artifact), download: filename });
+    a.click();
+    return true;
+  }
+  const path = await save({ defaultPath: filename });
+  if (!path) return false;
+  await invoke("attachment_save", { hub: hub.id, agent, artifact, path });
+  return true;
+};
+
+/** Uploads `file` to agent `agent`'s conversation on `channel`, as the hub
+ *  then describes it. Throws what the hub said when it refused. */
+export const uploadFile = async (hub: HubAccount, agent: string, channel: string, file: File): Promise<Attachment> => {
+  if (preview) {
+    const url = new URL(`/api/agents/${encodeURIComponent(agent)}/attachments`, hub.url);
+    url.search = new URLSearchParams({ channel, filename: file.name }).toString();
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${hub.token}` }, body: file });
+    const body = (await res.json().catch(() => ({}))) as Attachment & { error?: string };
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    return body;
+  }
+  return tauriInvoke<Attachment>("attachment_upload", new Uint8Array(await file.arrayBuffer()), {
+    headers: {
+      "x-desk-hub": encodeURIComponent(hub.id),
+      "x-desk-agent": encodeURIComponent(agent),
+      "x-desk-channel": encodeURIComponent(channel),
+      "x-desk-filename": encodeURIComponent(file.name),
+    },
+  });
+};
 
 export interface TupleRequest {
   agent: string | null;

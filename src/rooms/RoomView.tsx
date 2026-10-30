@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent, type ChatMessage } from "../chat/types";
 import { useDesk, type RoomDraft } from "../hub/store";
@@ -26,8 +27,8 @@ const asChat = (m: RoomMessage): ChatMessage => ({
   ...(m.attachments?.length ? { attachments: m.attachments } : {}),
 });
 
-/** Where a routed approval a room message asks you is decided: its
- *  author's hub and agent. */
+/** Where a room message's files are, unless a file says (and where a
+ *  routed approval it asks you is decided): its author's hub and agent. */
 const homeOf = (m: RoomMessage) => {
   const [hub, agent] = m.author.split("/");
   return hub && agent ? { hub, agent } : undefined;
@@ -40,7 +41,10 @@ const draftsIn = (drafts: readonly RoomDraft[], all: readonly RoomMessage[], thr
   return drafts.filter((d) => d.threadId === threadId && !(d.source && posted.has(d.source)));
 };
 
-function Composer({ room, threadId, placeholder }: { room: Room; threadId: string | null; placeholder: string }) {
+/** Files dropped anywhere on a room or thread go with its next message. */
+type Files = ReturnType<typeof usePendingFiles>;
+
+function Composer({ room, threadId, placeholder, files }: { room: Room; threadId: string | null; placeholder: string; files: Files }) {
   const fail = useDesk((s) => s.fail);
   const { roster, hubs } = useChat();
   // Kept per room and thread until it's sent (and through a crash).
@@ -71,19 +75,27 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
     });
   };
 
+  const [sending, setSending] = useState(false);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft;
-    if (!text.trim()) return;
+    const picked = files.files;
+    if ((!text.trim() && !picked.length) || sending) return;
     setDraft("");
     setCaret(0);
-    say(room, text, threadId).catch((err) => {
-      setDraft(text);
-      fail(err);
-    });
+    setSending(true);
+    say(room, text, threadId, picked)
+      .then(() => files.clear())
+      .catch((err: unknown) => {
+        setDraft(text);
+        if (picked.length) files.setProblem(err instanceof Error ? err.message : String(err));
+        else fail(err);
+      })
+      .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-mentions" onSubmit={submit}>
+    <form className="composer composer-mentions composer-files" onSubmit={submit}>
+      <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
       {open && (
         <ul className="mention-menu" role="listbox" id={listId} aria-label="Mention someone">
           {options.map((a, i) => (
@@ -109,6 +121,7 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
           ))}
         </ul>
       )}
+      <AttachButton onFiles={files.add} disabled={sending} />
       <textarea
         ref={field}
         rows={1}
@@ -149,8 +162,8 @@ function Composer({ room, threadId, placeholder }: { room: Room; threadId: strin
           if (e.key === "Enter" && !e.shiftKey) submit(e);
         }}
       />
-      <button type="submit" className="btn btn-signal" disabled={!draft.trim()}>
-        Send
+      <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length)}>
+        {sending ? "Sending…" : "Send"}
       </button>
     </form>
   );
@@ -192,6 +205,8 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const setRoomThread = useUi((u) => u.setRoomThread);
   const author = useAuthor();
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
   const parent = all.find((m) => m.id === thread);
   if (!parent) return null;
   const replies = all.filter((m) => m.threadId === thread);
@@ -203,16 +218,19 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
       onClose={() => setRoomThread(room.id, null)}
       title={<b className="display rpanel-name">Thread</b>}
     >
-      <div className="room-scroll">
-        <RoomMessageView m={parent} name={author(parent.author).name} />
-        {replies.map((m) => (
-          <RoomMessageView key={m.id} m={m} name={author(m.author).name} />
-        ))}
-        {draftsIn(drafts, all, thread).map((d) => (
-          <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
-        ))}
+      <div className="thread-body drop-target" {...drop.handlers}>
+        <div className="room-scroll">
+          <RoomMessageView m={parent} name={author(parent.author).name} />
+          {replies.map((m) => (
+            <RoomMessageView key={m.id} m={m} name={author(m.author).name} />
+          ))}
+          {draftsIn(drafts, all, thread).map((d) => (
+            <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
+          ))}
+        </div>
+        <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" files={files} />
+        {drop.dragging && <DropOverlay to="the thread" />}
       </div>
-      <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" />
     </SidePanel>
   );
 }
@@ -220,6 +238,8 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
 export function RoomView({ room }: { room: Room }) {
   const { timelines, openThread } = useDesk();
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
+  const files = usePendingFiles();
+  const drop = useFileDrop(files.add);
   // The open thread, per room (and across launches): shown beside, as a
   // column of its own.
   const thread = useUi((u) => u.roomThreads[room.id] ?? null);
@@ -250,7 +270,7 @@ export function RoomView({ room }: { room: Room }) {
   const author = useAuthor();
 
   return (
-    <main className="room" aria-label={`Room ${room.name}`}>
+    <main className="room drop-target" aria-label={`Room ${room.name}`} {...drop.handlers}>
       <header className="room-head">
         <span className="room-title">
           <span className="room-title-row">
@@ -293,7 +313,9 @@ export function RoomView({ room }: { room: Room }) {
         room={room}
         threadId={null}
         placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
+        files={files}
       />
+      {drop.dragging && <DropOverlay to={room.name} />}
     </main>
   );
 }

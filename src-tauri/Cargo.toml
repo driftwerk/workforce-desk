@@ -14,15 +14,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
+bytes = "1.12.1"
 desk-core = { workspace = true }
 desk-tuple = { path = "../crates/desk-tuple" }
 desk-voice = { path = "../crates/desk-voice" }
 tokio = { workspace = true }
 eyre = { workspace = true }
 notify = "8.2.1"
+percent-encoding = "2.3.2"
 portable-pty = "0.9.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["json", "blocking"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "blocking", "rustls-no-provider"] }
 plist = "1.10.3"
 serde = { workspace = true }
 serde_json = { workspace = true }

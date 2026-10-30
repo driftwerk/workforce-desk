@@ -8,6 +8,7 @@ import type { Room, RoomMemberRef, RoomMessage } from "../hub/types";
 import { Drainer, sourceKey } from "../hubs/drain";
 import { closeConversation } from "../hubs/surface";
 import { deskState } from "../restore/boot";
+import { uploadAll } from "../attachments/upload";
 import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
 import { addressees, contextFor, MAX_HOPS, memberKey, relay, roomChannel } from "./routing";
@@ -429,16 +430,27 @@ async function bringIn(desk: DeskHub, room: Room, text: string): Promise<Room> {
 }
 
 /** You say something in a room: anyone it names who isn't in the room is
- *  brought in, it is kept, then each member it addresses is asked. */
-export async function say(room: Room, text: string, threadId: string | null): Promise<void> {
+ *  brought in, its files are sent to each member it addresses, it is
+ *  kept, then each of them is asked. */
+export async function say(room: Room, text: string, threadId: string | null, files: readonly File[] = []): Promise<void> {
   const hub = useDesk.getState().hub;
-  if (!hub || !text.trim()) return;
+  if (!hub || (!text.trim() && !files.length)) return;
   const here = await bringIn(hub, room, text);
   const { roster, hubs } = useChat.getState();
   const to = addressees(text, here.members, roster, here.defaultMember, undefined, hubs);
-  const posted = await hub.post(here.id, { author: "you", content: text, threadId });
+  if (files.length && !to.length) throw new Error("Mention someone in the room to send the files to.");
+  const sent = await Promise.all(
+    to.map((m) => {
+      const account = hubFor(m.hub);
+      if (!files.length || !account) return Promise.resolve([]);
+      return uploadAll(account, m.agent, roomChannel(here), files).then((up) => up.map((f) => ({ ...f, hub: m.hub, agent: m.agent })));
+    }),
+  );
+  const posted = await hub.post(here.id, { author: "you", content: text, threadId, attachments: sent[0] ?? [] });
   useDesk.getState().keep(posted.message);
-  for (const m of to) ask(here, m, { text, threadId, hop: 0, speaker: { kind: "person" }, message: posted.message.id, attachments: [] });
+  to.forEach((m, i) =>
+    ask(here, m, { text, threadId, hop: 0, speaker: { kind: "person" }, message: posted.message.id, attachments: sent[i] ?? [] }),
+  );
 }
 
 /** A room you're deleting: each member's hub is told, so what was set up

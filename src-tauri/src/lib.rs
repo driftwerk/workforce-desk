@@ -1,3 +1,4 @@
+mod attachments;
 mod files;
 mod frame;
 mod grid_windows;
@@ -112,16 +113,25 @@ fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> {
 #[tauri::command]
 fn hubs_save(
     app: State<'_, App>,
+    files: State<'_, attachments::Files>,
     label: String,
     url: String,
     token: String,
 ) -> CommandResult<hubs::HubRecord> {
-    hubs::save(&app.paths, &label, &url, &token).map_err(text)
+    let saved = hubs::save(&app.paths, &label, &url, &token).map_err(text);
+    files.forget();
+    saved
 }
 
 #[tauri::command]
-fn hubs_remove(app: State<'_, App>, id: String) -> CommandResult<()> {
-    hubs::remove(&app.paths, &id).map_err(text)
+fn hubs_remove(
+    app: State<'_, App>,
+    files: State<'_, attachments::Files>,
+    id: String,
+) -> CommandResult<()> {
+    let removed = hubs::remove(&app.paths, &id).map_err(text);
+    files.forget();
+    removed
 }
 
 #[tauri::command]
@@ -463,6 +473,7 @@ pub fn run() {
         .manage(logins::Logins::default())
         .manage(logins::install::Installs::default())
         .manage(Frames::default())
+        .register_asynchronous_uri_scheme_protocol(attachments::SCHEME, attachments::protocol)
         .setup(|app| {
             let paths = Paths::new()?;
             // What was open, and where the window was, before anything shows.
@@ -484,6 +495,7 @@ pub fn run() {
             tracing::info!(?helper, version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths));
+            app.manage(attachments::Files::new(paths.clone()));
             app.manage(App {
                 paths,
                 helper: Mutex::new(helper),
@@ -530,6 +542,9 @@ pub fn run() {
             grid_window_mode,
             grid_window_monitor,
             grid_monitors,
+            attachments::attachment_open,
+            attachments::attachment_save,
+            attachments::attachment_upload,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_set_roster,
