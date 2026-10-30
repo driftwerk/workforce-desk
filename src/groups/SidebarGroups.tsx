@@ -32,6 +32,7 @@ import {
   type Layout,
   type Shown,
 } from "./model";
+import { Badge, needsYou } from "../ui/Badge";
 import { useSessionNames } from "./names";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
@@ -527,7 +528,7 @@ function GroupSection({
               </span>
               <span className="grp-name">{group.name}</span>
               <span className="grp-count">{group.items.length}</span>
-              {!open && count > 0 && <NeedsBadge count={count} />}
+              {!open && count > 0 && <Badge count={count} says={needsYou(count)} />}
             </button>
           )}
           {!fixed && (
@@ -554,15 +555,6 @@ function GroupSection({
       </section>
       {dropAfter && <div className="drop-line drop-line-group" aria-hidden="true" />}
     </>
-  );
-}
-
-/** How many things wait on the person, as every badge says it. */
-function NeedsBadge({ count }: { count: number }) {
-  return (
-    <span className="badge" aria-label={`${count} ${count === 1 ? "needs" : "need"} you`}>
-      {count}
-    </span>
   );
 }
 
@@ -622,8 +614,8 @@ function ItemRow({
       onNudge={onNudge}
       onMenu={onMenu}
     >
-      {count > 0 && <NeedsBadge count={count} />}
-      {unread > 0 && <span className="badge">{unread}</span>}
+      {count > 0 && <Badge count={count} says={needsYou(count)} />}
+      {unread > 0 && <Badge count={unread} says={`${unread} unread`} />}
     </SortRow>
   );
 }

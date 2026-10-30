@@ -157,7 +157,7 @@ afterEach(() => {
 const rail = () => screen.getByRole("complementary", { name: "Activity" });
 const needsTab = () => within(rail()).getByRole("radio", { name: /Needs you/ });
 const counts = () => screen.getByText(/working ·/).textContent;
-const badges = () => screen.getAllByLabelText(/^\d+ needs? you$/).map((b) => Number(b.textContent));
+const badges = () => screen.getAllByText(/^\d+ needs? you$/, { selector: ".badge > *" }).map((b) => parseInt(b.textContent!, 10));
 const rightNowNeeds = () =>
   within(screen.getByRole("region", { name: "Right now" }))
     .getByRole("group", { name: /^Needs you · / })

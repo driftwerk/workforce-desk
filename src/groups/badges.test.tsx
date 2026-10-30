@@ -60,9 +60,9 @@ const row = (name: string, group: string) =>
 describe("the sidebar's needs badges", () => {
   it("count what waits on each session and agent, the same agent on each hub apart", () => {
     render(<SidebarGroups />);
-    expect(within(row("api-e7", "Acme")).getByLabelText("2 need you").textContent).toBe("2");
-    expect(within(row("Scout", "Acme")).getByLabelText("1 needs you")).toBeTruthy();
-    expect(within(row("Scout", "Ungrouped")).queryByLabelText(/need/)).toBeNull();
+    expect(within(row("api-e7", "Acme")).getByText("2 need you")).toBeTruthy();
+    expect(within(row("Scout", "Acme")).getByText("1 needs you")).toBeTruthy();
+    expect(within(row("Scout", "Ungrouped")).queryByText(/need/)).toBeNull();
   });
 
   it("sum a collapsed group's, and open a row where it shows", () => {
@@ -70,7 +70,7 @@ describe("the sidebar's needs badges", () => {
     fireEvent.click(row("Scout", "Acme"));
     expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "b/scout" });
     fireEvent.click(within(screen.getByRole("group", { name: "Acme" })).getAllByRole("button")[0]!);
-    expect(within(screen.getByRole("group", { name: "Acme" })).getByLabelText("3 need you")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Acme" })).getByText("3 need you")).toBeTruthy();
   });
 
   it("show a session waiting on its background work as working", () => {

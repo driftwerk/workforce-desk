@@ -18,6 +18,7 @@ import { YouMark } from "../ui/Mark";
 import { useYou } from "../pictures/who";
 import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { Badge } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
@@ -196,7 +197,7 @@ export function Sidebar({
                       onNudge={(by) => nudgeRoomBy(id, by)}
                       onMenu={(at, from) => setRoomMenu({ id, at, from })}
                     >
-                      {(unread[id] ?? 0) > 0 && <span className="badge">{unread[id]}</span>}
+                      {(unread[id] ?? 0) > 0 && <Badge count={unread[id]!} says={`${unread[id]} unread`} />}
                     </SortRow>
                   );
                 }}
