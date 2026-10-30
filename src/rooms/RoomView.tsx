@@ -271,7 +271,16 @@ export function RoomView({ room }: { room: Room }) {
       <header className="room-head">
         <span className="room-title">
           <span className="room-title-row">
-            <h1 className="display-lg">{room.name}</h1>
+            <h1 className="display-lg">
+              <button
+                type="button"
+                className="room-name-btn"
+                title="Room details"
+                onClick={() => useUi.getState().setRoomDetails({ room: room.id, rename: false })}
+              >
+                {room.name}
+              </button>
+            </h1>
             <span className="member-stack">
               {room.members.map((m) => (
                 <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />

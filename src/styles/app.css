@@ -2217,3 +2217,48 @@ button.thread-bar:hover {
   border-radius: 3px;
   padding: 0 1px;
 }
+
+/* ── Room details ───────────────────────────────────────────────────────── */
+
+.room-name-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.room-name-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.details-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.details-row > input {
+  flex: 1;
+}
+.details-members {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.details-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.details-member-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.details-level {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}

@@ -1,11 +1,8 @@
 import { useState } from "react";
-import { useChat } from "../chat/store";
-import { agentKey } from "../chat/types";
 import { useDesk } from "../hub/store";
-import { AgentMark } from "../ui/Mark";
+import { MemberPicker } from "./MemberPicker";
 
 export function NewRoom({ onClose }: { onClose: () => void }) {
-  const { roster, hubs } = useChat();
   const { hub, fail, openRoom } = useDesk();
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
@@ -36,28 +33,7 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
         </label>
         <div className="field">
           <span>Who’s in it</span>
-          <div className="quick-list">
-            {roster.map((a) => {
-              const k = agentKey(a);
-              return (
-                <label key={k} className="side-row">
-                  <input type="checkbox" checked={picked.includes(k)} onChange={() => toggle(k)} />
-                  <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
-                  <span className="display crew-name">{a.name}</span>
-                  <span className="faint small">{hubs.find((h) => h.id === a.hubId)?.label}</span>
-                  <input
-                    type="radio"
-                    name="lead"
-                    aria-label={`Unaddressed messages go to ${a.name}`}
-                    title="Unaddressed messages go to this member"
-                    disabled={!picked.includes(k)}
-                    checked={lead === k}
-                    onChange={() => setLead(k)}
-                  />
-                </label>
-              );
-            })}
-          </div>
+          <MemberPicker picked={picked} onToggle={toggle} lead={{ key: lead, onPick: setLead }} />
           <span className="faint small">The round button picks who answers messages that don’t @-mention anyone.</span>
         </div>
         <footer className="sheet-foot">

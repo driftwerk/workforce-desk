@@ -54,6 +54,9 @@ interface UiState {
   panelFocus: PanelFocus | null;
   /** The Floor's Activity list is open, not docked as a tab. */
   activityOpen: boolean;
+  /** A room's details, while they're open; `rename` puts focus on its name. */
+  roomDetails: { room: string; rename: boolean } | null;
+  setRoomDetails: (open: { room: string; rename: boolean } | null) => void;
   /** Search, while it's open: what's typed in it. */
   search: { text: string } | null;
   /** Opens search with `text` (null closes it). */
@@ -91,6 +94,8 @@ export const useUi = create<UiState>((set) => ({
   panelWidths: {},
   panelFocus: null,
   activityOpen: true,
+  roomDetails: null,
+  setRoomDetails: (roomDetails) => set({ roomDetails }),
   search: null,
   setSearch: (text) => set({ search: text === null ? null : { text } }),
   flash: null,

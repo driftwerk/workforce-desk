@@ -25,6 +25,7 @@ import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
 import { SearchPanel } from "../rooms/SearchPanel";
+import { OpenRoomDetails } from "../rooms/RoomDetails";
 import { AgentPanel, useAgentPanel } from "../rooms/AgentPanel";
 import { Stage, type OpenPanel } from "../panels/Stage";
 import { useSessionName } from "../groups/names";
@@ -312,6 +313,7 @@ export function App() {
       {newSession && <NewSession onClose={() => setNewSession(false)} />}
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
+      <OpenRoomDetails />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <UpdateNotice />
       {error && (
