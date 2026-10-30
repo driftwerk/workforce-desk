@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
-import type { Session } from "../hub/types";
+import type { Session, TerminalInfo } from "../hub/types";
 import type { PaneContent } from "../grids/engine";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
@@ -109,6 +109,12 @@ describe("a session's card says where the session already is", () => {
 
   it("running in a Desk terminal no grid shows: puts that terminal in the grid shown now", () => {
     useDesk.setState({ sessions: { s1: session({ terminalId: "t1" }) } });
+    // Until the hub says it has that terminal, there's none to show.
+    const { unmount } = card();
+    expect(where()).toBeNull();
+    expect(screen.getByRole("button", { name: "Put this session in a grid" })).toBeTruthy();
+    unmount();
+    useTerminals.setState({ byId: { t1: { id: "t1", live: true } as TerminalInfo } });
     card();
     expect(lines()).toEqual(["Running in a Desk terminal that isn’t in a grid"]);
     act(() => fireEvent.click(screen.getByRole("button", { name: "Show it" })));

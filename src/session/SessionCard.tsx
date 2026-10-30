@@ -7,6 +7,7 @@ import type { Session } from "../hub/types";
 import { PutInGrid } from "../grids/PutInGrid";
 import { shownGrid, useGrids } from "../grids/store";
 import { placesOf, type Place } from "../grids/where";
+import { useTerminals } from "../grids/terminals";
 import { addToGrid, goTo } from "../grids/windows";
 import { sessionItem } from "../groups/model";
 import { SidePanel } from "../panels/Stage";
@@ -32,8 +33,10 @@ export function SessionCard({ session }: { session: Session }) {
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
   const places = placesOf({ order, grids }, sessions, sessionItem(session.id));
-  // Running in a Desk terminal that no pane shows (nor the session itself).
-  const loose = !places.length && session.live && session.terminalId ? session.terminalId : null;
+  // Running in a Desk terminal that no pane shows (nor the session itself),
+  // while the hub has it.
+  const ranIn = useTerminals((s) => (session.terminalId && s.byId[session.terminalId]?.live ? session.terminalId : null));
+  const loose = !places.length && session.live ? ranIn : null;
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
   const saveGoal = () => {
@@ -89,11 +92,6 @@ export function SessionCard({ session }: { session: Session }) {
   );
 }
 
-/** One of each kind of place per grid: a grid holding the session in a
- *  pane of its own, or the terminal it runs in. */
-const perGrid = (places: Place[], terminal: boolean): Place[] =>
-  places.filter((p, i) => (p.content.kind === "terminal") === terminal && places.findIndex((q) => q.gridId === p.gridId && q.content.kind === p.content.kind) === i);
-
 /** Where the session already is (see `placesOf`), each with a way there:
  *  its own pane in a grid, the terminal in a grid it runs in, or a Desk
  *  terminal no grid shows, which is put in the grid shown now. `onShown`
@@ -104,7 +102,7 @@ function ShownIn({ places, loose, onShown }: { places: Place[]; loose: string | 
   const line = (p: Place, says: string, label: string) => {
     const grid = grids[p.gridId]?.name ?? "a grid";
     return (
-      <li key={`${p.content.kind}:${p.gridId}`}>
+      <li key={p.paneId}>
         <span>
           {says} <span className="strong">{grid}</span>
         </span>
@@ -116,8 +114,8 @@ function ShownIn({ places, loose, onShown }: { places: Place[]; loose: string | 
   };
   return (
     <ul className="session-where small" aria-label="Where it is">
-      {perGrid(places, false).map((p) => line(p, "In grid", "Go to it"))}
-      {perGrid(places, true).map((p) => line(p, "Running in a terminal in", "Go to the terminal"))}
+      {places.filter((p) => p.content.kind !== "terminal").map((p) => line(p, "In grid", "Go to it"))}
+      {places.filter((p) => p.content.kind === "terminal").map((p) => line(p, "Running in a terminal in", "Go to the terminal"))}
       {loose && (
         <li>
           <span>Running in a Desk terminal that isn’t in a grid</span>
