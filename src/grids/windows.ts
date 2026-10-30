@@ -190,8 +190,12 @@ export const focusGridWindow = async (id: string): Promise<void> => {
 };
 
 /** Focuses and points out the pane showing `content` in grid `gridId`, in
- *  this window; false when it isn't laid out there. */
-const pointOut = (gridId: string, content: PaneContent): boolean => {
+ *  this window: a parked one is swapped back into the layout first, here,
+ *  as this window writes the grid. False when it isn't in the grid, or
+ *  can't be laid out. */
+export const pointOut = (gridId: string, content: PaneContent): boolean => {
+  const there = findContent(useGrids.getState().grids[gridId]?.panes ?? [], content);
+  if (!there || (!there.rect && !swapInPane(gridId, there.id))) return false;
   const p = findContent(laidOut(useGrids.getState().grids[gridId]?.panes ?? []), content);
   if (!p) return false;
   // Another pane filling the grid would hide it.
@@ -235,15 +239,14 @@ export const reveal = (content: PaneContent): boolean => {
 };
 
 /** Takes the person to `place` (see `placesOf`): a grid whose monitor is
- *  away is shown in the main window again, as its sidebar row does; a
- *  parked pane is swapped back into the layout; then it's shown as
- *  `revealIn` shows it. */
+ *  away is shown in the main window again, as its sidebar row does; then
+ *  it's shown as `revealIn` shows it (a parked pane swapped back in by the
+ *  window that writes its grid). */
 export const goTo = (place: Place): boolean => {
   const s = useGrids.getState();
   const g = s.grids[place.gridId];
   if (!g) return false;
   if (isAway(g, s.open)) bringBack(g.id);
-  if (place.parked) swapInPane(place.gridId, place.paneId);
   return revealIn(place.gridId, place.content);
 };
 
