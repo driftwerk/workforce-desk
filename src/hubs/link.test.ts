@@ -6,7 +6,7 @@ const state = vi.hoisted(() => new Map<string, unknown>());
 const drained = vi.hoisted(() => [] as { hub: string; agent: string; channel: string }[]);
 const notified = vi.hoisted(() => [] as { title: string; body: string }[]);
 const spoken = vi.hoisted(() => [] as string[]);
-const said = vi.hoisted(() => ({ messages: [] as { id: string; from: string; text: string }[] }));
+const said = vi.hoisted(() => ({ messages: [] as { id: string; from: string; text: string }[], done: true }));
 
 vi.mock("../restore/boot", () => ({
   deskState: { get: (k: string) => state.get(k), set: (k: string, v: unknown) => void state.set(k, v), remove: (k: string) => void state.delete(k) },
@@ -15,8 +15,9 @@ vi.mock("../rooms/engine", () => ({
   drainer: {
     drain: async (hub: HubAccount, agent: string, channel: string) => {
       drained.push({ hub: hub.id, agent, channel });
-      return said.messages;
+      return said.done;
     },
+    said: (_hub: string, _agent: string, id: string) => said.messages.find((m) => m.id === id),
   },
 }));
 vi.mock("../shell/notify", () => ({ notify: async (n: { title: string; body: string }) => void notified.push(n) }));
@@ -29,7 +30,7 @@ vi.mock("../floor/store", () => ({
 }));
 
 const { HubLink, linkUrl } = await import("./link");
-const { followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
+const { CATCH_UP_RETRY_MS, followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
 const { useChat } = await import("../chat/store");
 
 const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "tok" };
@@ -48,6 +49,7 @@ beforeEach(() => {
   spoken.length = 0;
   sinces.length = 0;
   said.messages = [];
+  said.done = true;
   conversations = [];
   floor.heard.length = 0;
   floor.unheard.length = 0;
@@ -73,6 +75,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   followHubs([]);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -110,6 +113,22 @@ describe("a hub link", () => {
     expect(drained.map((d) => d.channel)).toEqual(["desk", "desk:6f1c"]);
     expect(useChat.getState().hubFeatures.dw?.has("desk.deliveries")).toBe(true);
     await vi.waitFor(() => expect(state.get("drain.dw.seen")).not.toBe("2026-10-30T10:00:00.000Z"));
+  });
+
+  it("tries a catch-up that left something undrained again, and only then counts it as looked at", async () => {
+    state.set("drain.dw.seen", "2026-10-30T10:00:00.000Z");
+    conversations = [{ agent_id: "allan", channel: "desk:6f1c", updated_at: "2026-10-30T10:01:00Z" }];
+    said.done = false;
+    const s = await link();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    s.receive({ type: "hello", features: ["desk.deliveries"] });
+    await vi.waitFor(() => expect(drained).toHaveLength(1));
+    expect(state.get("drain.dw.seen")).toBe("2026-10-30T10:00:00.000Z");
+    said.done = true;
+    await vi.advanceTimersByTimeAsync(CATCH_UP_RETRY_MS);
+    await vi.waitFor(() => expect(state.get("drain.dw.seen")).not.toBe("2026-10-30T10:00:00.000Z"));
+    expect(drained).toHaveLength(2);
+    expect(sinces).toHaveLength(2);
   });
 
   it("drains a delivery's conversation, counts it unread in its DM, tells you, and reads a spoken one aloud", async () => {

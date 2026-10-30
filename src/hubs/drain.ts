@@ -76,32 +76,70 @@ export interface DrainDeps {
 /** The most pages one drain reads before it waits for the next signal. */
 const MAX_PAGES = 20;
 
-/** Refusals of one post (not a member any more, the loop guard) that leave
- *  the rest of the conversation to drain. */
-const refused = (e: unknown): boolean => e instanceof HubError && e.status >= 400 && e.status < 500;
+/** How many of the messages drained last Desk keeps to tell of. */
+const RECENT = 200;
 
-/** Drains conversations, one drain per conversation at a time. */
+/** Refusals of one post that a later drain would only meet again (a bad
+ *  message, not a member any more, a room that's gone, the loop guard):
+ *  the rest of the conversation drains past it. */
+const FINAL = new Set([400, 403, 404, 409, 413, 422]);
+const refused = (e: unknown): boolean => e instanceof HubError && FINAL.has(e.status);
+
+const sameAccount = (a: HubAccount, b: HubAccount): boolean => a.url === b.url && a.token === b.token;
+
+/** A drain of one conversation, and whether it has begun reading. */
+interface Queued {
+  hub: HubAccount;
+  run: Promise<boolean>;
+  started: boolean;
+}
+
+/** Drains conversations, one drain per conversation at a time; a drain
+ *  asked for while another waits to begin is that one. */
 export class Drainer {
-  private queue = new Map<string, Promise<HubMessage[]>>();
+  private queue = new Map<string, Queued>();
+  private recent = new Map<string, HubMessage>();
 
   constructor(private readonly deps: DrainDeps) {}
 
-  /** Drains `agentId`'s conversation on `channel` of `hub`; what it read. */
-  drain(hub: HubAccount, agentId: string, channel: string): Promise<HubMessage[]> {
+  /** Drains `agentId`'s conversation on `channel` of `hub`: true once it
+   *  has read and placed all there was, false when some is left for the
+   *  next drain. */
+  drain(hub: HubAccount, agentId: string, channel: string): Promise<boolean> {
     const key = cursorKey(hub.id, agentId, channel);
-    const next = (this.queue.get(key) ?? Promise.resolve([])).catch(() => []).then(() => this.run(hub, agentId, channel, key));
-    this.queue.set(key, next);
-    void next.finally(() => this.queue.get(key) === next && this.queue.delete(key)).catch(() => undefined);
-    return next;
+    const was = this.queue.get(key);
+    if (was && !was.started && sameAccount(was.hub, hub)) return was.run;
+    const q: Queued = { hub, started: false, run: Promise.resolve(true) };
+    q.run = (was?.run ?? Promise.resolve(true))
+      .catch(() => false)
+      .then(() => {
+        q.started = true;
+        return this.run(hub, agentId, channel, key);
+      });
+    this.queue.set(key, q);
+    void q.run.finally(() => this.queue.get(key) === q && this.queue.delete(key)).catch(() => undefined);
+    return q.run;
   }
 
-  private async run(hub: HubAccount, agentId: string, channel: string, key: string): Promise<HubMessage[]> {
-    const read: HubMessage[] = [];
+  /** Message `messageId` of `agentId` on `hub`, among those drained lately. */
+  said(hubId: string, agentId: string, messageId: string): HubMessage | undefined {
+    return this.recent.get(sourceKey(hubId, agentId, messageId));
+  }
+
+  private heard(hubId: string, agentId: string, messages: readonly HubMessage[]) {
+    for (const m of messages) this.recent.set(sourceKey(hubId, agentId, m.id), m);
+    for (const k of this.recent.keys()) {
+      if (this.recent.size <= RECENT) break;
+      this.recent.delete(k);
+    }
+  }
+
+  private async run(hub: HubAccount, agentId: string, channel: string, key: string): Promise<boolean> {
     let cursor = this.deps.cursors.get(key);
     for (let pages = 0; pages < MAX_PAGES; pages++) {
       const at = await this.page(hub, agentId, channel, cursor, key);
-      if (!at.page) return read;
-      read.push(...at.page.messages);
+      if (!at.page) return true;
+      this.heard(hub.id, agentId, at.page.messages);
       const { done, through } = await this.place(hub, agentId, channel, at.page.messages);
       const placed = at.page.messages.slice(0, at.page.messages.findIndex((m) => m.id === through) + 1);
       const next = cursorIn(placed, "last");
@@ -110,9 +148,10 @@ export class Drainer {
         this.deps.cursors.set(key, next);
       }
       // Without a cursor the newest page was read, and `more` is what's older.
-      if (!done || !at.forward || !at.page.more || !next) return read;
+      if (!done) return false;
+      if (!at.forward || !at.page.more || !next) return true;
     }
-    return read;
+    return false;
   }
 
   /** The page after `cursor`; the newest when there is none, or when it
@@ -176,7 +215,7 @@ export class Drainer {
       content: said.text ?? said.content ?? "",
       threadId: p.threadId,
       hop: delivery ? 0 : this.deps.hopOf(hub.id, agentId, said.id),
-      attachments: (said.attachments ?? []).map((a) => ({ ...a, hub: a.hub ?? hub.id, agent: a.agent ?? agentId })),
+      attachments: (said.attachments ?? []).map((a) => ({ ...a, hub: hub.id, agent: agentId })),
       source: p.source,
       ...(delivery ? { delivery } : {}),
       ...(said.mark?.request_id ? { requestId: said.mark.request_id } : {}),

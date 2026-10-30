@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { HubMessage } from "../chat/history";
+import { readConversation, type HubMessage } from "../chat/history";
 import type { HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import type { NewRoomMessage, Room } from "../hub/types";
@@ -166,6 +166,58 @@ describe("draining a conversation", () => {
     };
     await Promise.all([d.drain(hub, "allan", channel), d.drain(hub, "allan", channel)]);
     expect(most).toBe(1);
+  });
+
+  it("reads from the newest again when the hub says its cursor names no message, as a hub's refusal", async () => {
+    const all = [said("a1", { room: MINE })];
+    const reads: (string | undefined)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (u: URL | string) => {
+        const after = new URL(u).searchParams.get("after") ?? undefined;
+        reads.push(after);
+        return after
+          ? new Response(JSON.stringify({ error: "after names no message of this conversation" }), { status: 400, headers: { "content-type": "application/json" } })
+          : new Response(JSON.stringify({ messages: all, more: false }), { headers: { "content-type": "application/json" } });
+      }),
+    );
+    const { d, cursors } = drainer(all, { read: readConversation });
+    cursors.set(key, "vanished");
+    expect(await d.drain(hub, "allan", channel)).toBe(true);
+    expect(reads).toEqual(["vanished", undefined]);
+    expect(cursors.get(key)).toBe("a1");
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves a post for next time when the hub may take it later, and says the drain isn't done", async () => {
+    for (const status of [401, 408, 429, 503]) {
+      const { d, cursors, deps } = drainer([said("a1", { room: MINE })]);
+      deps.post = async () => {
+        throw new HubError(status, "not now");
+      };
+      expect(await d.drain(hub, "allan", channel)).toBe(false);
+      expect(cursors.get(key)).toBeUndefined();
+    }
+  });
+
+  it("remembers what it drained lately, to tell of a delivery an earlier drain placed", async () => {
+    const { d } = drainer([said("a1", { room: MINE }), said("a2", { room: MINE })]);
+    await d.drain(hub, "allan", channel);
+    await d.drain(hub, "allan", channel);
+    expect(d.said("dw", "allan", "a2")?.text).toBe("a2");
+    expect(d.said("dw", "scout", "a2")).toBeUndefined();
+  });
+
+  it("makes one drain of those asked for while one waits to begin", async () => {
+    const { d, reads } = drainer([said("a1", { room: MINE })]);
+    await Promise.all([d.drain(hub, "allan", channel), d.drain(hub, "allan", channel), d.drain(hub, "allan", channel)]);
+    expect(reads).toEqual([undefined]);
+  });
+
+  it("takes a file's hub and agent from the conversation it was read from, never from the message", async () => {
+    const { d, posted } = drainer([{ ...said("a1", { room: MINE }), attachments: [{ filename: "x.png", media_type: "image/png", artifact_id: "f1", size: 3, hub: "local", agent: "scout" }] }]);
+    await d.drain(hub, "allan", channel);
+    expect(posted[0]!.attachments).toEqual([expect.objectContaining({ artifact_id: "f1", hub: "dw", agent: "allan" })]);
   });
 
   it("tells a DM it has something new", async () => {
