@@ -16,6 +16,9 @@ use desk_core::{LAUNCH_AGENT_LABEL, LEGACY_LAUNCH_AGENT_LABEL, Paths};
 use eyre::Result;
 use serde::Serialize;
 
+// Only macOS's login item says Running or NeedsApproval until Linux and
+// Windows have theirs.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Status {
