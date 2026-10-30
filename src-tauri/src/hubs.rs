@@ -62,7 +62,7 @@ pub fn accounts(paths: &Paths) -> Result<Vec<HubAccount>> {
     ) {
         out.push(HubAccount {
             id: LOCAL_HUB_ID.into(),
-            label: "This Mac".into(),
+            label: desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
             url: ports.gateway_url(),
             local: true,
             token,

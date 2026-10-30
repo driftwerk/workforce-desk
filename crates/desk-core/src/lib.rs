@@ -1,5 +1,6 @@
 //! What the Desk app and `desk-hubd` share: where Desk keeps its files, the
-//! local hub's ports, its secrets in the macOS keychain, and its PTY holder.
+//! local hub's ports, its secrets in the macOS keychain, its PTY holder,
+//! and what this computer and its person are called.
 
 pub mod holder;
 pub mod redact;
@@ -357,6 +358,25 @@ pub fn device_token_account(hub_id: &str) -> String {
 }
 
 pub const LOCAL_HUB_ID: &str = "local";
+
+/// A name the system gave, if it gave one that says anything.
+fn named(name: whoami::Result<String>) -> Option<String> {
+    name.ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+/// What this computer is called, as its system names it to people: its
+/// device name, else its host name.
+pub fn computer_name() -> Option<String> {
+    named(whoami::devicename()).or_else(|| named(whoami::hostname()))
+}
+
+/// Who uses this computer, as its system names them: their full name, else
+/// their account's.
+pub fn person_name() -> Option<String> {
+    named(whoami::realname()).or_else(|| named(whoami::username()))
+}
 
 impl SecretStore for Keychain {
     fn get(&self, secret: Secret) -> Result<Option<String>> {
