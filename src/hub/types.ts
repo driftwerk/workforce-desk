@@ -354,7 +354,11 @@ export type ActivityKind =
   | "suggested"
   | "dismissed"
   | "summary"
-  | "assigned";
+  | "assigned"
+  /** An agent on another hub answered in one of your rooms. */
+  | "replied"
+  /** A delivery reached one of your rooms. */
+  | "delivered";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -370,6 +374,10 @@ export interface ActivityEvent {
   reason?: string | null;
   suggestionId?: string | null;
   approvalId?: string | null;
+  /** Where in Desk it happened: a room, its thread. */
+  place?: Place | null;
+  /** The room message it's about. */
+  message?: string | null;
 }
 
 export type ActivityFilter = "all" | "needs_you" | "manager";

@@ -10,6 +10,9 @@ vi.mock("../restore/boot", () => ({
   },
 }));
 
+const notified = vi.hoisted(() => [] as { title: string; body: string }[]);
+vi.mock("../shell/notify", () => ({ notify: async (n: { title: string; body: string }) => void notified.push(n), notificationFor: () => null }));
+
 const { useChat } = await import("../chat/store");
 const { emptyConversation } = await import("../chat/conversation");
 const { useDesk } = await import("../hub/store");
@@ -84,6 +87,7 @@ beforeEach(() => {
   sources.clear();
   saved.clear();
   closed.length = 0;
+  notified.length = 0;
   prune({});
   vi.stubGlobal(
     "fetch",
@@ -573,6 +577,25 @@ describe("asking a room's members", () => {
 });
 
 type RoomDraft = import("../hub/store").RoomDraft;
+
+describe("telling you of a room's answers", () => {
+  it("tells you of an answer to your ask that took over a minute, not a quick one, and not a hand-off's", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await say(room, "@allan long one", null);
+    const allan = await connect("allan", ["desk.place", "desk.stream"]);
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    vi.setSystemTime(Date.now() + 70_000);
+    answer(allan, allan.chats[0]!.turn_ref as string, "m1", "Done, @scout check it.\nMore.");
+    await vi.waitFor(() => expect(notified).toEqual([{ title: "Allan answered · Release", body: "Done, @scout check it." }]));
+    const scout = await connect("scout", ["desk.place", "desk.stream"]);
+    await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
+    vi.setSystemTime(Date.now() + 70_000);
+    answer(scout, scout.chats[0]!.turn_ref as string, "m2", "Checked.");
+    await vi.waitFor(() => expect(posts.filter((p) => p.author === "local/scout")).toHaveLength(1));
+    expect(notified).toHaveLength(1);
+    vi.useRealTimers();
+  });
+});
 
 describe("acting on a room's messages", () => {
   it("asks again what an answer answered, of who answered it, fetching it when it isn't loaded", async () => {

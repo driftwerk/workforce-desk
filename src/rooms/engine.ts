@@ -14,6 +14,7 @@ import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
 import { addressees, contextFor, MAX_HOPS, memberKey, memberOf, relay, roomChannel } from "./routing";
 import { newestRun, ofPlace, placeKey } from "./window";
+import { firstLine, notifyPlace, QUICK_MS, type Notice } from "../unread/notices";
 
 // Asking a room's members. Each member answers on a conversation of its own
 // for the room (`room.channel` on its hub), one ask at a time across the
@@ -117,6 +118,27 @@ const draftOf = (a: Ask, patch: Partial<RoomDraft> = {}): RoomDraft => {
 
 const show = (a: Ask, patch: Partial<RoomDraft>) => useDesk.getState().putDraft(a.roomId, draftOf(a, patch));
 
+/** Tells you of what an ask came to, as the room's level deserves. */
+function told(a: Ask, what: { kind: "waiting"; ask: string; id: string } | { kind: "failed"; why: string } | { kind: "answered"; text: string }) {
+  const room = useDesk.getState().rooms[a.roomId];
+  if (!room) return;
+  const who = displayName(a.member);
+  const where = `${room.name}${a.threadId ? " ▸ thread" : ""}`;
+  const place: Notice["place"] = a.threadId ? { kind: "thread", room: room.id, thread: a.threadId } : { kind: "room", room: room.id };
+  if (what.kind === "waiting") notifyPlace({ place, urgency: "needs", id: `prompt:${what.id}`, title: `${who} needs you · ${where}`, body: firstLine(what.ask) });
+  else if (what.kind === "failed") notifyPlace({ place, urgency: "needs", id: `failed:${a.id}`, title: `${who}’s answer failed · ${where}`, body: firstLine(what.why) });
+  else
+    notifyPlace({
+      place,
+      // An answer to an agent's hand-off is only new to you.
+      urgency: a.speaker.kind === "person" ? "forYou" : "new",
+      quick: Date.now() - a.sentAt < QUICK_MS,
+      id: `answered:${a.id}`,
+      title: `${who} answered · ${where}`,
+      body: firstLine(what.text),
+    });
+}
+
 /** The ask is over: its draft goes, and the member's next ask is sent,
  *  and what it was too busy for elsewhere asked again. */
 const done = (a: Ask) => {
@@ -215,6 +237,7 @@ function send(a: Ask) {
     else {
       a.state = "held";
       show(a, { state: "failed", error: `Couldn’t reach ${displayName(a.member)}.` });
+      told(a, { kind: "failed", why: `Couldn’t reach ${displayName(a.member)}.` });
       pump(lineKey(here, a.member));
     }
   };
@@ -291,10 +314,12 @@ function follow(key: string, a: Ask, t: Turn, state: ConversationState) {
       setTimeout(() => pump(key), backoff(a.refusals++));
     } else {
       show(a, { state: "failed", text: t.text, working: null, tools: t.tools, attachments: t.attachments, prompts: [], error: t.error });
+      told(a, { kind: "failed", why: t.error ?? "" });
       pump(key);
     }
     return;
   }
+  for (const p of prompts) told(a, { kind: "waiting", ask: p.content, id: p.requestId });
   show(a, {
     state: t.state === "stalled" ? "stalled" : "live",
     text: t.text,
@@ -318,6 +343,7 @@ async function settle(a: Ask, t: Turn) {
   try {
     if (line.convo.current.features?.has(FEATURES.deliveries)) await drainer.drain(hub, a.member.agent, roomChannel(room));
     else await postAnswer(room, a, t.text, t.attachments, sourceKey(hub.id, a.member.agent, t.replyId));
+    told(a, { kind: "answered", text: t.text });
   } catch (e) {
     a.state = "held";
     show(a, { state: "failed", working: null, error: `Couldn’t fetch ${displayName(a.member)}’s answer: ${e instanceof Error ? e.message : String(e)}` });

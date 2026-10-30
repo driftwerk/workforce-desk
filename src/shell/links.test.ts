@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../platform", () => ({ openUrl: vi.fn() }));
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: vi.fn() }));
 vi.mock("./navigate", () => ({ openTarget: vi.fn() }));
 
 const { openUrl } = await import("../platform");

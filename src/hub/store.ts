@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { shownState } from "../floor/background";
-import { notificationFor, notify } from "../shell/notify";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, HubError, ROOM_PAGE, type HubConnection } from "./client";
@@ -253,11 +252,6 @@ export const useDesk = create<DeskState>((set, get) => ({
     set({ hub, detached: opts?.notify === false });
     return hub.events(
       (e) => {
-        if (e.type === "session" && !get().detached) {
-          const was = get().sessions[e.session.id];
-          const n = notificationFor(was && shownState(was), e.session);
-          if (n) void notify(n);
-        }
         set((s) => ({
           rooms: applyRooms(s.rooms, e),
           timelines:

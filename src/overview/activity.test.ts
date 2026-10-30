@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubError, type DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
-import type { ActivityEvent, ActivityFilter, ActivityPage } from "../hub/types";
-import { lineOf, matches, mergeEvents } from "./activity";
+import type { ActivityEvent, ActivityFilter, ActivityPage, Room } from "../hub/types";
+import { agentNamer, eventTarget, lineOf, matches, mergeEvents, toneOf } from "./activity";
 import { onDeskEvent, useOverview } from "./store";
 
 const ev = (id: string, at: string, over: Partial<ActivityEvent> = {}): ActivityEvent => ({
@@ -121,5 +121,42 @@ describe("the Activity rail's store", () => {
     await useOverview.getState().loadActivity("manager");
     expect(useOverview.getState().activitySupport).toBe("no");
     expect(useOverview.getState().feeds.manager!.state).toBe("failed");
+  });
+});
+
+describe("an event about a room message", () => {
+  const ev = (over: Partial<ActivityEvent>): ActivityEvent => ({
+    id: "e1",
+    at: "2026-10-30T10:00:00Z",
+    kind: "replied",
+    actor: { kind: "agent", id: "dw/atlas", name: "dw/atlas" },
+    subject: { kind: "agent", id: "dw/atlas", name: "dw/atlas" },
+    text: "replied",
+    ...over,
+  });
+  const rooms = { r1: { id: "r1", name: "Release" } as Room };
+
+  it("opens the message where it happened, in a room this computer has", () => {
+    expect(eventTarget(ev({ place: { kind: "room", room: "r1", thread: "t1" }, message: "m1" }), rooms)).toEqual({ kind: "room", roomId: "r1", threadId: "t1", messageId: "m1" });
+    expect(eventTarget(ev({ place: { kind: "room", room: "gone", thread: null } }), rooms)).toBeNull();
+    expect(eventTarget(ev({}), rooms)).toBeNull();
+  });
+
+  it("colours a reply as done, an approval delivered as needing you, other deliveries as quiet", () => {
+    expect(toneOf(ev({}))).toBe("done");
+    expect(toneOf(ev({ kind: "delivered", approvalId: "a1" }))).toBe("blocked");
+    expect(toneOf(ev({ kind: "delivered" }))).toBe("quiet");
+  });
+
+  it("names an agent from the roster, by its hub/agent key or on this computer", () => {
+    const named = agentNamer(
+      [
+        { hubId: "dw", id: "atlas", name: "Atlas" },
+        { hubId: "local", id: "allan", name: "Allan" },
+      ],
+      "local",
+    );
+    expect(lineOf(ev({}), {}, named).lead).toEqual({ name: "Atlas", session: false });
+    expect(lineOf(ev({ subject: { kind: "agent", id: "allan", name: "allan" } }), {}, named).lead?.name).toBe("Allan");
   });
 });

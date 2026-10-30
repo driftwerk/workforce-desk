@@ -14,21 +14,32 @@ import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
-import { lineOf, needStates, toneOf, type NeedState } from "./activity";
+import { agentNamer, eventTarget, lineOf, needStates, toneOf, type NeedState } from "./activity";
+import { useDesk } from "../hub/store";
+import { placeLabel } from "../floor/target";
+import { openTarget } from "../shell/navigate";
 import { useOverview } from "./store";
 
 /** "allowed by you 16:31", "no longer waiting". */
 const resolvedText = (state: Extract<NeedState, { open: false }>): string => (state.at ? `${state.how} ${clock(state.at)}` : state.how);
 
 export function ActivityRow({ event, need }: { event: ActivityEvent; need?: NeedState }) {
-  const line = lineOf(event, useSessionNames());
+  const roster = useChat((s) => s.roster);
+  const localHub = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  const line = lineOf(event, useSessionNames(), agentNamer(roster, localHub));
+  const rooms = useDesk((s) => s.rooms);
+  const target = eventTarget(event, rooms);
+  const where = event.place ? placeLabel(event.place, rooms) : null;
+  const thread = event.place?.kind === "room" && event.place.thread ? " ▸ thread" : "";
+  // A row about a room message opens it.
+  const Text = target ? "button" : "span";
   return (
     <li className={`ev ${need?.open ? "ev-open" : need ? "ev-resolved" : ""}`} data-message-id={event.id}>
       <time className="ev-time" dateTime={event.at}>
         {clock(event.at)}
       </time>
       <span className={`ev-dot ev-${toneOf(event)}`} aria-hidden="true" />
-      <span className="ev-text">
+      <Text className={target ? "ev-text ev-link" : "ev-text"} {...(target ? { type: "button" as const, onClick: () => openTarget(target) } : {})}>
         {line.lead && (line.lead.session ? <span className="mono ev-who">{line.lead.name}</span> : <b>{line.lead.name}</b>)}{" "}
         {line.parts.map((p, i) =>
           p.name ? (
@@ -43,9 +54,16 @@ export function ActivityRow({ event, need }: { event: ActivityEvent; need?: Need
             <span key={i}>{p.text}</span>
           ),
         )}
+        {where && (
+          <span className="faint">
+            {" "}
+            {where}
+            {thread}
+          </span>
+        )}
         {event.reason && <span className="ev-reason">{event.reason}</span>}
         {need && <span className="ev-reason">{need.open ? "Still waiting on you" : `Resolved · ${resolvedText(need)}`}</span>}
-      </span>
+      </Text>
     </li>
   );
 }

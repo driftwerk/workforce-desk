@@ -14,7 +14,7 @@ import { useUi } from "./ui";
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../grids/windows", () => ({ reveal: vi.fn(() => false) }));
-vi.mock("../platform", () => ({ openUrl: vi.fn() }));
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: vi.fn() }));
 vi.mock("../rooms/AgentPanel", () => ({ openAgent: vi.fn(), openAgentBeside: vi.fn() }));
 
 const message = (id: string): RoomMessage => ({ id, roomId: "r1", threadId: null, author: "you", content: "hi", hop: 0, createdAt: "" });

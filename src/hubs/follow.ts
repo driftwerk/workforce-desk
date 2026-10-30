@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { textOf } from "../chat/history";
 import { useChat } from "../chat/store";
-import { DESK_DM, type DeliveryKind, type HubAccount } from "../chat/types";
+import { DESK_DM, type HubAccount } from "../chat/types";
 import { floorHeard, floorUnheard, ask as readFloor } from "../floor/store";
 import { deskState } from "../restore/boot";
 import { drainer } from "../rooms/engine";
-import { notify } from "../shell/notify";
+import { DELIVERY_LABEL, firstLine, notifyPlace, QUIET } from "../unread/notices";
 import { cachedDms, dmsFrom, hubBack, refreshDms } from "../unread/summary";
 import { readAloud } from "../voice/useVoice";
 import { DRAIN_PREFIX } from "./drain";
@@ -23,15 +23,6 @@ import { activeConversations } from "./surface";
 export const SINCE_MARGIN_MS = 5 * 60_000;
 
 const seenKey = (hubId: string) => `${DRAIN_PREFIX}${hubId}.seen`;
-
-/** What a delivery is called when you're told of it; kinds not here aren't
- *  worth a notification. */
-const NOTIFIED: Partial<Record<DeliveryKind, string>> = {
-  reminder: "Reminder",
-  job: "Scheduled job",
-  approval: "Needs your approval",
-  check_in: "Check-in",
-};
 
 /** The `since` to drain a hub from, as Desk last looked at it. */
 export const sinceOf = (seen: unknown): string | null => {
@@ -77,10 +68,19 @@ async function arrived(hub: HubAccount, d: Delivered) {
   const said = drainer.said(hub.id, d.agentId, d.messageId);
   const { roster } = useChat.getState();
   const agent = roster.find((a) => a.hubId === hub.id && a.id === d.agentId);
-  if (d.channel === DESK_DM) void refreshDms(hub);
-  const label = NOTIFIED[d.kind];
   const text = said ? textOf(said) : "";
-  if (label) void notify({ title: `${agent?.name ?? d.agentId} · ${label}`, body: text.split("\n")[0]?.slice(0, 200) ?? "" });
+  // A room's is told of once it's kept in the room.
+  if (d.channel === DESK_DM) {
+    void refreshDms(hub);
+    notifyPlace({
+      place: { kind: "dm", hub: hub.id, agent: d.agentId },
+      urgency: d.kind === "notice" ? "new" : "forYou",
+      quiet: QUIET.has(d.kind),
+      id: `dm:${hub.id}/${d.agentId}/${d.messageId}`,
+      title: `${agent?.name ?? d.agentId} · ${DELIVERY_LABEL[d.kind] ?? "Message"}`,
+      body: firstLine(text),
+    });
+  }
   if (d.spoken && agent && text) readAloud(agent, text);
 }
 

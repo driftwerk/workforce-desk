@@ -34,6 +34,7 @@ import {
 } from "./model";
 import { badgeOfGroup, itemBadge, type Badge } from "../unread/badges";
 import { Marks, useBadgeData } from "../unread/Marks";
+import { levelOf, NOTIFY_LEVELS, setLevel } from "../unread/prefs";
 import { useSessionNames } from "./names";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
@@ -289,6 +290,18 @@ export function SidebarGroups() {
       { kind: "separator" },
       { kind: "item", label: "Open", onSelect: () => openItem(item) },
       ...(item.kind === "agent" ? [{ kind: "item" as const, label: "Settings", onSelect: () => openAgentSettings(agentKey(item.agent)) }] : []),
+      ...(item.kind === "agent"
+        ? [
+            {
+              kind: "item" as const,
+              label: "Notifications",
+              submenu: NOTIFY_LEVELS.map((l) => {
+                const place = { kind: "dm" as const, hub: item.agent.hubId, agent: item.agent.id };
+                return { kind: "item" as const, label: `${levelOf(place) === l.id ? "✓ " : ""}${l.label}`, onSelect: () => setLevel(place, l.id) };
+              }),
+            },
+          ]
+        : []),
     ];
   };
 

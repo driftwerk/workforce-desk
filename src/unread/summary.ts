@@ -5,6 +5,7 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, UnreadSummary } from "../hub/types";
 import { activeConversations, type Active, type ConversationUnread } from "../hubs/surface";
 import { deskState } from "../restore/boot";
+import { noticesFrom } from "./notices";
 import { flushPending, heard, loadLocal, onDmWritten, useReads } from "./reads";
 
 // What's unread, as the hubs that own it count it: this computer's hub's
@@ -148,6 +149,7 @@ export function forgetHubs(hubs: readonly HubAccount[]): void {
 const CHANGES: ReadonlySet<DeskEvent["type"]> = new Set(["roomMessage", "read", "session", "removed", "activity", "room", "roomRemoved"]);
 
 const onEvent = (e: DeskEvent) => {
+  noticesFrom(e);
   if (e.type === "read") heard([{ place: e.place, ...e.point }]);
   if (e.type === "snapshot") {
     void refreshLocal();

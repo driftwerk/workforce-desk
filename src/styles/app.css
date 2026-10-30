@@ -2262,3 +2262,17 @@ button.thread-bar:hover {
   align-items: baseline;
   gap: 8px;
 }
+
+.ev-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ev-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
