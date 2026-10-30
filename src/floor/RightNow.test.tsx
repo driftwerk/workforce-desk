@@ -83,6 +83,26 @@ describe("Right now", () => {
     expect(done.querySelector(".dot-failed")).toBeTruthy();
   });
 
+  it("keeps each column's rows in a list of its own, which scrolls when long", () => {
+    useFloor.setState({
+      hubs: {
+        local: ready(
+          view({
+            done: Array.from({ length: 30 }, (_, i) =>
+              work(agent(`a${i}`, `Agent ${i}`), { what: `Finished ${i}.`, endedAt: at(i), outcome: "finished" }),
+            ),
+          }),
+        ),
+      },
+    });
+    const { container } = render(<RightNow brief={null} />);
+    const done = screen.getByRole("group", { name: "Done · last 24 hours" });
+    const list = done.querySelector(".right-now-list")!;
+    expect(list.contains(within(done).getByText("Finished 0."))).toBe(true);
+    expect(within(done).getByRole("heading").closest(".right-now-list")).toBeNull();
+    expect(container.querySelectorAll(".right-now-list")).toHaveLength(1);
+  });
+
   it("says so in each column with nothing in it", () => {
     useFloor.setState({ hubs: { local: ready(view()) } });
     render(<RightNow brief={null} />);

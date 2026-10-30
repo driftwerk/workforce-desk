@@ -53,6 +53,16 @@
 .right-now-col .ov-label {
   margin-bottom: 4px;
 }
+/* A long column scrolls under its label rather than lengthening the page. */
+.right-now-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(440px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+}
 .floor-item {
   display: flex;
   flex-direction: column;

@@ -83,11 +83,13 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
   );
 }
 
+/** One of Right now's columns; a long one scrolls in place, under its
+ *  label, so the others stay beside it. */
 function Column({ label, tone, empty, rows, more = 0 }: { label: string; tone: string; empty: string; rows: ReactNode[]; more?: number }) {
   return (
     <div className="right-now-col" role="group" aria-label={label}>
       <h3 className={`ov-label state-${tone}`}>{label}</h3>
-      {rows.length ? rows : <p className="faint small">{empty}</p>}
+      {rows.length ? <div className="right-now-list">{rows}</div> : <p className="faint small">{empty}</p>}
       {more > 0 && <p className="faint small">and {more} more</p>}
     </div>
   );
