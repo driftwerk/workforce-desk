@@ -1,10 +1,13 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dropOnGrid, endGridDrag, moveGridDrag, startGridDrag } from "./drag";
-import { GridsMain } from "./Grids";
+import { GridsMain, GridsSection } from "./Grids";
 import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
-import { createGrid, deleteGrid, newTerminalHere, setPlacement, startGrids, useGrids } from "./store";
+import { createGrid, deleteGrid, deliver, newTerminalHere, setPlacement, startGrids, useGrids } from "./store";
+import { useDesk } from "../hub/store";
+import type { Session, TerminalInfo } from "../hub/types";
+import { useTerminals } from "./terminals";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -70,5 +73,21 @@ describe("the Grids view with no grids", () => {
     expect(order).toHaveLength(2);
     expect(laidOut(order[1]!)).toEqual([{ kind: "terminal", terminalId: null }]);
     expect(laidOut(away)).toEqual([null]);
+  });
+});
+
+describe("deleting a grid", () => {
+  it("closes the terminal a session's pane shows in place of its own, as it would the terminal's pane", async () => {
+    const closeTerminal = vi.fn(() => Promise.resolve());
+    useDesk.setState({ hub: { closeTerminal } as never, sessions: { s1: { id: "s1", name: "api-e7", terminalId: "t1", live: true } as unknown as Session } });
+    useTerminals.setState({ byId: { t1: { id: "t1", live: true } as TerminalInfo } });
+    const id = createGrid();
+    deliver(id, { kind: "session", sessionId: "s1" });
+    render(<GridsSection />);
+    fireEvent.click(screen.getByRole("button", { name: `${useGrids.getState().grids[id]!.name} options` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete grid…" }));
+    expect(screen.getByText("Its terminal closes, with anything running in it.")).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete grid" })));
+    expect(closeTerminal).toHaveBeenCalledWith("t1");
   });
 });

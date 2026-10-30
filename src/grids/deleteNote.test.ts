@@ -12,5 +12,9 @@ describe("deleting a grid", () => {
     );
     expect(deleteNote(grid([{ kind: "session" }]))).toBe("Its session or agent stays where it is, just off this grid.");
     expect(deleteNote(grid([null]))).toBe("It's empty.");
+    // A session shown in place of the terminal it runs in is that terminal here.
+    expect(deleteNote(grid([{ kind: "session" }, { kind: "agent" }]), 1)).toBe(
+      "Its session or agent stays where it is, just off this grid. Its terminal closes, with anything running in it.",
+    );
   });
 });

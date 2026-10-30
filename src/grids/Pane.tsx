@@ -18,7 +18,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
-import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
+import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
@@ -121,16 +121,21 @@ export function usePaneLabel(content: PaneContent | null): Label {
 
 /** Taking pane `pane` out of the grid: a session or a conversation just
  *  leaves it (nothing ends); a terminal with something still running in it
- *  asks first, as closing it ends that. */
+ *  asks first, as closing it ends that. A session shown in place of the
+ *  terminal it runs in, where no other pane shows that terminal, is that
+ *  terminal here: it closes with the pane. */
 function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: () => void; dialog: ReactNode } {
   const [confirm, setConfirm] = useState(false);
-  const running = useTerminals((s) =>
-    pane.content?.kind === "terminal" && pane.content.terminalId ? describeTerminal(s.byId[pane.content.terminalId], s.programs[pane.content.terminalId]).running : null,
-  );
+  const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
+  const terminalId = pane.content?.kind === "terminal" ? pane.content.terminalId : hosted;
+  const running = useTerminals((s) => (terminalId ? describeTerminal(s.byId[terminalId], s.programs[terminalId]).running : null));
+  const shown = useDesk((s) => (hosted && pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined));
+  const inIt = label.tracked ?? (shown?.live ? shown : null);
+  const close = () => closePane(gridId, pane.id, (c) => closeContent(hosted ? { kind: "terminal", terminalId: hosted } : c));
   const remove = () => {
-    const busy = pane.content?.kind === "terminal" && (label.tracked || running);
+    const busy = (pane.content?.kind === "terminal" || hosted) && (inIt || running);
     if (busy) setConfirm(true);
-    else closePane(gridId, pane.id, closeContent);
+    else close();
   };
   const dialog = confirm && (
     <Dialog
@@ -141,7 +146,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
             <h1 id={id} className="display-md">
               Close this terminal?
             </h1>
-            <p>{label.tracked ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
+            <p>{inIt ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
           </span>
           <CloseButton onClose={() => setConfirm(false)} />
         </header>
@@ -156,7 +161,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
           className="btn btn-danger"
           onClick={() => {
             setConfirm(false);
-            closePane(gridId, pane.id, closeContent);
+            close();
           }}
         >
           Close terminal
@@ -167,9 +172,11 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
   return { remove, dialog };
 }
 
-/** What removing a pane is called: a terminal closes; anything else only
- *  leaves the grid. */
-const removeLabel = (pane: PaneData): string => (pane.content?.kind === "terminal" ? "Close terminal" : pane.content ? "Remove from grid" : "Close pane");
+/** What removing a pane is called: a terminal closes (and a session shown
+ *  in place of its terminal, see `hostedBy`); anything else only leaves the
+ *  grid. */
+const removeLabel = (pane: PaneData, hosted: string | null): string =>
+  pane.content?.kind === "terminal" || hosted ? "Close terminal" : pane.content ? "Remove from grid" : "Close pane";
 
 const RemoveIcon = () => (
   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
@@ -484,12 +491,24 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
       : []),
   ];
   const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
+  // A tracked terminal shows as its session, and back: the same terminal
+  // either way, so nothing starts or stops.
+  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, pane.content.terminalId) : null;
+  const ranIn = pane.content?.kind === "session" ? (sessions[pane.content.sessionId]?.terminalId ?? null) : null;
+  const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));
+  const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
+  const swap: MenuEntry[] = tracked
+    ? [{ kind: "item", label: "Show as session", onSelect: () => put({ kind: "session", sessionId: tracked.id }) }]
+    : terminal
+      ? [{ kind: "item", label: "Show the terminal", onSelect: () => put({ kind: "terminal", terminalId: terminal.id, cwd: terminal.cwd }) }]
+      : [];
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    ...swap,
     ...(action ? [{ kind: "item" as const, label: action.label, onSelect: action.run }] : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     { kind: "separator" },
-    { kind: "item", label: removeLabel(pane), onSelect: onClose },
+    { kind: "item", label: removeLabel(pane, hosted), onSelect: onClose },
   ];
 }
