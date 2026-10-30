@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import type { Attachment, HubAccount } from "../chat/types";
 import { fileUrl, openFile, saveFileAs } from "../platform";
-import { CloseButton } from "../ui/Dialog";
+import { CloseButton, useModal } from "../ui/Dialog";
 import { describe, kindOf, type Kind } from "./kinds";
 
 /** Where a message's files are, unless a file says otherwise: the hub and
@@ -24,7 +24,12 @@ interface Held {
  *  names, in the same store as its file. */
 export const thumbnailOf = (url: string | null | undefined): string | null => {
   const m = url ? /\/api\/agents\/[^/]+\/attachments\/([^/?#]+)/.exec(url) : null;
-  return m ? decodeURIComponent(m[1]!) : null;
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return null;
+  }
 };
 
 /** The files of a message, as the design shows them: images inline (click
@@ -65,11 +70,10 @@ function AttachmentView({ held }: { held: Held }) {
 
 const src = (h: Held, artifact = h.file.artifact_id): string | undefined => h.hub && fileUrl(h.hub, h.agent, artifact);
 
-/** Open and Save as…, saying what went wrong in plain words. */
-function FileActions({ held }: { held: Held }) {
+/** Opening and saving a file, and what went wrong doing it, in plain words. */
+function useFileActions({ hub, agent, file }: Held) {
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<"open" | "save" | null>(null);
-  const { hub, agent, file } = held;
   const run = async (what: "open" | "save") => {
     if (!hub) return;
     setBusy(what);
@@ -82,7 +86,20 @@ function FileActions({ held }: { held: Held }) {
     }
     setBusy(null);
   };
-  if (!hub) return <span className="small faint">Its workspace isn’t connected to Desk any more.</span>;
+  return { busy, problem, run };
+}
+
+const Problem = ({ problem }: { problem: string | null }) =>
+  problem && (
+    <span className="small state-blocked att-problem" role="alert">
+      {problem}
+    </span>
+  );
+
+/** Open and Save as…, saying what went wrong in plain words. */
+function FileActions({ held }: { held: Held }) {
+  const { busy, problem, run } = useFileActions(held);
+  if (!held.hub) return <span className="small faint">Its workspace isn’t connected to Desk any more.</span>;
   return (
     <span className="att-actions">
       <button type="button" className="btn att-btn" disabled={busy !== null} onClick={() => void run("open")}>
@@ -91,11 +108,7 @@ function FileActions({ held }: { held: Held }) {
       <button type="button" className="btn att-btn" disabled={busy !== null} onClick={() => void run("save")}>
         {busy === "save" ? "Saving…" : "Save as…"}
       </button>
-      {problem && (
-        <span className="small state-blocked att-problem" role="alert">
-          {problem}
-        </span>
-      )}
+      <Problem problem={problem} />
     </span>
   );
 }
@@ -113,6 +126,7 @@ function Title({ held }: { held: Held }) {
 
 function ImageFile({ held }: { held: Held }) {
   const [zoomed, setZoomed] = useState(false);
+  const { problem, run } = useFileActions(held);
   const url = src(held);
   const { width, height, filename } = held.file;
   if (!url) return <FileCard held={held} />;
@@ -125,12 +139,13 @@ function ImageFile({ held }: { held: Held }) {
         onClick={() => setZoomed(true)}
         onContextMenu={(e) => {
           e.preventDefault();
-          void saveFileAs(held.hub!, held.agent, held.file.artifact_id, filename);
+          void run("save");
         }}
       >
         <img src={url} alt={filename} loading="lazy" style={width && height ? { aspectRatio: `${width} / ${height}` } : undefined} />
       </button>
       <figcaption className="small faint">{filename} · click to zoom · right-click to save</figcaption>
+      <Problem problem={problem} />
       {zoomed && <Zoom held={held} url={url} onClose={() => setZoomed(false)} />}
     </figure>
   );
@@ -139,11 +154,7 @@ function ImageFile({ held }: { held: Held }) {
 /** An image at full size over everything, to open or save. */
 function Zoom({ held, url, onClose }: { held: Held; url: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    ref.current?.querySelector<HTMLElement>(".att-zoom-close button")?.focus();
-    return () => before?.focus();
-  }, []);
+  const onKeyDown = useModal(ref, onClose);
   return (
     <div
       ref={ref}
@@ -151,20 +162,14 @@ function Zoom({ held, url, onClose }: { held: Held; url: string; onClose: () => 
       role="dialog"
       aria-modal="true"
       aria-label={held.file.filename}
+      tabIndex={-1}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }}
+      onKeyDown={onKeyDown}
     >
       <div className="att-zoom-bar">
         <Title held={held} />
         <FileActions held={held} />
-        <span className="att-zoom-close">
-          <CloseButton onClose={onClose} />
-        </span>
+        <CloseButton onClose={onClose} autoFocus />
       </div>
       <img className="att-zoom-image" src={url} alt={held.file.filename} onMouseDown={(e) => e.stopPropagation()} />
     </div>

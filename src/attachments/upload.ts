@@ -2,8 +2,9 @@ import type { Attachment, HubAccount } from "../chat/types";
 import { uploadFile } from "../platform";
 import { formatSize } from "./kinds";
 
-/** The largest file a hub takes unless its `[desk] attachment_max_mb` says
- *  otherwise; a hub that takes less says so when it refuses. */
+/** The largest file Desk sends, which it reads whole to send: a hub's own
+ *  default (`[desk] attachment_max_mb`). A hub that takes less says so
+ *  when it refuses. */
 export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 /** The most files one message carries (the hub's `MAX_PER_MESSAGE`). */

@@ -5,10 +5,15 @@ import type { Attachment } from "../chat/types";
 const opened = vi.hoisted(() => [] as unknown[][]);
 const saved = vi.hoisted(() => [] as unknown[][]);
 const uploads = vi.hoisted(() => ({ fail: null as Error | null, sent: [] as string[] }));
+const saveFails = vi.hoisted(() => ({ error: null as Error | null }));
 vi.mock("../platform", () => ({
   fileUrl: (hub: { id: string }, agent: string, artifact: string) => `deskfile://localhost/${hub.id}/${agent}/${artifact}`,
   openFile: async (...args: unknown[]) => void opened.push(args),
-  saveFileAs: async (...args: unknown[]) => (saved.push(args), true),
+  saveFileAs: async (...args: unknown[]) => {
+    if (saveFails.error) throw saveFails.error;
+    saved.push(args);
+    return true;
+  },
   uploadFile: async (_hub: unknown, _agent: string, _channel: string, file: File): Promise<Attachment> => {
     if (uploads.fail) throw uploads.fail;
     uploads.sent.push(file.name);
@@ -35,6 +40,7 @@ beforeEach(() => {
   opened.length = 0;
   saved.length = 0;
   uploads.fail = null;
+  saveFails.error = null;
   uploads.sent.length = 0;
   useChat.setState({ hubs: [hub] });
 });
@@ -64,6 +70,7 @@ describe("what a file is", () => {
   it("names the thumbnail its PDF's first page is", () => {
     expect(thumbnailOf("/api/agents/scout/attachments/art_thumb")).toBe("art_thumb");
     expect(thumbnailOf(null)).toBeNull();
+    expect(thumbnailOf("/api/agents/scout/attachments/art%E0%A4%A")).toBeNull();
   });
 });
 
@@ -78,6 +85,31 @@ describe("a message's files", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.contextMenu(screen.getByRole("button", { name: "Zoom burndown.png" }));
     expect(saved).toEqual([[hub, "allan", "art_burndown.png", "burndown.png"]]);
+  });
+
+  it("keeps focus in the zoomed image until it closes, then gives it back", () => {
+    render(<Attachments files={[file("burndown.png", "image/png")]} home={{ hub: "dw", agent: "allan" }} />);
+    const opener = screen.getByRole("button", { name: "Zoom burndown.png" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog");
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(document.activeElement).toBe(close);
+    const buttons = [...dialog.querySelectorAll("button")];
+    buttons.at(-1)!.focus();
+    fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+    expect(document.activeElement).toBe(buttons[0]);
+    fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(buttons.at(-1));
+    fireEvent.click(close);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("says when saving from a right-click went wrong", async () => {
+    saveFails.error = new Error("the disk is full");
+    render(<Attachments files={[file("burndown.png", "image/png")]} home={{ hub: "dw", agent: "allan" }} />);
+    await act(async () => fireEvent.contextMenu(screen.getByRole("button", { name: "Zoom burndown.png" })));
+    expect(screen.getByRole("alert").textContent).toBe("Couldn’t save burndown.png: the disk is full");
   });
 
   it("shows a PDF's first page when the hub made one, a page of lines when not, to open or save", async () => {
