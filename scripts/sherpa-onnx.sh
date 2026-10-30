@@ -69,8 +69,9 @@ prepare() {
     url="https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/$archive"
     echo "$archive: downloading $url"
     curl -fsSL --retry 3 -o "$dir/$archive.part" "$url"
-    # A truncated download must not be cached as the archive.
-    tar -tjf "$dir/$archive.part" > /dev/null
+    # A truncated download must not be cached as the archive. (Read from
+    # stdin: GNU tar takes "D:\..." for a remote host.)
+    tar -tjf - < "$dir/$archive.part" > /dev/null
     mv "$dir/$archive.part" "$dir/$archive"
   done
 
