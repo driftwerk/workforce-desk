@@ -75,12 +75,12 @@ export function PictureField({
               <button type="button" className="btn" disabled={busy} onClick={() => input.current?.click()}>
                 Choose a picture…
               </button>
-              {chosen && picture?.slack && (
+              {chosen && picture?.slack != null && (
                 <button type="button" className="btn" disabled={busy} onClick={() => void unchoose()}>
                   Use the Slack picture
                 </button>
               )}
-              {chosen && !picture?.slack && (
+              {chosen && (
                 <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void unchoose()}>
                   Remove
                 </button>
