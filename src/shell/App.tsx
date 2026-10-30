@@ -14,6 +14,7 @@ import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { useHubLinks } from "../hubs/follow";
 import { forgetHubs, startUnread } from "../unread/summary";
+import { useAppBadge } from "../unread/icon";
 import { prune, stop, stopTarget } from "../rooms/engine";
 import { jumpers } from "../rooms/unread";
 import { placeKey } from "../rooms/window";
@@ -86,6 +87,7 @@ export function App() {
   }, [rooms, hubs]);
   useHubLinks();
   useEffect(() => startUnread(), []);
+  useAppBadge();
   useEffect(() => forgetHubs(hubs), [hubs]);
   const settings = useUi((u) => u.settings !== null);
   const platform = useHost((h) => h.platform);
@@ -199,6 +201,10 @@ export function App() {
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
   useAppShortcut("stopAnswer", stopNearest, true, { fromFields: false });
   useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
+  useAppShortcut("unread", () => {
+    useUi.getState().closeSettings();
+    useDesk.getState().setInbox(true);
+  }, true, { fromFields: false });
 
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");

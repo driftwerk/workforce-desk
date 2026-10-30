@@ -66,6 +66,7 @@ export const SHORTCUTS = [
     scope: "app",
     terminal: false,
   },
+  { id: "unread", name: "Unread", about: "Opens the Unread page: everything new for you, everywhere.", keys: "Shift+Primary+U", scope: "app" },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];

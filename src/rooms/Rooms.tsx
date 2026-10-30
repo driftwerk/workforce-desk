@@ -8,6 +8,7 @@ import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
+import { Unread as UnreadPage } from "../unread/Unread";
 import { agentKey, describeAgent, DESK_DM } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
@@ -47,6 +48,8 @@ export function Rooms() {
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
   const loaded = useDesk((s) => s.loaded);
   const activeAgent = useChat((s) => s.activeAgent);
+  const inbox = useDesk((s) => s.inbox);
+  if (inbox) return <UnreadPage />;
   // Each keyed by what it shows, so nothing typed or picked for one shows in another.
   if (room) return <RoomView key={room.id} room={room} />;
   // A room put back on launch shows once the hub says what rooms it has.

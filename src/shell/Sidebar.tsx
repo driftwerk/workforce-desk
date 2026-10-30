@@ -19,9 +19,30 @@ import { useYou } from "../pictures/who";
 import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { RoomMarks } from "../unread/RoomMarks";
+import { Marks, useTotal } from "../unread/Marks";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
+
+/** The Unread page's row: everything new for you, each item once. */
+function UnreadRow() {
+  const on = useDesk((s) => s.view === "rooms" && s.inbox);
+  const setInbox = useDesk((s) => s.setInbox);
+  const keys = useSettings((s) => s.keys);
+  const total = useTotal();
+  return (
+    <button
+      type="button"
+      className={`side-unread${on ? " on" : ""}`}
+      aria-current={on ? "true" : undefined}
+      title={`Unread (${shortcutLabel(keys.unread)})`}
+      onClick={() => setInbox(true)}
+    >
+      <span className="gi-name">Unread</span>
+      <Marks badge={total} />
+    </button>
+  );
+}
 
 /** Whether a scroller has more above and below what shows. */
 export const scrollEdges = (el: Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">): { above: boolean; below: boolean } => ({
@@ -150,6 +171,7 @@ export function Sidebar({
             </button>
           ))}
         </div>
+        <UnreadRow />
       </div>
       <div className="side-mid">
         <div ref={middle} className="side-scroll">

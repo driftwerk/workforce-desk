@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { advance } from "../unread/reads";
+import { useSeenWhole } from "../unread/seen";
 import { useSessionNames } from "../groups/names";
 import { useDesk } from "../hub/store";
 import { inApp, openUrl } from "../platform";
@@ -32,7 +34,17 @@ export function UpdateNotice() {
   const [asking, setAsking] = useState(false);
   const live = Object.values(sessions).filter(isLive);
   const working = live.filter(isWorking);
-  const go = () => void restart(live.map((s) => s.id)).catch(fail);
+  // The notice is read once it has shown, or acted on; a newer version is
+  // new again.
+  const version = state.phase === "ready" ? state.version : null;
+  const point = useMemo(() => (version ? { at: new Date().toISOString(), message: version } : null), [version]);
+  const notice = useRef<HTMLDivElement>(null);
+  useSeenWhole({ kind: "update" }, point, notice, { enabled: true });
+  const acted = () => point && void advance({ kind: "update" }, point);
+  const go = () => {
+    acted();
+    void restart(live.map((s) => s.id)).catch(fail);
+  };
 
   useEffect(() => {
     if (waiting && state.phase === "ready" && working.length === 0) go();
@@ -54,7 +66,7 @@ export function UpdateNotice() {
   const installing = state.phase === "installing";
   return (
     <>
-      <div className="update-notice" role="status">
+      <div ref={notice} className="update-notice" role="status">
         <span>
           {installing
             ? `Updating to Desk ${state.version}…`
@@ -111,6 +123,7 @@ export function UpdateNotice() {
                 className="btn"
                 data-autofocus
                 onClick={() => {
+                  acted();
                   wait(true);
                   setAsking(false);
                 }}

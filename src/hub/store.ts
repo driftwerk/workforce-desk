@@ -43,6 +43,10 @@ interface DeskState {
   keep: (message: RoomMessage, created?: boolean) => void;
   openId: string | null;
   view: View;
+  /** Rooms shows the Unread page. */
+  inbox: boolean;
+  /** Rooms with the Unread page, or back from it. */
+  setInbox: (on: boolean) => void;
   error: string | null;
   /** A detached grid's window, which leaves telling the system of sessions'
    *  changes, and handing Desk's groups to the hub, to the main window. */
@@ -239,6 +243,8 @@ export const useDesk = create<DeskState>((set, get) => ({
     })),
   openId: null,
   view: "floor",
+  inbox: false,
+  setInbox: (inbox) => set(inbox ? { inbox, view: "rooms" } : { inbox }),
   loaded: false,
   error: null,
   detached: false,
@@ -287,7 +293,7 @@ export const useDesk = create<DeskState>((set, get) => ({
   open: (openId) => set({ openId }),
   setView: (view) => set({ view }),
   openRoom: async (id) => {
-    set({ activeRoom: id, view: "rooms" });
+    set({ activeRoom: id, view: "rooms", inbox: false });
     if (!id || !get().hub || get().windows[id]) return;
     await get()
       .page(id, null, "newest")

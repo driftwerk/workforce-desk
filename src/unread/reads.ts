@@ -7,7 +7,8 @@ import type { ReadPoint, ReadRow, RoomMessage } from "../hub/types";
 import { putConversationRead } from "../hubs/surface";
 import { deskState } from "../restore/boot";
 import { instant, justBefore } from "../rooms/time";
-import { placeKey, type Place } from "./places";
+import { parsePlace, placeKey, type Place } from "./places";
+import type { ConversationUnread } from "../hubs/surface";
 
 // Read points: this computer's hub's (rooms, threads, sessions, Activity,
 // the brief, the update) and each agent hub's DM points, as last heard. A
@@ -147,4 +148,30 @@ export async function flushPending(hubId: string): Promise<void> {
   if (!waiting.length) return;
   deskState.remove(pendingKey(hubId));
   for (const w of waiting) await write(w.place, w.point, w.mark ?? "advance");
+}
+
+/** Everything read: this computer's places in one call to its hub, and each
+ *  DM with something unread through its newest message. Answers how to put
+ *  each point back as it was (Undo). */
+export async function markEverythingRead(dms: Readonly<Record<string, ConversationUnread>>, floor: string | null): Promise<() => Promise<void>> {
+  const before = useReads.getState();
+  const desk = useDesk.getState().hub;
+  const moved = desk ? await desk.markAllRead("everything") : [];
+  heard(moved);
+  const dmMoved: [Place, ReadPoint | undefined][] = [];
+  for (const [key, u] of Object.entries(dms)) {
+    if (!u.count || !u.last) continue;
+    const [hub = "", ...rest] = key.split("/");
+    const place: Place = { kind: "dm", hub, agent: rest.join("/") };
+    dmMoved.push([place, before.dms[key]]);
+    await advance(place, { at: u.last.at, message: u.last.message_id });
+  }
+  return async () => {
+    for (const r of moved) {
+      const place = parsePlace(r.place);
+      const was = before.local[r.place] ?? (floor ? { at: floor, message: null } : undefined);
+      if (place && was) await markUnread(place, was);
+    }
+    for (const [place, was] of dmMoved) if (was) await markUnread(place, was);
+  };
 }

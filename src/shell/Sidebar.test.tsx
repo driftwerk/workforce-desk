@@ -347,4 +347,15 @@ describe("unread in the sidebar", () => {
     sidebar();
     expect(within(rowOf("Main")).getByText("2 need you")).toBeTruthy();
   });
+
+  it("opens the Unread page from its row, which counts everything once", async () => {
+    const { useUnread } = await import("../unread/summary");
+    useUnread.setState({ dms: { "local/allan": { count: 1, for_you: 1, first: null, last: null, capped: false } }, local: null });
+    useDesk.setState({ view: "floor", inbox: false });
+    sidebar();
+    const row = screen.getByRole("button", { name: /^Unread/ });
+    expect(within(row).getByText("1 needs you")).toBeTruthy();
+    fireEvent.click(row);
+    expect(useDesk.getState()).toMatchObject({ view: "rooms", inbox: true });
+  });
 });

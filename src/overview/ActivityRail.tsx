@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useMainHidden } from "../panels/Stage";
+import { badgeOfFloor } from "../unread/badges";
+import { Marks } from "../unread/Marks";
+import { useSeen } from "../unread/seen";
+import { useUnread } from "../unread/summary";
 import { useChat } from "../chat/store";
 import type { FloorNeed } from "../floor/merge";
 import { NeedRow } from "../floor/NeedRow";
@@ -18,7 +23,7 @@ const resolvedText = (state: Extract<NeedState, { open: false }>): string => (st
 export function ActivityRow({ event, need }: { event: ActivityEvent; need?: NeedState }) {
   const line = lineOf(event, useSessionNames());
   return (
-    <li className={`ev ${need?.open ? "ev-open" : need ? "ev-resolved" : ""}`}>
+    <li className={`ev ${need?.open ? "ev-open" : need ? "ev-resolved" : ""}`} data-message-id={event.id}>
       <time className="ev-time" dateTime={event.at}>
         {clock(event.at)}
       </time>
@@ -129,6 +134,13 @@ export function ActivityRail({
   const current = options.findIndex((o) => o.id === shown);
   const events = feed?.events ?? NO_EVENTS;
   const earlier = () => void loadEarlier(shown);
+  // What happened is read as its rows show; the newest row seen is the point.
+  const scroller = useRef<HTMLDivElement>(null);
+  const seenItems = useMemo(() => [...events].reverse().map((e) => ({ id: e.id, at: e.at })), [events]);
+  useSeen(shown === "all" ? { kind: "activity" } : null, scroller, seenItems, { enabled: !useMainHidden() });
+  const activity = useUnread((s) => s.local?.activity);
+  const brief = useUnread((s) => s.local?.brief);
+  const floorBadge = badgeOfFloor(needs, activity, brief);
   const states = useMemo(
     () =>
       floorOn && shown === "all"
@@ -195,6 +207,7 @@ export function ActivityRail({
           <h2 id="activity-head" className="display">
             Activity
           </h2>
+          <Marks badge={floorBadge} />
           <button ref={closeRef} type="button" className="icon-btn-sm" aria-label="Close Activity" title="Close (it waits on the right)" onClick={onClose}>
             <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
               <path d="M3 3l8 8M11 3l-8 8" />
@@ -224,6 +237,7 @@ export function ActivityRail({
         </div>
       </div>
       <div
+        ref={scroller}
         className="activity-scroll"
         onScroll={(e) => {
           const el = e.currentTarget;

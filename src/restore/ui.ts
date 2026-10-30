@@ -42,6 +42,8 @@ export interface MainUi {
   panelFocus: PanelFocus | null;
   /** The Floor's Activity list is open (false: docked as a tab). */
   activity: boolean;
+  /** Rooms shows the Unread page; absent from an older Desk's. */
+  inbox?: boolean;
 }
 
 export const DEFAULT_UI: MainUi = {
@@ -61,6 +63,7 @@ export const DEFAULT_UI: MainUi = {
   panelWidths: {},
   panelFocus: null,
   activity: true,
+  inbox: false,
 };
 
 const TABS: readonly string[] = ["chat", "settings", "files"];
@@ -110,6 +113,7 @@ export const sanitize = (raw: unknown): MainUi => {
     ),
     panelFocus: focusOf(o.panelFocus),
     activity: o.activity !== false,
+    inbox: o.inbox === true,
   };
 };
 
@@ -134,13 +138,14 @@ export const capture = (): MainUi => {
     panelWidths: ui.panelWidths,
     panelFocus: ui.panelFocus,
     activity: ui.activityOpen,
+    inbox: desk.inbox,
   };
 };
 
 /** Shows `ui`. What it names that isn't loaded yet (the roster, the hub's
  *  rooms and sessions) shows once it is. */
 export const apply = (ui: MainUi): void => {
-  useDesk.setState({ view: ui.view, activeRoom: ui.room, openId: ui.session });
+  useDesk.setState({ view: ui.view, activeRoom: ui.room, openId: ui.session, inbox: ui.inbox ?? false });
   useGrids.setState({ active: ui.grid });
   useChat.setState({ activeAgent: ui.dm, panelAgent: ui.panelAgent });
   useUi.setState({

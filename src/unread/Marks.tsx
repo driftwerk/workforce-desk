@@ -6,6 +6,7 @@ import { Badge, needsYou } from "../ui/Badge";
 import { badgeOfRoom, inRoom, pastPoints, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
 import { useReads } from "./reads";
 import { useUnread } from "./summary";
+import { useUpdates } from "../updates/store";
 
 /** A row's mark: the number for you, else a dot for something new. */
 export function Marks({ badge }: { badge: Marked }) {
@@ -52,8 +53,17 @@ export const useRoomMarker = (room: string): RoomMarker => {
   return badgeOfRoom(summary, drafts, inRoom(needs, room), hasFloor);
 };
 
+/** The version of Desk ready to restart into while it's unread: its
+ *  notice hasn't been on screen, nor acted on. */
+export const useUnreadUpdate = (): string | null => {
+  const version = useUpdates((s) => (s.state.phase === "ready" ? s.state.version : null));
+  const seen = useUnread((s) => s.local?.update?.message);
+  return version && seen !== version ? version : null;
+};
+
 /** Everything unread, each item once. */
-export const useTotal = (update = false): Marked => {
+export const useTotal = (): Marked => {
+  const update = !!useUnreadUpdate();
   const needs: readonly FloorNeed[] = useNeeds();
   const dms = useUnreadDms();
   const local = useUnread((s) => s.local);
