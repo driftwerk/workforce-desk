@@ -25,7 +25,9 @@ interface DeskState {
   putDraft: (roomId: string, draft: RoomDraft) => void;
   dropDraft: (roomId: string, id: string) => void;
   /** A message kept in a room just now, shown at once. */
-  keep: (message: RoomMessage) => void;
+  /** Keeps a message posted to a room; one the hub had already (`created`
+   *  false) is counted on its thread already. */
+  keep: (message: RoomMessage, created?: boolean) => void;
   openId: string | null;
   view: View;
   error: string | null;
@@ -96,9 +98,10 @@ export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
 };
 
 /** `timeline` with `message`, kept as it happened: a reply new to the
- *  timeline counts on its parent; one already in it, by id, does not. */
-export const arrived = (timeline: RoomMessage[], message: RoomMessage): RoomMessage[] => {
-  const fresh = !!message.threadId && !timeline.some((m) => m.id === message.id);
+ *  timeline counts on its parent, unless the hub had it already (`created`
+ *  false); one already in it, by id, does not. */
+export const arrived = (timeline: RoomMessage[], message: RoomMessage, created = true): RoomMessage[] => {
+  const fresh = created && !!message.threadId && !timeline.some((m) => m.id === message.id);
   const merged = merge(timeline, [message]);
   return fresh ? merged.map((m) => (m.id === message.threadId ? counted(m, message) : m)) : merged;
 };
@@ -171,10 +174,10 @@ export const useDesk = create<DeskState>((set, get) => ({
         ? { roomDrafts: { ...s.roomDrafts, [roomId]: s.roomDrafts[roomId]!.filter((d) => d.id !== id) } }
         : s,
     ),
-  keep: (message) =>
+  keep: (message, created = true) =>
     set((s) => ({
       timelines: s.timelines[message.roomId]
-        ? { ...s.timelines, [message.roomId]: arrived(s.timelines[message.roomId]!, message) }
+        ? { ...s.timelines, [message.roomId]: arrived(s.timelines[message.roomId]!, message, created) }
         : s.timelines,
       roomDrafts: answered(s.roomDrafts, message),
     })),

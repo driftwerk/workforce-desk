@@ -141,6 +141,13 @@ describe("a timeline's reply counts", () => {
     expect(read.find((m) => m.id === "a")).toMatchObject({ replyCount: 250, lastReplyAt: "2026-10-30T12:00:00Z" });
   });
 
+  it("count a reply the hub had already only once", () => {
+    const parent = message("a", { replyCount: 1, lastReplyAt: "2026-10-30T10:30:00Z" });
+    const again = arrived([parent], reply("x", "a", "2026-10-30T10:30:00Z"), false);
+    expect(again.find((m) => m.id === "a")?.replyCount).toBe(1);
+    expect(again.some((m) => m.id === "x")).toBe(true);
+  });
+
   it("leave a parent from a hub that counts none to the replies loaded", () => {
     const heard = arrived([message("a")], reply("x", "a", "2026-10-30T10:30:00Z"));
     expect(heard.find((m) => m.id === "a")?.replyCount).toBeUndefined();

@@ -310,10 +310,10 @@ async function postAnswer(room: Room, a: Ask, content: string, attachments: Atta
     content,
     threadId: a.threadId,
     hop: a.hop,
-    attachments: attachments.map((f) => ({ ...f, hub: f.hub ?? a.member.hub, agent: f.agent ?? a.member.agent })),
+    attachments: attachments.map((f) => ({ ...f, hub: a.member.hub, agent: a.member.agent })),
     ...(source ? { source } : {}),
   });
-  useDesk.getState().keep(posted.message);
+  useDesk.getState().keep(posted.message, posted.created);
   if (posted.created) handOn(room, a.member, posted.message);
 }
 
@@ -430,7 +430,7 @@ export const drainer = new Drainer({
   read: readConversation,
   post: async (roomId, m) => {
     const posted = await roomOfHub().post(roomId, m);
-    useDesk.getState().keep(posted.message);
+    useDesk.getState().keep(posted.message, posted.created);
     return posted;
   },
   close: closeConversation,
@@ -502,7 +502,7 @@ async function speak(hub: DeskHub, here: Room, text: string, threadId: string | 
     }),
   );
   const posted = await hub.post(here.id, { author: "you", content: text, threadId, attachments: sent[0] ?? [] });
-  useDesk.getState().keep(posted.message);
+  useDesk.getState().keep(posted.message, posted.created);
   to.forEach((m, i) =>
     ask(here, m, { text, threadId, hop: 0, speaker: { kind: "person" }, message: posted.message.id, attachments: sent[i] ?? [] }),
   );
