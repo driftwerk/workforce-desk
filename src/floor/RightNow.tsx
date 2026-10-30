@@ -8,7 +8,7 @@ import type { Brief } from "../hub/types";
 import { localKey, openLocalDm } from "../overview/people";
 import { useOverview } from "../overview/store";
 import { openTarget } from "../shell/navigate";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { backgroundLine } from "./background";
 import type { FloorWork } from "./merge";
@@ -156,7 +156,7 @@ export function BriefCard({
   };
   return (
     <section className="brief" aria-label={`${name}’s brief`}>
-      <Mark name={name} />
+      <AgentMark agent={localKey(managerId) ?? ""} name={name} />
       <div className="brief-body">
         <span className="brief-head">
           <b>{name}</b>

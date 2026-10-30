@@ -14,6 +14,9 @@ import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 import { Confirm } from "../ui/Confirm";
 import { Menu } from "../ui/Menu";
+import { YouMark } from "../ui/Mark";
+import { useYou } from "../pictures/who";
+import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { useSavedScroll } from "../restore/scroll";
 
@@ -52,6 +55,18 @@ function useScrollEdges(): (el: HTMLElement | null) => void {
       changed?.disconnect();
     };
   }, []);
+}
+
+/** You, as Desk shows you: opens your Profile. */
+function You() {
+  const { name } = useYou(null);
+  if (!name) return null;
+  return (
+    <button type="button" className="side-you" title="Your picture, in Settings → Profile" onClick={() => useUi.getState().openSettings("profile")}>
+      <YouMark hub={null} size="sm" />
+      <span className="side-you-name">{name}</span>
+    </button>
+  );
 }
 
 /** The sidebar: Ask anyone and the views always at the top; the rooms or
@@ -242,6 +257,7 @@ export function Sidebar({
           </button>
         </div>
         <VoicePill />
+        <You />
         <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This Mac" : "Starting…"}</span>
         <ThemeSwitcher onSettings={onSettings} />
       </div>

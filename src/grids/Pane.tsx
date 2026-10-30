@@ -22,6 +22,7 @@ import { closePane, createGrid, flashDone, movePane, newTerminal, replacePane, s
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
+import { AgentMark } from "../ui/Mark";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -225,6 +226,7 @@ export function GridPane({
       <div className="gpane-box">
         <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={pane.content ? "Drag to move" : undefined} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
+          {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
           <span className={`gpane-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
           {label.meta && <span className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>{label.meta}</span>}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}

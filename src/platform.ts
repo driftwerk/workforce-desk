@@ -98,6 +98,9 @@ export const saveSettings = (settings: Settings): Promise<void> => invoke("setti
 
 export const themeFiles = (): Promise<ThemeFile[]> => invoke("themes_list");
 
+/** The font families installed on this computer, sorted. */
+export const systemFonts = (): Promise<string[]> => invoke("fonts_list");
+
 export const writeTheme = (id: string, source: string): Promise<void> => invoke("themes_write", { id, source });
 
 export const revealThemes = (): Promise<void> => invoke("themes_reveal");

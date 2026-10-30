@@ -19,6 +19,7 @@ import type {
   TerminalInfo,
 } from "./types";
 import { hubFetch } from "./net";
+import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
 
 export interface HubConnection {
   url: string;
@@ -128,6 +129,19 @@ export const refusal = async (res: Response): Promise<HubError> => {
   return new HubError(res.status, message || res.statusText || "The hub refused that.");
 };
 
+/** Chooses `image` as the picture at `path` on a hub (null: chooses none,
+ *  so its Slack picture, if any, shows again); the picture shown after. */
+export const sendPicture = async (conn: HubConnection, path: string, image: Blob | null): Promise<Picture | null> => {
+  const res = await hubFetch(new URL(path, conn.url), {
+    method: image ? "PUT" : "DELETE",
+    headers: { authorization: `Bearer ${conn.token}`, ...(image ? { "content-type": image.type || "application/octet-stream" } : {}) },
+    body: image ?? undefined,
+  });
+  if (!res.ok) throw await refusal(res);
+  if (!(res.headers.get("content-type") ?? "").includes("json")) throw new HubError(404, NO_ROUTE);
+  return pictureOf(((await res.json()) as { picture?: unknown }).picture);
+};
+
 const wsUrl = (base: string, path: string, token: string): string => {
   const u = new URL(path, base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
@@ -233,6 +247,8 @@ export class DeskHub {
   /** A new name and, for agents Desk made, the instructions that say it. */
   renameAgent = (id: string, name: string, systemPrompt?: string): Promise<unknown> =>
     this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, systemPrompt === undefined ? { name } : { name, system_prompt: systemPrompt });
+  /** Chooses a picture for an agent here (null: none); the one it shows after. */
+  setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => sendPicture(this.conn, agentPicturePath(id), image);
   /** What agents on this Mac can think with, connected or not. */
   providers = async (): Promise<Provider[]> =>
     (await this.desk<{ providers: Provider[] }>("GET", "/api/desk/providers")).providers;

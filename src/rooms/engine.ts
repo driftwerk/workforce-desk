@@ -75,7 +75,7 @@ const displayName = (m: RoomMemberRef): string =>
 
 /** Who wrote a room message, as the members are told it. */
 const nameOf = (author: string): string => {
-  if (author === "you") return useChat.getState().people.local ?? "The person you work for";
+  if (author === "you") return useChat.getState().me.local?.name ?? "The person you work for";
   if (author === "desk") return "Desk";
   const [hub, agent] = author.split("/");
   return `${displayName({ hub: hub ?? "", agent: agent ?? author })} (agent)`;

@@ -3,7 +3,7 @@ import { Attachments } from "../attachments/Attachments";
 import { PromptCard } from "../chat/Approvals";
 import { StatusLine, ToolChips } from "../chat/WorkingRow";
 import type { RoomDraft } from "../hub/store";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { answerPrompt, dismiss, retry } from "./engine";
 
 /** What a draft says when it isn't going: why, and what can be done. */
@@ -21,7 +21,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
   const note = draft.state === "failed" ? draft.error : NOTE[draft.state];
   return (
     <article className="msg msg-assistant msg-draft" aria-live="polite" aria-label={`${name}’s answer on its way`}>
-      <Mark name={name} state={stopped ? undefined : "working"} />
+      <AgentMark agent={draft.member} name={name} state={stopped ? undefined : "working"} />
       <div className="msg-body">
         <span className="msg-head">
           <b className="display">{name}</b>

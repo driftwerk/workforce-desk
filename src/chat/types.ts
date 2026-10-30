@@ -1,4 +1,5 @@
 import type { DeskExtras } from "../hub/types";
+import type { Picture } from "../pictures/pictures";
 
 /** A hub Desk talks to: the local one, or a remote hub paired as a device. */
 export interface HubAccount {
@@ -19,6 +20,15 @@ export interface Agent {
   provider: string | null;
   /** Its hub's default agent. */
   isDefault: boolean;
+  /** Its picture, where its hub keeps one. */
+  picture?: Picture | null;
+}
+
+/** You, as a hub knows you: your account there, your name and picture. */
+export interface Me {
+  id: string;
+  name: string | null;
+  picture: Picture | null;
 }
 
 const PROVIDERS: Record<string, string> = {

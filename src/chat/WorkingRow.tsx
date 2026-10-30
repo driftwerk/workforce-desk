@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { statusOf, type Working } from "./conversation";
 import type { ToolCall } from "./types";
 
@@ -43,10 +43,10 @@ export function ToolChips({ tools }: { tools: ToolCall[] }) {
 }
 
 /** The reply-in-progress row: who, what they've run, and what they're doing. */
-export function WorkingRow({ name, working, tools = [] }: { name: string; working: Working; tools?: ToolCall[] }) {
+export function WorkingRow({ agent, name, working, tools = [] }: { agent: string; name: string; working: Working; tools?: ToolCall[] }) {
   return (
     <article className="msg msg-working" aria-live="polite" aria-label={`${name} is ${working.step.toLowerCase()}`}>
-      <Mark name={name} state="working" />
+      <AgentMark agent={agent} name={name} state="working" />
       <div className="msg-body">
         <span className="msg-head">
           <b className="display">{name}</b>

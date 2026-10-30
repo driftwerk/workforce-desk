@@ -15,7 +15,7 @@ import { brainLine } from "../crew/brain";
 import { dirtyFiles, useDrafts } from "../crew/files";
 import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
 import { Message } from "./Message";
 import { relayedOf } from "../chat/relayed";
@@ -73,7 +73,7 @@ const TABS: { id: Tab; label: string }[] = [
 /** A DM: the one Rooms shows, or with `agent`, that agent's in a grid pane
  *  or the side panel — the conversation alone, under its own header. */
 export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
-  const { activeAgent: shownInRooms, roster, hubs, people, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } =
+  const { activeAgent: shownInRooms, roster, hubs, me, conversations, histories, send, cancel, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } =
     useChat();
   const activeAgent = inPane ?? shownInRooms;
   const agent = roster.find((a) => agentKey(a) === activeAgent);
@@ -222,7 +222,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // had then).
   const crewNames = local ? roster.filter((a) => a.hubId === agent.hubId).flatMap((a) => [a.name, a.id]) : [];
   const overseerName = local && manager?.agentId ? (roster.find((a) => a.hubId === agent.hubId && a.id === manager.agentId)?.name ?? null) : null;
-  const sentOn = { local, crew: crewNames, overseer: overseerName, person: people[agent.hubId] ?? null };
+  const sentOn = { local, crew: crewNames, overseer: overseerName, person: me[agent.hubId]?.name ?? null };
 
   const chat = tab !== "settings" && !(tab === "files" && local);
   return (
@@ -233,7 +233,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     >
       {!inPane && (
         <header className="room-head">
-          <Mark name={agent.name} size="lg" />
+          <AgentMark agent={agentKey(agent)} name={agent.name} size="lg" />
           <span className="room-title">
             <h1 className="display-lg">{agent.name}</h1>
             <span className="faint small">
@@ -319,6 +319,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 key={m.id}
                 message={m}
                 author={agent.name}
+                authorKey={agentKey(agent)}
+                youOn={agent.hubId}
                 home={hub?.label}
                 relayed={relayedOf(m, sentOn)}
                 origin={{ hub: agent.hubId, agent: agent.id }}
@@ -328,7 +330,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             {convo.prompts.map((p) => (
               <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
             ))}
-            {convo.working && !answering && <WorkingRow name={agent.name} working={convo.working} tools={pending?.tools} />}
+            {convo.working && !answering && <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />
           </div>
           <form className="composer composer-files" onSubmit={submit}>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
@@ -9,7 +9,9 @@ import { Today } from "../floor/Today";
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Overview, OverviewItem, Session } from "../hub/types";
+import { DockStrip, DockTab } from "../panels/DockTab";
 import { useSavedScroll } from "../restore/scroll";
+import { useUi } from "../shell/ui";
 import { ActivityRail } from "./ActivityRail";
 import { ItemTile } from "./ItemTile";
 import { useLocalAgent } from "./people";
@@ -89,6 +91,21 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
     ) : (
       paused && <PausedNote who={paused} onResumed={() => setPaused(null)} />
     );
+  const activityOpen = useUi((s) => s.activityOpen);
+  const tab = useRef<HTMLButtonElement>(null);
+  const railClose = useRef<HTMLButtonElement>(null);
+  /** Where focus goes once Activity has opened or docked, when a key or
+   *  click here did it. */
+  const handOff = useRef(false);
+  useEffect(() => {
+    if (!handOff.current) return;
+    handOff.current = false;
+    (activityOpen ? railClose : tab).current?.focus();
+  }, [activityOpen]);
+  const showActivity = (open: boolean) => {
+    handOff.current = true;
+    useUi.getState().setActivityOpen(open);
+  };
 
   return (
     <main className="crew-floor" aria-label="Floor">
@@ -129,7 +146,23 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
             <Group key={g.title} group={g} />
           ))}
         </div>
-        {activitySupport !== "no" && <ActivityRail managerName={managerName} />}
+        {activitySupport !== "no" &&
+          (activityOpen ? (
+            <ActivityRail managerName={managerName} closeRef={railClose} onClose={() => showActivity(false)} />
+          ) : (
+            <DockStrip label="Docked">
+              <DockTab
+                buttonRef={tab}
+                label="Activity"
+                count={counts.needsYou}
+                ariaLabel={
+                  counts.needsYou ? `Open Activity, ${counts.needsYou} need${counts.needsYou === 1 ? "s" : ""} you` : "Open Activity"
+                }
+                title="Open Activity"
+                onClick={() => showActivity(true)}
+              />
+            </DockStrip>
+          ))}
       </div>
     </main>
   );

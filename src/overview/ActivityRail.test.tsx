@@ -65,7 +65,7 @@ const rail = () => screen.getByRole("complementary", { name: "Activity" });
 
 describe("Activity with the floor", () => {
   it("shows only what's still waiting on you, on every hub, counted on its tab", async () => {
-    render(<ActivityRail managerName={null} />);
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
     const tab = within(rail()).getByRole("radio", { name: /Needs you/ });
     expect(within(tab).getByText("2")).toBeTruthy();
     fireEvent.click(tab);
@@ -83,7 +83,7 @@ describe("Activity with the floor", () => {
       hubs.local!.floor = view();
       return 204;
     };
-    render(<ActivityRail managerName={null} />);
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
     await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
     expect(hubs.local!.decided).toEqual([{ at: { kind: "session", sessionId: "s-1", approvalId: "wait:t1:ap-2" }, choice: "allow" }]);
@@ -94,7 +94,7 @@ describe("Activity with the floor", () => {
 
   it("says when another device answered first", async () => {
     hubs.local!.decide = () => 409;
-    render(<ActivityRail managerName={null} />);
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
     await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
     expect(within(rail()).getByText("Already answered")).toBeTruthy();
@@ -102,7 +102,7 @@ describe("Activity with the floor", () => {
   });
 
   it("replies where the question was asked, its composer focused", () => {
-    render(<ActivityRail managerName={null} />);
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
     fireEvent.click(within(rail()).getByRole("button", { name: "Reply" }));
     expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "b/scout" }, { reply: true });
@@ -122,7 +122,7 @@ describe("Activity with the floor", () => {
         ),
       },
     }));
-    render(<ActivityRail managerName={null} />);
+    render(<ActivityRail managerName={null} onClose={() => {}} />);
     const list = await within(rail()).findByRole("list", { name: "Activity: All" });
     const open = within(rail()).getByRole("list", { name: "Still waiting on you" });
     expect(open.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DAY, HARBOUR, NIGHT } from "./builtin";
-import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS } from "./tokens";
+import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS, monoStack } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 
 describe("themes", () => {
@@ -67,5 +67,36 @@ describe("themes", () => {
   it("an agent keeps the same mark colour", () => {
     expect(markFor("allan")).toBe(markFor("allan"));
     expect(MARKS).toContain(markFor("atlas"));
+  });
+});
+
+describe("sizes", () => {
+  it("give chats and code their own CSS variables", () => {
+    const vars = cssVariables(derive({ ...NIGHT, fonts: { ...NIGHT.fonts, size: 13, chatSize: 16, codeSize: 11.5 } }));
+    expect([vars["--font-size"], vars["--font-size-chat"], vars["--font-size-code"]]).toEqual(["13px", "16px", "11.5px"]);
+    expect(vars["--font-mono"]).toBe(monoStack(NIGHT));
+  });
+});
+
+describe("a theme file from before chats and code had sizes", () => {
+  const old = `name = "Mine"\n[colors]\nbackground = "#111210"\nsignal = "#D4FF3A"\n[type]\ndisplay = "Georgia"\nsize = 16\n`;
+
+  it("looks as it did: its chats at its one size, its code at Desk's", () => {
+    const t = parseTheme("mine", old);
+    expect(t.fonts).toEqual({ ...NIGHT.fonts, display: "Georgia", size: 16, chatSize: 16, codeSize: 12.5 });
+  });
+
+  it("is written back with every size, and reads back the same", () => {
+    const t = parseTheme("mine", old);
+    const source = serializeTheme(t);
+    expect(source).toContain("chat_size = 16");
+    expect(source).toContain("code_size = 12.5");
+    expect(parseTheme("mine", source)).toEqual(t);
+  });
+
+  it("refuses sizes out of range", () => {
+    expect(() => parseTheme("x", old.replace("size = 16", "size = 16\nchat_size = 40"))).toThrow(ThemeError);
+    expect(() => parseTheme("x", old.replace("size = 16", "size = 16\ncode_size = \"big\""))).toThrow("[type].code_size must be a number from 9 to 22");
+    expect(() => parseTheme("x", old.replace("size = 16", "size = 30"))).toThrow("[type].size must be a number from 10 to 22");
   });
 });

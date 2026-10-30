@@ -12,7 +12,7 @@ import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { openTarget, targetOfItem } from "../shell/navigate";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { RenameField } from "../ui/RenameField";
 import {
@@ -397,7 +397,7 @@ export function SidebarGroups() {
           const item = items.get(id);
           return item ? (
             <DragChip mono={item.kind === "session"}>
-              {item.kind === "session" ? <span className={`dot dot-${lookOf(item.session)}`} /> : <Mark name={item.agent.name} size="sm" />}
+              {item.kind === "session" ? <span className={`dot dot-${lookOf(item.session)}`} /> : <AgentMark agent={agentKey(item.agent)} name={item.agent.name} size="sm" />}
               {nameOf(item)}
             </DragChip>
           ) : null;
@@ -609,7 +609,7 @@ function ItemRow({
       lineBefore={lineBefore}
       on={on}
       editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
-      lead={session ? <span className={`dot dot-${lookOf(session)}`} aria-hidden="true" /> : <Mark name={name} size="sm" />}
+      lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${lookOf(item.session)}`} aria-hidden="true" />}
       name={name}
       nameClass={session ? "mono" : "display"}
       meta={<span className={`gi-meta small ${session?.state === "blocked" ? "state-blocked" : "faint"}`}>{meta}</span>}

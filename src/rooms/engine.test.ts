@@ -111,7 +111,7 @@ beforeEach(() => {
       { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false },
       { hubId: "dw", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
     ],
-    people: { local: "Kingsley" },
+    me: { local: { id: "person-1", name: "Kingsley", picture: null } },
   });
   let n = 0;
   useDesk.setState({

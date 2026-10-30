@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useUi } from "../shell/ui";
+import { DockStrip, DockTab } from "./DockTab";
 import { clampWidth, fitWidths, HANDLE, maxWidth, MIN_WIDTH, spaceFor, STEP, wantedWidth, type PanelKind } from "./layout";
 
 /** A column open on the right: what it is, what its tab says when it's
@@ -147,20 +148,17 @@ export function Stage({ main, mainKey, mainName, panels }: { main: ReactNode; ma
             );
           })}
           {docked.length > 0 && (
-            <nav key="dock" className="stage-dock" aria-label="Other panels">
+            <DockStrip key="dock" label="Other panels">
               {docked.map((p) => (
-                <button
+                <DockTab
                   key={p.kind}
-                  type="button"
-                  className="dock-tab"
-                  aria-pressed={beside === p.kind}
+                  label={p.label}
+                  pressed={beside === p.kind}
                   title={beside === p.kind ? "Fold it back into a tab" : "Open it beside the focused view"}
                   onClick={() => useUi.getState().setBeside(beside === p.kind ? null : p.kind)}
-                >
-                  {p.label}
-                </button>
+                />
               ))}
-            </nav>
+            </DockStrip>
           )}
         </div>
       </div>

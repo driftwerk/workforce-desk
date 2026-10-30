@@ -5,7 +5,7 @@ import { useChat } from "../chat/store";
 import { agentKey, type Agent, type ChatMessage } from "../chat/types";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 import { Draft } from "./Draft";
 import { Message } from "./Message";
 import { answerForm, say } from "./engine";
@@ -16,6 +16,9 @@ import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
 import { SidePanel } from "../panels/Stage";
 import { useFocusRequest } from "../shell/focus";
+
+/** A room message's author's agent key (`hub/agent`), for a member's. */
+const agentAuthor = (author: string): string | undefined => (author.includes("/") ? author : undefined);
 
 const asChat = (m: RoomMessage): ChatMessage => ({
   id: m.id,
@@ -114,7 +117,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
               }}
               onMouseEnter={() => setActive(i)}
             >
-              <Mark name={a.name} size="sm" />
+              <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
               <b>{a.name}</b>
               <span className="faint small">
                 {home(a)}
@@ -203,7 +206,16 @@ function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; 
     void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
     return true;
   };
-  return <Message message={asChat(m)} author={name} home={home} origin={homeOf(m)} onSubmitForm={submitForm} />;
+  return (
+    <Message
+      message={asChat(m)}
+      author={name}
+      authorKey={agentAuthor(m.author)}
+      home={home}
+      origin={homeOf(m)}
+      onSubmitForm={submitForm}
+    />
+  );
 }
 
 /** A room's thread: its first message, the replies, and a reply box. */
@@ -284,7 +296,7 @@ export function RoomView({ room }: { room: Room }) {
             <h1 className="display-lg">{room.name}</h1>
             <span className="member-stack">
               {room.members.map((m) => (
-                <Mark key={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
+                <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
               ))}
             </span>
           </span>

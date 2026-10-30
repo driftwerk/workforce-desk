@@ -152,6 +152,9 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       return answer(undefined);
     case "themes_list":
       return answer([]);
+    case "fonts_list":
+      // What a computer's own list looks like; the app reads the real one.
+      return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);
     default:
       // Voice and Tuple live in the app process; in the preview they are off.
       if (cmd === "voice_status") return answer({ state: "off" });

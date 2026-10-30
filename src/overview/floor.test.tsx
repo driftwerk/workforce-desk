@@ -8,6 +8,8 @@ import type { ActivityPage, Overview, Session } from "../hub/types";
 import { Floor } from "../floor/Floor";
 import { DeskActions } from "./DeskActions";
 import { useOverview } from "./store";
+import { useUi } from "../shell/ui";
+import { servePictures } from "../pictures/testing";
 
 vi.mock("@workforce/rich", () => ({
   RichHostProvider: ({ children }: { children: ReactNode }) => children,
@@ -219,6 +221,51 @@ describe("the Floor", () => {
     render(<Floor onNewSession={() => {}} />);
     await screen.findByRole("region", { name: "Needs you" });
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Activity" })).toBeNull());
+  });
+});
+
+describe("Activity beside the Floor", () => {
+  beforeEach(() => useUi.setState({ activityOpen: true }));
+
+  it("closes into a tab on the right that says how many need you, and opens again from it", async () => {
+    useDesk.setState({ hub: hubWith({}) });
+    render(<Floor onNewSession={() => {}} />);
+    const rail = await screen.findByRole("complementary", { name: "Activity" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Close Activity" }));
+    expect(screen.queryByRole("complementary", { name: "Activity" })).toBeNull();
+    expect(useUi.getState().activityOpen).toBe(false);
+    const tab = screen.getByRole("button", { name: "Open Activity, 1 needs you" });
+    expect(document.activeElement).toBe(tab);
+    expect(tab.closest("nav")!.getAttribute("aria-label")).toBe("Docked");
+    expect(tab.className).toBe("dock-tab");
+    expect(within(tab).getByText("1")).toBeTruthy();
+    fireEvent.click(tab);
+    const back = await screen.findByRole("complementary", { name: "Activity" });
+    expect(document.activeElement).toBe(within(back).getByRole("button", { name: "Close Activity" }));
+    expect(useUi.getState().activityOpen).toBe(true);
+  });
+
+  it("stays docked as it was left", async () => {
+    useUi.setState({ activityOpen: false });
+    useDesk.setState({ hub: hubWith({}) });
+    render(<Floor onNewSession={() => {}} />);
+    expect(await screen.findByRole("button", { name: "Open Activity, 1 needs you" })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Activity" })).toBeNull();
+  });
+});
+
+describe("pictures on the Floor", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows an agent's tile with their picture, still in the ring that says what they're doing", async () => {
+    servePictures();
+    useChat.setState((s) => ({ roster: s.roster.map((a) => (a.id === "scout" ? { ...a, picture: { version: "v1", source: "chosen", at: "" } } : a)) }));
+    useDesk.setState({ hub: hubWith({}) });
+    render(<Floor onNewSession={() => {}} />);
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    const scout = within(needs).getByText("Scout").closest(".ov-tile")!;
+    await waitFor(() => expect(scout.querySelector(".mark img")).toBeTruthy());
+    expect(scout.querySelector(".mark")!.className).toContain("ring-blocked");
   });
 });
 

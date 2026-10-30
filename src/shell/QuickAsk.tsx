@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
-import { Mark } from "../ui/Mark";
+import { AgentMark } from "../ui/Mark";
 
 /** `@name message` — resolves the name against everyone on every hub and
  *  sends the message as a DM. A bare name just opens the DM. */
@@ -63,7 +63,7 @@ export function QuickAsk({ onClose }: { onClose: () => void }) {
         <div className="quick-list">
           {parsed.matches.slice(0, 6).map((a) => (
             <button key={agentKey(a)} type="button" className={`side-row ${parsed.agent === a ? "on" : ""}`} onClick={() => go(a)}>
-              <Mark name={a.name} size="sm" />
+              <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
               <span className="display crew-name">{a.name}</span>
               <span className="faint small">{describeAgent(a, hubs.find((h) => h.id === a.hubId)?.label ?? a.hubId)}</span>
             </button>
