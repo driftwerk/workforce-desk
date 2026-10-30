@@ -21,6 +21,7 @@ const { arrived, merge, threadRead, useDesk } = await import("../hub/store");
 const { ROOM_PAGE } = await import("../hub/client");
 const { useUi } = await import("../shell/ui");
 const { RoomView, ThreadPanel } = await import("./RoomView");
+const { dayClock } = await import("../floor/time");
 
 const room = {
   id: "r1",
@@ -181,7 +182,7 @@ describe("a thread's bar", () => {
     const { container } = render(<RoomView room={room} />);
     const bar = container.querySelector(".thread-bar")!;
     expect(bar.querySelectorAll(".thread-marks .mark")).toHaveLength(2);
-    expect(bar.querySelector(".thread-count")!.textContent).toMatch(/^4 replies · last \d\d:\d\d$/);
+    expect(bar.querySelector(".thread-count")!.textContent).toBe(`4 replies · last ${dayClock("2026-10-30T11:00:00Z")}`);
   });
 });
 
