@@ -7,7 +7,16 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
-import { oversightOf, parseCheckins, parseMinutes, parseTime, readable, setAgentOversight, type Oversight } from "./oversight";
+import {
+  MAX_CHECKINS_PER_HOUR,
+  oversightOf,
+  parseCheckins,
+  parseMinutes,
+  parseTime,
+  readable,
+  setAgentOversight,
+  type Oversight,
+} from "./oversight";
 
 const LEVELS: { id: OversightLevel; name: string; desc: string }[] = [
   { id: "watch", name: "Watch", desc: "Answers “what’s everyone doing?” and tells you when something needs you." },
@@ -38,10 +47,11 @@ const fieldsOf = (o: Oversight, was?: Record<Field, Typed>): Record<Field, Typed
   quiet: typed(o.wake.quietMinutes ? String(o.wake.quietMinutes) : lastMinutes(was?.quiet, "30")),
   morning: typed(o.summaries.morning || (was?.morning.text ?? "09:00")),
   evening: typed(o.summaries.evening || (was?.evening.text ?? "18:00")),
+  hourly: typed(String(o.maxCheckinsPerHour)),
   checkins: typed(String(o.maxCheckinsPerDay)),
 });
 
-type Field = "waiting" | "quiet" | "morning" | "evening" | "checkins";
+type Field = "waiting" | "quiet" | "morning" | "evening" | "hourly" | "checkins";
 
 /** An agent's Settings section for overseeing the crew: on or off (one
  *  agent at a time), how much it does on its own, what it keeps track of,
@@ -132,6 +142,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const setQuiet = minutes((o, v) => ({ ...o, wake: { ...o.wake, quietMinutes: v } }));
   const setMorning = time((o, v) => ({ ...o, summaries: { ...o.summaries, morning: v } }));
   const setEvening = time((o, v) => ({ ...o, summaries: { ...o.summaries, evening: v } }));
+  const setHourly = (o: Oversight, text: string) => {
+    const r = parseCheckins(text, MAX_CHECKINS_PER_HOUR);
+    return "problem" in r ? r.problem : { ...o, maxCheckinsPerHour: r.value };
+  };
   const setCheckins = (o: Oversight, text: string) => {
     const r = parseCheckins(text);
     return "problem" in r ? r.problem : { ...o, maxCheckinsPerDay: r.value };
@@ -317,6 +331,15 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             <span className="oversee-sub oversee-cap">
               {name} checks in at most{" "}
               <Num
+                problemId={`${ids}-hourly`}
+                label="Check-ins an hour"
+                value={fields.hourly}
+                onChange={(t) => setField("hourly", t)}
+                onCommit={() => commit("hourly", setHourly)}
+                narrow
+              />{" "}
+              times an hour and{" "}
+              <Num
                 problemId={`${ids}-checkins`}
                 label="Check-ins a day"
                 value={fields.checkins}
@@ -324,8 +347,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 onCommit={() => commit("checkins", setCheckins)}
                 narrow
               />{" "}
-              times a day. Events close together are taken as one.
+              times a day. Events close together are taken as one, and what happens past those waits for the next.
             </span>
+            {fields.hourly.problem && <Problem id={`${ids}-hourly`} text={fields.hourly.problem} />}
             {fields.checkins.problem && <Problem id={`${ids}-checkins`} text={fields.checkins.problem} />}
           </div>
 

@@ -104,6 +104,22 @@ describe("Oversees the crew", () => {
     expect((screen.getByRole("textbox", { name: "Minutes waiting" }) as HTMLInputElement).value).toBe("12");
   });
 
+  it("spends check-ins by the hour, under a ceiling for the day", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "watch" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nmax_checkins_per_day = 150\n`);
+    expect((screen.getByRole("textbox", { name: "Check-ins a day" }) as HTMLInputElement).value).toBe("150");
+    const hourly = screen.getByRole("textbox", { name: "Check-ins an hour" }) as HTMLInputElement;
+    expect(hourly.value).toBe("6");
+    fireEvent.change(hourly, { target: { value: "61" } });
+    fireEvent.blur(hourly);
+    expect(screen.getByRole("alert").textContent).toBe("Use a whole number from 1 to 60.");
+    expect(hub.saveAgentConfig).not.toHaveBeenCalled();
+    fireEvent.change(hourly, { target: { value: "4" } });
+    await act(async () => fireEvent.keyDown(hourly, { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ max_checkins_per_hour: 4, max_checkins_per_day: 150 }));
+  });
+
   it("reads minutes of 0 as off, and turns them back on with the last minutes, else 5 and 30", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "watch" } });
     const hub = fakeHub();
