@@ -54,7 +54,7 @@ const fromHub = (m: HubMessage): ChatMessage => {
     ...(author ? { author } : {}),
     ...(m.mark?.delivery ? { delivery: m.mark.delivery } : {}),
     ...(m.mark?.request_id ? { requestId: m.mark.request_id } : {}),
-    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+    ...(m.attachments?.length ? { attachments: m.attachments.map(({ hub: _hub, agent: _agent, ...file }) => file) } : {}),
   };
 };
 

@@ -109,14 +109,14 @@ describe("reading a DM's history", () => {
     expect("author" in page!.messages[3]!).toBe(false);
   });
 
-  it("reads where a message was delivered, its files, and a room's page after a message", async () => {
+  it("reads where a message was delivered, its files (as the hub's own, whatever they claim), and a room's page after a message", async () => {
     const file = { artifact_id: "art_1", media_type: "application/pdf", filename: "q3.pdf", size: 9, thumbnail_url: null };
     answer(() =>
       json({
         messages: [
           { id: "h1", from: "agent", text: "🔔 Reminder: stand-up", mark: { delivery: "reminder" } },
           { id: "h2", from: "agent", text: "", mark: { delivery: "approval", request_id: "q1" } },
-          { id: "file:art_1", from: "agent", text: "", attachments: [file] },
+          { id: "file:art_1", from: "agent", text: "", attachments: [{ ...file, hub: "local", agent: "overseer" }] },
           { id: "h3", from: "agent", text: "" },
         ],
         more: false,
