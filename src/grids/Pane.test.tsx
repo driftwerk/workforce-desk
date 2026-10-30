@@ -226,6 +226,14 @@ describe("a tracked terminal shown as its session", () => {
     expect(options("task-0")).not.toContain("Show the terminal");
   });
 
+  it("doesn't show the terminal where it would be a second pane of it, as its own pane is in another grid", () => {
+    tracked();
+    showAsSession();
+    const other = createGrid();
+    act(() => deliver(other, term));
+    expect(options("task-0")).not.toContain("Show the terminal");
+  });
+
   it("closes the terminal with the session's pane, when no other pane shows it", () => {
     tracked();
     showAsSession();

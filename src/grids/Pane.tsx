@@ -18,7 +18,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
-import { parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
+import { findContent, parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
@@ -520,10 +520,14 @@ function usePaneMenu(gridId: string, pane: PaneData, action: SessionAction | nul
   const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, pane.content.terminalId) : null;
   const ranIn = pane.content?.kind === "session" ? (sessions[pane.content.sessionId]?.terminalId ?? null) : null;
   const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));
+  // A pane of its own in another grid: one here would be a second.
+  const terminalElsewhere = useGrids(
+    (s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], { kind: "terminal", terminalId: ranIn })),
+  );
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
   const swap: MenuEntry[] = tracked
     ? [{ kind: "item", label: "Show as session", onSelect: () => put({ kind: "session", sessionId: tracked.id }) }]
-    : terminal
+    : terminal && !terminalElsewhere
       ? [{ kind: "item", label: "Show the terminal", onSelect: () => put({ kind: "terminal", terminalId: terminal.id, cwd: terminal.cwd }) }]
       : [];
   return [
