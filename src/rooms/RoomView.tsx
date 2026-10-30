@@ -3,10 +3,12 @@ import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles }
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk, type RoomDraft } from "../hub/store";
-import type { Room } from "../hub/types";
+import type { Room, RoomMessage } from "../hub/types";
 import { AgentMark } from "../ui/Mark";
 import { say, stopAll } from "./engine";
 import { useAuthor } from "./names";
+import { MemberMark } from "./MemberMark";
+import { ThreadBar } from "./ThreadBar";
 import { readAllHere, Timeline } from "./Timeline";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
 import { memberKey } from "./routing";
@@ -175,6 +177,7 @@ export function useOpenThread(): { room: Room; thread: string } | null {
 }
 
 const NO_DRAFTS: RoomDraft[] = [];
+const NO_MESSAGES: RoomMessage[] = [];
 
 /** A room's thread: its first message, the replies, and a reply box. */
 export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
@@ -182,14 +185,37 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
   const files = usePendingFiles();
   const drop = useFileDrop(files.add);
   const parent = useDesk((s) => s.timelines[room.id]?.find((m) => m.id === thread));
+  const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
+  const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
+  const author = useAuthor();
   if (!parent) return null;
+  const replies = all.filter((m) => m.threadId === parent.id);
+  const writers = [...new Set([parent.author, ...replies.map((m) => m.author)])];
   return (
     <SidePanel
       className="thread-panel"
       label="Thread"
       noun="the thread"
       onClose={() => setRoomThread(room.id, null)}
-      title={<b className="display rpanel-name">Thread</b>}
+      title={
+        <span className="thread-head">
+          <span className="thread-head-row">
+            <b className="display rpanel-name">Thread</b>
+            <span className="member-stack">
+              {writers.map((w) => (
+                <MemberMark key={w} member={w} name={author(w).name} size="sm" />
+              ))}
+            </span>
+          </span>
+          <ThreadBar
+            room={room.id}
+            parent={parent}
+            count={parent.replyCount ?? replies.length}
+            drafts={drafts.filter((d) => d.threadId === parent.id)}
+            authors={parent.replyAuthors ?? []}
+          />
+        </span>
+      }
     >
       <div className="thread-body drop-target" {...drop.handlers} onKeyDown={(e) => shiftEscape(e, room.id, parent.id)}>
         <Timeline room={room} thread={parent.id} />

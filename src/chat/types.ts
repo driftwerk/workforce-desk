@@ -58,6 +58,9 @@ export const agentKey = (a: Pick<Agent, "hubId" | "id">): string => `${a.hubId}/
 export interface ToolCall {
   name: string;
   done: boolean;
+  /** When its start and end frames came (ms, this computer's clock). */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 /** Who said a DM message, as a hub that says so tells it: you (typed, or

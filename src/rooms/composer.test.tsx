@@ -127,7 +127,8 @@ describe("answers on their way in a room", () => {
     });
     render(<RoomView room={room} />);
     expect(screen.getByText("Two PRs are")).toBeTruthy();
-    expect(screen.getByText("Thinking")).toBeTruthy();
+    // It asks you something first: its card says it's waiting on you.
+    expect(screen.getByText("Waiting on you")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retried).toEqual(["a2"]);

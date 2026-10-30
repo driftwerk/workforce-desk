@@ -14,6 +14,7 @@ import { useUnread } from "../unread/summary";
 import { Draft } from "./Draft";
 import { answerForm } from "./engine";
 import { Message } from "./Message";
+import { ThreadBar } from "./ThreadBar";
 import { useAuthor } from "./names";
 import { memberOf } from "./routing";
 import { after } from "./time";
@@ -46,9 +47,6 @@ export const draftsByThread = (drafts: readonly RoomDraft[], all: readonly RoomM
   return by;
 };
 
-/** Whether a draft's member is answering now, not waiting or stopped. */
-const answering = (d: RoomDraft): boolean => d.state === "live" || d.state === "stalled";
-
 /** Within this of the top, the earlier page is read. */
 const EARLIER_PX = 80;
 /** How long a message jumped to flashes. */
@@ -78,6 +76,7 @@ export const RoomMessageView = memo(function RoomMessageView({ room, m, name, ho
       authorKey={member ? m.author : undefined}
       home={home}
       origin={member ?? undefined}
+      steps={m.steps}
       onSubmitForm={submitForm}
     />
   );
@@ -335,7 +334,6 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     }
   };
 
-  const names = (ds: RoomDraft[]) => [...new Set(ds.map((d) => author(d.member).name))];
   let day = "";
   const dayBefore = (m: RoomMessage) => {
     const d = dayName(m.createdAt);
@@ -383,23 +381,20 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
               );
             const n = m.replyCount ?? replies.get(m.id) ?? 0;
             const there = openThread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
-            const replying = names(there.filter(answering));
-            const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted" || d.state === "stopped"));
             return (
               <Fragment key={m.id}>
                 {dayLine}
                 {fresh}
                 <div className="room-msg" {...row}>
                   <RoomMessageView room={room} m={m} name={a.name} home={home} />
-                  <button type="button" className="link small thread-link" onClick={() => setRoomThread(room.id, m.id)}>
-                    {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
-                  </button>
-                  {replying.length > 0 && (
-                    <span className="small faint thread-replying">
-                      {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
-                    </span>
-                  )}
-                  {stopped.length > 0 && <span className="small state-blocked thread-replying">{stopped.join(", ")} couldn’t answer</span>}
+                  <ThreadBar
+                    room={room.id}
+                    parent={m}
+                    count={n}
+                    drafts={there}
+                    authors={m.replyAuthors ?? []}
+                    onOpen={() => setRoomThread(room.id, m.id)}
+                  />
                 </div>
               </Fragment>
             );

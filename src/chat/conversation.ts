@@ -278,10 +278,10 @@ const foldTurn = (turns: Record<string, Turn>, ref: string, msg: ServerMessage, 
   const next = ((): Turn => {
     switch (msg.type) {
       case "tool_start":
-        return { ...t, working, tools: [...t.tools, { name: msg.content ?? "tool", done: false }] };
+        return { ...t, working, tools: [...t.tools, { name: msg.content ?? "tool", done: false, startedAt: now }] };
       case "tool_end": {
         const i = t.tools.findIndex((x) => !x.done);
-        return { ...t, working, tools: t.tools.map((x, j) => (j === i ? { ...x, done: true } : x)) };
+        return { ...t, working, tools: t.tools.map((x, j) => (j === i ? { ...x, done: true, endedAt: now } : x)) };
       }
       case "stream_start":
         return { ...t, working };

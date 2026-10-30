@@ -1252,13 +1252,52 @@ button {
   text-align: center;
   padding: 6px 0;
 }
-.thread-link {
+.thread-bar {
   align-self: flex-start;
   margin-left: 46px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
 }
-.thread-replying {
-  align-self: flex-start;
-  margin-left: 46px;
+button.thread-bar:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.thread-bar-head {
+  margin-left: 0;
+  padding: 0;
+}
+.thread-unread .thread-count {
+  font-weight: 700;
+  color: var(--text);
+}
+.thread-marks {
+  display: inline-flex;
+  gap: 3px;
+}
+.thread-needs,
+.thread-failed {
+  color: var(--blocked);
+  font-weight: 600;
+}
+.thread-answering {
+  color: var(--working);
+}
+.thread-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.thread-head-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .thread-panel {
   background: var(--surface);
@@ -1902,4 +1941,76 @@ button {
   font-weight: 650;
   box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
   z-index: 2;
+}
+
+/* ── An answer's progress ───────────────────────────────────────────────── */
+
+.prog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.prog-waiting {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
+}
+.prog-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.prog-head > .link {
+  margin-left: auto;
+}
+.prog-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.prog-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.prog-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  line-height: 1;
+  flex: none;
+  background: var(--done);
+  color: var(--bg);
+}
+.prog-running .prog-dot {
+  background: var(--working);
+}
+.prog-failed .prog-dot,
+.prog-unfinished .prog-dot {
+  background: var(--blocked);
+}
+.msg-steps {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.msg-steps > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+.msg-steps[open] > summary {
+  margin-bottom: 6px;
 }

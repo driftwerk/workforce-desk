@@ -7,6 +7,9 @@ import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
 import { AgentMark, Mark, YouMark } from "../ui/Mark";
+import type { Step } from "../hub/types";
+import { stepsOf } from "./progress";
+import { Steps } from "./ProgressCard";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -37,6 +40,7 @@ export const Message = memo(function Message({
   home,
   relayed,
   origin,
+  steps,
   onSubmitForm,
 }: {
   message: ChatMessage;
@@ -54,6 +58,8 @@ export const Message = memo(function Message({
   /** A turn the overseer sent on, shown as from it (or from you, saying yes
    *  to it), not as something you typed. */
   relayed?: Relayed | null;
+  /** The tools an agent's turn ran for it, shown folded away. */
+  steps?: readonly Step[];
   onSubmitForm: (summary: string, values: Record<string, unknown>) => boolean;
 }) {
   const host = useMemo<RichHost>(
@@ -103,6 +109,14 @@ export const Message = memo(function Message({
               <RichMarkdown text={message.content} streaming={message.status === "streaming"} />
             </div>
           </RichHostProvider>
+        )}
+        {steps && steps.length > 0 && (
+          <details className="msg-steps">
+            <summary className="small">
+              What {name} did · {steps.length} step{steps.length === 1 ? "" : "s"}
+            </summary>
+            <Steps steps={stepsOf(steps)} />
+          </details>
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}

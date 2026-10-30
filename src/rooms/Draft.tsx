@@ -1,10 +1,11 @@
 import { RichMarkdown } from "@workforce/rich";
 import { Attachments } from "../attachments/Attachments";
 import { PromptCard } from "../chat/Approvals";
-import { StatusLine, ToolChips } from "../chat/WorkingRow";
+import { useNeeds } from "../floor/store";
 import type { RoomDraft } from "../hub/store";
 import { AgentMark } from "../ui/Mark";
 import { answerPrompt, cancelAsk, dismiss, retry, stop } from "./engine";
+import { Progress } from "./ProgressCard";
 import { memberOf } from "./routing";
 
 /** What a draft says when it isn't going: why, and what can be done. */
@@ -28,6 +29,10 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
   const stopped = draft.state === "interrupted" || draft.state === "failed" || draft.state === "stopped";
   const note = draft.state === "failed" ? draft.error : draft.state === "stopped" ? stoppedNote(draft.took ?? 0) : NOTE[draft.state];
   const cancellable = draft.state === "queued" || draft.state === "busy";
+  // A need the Floor placed on its thread for its member waits on you too.
+  const asked = useNeeds().some(
+    (n) => n.place.kind === "room" && n.place.room === roomId && n.place.thread === draft.threadId && `${n.hubId}/${n.who.id}` === draft.member,
+  );
   return (
     <article className="msg msg-assistant msg-draft" aria-busy={!stopped} aria-label={`${name}’s answer on its way`}>
       <AgentMark agent={draft.member} name={name} state={stopped ? undefined : "working"} />
@@ -35,7 +40,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
         <span className="msg-head">
           <b className="display">{name}</b>
         </span>
-        <ToolChips tools={draft.tools} />
+        <Progress draft={draft} asked={asked} onStop={() => stop(roomId, draft.id)} />
         {draft.text && (
           <div className="msg-text rich">
             <RichMarkdown text={draft.text} streaming={!stopped} />
@@ -45,14 +50,6 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
         {draft.prompts.map((p) => (
           <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(roomId, draft.id, p.requestId, choice)} />
         ))}
-        {draft.state === "live" && (
-          <span className="draft-live">
-            {draft.working && <StatusLine working={draft.working} />}
-            <button type="button" className="link small" title="Stop the answer" onClick={() => stop(roomId, draft.id)}>
-              Stop
-            </button>
-          </span>
-        )}
         <span className="small faint draft-note" role="status">
           {!stopped && note}
           {cancellable && (
