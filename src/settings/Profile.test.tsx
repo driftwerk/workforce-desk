@@ -19,7 +19,7 @@ const hubs = vi.fn(async (input: URL | string, init?: RequestInit) => {
     return id === "local" ? json({ error: "unauthorized" }, 401) : json({ id: `u-${id}`, display_name: "Sam", picture: id === "dw" ? { version: "d1", source: "slack", at: "", slack: "Acme Slack" } : null });
   if (url.pathname === "/api/me/picture" && init?.method === "PUT")
     return id === "acme" ? json({ error: "Pictures need the hub's database, which isn't connected." }, 503) : json({ picture: { version: `${id}-2`, source: "chosen", at: new Date().toISOString() } });
-  if (url.pathname === "/api/me/picture") return new Response(new Blob([PNG_BYTES], { type: "image/png" }), { headers: { "content-type": "image/png" } });
+  if (url.pathname === "/api/me/picture") return new Response(PNG_BYTES, { headers: { "content-type": "image/png" } });
   return json({ agents: [] });
 });
 

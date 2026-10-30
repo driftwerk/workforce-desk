@@ -8,7 +8,7 @@ export const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1
 export function servePictures(other: (url: URL) => Response = () => new Response("{}", { headers: { "content-type": "application/json" } })) {
   const fetch = vi.fn(async (input: URL | string) => {
     const url = new URL(String(input));
-    return url.pathname.endsWith("/picture") ? new Response(new Blob([PNG_BYTES], { type: "image/png" }), { headers: { "content-type": "image/png" } }) : other(url);
+    return url.pathname.endsWith("/picture") ? new Response(PNG_BYTES, { headers: { "content-type": "image/png" } }) : other(url);
   });
   vi.stubGlobal("fetch", fetch);
   let n = 0;
