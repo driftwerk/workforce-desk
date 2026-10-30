@@ -381,6 +381,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   checked={o.act.handOutWork}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOutWork: v } }))}
                 />
+                <Check
+                  label="Interrupt"
+                  sub="End a session’s turn when it’s stuck, as Esc in its terminal; the session and its terminal keep running"
+                  checked={o.act.interrupt}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, interrupt: v } }))}
+                />
               </div>
               <span className="oversee-sub">
                 {name} always asks you first before pushing code, deleting anything, or sending messages outside Desk. Everything it

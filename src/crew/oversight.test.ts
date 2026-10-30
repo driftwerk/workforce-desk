@@ -26,7 +26,7 @@ wake = { waiting_minutes = 10, quiet_minutes = 0, on_finish = false, on_failure 
 summaries = { morning = "08:30", evening = "" }
 max_checkins_per_hour = 3
 max_checkins_per_day = 12
-act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_out_work = false }
+act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_out_work = false, interrupt = true }
 `);
     expect(o).toEqual({
       enabled: true,
@@ -36,7 +36,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
       summaries: { morning: "08:30", evening: "" },
       maxCheckinsPerHour: 3,
       maxCheckinsPerDay: 12,
-      act: { nudge: false, resumeRestart: true, readOnlyApprovals: true, handOutWork: false },
+      act: { nudge: false, resumeRestart: true, readOnlyApprovals: true, handOutWork: false, interrupt: true },
     });
   });
 
@@ -74,7 +74,7 @@ wake = { waiting_minutes = 2.5 }
       summaries: { morning: "09:00", evening: "18:00" },
       max_checkins_per_hour: 6,
       max_checkins_per_day: 100,
-      act: { nudge: true, resume_restart: true, read_only_approvals: false, hand_out_work: false },
+      act: { nudge: true, resume_restart: true, read_only_approvals: false, hand_out_work: false, interrupt: false },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
   });
