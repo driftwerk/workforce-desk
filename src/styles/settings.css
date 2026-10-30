@@ -345,6 +345,7 @@ legend.set-label {
   padding: 1px 7px;
 }
 .font-none {
+  display: block;
   padding: 7px 9px;
 }
 .size-rows {

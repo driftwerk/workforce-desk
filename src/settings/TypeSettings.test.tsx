@@ -77,6 +77,37 @@ describe("the font picker", () => {
     expect(document.activeElement).toBe(button);
     expect(onPick).toHaveBeenCalledTimes(1);
   });
+
+  it("opens at the font in use however far down the list it is", () => {
+    const many = fontOptions(Array.from({ length: 200 }, (_, i) => `Font ${i}`));
+    const onPick = vi.fn();
+    render(<FontPicker label="Code" hint="terminals" value="Font 150" options={many} onPick={onPick} />);
+    fireEvent.click(screen.getByRole("button", { name: /Code/ }));
+    const search = screen.getByRole("combobox");
+    expect(document.getElementById(search.getAttribute("aria-activedescendant")!)!.textContent).toContain("Font 150");
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onPick).toHaveBeenCalledWith("Font 150");
+  });
+
+  it("leaves Home, End and Space to the search text, and closes when focus leaves it", () => {
+    picker();
+    fireEvent.click(screen.getByRole("button", { name: /Headings/ }));
+    const search = screen.getByRole("combobox");
+    const at = search.getAttribute("aria-activedescendant");
+    expect(fireEvent.keyDown(search, { key: "End" })).toBe(true);
+    expect(fireEvent.keyDown(search, { key: " " })).toBe(true);
+    expect(search.getAttribute("aria-activedescendant")).toBe(at);
+    fireEvent.blur(search, { relatedTarget: document.body });
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("says so when no font matches, outside the list", () => {
+    picker();
+    fireEvent.click(screen.getByRole("button", { name: /Headings/ }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "zzz" } });
+    expect(within(screen.getByRole("listbox")).queryByText("No font is called that.")).toBeNull();
+    expect(screen.getByText("No font is called that.")).toBeTruthy();
+  });
 });
 
 describe("type in Appearance", () => {

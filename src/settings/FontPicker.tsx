@@ -28,6 +28,13 @@ export const faceOf = (name: string): string => `"${name.replace(/["\\]/g, "")}"
 /** The most options drawn at once (each loads its own face); typing finds the rest. */
 const SHOWN = 80;
 
+/** The first of `found` to draw, with `value` among them wherever it is. */
+export const firstShown = (found: readonly FontOption[], value: string): FontOption[] => {
+  const shown = found.slice(0, SHOWN);
+  const current = found.find((o) => o.name === value);
+  return current && !shown.includes(current) ? [...shown, current] : shown;
+};
+
 /** A font for one role: a button showing it in its own face, opening a
  *  searchable list of Desk's fonts and this computer's, each in its face. */
 export function FontPicker({
@@ -51,7 +58,7 @@ export function FontPicker({
   const list = useRef<HTMLUListElement>(null);
   const id = useId();
   const found = matching(options, query);
-  const shown = found.slice(0, SHOWN);
+  const shown = firstShown(found, value);
 
   const close = (refocus = true) => {
     setOpen(false);
@@ -59,7 +66,7 @@ export function FontPicker({
     if (refocus) button.current?.focus();
   };
   const show = () => {
-    setActive(Math.max(0, options.findIndex((o) => o.name === value)));
+    setActive(Math.max(0, firstShown(options, value).findIndex((o) => o.name === value)));
     setOpen(true);
   };
   const pick = (name: string) => {
@@ -116,7 +123,14 @@ export function FontPicker({
         </svg>
       </button>
       {open && (
-        <div ref={pop} className="font-pop">
+        <div
+          ref={pop}
+          className="font-pop"
+          onBlur={(e) => {
+            const to = e.relatedTarget as Node | null;
+            if (!e.currentTarget.contains(to) && to !== button.current) close(false);
+          }}
+        >
           <input
             autoFocus
             className="font-search"
@@ -133,7 +147,7 @@ export function FontPicker({
               setActive(0);
             }}
             onKeyDown={(e) =>
-              listboxKey(e, shown.length, active, { move: setActive, choose: (i) => pick(shown[i]!.name), close: () => close() }, { space: false })
+              listboxKey(e, shown.length, active, { move: setActive, choose: (i) => pick(shown[i]!.name), close: () => close() }, { typing: true })
             }
           />
           <span className="small faint font-count" aria-live="polite">
@@ -161,8 +175,8 @@ export function FontPicker({
                 <span className="font-tag">{o.desk ? "Desk" : "This computer"}</span>
               </li>
             ))}
-            {found.length === 0 && <li className="font-none small faint">No font is called that.</li>}
           </ul>
+          {found.length === 0 && <span className="font-none small faint">No font is called that.</span>}
           {found.length > shown.length && <span className="small faint font-count">Type to find the other {found.length - shown.length}.</span>}
         </div>
       )}

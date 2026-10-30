@@ -7,9 +7,10 @@ export interface ListboxActions {
 }
 
 /** A key pressed in a list of `count` options whose `active` one is shown
- *  as current: ↑ ↓ Home End move it, Enter (and Space, where it doesn't
- *  type) chooses it, Escape closes the list. Other keys are left alone. */
-export function listboxKey(e: KeyboardEvent, count: number, active: number, act: ListboxActions, { space = true } = {}): void {
+ *  as current: ↑ ↓ move it, Enter chooses it, Escape closes the list; Home,
+ *  End and Space do too, except from a field being typed in, whose text
+ *  they belong to. Other keys are left alone. */
+export function listboxKey(e: KeyboardEvent, count: number, active: number, act: ListboxActions, { typing = false } = {}): void {
   const last = count - 1;
   const move = (to: number) => {
     e.preventDefault();
@@ -21,11 +22,11 @@ export function listboxKey(e: KeyboardEvent, count: number, active: number, act:
     case "ArrowUp":
       return move(active - 1);
     case "Home":
-      return move(0);
+      return typing ? undefined : move(0);
     case "End":
-      return move(last);
+      return typing ? undefined : move(last);
     case " ":
-      if (!space) return;
+      if (typing) return;
       e.preventDefault();
       if (active >= 0 && active < count) act.choose(active);
       return;
