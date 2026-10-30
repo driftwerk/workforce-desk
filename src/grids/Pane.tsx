@@ -23,6 +23,7 @@ import { FocusIcon, UnfocusIcon } from "../panels/Stage";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
+import { baseName, homeShort } from "../ui/paths";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -64,8 +65,8 @@ export interface Label {
   mono: boolean;
 }
 
-const home = (path: string | null | undefined): string | null => (path ? path.replace(/^\/Users\/[^/]+/, "~") : null);
-const folder = (path: string | null | undefined): string | null => path?.split("/").filter(Boolean).pop() ?? null;
+const home = (path: string | null | undefined): string | null => (path ? homeShort(path) : null);
+const folder = (path: string | null | undefined): string | null => (path ? baseName(path) : null);
 
 /** Each pane's header, from what it holds. */
 export function usePaneLabel(content: PaneContent | null): Label {

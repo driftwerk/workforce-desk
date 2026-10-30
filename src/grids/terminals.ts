@@ -17,6 +17,7 @@ import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session, TerminalInfo } from "../hub/types";
 import { claudePluginDir, inApp, programsUnder } from "../platform";
+import { baseName } from "../ui/paths";
 import type { Pane, PaneContent } from "./engine";
 import { newId } from "./model";
 import { setAskingCheck, setTerminal, useGrids, writes } from "./store";
@@ -179,7 +180,7 @@ const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "tcsh", "ksh", "log
  *  (Codex is recognised here, by its process). */
 export const describeTerminal = (info: TerminalInfo | undefined, programs: string[] | undefined) => {
   const [first, ...rest] = programs ?? [];
-  const shell = first ?? info?.shell.split("/").pop() ?? "zsh";
+  const shell = first ?? (info && baseName(info.shell)) ?? "zsh";
   const running = rest.find((p) => !SHELLS.has(p)) ?? null;
   return { shell, running, codex: rest.some((p) => /^codex\b/.test(p)), claude: rest.some((p) => p === "claude") };
 };

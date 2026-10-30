@@ -10,12 +10,13 @@ import { Mark } from "../ui/Mark";
 import { sessionAction } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
+import { homeShort } from "../ui/paths";
 
 const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
 
 const where = (s: Session): string => {
   const background = backgroundOf(s);
-  return [ENGINE[s.engine], s.branch ? `branch ${s.branch}` : s.cwd.replace(/^\/Users\/[^/]+/, "~"), background && backgroundLine(background)]
+  return [ENGINE[s.engine], s.branch ? `branch ${s.branch}` : homeShort(s.cwd), background && backgroundLine(background)]
     .filter(Boolean)
     .join(" · ");
 };
