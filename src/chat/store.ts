@@ -13,6 +13,7 @@ import {
   type PermissionChoice,
 } from "./types";
 import { hubFetch } from "../hub/net";
+import { useDesk } from "../hub/store";
 import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -52,7 +53,7 @@ interface ChatStore {
   learnFeatures: (hubId: string, features: ReadonlySet<string>) => void;
   /** Messages delivered into DMs you haven't opened since, by agent key. */
   dmUnread: Record<string, number>;
-  /** One more message in a DM; none while it is the one shown. */
+  /** One more message in a DM; none while it is on screen. */
   bumpDm: (key: string) => void;
   seenDm: (key: string) => void;
   setHubs: (hubs: HubAccount[]) => void;
@@ -235,7 +236,11 @@ export const useChat = create<ChatStore>((set, get) => ({
     }),
   dmUnread: {},
   bumpDm: (key) =>
-    set((s) => (s.activeAgent === key || s.panelAgent === key ? s : { dmUnread: { ...s.dmUnread, [key]: (s.dmUnread[key] ?? 0) + 1 } })),
+    set((s) => {
+      const desk = useDesk.getState();
+      const shown = s.panelAgent === key || (s.activeAgent === key && desk.view === "rooms" && !desk.activeRoom);
+      return shown ? s : { dmUnread: { ...s.dmUnread, [key]: (s.dmUnread[key] ?? 0) + 1 } };
+    }),
   seenDm: (key) =>
     set((s) => {
       if (!(key in s.dmUnread)) return s;

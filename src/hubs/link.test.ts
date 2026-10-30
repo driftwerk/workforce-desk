@@ -32,6 +32,7 @@ vi.mock("../floor/store", () => ({
 const { HubLink, linkUrl } = await import("./link");
 const { CATCH_UP_RETRY_MS, followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
 const { useChat } = await import("../chat/store");
+const { useDesk } = await import("../hub/store");
 
 const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "tok" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -149,6 +150,17 @@ describe("a hub link", () => {
     expect(notified[0]).toEqual({ title: "Allan · Reminder", body: "🔔 Reminder: stand-up" });
     expect(useChat.getState().dmUnread["dw/allan"]).toBe(1);
     expect(spoken).toEqual(["🔔 Reminder: stand-up\nin five"]);
+  });
+
+  it("counts unread for the DM last opened while a room or the Floor is shown instead, and none while it's shown", () => {
+    useChat.setState({ activeAgent: "dw/allan", panelAgent: null, dmUnread: {} });
+    useDesk.setState({ view: "floor", activeRoom: null });
+    useChat.getState().bumpDm("dw/allan");
+    useDesk.setState({ view: "rooms", activeRoom: "6f1c" });
+    useChat.getState().bumpDm("dw/allan");
+    useDesk.setState({ activeRoom: null });
+    useChat.getState().bumpDm("dw/allan");
+    expect(useChat.getState().dmUnread["dw/allan"]).toBe(2);
   });
 
   it("tells you of nothing a notice says, and counts no unread for a room", async () => {
