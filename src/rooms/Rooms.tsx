@@ -1,3 +1,4 @@
+import { formAnswer } from "../chat/forms";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { uploadAll } from "../attachments/upload";
@@ -150,7 +151,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   const submitForm = useCallback(
     (summary: string, values: Record<string, unknown>) =>
-      !!activeAgent && send(activeAgent, `${summary}\n\n\`\`\`json\n${JSON.stringify(values, null, 2)}\n\`\`\``),
+      !!activeAgent && send(activeAgent, formAnswer(summary, values)),
     [activeAgent, send],
   );
 

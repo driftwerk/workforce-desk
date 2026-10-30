@@ -11,7 +11,7 @@ import { deskState } from "../restore/boot";
 import { uploadAll } from "../attachments/upload";
 import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
-import { addressees, contextFor, MAX_HOPS, memberKey, relay, roomChannel } from "./routing";
+import { addressees, contextFor, MAX_HOPS, memberKey, memberOf, relay, roomChannel } from "./routing";
 
 // Asking a room's members. Each member answers on a conversation of its own
 // for the room (`room.channel` on its hub), one ask at a time across the
@@ -437,7 +437,21 @@ export async function say(room: Room, text: string, threadId: string | null, fil
   if (!hub || (!text.trim() && !files.length)) return;
   const here = await bringIn(hub, room, text);
   const { roster, hubs } = useChat.getState();
-  const to = addressees(text, here.members, roster, here.defaultMember, undefined, hubs);
+  await speak(hub, here, text, threadId, files, addressees(text, here.members, roster, here.defaultMember, undefined, hubs));
+}
+
+/** You filled in a form an agent posted in a room: your answer is kept
+ *  where the form is, in its thread if it's in one, and asked of the agent
+ *  that posted it alone, whatever it mentions. */
+export async function answerForm(room: Room, form: RoomMessage, answer: string): Promise<void> {
+  const hub = useDesk.getState().hub;
+  const author = memberOf(form.author);
+  if (!hub || !author) return;
+  await speak(hub, room, answer, form.threadId, [], [author]);
+}
+
+/** What you said in `here`, kept and asked of `to`, each sent the files. */
+async function speak(hub: DeskHub, here: Room, text: string, threadId: string | null, files: readonly File[], to: RoomMemberRef[]): Promise<void> {
   if (files.length && !to.length) throw new Error("Mention someone in the room to send the files to.");
   const sent = await Promise.all(
     to.map((m) => {

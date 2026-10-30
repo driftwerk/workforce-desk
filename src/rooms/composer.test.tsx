@@ -9,6 +9,7 @@ vi.mock("./engine", () => ({
   retry: (_room: string, id: string) => void retried.push(id),
   dismiss: () => {},
   answerPrompt: () => true,
+  answerForm: vi.fn(async () => {}),
 }));
 vi.mock("@workforce/rich", () => ({
   RichHostProvider: ({ children }: { children: unknown }) => children,

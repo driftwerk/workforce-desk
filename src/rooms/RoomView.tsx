@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
+import { formAnswer } from "../chat/forms";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent, type ChatMessage } from "../chat/types";
 import { useDesk, type RoomDraft } from "../hub/store";
@@ -7,9 +8,9 @@ import type { Room, RoomMessage } from "../hub/types";
 import { Mark } from "../ui/Mark";
 import { Draft } from "./Draft";
 import { Message } from "./Message";
-import { say } from "./engine";
+import { answerForm, say } from "./engine";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
-import { memberKey } from "./routing";
+import { memberKey, memberOf } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
@@ -183,8 +184,6 @@ function useAuthor(): (key: string) => { name: string; home: string } {
   };
 }
 
-const noForms = () => false;
-
 /** The thread open in the room Rooms shows, while its first message is
  *  loaded: it opens as a column on the right. */
 export function useOpenThread(): { room: Room; thread: string } | null {
@@ -196,9 +195,15 @@ export function useOpenThread(): { room: Room; thread: string } | null {
 
 const NO_DRAFTS: RoomDraft[] = [];
 
-/** A room message as the room shows it. */
-function RoomMessageView({ m, name, home }: { m: RoomMessage; name: string; home?: string }) {
-  return <Message message={asChat(m)} author={name} home={home} origin={homeOf(m)} onSubmitForm={noForms} />;
+/** A room message as the room shows it; a form an agent posted in it is
+ *  answered to that agent, where the form is. */
+function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; name: string; home?: string }) {
+  const submitForm = (summary: string, values: Record<string, unknown>): boolean => {
+    if (!memberOf(m.author)) return false;
+    void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
+    return true;
+  };
+  return <Message message={asChat(m)} author={name} home={home} origin={homeOf(m)} onSubmitForm={submitForm} />;
 }
 
 /** A room's thread: its first message, the replies, and a reply box. */
@@ -222,9 +227,9 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
     >
       <div className="thread-body drop-target" {...drop.handlers}>
         <div className="room-scroll">
-          <RoomMessageView m={parent} name={author(parent.author).name} />
+          <RoomMessageView room={room} m={parent} name={author(parent.author).name} />
           {replies.map((m) => (
-            <RoomMessageView key={m.id} m={m} name={author(m.author).name} />
+            <RoomMessageView key={m.id} room={room} m={m} name={author(m.author).name} />
           ))}
           {draftsIn(drafts, all, thread).map((d) => (
             <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />
@@ -295,7 +300,7 @@ export function RoomView({ room }: { room: Room }) {
           const n = replies.get(m.id)?.length ?? 0;
           return (
             <div key={m.id} className="room-msg">
-              <RoomMessageView m={m} name={a.name} home={m.author.includes("/") ? a.home : undefined} />
+              <RoomMessageView room={room} m={m} name={a.name} home={m.author.includes("/") ? a.home : undefined} />
               <button
                 type="button"
                 className="link small thread-link"

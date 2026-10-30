@@ -9,6 +9,13 @@ export interface RoomMember {
 
 export const memberKey = (m: RoomMember): string => `${m.hub}/${m.agent}`;
 
+/** The member a message's author key (`hub/agent`) names; none for you or
+ *  Desk. */
+export const memberOf = (author: string): RoomMember | null => {
+  const [hub, agent, ...rest] = author.split("/");
+  return hub && agent && !rest.length ? { hub, agent } : null;
+};
+
 /** How many agent-to-agent hand-offs one ask may chain: the hub's
  *  `MAX_HOPS`, which it holds turns and room posts to. */
 export const MAX_HOPS = 3;

@@ -12,7 +12,7 @@ vi.mock("../restore/boot", () => ({
 
 const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
-const { say, prune, closeRoom, retry, RECONNECT_GRACE_MS } = await import("./engine");
+const { say, answerForm, prune, closeRoom, retry, RECONNECT_GRACE_MS } = await import("./engine");
 const { MAX_HOPS } = await import("./routing");
 
 const ROOM_ID = "6f1c2a4e-0b7d-4c55-9a51-3d2e8f9b1c07";
@@ -169,6 +169,23 @@ describe("asking a room's members", () => {
     });
     expect(typeof chat.turn_ref).toBe("string");
     expect(drafts()).toMatchObject([{ member: "dw/allan", threadId: "root", state: "live" }]);
+  });
+
+  it("answers a form in a thread to the agent that posted it, there, and its answer lands in the thread", async () => {
+    const form = { id: "f1", roomId: ROOM_ID, threadId: "t1", author: "local/scout", content: "Pick a branch", hop: 0, createdAt: "1" };
+    useDesk.setState({ timelines: { [ROOM_ID]: [form] } });
+    await answerForm(room, form, "Branch: main (mentions @allan)");
+    const scout = await connect("scout");
+    await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
+    expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeUndefined();
+    expect(posts).toEqual([expect.objectContaining({ author: "you", content: "Branch: main (mentions @allan)", threadId: "t1" })]);
+    const chat = scout.chats[0]!;
+    expect(chat).toMatchObject({ desk: { place: { kind: "room", room: ROOM_ID, name: "Release", thread: "t1" }, speaker: { kind: "person" } } });
+    keep("scout", { id: "m5", from: "agent", text: "Using main.", mark: { room: ROOM_ID, thread: "t1" } });
+    answer(scout, chat.turn_ref as string, "m5", "Using main.");
+    await vi.waitFor(() =>
+      expect(posts.filter((p) => p.author === "local/scout")).toEqual([expect.objectContaining({ content: "Using main.", threadId: "t1" })]),
+    );
   });
 
   it("streams a draft in its thread and posts the saved answer once, from the drain", async () => {
