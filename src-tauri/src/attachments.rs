@@ -362,6 +362,8 @@ pub async fn attachment_open(
         .app_cache_dir()
         .map_err(|e| e.to_string())?
         .join("attachments")
+        .join(safe_filename(&hub))
+        .join(safe_filename(&agent))
         .join(safe_filename(&artifact));
     tokio::fs::create_dir_all(&dir)
         .await
