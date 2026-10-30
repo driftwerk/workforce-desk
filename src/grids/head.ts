@@ -8,11 +8,14 @@
 export type HeadPart = "cwd" | "meta" | "badge";
 
 /** Each part, in the order it gives way, with the header width (px) at
- *  which it's hidden, and below. */
+ *  which it's hidden, and below. Each width is what the busiest header (a
+ *  terminal tracking a running Claude Code: its badge, Stop and three
+ *  buttons, about 200px besides) needs for the parts still shown and about
+ *  80px of name. */
 export const HEAD_DROPS: readonly { part: HeadPart; upTo: number }[] = [
-  { part: "cwd", upTo: 560 },
-  { part: "meta", upTo: 440 },
-  { part: "badge", upTo: 340 },
+  { part: "cwd", upTo: 660 },
+  { part: "meta", upTo: 570 },
+  { part: "badge", upTo: 440 },
 ];
 
 /** The parts a header `width` wide shows besides its name. */

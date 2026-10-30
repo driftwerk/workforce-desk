@@ -10,10 +10,10 @@ const css = fs.readFileSync(`${cwd}/src/styles/grids.css`, "utf8");
 describe("a pane's header as it narrows", () => {
   it("gives way where a terminal is first, then what the pane is, then the badge; the name stays", () => {
     expect(headParts(900)).toEqual(["cwd", "meta", "badge"]);
-    expect(headParts(560)).toEqual(["meta", "badge"]);
-    expect(headParts(440)).toEqual(["badge"]);
-    expect(headParts(340)).toEqual([]);
-    expect(headParts(120)).toEqual([]);
+    expect(headParts(660)).toEqual(["meta", "badge"]);
+    expect(headParts(570)).toEqual(["badge"]);
+    // Three panes side by side on a laptop: the name alone.
+    expect(headParts(380)).toEqual([]);
     // Each part is gone before the next, at any width.
     for (let w = 0; w <= 900; w += 10) {
       const shown = headParts(w);

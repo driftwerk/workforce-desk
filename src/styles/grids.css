@@ -178,6 +178,7 @@
   flex: 0 1 auto;
   display: flex;
   min-width: 0;
+  overflow: hidden;
   font-weight: 600;
   font-size: 12.5px;
   white-space: nowrap;
@@ -228,17 +229,17 @@
 /* As the header narrows, the rest gives way before the name: where a
    terminal is, then what the pane is, then the badge (the widths are
    HEAD_DROPS, in head.ts). */
-@container gpane-head (max-width: 560px) {
+@container gpane-head (max-width: 660px) {
   .gpane-cwd {
     display: none;
   }
 }
-@container gpane-head (max-width: 440px) {
+@container gpane-head (max-width: 570px) {
   .gpane-meta {
     display: none;
   }
 }
-@container gpane-head (max-width: 340px) {
+@container gpane-head (max-width: 440px) {
   .gpane-badge {
     display: none;
   }
