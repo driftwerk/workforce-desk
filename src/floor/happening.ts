@@ -32,6 +32,7 @@ const EXTENSIONS = /\.(rs|tsx?|jsx?|json|toml|md|sql|py|css|html|ya?ml|sh|lock|g
  *  issue number, commit id, path, branch, file, code or tool mark. */
 const identifier = (word: string): boolean =>
   /^[#●]/.test(word) ||
+  /^at-(?:dm|ses|wf)-/i.test(word) ||
   /#\d/.test(word) ||
   /:\/\/|::|\(\)|=|[{}]|--|_/.test(word) ||
   EXTENSIONS.test(word) ||
@@ -127,7 +128,7 @@ const entryOf = (w: FloorWork, who: Who): FloorEntry => {
  *  waiting on its background work, or finished within the last two hours;
  *  working first, then waiting, then finished, each most recently written
  *  first. Of a subject's turns, the one furthest along that order, and of
- *  those the latest, speaks for it. `whoOf` says who a turn is, so a
+ *  those one its hub said a gist of, then the latest, speaks for it. `whoOf` says who a turn is, so a
  *  session an agent's turn ran as is that agent's entry. */
 export const happening = (m: Pick<Merged, "working" | "done">, now: number, whoOf: (w: FloorWork) => Who = (w) => w.who): FloorEntry[] => {
   const lately = m.done.filter((w) => w.endedAt !== null && now - Date.parse(w.endedAt) <= DONE_FOR_MS);
@@ -137,8 +138,11 @@ export const happening = (m: Pick<Merged, "working" | "done">, now: number, whoO
     const who = whoOf(w);
     const key = keyOf(w, who);
     const have = chosen.get(key)?.w;
+    const said = (x: FloorWork): number => Number(!!x.gist);
     const better =
-      !have || RANK[stateOf(w)] < RANK[stateOf(have)] || (RANK[stateOf(w)] === RANK[stateOf(have)] && when(w) > when(have));
+      !have ||
+      RANK[stateOf(w)] < RANK[stateOf(have)] ||
+      (RANK[stateOf(w)] === RANK[stateOf(have)] && (said(w) > said(have) || (said(w) === said(have) && when(w) > when(have))));
     if (better) chosen.set(key, { w, who });
   }
   return [...chosen.values()]

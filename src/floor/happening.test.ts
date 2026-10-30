@@ -34,12 +34,15 @@ describe("what's happening", () => {
 
   it("folds a session an agent's turn ran as into that agent's entry", () => {
     const m = on("local", {
-      working: [work(session("s-9", "at-dm-d4774cbb6c89-2e"), { since: at(2), heardAt: at(1) })],
+      working: [
+        work(session("s-9", "at-dm-d4774cbb6c89-2e"), { since: at(2), heardAt: at(1) }),
+        work(agent("scout", "Scout"), { since: at(3), gist: { purpose: "Watching the spend.", now: "Comparing this month.", at: at(2) } }),
+      ],
       done: [work(agent("scout", "Scout"), { endedAt: at(20), outcome: "finished" })],
     });
     const whoOf = (w: FloorWork) => (w.who.id === "s-9" ? agent("scout", "Scout") : w.who);
     const entries = happening(m, NOW, whoOf);
-    expect(entries.map((e) => [e.key, e.state, e.who.name])).toEqual([["local/agent:scout", "working", "Scout"]]);
+    expect(entries.map((e) => [e.key, e.state, e.who.name, e.now])).toEqual([["local/agent:scout", "working", "Scout", "Comparing this month."]]);
   });
 
   it("keeps what finished within two hours and drops what finished before", () => {
@@ -73,6 +76,7 @@ describe("what's happening", () => {
     expect(plain("Killed pid 92498 then restarted")).toBe("Killed then restarted");
     expect(plain("Mac and Windows/Linux support")).toBe("Mac and Windows/Linux support");
     expect(plain("#123")).toBe("");
+    expect(plain("Waiting on at-dm-d4774cbb6c89-2e now")).toBe("Waiting on now");
     expect(plain("● Bash cargo test")).toBe("Bash cargo test");
   });
 });
