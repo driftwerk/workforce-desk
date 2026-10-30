@@ -9,6 +9,8 @@ import { answerPrompt, dismiss, retry } from "./engine";
 /** What a draft says when it isn't going: why, and what can be done. */
 const NOTE: Partial<Record<RoomDraft["state"], string>> = {
   queued: "Will answer once it’s done in another thread",
+  connecting: "Connecting…",
+  busy: "Will answer once it’s done with something else",
   stalled: "Reconnecting…",
   interrupted: "Interrupted",
 };

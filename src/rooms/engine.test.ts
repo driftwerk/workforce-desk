@@ -11,6 +11,7 @@ vi.mock("../restore/boot", () => ({
 }));
 
 const { useChat } = await import("../chat/store");
+const { emptyConversation } = await import("../chat/conversation");
 const { useDesk } = await import("../hub/store");
 const { say, answerForm, prune, closeRoom, retry, RECONNECT_GRACE_MS } = await import("./engine");
 const { MAX_HOPS } = await import("./routing");
@@ -333,12 +334,92 @@ describe("asking a room's members", () => {
     expect(after.chats[0]!.turn_ref).not.toBe(allan.chats[0]!.turn_ref);
   }, 10_000);
 
-  it("waits a busy refusal out, then asks again", async () => {
+  it("asks again what a busy member refused, after a while and as soon as their DM is done", async () => {
     await say(room, "@allan one", null);
     const allan = await connect("allan");
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
     allan.receive({ type: "error", turn_ref: allan.chats[0]!.turn_ref, content: "busy" });
-    expect(drafts()[0]).toMatchObject({ state: "queued" });
+    expect(drafts()[0]).toMatchObject({ state: "busy" });
+    expect(allan.chats).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(allan.chats).toHaveLength(2);
+    expect(allan.chats[1]!.turn_ref).not.toBe(allan.chats[0]!.turn_ref);
+    allan.receive({ type: "error", turn_ref: allan.chats[1]!.turn_ref, content: "busy" });
+    const dm = (working: boolean) =>
+      useChat.setState((s) => ({ conversations: { ...s.conversations, "dw/allan": { ...emptyConversation(), working: working ? { since: 0, at: 0, phase: "thinking", step: "Thinking" } : null } } }));
+    dm(true);
+    dm(false);
+    expect(allan.chats).toHaveLength(3);
+    expect(drafts()[0]).toMatchObject({ state: "live" });
+  });
+
+  it("frees a member whose ask failed for an ask in another thread", async () => {
+    await say(room, "@allan one", "t1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    allan.receive({ type: "error", turn_ref: allan.chats[0]!.turn_ref, content: "The model gave up." });
+    await say(room, "@allan two", "t2");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(2));
+    expect(drafts().map((d) => [d.threadId, d.state])).toEqual([
+      ["t1", "failed"],
+      ["t2", "live"],
+    ]);
+  });
+
+  it("finishes an ask whose answer the reconnect's drain posted, at the hand-off it was asked at, freeing the member", async () => {
+    await say(room, "@allan long one", "t1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    allan.receive({ type: "typing", turn_ref: allan.chats[0]!.turn_ref, id: "m1" });
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    allan.drop();
+    vi.advanceTimersByTime(1_000);
+    vi.useRealTimers();
+    keep("allan", { id: "m1", from: "agent", text: "Done.", mark: { room: ROOM_ID, thread: "t1" } });
+    const again = await connect("allan");
+    await new Promise((r) => setTimeout(r, RECONNECT_GRACE_MS + 100));
+    await vi.waitFor(() => expect(drafts()).toEqual([]));
+    expect(posts.filter((p) => p.content === "Done.")).toEqual([expect.objectContaining({ threadId: "t1", hop: 0 })]);
+    await say(room, "@allan another thread", "t2");
+    await vi.waitFor(() => expect(again.chats).toHaveLength(1));
+  }, 10_000);
+
+  it("keeps an ask not yet on the wire when its hub is paired again, and sends it on the new conversation", async () => {
+    await say(room, "@allan hi", null);
+    await vi.waitFor(() => expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeDefined());
+    expect(drafts()[0]).toMatchObject({ state: "connecting" });
+    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, token: "new" } : h));
+    useChat.setState({ hubs });
+    prune(useDesk.getState().rooms, hubs);
+    expect(drafts()).toHaveLength(1);
+    const fresh = await connect("allan");
+    await vi.waitFor(() => expect(fresh.chats).toHaveLength(1));
+  });
+
+  it("isn't misled by a conversation closed for a hub paired again, closing late", async () => {
+    await say(room, "@allan a", "t1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const ref = allan.chats[0]!.turn_ref as string;
+    allan.receive({ type: "typing", turn_ref: ref });
+    await say(room, "@allan b", "t1");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(2));
+    allan.receive({ type: "injected", content: "Follow-up absorbed into active run" });
+    keep("allan", { id: "m1", from: "agent", text: "ok", mark: { room: ROOM_ID, thread: "t1" } });
+    answer(allan, ref, "m1", "ok");
+    await vi.waitFor(() => expect(drafts()).toEqual([]));
+    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, token: "new" } : h));
+    useChat.setState({ hubs });
+    prune(useDesk.getState().rooms, hubs);
+    await say(room, "@allan c", "t1");
+    const fresh = await connect("allan");
+    await vi.waitFor(() => expect(fresh.chats).toHaveLength(1));
+    fresh.receive({ type: "typing", turn_ref: fresh.chats[0]!.turn_ref });
+    await say(room, "@allan d", "t1");
+    await vi.waitFor(() => expect(fresh.chats).toHaveLength(2));
+    fresh.receive({ type: "injected", content: "Follow-up absorbed into active run" });
+    expect(drafts()).toHaveLength(1);
   });
 
   it("tells each member's hub when the room is deleted, and remembers it deleted it", async () => {

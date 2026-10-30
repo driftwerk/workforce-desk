@@ -60,8 +60,10 @@ export interface RoomDraft {
   tools: ToolCall[];
   attachments: Attachment[];
   prompts: Prompt[];
-  /** `queued`: waiting for the member's answer in another thread. */
-  state: "queued" | "live" | "stalled" | "interrupted" | "failed";
+  /** `queued`: waiting for the member's answer in another thread;
+   *  `connecting`: waiting for the member's conversation to open; `busy`:
+   *  waiting for the member to finish something elsewhere. */
+  state: "queued" | "connecting" | "busy" | "live" | "stalled" | "interrupted" | "failed";
   error?: string;
   /** What its answer is posted under, once the hub has said its id. */
   source?: string;

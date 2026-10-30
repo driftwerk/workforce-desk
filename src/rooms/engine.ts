@@ -9,6 +9,7 @@ import { Drainer, sourceKey } from "../hubs/drain";
 import { closeConversation } from "../hubs/surface";
 import { deskState } from "../restore/boot";
 import { uploadAll } from "../attachments/upload";
+import { backoff } from "../hub/socket";
 import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
 import { addressees, contextFor, MAX_HOPS, memberKey, memberOf, relay, roomChannel } from "./routing";
@@ -36,8 +37,11 @@ interface Ask {
   ref: string | null;
   replyId: string | null;
   sentAt: number;
-  /** `held`: failed or interrupted, until it is asked again or let be. */
-  state: "queued" | "sent" | "settling" | "held";
+  /** How many times the hub has refused it as busy since it was asked. */
+  refusals: number;
+  /** `sending`: waiting for its member's conversation to take it; `held`:
+   *  failed or interrupted, until it is asked again or let be. */
+  state: "queued" | "sending" | "sent" | "settling" | "held";
 }
 
 /** A member's conversation for one room, and the account it was opened
@@ -99,13 +103,27 @@ const draftOf = (a: Ask, patch: Partial<RoomDraft> = {}): RoomDraft => ({
 
 const show = (a: Ask, patch: Partial<RoomDraft>) => useDesk.getState().putDraft(a.roomId, draftOf(a, patch));
 
-/** The ask is over: its draft goes, and the member's next ask is sent. */
+/** The ask is over: its draft goes, and the member's next ask is sent,
+ *  and what it was too busy for elsewhere asked again. */
 const done = (a: Ask) => {
   asks.delete(a.id);
   useDesk.getState().dropDraft(a.roomId, a.id);
   const key = lineOf(a);
   if (key) pump(key);
+  askBusyAgain(memberKey(a.member));
 };
+
+/** Asks again what member `member` was too busy to answer. */
+function askBusyAgain(member: string) {
+  const keys = new Set([...asks.values()].filter((a) => a.refusals > 0 && a.state === "queued" && memberKey(a.member) === member).map(lineOf));
+  for (const key of keys) if (key) pump(key);
+}
+
+// A member's DM finishing a turn frees them for what they were too busy for.
+useChat.subscribe((s, prev) => {
+  if (s.conversations === prev.conversations) return;
+  for (const [key, was] of Object.entries(prev.conversations)) if (was.working && !s.conversations[key]?.working) askBusyAgain(key);
+});
 
 /** The conversation `m` answers `room` on, opened if need be. */
 const lineFor = (room: Room, m: RoomMemberRef): Line | null => {
@@ -115,13 +133,14 @@ const lineFor = (room: Room, m: RoomMemberRef): Line | null => {
   const had = lines.get(key);
   if (had && had.hub.token === hub.token && had.hub.url === hub.url) return had;
   had?.convo.close();
-  const line: Line = {
+  const convo: Conversation = new Conversation(
     hub,
-    absorbed: 0,
-    connected: false,
-    droppedAt: 0,
-    convo: new Conversation(hub, m.agent, (state) => heard(key, state), roomChannel(room), (content) => void legacyAnswer(key, content)),
-  };
+    m.agent,
+    (state) => heard(key, convo, state),
+    roomChannel(room),
+    (content) => void legacyAnswer(key, convo, content),
+  );
+  const line: Line = { hub, absorbed: 0, connected: false, droppedAt: 0, convo };
   lines.set(key, line);
   return line;
 };
@@ -133,58 +152,65 @@ const asksOn = (key: string): Ask[] => [...asks.values()].filter((a) => lineOf(a
 function pump(key: string) {
   const on = asksOn(key);
   const next = on.find((a) => a.state === "queued");
-  const live = on.find((a) => a.state === "sent" || a.state === "settling");
+  const live = on.find((a) => a.state === "sending" || a.state === "sent" || a.state === "settling");
   if (!next || (live && live.threadId !== next.threadId)) return;
   send(next);
 }
 
+/** Sends ask `a` once its member's conversation takes it, on the line its
+ *  room has for the member then (one paired again meanwhile is a new one). */
 function send(a: Ask) {
-  const room = useDesk.getState().rooms[a.roomId];
-  const line = room && lineFor(room, a.member);
-  if (!room || !line) {
+  const gone = () => {
     a.state = "held";
     show(a, { state: "failed", error: `${displayName(a.member)} is on a workspace Desk isn’t connected to any more.` });
-    return;
-  }
-  a.state = "sent";
-  a.sentAt = Date.now();
-  const turn: DeskTurn = {
-    place: { kind: "room", room: room.id, name: room.name, ...(a.threadId ? { thread: a.threadId } : {}) },
-    speaker: a.speaker,
-    hop: a.hop,
-    context: contextFor(useDesk.getState().timelines[room.id] ?? [], memberKey(a.member), a.threadId, a.message, nameOf),
-    message: a.message,
-    spoken: false,
   };
+  const room = useDesk.getState().rooms[a.roomId];
+  if (!room || !lineFor(room, a.member)) return gone();
+  a.state = "sending";
+  show(a, { state: "connecting" });
   const from = a.speaker.kind === "agent" ? a.speaker.name : "you";
   const attempt = (n: number) => {
-    if (!asks.has(a.id)) return;
-    const sent = line.convo.send(a.text, { turn, legacy: relay(room.slug, from, a.text), attachments: a.attachments });
+    if (asks.get(a.id) !== a || a.state !== "sending") return;
+    const here = useDesk.getState().rooms[a.roomId];
+    const line = here && lineFor(here, a.member);
+    if (!here || !line) return gone();
+    const turn: DeskTurn = {
+      place: { kind: "room", room: here.id, name: here.name, ...(a.threadId ? { thread: a.threadId } : {}) },
+      speaker: a.speaker,
+      hop: a.hop,
+      context: contextFor(useDesk.getState().timelines[here.id] ?? [], memberKey(a.member), a.threadId, a.message, nameOf),
+      message: a.message,
+      spoken: false,
+    };
+    const sent = line.convo.send(a.text, { turn, legacy: relay(here.slug, from, a.text), attachments: a.attachments });
     if (sent) {
+      a.state = "sent";
+      a.sentAt = Date.now();
       a.ref = sent.turnRef;
       show(a, { state: "live", working: line.convo.current.working });
     } else if (n < SEND_TRIES) setTimeout(() => attempt(n + 1), SEND_RETRY_MS);
     else {
       a.state = "held";
       show(a, { state: "failed", error: `Couldn’t reach ${displayName(a.member)}.` });
-      pump(lineKey(room, a.member));
+      pump(lineKey(here, a.member));
     }
   };
   attempt(0);
 }
 
 /** Asks member `m` of `room` something said in it. */
-function ask(room: Room, m: RoomMemberRef, what: Omit<Ask, "id" | "roomId" | "member" | "ref" | "replyId" | "sentAt" | "state">) {
-  const a: Ask = { ...what, id: crypto.randomUUID(), roomId: room.id, member: m, ref: null, replyId: null, sentAt: 0, state: "queued" };
+function ask(room: Room, m: RoomMemberRef, what: Omit<Ask, "id" | "roomId" | "member" | "ref" | "replyId" | "sentAt" | "refusals" | "state">) {
+  const a: Ask = { ...what, id: crypto.randomUUID(), roomId: room.id, member: m, ref: null, replyId: null, sentAt: 0, refusals: 0, state: "queued" };
   asks.set(a.id, a);
   show(a, { state: "queued" });
   pump(lineKey(room, m));
 }
 
-/** A member's conversation changed: its asks' drafts follow their turns. */
-function heard(key: string, state: ConversationState) {
+/** A member's conversation changed: its asks' drafts follow their turns.
+ *  One closed since, for a line opened anew, is no longer heard. */
+function heard(key: string, convo: Conversation, state: ConversationState) {
   const line = lines.get(key);
-  if (!line) return;
+  if (line?.convo !== convo) return;
   const reconnected = state.connected && !line.connected;
   if (line.connected && !state.connected) line.droppedAt = Date.now();
   line.connected = state.connected;
@@ -206,32 +232,41 @@ function heard(key: string, state: ConversationState) {
       continue;
     }
     const t = state.turns[a.ref];
-    if (t) follow(a, t, state);
+    if (t) follow(key, a, t, state);
   }
   if (reconnected && line.droppedAt) setTimeout(() => void recheck(key, line.droppedAt), RECONNECT_GRACE_MS);
 }
 
-/** Ask `a`'s draft as its turn `t` stands. */
-function follow(a: Ask, t: Turn, state: ConversationState) {
+/** Ask `a`'s draft as its turn `t` on line `key` stands. Refused as busy,
+ *  it's asked again once the member is done elsewhere, or after a while;
+ *  failed, it's held and the member's next ask goes. */
+function follow(key: string, a: Ask, t: Turn, state: ConversationState) {
   if (t.replyId) a.replyId = t.replyId;
   const source = t.replyId ? sourceKey(a.member.hub, a.member.agent, t.replyId) : undefined;
   const prompts = state.prompts.filter((p) => p.turnRef === a.ref);
-  if (t.state === "failed" && t.error === BUSY) {
-    a.state = "queued";
+  if (t.state === "failed") {
+    const ref = a.ref;
+    const busy = t.error === BUSY;
     a.ref = null;
-    show(a, { state: "queued", working: null });
+    a.state = busy ? "queued" : "held";
+    if (ref) lines.get(key)?.convo.forget(ref);
+    if (busy) {
+      show(a, { state: "busy", working: null });
+      setTimeout(() => pump(key), backoff(a.refusals++));
+    } else {
+      show(a, { state: "failed", text: t.text, working: null, tools: t.tools, attachments: t.attachments, prompts: [], error: t.error });
+      pump(key);
+    }
     return;
   }
-  const shown: RoomDraft["state"] = t.state === "failed" ? "failed" : t.state === "stalled" ? "stalled" : "live";
   show(a, {
-    state: shown,
+    state: t.state === "stalled" ? "stalled" : "live",
     text: t.text,
     working: t.working,
     tools: t.tools,
     attachments: t.attachments,
     prompts,
     ...(source ? { source } : {}),
-    ...(t.error ? { error: t.error } : {}),
   });
   if (t.state === "ended") void settle(a, t);
 }
@@ -283,7 +318,8 @@ async function postAnswer(room: Room, a: Ask, content: string, attachments: Atta
 }
 
 /** An answer on a hub that streams no turns: the oldest ask sent is it. */
-async function legacyAnswer(key: string, content: string) {
+async function legacyAnswer(key: string, convo: Conversation, content: string) {
+  if (lines.get(key)?.convo !== convo || convo.current.features?.has(FEATURES.stream)) return;
   const a = asksOn(key).find((x) => x.state === "sent" && !x.ref);
   const room = a && useDesk.getState().rooms[a.roomId];
   if (!a || !room) return;
@@ -326,7 +362,11 @@ async function recheck(key: string, droppedAt: number) {
     await drainer.drain(line.hub, stalled[0]!.member.agent, roomChannel(room)).catch(() => undefined);
   for (const a of stalled) {
     const draft = useDesk.getState().roomDrafts[a.roomId]?.find((d) => d.id === a.id);
-    if (!draft) continue;
+    // Gone: the drain just posted its answer.
+    if (!draft) {
+      finish(a);
+      continue;
+    }
     if (a.ref) line.convo.forget(a.ref);
     a.ref = null;
     a.state = "held";
@@ -342,6 +382,7 @@ export function retry(roomId: string, draftId: string) {
   if (!a || !room) return;
   if (a.ref) lines.get(lineKey(room, a.member))?.convo.forget(a.ref);
   a.ref = null;
+  a.refusals = 0;
   a.state = "queued";
   show(a, { state: "queued", text: "", working: null, tools: [], attachments: [], prompts: [], error: undefined, source: undefined });
   pump(lineKey(room, a.member));
@@ -496,7 +537,7 @@ export function prune(rooms: Record<string, Room>, hubs: readonly HubAccount[] =
   for (const a of [...asks.values()]) {
     const room = rooms[a.roomId];
     const key = room && lineKey(room, a.member);
-    if (key && wanted.has(key) && !(closed.has(key) && a.state !== "queued")) continue;
+    if (key && wanted.has(key) && !(closed.has(key) && a.state !== "queued" && a.state !== "sending")) continue;
     asks.delete(a.id);
     useDesk.getState().dropDraft(a.roomId, a.id);
   }
