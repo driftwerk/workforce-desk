@@ -10,6 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 use eyre::{Result, eyre};
 
+use super::SharedIn;
 use super::gate::Speaking;
 use crate::resample::Resampler;
 use crate::{AudioIn, AudioOut, SharedAudioOut};
@@ -143,7 +144,7 @@ fn streams(
             .default_input_device()
             .ok_or_else(|| eyre!("no microphone"))?;
         let config = mic.default_input_config()?;
-        let input: Arc<dyn Fn(&[f32], u32) + Send + Sync> = Arc::from(input);
+        let input: SharedIn = Arc::from(input);
         streams.push(match config.sample_format() {
             SampleFormat::F32 => hear::<f32>(&mic, config.config(), input, speaking)?,
             SampleFormat::I16 => hear::<i16>(&mic, config.config(), input, speaking)?,
@@ -197,7 +198,7 @@ where
 fn hear<T>(
     device: &cpal::Device,
     config: StreamConfig,
-    input: Arc<dyn Fn(&[f32], u32) + Send + Sync>,
+    input: SharedIn,
     speaking: Arc<Speaking>,
 ) -> Result<cpal::Stream>
 where

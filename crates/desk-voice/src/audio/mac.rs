@@ -20,6 +20,7 @@ use objc2_avf_audio::{
     AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode, AVAudioTime,
 };
 
+use super::SharedIn;
 use super::gate::Speaking;
 use crate::resample::Resampler;
 use crate::{AudioIn, AudioOut, SharedAudioOut};
@@ -82,8 +83,6 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
 pub fn output() -> Result<SharedAudioOut> {
     Ok(Arc::new(build(None)?))
 }
-
-type SharedIn = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
 
 /// The engine, with the microphone when `input` is given: voice-processed
 /// (echo cancelled), or plain and quiet while Desk speaks.

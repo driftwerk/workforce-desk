@@ -13,9 +13,14 @@ use cpal_audio as platform;
 #[cfg(target_os = "macos")]
 use mac as platform;
 
+use std::sync::Arc;
+
 use eyre::Result;
 
 use crate::{AudioIn, SharedAudioOut};
+
+/// The microphone's samples handler, shared with the audio thread.
+type SharedIn = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
 
 /// Opens the microphone, which goes to `input` as mono samples at its own
 /// rate; the returned output plays speech.

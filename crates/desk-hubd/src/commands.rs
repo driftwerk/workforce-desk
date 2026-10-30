@@ -137,8 +137,10 @@ fn filesystem(path: &Path) -> Option<i64> {
     let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
     // SAFETY: a NUL-terminated path and a buffer statfs fills.
     let found = unsafe { libc::statfs(path.as_ptr(), fs.as_mut_ptr()) } == 0;
-    // SAFETY: statfs filled it.
-    found.then(|| i64::from(unsafe { fs.assume_init() }.f_type))
+    // SAFETY: statfs filled it. Its `f_type` is i64, i32 or u32 by
+    // architecture.
+    #[allow(clippy::unnecessary_cast)]
+    found.then(|| unsafe { fs.assume_init() }.f_type as i64)
 }
 
 #[cfg(not(target_os = "linux"))]
