@@ -1,6 +1,7 @@
 import type { Layout } from "../groups/model";
 import { preview } from "../preview";
 import type { Provider } from "./providers";
+import type { SearchFilters } from "../rooms/search";
 import type {
   ActivityFilter,
   ActivityPage,
@@ -16,6 +17,7 @@ import type {
   Room,
   RoomMemberRef,
   RoomMessage,
+  SearchHit,
   Session,
   Suggestion,
   TerminalInfo,
@@ -361,8 +363,18 @@ export class DeskHub {
    *  read through its newest; answers the points that moved. */
   markAllRead = async (scope: "everything" | { room: string }): Promise<ReadRow[]> =>
     (await this.call<{ reads: ReadRow[] }>("POST", "/api/desk/reads/all", { scope })).reads;
-  search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
-    this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
+  /** Room messages matching `f`'s text and filters: by rank with text,
+   *  else newest first. */
+  search = (f: SearchFilters, limit = 50): Promise<SearchHit[]> => {
+    const params = new URLSearchParams({ q: f.q, limit: String(limit) });
+    if (f.room) params.set("room", f.room);
+    if (f.from) params.set("from", f.from);
+    if (f.has.length) params.set("has", f.has.join(","));
+    if (f.inThread) params.set("inThread", "true");
+    if (f.after) params.set("after", f.after);
+    if (f.before) params.set("before", f.before);
+    return this.call("GET", `/api/desk/rooms/search?${params}`);
+  };
 
   /** Desk's restorable state on this hub (see restore/store.ts); a hub
    *  without a state store answers 404. */

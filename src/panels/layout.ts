@@ -4,13 +4,13 @@
 // drawn is that width fitted into the window, so a narrower window shrinks
 // the columns without losing the widths they come back to.
 
-export const PANEL_KINDS = ["thread", "agent", "session"] as const;
+export const PANEL_KINDS = ["thread", "agent", "session", "search"] as const;
 export type PanelKind = (typeof PANEL_KINDS)[number];
 
 export const isPanelKind = (x: unknown): x is PanelKind => typeof x === "string" && (PANEL_KINDS as readonly string[]).includes(x);
 
 /** Each kind's width until it's dragged, and again after a double-click. */
-export const DEFAULT_WIDTH: Record<PanelKind, number> = { thread: 420, agent: 480, session: 560 };
+export const DEFAULT_WIDTH: Record<PanelKind, number> = { thread: 420, agent: 480, session: 560, search: 400 };
 
 /** The narrowest a column is dragged to. */
 export const MIN_WIDTH = 300;

@@ -54,6 +54,10 @@ interface UiState {
   panelFocus: PanelFocus | null;
   /** The Floor's Activity list is open, not docked as a tab. */
   activityOpen: boolean;
+  /** Search, while it's open: what's typed in it. */
+  search: { text: string } | null;
+  /** Opens search with `text` (null closes it). */
+  setSearch: (text: string | null) => void;
   /** A message just jumped to, shown flashing for a moment. */
   flash: { id: string; at: number } | null;
   setFlash: (id: string | null) => void;
@@ -87,6 +91,8 @@ export const useUi = create<UiState>((set) => ({
   panelWidths: {},
   panelFocus: null,
   activityOpen: true,
+  search: null,
+  setSearch: (text) => set({ search: text === null ? null : { text } }),
   flash: null,
   setFlash: (id) => set({ flash: id ? { id, at: Date.now() } : null }),
   setActivityOpen: (activityOpen) => set((s) => (s.activityOpen === activityOpen ? s : { activityOpen })),

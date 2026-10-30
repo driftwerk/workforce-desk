@@ -24,6 +24,7 @@ import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { SearchPanel } from "../rooms/SearchPanel";
 import { AgentPanel, useAgentPanel } from "../rooms/AgentPanel";
 import { Stage, type OpenPanel } from "../panels/Stage";
 import { useSessionName } from "../groups/names";
@@ -59,6 +60,13 @@ const stopNearest = () => {
   }
   const chat = useChat.getState();
   if (chat.activeAgent && chat.conversations[chat.activeAgent]?.working) chat.cancel(chat.activeAgent);
+};
+
+/** Opens search: on the open room, or every room. */
+const searchHere = (inRoom: boolean) => {
+  const desk = useDesk.getState();
+  const room = inRoom && desk.view === "rooms" && desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
+  useUi.getState().setSearch(room ? `in:#${room.slug} ` : "");
 };
 
 /** The open room's pill: the open thread's when focus is in it. */
@@ -202,6 +210,8 @@ export function App() {
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
   useAppShortcut("stopAnswer", stopNearest, true, { fromFields: false });
   useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
+  useAppShortcut("searchRoom", () => searchHere(true), true, { fromFields: false });
+  useAppShortcut("searchRooms", () => searchHere(false), true, { fromFields: false });
   useAppShortcut("unread", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setInbox(true);
@@ -214,6 +224,7 @@ export function App() {
   const mainName = useMainName();
   const mainKey = useMainKey();
   const panels: OpenPanel[] = [];
+  const searching = useUi((u) => u.search !== null);
   if (thread) {
     panels.push({
       kind: "thread",
@@ -232,6 +243,17 @@ export function App() {
       element: (
         <ErrorBoundary name="agent">
           <AgentPanel agent={beside} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (searching) {
+    panels.push({
+      kind: "search",
+      label: "Search",
+      element: (
+        <ErrorBoundary name="search">
+          <SearchPanel />
         </ErrorBoundary>
       ),
     });

@@ -196,6 +196,14 @@ export interface RoomMessage {
   postedToRoom?: boolean;
 }
 
+/** A room message search found, and the text around its matches, each
+ *  match between U+E000 and U+E001. */
+export interface SearchHit {
+  roomId: string;
+  message: RoomMessage;
+  snippet: string;
+}
+
 /** One tool an agent's turn ran: what it was, whether it worked, how long. */
 export interface Step {
   tool: string;

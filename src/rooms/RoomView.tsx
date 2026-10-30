@@ -283,13 +283,25 @@ export function RoomView({ room }: { room: Room }) {
             {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
           </span>
         </span>
-        {liveCount >= 2 && (
-          <span className="room-head-actions">
+        <span className="room-head-actions">
+          {liveCount >= 2 && (
             <button type="button" className="btn btn-ghost" onClick={() => stopAll(room.id)}>
               Stop all ({liveCount})
             </button>
-          </span>
-        )}
+          )}
+          <button
+            type="button"
+            className="icon-btn-sm"
+            aria-label="Search this room"
+            title="Search this room"
+            onClick={() => useUi.getState().setSearch(`in:#${room.slug} `)}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="M10.5 10.5L14 14" />
+            </svg>
+          </button>
+        </span>
       </header>
       <Timeline room={room} thread={null} />
       <Composer
