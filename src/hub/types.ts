@@ -239,6 +239,7 @@ export type ActivityKind =
   | "limit"
   | "quiet"
   | "stopped"
+  | "interrupted"
   | "resumed"
   | "restarted"
   | "nudged"
