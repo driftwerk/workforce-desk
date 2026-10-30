@@ -497,6 +497,54 @@ fn grid_monitors(app: tauri::AppHandle) -> Vec<grid_windows::MonitorInfo> {
     grid_windows::monitors(&app)
 }
 
+/// The person's home folder where the backend runs, as it names it: where
+/// a terminal opens when it has no folder of its own.
+#[tauri::command]
+fn backend_home(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<String> {
+    match app.backend()?.host {
+        Host::Wsl(w) => Ok(w.home),
+        Host::Native => Ok(handle
+            .path()
+            .home_dir()
+            .map_err(text)?
+            .to_string_lossy()
+            .into_owned()),
+    }
+}
+
+/// A folder the person picks for the backend to work in (a session's), as
+/// the backend names it: on Windows one in the distro or on a Windows
+/// drive, which WSL reaches; none when they cancel.
+#[tauri::command]
+async fn pick_folder(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+) -> CommandResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let host = app.backend()?.host;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dialog = handle.dialog().file();
+        let dialog = match &host {
+            Host::Wsl(w) => dialog.set_directory(host.host_path(&w.home)),
+            Host::Native => dialog,
+        };
+        let Some(picked) = dialog.blocking_pick_folder() else {
+            return Ok(None);
+        };
+        let picked = picked.into_path().map_err(text)?;
+        match (host.backend_path(&picked), &host) {
+            (Some(path), _) => Ok(Some(path)),
+            (None, Host::Wsl(w)) => Err(format!(
+                "Pick a folder in {} or on a Windows drive.",
+                w.distro
+            )),
+            (None, Host::Native) => Err(format!("Desk can't use {}", picked.display())),
+        }
+    })
+    .await
+    .map_err(text)?
+}
+
 /// Desk's Claude Code plugin folder, for the shells of grid terminals, as
 /// the backend names it; none when this build doesn't have it.
 #[tauri::command]
@@ -694,6 +742,8 @@ pub fn run() {
             desk_state_flush,
             desk_ready,
             claude_plugin_dir,
+            backend_home,
+            pick_folder,
             programs_under,
             grid_window_open,
             grid_window_close,

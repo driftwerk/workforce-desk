@@ -107,10 +107,16 @@ export const revealThemes = (): Promise<void> => invoke("themes_reveal");
 
 export const onThemesChanged = (f: () => void): Promise<() => void> => listen("themes-changed", f);
 
+/** A folder for the backend to work in, as the backend names it (on
+ *  Windows, inside WSL); null when the person cancels. */
 export const pickFolder = async (): Promise<string | null> => {
+  if (!preview) return invoke<string | null>("pick_folder");
   const picked = await open({ directory: true, multiple: false });
   return typeof picked === "string" ? picked : null;
 };
+
+/** The person's home folder where the backend runs. */
+export const backendHome = (): Promise<string> => invoke("backend_home");
 
 /** Desk's Claude Code plugin folder, which grid terminals' shells load so
  *  a `claude` started there is tracked; null outside the app. */
