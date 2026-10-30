@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { SpanKind } from "../hub/types";
 import type { FloorLane } from "./merge";
 import { useWhoName } from "./Row";
@@ -13,6 +13,7 @@ export function Today({ now }: { now: number }) {
   const m = useMerged();
   const day = useFloor((s) => s.day);
   const [expanded, setExpanded] = useState(false);
+  const grid = useId();
   useEffect(() => setExpanded(false), [day]);
   const lanes = ordered(
     m.lanes.filter((l) => l.spans.some((s) => s.to === null || Date.parse(s.to) >= day)),
@@ -37,7 +38,7 @@ export function Today({ now }: { now: number }) {
       {lanes.length === 0 ? (
         <p className="faint small">Nothing has run yet today.</p>
       ) : (
-        <div className="today-grid">
+        <div id={grid} className="today-grid">
           {shown.map((l) => (
             <LaneRow key={l.key} lane={l} axis={a} />
           ))}
@@ -53,7 +54,7 @@ export function Today({ now }: { now: number }) {
         </div>
       )}
       {lanes.length > LANE_CAP && (
-        <button type="button" className="link small" onClick={() => setExpanded((x) => !x)}>
+        <button type="button" className="link small" aria-expanded={expanded} aria-controls={grid} onClick={() => setExpanded((x) => !x)}>
           {expanded ? "Show fewer" : `Show ${lanes.length - LANE_CAP} more`}
         </button>
       )}

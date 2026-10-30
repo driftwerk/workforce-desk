@@ -58,8 +58,11 @@ describe("Today", () => {
     show(Array.from({ length: 20 }, (_, i) => ({ who: agent(`a${i}`), spans: [{ kind: "working" as const, from: at(100 - i), to: at(50 - i) }] })));
     render(<Today now={NOW} />);
     expect(screen.getAllByRole("group")).toHaveLength(8);
-    fireEvent.click(screen.getByRole("button", { name: "Show 12 more" }));
+    const more = screen.getByRole("button", { name: "Show 12 more" });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(more);
     expect(screen.getAllByRole("group")).toHaveLength(20);
+    expect(screen.getByRole("button", { name: "Show fewer" }).getAttribute("aria-expanded")).toBe("true");
     act(() => useFloor.setState({ day: DAY.getTime() + 86_400_000 }));
     expect(screen.queryAllByRole("group").length).toBeLessThanOrEqual(8);
   });
