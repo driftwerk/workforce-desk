@@ -378,6 +378,7 @@ pub async fn attachment_open(
     filename: String,
 ) -> CommandResult<()> {
     use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
     let dir = app
         .path()
         .app_cache_dir()
@@ -402,15 +403,9 @@ pub async fn attachment_open(
             )
             .await?;
     }
-    tokio::process::Command::new("open")
-        .arg(&path)
-        .status()
-        .await
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Couldn't open the file: {e}"))
-        .and_then(|s| match s.success() {
-            true => Ok(()),
-            false => Err("No app on this Mac opens that kind of file.".into()),
-        })
 }
 
 /// Saves a file where the person chose.

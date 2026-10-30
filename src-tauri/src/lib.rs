@@ -96,14 +96,14 @@ fn themes_write(app: State<'_, App>, id: String, source: String) -> CommandResul
 }
 
 #[tauri::command]
-fn themes_reveal(app: State<'_, App>) -> CommandResult<()> {
+fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<()> {
+    use tauri_plugin_opener::OpenerExt;
     let dir = app.paths.themes();
     std::fs::create_dir_all(&dir).map_err(text)?;
-    std::process::Command::new("open")
-        .arg(&dir)
-        .status()
-        .map_err(text)?;
-    Ok(())
+    handle
+        .opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(text)
 }
 
 #[tauri::command]
