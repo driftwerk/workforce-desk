@@ -21,7 +21,7 @@ import { deskState } from "../restore/boot";
 import { findContent, laidOut, type PaneContent } from "./engine";
 import { gridOfLabel, windowLabel, type Grid, type MonitorRef, type WindowMode } from "./model";
 import { GRID_PREFIX } from "./storage";
-import { itemOf, shownAt } from "./where";
+import { itemOf, shownAt, type Place } from "./where";
 import { useDesk } from "../hub/store";
 import {
   createGrid,
@@ -35,6 +35,7 @@ import {
   setOpen,
   setPlacement,
   startGrids,
+  swapInPane,
   unfill,
   useGrids,
   type Role,
@@ -231,6 +232,19 @@ export const reveal = (content: PaneContent): boolean => {
   const item = itemOf(sessions, content);
   const at = item && shownAt(useGrids.getState(), sessions, item);
   return at ? revealIn(at.gridId, at.content) : false;
+};
+
+/** Takes the person to `place` (see `placesOf`): a grid whose monitor is
+ *  away is shown in the main window again, as its sidebar row does; a
+ *  parked pane is swapped back into the layout; then it's shown as
+ *  `revealIn` shows it. */
+export const goTo = (place: Place): boolean => {
+  const s = useGrids.getState();
+  const g = s.grids[place.gridId];
+  if (!g) return false;
+  if (isAway(g, s.open)) bringBack(g.id);
+  if (place.parked) swapInPane(place.gridId, place.paneId);
+  return revealIn(place.gridId, place.content);
 };
 
 /** Puts `content` in grid `gridId` (its first empty pane, else beside the

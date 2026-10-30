@@ -995,6 +995,36 @@ button {
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
+/* Where the session already is in the grids, with a way to each. */
+.session-where {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 6px 16px;
+  list-style: none;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+}
+.session-where li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.session-where li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-where .strong {
+  color: var(--text);
+}
+.session-where .link {
+  flex: none;
+}
 .session-goal input,
 .goal-text {
   width: 100%;
