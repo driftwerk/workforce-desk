@@ -1,16 +1,23 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type UIEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type UIEvent } from "react";
 import { formAnswer } from "../chat/forms";
 import type { ChatMessage } from "../chat/types";
-import { dayName } from "../floor/time";
+import { clock, dayName } from "../floor/time";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
-import { useAnchoredScroll, useFollowEnd } from "../restore/scroll";
+import { useMainHidden, useStowed } from "../panels/Stage";
+import { AT_NEWEST_PX, useAnchoredScroll, useFollowEnd } from "../restore/scroll";
 import { useUi } from "../shell/ui";
+import { placeKey as readKey, type Place } from "../unread/places";
+import { advance, effective, markRoomRead, markUnread, pointOf, unreadFrom, useReads } from "../unread/reads";
+import { useSeen } from "../unread/seen";
+import { useUnread } from "../unread/summary";
 import { Draft } from "./Draft";
 import { answerForm } from "./engine";
 import { Message } from "./Message";
 import { useAuthor } from "./names";
 import { memberOf } from "./routing";
+import { after } from "./time";
+import { countsAsUnread, dividerBefore, jumpers, pill, setDivider, useDividers, type Pill } from "./unread";
 import { isLive, ofPlace, placeKey, shown, type Window } from "./window";
 
 // One timeline for a room's main messages and for each of its threads: what
@@ -100,6 +107,28 @@ function LoadEarlier({ state, onLoad }: { state: "loading" | "failed" | undefine
   );
 }
 
+/** The read place a room's main timeline or thread is. */
+const readPlaceOf = (room: string, thread: string | null): Place => (thread ? { kind: "thread", room, thread } : { kind: "room", room });
+
+/** Shift+Esc: the main timeline marks the room and all its threads read,
+ *  a thread itself alone, and the New line goes. */
+export function readAllHere(room: string, thread: string | null): void {
+  const { timelines } = useDesk.getState();
+  setDivider(placeKey(room, thread), null);
+  if (!thread) {
+    for (const key of Object.keys(useDividers.getState())) if (key.startsWith(`${room}/`)) setDivider(key, null);
+    void markRoomRead(room).catch((e: unknown) => useDesk.getState().fail(e));
+    return;
+  }
+  const newest = ofPlace(timelines[room] ?? [], thread).at(-1);
+  const lastAt = useUnread.getState().local?.rooms.find((r) => r.roomId === room)?.threads.find((t) => t.parent.id === thread)?.unread.lastAt;
+  const point = newest && (!lastAt || !after({ createdAt: lastAt }, newest.createdAt)) ? { at: newest.createdAt, message: newest.id } : lastAt ? { at: lastAt, message: null } : null;
+  if (point) void advance(readPlaceOf(room, thread), point);
+}
+
+/** "3 new · Allan answered", "12 new since 09:14". */
+const pillText = (p: Pill): string => (p.dir === "up" ? `${p.count} new since ${clock(p.since)}` : `${p.count} new${p.lead ? ` · ${p.lead} answered` : ""}`);
+
 /** A room's main timeline (`thread` null) or one of its threads. */
 export function Timeline({ room, thread }: { room: Room; thread: string | null }) {
   const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
@@ -112,6 +141,18 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const flash = useUi((u) => u.flash);
   const author = useAuthor();
   const live = isLive(window);
+  const readPlace = useMemo(() => readPlaceOf(room.id, thread), [room.id, thread]);
+  const point = useReads((s) => s.local[readKey(readPlace)]);
+  const readsLoaded = useReads((s) => s.loaded);
+  const floor = useUnread((s) => s.local?.floor);
+  const summary = useUnread((s) => {
+    const r = s.local?.rooms.find((x) => x.roomId === room.id);
+    return thread ? r?.threads.find((t) => t.parent.id === thread)?.unread : r?.main;
+  });
+  const readNow = effective(point, floor);
+  const readAtOpen = useDividers((d) => d[key]);
+  const hidden = useMainHidden();
+  const stowed = useStowed();
 
   const messages = useMemo(() => shown(ofPlace(all, thread), window), [all, thread, window]);
   const parent = thread ? all.find((m) => m.id === thread) : undefined;
@@ -162,6 +203,77 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     }
   });
 
+  // The New line stays where the place was read to when it was shown, and
+  // moves when Desk comes back into focus with something unread.
+  useEffect(() => {
+    if (!readsLoaded) return;
+    setDivider(key, effective(pointOf(readPlace), useUnread.getState().local?.floor));
+    const back = () => {
+      const local = useUnread.getState().local;
+      const r = local?.rooms.find((x) => x.roomId === room.id);
+      const u = thread ? r?.threads.find((t) => t.parent.id === thread)?.unread : r?.main;
+      if (u?.count) setDivider(key, effective(pointOf(readPlace), local?.floor));
+    };
+    globalThis.addEventListener("focus", back);
+    return () => {
+      globalThis.removeEventListener("focus", back);
+      const { [key]: _gone, ...rest } = useDividers.getState();
+      useDividers.setState(rest, true);
+    };
+  }, [readsLoaded, key, readPlace, room.id, thread]);
+
+  const seenItems = useMemo(() => messages.map((m) => ({ id: m.id, at: m.createdAt })), [messages]);
+  useSeen(readPlace, scroller, seenItems, { enabled: !(thread ? stowed : hidden) });
+
+  // The last message showing, for what the pill counts below it.
+  const [lastVisible, setLastVisible] = useState<string | null>(null);
+  const measure = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= AT_NEWEST_PX) return setLastVisible(lastRow(el));
+    const bottom = el.getBoundingClientRect().bottom;
+    let last: string | null = null;
+    for (const r of el.querySelectorAll<HTMLElement>("[data-row]")) if (r.getBoundingClientRect().top < bottom) last = r.dataset.row ?? last;
+    setLastVisible(last);
+  }, []);
+  useLayoutEffect(measure);
+  const shownPill = pill({ shown: messages, read: readNow, lastVisible, window, unread: summary, name: (a) => author(a).name });
+  const jump = useCallback(async () => {
+    const desk = useDesk.getState();
+    if (shownPill?.dir === "up" && summary?.first) {
+      await desk.page(room.id, thread, { around: summary.first }).catch((e: unknown) => desk.fail(e));
+      useUi.getState().setFlash(summary.first);
+      return;
+    }
+    if (!live) await desk.toNewest(room.id, thread).catch((e: unknown) => desk.fail(e));
+    requestAnimationFrame(() => {
+      const el = scroller.current;
+      if (!el) return;
+      const rows = [...el.querySelectorAll<HTMLElement>("[data-row]")];
+      const from = rows.findIndex((r) => r.dataset.row === lastVisible) + 1;
+      const next = rows.slice(from).find((r) => r.dataset.unread !== undefined);
+      if (next) next.scrollIntoView?.({ block: "start" });
+      else el.scrollTop = el.scrollHeight;
+    });
+  }, [shownPill?.dir, summary?.first, live, room.id, thread, lastVisible]);
+  useEffect(() => {
+    jumpers.set(key, () => void jump());
+    return () => void jumpers.delete(key);
+  }, [key, jump]);
+
+  // Alt+click: unread from here.
+  const unreadHere = (e: MouseEvent, m: RoomMessage) => {
+    if (!e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const i = messages.findIndex((x) => x.id === m.id);
+    const p = unreadFrom(m, i > 0 ? messages[i - 1]! : null);
+    void markUnread(readPlace, p);
+    setDivider(key, p);
+  };
+  const divider = dividerBefore(messages, readAtOpen);
+  const unreadNow = (m: RoomMessage) => countsAsUnread(m) && (!readNow || after(m, readNow.at));
+
   const more = window?.older.kind === "at";
   const earlier = () => {
     if (!more || paging === "loading") return;
@@ -174,6 +286,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   };
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
     if (e.currentTarget.scrollTop < EARLIER_PX && more && !paging) earlier();
+    measure();
   };
 
   // A message jumped to scrolls to the middle and flashes, once: a timeline
@@ -232,76 +345,97 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   };
 
   return (
-    <div ref={pane} className="room-scroll" onScroll={onScroll} onKeyDown={onKeyDown} onFocus={onFocus}>
-      <div ref={followed.list} className="room-list">
-        {parent && (
-          <>
-            {dayBefore(parent)}
-            <div className="room-msg" data-row={parent.id} tabIndex={-1}>
-              <RoomMessageView room={room} m={parent} name={author(parent.author).name} />
-            </div>
-          </>
-        )}
-        {more && <LoadEarlier state={paging} onLoad={earlier} />}
-        {messages.map((m) => {
-          const a = author(m.author);
-          const divider = dayBefore(m);
-          const home = memberOf(m.author) ? a.home : undefined;
-          if (thread)
+    <div className="timeline">
+      <div ref={pane} className="room-scroll" onScroll={onScroll} onKeyDown={onKeyDown} onFocus={onFocus}>
+        <div ref={followed.list} className="room-list">
+          {parent && (
+            <>
+              {dayBefore(parent)}
+              <div className="room-msg" data-row={parent.id} tabIndex={-1}>
+                <RoomMessageView room={room} m={parent} name={author(parent.author).name} />
+              </div>
+            </>
+          )}
+          {more && <LoadEarlier state={paging} onLoad={earlier} />}
+          {messages.map((m) => {
+            const a = author(m.author);
+            const dayLine = dayBefore(m);
+            const home = memberOf(m.author) ? a.home : undefined;
+            const row = { "data-row": m.id, "data-unread": unreadNow(m) ? "" : undefined, tabIndex: m.id === tabTo ? 0 : -1, onClickCapture: (e: MouseEvent) => unreadHere(e, m) };
+            const fresh = m.id === divider && (
+              <div className="new-divider" role="separator" aria-label="New messages">
+                <span>New</span>
+              </div>
+            );
+            if (thread)
+              return (
+                <Fragment key={m.id}>
+                  {dayLine}
+                  {fresh}
+                  <div className="room-msg" {...row}>
+                    <RoomMessageView room={room} m={m} name={a.name} home={home} />
+                  </div>
+                </Fragment>
+              );
+            const n = m.replyCount ?? replies.get(m.id) ?? 0;
+            const there = openThread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
+            const replying = names(there.filter(answering));
+            const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted" || d.state === "stopped"));
             return (
               <Fragment key={m.id}>
-                {divider}
-                <div className="room-msg" data-row={m.id} tabIndex={m.id === tabTo ? 0 : -1}>
+                {dayLine}
+                {fresh}
+                <div className="room-msg" {...row}>
                   <RoomMessageView room={room} m={m} name={a.name} home={home} />
+                  <button type="button" className="link small thread-link" onClick={() => setRoomThread(room.id, m.id)}>
+                    {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
+                  </button>
+                  {replying.length > 0 && (
+                    <span className="small faint thread-replying">
+                      {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
+                    </span>
+                  )}
+                  {stopped.length > 0 && <span className="small state-blocked thread-replying">{stopped.join(", ")} couldn’t answer</span>}
                 </div>
               </Fragment>
             );
-          const n = m.replyCount ?? replies.get(m.id) ?? 0;
-          const there = openThread === m.id ? NO_DRAFTS : (byThread.get(m.id) ?? NO_DRAFTS);
-          const replying = names(there.filter(answering));
-          const stopped = names(there.filter((d) => d.state === "failed" || d.state === "interrupted" || d.state === "stopped"));
-          return (
-            <Fragment key={m.id}>
-              {divider}
-              <div className="room-msg" data-row={m.id} tabIndex={m.id === tabTo ? 0 : -1}>
-                <RoomMessageView room={room} m={m} name={a.name} home={home} />
-                <button type="button" className="link small thread-link" onClick={() => setRoomThread(room.id, m.id)}>
-                  {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
-                </button>
-                {replying.length > 0 && (
-                  <span className="small faint thread-replying">
-                    {replying.join(", ")} {replying.length === 1 ? "is" : "are"} replying…
-                  </span>
-                )}
-                {stopped.length > 0 && <span className="small state-blocked thread-replying">{stopped.join(", ")} couldn’t answer</span>}
-              </div>
-            </Fragment>
-          );
-        })}
-        {live ? (
-          here.map((d) => <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />)
-        ) : (
-          <div className="history-note timeline-older" role="status">
-            <span className="faint small">Viewing older messages · </span>
-            <button
-              type="button"
-              className="link small"
-              onClick={() => {
-                setAtEnd(true);
-                void useDesk
-                  .getState()
-                  .toNewest(room.id, thread)
-                  .catch((e: unknown) => useDesk.getState().fail(e));
-              }}
-            >
-              Jump to the newest
-            </button>
-          </div>
-        )}
+          })}
+          {live ? (
+            here.map((d) => <Draft key={d.id} roomId={room.id} draft={d} name={author(d.member).name} />)
+          ) : (
+            <div className="history-note timeline-older" role="status">
+              <span className="faint small">Viewing older messages · </span>
+              <button
+                type="button"
+                className="link small"
+                onClick={() => {
+                  setAtEnd(true);
+                  void useDesk
+                    .getState()
+                    .toNewest(room.id, thread)
+                    .catch((e: unknown) => useDesk.getState().fail(e));
+                }}
+              >
+                Jump to the newest
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+      {shownPill && (
+        <button type="button" className="jump-pill" title="Jump to new messages" onClick={() => void jump()}>
+          {pillText(shownPill)} <span aria-hidden="true">{shownPill.dir === "up" ? "↑" : "↓"}</span>
+        </button>
+      )}
     </div>
   );
 }
+
+/** The id of the last message row in `el`. */
+const lastRow = (el: HTMLElement): string | null => {
+  const rows = el.querySelectorAll<HTMLElement>("[data-row]");
+  return rows[rows.length - 1]?.dataset.row ?? null;
+};
 
 /** A row in sight: its id, and how far below the pane's top it sits. */
 type InSight = { id: string; offset: number };

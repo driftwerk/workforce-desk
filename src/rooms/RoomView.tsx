@@ -7,7 +7,7 @@ import type { Room } from "../hub/types";
 import { AgentMark } from "../ui/Mark";
 import { say, stopAll } from "./engine";
 import { useAuthor } from "./names";
-import { Timeline } from "./Timeline";
+import { readAllHere, Timeline } from "./Timeline";
 import { insertMention, mentionAt, mentionFor, suggestions } from "./mentions";
 import { memberKey } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -156,6 +156,15 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
   );
 }
 
+/** Shift+Esc marks where it was pressed read: kept from Stage's Esc, which
+ *  would otherwise also leave a focused panel. */
+const shiftEscape = (e: React.KeyboardEvent, room: string, thread: string | null) => {
+  if (e.key !== "Escape" || !e.shiftKey || e.defaultPrevented) return;
+  e.preventDefault();
+  e.stopPropagation();
+  readAllHere(room, thread);
+};
+
 /** The thread open in the room Rooms shows, while its first message is
  *  loaded: it opens as a column on the right. */
 export function useOpenThread(): { room: Room; thread: string } | null {
@@ -182,7 +191,7 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
       onClose={() => setRoomThread(room.id, null)}
       title={<b className="display rpanel-name">Thread</b>}
     >
-      <div className="thread-body drop-target" {...drop.handlers}>
+      <div className="thread-body drop-target" {...drop.handlers} onKeyDown={(e) => shiftEscape(e, room.id, parent.id)}>
         <Timeline room={room} thread={parent.id} />
         <Composer room={room} threadId={parent.id} placeholder="Reply in thread — @ someone to ask them" files={files} />
         {drop.dragging && <DropOverlay to="the thread" />}
@@ -210,7 +219,7 @@ export function RoomView({ room }: { room: Room }) {
   const author = useAuthor();
 
   return (
-    <main className="room drop-target" aria-label={`Room ${room.name}`} {...drop.handlers}>
+    <main className="room drop-target" aria-label={`Room ${room.name}`} {...drop.handlers} onKeyDown={(e) => shiftEscape(e, room.id, null)}>
       <header className="room-head">
         <span className="room-title">
           <span className="room-title-row">

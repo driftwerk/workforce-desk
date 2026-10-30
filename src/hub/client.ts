@@ -11,12 +11,15 @@ import type {
   NewSession,
   NewTerminal,
   Overview,
+  ReadPut,
+  ReadRow,
   Room,
   RoomMemberRef,
   RoomMessage,
   Session,
   Suggestion,
   TerminalInfo,
+  UnreadSummary,
 } from "./types";
 import { hubFetch } from "./net";
 import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
@@ -342,6 +345,16 @@ export class DeskHub {
     const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${id}/messages`, m);
     return { message: body, created: status === 201 || (!!m.source && !body.source) };
   };
+  /** What's unread of this computer's places. */
+  unread = (): Promise<UnreadSummary> => this.call("GET", "/api/desk/unread");
+  /** Every read point this computer's hub keeps. */
+  reads = async (): Promise<ReadRow[]> => (await this.call<{ reads: ReadRow[] }>("GET", "/api/desk/reads")).reads;
+  /** Moves read points; answers the ones that moved. */
+  putReads = async (puts: ReadPut[]): Promise<ReadRow[]> => (await this.call<{ reads: ReadRow[] }>("PUT", "/api/desk/reads", { puts })).reads;
+  /** Every place with something unread (or a room's, with its threads)
+   *  read through its newest; answers the points that moved. */
+  markAllRead = async (scope: "everything" | { room: string }): Promise<ReadRow[]> =>
+    (await this.call<{ reads: ReadRow[] }>("POST", "/api/desk/reads/all", { scope })).reads;
   search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
     this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
 

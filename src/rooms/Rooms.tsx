@@ -29,6 +29,8 @@ import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
 import type { OversightLevel } from "../hub/types";
 import { useFocusRequest } from "../shell/focus";
+import { useMainHidden, useStowed } from "../panels/Stage";
+import { useSeen } from "../unread/seen";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -79,14 +81,13 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const person = useChat((s) => (agent ? (s.me[agent.hubId]?.name ?? null) : null));
   const convo = useChat((s) => (activeAgent ? s.conversations[activeAgent] : undefined));
   const history = useChat((s) => (activeAgent ? s.histories[activeAgent] : undefined));
-  const { send, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } = useChat(
+  const { send, loadHistory, loadEarlier, watchDm, answerPrompt } = useChat(
     useShallow((s) => ({
       send: s.send,
       loadHistory: s.loadHistory,
       loadEarlier: s.loadEarlier,
       watchDm: s.watchDm,
       answerPrompt: s.answerPrompt,
-      seenDm: s.seenDm,
     })),
   );
   const hub = hubs.find((h) => h.id === agent?.hubId);
@@ -124,6 +125,17 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // messages you were reading stay put as it lands above them.
   const anchor = useRef<number | null>(null);
   const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
+  // What the agent said is read once it's been on screen, wherever this
+  // shows: the hub's copies only, by their own ids and times.
+  const hidden = useMainHidden();
+  const stowed = useStowed();
+  const seenItems = useMemo(
+    () => (history?.messages ?? []).filter((m) => m.role !== "user").map((m) => ({ id: m.id, at: m.at })),
+    [history?.messages],
+  );
+  useSeen(agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null, scroller, seenItems, {
+    enabled: tab === "chat" && !(inPane ? stowed : hidden),
+  });
   const known = roster.some((a) => agentKey(a) === inPane);
   useEffect(() => {
     if (inPane && known) watchDm(inPane);
@@ -138,10 +150,6 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   useEffect(() => {
     if (tab === "chat") toEnd();
   }, [convo?.messages, convo?.working?.step, convo?.prompts.length, tab, toEnd]);
-  // Shown: what was delivered into it isn't unread any more.
-  useEffect(() => {
-    if (activeAgent && tab === "chat") seenDm(activeAgent);
-  }, [activeAgent, tab, history?.messages, seenDm]);
 
   useLayoutEffect(() => {
     const el = scroller.current;

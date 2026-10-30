@@ -39,11 +39,12 @@ describe("shortcut keys on macOS", () => {
       settings: "Primary+Comma",
       saveFile: "Primary+S",
       stopAnswer: "Primary+Period",
+      jumpNew: "Primary+J",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 

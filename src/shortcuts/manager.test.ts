@@ -81,14 +81,14 @@ describe("shortcuts in Desk", () => {
     renderHook(() => useAppShortcut("newSession", onPress));
     press({ code: "KeyN", key: "n", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(1);
-    act(() => useSettings.getState().setShortcut("newSession", "Super+J"));
+    act(() => useSettings.getState().setShortcut("newSession", "Super+Y"));
     press({ code: "KeyN", key: "n", metaKey: true });
-    press({ code: "KeyJ", key: "j", metaKey: true, shiftKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true, shiftKey: true });
     expect(onPress).toHaveBeenCalledTimes(1);
-    press({ code: "KeyJ", key: "j", metaKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(2);
     act(() => useShortcuts.setState({ recording: true }));
-    press({ code: "KeyJ", key: "j", metaKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(2);
   });
 

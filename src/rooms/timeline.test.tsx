@@ -20,6 +20,9 @@ const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { useUi } = await import("../shell/ui");
 const { Timeline } = await import("./Timeline");
+const { RoomView } = await import("./RoomView");
+const { useReads } = await import("../unread/reads");
+const { useUnread } = await import("../unread/summary");
 
 const room = {
   id: "r1",
@@ -74,6 +77,8 @@ beforeEach(() => {
   });
   useUi.setState({ roomThreads: {}, anchors: {}, flash: null });
   useDesk.setState({ rooms: { r1: room }, timelines: {}, windows: {}, paging: {}, roomDrafts: {} });
+  useReads.setState({ local: {}, dms: {}, loaded: true });
+  useUnread.setState({ local: null });
 });
 afterEach(cleanup);
 
@@ -214,5 +219,58 @@ describe("a room's timeline", () => {
     expect(document.activeElement).toBe(rows[1]);
     fireEvent.keyDown(rows[1]!, { key: "t" });
     expect(useUi.getState().roomThreads).toEqual({ r1: "b" });
+  });
+});
+
+describe("what's unread in a room", () => {
+  const now = Date.now();
+  const four = [msg("a", now - 4000), msg("b", now - 3000), msg("c", now - 2000), msg("d", now - 1000, { forYou: true })];
+  const readTo = (m: RoomMessage) => ({ at: m.createdAt, message: m.id });
+
+  it("puts the New line at the point it was read to when shown, and keeps it there while reading", () => {
+    useReads.setState({ local: { "room:r1": readTo(four[1]!) }, loaded: true });
+    useDesk.setState({ timelines: { r1: four } });
+    const { container } = render(<Timeline room={room} thread={null} />);
+    const before = () => container.querySelector(".new-divider")?.nextElementSibling?.getAttribute("data-row");
+    expect(before()).toBe("c");
+    act(() => useReads.setState({ local: { "room:r1": readTo(four[3]!) } }));
+    expect(before()).toBe("c");
+  });
+
+  it("shows the pill for what's unread below where you're reading, and not once you're at the end", () => {
+    useReads.setState({ local: { "room:r1": readTo(four[0]!) }, loaded: true });
+    useDesk.setState({ timelines: { r1: four } });
+    const { container } = render(<Timeline room={room} thread={null} />);
+    expect(screen.queryByRole("button", { name: /new/ })).toBeNull();
+    const pane = container.querySelector<HTMLElement>(".room-scroll")!;
+    sized(pane, 1000);
+    // jsdom lays nothing out: only the first row is said to show.
+    const rows = [...container.querySelectorAll<HTMLElement>("[data-row]")];
+    rows.forEach((r, i) => (r.getBoundingClientRect = () => ({ top: i === 0 ? 0 : 500, bottom: 0 }) as DOMRect));
+    pane.getBoundingClientRect = () => ({ top: 0, bottom: 200 }) as DOMRect;
+    scrollTo(pane, 0);
+    expect(screen.getByRole("button", { name: "3 new · Allan answered" })).toBeTruthy();
+    scrollTo(pane, 800);
+    expect(screen.queryByRole("button", { name: /new/ })).toBeNull();
+  });
+
+  it("marks the room and its threads read on Shift+Esc, kept from going back out of a panel", async () => {
+    const markAllRead = vi.fn(async () => []);
+    useDesk.setState({ hub: { markAllRead } as never, timelines: { r1: four } });
+    render(<RoomView room={room} />);
+    const kept = !fireEvent.keyDown(screen.getByRole("main"), { key: "Escape", shiftKey: true });
+    expect(kept).toBe(true);
+    await vi.waitFor(() => expect(markAllRead).toHaveBeenCalledWith({ room: "r1" }));
+  });
+
+  it("marks unread from a message on Alt+click", async () => {
+    const putReads = vi.fn(async (puts: { place: string; point: unknown }[]) => puts.map((p) => ({ place: p.place, ...(p.point as object) })));
+    useReads.setState({ local: { "room:r1": readTo(four[3]!) }, loaded: true });
+    useDesk.setState({ hub: { putReads } as never, timelines: { r1: four } });
+    const { container } = render(<Timeline room={room} thread={null} />);
+    const c = container.querySelector<HTMLElement>('[data-row="c"]')!;
+    fireEvent.click(c, { altKey: true });
+    await vi.waitFor(() => expect(putReads).toHaveBeenCalledWith([{ place: "room:r1", point: readTo(four[1]!), mark: "set" }]));
+    expect(container.querySelector(".new-divider")?.nextElementSibling?.getAttribute("data-row")).toBe("c");
   });
 });

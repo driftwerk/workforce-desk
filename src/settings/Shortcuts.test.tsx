@@ -72,8 +72,8 @@ describe("Keyboard shortcuts", () => {
     fireEvent.click(recorder("New session"));
     keys({ code: "KeyC", metaKey: true });
     expect(screen.getByRole("alert").textContent).toBe("⌘C is Copy — choose another");
-    keys({ code: "KeyJ", metaKey: true });
-    expect(keysOf().newSession).toBe("Primary+J");
+    keys({ code: "KeyY", metaKey: true });
+    expect(keysOf().newSession).toBe("Primary+Y");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -91,8 +91,8 @@ describe("Keyboard shortcuts", () => {
     keys({ code: "Space", altKey: true, metaKey: true });
     expect(screen.getByRole("alert").textContent).toBe("macOS uses ⌥⌘Space for the Finder search window — choose another");
     expect(keysOf().pushToTalk).toBe("Control+Shift+Space");
-    keys({ code: "KeyJ", ctrlKey: true, altKey: true });
-    expect(keysOf().pushToTalk).toBe("Control+Alt+J");
+    keys({ code: "KeyY", ctrlKey: true, altKey: true });
+    expect(keysOf().pushToTalk).toBe("Control+Alt+Y");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -119,7 +119,7 @@ describe("Keyboard shortcuts", () => {
   });
 
   it("resets to the default, unless another shortcut has it now", () => {
-    useSettings.getState().set({ shortcuts: { ask: "Control+Alt+A", pushToTalk: "Control+Alt+J" } });
+    useSettings.getState().set({ shortcuts: { ask: "Control+Alt+A", pushToTalk: "Control+Alt+Y" } });
     render(<Shortcuts />);
     fireEvent.click(screen.getByRole("button", { name: "Reset to ⌃⇧Space" }));
     expect(keysOf().pushToTalk).toBe("Control+Shift+Space");

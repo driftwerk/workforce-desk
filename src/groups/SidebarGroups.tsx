@@ -4,7 +4,6 @@ import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { lookOf, statusOf, waitsOnYou } from "../floor/background";
-import { useNeedCounts } from "../floor/store";
 import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
 import { addToGrid as placeInGrid } from "../grids/windows";
@@ -33,7 +32,8 @@ import {
   type Layout,
   type Shown,
 } from "./model";
-import { Badge, needsYou } from "../ui/Badge";
+import { badgeOfGroup, itemBadge, type Badge } from "../unread/badges";
+import { Marks, useBadgeData } from "../unread/Marks";
 import { useSessionNames } from "./names";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
@@ -96,7 +96,7 @@ export function SidebarGroups() {
   const layout = useLayout();
   const { groups } = layout;
   const names = useSessionNames();
-  const needs = useNeedCounts();
+  const badges = useBadgeData();
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const gridOrder = useGrids((s) => s.order);
   const allGrids = useGrids((s) => s.grids);
@@ -386,7 +386,7 @@ export function SidebarGroups() {
             dropAfter={drop?.kind === "group" && drop.before === null && g.id === groups.at(-1)?.id && dragging?.kind === "group"}
             dropInside={drop?.kind === "item" && drop.group === g.id && drop.before === null && dragging?.kind === "item"}
             dragging={dragging}
-            count={g.items.reduce((n, key) => n + (needs.get(key) ?? 0), 0)}
+            badge={badgeOfGroup(g.items.map((key) => itemBadge(key, badges)))}
             editing={editing?.kind === "group" && editing.id === g.id}
             register={register}
             onToggle={() => collapseGroup(g.id, !g.collapsed)}
@@ -407,7 +407,7 @@ export function SidebarGroups() {
                   key={key}
                   item={item}
                   name={nameOf(item)}
-                  count={needs.get(key) ?? 0}
+                  badge={itemBadge(key, badges)}
                   hint={`${hint}-${item.kind}`}
                   lineBefore={lineBefore}
                   lit={inFocus === key}
@@ -484,7 +484,7 @@ function GroupSection({
   dropAfter,
   dropInside,
   dragging,
-  count,
+  badge,
   editing,
   register,
   onToggle,
@@ -500,8 +500,8 @@ function GroupSection({
   dropAfter: boolean;
   dropInside: boolean;
   dragging: { kind: "item" | "group"; id: string } | null;
-  /** How many needs wait on its items. */
-  count: number;
+  /** Its items' badges together. */
+  badge: Badge;
   editing: boolean;
   register: (id: string, el: HTMLElement | null) => void;
   onToggle: () => void;
@@ -589,7 +589,7 @@ function GroupSection({
               </span>
               <span className="grp-name">{group.name}</span>
               <span className="grp-count">{group.items.length}</span>
-              {!open && count > 0 && <Badge count={count} says={needsYou(count)} />}
+              <Marks badge={badge} />
             </button>
           )}
           {!fixed && (
@@ -622,7 +622,7 @@ function GroupSection({
 function ItemRow({
   item,
   name,
-  count,
+  badge,
   hint,
   lineBefore,
   lit,
@@ -640,7 +640,7 @@ function ItemRow({
 }: {
   item: Item;
   name: string;
-  count: number;
+  badge: Badge;
   hint: string;
   lineBefore: boolean;
   /** Its pane has focus in the grid shown. */
@@ -658,7 +658,6 @@ function ItemRow({
   onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
-  const unread = useChat((s) => (item.kind === "agent" ? (s.dmUnread[agentKey(item.agent)] ?? 0) : 0));
   return (
     <SortRow
       id={item.key}
@@ -682,8 +681,7 @@ function ItemRow({
       onMenu={onMenu}
       onHover={onHover}
     >
-      {count > 0 && <Badge count={count} says={needsYou(count)} />}
-      {unread > 0 && <Badge count={unread} says={`${unread} unread`} />}
+      <Marks badge={badge} />
     </SortRow>
   );
 }

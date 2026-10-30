@@ -33,8 +33,6 @@ interface DeskState {
   /** Back to a place's newest messages, unless it shows them already. */
   toNewest: (roomId: string, thread: string | null) => Promise<void>;
   activeRoom: string | null;
-  /** Agent messages in rooms you aren't looking at. */
-  unread: Record<string, number>;
   /** Answers on their way in each room, oldest first, by room id. */
   roomDrafts: Record<string, RoomDraft[]>;
   putDraft: (roomId: string, draft: RoomDraft) => void;
@@ -210,7 +208,6 @@ export const useDesk = create<DeskState>((set, get) => ({
   windows: {},
   paging: {},
   activeRoom: null,
-  unread: {},
   roomDrafts: {},
   putDraft: (roomId, draft) =>
     set((s) => {
@@ -262,10 +259,6 @@ export const useDesk = create<DeskState>((set, get) => ({
               ? null
               : s.activeRoom,
           loaded: s.loaded || e.type === "snapshot",
-          unread:
-            e.type === "roomMessage" && e.message.author !== "you" && !(s.view === "rooms" && s.activeRoom === e.message.roomId)
-              ? { ...s.unread, [e.message.roomId]: (s.unread[e.message.roomId] ?? 0) + 1 }
-              : s.unread,
           sessions: apply(s.sessions, e),
           restore: e.type === "snapshot" ? e.restore : s.restore.filter((r) => e.type !== "session" || r.id !== e.session.id),
           openId: e.type === "removed" && s.openId === e.id ? null : s.openId,
@@ -286,7 +279,7 @@ export const useDesk = create<DeskState>((set, get) => ({
   open: (openId) => set({ openId }),
   setView: (view) => set({ view }),
   openRoom: async (id) => {
-    set((s) => ({ activeRoom: id, view: "rooms", unread: id ? { ...s.unread, [id]: 0 } : s.unread }));
+    set({ activeRoom: id, view: "rooms" });
     if (!id || !get().hub || get().windows[id]) return;
     await get()
       .page(id, null, "newest")

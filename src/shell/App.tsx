@@ -13,7 +13,10 @@ import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/ma
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { useHubLinks } from "../hubs/follow";
+import { forgetHubs, startUnread } from "../unread/summary";
 import { prune, stop, stopTarget } from "../rooms/engine";
+import { jumpers } from "../rooms/unread";
+import { placeKey } from "../rooms/window";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
 import { resumePairing } from "../hubs/PairHub";
@@ -56,6 +59,15 @@ const stopNearest = () => {
   if (chat.activeAgent && chat.conversations[chat.activeAgent]?.working) chat.cancel(chat.activeAgent);
 };
 
+/** The open room's pill: the open thread's when focus is in it. */
+const jumpNearest = () => {
+  const desk = useDesk.getState();
+  const room = desk.view === "rooms" ? desk.activeRoom : null;
+  if (!room) return;
+  const thread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room] ?? null) : null;
+  jumpers.get(placeKey(room, thread))?.();
+};
+
 /** How often the agents every workspace lists are read again. */
 const ROSTER_EVERY_MS = 60_000;
 
@@ -73,6 +85,8 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   useHubLinks();
+  useEffect(() => startUnread(), []);
+  useEffect(() => forgetHubs(hubs), [hubs]);
   const settings = useUi((u) => u.settings !== null);
   const platform = useHost((h) => h.platform);
   const needsSetup = useHost((h) => h.platform === "windows" && h.host === null);
@@ -184,6 +198,7 @@ export function App() {
   });
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
   useAppShortcut("stopAnswer", stopNearest, true, { fromFields: false });
+  useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
 
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");

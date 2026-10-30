@@ -25,10 +25,11 @@ export interface Delivered {
  *  is paired to it as nobody (`link_requires_identity`). */
 export type Unlinked = "legacy" | "unlinked";
 
-/** What a hub says changed of yours, beyond your conversations. */
-export type Changed = "floor" | "usage";
+/** What a hub says changed of yours, beyond your conversations: its
+ *  floor, plans' usage, or how far you've read a DM (on another Desk). */
+export type Changed = "floor" | "usage" | "reads";
 
-const CHANGED: Record<string, Changed> = { floor_changed: "floor", usage_changed: "usage" };
+const CHANGED: Record<string, Changed> = { floor_changed: "floor", usage_changed: "usage", read_changed: "reads" };
 
 export interface LinkEvents {
   hello: (features: ReadonlySet<string>) => void;

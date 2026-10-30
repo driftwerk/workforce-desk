@@ -6,6 +6,7 @@ import { floorHeard, floorUnheard, ask as readFloor } from "../floor/store";
 import { deskState } from "../restore/boot";
 import { drainer } from "../rooms/engine";
 import { notify } from "../shell/notify";
+import { cachedDms, dmsFrom, hubBack, refreshDms } from "../unread/summary";
 import { readAloud } from "../voice/useVoice";
 import { DRAIN_PREFIX } from "./drain";
 import { HubLink, type Delivered } from "./link";
@@ -59,6 +60,7 @@ async function catchUp(hub: HubAccount, link: HubLink, wait = CATCH_UP_RETRY_MS)
   let done = false;
   try {
     const active = await activeConversations(hub, sinceOf(deskState.get(seenKey(hub.id))));
+    if (active) dmsFrom(hub, active);
     const drained = await Promise.allSettled((active ?? []).map((c) => drainer.drain(hub, c.agent_id, c.channel)));
     done = drained.every((d) => d.status === "fulfilled" && d.value);
   } catch (e) {
@@ -73,10 +75,9 @@ async function catchUp(hub: HubAccount, link: HubLink, wait = CATCH_UP_RETRY_MS)
 async function arrived(hub: HubAccount, d: Delivered) {
   await drainer.drain(hub, d.agentId, d.channel).catch(() => false);
   const said = drainer.said(hub.id, d.agentId, d.messageId);
-  const key = `${hub.id}/${d.agentId}`;
-  const { roster, bumpDm } = useChat.getState();
+  const { roster } = useChat.getState();
   const agent = roster.find((a) => a.hubId === hub.id && a.id === d.agentId);
-  if (d.channel === DESK_DM) bumpDm(key);
+  if (d.channel === DESK_DM) void refreshDms(hub);
   const label = NOTIFIED[d.kind];
   const text = said ? textOf(said) : "";
   if (label) void notify({ title: `${agent?.name ?? d.agentId} · ${label}`, body: text.split("\n")[0]?.slice(0, 200) ?? "" });
@@ -105,14 +106,16 @@ export function followHubs(hubs: readonly HubAccount[]) {
   for (const hub of hubs) {
     if (links.has(hub.id) || unlinked.get(hub.id) === hub.token) continue;
     unlinked.delete(hub.id);
+    cachedDms(hub);
     const link: HubLink = new HubLink(hub, {
       hello: (features) => {
         floorHeard(hub.id, features);
         useChat.getState().learnFeatures(hub.id, features);
+        void hubBack(hub);
         void catchUp(hub, link);
       },
       delivered: (d) => void arrived(hub, d),
-      changed: () => readFloor([hub.id]),
+      changed: (what) => (what === "reads" ? void refreshDms(hub) : readFloor([hub.id])),
       closed: () => {
         stopRetrying(hub.id);
         floorUnheard(hub.id);

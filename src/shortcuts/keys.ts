@@ -55,6 +55,13 @@ export const SHORTCUTS = [
     keys: "Primary+Period",
     scope: "app",
   },
+  {
+    id: "jumpNew",
+    name: "Jump to new messages",
+    about: "Takes you to what’s new in the room or thread you’re in.",
+    keys: "Primary+J",
+    scope: "app",
+  },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];

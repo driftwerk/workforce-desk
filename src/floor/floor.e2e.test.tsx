@@ -157,7 +157,8 @@ afterEach(() => {
 const rail = () => screen.getByRole("complementary", { name: "Activity" });
 const needsTab = () => within(rail()).getByRole("radio", { name: /Needs you/ });
 const counts = () => screen.getByText(/working ·/).textContent;
-const badges = () => screen.getAllByText(/^\d+ needs? you$/, { selector: ".badge > *" }).map((b) => parseInt(b.textContent!, 10));
+/** The items' badges; a group's header sums its own. */
+const badges = () => screen.getAllByText(/^\d+ needs? you$/, { selector: ".gi .badge > *" }).map((b) => parseInt(b.textContent!, 10));
 const rightNowNeeds = () =>
   within(screen.getByRole("region", { name: "Right now" }))
     .getByRole("group", { name: /^Needs you · / })

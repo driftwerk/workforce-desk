@@ -11,6 +11,7 @@ import { createGrid, deleteGrid, hostedBy, moveGrid, nudgeGrid, renameGrid, setA
 import { closeContent } from "./terminals";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
+import { GridMarks } from "../unread/GridMarks";
 
 /** The Grids view of the main window: the grid shown here, with its
  *  layouts, a new terminal, and a window of its own. With none shown (there
@@ -175,7 +176,9 @@ export function GridsSection() {
               onStartRename={() => setEditing(id)}
               onNudge={(by) => nudge(id, by)}
               onMenu={(at, from) => setMenu({ id, at, from })}
-            />
+            >
+              <GridMarks grid={g} />
+            </SortRow>
           );
         }}
       />

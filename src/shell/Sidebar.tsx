@@ -18,7 +18,7 @@ import { YouMark } from "../ui/Mark";
 import { useYou } from "../pictures/who";
 import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge } from "../ui/Badge";
+import { RoomMarks } from "../unread/RoomMarks";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
@@ -86,7 +86,7 @@ export function Sidebar({
   onNewCrew: () => void;
   onSettings: () => void;
 }) {
-  const { view, setView, connected, activeRoom, openRoom, unread } = useDesk();
+  const { view, setView, connected, activeRoom, openRoom } = useDesk();
   const roomOrder = useRoomOrder((s) => s.order);
   const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -197,7 +197,7 @@ export function Sidebar({
                       onNudge={(by) => nudgeRoomBy(id, by)}
                       onMenu={(at, from) => setRoomMenu({ id, at, from })}
                     >
-                      {(unread[id] ?? 0) > 0 && <Badge count={unread[id]!} says={`${unread[id]} unread`} />}
+                      <RoomMarks room={r} />
                     </SortRow>
                   );
                 }}

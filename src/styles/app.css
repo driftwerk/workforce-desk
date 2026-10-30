@@ -1853,3 +1853,53 @@ button {
   bottom: 0;
   background: var(--bg);
 }
+
+/* ── Unread marks ───────────────────────────────────────────────────────── */
+
+.side-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text);
+  flex: none;
+}
+.gi:has(.side-dot, .badge) .gi-name {
+  font-weight: 650;
+  color: var(--text);
+}
+.timeline {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.new-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0;
+  color: var(--blocked);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.new-divider::before {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--blocked);
+}
+.jump-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 12.5px;
+  font-weight: 650;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+  z-index: 2;
+}
