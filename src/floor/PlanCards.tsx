@@ -72,7 +72,7 @@ function Card({ card, now }: { card: PlanCard; now: number }) {
         {card.reading && <span className="floor-time">as of {clock(card.reading.observedAt)}</span>}
       </div>
       {card.state === "reading" && card.reading ? (
-        card.reading.windows.map((w) => <Window key={w.minutes} w={w} observedAt={card.reading!.observedAt} now={now} />)
+        card.reading.windows.map((w, i) => <Window key={`${w.minutes}:${i}`} w={w} observedAt={card.reading!.observedAt} now={now} />)
       ) : card.state === "no-reading" ? (
         <p className="muted small">No reading yet. It shows after {CLI_NAME[card.kind]} next answers on this plan.</p>
       ) : (
@@ -88,6 +88,7 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
   const tick = reset ? null : pace(w, now);
   const ahead = reset ? null : projection(w, now);
   const percent = Math.round(used);
+  const level = fullness(percent);
   const resets = resetAt === null ? null : dayClock(resetAt, now);
   const line = reset
     ? `Reset at ${resets} · no use seen since.`
@@ -108,11 +109,11 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
     <div className="plan-window">
       <div className="plan-window-head">
         <span>{label}</span>
-        <b className={`plan-${fullness(used)}`}>{percent}%</b>
+        <b className={`plan-${level}`}>{percent}%</b>
         {when && <span className="floor-time">{when}</span>}
       </div>
       <div className="plan-bar" role="img" aria-label={spoken}>
-        <span className={`plan-fill plan-fill-${fullness(used)}`} style={{ width: `${Math.min(100, Math.max(0, used))}%` }} />
+        <span className={`plan-fill plan-fill-${level}`} style={{ width: `${Math.min(100, Math.max(0, used))}%` }} />
         {tick !== null && <span className="plan-pace" style={{ left: `${tick * 100}%` }} title="Where you’d be at an even pace" />}
       </div>
       {line && <span className="muted small">{line}</span>}

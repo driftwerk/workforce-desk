@@ -108,6 +108,13 @@ describe("the plan cards", () => {
     expect(within(claude).getByText(/^At the limit\. It resets at .+\.$/)).toBeTruthy();
   });
 
+  it("colour a window by the percent they show", () => {
+    show(usage({ readings: [reading([{ usedPercent: 89.6, resetsAt: later(60), minutes: 300 }])] }));
+    render(<PlanCards />);
+    const shown = within(card("Claude plan usage")).getByText("90%");
+    expect(shown.className).toBe("plan-full");
+  });
+
   it("show a window that resets while shown as reset, without reading again", async () => {
     show(usage({ readings: [reading([{ usedPercent: 70, resetsAt: later(2), minutes: 300 }])] }));
     render(<PlanCards />);
