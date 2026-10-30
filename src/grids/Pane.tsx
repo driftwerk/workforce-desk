@@ -395,7 +395,7 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
     );
   }
   if (c.kind === "terminal") return <TerminalBody gridId={gridId} pane={pane.id} content={c} />;
-  if (c.kind === "agent") return <DirectMessage agent={c.agent} />;
+  if (c.kind === "agent") return <DirectMessage key={c.agent} agent={c.agent} />;
   return <SessionPane id={c.sessionId} />;
 }
 

@@ -16,14 +16,11 @@ vi.mock("./engine", () => ({
   answerPrompt: () => true,
   answerForm: vi.fn(async () => {}),
 }));
-vi.mock("@workforce/rich", () => ({
-  RichHostProvider: ({ children }: { children: unknown }) => children,
-  RichMarkdown: ({ text }: { text: string }) => text,
-}));
 
 const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { RoomView } = await import("./RoomView");
+const { Rooms } = await import("./Rooms");
 
 const room = {
   id: "r1",
@@ -163,5 +160,17 @@ describe("pictures in a room", () => {
     expect(fetch.mock.calls.map(([u]) => String(u))).toContain("https://dw/api/me/picture");
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "@", selectionStart: 1, selectionEnd: 1 } });
     await vi.waitFor(() => expect(screen.getAllByRole("option").every((o) => o.querySelector(".mark img"))).toBe(true));
+  });
+});
+
+describe("switching rooms", () => {
+  it("leaves the files picked for one room behind", () => {
+    useDesk.setState({ rooms: { r1: room, r2: { ...room, id: "r2", slug: "ops", name: "ops" } }, timelines: { r1: [], r2: [] }, activeRoom: "r1", loaded: true });
+    const { container } = render(<Rooms />);
+    const pick = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(pick, { target: { files: [new File(["x"], "notes.txt", { type: "text/plain" })] } });
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    act(() => useDesk.setState({ activeRoom: "r2" }));
+    expect(screen.queryByText("notes.txt")).toBeNull();
   });
 });

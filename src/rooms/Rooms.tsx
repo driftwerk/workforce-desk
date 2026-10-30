@@ -50,10 +50,12 @@ export function Rooms() {
   const activeRoom = useDesk((s) => s.activeRoom);
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
   const loaded = useDesk((s) => s.loaded);
-  if (room) return <RoomView room={room} />;
+  const activeAgent = useChat((s) => s.activeAgent);
+  // Each keyed by what it shows, so nothing typed or picked for one shows in another.
+  if (room) return <RoomView key={room.id} room={room} />;
   // A room put back on launch shows once the hub says what rooms it has.
   if (activeRoom && !loaded) return <Waiting />;
-  return <DirectMessage />;
+  return <DirectMessage key={activeAgent ?? ""} />;
 }
 
 /** In place of a room or DM that's open but not loaded yet: not the empty

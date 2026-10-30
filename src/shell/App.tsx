@@ -169,7 +169,7 @@ export function App() {
       label: "Thread",
       element: (
         <ErrorBoundary name="thread">
-          <ThreadPanel room={thread.room} thread={thread.thread} />
+          <ThreadPanel key={`${thread.room.id}/${thread.thread}`} room={thread.room} thread={thread.thread} />
         </ErrorBoundary>
       ),
     });
