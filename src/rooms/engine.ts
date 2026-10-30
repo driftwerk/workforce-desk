@@ -311,6 +311,7 @@ async function postAnswer(room: Room, a: Ask, content: string, attachments: Atta
     threadId: a.threadId,
     hop: a.hop,
     attachments: attachments.map((f) => ({ ...f, hub: a.member.hub, agent: a.member.agent })),
+    inReplyTo: a.message,
     ...(source ? { source } : {}),
   });
   useDesk.getState().keep(posted.message, posted.created);
@@ -488,11 +489,19 @@ export async function answerForm(room: Room, form: RoomMessage, answer: string):
   const hub = useDesk.getState().hub;
   const author = memberOf(form.author);
   if (!hub || !author) return;
-  await speak(hub, room, answer, form.threadId, [], [author]);
+  await speak(hub, room, answer, form.threadId, [], [author], form.id);
 }
 
 /** What you said in `here`, kept and asked of `to`, each sent the files. */
-async function speak(hub: DeskHub, here: Room, text: string, threadId: string | null, files: readonly File[], to: RoomMemberRef[]): Promise<void> {
+async function speak(
+  hub: DeskHub,
+  here: Room,
+  text: string,
+  threadId: string | null,
+  files: readonly File[],
+  to: RoomMemberRef[],
+  inReplyTo?: string,
+): Promise<void> {
   if (files.length && !to.length) throw new Error("Mention someone in the room to send the files to.");
   const sent = await Promise.all(
     to.map((m) => {
@@ -501,7 +510,13 @@ async function speak(hub: DeskHub, here: Room, text: string, threadId: string | 
       return uploadAll(account, m.agent, roomChannel(here), files).then((up) => up.map((f) => ({ ...f, hub: m.hub, agent: m.agent })));
     }),
   );
-  const posted = await hub.post(here.id, { author: "you", content: text, threadId, attachments: sent[0] ?? [] });
+  const posted = await hub.post(here.id, {
+    author: "you",
+    content: text,
+    threadId,
+    attachments: sent[0] ?? [],
+    ...(inReplyTo ? { inReplyTo } : {}),
+  });
   useDesk.getState().keep(posted.message, posted.created);
   to.forEach((m, i) =>
     ask(here, m, { text, threadId, hop: 0, speaker: { kind: "person" }, message: posted.message.id, attachments: sent[i] ?? [] }),

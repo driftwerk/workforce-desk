@@ -1,6 +1,7 @@
 import type { Agent, DeskLine, HubAccount } from "../chat/types";
 import type { Room, RoomMessage } from "../hub/types";
 import { resolveMentions } from "./mentions";
+import { byTime } from "./time";
 
 export interface RoomMember {
   hub: string;
@@ -69,7 +70,7 @@ export const contextFor = (
 ): DeskLine[] => {
   const here = timeline
     .filter((m) => (m.threadId ?? null) === threadId && m.id !== exclude)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort(byTime);
   const last = here.map((m) => m.author).lastIndexOf(member);
   const window = here.slice(last + 1);
   const root = threadId ? timeline.find((m) => m.id === threadId && m.id !== exclude) : undefined;

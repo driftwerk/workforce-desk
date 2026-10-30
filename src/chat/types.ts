@@ -1,4 +1,4 @@
-import type { DeskExtras } from "../hub/types";
+import type { DeskExtras, Step } from "../hub/types";
 import type { Picture } from "../pictures/pictures";
 
 /** A hub Desk talks to: the local one, or a remote hub paired as a device. */
@@ -144,6 +144,10 @@ export interface DeskMark {
   speaker?: DeskSpeaker;
   delivery?: DeliveryKind;
   request_id?: string;
+  /** The room message the turn was asked with, which this answers. */
+  in_reply_to?: string;
+  /** The tools the turn ran. */
+  steps?: Step[];
 }
 
 /** What a live turn is doing, as a snapshot says. */

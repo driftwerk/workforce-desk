@@ -41,6 +41,7 @@ interface Posted {
   hop?: number;
   source?: string;
   delivery?: string;
+  inReplyTo?: string;
 }
 
 const posts: Posted[] = [];
@@ -179,7 +180,7 @@ describe("asking a room's members", () => {
     const scout = await connect("scout");
     await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
     expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeUndefined();
-    expect(posts).toEqual([expect.objectContaining({ author: "you", content: "Branch: main (mentions @allan)", threadId: "t1" })]);
+    expect(posts).toEqual([expect.objectContaining({ author: "you", content: "Branch: main (mentions @allan)", threadId: "t1", inReplyTo: "f1" })]);
     const chat = scout.chats[0]!;
     expect(chat).toMatchObject({ desk: { place: { kind: "room", room: ROOM_ID, name: "Release", thread: "t1" }, speaker: { kind: "person" } } });
     keep("scout", { id: "m5", from: "agent", text: "Using main.", mark: { room: ROOM_ID, thread: "t1" } });
@@ -268,7 +269,7 @@ describe("asking a room's members", () => {
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
     answer(allan, allan.chats[0]!.turn_ref as string, "m1", "All green");
     await vi.waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts[1]).toMatchObject({ author: "dw/allan", content: "All green", source: "dw/allan/m1" });
+    expect(posts[1]).toMatchObject({ author: "dw/allan", content: "All green", source: "dw/allan/m1", inReplyTo: "p1" });
   });
 
   it("speaks a hub without structured turns in the room's own words, and posts its answer", async () => {

@@ -4,6 +4,7 @@ import { notificationFor, notify } from "../shell/notify";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, ROOM_PAGE, type HubConnection } from "./client";
+import { byTime, later } from "../rooms/time";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
 /** The main window's views: the Floor, Rooms, and Grids. */
@@ -81,8 +82,6 @@ const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessage): Rec
 /** Others listening to the events socket (the overview, Activity). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
 
-const later = (a: string | null | undefined, b: string): string => (a && a.localeCompare(b) > 0 ? a : b);
-
 /** `parent` with one more reply, `reply`, counted; a parent from a hub that
  *  counts none is left to the replies loaded. */
 const counted = (parent: RoomMessage, reply: RoomMessage): RoomMessage =>
@@ -94,7 +93,7 @@ const counted = (parent: RoomMessage, reply: RoomMessage): RoomMessage =>
 export const merge = (a: RoomMessage[], b: RoomMessage[]): RoomMessage[] => {
   const byId = new Map(a.map((m) => [m.id, m]));
   for (const m of b) byId.set(m.id, m);
-  return [...byId.values()].sort((x, y) => x.createdAt.localeCompare(y.createdAt));
+  return [...byId.values()].sort(byTime);
 };
 
 /** `timeline` with `message`, kept as it happened: a reply new to the

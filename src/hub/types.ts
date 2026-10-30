@@ -178,6 +178,29 @@ export interface RoomMessage {
    *  when the last came; absent from a hub that doesn't count them. */
   replyCount?: number;
   lastReplyAt?: string | null;
+  /** Who wrote its thread's replies, latest first (at most three). */
+  replyAuthors?: string[];
+  /** The message it answers: the ask an agent's answer is to, the form
+   *  your answer fills in, the post a hand-off answers. */
+  inReplyTo?: string | null;
+  /** The thread message this main-timeline copy was posted from. */
+  copyOf?: string | null;
+  /** The tools the agent's turn ran on the way, in order. */
+  steps?: Step[];
+  /** Whether it is for you: what Desk wrote, an answer to you, a delivery
+   *  to you. Absent from a hub that doesn't say. */
+  forYou?: boolean;
+  /** A form you have answered. */
+  answered?: boolean;
+  /** A thread message with a copy in the room's timeline. */
+  postedToRoom?: boolean;
+}
+
+/** One tool an agent's turn ran: what it was, whether it worked, how long. */
+export interface Step {
+  tool: string;
+  ok: boolean;
+  ms: number;
 }
 
 /** A room message to keep. */
@@ -190,6 +213,10 @@ export interface NewRoomMessage {
   source?: string;
   delivery?: DeliveryKind;
   requestId?: string;
+  inReplyTo?: string;
+  steps?: Step[];
+  /** A thread reply of yours, also posted to the room's timeline. */
+  alsoInRoom?: boolean;
 }
 
 export type DeskEvent =
