@@ -54,11 +54,11 @@ export interface Undo {
   parked: number;
 }
 
-/** A pane to point out for a moment: `n` counts, so the same pane can be
+/** Panes to point out for a moment: `n` counts, so the same ones can be
  *  pointed out again. */
 export interface Flash {
   gridId: string;
-  paneId: string;
+  paneIds: string[];
   n: number;
 }
 
@@ -216,9 +216,9 @@ export const setFocus = (gridId: string, pane: string, again = false): void => {
 const touch = (gridId: string, pane: string) =>
   changePanes(gridId, (panes) => (panes.some((p) => p.id === pane) ? panes.map((p) => (p.id === pane ? { ...p, lastActive: Date.now() } : p)) : null));
 
-/** Points pane `pane` out for a moment. */
-export const flashPane = (gridId: string, paneId: string): void =>
-  useGrids.setState((s) => ({ flash: { gridId, paneId, n: (s.flash?.n ?? 0) + 1 } }));
+/** Points panes `paneIds` out for a moment. */
+export const flashPanes = (gridId: string, paneIds: string[]): void =>
+  useGrids.setState((s) => ({ flash: { gridId, paneIds, n: (s.flash?.n ?? 0) + 1 } }));
 
 /** Pointing out `n` is over (so a grid shown again doesn't do it again). */
 export const flashDone = (n: number): void => void (get().flash?.n === n && useGrids.setState({ flash: null }));

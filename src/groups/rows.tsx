@@ -90,6 +90,7 @@ export function SortRow({
   onStartRename,
   onNudge,
   onMenu,
+  onHover,
   children,
 }: {
   /** dnd-kit's id, and what `register` and the drop line know it by. */
@@ -120,6 +121,8 @@ export function SortRow({
   onStartRename?: () => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
+  /** The pointer came onto it. */
+  onHover?: () => void;
   /** After the name and meta: a badge. */
   children?: ReactNode;
 }) {
@@ -149,6 +152,7 @@ export function SortRow({
             aria-current={on ? "true" : undefined}
             {...data}
             onClick={onOpen}
+            onPointerEnter={onHover}
             onDoubleClick={(e) => {
               if (!onStartRename) return;
               e.preventDefault();

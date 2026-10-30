@@ -10,7 +10,7 @@ import { SessionCard } from "../session/SessionCard";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { closeContent } from "../grids/terminals";
-import { createGrid, deleteGrid, deliver, layOut, startGrids, useGrids } from "../grids/store";
+import { createGrid, deleteGrid, deliver, layOut, setActive, setFocus, startGrids, useGrids } from "../grids/store";
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { SidebarGroups } from "./SidebarGroups";
@@ -281,14 +281,14 @@ describe("sessions and agents in grids", () => {
     const pane = s.grids[other]!.panes.find((p) => p.content?.kind === "session")!;
     expect(useDesk.getState().view).toBe("grids");
     expect(s.active).toBe(other);
-    expect(s.flash).toMatchObject({ gridId: other, paneId: pane.id });
+    expect(s.flash).toMatchObject({ gridId: other, paneIds: [pane.id] });
     expect(s.focus[other]).toBe(pane.id);
     expect(useDesk.getState().openId).toBeNull();
 
     useDesk.setState({ view: "floor" });
     fireEvent.click(row("Ada"));
     expect(useDesk.getState().view).toBe("grids");
-    expect(useGrids.getState().flash?.paneId).toBe(useGrids.getState().grids[other]!.panes.find((p) => p.content?.kind === "agent")!.id);
+    expect(useGrids.getState().flash?.paneIds).toEqual([useGrids.getState().grids[other]!.panes.find((p) => p.content?.kind === "agent")!.id]);
     expect(useChat.getState().activeAgent).toBeNull();
   });
 
@@ -352,5 +352,69 @@ describe("sessions and agents in grids", () => {
     expect(contentOf(fresh!)).toEqual([{ kind: "agent", agent: "local/scout" }]);
     expect(useGrids.getState().active).toBe(fresh);
     expect(useDesk.getState().view).toBe("grids");
+  });
+  describe("the item whose pane has focus", () => {
+    const lit = () => screen.getAllByRole("button").filter((b) => b.classList.contains("in-focus")).map((b) => b.querySelector(".gi-name")!.textContent);
+    const paneOf = (gridId: string, sessionOrAgent: string) =>
+      useGrids.getState().grids[gridId]!.panes.find((p) => (p.content?.kind === "session" ? p.content.sessionId : p.content?.kind === "agent" ? p.content.agent : p.content?.kind === "terminal" ? p.content.terminalId : null) === sessionOrAgent)!.id;
+    beforeEach(() => {
+      useDesk.setState({ view: "grids" });
+      Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    it("is lit as focus moves between panes and grids, and not outside the Grids view", () => {
+      layOut(MAIN_GRID, "halves");
+      deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+      deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+      const other = createGrid();
+      deliver(other, { kind: "terminal", terminalId: "t2" });
+      useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, live: true, terminalId: "t2" } } }));
+      setActive(MAIN_GRID);
+      groups();
+      expect(lit()).toEqual(["Scout"]);
+      act(() => setFocus(MAIN_GRID, paneOf(MAIN_GRID, "s1")));
+      expect(lit()).toEqual(["api-e7"]);
+      // Another grid: its focused pane, a terminal web-release runs in.
+      act(() => setActive(other));
+      expect(lit()).toEqual(["web-release"]);
+      act(() => useDesk.setState({ view: "floor" }));
+      expect(lit()).toEqual([]);
+      act(() => useDesk.setState({ view: "grids" }));
+      // No pane focused there any more.
+      act(() => useGrids.setState((s) => ({ focus: { ...s.focus, [other]: "gone" } })));
+      expect(lit()).toEqual([]);
+    });
+
+    it("opens its group if it was collapsed, once, and scrolls its row into view", () => {
+      useSettings.setState({ groups: [{ ...ACME, collapsed: true }, BETA] });
+      layOut(MAIN_GRID, "halves");
+      deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+      deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+      groups();
+      expect(useSettings.getState().groups.find((g) => g.id === "acme")!.collapsed).toBe(false);
+      expect(lit()).toEqual(["api-e7"]);
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+      // Collapsed again by hand while it still has focus, it stays so.
+      fireEvent.click(header("Acme"));
+      expect(useSettings.getState().groups.find((g) => g.id === "acme")!.collapsed).toBe(true);
+      // Focus moving away and back opens it again.
+      act(() => setFocus(MAIN_GRID, paneOf(MAIN_GRID, "s2")));
+      act(() => setFocus(MAIN_GRID, paneOf(MAIN_GRID, "s1")));
+      expect(useSettings.getState().groups.find((g) => g.id === "acme")!.collapsed).toBe(false);
+    });
+
+    it("points out its panes in the grid shown when hovered", () => {
+      layOut(MAIN_GRID, "halves");
+      deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+      deliver(MAIN_GRID, { kind: "terminal", terminalId: "t2" });
+      useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, live: true, terminalId: "t2" } } }));
+      groups();
+      fireEvent.pointerEnter(row("web-release"));
+      expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneIds: [paneOf(MAIN_GRID, "s2"), paneOf(MAIN_GRID, "t2")] });
+      // One in no pane here points out nothing.
+      useGrids.setState({ flash: null });
+      fireEvent.pointerEnter(row("Ada"));
+      expect(useGrids.getState().flash).toBeNull();
+    });
   });
 });

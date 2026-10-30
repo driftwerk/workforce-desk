@@ -221,7 +221,7 @@ export function GridPane({
   const movingPane = useGridDrag((s) => !!s.item?.from);
   const swapping = useGridDrag((s) => !!s.item?.from?.parked);
   const lifted = useGridDrag((s) => s.item?.from?.gridId === gridId && s.item.from.paneId === pane.id);
-  const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneId === pane.id ? s.flash.n : 0));
+  const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneIds.includes(pane.id) ? s.flash.n : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;

@@ -27,7 +27,7 @@ import {
   createGrid,
   deliver,
   filledPane,
-  flashPane,
+  flashPanes,
   heardGrid,
   renameGrid,
   setActive,
@@ -197,7 +197,7 @@ const pointOut = (gridId: string, content: PaneContent): boolean => {
   // Another pane filling the grid would hide it.
   if (filledPane(useGrids.getState(), gridId) !== p.id) unfill(gridId);
   setFocus(gridId, p.id);
-  flashPane(gridId, p.id);
+  flashPanes(gridId, [p.id]);
   return true;
 };
 

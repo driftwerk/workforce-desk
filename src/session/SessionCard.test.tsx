@@ -66,7 +66,7 @@ describe("a session's card says where the session already is", () => {
     act(() => fireEvent.click(screen.getByRole("button", { name: "Go to it in Main" })));
     const pane = paneOf(MAIN_GRID, own).id;
     expect(useGrids.getState().focus[MAIN_GRID]).toBe(pane);
-    expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneId: pane });
+    expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneIds: [pane] });
     expect(useDesk.getState().view).toBe("grids");
     expect(useDesk.getState().openId).toBeNull();
   });

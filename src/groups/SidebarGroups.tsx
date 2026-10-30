@@ -5,7 +5,8 @@ import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import { lookOf, statusOf } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
-import { useGrids } from "../grids/store";
+import { flashPanes, shownGrid, useGrids } from "../grids/store";
+import { placesOf } from "../grids/where";
 import { addToGrid as placeInGrid } from "../grids/windows";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
@@ -81,7 +82,9 @@ const GROUP_ACCEPTS = ["item", "group"];
 /** Groups of agents and sessions, kept by the hub (or, on a hub that can't,
  *  by Desk), with Ungrouped last. Drag to
  *  move and reorder; or Alt+↑/↓, F2 to rename, and Shift+F10 for the rest.
- *  One that's showing in a grid is shown there when clicked. */
+ *  One that's showing in a grid is shown there when clicked. In the Grids
+ *  view, the one whose pane has focus is lit, and hovering one points out
+ *  its panes. */
 export function SidebarGroups() {
   const { sessions, openId, view, activeRoom } = useDesk();
   const { roster, hubs, activeAgent, panelAgent } = useChat();
@@ -92,6 +95,8 @@ export function SidebarGroups() {
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
   const gridOrder = useGrids((s) => s.order);
   const allGrids = useGrids((s) => s.grids);
+  const shownId = useGrids((s) => shownGrid(s)?.id ?? null);
+  const focusedPane = useGrids((s) => (shownId ? s.focus[shownId] : undefined));
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -107,6 +112,14 @@ export function SidebarGroups() {
   for (const s of sortedSessions(sessions)) if (s.state !== "closed") items.set(sessionItem(s.id), { key: sessionItem(s.id), kind: "session", session: s });
   const present = [...items.keys()];
   const shown = resolve(layout, present);
+
+  /** The panes showing `key` in the grid the Grids view shows (see
+   *  `placesOf`); none in any other view. */
+  const panesHere = (key: ItemKey): string[] =>
+    view === "grids" && shownId
+      ? placesOf({ order: gridOrder, grids: allGrids }, sessions, key).flatMap((p) => (p.gridId === shownId && !p.parked ? [p.paneId] : []))
+      : [];
+  const inFocus = focusedPane ? (present.find((key) => panesHere(key).includes(focusedPane)) ?? null) : null;
 
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
   const nameOf = (item: Item | undefined): string =>
@@ -126,6 +139,32 @@ export function SidebarGroups() {
     focusNext.current = null;
     rows.current.get(id)?.focus();
   });
+
+  // Focus moving to another item's pane opens its group if it was collapsed
+  // and scrolls its row into view; once each time, so it can be collapsed
+  // again.
+  const litBefore = useRef<ItemKey | null>(null);
+  const scrollTo = useRef<ItemKey | null>(null);
+  useEffect(() => {
+    if (inFocus === litBefore.current) return;
+    litBefore.current = inFocus;
+    if (!inFocus) return;
+    const group = shown.find((g) => g.items.includes(inFocus));
+    if (group?.collapsed) collapseGroup(group.id, false);
+    scrollTo.current = inFocus;
+  });
+  useEffect(() => {
+    const el = scrollTo.current && rows.current.get(scrollTo.current);
+    if (!el) return;
+    scrollTo.current = null;
+    el.scrollIntoView?.({ block: "nearest" });
+  });
+
+  /** Points out, for a moment, the panes showing `key` in the grid shown. */
+  const pointOut = (key: ItemKey) => {
+    const panes = panesHere(key);
+    if (shownId && panes.length && !dragging) flashPanes(shownId, panes);
+  };
 
   /** After a change: where focus goes, and what a screen reader hears. */
   const after = (focus?: string, say?: string) => {
@@ -354,6 +393,7 @@ export function SidebarGroups() {
                   count={needs.get(key) ?? 0}
                   hint={`${hint}-${item.kind}`}
                   lineBefore={lineBefore}
+                  lit={inFocus === key}
                   on={
                     item.kind === "session"
                       ? openId === item.session.id
@@ -382,6 +422,7 @@ export function SidebarGroups() {
                   }}
                   onNudge={(by) => nudge(key, by)}
                   onMenu={(at, from) => setMenu({ kind: "item", key, at, from })}
+                  onHover={() => pointOut(key)}
                 />
               );
             })}
@@ -564,6 +605,7 @@ function ItemRow({
   count,
   hint,
   lineBefore,
+  lit,
   on,
   meta,
   title,
@@ -574,12 +616,15 @@ function ItemRow({
   onRename,
   onNudge,
   onMenu,
+  onHover,
 }: {
   item: Item;
   name: string;
   count: number;
   hint: string;
   lineBefore: boolean;
+  /** Its pane has focus in the grid shown. */
+  lit: boolean;
   on: boolean;
   meta: string;
   title: string;
@@ -590,6 +635,7 @@ function ItemRow({
   onRename: (name: string | null) => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
+  onHover: () => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
   const unread = useChat((s) => (item.kind === "agent" ? (s.dmUnread[agentKey(item.agent)] ?? 0) : 0));
@@ -600,6 +646,7 @@ function ItemRow({
       collisionPriority={3}
       lineBefore={lineBefore}
       on={on}
+      className={lit ? "in-focus" : ""}
       editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
       lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${lookOf(item.session)}`} aria-hidden="true" />}
       name={name}
@@ -613,6 +660,7 @@ function ItemRow({
       onStartRename={session ? onStartRename : undefined}
       onNudge={onNudge}
       onMenu={onMenu}
+      onHover={onHover}
     >
       {count > 0 && <Badge count={count} says={needsYou(count)} />}
       {unread > 0 && <Badge count={unread} says={`${unread} unread`} />}

@@ -1583,6 +1583,15 @@ button {
 .gi-editing {
   background: var(--raised);
 }
+/* The item whose pane has focus in the grid shown. */
+.gi.in-focus {
+  box-shadow: inset 2px 0 0 var(--signal);
+  background: color-mix(in srgb, var(--signal) 8%, transparent);
+}
+.gi.in-focus:hover,
+.gi.in-focus.on {
+  background: color-mix(in srgb, var(--signal) 8%, var(--raised));
+}
 .gi .gi-handle {
   opacity: 0;
   cursor: grab;
