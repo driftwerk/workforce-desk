@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { localIso } from "../hub/floor";
+import { deskListeners } from "../hub/store";
 import { merged } from "./merge";
 import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, watchFloor } from "./store";
 import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
@@ -140,6 +141,49 @@ describe("the floor's store", () => {
     useChat.setState({ hubs: [hub("b")] });
     await settle();
     expect(floorOf("b")?.state).toBe("failed");
+  });
+
+  it("reads a hub whose link is up again on the minute after a read of it failed", async () => {
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    floorHeard("b", new Set(["desk.floor"]));
+    hubs.b!.down = true;
+    await settle();
+    expect(floorOf("b")?.stale).toBe(true);
+    hubs.b!.down = false;
+    const { unmount } = renderHook(() => useFloorTick(true));
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(floorOf("b")?.stale).toBe(false);
+    unmount();
+  });
+
+  it("asks a hub whose clock is behind for a day that has begun there, and the new day's floor once it has", async () => {
+    useChat.setState({ hubs: [hub("local")] });
+    await settle();
+    useFloor.setState((s) => ({ hubs: { ...s.hubs, local: { ...s.hubs.local!, offset: -120_000 } } }));
+    const midnight = new Date("2026-10-30T00:00:00").getTime();
+    await vi.advanceTimersByTimeAsync(midnight - Date.now() + SETTLE_MS);
+    expect(hubs.local!.days.at(-1)).toBe(localIso(new Date("2026-10-29T00:00:00")));
+    expect(useFloor.getState().day).toBe(midnight);
+    useFloor.setState((s) => ({ hubs: { ...s.hubs, local: { ...s.hubs.local!, offset: -120_000 } } }));
+    await vi.advanceTimersByTimeAsync(120_000 + SETTLE_MS);
+    expect(hubs.local!.days.at(-1)).toBe(localIso(new Date("2026-10-30T00:00:00")));
+  });
+
+  it("reads this computer's hub when its sessions move only while its link isn't saying so", async () => {
+    useChat.setState({ hubs: [hub("local")] });
+    await settle();
+    const moved = () => deskListeners.forEach((f) => f({ type: "removed", id: "s-1" }));
+    floorHeard("local", new Set(["desk.floor"]));
+    await settle();
+    const reads = hubs.local!.days.length;
+    moved();
+    await settle();
+    expect(hubs.local!.days).toHaveLength(reads);
+    floorUnheard("local");
+    moved();
+    await settle();
+    expect(hubs.local!.days).toHaveLength(reads + 1);
   });
 
   it("reads again for the new day at midnight", async () => {

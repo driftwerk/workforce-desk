@@ -72,7 +72,7 @@ export const useFloor = create<FloorStore>((set) => {
   const read = async (hubId: string): Promise<void> => {
     const hub = accountOf(hubId);
     if (!hub) return;
-    const day = startOfLocalDay();
+    const day = startOfLocalDay(Date.now() + Math.min(0, useFloor.getState().hubs[hubId]?.offset ?? 0));
     const nth = (begun.get(hubId) ?? 0) + 1;
     begun.set(hubId, nth);
     const api = floorOf(hub);
@@ -173,7 +173,8 @@ const supported = (): string[] =>
 
 const everyHub = (): string[] => useChat.getState().hubs.map((h) => h.id);
 
-/** The events of this computer's hub after which its floor may differ. */
+/** The events of this computer's hub after which its floor may differ, while
+ *  its link doesn't say so. */
 const MOVES = new Set<DeskEvent["type"]>(["snapshot", "session", "removed", "activity"]);
 
 /** The floor kept in step with the hubs: read when a hub is added or
@@ -211,15 +212,20 @@ export const watchFloor = (): (() => void) => {
   window.addEventListener("focus", focused);
   const heard = (e: DeskEvent) => {
     const local = useChat.getState().hubs.find((h) => h.local)?.id;
-    if (local && MOVES.has(e.type) && supported().includes(local)) ask([local]);
+    if (local && MOVES.has(e.type) && !useFloor.getState().heard[local] && supported().includes(local)) ask([local]);
   };
   deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;
   const atMidnight = () => {
     midnight = setTimeout(() => {
       useFloor.setState({ day: startOfLocalDay().getTime() });
-      ask(supported());
-      atMidnight();
+      const behind = Math.max(0, ...Object.values(useFloor.getState().hubs).map((h) => -h.offset));
+      const read = () => {
+        ask(supported());
+        atMidnight();
+      };
+      if (behind > 0) midnight = setTimeout(read, behind);
+      else read();
     }, nextLocalMidnight().getTime() - Date.now());
   };
   atMidnight();
@@ -248,11 +254,14 @@ export const floorUnheard = (hubId: string): void => {
 };
 
 /** The hubs the minute's read is for: those whose link isn't saying when
- *  their floor changes, and those with work running, whose progress is
- *  never signalled. */
+ *  their floor changes, those with work running, whose progress is never
+ *  signalled, and those whose last read failed. */
 const unheard = (): string[] => {
   const { heard, hubs } = useFloor.getState();
-  return supported().filter((id) => !heard[id] || (hubs[id]?.floor?.working.length ?? 0) > 0);
+  return supported().filter((id) => {
+    const f = hubs[id];
+    return !heard[id] || f?.stale || f?.state === "failed" || (f?.floor?.working.length ?? 0) > 0;
+  });
 };
 
 /** Reads the floor every minute while `on`, of the hubs whose links don't
