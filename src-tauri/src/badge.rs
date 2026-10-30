@@ -21,17 +21,26 @@ pub fn title(count: u32, dot: bool) -> String {
 
 #[tauri::command]
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-pub fn set_unread_badge(window: WebviewWindow, count: u32, dot: bool, overlay: Option<Vec<u8>>) -> Result<(), String> {
+pub fn set_unread_badge(
+    window: WebviewWindow,
+    count: u32,
+    dot: bool,
+    overlay: Option<Vec<u8>>,
+) -> Result<(), String> {
     let fail = |e: tauri::Error| e.to_string();
     window.set_title(&title(count, dot)).map_err(fail)?;
     #[cfg(target_os = "macos")]
     if count > 0 {
         window.set_badge_count(Some(count.into())).map_err(fail)?;
     } else {
-        window.set_badge_label(dot.then(|| "•".to_string())).map_err(fail)?;
+        window
+            .set_badge_label(dot.then(|| "•".to_string()))
+            .map_err(fail)?;
     }
     #[cfg(target_os = "linux")]
-    window.set_badge_count((count > 0).then_some(count.into())).map_err(fail)?;
+    window
+        .set_badge_count((count > 0).then_some(count.into()))
+        .map_err(fail)?;
     #[cfg(target_os = "windows")]
     window
         .set_overlay_icon(
