@@ -1,5 +1,6 @@
 import type { DeliveryKind, DeskPlace, HubAccount, ServerMessage } from "../chat/types";
 import { hubFetch } from "../hub/net";
+import { backoff, detach, keepAlive } from "../hub/socket";
 import { whoAmI } from "./pairing";
 
 // The hub link: one socket per paired hub (`/ws/desk`), over which the hub
@@ -72,8 +73,6 @@ const delivered = (m: ServerMessage): Delivered | null =>
       }
     : null;
 
-const PING_MS = 30_000;
-
 /** One hub's link, reconnecting with the same back-off as a conversation
  *  until closed, or until the hub turns out to have none. */
 export class HubLink {
@@ -81,7 +80,7 @@ export class HubLink {
   private closed = false;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private ping: ReturnType<typeof setInterval> | undefined;
+  private alive: ReturnType<typeof keepAlive> | undefined;
 
   constructor(
     readonly hub: HubAccount,
@@ -98,9 +97,10 @@ export class HubLink {
     ws.onopen = () => {
       opened = true;
       this.retry = 0;
-      this.ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "ping" })), PING_MS);
+      this.alive = keepAlive(ws);
     };
     ws.onmessage = (e) => {
+      this.alive?.heard();
       let m: ServerMessage;
       try {
         m = JSON.parse(e.data as string) as ServerMessage;
@@ -114,13 +114,13 @@ export class HubLink {
       if (changed) this.events.changed(changed);
     };
     ws.onclose = () => {
-      clearInterval(this.ping);
+      this.alive?.stop();
       if (this.closed) return;
       if (opened) this.events.closed();
       void (opened ? Promise.resolve(null) : this.probe(this.hub)).then((why) => {
         if (this.closed) return;
         if (why) return this.events.unavailable(why);
-        this.timer = setTimeout(() => this.open(), Math.min(30_000, 1000 * 2 ** this.retry++));
+        this.timer = setTimeout(() => this.open(), backoff(this.retry++));
       });
     };
   }
@@ -128,7 +128,7 @@ export class HubLink {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
-    clearInterval(this.ping);
-    this.ws?.close();
+    this.alive?.stop();
+    detach(this.ws);
   }
 }

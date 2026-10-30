@@ -364,6 +364,6 @@ describe("asking a room's members", () => {
       { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "new" },
       { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, token: "t" },
     ]);
-    expect(first.readyState).toBe(FakeSocket.CLOSED);
+    expect(first.readyState).toBe(FakeSocket.CLOSING);
   });
 });

@@ -1,10 +1,11 @@
 // A stand-in for the WebSocket a conversation or hub link opens, for
 // tests: it opens at once, keeps what was sent, and is told what the hub
-// says.
+// says. Closed, it says so a moment later, as a browser's does.
 
 export class FakeSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
+  static readonly CLOSING = 2;
   static readonly CLOSED = 3;
   static opened: FakeSocket[] = [];
 
@@ -43,8 +44,9 @@ export class FakeSocket {
   }
 
   close() {
-    if (this.readyState === FakeSocket.CLOSED) return;
-    this.drop();
+    if (this.readyState >= FakeSocket.CLOSING) return;
+    this.readyState = FakeSocket.CLOSING;
+    setTimeout(() => this.drop(), 0);
   }
 
   /** Chat frames sent, without pings. */
@@ -65,7 +67,7 @@ export class FakeSocket {
           new URL(s.url).pathname === path &&
           (agent === undefined || s.query.get("agent_id") === agent) &&
           (channel === undefined || s.query.get("channel") === channel) &&
-          s.readyState !== FakeSocket.CLOSED,
+          s.readyState < FakeSocket.CLOSING,
       );
   }
 }

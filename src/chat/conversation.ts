@@ -12,6 +12,7 @@ import {
   type ToolCall,
   type TurnPhase,
 } from "./types";
+import { backoff, detach, keepAlive } from "../hub/socket";
 
 /** What a turn is doing: sending, waiting on the model, writing, running a
  *  tool, tidying its context, or held by a rate limit or a model switch. */
@@ -544,7 +545,7 @@ export class Conversation {
   private closed = false;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private ping: ReturnType<typeof setInterval> | undefined;
+  private alive: ReturnType<typeof keepAlive> | undefined;
 
   constructor(
     readonly hub: HubAccount,
@@ -577,9 +578,10 @@ export class Conversation {
     ws.onopen = () => {
       this.retry = 0;
       this.set({ ...this.state, connected: true });
-      this.ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "ping" })), 30_000);
+      this.alive = keepAlive(ws);
     };
     ws.onmessage = (e) => {
+      this.alive?.heard();
       try {
         this.set(reduce(this.state, JSON.parse(e.data as string) as ServerMessage));
       } catch {
@@ -587,9 +589,9 @@ export class Conversation {
       }
     };
     ws.onclose = () => {
-      clearInterval(this.ping);
+      this.alive?.stop();
       this.set(disconnected(this.state));
-      if (!this.closed) this.timer = setTimeout(() => this.open(), Math.min(30_000, 1000 * 2 ** this.retry++));
+      if (!this.closed) this.timer = setTimeout(() => this.open(), backoff(this.retry++));
     };
   }
 
@@ -663,7 +665,7 @@ export class Conversation {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
-    clearInterval(this.ping);
-    this.ws?.close();
+    this.alive?.stop();
+    detach(this.ws);
   }
 }
