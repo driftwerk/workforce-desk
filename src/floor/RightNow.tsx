@@ -1,5 +1,5 @@
 import { RichMarkdown } from "@workforce/rich";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { setAgentOversight } from "../crew/oversight";
 import { useSessionNames } from "../groups/names";
@@ -10,14 +10,15 @@ import { useOverview } from "../overview/store";
 import { openTarget } from "../shell/navigate";
 import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { backgroundLine } from "./background";
-import type { FloorWork } from "./merge";
+import { backgroundTasks } from "./background";
+import { happening, type FloorEntry } from "./happening";
+import type { Merged } from "./merge";
 import { NeedRow } from "./NeedRow";
 import { FloorRow } from "./Row";
-import { useFloor, useMerged } from "./store";
-import { sentence } from "./summary";
+import { useMerged } from "./store";
+import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
 import { targetOf } from "./target";
-import { clock, dayClock, durationOf, since } from "./time";
+import { clock } from "./time";
 
 /** The clock the floor's times are said against, moving every minute. */
 export const useMinute = (): number => {
@@ -29,97 +30,79 @@ export const useMinute = (): number => {
   return now;
 };
 
-/** When the floor was last read, from whichever hub answered last. */
-const useReadAt = (): string | null =>
-  useFloor((s) =>
-    Object.values(s.hubs)
-      .map((h) => h.at)
-      .reduce<string | null>((latest, at) => (at && (!latest || at > latest) ? at : latest), null),
-  );
+/** The paragraph above what's happening: the hubs' own, while anything is
+ *  happening; else Desk's, which changes at most every ten minutes. */
+const useParagraph = (m: Merged, entries: readonly FloorEntry[], names: Readonly<Record<string, string>>): Held => {
+  const held = useRef<Held | null>(null);
+  held.current = refreshed(held.current, paragraphOf(entries, names), Date.now());
+  if (entries.length === 0 || m.summaries.length === 0) return held.current;
+  return { text: m.summaries.map((s) => s.text).join(" "), at: Math.max(...m.summaries.map((s) => Date.parse(s.at))) };
+};
 
-/** What needs the person, what's running and what's done, with the
- *  overseer's brief (or, without one, Desk's own line) above. */
+/** What needs the person, then what each agent and session is doing, with
+ *  the overseer's brief (or, without one, the floor's paragraph) above. */
 export function RightNow({ brief }: { brief: ReactNode | null }) {
   const m = useMerged();
   const now = useMinute();
-  const day = useFloor((s) => s.day);
   const names = useSessionNames();
-  const readAt = useReadAt();
+  const entries = happening(m, now);
+  const paragraph = useParagraph(m, entries, names);
   return (
     <section className="floor-card right-now" aria-label="Right now">
       <div className="floor-card-head">
         <h2 className="display floor-card-title">Right now</h2>
-        {!brief && readAt && <span className="floor-time">summary by Desk · {clock(readAt)}</span>}
+        {!brief && <span className="floor-time">updated {clock(paragraph.at)}</span>}
       </div>
-      {brief ?? <p className="right-now-summary">{sentence(m, day, names)}</p>}
-      <div className="right-now-cols">
-        <Column
-          label={`Needs you · ${m.needs.length}`}
-          tone="blocked"
-          empty="Nothing is waiting on you."
-          rows={m.needs.map((n) => (
-            <NeedRow key={n.key} need={n} now={now} />
-          ))}
-        />
-        <Column
-          label={`Working · ${m.working.length}`}
-          tone="working"
-          empty="Nothing is running."
-          rows={m.working.map((w) => (
-            <WorkRow key={w.key} work={w} now={now} />
-          ))}
-        />
-        <Column
-          label="Done · last 24 hours"
-          tone="done"
-          empty="Nothing has finished since yesterday."
-          rows={m.done.map((w) => (
-            <WorkRow key={w.key} work={w} now={now} />
-          ))}
-          more={m.more.done}
-        />
-      </div>
+      {brief ?? (
+        <p className="right-now-summary">
+          {paragraph.text} {needsLine(m.needs.length)}
+        </p>
+      )}
+      <Column
+        label={`Needs you · ${m.needs.length}`}
+        tone="blocked"
+        empty="Nothing is waiting on you."
+        rows={m.needs.map((n) => (
+          <NeedRow key={n.key} need={n} now={now} />
+        ))}
+      />
+      <Column
+        label="What’s happening"
+        tone="working"
+        empty="Nothing is running, and nothing has finished in the last two hours."
+        rows={entries.map((e) => (
+          <EntryRow key={e.key} entry={e} />
+        ))}
+      />
     </section>
   );
 }
 
-function Column({ label, tone, empty, rows, more = 0 }: { label: string; tone: string; empty: string; rows: ReactNode[]; more?: number }) {
+/** One of Right now's lists; a long one scrolls in place, under its label,
+ *  so what follows stays in view. */
+function Column({ label, tone, empty, rows }: { label: string; tone: string; empty: string; rows: ReactNode[] }) {
   return (
     <div className="right-now-col" role="group" aria-label={label}>
       <h3 className={`ov-label state-${tone}`}>{label}</h3>
-      {rows.length ? rows : <p className="faint small">{empty}</p>}
-      {more > 0 && <p className="faint small">and {more} more</p>}
+      {rows.length ? <div className="right-now-list">{rows}</div> : <p className="faint small">{empty}</p>}
     </div>
   );
 }
 
-/** A turn running ("38m · 1m ago": running for, last heard) or done
- *  ("16:20 · 48m": when it ended, how long it took). */
-function WorkRow({ work, now }: { work: FloorWork; now: number }) {
+const STATE_WORD: Record<FloorEntry["state"], string> = { working: "working", waiting: "waiting", done: "done", failed: "failed" };
+
+const LOOK = { working: "working", waiting: "background", done: "done", failed: "failed" } as const;
+
+/** An agent or session as what's happening says it: its state, what it is
+ *  for and what it is doing, and when that was written. */
+function EntryRow({ entry }: { entry: FloorEntry }) {
   const rooms = useDesk((s) => s.rooms);
-  const target = targetOf(work, rooms);
-  const open = target ? () => openTarget(target) : undefined;
-  if (work.endedAt === null) {
-    const heard = since(work.heardAt, now);
-    return (
-      <FloorRow
-        item={work}
-        look={work.background ? "background" : "working"}
-        time={[durationOf(work.since, now), heard === "just now" ? heard : `${heard} ago`].join(" · ")}
-        onOpen={open}
-      >
-        {work.background ? backgroundLine(work.background, now) : work.what}
-      </FloorRow>
-    );
-  }
+  const target = targetOf(entry, rooms);
+  const state = entry.state === "waiting" && entry.background ? `waiting on ${backgroundTasks(entry.background)}` : STATE_WORD[entry.state];
   return (
-    <FloorRow
-      item={work}
-      look={work.outcome === "finished" ? "done" : "failed"}
-      time={`${dayClock(work.endedAt, now)} · ${durationOf(work.since, work.endedAt)}`}
-      onOpen={open}
-    >
-      {work.what}
+    <FloorRow item={entry} look={LOOK[entry.state]} time={`${state} · updated ${clock(entry.at)}`} onOpen={target ? () => openTarget(target) : undefined}>
+      {entry.purpose && <span className="floor-entry-purpose">{entry.purpose} </span>}
+      {entry.now}
     </FloorRow>
   );
 }

@@ -51,6 +51,16 @@ describe("every hub's floor as one", () => {
     );
     expect(m.needs[0]!.since).toBe(at(12));
     expect(m.lanes[0]!.spans[0]).toEqual({ kind: "working", from: at(32), to: null });
+    const said = merged(
+      {
+        b: ready(view({ working: [work(agent("a"), { gist: { purpose: null, now: "Testing.", at: at(4) } })], summary: { text: "All well.", at: at(6) } }), {
+          offset: 120_000,
+        }),
+      },
+      [remote],
+    );
+    expect(said.working[0]!.gist).toEqual({ purpose: null, now: "Testing.", at: at(6) });
+    expect(said.summaries).toEqual([{ text: "All well.", at: at(8), hubId: "b", local: false }]);
   });
 
   it("keeps a stale hub's items, marked, and leaves out hubs with none", () => {
