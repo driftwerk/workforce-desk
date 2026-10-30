@@ -32,7 +32,7 @@ const hubOf = (all: RoomMessage[]) => {
         if (q.around) {
           const i = at(q.around);
           if (i < 0) throw new HubError(400, "that message is in a thread");
-          const before = Math.floor(limit / 2);
+          const before = Math.ceil(limit / 2);
           return place.slice(Math.max(0, i - before + 1), i + 1 + (limit - before));
         }
         return place.slice(-limit);

@@ -48,7 +48,7 @@ const union = (a: Window, b: Window): Window | null =>
 /** How an `around` page of `limit` divides: this many at or before its
  *  target (the target included), the rest after it, as the hub reads it. */
 export const aroundSplit = (limit: number): { before: number; after: number } => {
-  const before = Math.max(1, Math.floor(limit / 2));
+  const before = Math.max(1, Math.ceil(limit / 2));
   return { before, after: limit - before };
 };
 

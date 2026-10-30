@@ -36,6 +36,7 @@ describe("a place's window after a page", () => {
 
   it("holds a jumped-to message with what came before and after, short at either end", () => {
     expect(aroundSplit(4)).toEqual({ before: 2, after: 2 });
+    expect(aroundSplit(5)).toEqual({ before: 3, after: 2 });
     expect(afterPage(undefined, { around: "m5" }, all.slice(4, 8), 4)).toEqual({ older: at(all[4]!), newer: at(all[7]!) });
     expect(afterPage(undefined, { around: "m0" }, all.slice(0, 3), 4)).toEqual({ older: START, newer: at(all[2]!) });
     expect(afterPage(undefined, { around: "m9" }, all.slice(8), 4)).toEqual({ older: at(all[8]!), newer: END });
