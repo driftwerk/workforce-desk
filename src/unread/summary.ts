@@ -5,6 +5,7 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, UnreadSummary } from "../hub/types";
 import { activeConversations, type Active, type ConversationUnread } from "../hubs/surface";
 import { deskState } from "../restore/boot";
+import { shareFocus } from "./focus";
 import { noticesFrom } from "./notices";
 import { flushPending, heard, loadLocal, onDmWritten, useReads } from "./reads";
 
@@ -172,9 +173,11 @@ export function startUnread(): () => void {
   if (kept?.local && !useUnread.getState().local) useUnread.setState({ local: kept.local, localAt: kept.at });
   deskListeners.add(onEvent);
   const unwatch = watchDmTurns();
+  const unshare = shareFocus();
   return () => {
     deskListeners.delete(onEvent);
     unwatch();
+    unshare();
     clearTimeout(soon);
     for (const t of counting.values()) clearTimeout(t);
     counting.clear();

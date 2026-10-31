@@ -1,4 +1,4 @@
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
@@ -21,7 +21,8 @@ import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
 import { findContent, parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
-import { FocusIcon, UnfocusIcon } from "../panels/Stage";
+import { FocusIcon, UnfocusIcon, useOutOfSight } from "../panels/Stage";
+import { useSeenSession } from "../unread/seen";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
@@ -270,8 +271,14 @@ export function GridPane({
   const free = over?.kind === "free";
   const [start, end] = nameParts(label.name);
   const said = useId();
+  // A tracked session's terminal is that session on screen: seen as its
+  // own pane is (a session's pane and a conversation read themselves).
+  const box = useRef<HTMLElement | null>(null);
+  const hidden = useOutOfSight();
+  useSeenSession(pane.content?.kind === "terminal" ? label.tracked?.id : null, box, { enabled: !hidden && fill !== "hidden" });
   return (
     <section
+      ref={box}
       className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
       style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}

@@ -4,14 +4,14 @@ import type { ChatMessage } from "../chat/types";
 import { useNeeds } from "../floor/store";
 import { clock, dayName } from "../floor/time";
 import { useDesk, type RoomDraft } from "../hub/store";
-import type { Room, RoomMessage } from "../hub/types";
-import { useMainHidden, useStowed } from "../panels/Stage";
+import type { Room, RoomMessage, Unread } from "../hub/types";
+import { useOutOfSight } from "../panels/Stage";
 import { AT_NEWEST_PX, useAnchoredScroll, useFollowEnd } from "../restore/scroll";
 import { useUi } from "../shell/ui";
 import { inRoom } from "../unread/badges";
 import { placeKey as readKey, type Place } from "../unread/places";
 import { advance, effective, markRoomRead, markUnread, pointOf, unreadFrom, useReads } from "../unread/reads";
-import { useSeen } from "../unread/seen";
+import { useOnScreen } from "../unread/seen";
 import { useUnread } from "../unread/summary";
 import { Draft } from "./Draft";
 import { answerForm } from "./engine";
@@ -195,8 +195,13 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   });
   const readNow = effective(point, floor);
   const readAtOpen = useDividers((d) => d[key]);
-  const hidden = useMainHidden();
-  const stowed = useStowed();
+  const outOfSight = useOutOfSight();
+  // What was unread when the place was shown: it's read while it stays on
+  // screen, but the New line, the unread rows and the pill still go by
+  // where you were when you came.
+  const [arrived, setArrived] = useState<Unread | undefined>(undefined);
+  const opened = readAtOpen ? (summary?.count ? summary : arrived) : summary;
+  const readThen = readAtOpen ?? readNow;
 
   const messages = useMemo(() => shown(ofPlace(all, thread), window), [all, thread, window]);
   const parent = thread ? all.find((m) => m.id === thread) : undefined;
@@ -256,12 +261,18 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const floorKnown = floor !== undefined;
   useEffect(() => {
     if (!readsLoaded) return;
-    setDivider(key, effective(pointOf(readPlace), useUnread.getState().local?.floor));
-    const back = () => {
+    const counted = () => {
       const local = useUnread.getState().local;
       const r = local?.rooms.find((x) => x.roomId === room.id);
-      const u = thread ? r?.threads.find((t) => t.parent.id === thread)?.unread : r?.main;
-      if (u?.count) setDivider(key, effective(pointOf(readPlace), local?.floor));
+      return thread ? r?.threads.find((t) => t.parent.id === thread)?.unread : r?.main;
+    };
+    setDivider(key, effective(pointOf(readPlace), useUnread.getState().local?.floor));
+    setArrived(counted());
+    const back = () => {
+      const u = counted();
+      if (!u?.count) return;
+      setDivider(key, effective(pointOf(readPlace), useUnread.getState().local?.floor));
+      setArrived(u);
     };
     globalThis.addEventListener("focus", back);
     return () => {
@@ -271,8 +282,21 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     };
   }, [readsLoaded, floorKnown, key, readPlace, room.id, thread]);
 
-  const seenItems = useMemo(() => messages.map((m) => ({ id: m.id, at: m.createdAt })), [messages]);
-  useSeen(readPlace, scroller, seenItems, { enabled: !(thread ? stowed : hidden) });
+  // The place is read while it's on screen, however far it's scrolled:
+  // through its newest message loaded, or the newest its hub counts unread
+  // when that's later (one not loaded yet).
+  const lastAt = summary?.lastAt;
+  const newestHere = messages.at(-1);
+  const newest = useMemo(
+    () =>
+      newestHere && (!lastAt || !after({ createdAt: lastAt }, newestHere.createdAt))
+        ? { at: newestHere.createdAt, message: newestHere.id }
+        : lastAt
+          ? { at: lastAt, message: null }
+          : null,
+    [newestHere, lastAt],
+  );
+  useOnScreen(readPlace, scroller, newest, { enabled: !outOfSight });
 
   // The last message showing, for what the pill counts below it.
   const [lastVisible, setLastVisible] = useState<string | null>(null);
@@ -288,12 +312,13 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   // Measured as the messages change, the pane scrolls or resizes: not as
   // an answer streams in below them.
   useLayoutEffect(measure, [measure, messages]);
-  const shownPill = pill({ shown: messages, read: readNow, lastVisible, window, unread: summary, name: (a) => author(a).name });
+  const shownPill = pill({ shown: messages, read: readThen, lastVisible, window, unread: opened, name: (a) => author(a).name });
+  const firstUnread = opened?.first;
   const jump = useCallback(async () => {
     const desk = useDesk.getState();
-    if (shownPill?.dir === "up" && summary?.first) {
-      await desk.page(room.id, thread, { around: summary.first }).catch((e: unknown) => desk.fail(e));
-      useUi.getState().setFlash(summary.first);
+    if (shownPill?.dir === "up" && firstUnread) {
+      await desk.page(room.id, thread, { around: firstUnread }).catch((e: unknown) => desk.fail(e));
+      useUi.getState().setFlash(firstUnread);
       return;
     }
     if (!live) await desk.toNewest(room.id, thread).catch((e: unknown) => desk.fail(e));
@@ -306,7 +331,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
       if (next) next.scrollIntoView?.({ block: "start" });
       else el.scrollTop = el.scrollHeight;
     });
-  }, [shownPill?.dir, summary?.first, live, room.id, thread, lastVisible]);
+  }, [shownPill?.dir, firstUnread, live, room.id, thread, lastVisible]);
   useEffect(() => {
     jumpers.set(key, () => void jump());
     return () => void jumpers.delete(key);
@@ -334,7 +359,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const onAction = useCallback((id: ActionId, m: RoomMessage) => latestRun.current(id, m), []);
   const onActions = useCallback((m: RoomMessage, from: HTMLElement) => setMenu({ m, at: below(from), from }), []);
   const divider = dividerBefore(messages, readAtOpen);
-  const unreadNow = (m: RoomMessage) => countsAsUnread(m) && (!readNow || after(m, readNow.at));
+  const unreadNow = (m: RoomMessage) => countsAsUnread(m) && (!readThen || after(m, readThen.at));
 
   const more = window?.older.kind === "at";
   const earlier = () => {
