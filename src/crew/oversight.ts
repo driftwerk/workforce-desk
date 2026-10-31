@@ -11,6 +11,9 @@ export interface Oversight {
   wake: { waitingMinutes: number; quietMinutes: number; onFinish: boolean; onFailure: boolean };
   /** Local times like "09:00"; "" is off. */
   summaries: { morning: string; evening: string };
+  /** Check-ins in any hour; what happens past them waits for the next. */
+  maxCheckinsPerHour: number;
+  /** The ceiling over a day. */
   maxCheckinsPerDay: number;
   act: { nudge: boolean; resumeRestart: boolean; readOnlyApprovals: boolean; handOutWork: boolean };
 }
@@ -21,7 +24,8 @@ export const DEFAULT_OVERSIGHT: Oversight = {
   track: { crew: true, deskSessions: true, externalSessions: true, workspaces: false },
   wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true },
   summaries: { morning: "09:00", evening: "" },
-  maxCheckinsPerDay: 40,
+  maxCheckinsPerHour: 6,
+  maxCheckinsPerDay: 100,
   act: { nudge: true, resumeRestart: true, readOnlyApprovals: false, handOutWork: false },
 };
 
@@ -78,6 +82,7 @@ export const oversightOf = (source: string): Oversight => {
       onFailure: bool(wake.on_failure, d.wake.onFailure),
     },
     summaries: { morning: time(summaries.morning, d.summaries.morning), evening: time(summaries.evening, d.summaries.evening) },
+    maxCheckinsPerHour: count(o.max_checkins_per_hour, d.maxCheckinsPerHour) || d.maxCheckinsPerHour,
     maxCheckinsPerDay: count(o.max_checkins_per_day, d.maxCheckinsPerDay) || d.maxCheckinsPerDay,
     act: {
       nudge: bool(act.nudge, d.act.nudge),
@@ -112,6 +117,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       on_failure: o.wake.onFailure,
     },
     summaries: { ...table(was.summaries), morning: o.summaries.morning, evening: o.summaries.evening },
+    max_checkins_per_hour: o.maxCheckinsPerHour,
     max_checkins_per_day: o.maxCheckinsPerDay,
     act: {
       ...table(was.act),
@@ -126,6 +132,7 @@ export const withOversight = (source: string, o: Oversight): string => {
 
 export const MAX_MINUTES = 1440;
 export const MAX_CHECKINS = 500;
+export const MAX_CHECKINS_PER_HOUR = 60;
 
 /** Minutes as typed: a whole number from 1 to a day, or why not. */
 export const parseMinutes = (typed: string): { value: number } | { problem: string } => {
@@ -145,10 +152,11 @@ export const parseTime = (typed: string): { value: string } | { problem: string 
   return { value: `${String(h).padStart(2, "0")}:${m[2]}` };
 };
 
-export const parseCheckins = (typed: string): { value: number } | { problem: string } => {
+/** Check-ins as typed: a whole number from 1 to `most` (a day's by
+ *  default), or why not. */
+export const parseCheckins = (typed: string, most: number = MAX_CHECKINS): { value: number } | { problem: string } => {
   const t = typed.trim();
-  if (!/^\d+$/.test(t) || Number(t) < 1 || Number(t) > MAX_CHECKINS)
-    return { problem: `Use a whole number from 1 to ${MAX_CHECKINS}.` };
+  if (!/^\d+$/.test(t) || Number(t) < 1 || Number(t) > most) return { problem: `Use a whole number from 1 to ${most}.` };
   return { value: Number(t) };
 };
 

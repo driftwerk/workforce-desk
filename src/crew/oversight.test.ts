@@ -24,6 +24,7 @@ level = "act"
 track = { crew = true, desk_sessions = false, external_sessions = true, workspaces = true }
 wake = { waiting_minutes = 10, quiet_minutes = 0, on_finish = false, on_failure = true }
 summaries = { morning = "08:30", evening = "" }
+max_checkins_per_hour = 3
 max_checkins_per_day = 12
 act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_out_work = false }
 `);
@@ -33,6 +34,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
       track: { crew: true, deskSessions: false, externalSessions: true, workspaces: true },
       wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true },
       summaries: { morning: "08:30", evening: "" },
+      maxCheckinsPerHour: 3,
       maxCheckinsPerDay: 12,
       act: { nudge: false, resumeRestart: true, readOnlyApprovals: true, handOutWork: false },
     });
@@ -43,12 +45,14 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
 enabled = "yes"
 level = "boss"
 max_checkins_per_day = -3
+max_checkins_per_hour = 0
 summaries = { morning = "9am" }
 wake = { waiting_minutes = 2.5 }
 `);
     expect(o.enabled).toBe(false);
     expect(o.level).toBe("watch");
-    expect(o.maxCheckinsPerDay).toBe(40);
+    expect(o.maxCheckinsPerDay).toBe(100);
+    expect(o.maxCheckinsPerHour).toBe(6);
     expect(o.summaries.morning).toBe("09:00");
     expect(o.wake.waitingMinutes).toBe(5);
   });
@@ -68,7 +72,8 @@ wake = { waiting_minutes = 2.5 }
       track: { crew: true, desk_sessions: true, external_sessions: true, workspaces: false },
       wake: { coalesce_seconds: 60, waiting_minutes: 5, quiet_minutes: 30, on_finish: true, on_failure: true },
       summaries: { morning: "09:00", evening: "18:00" },
-      max_checkins_per_day: 40,
+      max_checkins_per_hour: 6,
+      max_checkins_per_day: 100,
       act: { nudge: true, resume_restart: true, read_only_approvals: false, hand_out_work: false },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
@@ -110,5 +115,7 @@ describe("checking what's typed, in plain words", () => {
     expect(parseCheckins("40")).toEqual({ value: 40 });
     expect(parseCheckins("0")).toEqual({ problem: "Use a whole number from 1 to 500." });
     expect(parseCheckins("lots")).toEqual({ problem: "Use a whole number from 1 to 500." });
+    expect(parseCheckins("61", 60)).toEqual({ problem: "Use a whole number from 1 to 60." });
+    expect(parseCheckins("6", 60)).toEqual({ value: 6 });
   });
 });
