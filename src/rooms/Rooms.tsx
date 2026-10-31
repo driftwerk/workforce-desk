@@ -32,6 +32,8 @@ import type { OversightLevel } from "../hub/types";
 import { useFocusRequest } from "../shell/focus";
 import { useMainHidden, useStowed } from "../panels/Stage";
 import { useSeen } from "../unread/seen";
+import { DmVoiceBar, DmVoiceControls } from "../voice/DmVoice";
+import { useDmPresence } from "../voice/dms";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -115,6 +117,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // another tab is open is still sending when you come back.
   const sending = useState(false);
   const end = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement | null>(null);
+  // Where "talk here" finds this DM, and lets its microphone go when it goes.
+  useDmPresence(agent ? (activeAgent ?? null) : null, root);
   const scroller = useRef<HTMLDivElement | null>(null);
   const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
   const scrollerRef = useCallback(
@@ -238,6 +243,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const chat = tab !== "settings" && !(tab === "files" && local);
   return (
     <Root
+      ref={(el: HTMLElement | null) => {
+        root.current = el;
+      }}
       className={`${inPane ? "room room-in-pane" : "room"} drop-target`}
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
@@ -443,40 +451,44 @@ function DmComposer({
       .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-files" onSubmit={submit} data-composer="">
-      <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
-      {emoji.menu}
-      <AttachButton onFiles={files.add} disabled={sending} />
-      <textarea
-        ref={composer}
-        rows={1}
-        value={draft}
-        placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
-        {...(emoji.open
-          ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
-          : {})}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          emoji.onChange(e);
-        }}
-        onSelect={emoji.onSelect}
-        onFocus={emoji.onFocus}
-        onKeyDown={(e) => {
-          if (emoji.onKeyDown(e)) return;
-          if (e.key === "Enter" && !e.shiftKey) submit(e);
-        }}
-      />
-      <EmojiButton onPick={emoji.insert} disabled={sending} />
-      {busy ? (
-        <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
-          Stop
-        </button>
-      ) : (
-        <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
-          {sending ? "Sending…" : "Send"}
-        </button>
-      )}
-    </form>
+    <>
+      <DmVoiceBar agent={to} name={agent.name} />
+      <form className="composer composer-files" onSubmit={submit} data-composer="">
+        <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+        {emoji.menu}
+        <AttachButton onFiles={files.add} disabled={sending} />
+        <textarea
+          ref={composer}
+          rows={1}
+          value={draft}
+          placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
+          {...(emoji.open
+            ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
+            : {})}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            emoji.onChange(e);
+          }}
+          onSelect={emoji.onSelect}
+          onFocus={emoji.onFocus}
+          onKeyDown={(e) => {
+            if (emoji.onKeyDown(e)) return;
+            if (e.key === "Enter" && !e.shiftKey) submit(e);
+          }}
+        />
+        <EmojiButton onPick={emoji.insert} disabled={sending} />
+        <DmVoiceControls agent={to} name={agent.name} />
+        {busy ? (
+          <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
+            Stop
+          </button>
+        ) : (
+          <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
+            {sending ? "Sending…" : "Send"}
+          </button>
+        )}
+      </form>
+    </>
   );
 }
 

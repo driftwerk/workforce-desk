@@ -123,7 +123,7 @@ impl VoiceEngine for Realtime {
     }
 
     /// The model says it, in its own words and the session's voice.
-    fn speak(&self, text: String, _more: bool, _voice: Option<VoiceSpec>) {
+    fn speak(&self, text: String, _voice: Option<VoiceSpec>) {
         self.send(Input::Say(text));
     }
 

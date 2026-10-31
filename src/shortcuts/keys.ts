@@ -33,6 +33,22 @@ export const SHORTCUTS = [
     keys: "Control+Shift+Space",
     scope: "global",
   },
+  {
+    id: "holdToTalkHere",
+    name: "Hold to talk here",
+    about: "Hold to talk to the agent whose DM you’re in, let go to send; it answers the way that DM is set to.",
+    keys: "Control+Shift+M",
+    scope: "app",
+    terminal: false,
+  },
+  {
+    id: "talkHere",
+    name: "Talk here",
+    about: "Starts or ends a spoken conversation with the agent whose DM you’re in: everything you say goes to it until you end it.",
+    keys: "Control+Shift+L",
+    scope: "app",
+    terminal: false,
+  },
   { id: "newSession", name: "New session", about: "Starts a new session.", keys: "Primary+N", scope: "app" },
   {
     id: "newTerminal",

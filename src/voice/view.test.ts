@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { pillView, type HoldToTalk } from "./view";
+import type { MicState } from "./mic";
+import { dmVoiceView, pillView, type HoldToTalk } from "./view";
 
 const hold: HoldToTalk = { label: "⌃⇧Space", available: true };
 
@@ -51,5 +52,74 @@ describe("voice pill", () => {
       title: "allan is on it",
       step: "thinking",
     });
+  });
+});
+
+describe("the pill while a DM has the mic", () => {
+  it("names the agent, and says voice by name waits", () => {
+    const listening = { state: "listening", conversation: null } as const;
+    expect(pillView(listening, false, null, "", hold, { name: "Atlas", byName: true })).toMatchObject({
+      agent: "Atlas",
+      title: "Atlas has the mic",
+      detail: "Voice by name is paused until you finish in the DM",
+    });
+    expect(pillView(listening, false, null, "", hold, { name: "Atlas", byName: false }).detail).toBe("Talking with Atlas in the DM");
+    expect(pillView({ state: "downloading", model: "asr", progress: 0.5 }, false, null, "", hold, { name: "Atlas", byName: true }).title).toBe(
+      "Getting voice ready",
+    );
+  });
+});
+
+describe("a DM's voice bar", () => {
+  const mic = (patch: Partial<MicState> = {}): MicState => ({ talk: null, hold: null, pressed: false, problem: null, ...patch });
+  const key = "local/atlas";
+  const listening = { state: "listening", conversation: null } as const;
+
+  it("says nothing for a DM voice has nothing to do with", () => {
+    expect(dmVoiceView(key, "Atlas", mic({ talk: "local/scout" }), listening, false, null, false)).toBeNull();
+  });
+
+  it("follows a spoken conversation, saying how the agent answers", () => {
+    const talking = mic({ talk: key });
+    expect(dmVoiceView(key, "Atlas", talking, { state: "off" }, false, null, false)?.line).toBe("Starting the microphone…");
+    expect(dmVoiceView(key, "Atlas", talking, { state: "downloading", model: "asr", progress: 0.34 }, false, null, false)).toMatchObject({
+      line: "Getting voice ready",
+      detail: "34% · a one-time download, kept on this computer",
+    });
+    expect(dmVoiceView(key, "Atlas", talking, listening, false, null, false)).toMatchObject({
+      line: "Atlas is listening",
+      detail: "Atlas answers aloud",
+      live: true,
+    });
+    expect(dmVoiceView(key, "Atlas", talking, { state: "transcribing" }, false, null, true)).toMatchObject({
+      line: "Transcribing…",
+      detail: "Atlas answers in writing",
+    });
+    expect(dmVoiceView(key, "Atlas", talking, listening, true, null, false)?.line).toBe("Atlas is thinking");
+    expect(dmVoiceView(key, "Atlas", talking, { state: "speaking" }, false, key, false)).toMatchObject({
+      line: "Atlas is speaking",
+      speaking: true,
+    });
+  });
+
+  it("follows a hold from press to send", () => {
+    expect(dmVoiceView(key, "Atlas", mic({ hold: key, pressed: true }), listening, false, null, false)?.line).toBe("Listening — let go to send");
+    expect(dmVoiceView(key, "Atlas", mic({ hold: key }), listening, false, null, false)?.line).toBe("Transcribing…");
+  });
+
+  it("shows a DM that lent its microphone to a hold elsewhere as not live", () => {
+    expect(dmVoiceView(key, "Atlas", mic({ talk: key, hold: "local/scout" }), listening, false, null, false)).toBeNull();
+  });
+
+  it("says why the microphone couldn't be had", () => {
+    expect(dmVoiceView(key, "Atlas", mic({ problem: { agent: key, message: "microphone access was denied" } }), listening, false, null, false)).toMatchObject({
+      line: "microphone access was denied",
+      problem: true,
+    });
+  });
+
+  it("shows an answer asked by name as thinking, then speaking, in its DM", () => {
+    expect(dmVoiceView(key, "Atlas", mic(), listening, true, null, false)?.line).toBe("Atlas is thinking");
+    expect(dmVoiceView(key, "Atlas", mic(), { state: "speaking" }, false, key, false)?.line).toBe("Atlas is speaking");
   });
 });

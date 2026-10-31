@@ -8,6 +8,7 @@ import { useSessionName, useSessionNames } from "../groups/names";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
+import { MicBadge } from "../voice/DmVoice";
 import { approvalsSwitchable, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
@@ -285,6 +286,7 @@ export function GridPane({
         <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
           <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
           {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
+          {pane.content?.kind === "agent" && <MicBadge agent={pane.content.agent} />}
           <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
             <span className="gpane-name-start">{start}</span>
             {end && <span className="gpane-name-end">{end}</span>}

@@ -8,6 +8,7 @@ import {
   type Attachment,
   type ChatMessage,
   type DeskTurn,
+  type DeskVoice,
   type HubAccount,
   type Me,
   type PermissionChoice,
@@ -85,20 +86,21 @@ interface ChatStore {
   forget: (key: string) => void;
 }
 
-/** How a DM message is sent: spoken (voice), and with files uploaded to the
- *  agent already. */
+/** How a DM message is sent: said rather than typed (and how it's
+ *  answered), and with files uploaded to the agent already. */
 export interface SendOptions {
-  spoken?: boolean;
+  voice?: DeskVoice;
   attachments?: Attachment[];
 }
 
 /** A turn in your DM with an agent. */
-export const dmTurn = (spoken = false): DeskTurn => ({
+export const dmTurn = (voice?: DeskVoice): DeskTurn => ({
   place: { kind: "dm" },
   speaker: { kind: "person" },
   hop: 0,
   context: [],
-  spoken,
+  spoken: voice?.reply === "spoken",
+  ...(voice ? { voice } : {}),
 });
 
 const live = new Map<string, Conversation>();
@@ -362,7 +364,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream)));
   },
   send: (key, content, opts = {}) =>
-    (live.get(key)?.send(content, { turn: dmTurn(opts.spoken), attachments: opts.attachments }) ?? false) !== false,
+    (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,
   answerPrompt: (key, requestId, choice) => live.get(key)?.answer(requestId, choice) ?? false,
   sendTo: (key, content) =>
     new Promise((resolve) => {

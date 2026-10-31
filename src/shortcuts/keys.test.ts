@@ -33,6 +33,8 @@ describe("shortcut keys on macOS", () => {
     expect(MAC).toEqual({
       ask: "Control+Shift+K",
       pushToTalk: "Control+Shift+Space",
+      holdToTalkHere: "Control+Shift+M",
+      talkHere: "Control+Shift+L",
       newSession: "Primary+N",
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
@@ -47,7 +49,7 @@ describe("shortcut keys on macOS", () => {
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -169,6 +171,8 @@ describe("shortcut keys on Windows and Linux", () => {
     expect(WIN).toEqual({
       ask: "Primary+Shift+K",
       pushToTalk: "Primary+Shift+Space",
+      holdToTalkHere: "Primary+Shift+M",
+      talkHere: "Primary+Shift+L",
       newSession: "Primary+N",
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
@@ -185,7 +189,7 @@ describe("shortcut keys on Windows and Linux", () => {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
+      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
         expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }
