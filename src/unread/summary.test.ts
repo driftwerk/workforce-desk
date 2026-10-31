@@ -36,6 +36,14 @@ describe("DM counts", () => {
     expect(state.get("unread.cache.dw")).toMatchObject({ dms: { "dw/allan": { count: 2 } } });
   });
 
+  it("clear once a hub that keeps read points lists nothing unread", () => {
+    useChat.setState({ hubFeatures: { dw: new Set(["desk.reads"]) } });
+    dmsFrom(dw, [row("allan", 2)]);
+    dmsFrom(dw, []);
+    expect(Object.keys(useUnread.getState().dms)).toEqual(["local/scout"]);
+    useChat.setState({ hubFeatures: {} });
+  });
+
   it("say nothing from a hub that keeps no read points", () => {
     dmsFrom(dw, [{ agent_id: "allan", channel: "desk", updated_at: "" }]);
     expect(Object.keys(useUnread.getState().dms)).toEqual(["local/scout"]);

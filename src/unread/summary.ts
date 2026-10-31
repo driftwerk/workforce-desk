@@ -25,6 +25,9 @@ interface UnreadState {
 
 export const useUnread = create<UnreadState>(() => ({ local: null, localAt: null, dms: {}, dmsAt: {} }));
 
+/** What a hub that keeps DM read points says it does. */
+export const FEATURE_READS = "desk.reads";
+
 /** After an event that can change the summary, it's read once things settle. */
 export const SUMMARY_DEBOUNCE_MS = 300;
 
@@ -66,10 +69,12 @@ export const refreshLocalSoon = (): void => {
 
 /** A listing of `hub`'s conversations says which DMs have something unread
  *  (one with nothing unread isn't listed, or says zero) and how far each
- *  was read. A hub that keeps no read points says nothing. */
+ *  was read. A hub that keeps no read points (it doesn't say `desk.reads`)
+ *  says nothing. */
 export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
   const dmRows = rows.filter((r) => r.channel === DESK_DM);
-  if (!dmRows.some((r) => r.unread !== undefined || r.read !== undefined)) return;
+  const keeps = useChat.getState().hubFeatures[hub.id]?.has(FEATURE_READS) || dmRows.some((r) => r.unread !== undefined || r.read !== undefined);
+  if (!keeps) return;
   const at = Date.now();
   const prefix = `${hub.id}/`;
   useUnread.setState((s) => {
