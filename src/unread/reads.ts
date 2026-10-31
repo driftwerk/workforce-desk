@@ -8,6 +8,7 @@ import { putConversationRead } from "../hubs/surface";
 import { deskState } from "../restore/boot";
 import { instant, justBefore } from "../rooms/time";
 import { parsePlace, placeKey, type Place } from "./places";
+import { hold } from "./watching";
 import type { ConversationUnread } from "../hubs/surface";
 
 // Read points: this computer's hub's (rooms, threads, sessions, Activity,
@@ -129,8 +130,10 @@ export const advance = (place: Place, point: ReadPoint): Promise<void> => {
   return write(place, point, "advance");
 };
 
-/** `place` is unread again from just after `point`. */
+/** `place` is unread again from just after `point`: on screen here, it
+ *  stays so until it's shown again. */
 export const markUnread = (place: Place, point: ReadPoint): Promise<void> => {
+  hold(place);
   shown(place, point);
   return write(place, point, "set");
 };
