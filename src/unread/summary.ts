@@ -7,7 +7,7 @@ import { activeConversations, type Active, type ConversationUnread } from "../hu
 import { deskState } from "../restore/boot";
 import { shareFocus } from "./focus";
 import { noticesFrom } from "./notices";
-import { flushPending, heard, loadLocal, onDmWritten, useReads } from "./reads";
+import { checkInDmRead, flushPending, heard, loadLocal, onDmWritten, useReads } from "./reads";
 
 // What's unread, as the hubs that own it count it: this computer's hub's
 // summary of its places, and each agent hub's count of your DMs. Read on
@@ -93,6 +93,9 @@ export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
       ...Object.fromEntries(dmRows.flatMap((r) => (r.read ? [[`${hub.id}/${r.agent_id}`, { at: r.read.at, message: r.read.message_id }]] : []))),
     },
   }));
+  // The overseer's DM read elsewhere has read its check-in, the brief.
+  for (const r of dmRows)
+    if (r.read) void checkInDmRead({ kind: "dm", hub: hub.id, agent: r.agent_id }, { at: r.read.at, message: r.read.message_id });
 }
 
 /** Reads `hub`'s DM counts again: rows with something unread are listed

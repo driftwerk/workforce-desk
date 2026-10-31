@@ -21,7 +21,8 @@ const { useDesk } = await import("../hub/store");
 const { useOverview } = await import("../overview/store");
 const { advance, useReads } = await import("./reads");
 const { unreadRows } = await import("./rows");
-const { totalOf } = await import("./badges");
+const { notHere, totalOf } = await import("./badges");
+const { dmsFrom } = await import("./summary");
 
 const at = (min: number) => new Date(Date.UTC(2026, 9, 30, 9, min)).toISOString();
 const brief = { text: "Three things moved overnight.", at: at(10), by: { id: "desk", name: "Desk" } };
@@ -50,8 +51,19 @@ beforeEach(() => {
 describe("the overseer's check-in", () => {
   it("reads the brief when its DM is read through the check-in's answer", async () => {
     await advance({ kind: "dm", hub: "local", agent: "desk" }, { at: at(11), message: "a1" });
-    expect(puts).toEqual([{ place: "brief", point: { at: at(10), message: null }, mark: "advance" }]);
-    expect(useReads.getState().local.brief).toEqual({ at: at(10), message: null });
+    expect(puts).toEqual([{ place: "brief", point: { at: at(11), message: null }, mark: "advance" }]);
+    expect(useReads.getState().local.brief).toEqual({ at: at(11), message: null });
+  });
+
+  it("reads the brief when its hub says the DM was read past it, on another Desk", async () => {
+    dmsFrom(hubs[0]!, [{ agent_id: "desk", channel: "desk", updated_at: at(12), read: { at: at(12), message_id: "a1" }, unread: null }]);
+    await vi.waitFor(() => expect(puts).toEqual([{ place: "brief", point: { at: at(12), message: null }, mark: "advance" }]));
+  });
+
+  it("is read on the page without waiting for its hub to count again", () => {
+    const local = { floor: at(0), rooms: [], sessions: [], activity: { count: 0, lastAt: null }, brief: at(10), update: null };
+    expect(notHere(local, { brief: { at: at(11), message: null } }, () => false)?.brief).toBeNull();
+    expect(notHere(local, { brief: { at: at(9), message: null } }, () => false)?.brief).toBe(at(10));
   });
 
   it("leaves the brief unread for a DM read only to before the check-in, or another agent's DM", async () => {

@@ -149,11 +149,20 @@ export const checkInOf = (): { at: string; dm: Extract<Place, { kind: "dm" }> } 
  *  turn and what followed it. */
 export const CHECK_IN_PAGE = 20;
 
+/** The overseer's DM read through `point` has read every brief kept
+ *  before it: the brief is read through that time too. Its hub saying so
+ *  (a read on another Desk) counts as much as a read here. */
+export const checkInDmRead = (place: Place, point: ReadPoint): Promise<void> => {
+  const c = checkInOf();
+  const overseers = !!c && place.kind === "dm" && place.hub === c.dm.hub && place.agent === c.dm.agent;
+  return c && overseers && instant(point.at) >= instant(c.at) ? advance({ kind: "brief" }, { at: point.at, message: null }) : Promise.resolve();
+};
+
 /** What reading `place` through `point` reads of the check-in elsewhere. */
 async function checkInRead(place: Place, point: ReadPoint): Promise<void> {
   const c = checkInOf();
   if (!c || instant(point.at) < instant(c.at)) return;
-  if (place.kind === "dm" && place.hub === c.dm.hub && place.agent === c.dm.agent) return advance({ kind: "brief" }, { at: c.at, message: null });
+  if (place.kind === "dm") return checkInDmRead(place, point);
   if (place.kind !== "brief") return;
   const hub = localHub();
   const page = hub && (await readConversation(hub, c.dm.agent, { limit: CHECK_IN_PAGE }).catch(() => null));
