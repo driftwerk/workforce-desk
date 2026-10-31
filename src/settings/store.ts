@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { EMPTY_LAYOUT } from "../groups/model";
 import { loadSettings, saveSettings, type CustomVoice, type Settings, type VoiceSpec } from "../platform";
-import { choose, DEFAULT_SHORTCUTS, resolve, type ShortcutId } from "../shortcuts/keys";
+import { choose, defaultShortcuts, resolve, type ShortcutId } from "../shortcuts/keys";
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
@@ -31,7 +31,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   ungrouped: EMPTY_LAYOUT.ungrouped,
   sessionNames: {},
   layoutOnHub: false,
-  keys: DEFAULT_SHORTCUTS,
+  keys: defaultShortcuts(),
   loaded: false,
   load: async () => {
     const s = await loadSettings();

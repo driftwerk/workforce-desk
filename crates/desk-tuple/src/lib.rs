@@ -5,7 +5,8 @@
 //! as a Tuple notification over the call.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -174,6 +175,37 @@ pub enum Status {
     Unavailable { reason: String },
 }
 
+/// Where Tuple's installer puts its CLI, for an app started without it on
+/// PATH (macOS starts apps with a short one).
+const INSTALLED: &[&str] = if cfg!(target_os = "macos") {
+    &["/usr/local/bin/tuple", "/opt/homebrew/bin/tuple"]
+} else {
+    &[]
+};
+
+/// The Tuple CLI on `path`, else at one of the `installed` paths.
+pub fn find(
+    path: Option<&OsStr>,
+    installed: &[&str],
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let name = format!("tuple{}", std::env::consts::EXE_SUFFIX);
+    path.into_iter()
+        .flat_map(std::env::split_paths)
+        .map(|dir| dir.join(&name))
+        .chain(installed.iter().map(PathBuf::from))
+        .find(|p| is_file(p))
+}
+
+/// The Tuple CLI; none when this computer doesn't have Tuple.
+pub fn binary() -> Option<PathBuf> {
+    find(
+        std::env::var_os("PATH").as_deref(),
+        INSTALLED,
+        Path::is_file,
+    )
+}
+
 /// Follows calls until `names` closes, restarting the follower when the
 /// roster changes (resuming after the last delivered record) or Tuple goes away.
 pub async fn run(
@@ -282,6 +314,23 @@ pub async fn notify(tuple: &std::path::Path, agent: &str, text: &str) -> Result<
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_cli_is_found_on_path_then_where_tuple_installs_it() {
+        let name = format!("tuple{}", std::env::consts::EXE_SUFFIX);
+        let path = std::env::join_paths(["/opt/a", "/opt/b"]).unwrap();
+        let on_b = |p: &Path| p == Path::new("/opt/b").join(&name);
+        assert_eq!(
+            find(Some(&path), &["/usr/local/bin/tuple"], on_b),
+            Some(Path::new("/opt/b").join(&name))
+        );
+        let installed = |p: &Path| p == Path::new("/usr/local/bin/tuple");
+        assert_eq!(
+            find(Some(&path), &["/usr/local/bin/tuple"], installed),
+            Some(PathBuf::from("/usr/local/bin/tuple"))
+        );
+        assert_eq!(find(None, &[], |_| false), None);
+    }
 
     fn names() -> Vec<String> {
         vec!["Atlas".into(), "allan".into()]

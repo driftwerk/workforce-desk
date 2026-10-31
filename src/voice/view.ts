@@ -19,8 +19,8 @@ export interface PillView {
   progress: number | null;
 }
 
-/** Hold-to-talk as the pill mentions it: its keys, shown the macOS way, and
- *  whether Desk got them. */
+/** Hold-to-talk as the pill mentions it: its keys, shown the system's way,
+ *  and whether Desk got them. */
 export interface HoldToTalk {
   label: string;
   available: boolean;

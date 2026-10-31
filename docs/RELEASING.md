@@ -1,7 +1,10 @@
 # Releasing Desk
 
 A release is one universal `Desk.app` (Apple Silicon and Intel) on a signed,
-notarized disk image. Inside it, beside the app:
+notarized disk image, and for Linux (x86_64) an AppImage and a `.deb`, which
+carry the same three programs under Linux names (`desk-helper`,
+`desk-agents`, `desk-memory`) beside the app. Inside `Desk.app`, beside the
+app:
 
 | In `Contents/MacOS` | What it is |
 | --- | --- |
@@ -46,12 +49,23 @@ hub keeps memories in SQLite; then it moves them into the store, once.
      the entitlements in `src-tauri/entitlements/`
    - notarizes and staples the app, then builds, signs, notarizes and staples
      the disk image
-   - writes the updater artifacts: `Desk.app.tar.gz`, its `.sig` and
-     `latest.json`
-   - publishes everything to a GitHub release
+   - writes the macOS updater artifact: `Desk.app.tar.gz` and its `.sig`
+4. Beside it, the `linux-x86_64` job builds on Ubuntu 22.04 (glibc 2.35, the
+   oldest Desk supports):
+   - the three sidecars under their Linux names (`desk-helper`,
+     `desk-agents`, `desk-memory`), with ort's own ONNX Runtime;
+   - `Desk_<version>_amd64.AppImage` with its updater `.sig`, and
+     `Desk_<version>_amd64.deb`;
+   - the `backend-linux-x86_64` workflow artifact (the three programs and
+     the Claude Code plugin), which Desk on Windows installs inside WSL.
+5. The `publish` job writes one `latest.json` (`darwin-aarch64`,
+   `darwin-x86_64` and `linux-x86_64`) and publishes everything to a GitHub
+   release.
 
 Installed copies check `latest.json` on launch and every four hours. They
-download the update in the background and offer **Restart to update**.
+download the update in the background and offer **Restart to update**. A
+`.deb` is updated by the system's package manager instead: Desk says a new
+version is out and links to the release.
 
 The first build of a new hub ref takes well over an hour, and the first
 Intel ONNX Runtime build adds 30 to 60 minutes. Later builds reuse the cargo
@@ -107,7 +121,8 @@ git commit -m "Desk ships hub <short sha>: <why>" hub.ref
 `build-sidecars.sh` refuses a `HUB_SOURCE` whose HEAD isn't `hub.ref`
 (`HUB_ANY_REF=1` overrides this for experiments). Without `HUB_SOURCE` it
 clones `HUB_REPO` (default `git@github.com:driftwerk/workforce.git`) into
-`~/Library/Caches/desk-build/hub` and checks the ref out there. A local clone
+`~/Library/Caches/desk-build/hub` (`~/.cache/desk-build/hub` on Linux) and
+checks the ref out there. A local clone
 works as `HUB_REPO` too.
 
 ## Bumping vellev
@@ -123,9 +138,10 @@ echo <sha> > vellev.ref
 git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
 ```
 
-`build-sidecars.sh` refuses a vellev whose locked `ort-sys` is not the one
-`scripts/onnxruntime-x86_64.sh` builds ONNX Runtime for; move that script's
-pin (version and commit) to the ONNX Runtime the new `ort-sys` links.
+When it builds for Intel Macs, `build-sidecars.sh` refuses a vellev whose
+locked `ort-sys` is not the one `scripts/onnxruntime-x86_64.sh` builds ONNX
+Runtime for; move that script's pin (version and commit) to the ONNX Runtime
+the new `ort-sys` links.
 
 ## Building locally
 
@@ -159,8 +175,18 @@ DESK_HOME=/tmp/desk-try DESK_REGISTER_HELPER=1 Desk.app/Contents/MacOS/desk --un
 sfltool dumpbtm | grep -i -A3 "xyz.driftwerk.desk.helper"   # read-only check: nothing left
 ```
 
+On Linux, build the sidecars (one target, this machine's) and then the
+AppImage and the `.deb`; `createUpdaterArtifacts` signs the AppImage, so
+without the updater key turn it off:
+
+```sh
+HUB_REPO=../workforce-public-desk scripts/build-sidecars.sh
+npx tauri build --bundles appimage,deb --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
 `Desk --unregister-helper` (no `DESK_HOME`) is also how an uninstall script
-removes the installed helper. Settings → Help → **Remove Desk's data…** does
+removes the installed helper: the login item on macOS, the systemd user
+service or the autostart entry on Linux. Settings → Help → **Remove Desk's data…** does
 the same and can delete the data.
 
 ## Development
@@ -169,6 +195,7 @@ A development run (`npm run tauri dev` with `DESK_HOME` set) registers
 nothing. It talks to a `desk-hubd` you start yourself (`target/debug/desk-hubd
 --workforce <hub>`). `scripts/stage-sidecars.sh` builds the development
 sidecars under their bundle names (`Desk Helper-<triple>`,
-`Desk Agents-<triple>`, `Desk Memory-<triple>`). Without a `vellev` beside
+`Desk Agents-<triple>`, `Desk Memory-<triple>` on macOS, `desk-helper-<triple>`
+and so on on Linux). Without a `vellev` beside
 `desk-hubd`, on `PATH` or given with `--memory <path>`, the development hub
 keeps memories in SQLite.

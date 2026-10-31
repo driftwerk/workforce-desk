@@ -234,6 +234,8 @@ export interface TupleRequest {
 
 export type TupleStatus = { state: "off" } | { state: "following" } | { state: "unavailable"; reason: string };
 
+/** Whether this computer has Tuple; never in the browser preview. */
+export const tupleAvailable = async (): Promise<boolean> => (preview ? false : invoke<boolean>("tuple_available"));
 export const enableTuple = (names: string[]): Promise<void> => invoke("tuple_enable", { names });
 export const disableTuple = (): Promise<void> => invoke("tuple_disable");
 export const replyOnTuple = (agent: string, answer: string): Promise<void> => invoke("tuple_reply", { agent, answer });
@@ -294,6 +296,14 @@ export const saveReport = (path: string, about: string): Promise<void> => invoke
 /** Stops Desk Helper and takes it out of what starts at login; with
  *  `everything`, also deletes Desk's folders and the secrets it keeps. */
 export const removeDeskData = (everything: boolean): Promise<void> => invoke("data_remove", { everything });
+
+/** How this install gets a new version: by itself, or (a package) through
+ *  the system's package manager, with a page to download one by hand. */
+export interface Updating {
+  byItself: boolean;
+  download: string | null;
+}
+export const updating = (): Promise<Updating> => invoke("updating");
 
 /** Sessions to resume once Desk has restarted into an update. */
 export const resumeLater = (ids: string[]): Promise<void> => invoke("resume_later", { ids });

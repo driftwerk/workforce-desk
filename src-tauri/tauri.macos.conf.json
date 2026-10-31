@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Desk",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "backgroundColor": "#111210",
+        "dragDropEnabled": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "externalBin": [
+      "binaries/Desk Helper",
+      "binaries/Desk Agents",
+      "binaries/Desk Memory"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements/Desk.entitlements",
+      "files": {
+        "Library/LaunchAgents/xyz.driftwerk.desk.helper.plist": "LaunchAgents/xyz.driftwerk.desk.helper.plist"
+      }
+    }
+  }
+}

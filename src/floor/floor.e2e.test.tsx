@@ -13,7 +13,7 @@ import type { Overview, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { Sidebar } from "../shell/Sidebar";
-import { DEFAULT_SHORTCUTS } from "../shortcuts/keys";
+import { defaultShortcuts } from "../shortcuts/keys";
 import { Floor } from "./Floor";
 import { SETTLE_MS, TICK_MS, useFloor, watchFloor } from "./store";
 import { NOW, agent, approval, at, fakeFetch, fakeHub, hub, need, session, view, type FakeHub } from "./testing";
@@ -121,7 +121,7 @@ beforeEach(() => {
   };
   vi.stubGlobal("fetch", fakeFetch(hubs));
   kept.clear();
-  useSettings.setState({ loaded: true, shortcuts: {}, keys: DEFAULT_SHORTCUTS, groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  useSettings.setState({ loaded: true, shortcuts: {}, keys: defaultShortcuts(), groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useDesk.setState({

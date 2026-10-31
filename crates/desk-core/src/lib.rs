@@ -6,6 +6,7 @@ pub mod backend;
 #[cfg(unix)]
 pub mod holder;
 pub mod host;
+pub mod install;
 #[cfg(unix)]
 pub mod process;
 pub mod redact;

@@ -24,8 +24,12 @@ export const DEFAULT_HOST: HostInfo = { platform: "macos", host: { kind: "native
 /** This computer, read once before the shell first renders. */
 export const useHost = create<HostInfo>(() => DEFAULT_HOST);
 
+/** Reads it, and marks the page with the platform for what only its
+ *  styles differ in (`:root[data-platform="macos"]`). */
 export const loadHost = async (): Promise<void> => {
-  useHost.setState(await invoke<HostInfo>("host_info"));
+  const info = await invoke<HostInfo>("host_info");
+  useHost.setState(info);
+  document.documentElement.dataset.platform = info.platform;
 };
 
 /** Text that differs by platform, chosen for `platform`. */

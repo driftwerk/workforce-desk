@@ -1,0 +1,9 @@
+# gitleaks' own rules, but for keyboard shortcuts: an accelerator such as
+# "Shift+Primary+Enter" in a field named `keys` reads to them as an API key.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Keyboard shortcuts, as the global-shortcut plugin reads them"
+regexTarget = "match"
+regexes = ['''keys: "(?:(?:Primary|Control|Alt|Shift|Super)\+)+[A-Za-z0-9]+"''']

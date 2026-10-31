@@ -6,7 +6,7 @@ import { trackedIn } from "../grids/terminals";
 import { useDesk } from "../hub/store";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
-import { matches, scopeOf, type ShortcutId } from "../shortcuts/keys";
+import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
 import { xtermTheme } from "../theme/xterm";
@@ -92,10 +92,12 @@ export function Terminal({
     const el = host.current;
     const turns = ["mousedown", "focus", "paste"] as const;
     for (const t of turns) el.addEventListener(t, turnedHere, true);
-    // Desk's own shortcuts (New terminal, New session, Settings) reach Desk, not the shell.
+    // Desk's own shortcuts (New terminal, New session, Settings) reach Desk,
+    // not the shell, with the keys they take in a terminal: Ctrl and a
+    // letter stays the shell's on Windows and Linux.
     x.attachCustomKeyEventHandler((e) => {
       const keys = useSettings.getState().keys;
-      const desks = (Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, keys[id]));
+      const desks = (Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, terminalKeys(keys[id])));
       if (!desks && e.type === "keydown") viewer.claim();
       return !desks;
     });
@@ -131,7 +133,7 @@ export function Terminal({
 
   return (
     <div className="terminal-frame">
-      <div className="terminal" ref={host} />
+      <div className="terminal" data-terminal ref={host} />
       {viewing && (
         <button type="button" className="terminal-viewing" onClick={() => term.current?.focus()}>
           Viewing · click to type here

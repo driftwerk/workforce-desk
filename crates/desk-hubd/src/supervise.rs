@@ -8,6 +8,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use desk_core::host::Host;
+use desk_core::install::Install;
 use desk_core::{
     HUB_EXECUTABLE, HubPorts, Paths, Secret, SecretStore, Secrets, read_ports, write_ports,
 };
@@ -16,7 +17,6 @@ use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
-use crate::install::Install;
 use crate::{bootstrap, commands, config, holder, memory, model, moving};
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);

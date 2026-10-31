@@ -19,8 +19,6 @@
         "height": 900,
         "minWidth": 960,
         "minHeight": 600,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "backgroundColor": "#111210",
         "dragDropEnabled": false
       }
@@ -31,10 +29,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg"
-    ],
     "category": "DeveloperTool",
     "icon": [
       "icons/32x32.png",
@@ -45,19 +39,6 @@
     ],
     "resources": {
       "resources/claude-plugin/": "claude-plugin/"
-    },
-    "externalBin": [
-      "binaries/Desk Helper",
-      "binaries/Desk Agents",
-      "binaries/Desk Memory"
-    ],
-    "macOS": {
-      "minimumSystemVersion": "13.0",
-      "hardenedRuntime": true,
-      "entitlements": "entitlements/Desk.entitlements",
-      "files": {
-        "Library/LaunchAgents/xyz.driftwerk.desk.helper.plist": "LaunchAgents/xyz.driftwerk.desk.helper.plist"
-      }
     }
   },
   "plugins": {
