@@ -23,7 +23,7 @@ const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { useRoomOrder } = await import("../rooms/order");
 const { useSettings } = await import("../settings/store");
-const { DEFAULT_SHORTCUTS } = await import("../shortcuts/keys");
+const { defaultShortcuts } = await import("../shortcuts/keys");
 const { Sidebar } = await import("../shell/Sidebar");
 const { useAppBadge } = await import("./icon");
 const { startUnread, useUnread } = await import("./summary");
@@ -48,7 +48,7 @@ function Badge() {
 beforeEach(() => {
   state.clear();
   invoked.length = 0;
-  useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS, groups: [], sessionNames: {} });
+  useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
   useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }], roster: [] });
   useRoomOrder.setState({ order: [ROOM] });
   useDesk.setState({

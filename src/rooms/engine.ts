@@ -346,7 +346,9 @@ async function settle(a: Ask, t: Turn) {
     told(a, { kind: "answered", text: t.text });
   } catch (e) {
     a.state = "held";
-    show(a, { state: "failed", working: null, error: `Couldn’t fetch ${displayName(a.member)}’s answer: ${e instanceof Error ? e.message : String(e)}` });
+    const why = `Couldn’t fetch ${displayName(a.member)}’s answer: ${e instanceof Error ? e.message : String(e)}`;
+    show(a, { state: "failed", working: null, error: why });
+    told(a, { kind: "failed", why });
     const key = lineOf(a);
     if (key) pump(key);
     return;

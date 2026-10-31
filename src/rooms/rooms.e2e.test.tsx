@@ -27,7 +27,7 @@ const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { useRoomOrder } = await import("./order");
 const { useSettings } = await import("../settings/store");
-const { DEFAULT_SHORTCUTS } = await import("../shortcuts/keys");
+const { defaultShortcuts } = await import("../shortcuts/keys");
 const { useAppShortcut } = await import("../shortcuts/manager");
 const { Sidebar } = await import("../shell/Sidebar");
 const { useUi } = await import("../shell/ui");
@@ -99,7 +99,7 @@ beforeEach(() => {
   state.clear();
   posts.length = 0;
   prune({});
-  useSettings.setState({ shortcuts: {}, keys: DEFAULT_SHORTCUTS, groups: [], sessionNames: {} });
+  useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
   useChat.setState({
     hubs: [{ id: "dw", label: "Acme", url: "https://acme.example.com", local: false, token: "t" }],
     roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
