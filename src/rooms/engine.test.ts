@@ -493,6 +493,17 @@ describe("asking a room's members", () => {
     expect(scout.chats).toHaveLength(1);
   });
 
+  it("stops an ask still connecting too, so it never goes out once the room's answers are stopped", async () => {
+    await say(room, "@allan hi", null);
+    await vi.waitFor(() => expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeDefined());
+    expect(drafts()[0]).toMatchObject({ state: "connecting" });
+    stopAll(ROOM_ID);
+    expect(drafts()).toEqual([]);
+    const allan = await connect("allan");
+    await flush();
+    expect(allan.chats).toHaveLength(0);
+  });
+
   it("lets a stopped draft go when its answer arrives anyway", async () => {
     await say(room, "@allan one", null);
     const allan = await connect("allan");

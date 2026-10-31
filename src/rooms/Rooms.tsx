@@ -432,7 +432,7 @@ function DmComposer({
       .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-files" onSubmit={submit}>
+    <form className="composer composer-files" onSubmit={submit} data-composer="">
       <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
       {emoji.menu}
       <AttachButton onFiles={files.add} disabled={sending} />

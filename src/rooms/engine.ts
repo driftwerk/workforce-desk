@@ -456,12 +456,17 @@ export function stop(roomId: string, draftId: string): void {
   pump(key);
 }
 
-/** Takes a queued ask out; the live one is left alone. */
+/** Takes out an ask that's queued, or still waiting for its member's
+ *  conversation to take it; the live one is left alone. */
 export function cancelAsk(roomId: string, draftId: string): void {
   const a = asks.get(draftId);
-  if (!a || a.roomId !== roomId || a.state !== "queued") return;
+  if (!a || a.roomId !== roomId || (a.state !== "queued" && a.state !== "sending")) return;
+  const sending = a.state === "sending";
+  const key = lineOf(a);
   asks.delete(a.id);
   useDesk.getState().dropDraft(roomId, a.id);
+  // One being sent held its member's turn: the next may go.
+  if (sending && key) pump(key);
 }
 
 /** Every live answer in the room stopped, and every queued one cancelled,
@@ -469,6 +474,7 @@ export function cancelAsk(roomId: string, draftId: string): void {
 export function stopAll(roomId: string): void {
   // Queued ones first: stopping a live answer sends its member's next ask.
   for (const a of [...asks.values()]) if (a.roomId === roomId && a.state === "queued") cancelAsk(roomId, a.id);
+  for (const a of [...asks.values()]) if (a.roomId === roomId && a.state === "sending") cancelAsk(roomId, a.id);
   const drafts = useDesk.getState().roomDrafts[roomId] ?? [];
   for (const d of drafts) if (d.state === "live") stop(roomId, d.id);
 }

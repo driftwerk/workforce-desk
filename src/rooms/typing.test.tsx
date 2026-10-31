@@ -198,6 +198,8 @@ describe("typing in a room with a long timeline", () => {
       id: "d1",
       member: "dw/allan",
       threadId: null,
+      asked: "m0",
+      since: 0,
       text,
       working: null,
       tools: [],

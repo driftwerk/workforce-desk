@@ -170,13 +170,15 @@ describe("shortcut keys on Windows and Linux", () => {
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
       saveFile: "Primary+S",
+      stopAnswer: "Primary+Period",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
     for (const platform of ["windows", "linux"] as const) {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile"] as const) expect(refusal(d[id], "app", platform)).toBeNull();
+      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer"] as const) expect(refusal(d[id], "app", platform)).toBeNull();
+      expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }
   });
 
