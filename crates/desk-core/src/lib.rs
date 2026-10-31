@@ -10,6 +10,8 @@ pub mod install;
 #[cfg(unix)]
 pub mod process;
 pub mod redact;
+// A Unix login shell's environment: on Windows the CLIs run inside WSL.
+#[cfg(unix)]
 pub mod shell;
 
 use std::path::{Path, PathBuf};
@@ -108,6 +110,10 @@ impl Paths {
     /// The backend's installed versions, inside WSL.
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
+    }
+    /// The backend the app uses, where setup chose one (WSL on Windows).
+    pub fn backend_host(&self) -> PathBuf {
+        self.root.join("backend.json")
     }
     /// Which store this folder's secrets are in, once chosen.
     pub fn keys(&self) -> PathBuf {

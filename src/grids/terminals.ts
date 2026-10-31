@@ -10,13 +10,12 @@
 // the hub as a Desk session hosted in that terminal (see
 // src-tauri/resources/claude-plugin).
 
-import { homeDir } from "@tauri-apps/api/path";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session, TerminalInfo } from "../hub/types";
-import { claudePluginDir, inApp, programsUnder } from "../platform";
+import { backendHome, claudePluginDir, inApp, programsUnder } from "../platform";
 import { baseName } from "../ui/paths";
 import type { Pane, PaneContent } from "./engine";
 import { newId } from "./model";
@@ -89,7 +88,7 @@ export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | nu
     const hub = useDesk.getState().hub;
     if (!hub || !writes(gridId)) return;
     try {
-      const where = cwd || (inApp ? await homeDir().catch(() => "/") : "/");
+      const where = cwd || (inApp ? await backendHome().catch(() => "/") : "/");
       const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await pluginEnv() });
       setProblem(pane, null);
       remember(info);

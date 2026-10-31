@@ -301,9 +301,15 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
         table(&[
             ("listen", s(&format!("127.0.0.1:{}", ports.gateway))),
             ("cors", Value::Boolean(true)),
+            // The app's page: macOS's and Linux's webview origin, Windows'
+            // (WebView2), and the development server.
             (
                 "cors_allowed_origins",
-                Value::Array(vec![s("tauri://localhost"), s("http://localhost:5183")]),
+                Value::Array(vec![
+                    s("tauri://localhost"),
+                    s("http://tauri.localhost"),
+                    s("http://localhost:5183"),
+                ]),
             ),
         ]),
     );
@@ -490,6 +496,20 @@ mod tests {
         }
         assert_eq!(doc["weaviate"]["enabled"].as_bool(), Some(false));
         assert_eq!(doc["desk"]["enabled"].as_bool(), Some(true));
+        let origins: Vec<_> = doc["gateway"]["cors_allowed_origins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| o.as_str())
+            .collect();
+        assert_eq!(
+            origins,
+            [
+                "tauri://localhost",
+                "http://tauri.localhost",
+                "http://localhost:5183"
+            ]
+        );
         assert_eq!(
             doc["desk"]["pty_holder_socket"].as_str(),
             Some("/Users/k/Library/Application Support/Desk/hub/run/pty.sock")

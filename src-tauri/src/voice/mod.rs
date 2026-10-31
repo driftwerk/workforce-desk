@@ -45,7 +45,7 @@ pub struct Voice {
 }
 
 impl Voice {
-    pub fn new(paths: &Paths, backend: Backend) -> Self {
+    pub fn new(paths: &Paths, backend: Option<Backend>) -> Self {
         Self {
             models: Models::new(default_dir(paths)),
             engine: Mutex::new(None),
@@ -123,7 +123,7 @@ fn downloading(events: &Events) -> impl FnMut(Progress) + '_ {
 /// The local hub, which holds the provider keys: found when first needed,
 /// since it may start after Desk.
 struct LocalHub {
-    backend: Backend,
+    backend: Option<Backend>,
     hub: Mutex<Option<Arc<Hub>>>,
 }
 
@@ -135,6 +135,8 @@ impl LocalHub {
         }
         let c = self
             .backend
+            .as_ref()
+            .ok_or_else(|| eyre!("Desk isn't set up on this computer yet"))?
             .connection()?
             .ok_or_else(|| eyre!("Desk is still starting"))?;
         Ok(hub

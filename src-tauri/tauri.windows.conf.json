@@ -1,0 +1,24 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/Desk Helper"
+    ],
+    "resources": {
+      "resources/backend/linux-x86_64/": "backend/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

@@ -1060,6 +1060,7 @@ dependencies = [
  "desk-core",
  "desk-tuple",
  "desk-voice",
+ "desk-wsl",
  "dirs",
  "eyre",
  "fontdb",
@@ -1169,6 +1170,19 @@ dependencies = [
  "tungstenite",
  "unicode-normalization",
  "ureq 3.5.0",
+]
+
+[[package]]
+name = "desk-wsl"
+version = "0.1.0"
+dependencies = [
+ "desk-core",
+ "eyre",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "windows-registry",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

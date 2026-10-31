@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 base64 = "0.23.1"
 desk-core = { path = "crates/desk-core" }
+desk-wsl = { path = "crates/desk-wsl" }
 dirs = "7.0.0"
 eyre = "0.6.14"
 keyring = "4.2.0"

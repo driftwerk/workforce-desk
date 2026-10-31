@@ -1,7 +1,8 @@
 //! Desk Helper — `desk-hubd`, which keeps the local hub and every session it
 //! hosts running from login, independent of this window — started at login
 //! the way each system wants: a login item on macOS, a systemd user service
-//! (or an autostart entry) on Linux.
+//! (or an autostart entry) on Linux, and on Windows `Desk Helper.exe` from
+//! the Run key, which runs it inside WSL.
 //!
 //! A development run (`DESK_HOME` set, or not an installed Desk) registers
 //! nothing: it talks to a supervisor started by hand.
@@ -27,9 +28,9 @@ pub use linux::run_bundled;
 use mac::Helper;
 #[cfg(windows)]
 use windows::Helper;
+#[cfg(windows)]
+pub use windows::{launcher, start_launcher};
 
-// Windows' helper is a development stand-in until it runs Desk in WSL.
-#[cfg_attr(windows, allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Status {
@@ -45,6 +46,17 @@ pub enum Status {
     MoveToApplications,
     /// A development run: the supervisor is started by hand.
     Development,
+    /// The distro setup chose can't run Desk any more (removed, or back on
+    /// WSL 1).
+    #[cfg(windows)]
+    NoWsl {
+        problem: desk_wsl::WslProblem,
+    },
+    /// Started, and the hub isn't answering yet.
+    Starting,
+    /// The hub answers inside WSL, but WSL doesn't pass its port to Windows.
+    #[cfg(windows)]
+    PortUnreachable,
     Failed {
         message: String,
     },
@@ -70,8 +82,18 @@ impl Status {
             Status::NeedsApproval => Some(format!(
                 "Desk Helper is turned off. Turn Desk on in {STARTUP_SETTINGS}, then open Desk again."
             )),
+            #[cfg(windows)]
+            Status::NoWsl { problem } => Some(format!(
+                "{problem}. Settings → Help → Where Desk runs sets Desk up again."
+            )),
+            #[cfg(windows)]
+            Status::PortUnreachable => Some(
+                "Windows can't reach Desk inside WSL. Settings → Help shows how to fix it.".into(),
+            ),
             Status::Failed { message } => Some(format!("Desk Helper couldn't start: {message}")),
-            Status::Running | Status::NotRegistered | Status::Development => None,
+            Status::Running | Status::NotRegistered | Status::Development | Status::Starting => {
+                None
+            }
         }
     }
 }
@@ -112,6 +134,7 @@ mod tests {
         assert!(Status::Running.blocked().is_none());
         assert!(Status::Development.blocked().is_none());
         assert!(Status::NotRegistered.blocked().is_none());
+        assert!(Status::Starting.blocked().is_none());
         assert!(
             Status::NeedsApproval
                 .blocked()
@@ -132,5 +155,20 @@ mod tests {
     fn a_mac_app_run_from_its_disk_image_is_told_to_move() {
         let why = Status::MoveToApplications.blocked().unwrap();
         assert!(why.contains("Applications") && !why.to_lowercase().contains("workforce"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_wsl_problem_says_where_to_set_desk_up_again() {
+        assert!(
+            Status::PortUnreachable
+                .blocked()
+                .unwrap()
+                .contains("can't reach")
+        );
+        let gone = Status::NoWsl {
+            problem: desk_wsl::WslProblem::NoDistro,
+        };
+        assert!(gone.blocked().unwrap().contains("Where Desk runs"));
     }
 }

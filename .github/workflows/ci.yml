@@ -58,7 +58,7 @@ jobs:
   check:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 150
     permissions:
       contents: read
     strategy:
@@ -66,16 +66,23 @@ jobs:
       matrix:
         include:
           # The frontend is the same everywhere (what differs by platform
-          # takes the platform as an argument), so it is checked here only.
+          # takes the platform as an argument), so it is checked on macOS
+          # only. Windows also builds its installers, which need the page.
           - os: macos-latest
             name: macOS — format, lint, types and tests
             frontend: true
+            page: true
+            bundle: false
           - os: ubuntu-24.04
             name: Linux — lint and tests
             frontend: false
+            page: false
+            bundle: false
           - os: windows-latest
-            name: Windows — lint
+            name: Windows — lint, tests and installers
             frontend: false
+            page: true
+            bundle: true
     defaults:
       run:
         shell: bash
@@ -96,18 +103,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev pkg-config
       - name: Read the hub ref
-        if: matrix.frontend
+        if: matrix.page
         id: hub
         run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        if: matrix.frontend
+        if: matrix.page
         with:
           repository: driftwerk/workforce
           ref: ${{ steps.hub.outputs.ref }}
           path: workforce-public-desk
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: matrix.frontend
+        if: matrix.page
         with:
           node-version: 22
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -127,33 +134,40 @@ jobs:
         working-directory: desk
         run: scripts/sherpa-onnx.sh prepare
       - name: Build the rich renderers
-        if: matrix.frontend
+        if: matrix.page
         working-directory: workforce-public-desk/packages/rich
         run: npm ci && npm run build
       - name: Install
-        if: matrix.frontend
+        if: matrix.page
         working-directory: desk
         run: npm ci
       - name: Types and frontend tests
         if: matrix.frontend
         working-directory: desk
         run: npx tsc --noEmit && npx vitest run
-      # The app bundles the helper, the hub and its memory store as sidecars;
-      # checks only need the files to exist (release builds them for real).
+      # The app bundles the helper, the hub and its memory store as sidecars
+      # (on Windows, Desk Helper.exe and the Linux backend it installs into
+      # WSL); checks only need the files to exist (release builds them).
       - name: Placeholder sidecars
         working-directory: desk/src-tauri
         run: |
           triple=$(rustc -vV | sed -n 's/^host: //p')
-          ext=$([ "$RUNNER_OS" = Windows ] && echo .exe || true)
           case "$RUNNER_OS" in
-            Linux) names=(desk-helper desk-agents desk-memory) ;;
-            *) names=("Desk Helper" "Desk Agents" "Desk Memory") ;;
+            Linux) names=(desk-helper desk-agents desk-memory) ext= ;;
+            Windows) names=("Desk Helper") ext=.exe ;;
+            *) names=("Desk Helper" "Desk Agents" "Desk Memory") ext= ;;
           esac
           mkdir -p binaries
           for name in "${names[@]}"; do
             touch "binaries/$name-$triple$ext"
             chmod +x "binaries/$name-$triple$ext"
           done
+          if [ "$RUNNER_OS" = Windows ]; then
+            backend=resources/backend/linux-x86_64
+            mkdir -p "$backend"
+            touch "$backend/desk-helper" "$backend/desk-agents" "$backend/desk-memory"
+            cp -R resources/claude-plugin "$backend/claude-plugin"
+          fi
       - name: Format
         if: matrix.frontend
         working-directory: desk
@@ -162,6 +176,16 @@ jobs:
         working-directory: desk
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Rust tests
-        if: runner.os != 'Windows'
         working-directory: desk
         run: cargo test --workspace
+      # The installers, with the real Desk Helper.exe (unsigned, and without
+      # the updater's signature: that key is the release's).
+      - name: NSIS and MSI installers
+        if: matrix.bundle
+        working-directory: desk
+        run: |
+          cargo build --locked -p desk-wsl --bin desk-wsl-helper
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          cp target/debug/desk-wsl-helper.exe "src-tauri/binaries/Desk Helper-$triple.exe"
+          npx tauri build --debug --bundles nsis,msi --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          ls target/debug/bundle/nsis target/debug/bundle/msi

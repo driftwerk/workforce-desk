@@ -10,7 +10,8 @@ export type BackendHost = { kind: "native" } | { kind: "wsl"; distro: string; us
 
 export interface HostInfo {
   platform: Platform;
-  host: BackendHost;
+  /** Null on Windows until Desk is set up inside WSL. */
+  host: BackendHost | null;
   /** What the person calls this computer; null when the system won't say. */
   computerName: string | null;
   /** Where the backend keeps its secrets, as Help names it ("the keychain",

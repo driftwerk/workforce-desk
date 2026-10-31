@@ -5,3 +5,4 @@ src-tauri/gen
 src-tauri/binaries
 *.tsbuildinfo
 .vite
+src-tauri/resources/backend

@@ -34,6 +34,8 @@ import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
 import { dragWindow } from "../ui/drag";
+import { useSetup } from "../setup/store";
+import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
@@ -57,6 +59,11 @@ export function App() {
   useHubLinks();
   const settings = useUi((u) => u.settings !== null);
   const platform = useHost((h) => h.platform);
+  const needsSetup = useHost((h) => h.platform === "windows" && h.host === null);
+  const setupOpen = useSetup((s) => s.open);
+  useEffect(() => {
+    if (needsSetup) useSetup.getState().show();
+  }, [needsSetup]);
   const { openSettings, closeSettings } = useUi.getState();
   const setHubs = useChat((s) => s.setHubs);
   const loadSettings = useSettings((s) => s.load);
@@ -109,9 +116,12 @@ export function App() {
     loadSettings().catch(fail);
     refresh();
     const unlisten = subscribe(onThemesChanged(refresh));
+    // Workspaces connected from here work without the local hub (on
+    // Windows, before Desk is set up in WSL).
     hubConnection()
       .then((c) => (stop = connect(c)))
       .then(() => (inApp ? resumeAfterUpdate() : undefined))
+      .catch(fail)
       .then(() => hubAccounts())
       .then(setHubs)
       .then(resumePairing)
@@ -204,6 +214,11 @@ export function App() {
           content), so this strip is what moves it; elsewhere the system's
           title bar does. */}
       {platform === "macos" && <div className="titlebar" onMouseDown={dragWindow} />}
+      {setupOpen && (
+        <ErrorBoundary name="setup">
+          <WindowsSetup />
+        </ErrorBoundary>
+      )}
       {settings ? (
         <ErrorBoundary name="settings">
           <Settings onClose={closeSettings} />
