@@ -1,5 +1,5 @@
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
 import { openUrl } from "../platform";
@@ -22,7 +22,9 @@ const time = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-export function Message({
+/** A message, rendered again only when what it's given changes: so those
+ *  who show it keep what they give it the same. */
+export const Message = memo(function Message({
   message,
   author,
   authorKey,
@@ -105,4 +107,4 @@ export function Message({
       </div>
     </article>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { formAnswer } from "../chat/forms";
 import { useChat } from "../chat/store";
@@ -197,17 +197,22 @@ const NO_DRAFTS: RoomDraft[] = [];
 const NO_MESSAGES: RoomMessage[] = [];
 
 /** A room message as the room shows it; a form an agent posted in it is
- *  answered to that agent, where the form is. */
-function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; name: string; home?: string }) {
-  const submitForm = (summary: string, values: Record<string, unknown>): boolean => {
-    if (!memberOf(m.author)) return false;
-    void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
-    return true;
-  };
-  const member = memberOf(m.author);
+ *  answered to that agent, where the form is. Rendered again only when it
+ *  changes, not as an answer streams in below it. */
+const RoomMessageView = memo(function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; name: string; home?: string }) {
+  const submitForm = useCallback(
+    (summary: string, values: Record<string, unknown>): boolean => {
+      if (!memberOf(m.author)) return false;
+      void answerForm(room, m, formAnswer(summary, values)).catch(useDesk.getState().fail);
+      return true;
+    },
+    [room, m],
+  );
+  const message = useMemo(() => asChat(m), [m]);
+  const member = useMemo(() => memberOf(m.author), [m.author]);
   return (
     <Message
-      message={asChat(m)}
+      message={message}
       author={name}
       authorKey={member ? m.author : undefined}
       home={home}
@@ -215,7 +220,7 @@ function RoomMessageView({ room, m, name, home }: { room: Room; m: RoomMessage; 
       onSubmitForm={submitForm}
     />
   );
-}
+});
 
 /** A room's thread: its first message, the replies, and a reply box. */
 export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
