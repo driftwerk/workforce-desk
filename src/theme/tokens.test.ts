@@ -1,7 +1,7 @@
 import { differenceEuclidean, oklch } from "culori";
 import { describe, expect, it } from "vitest";
 import { BUILTIN, DAY, HARBOUR, NIGHT } from "./builtin";
-import { codeColors, contrast, contrastChecks, cssVariables, derive, markFor, MARKS, monoStack, type ThemeSpec } from "./tokens";
+import { codeColors, contrast, contrastChecks, cssVariables, derive, EMOJI_STACK, markFor, MARKS, monoStack, type ThemeSpec } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 
 describe("themes", () => {
@@ -170,5 +170,22 @@ describe("state colours", () => {
     for (const k of STATES) expect(oklch(c[k])!.l, `${k} ${c[k]}`).toBeGreaterThan(oklch(derivedOnly(DAY).colors[k])!.l - 0.001);
     readable(light);
     expect(c.onBlocked).toBe("#FFFFFF");
+  });
+});
+
+describe("font stacks", () => {
+  it("end with the colour emoji fonts of every platform, the theme's own fonts first", () => {
+    expect(EMOJI_STACK).toBe('"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"');
+    const spec: ThemeSpec = { ...NIGHT, fonts: { ...NIGHT.fonts, display: "Bricolage Grotesque Variable", ui: "Figtree Variable", mono: "Geist Mono Variable" } };
+    const vars = cssVariables(derive(spec));
+    expect(vars["--font-ui"]).toBe(`"Figtree Variable", system-ui, sans-serif, ${EMOJI_STACK}`);
+    expect(vars["--font-display"]).toBe(`"Bricolage Grotesque Variable", system-ui, sans-serif, ${EMOJI_STACK}`);
+    expect(vars["--font-mono"]).toBe(`"Geist Mono Variable", ui-monospace, monospace, ${EMOJI_STACK}`);
+    expect(vars["--font-emoji"]).toBe(EMOJI_STACK);
+    // Terminals are drawn in the mono stack.
+    expect(monoStack(spec)).toBe(vars["--font-mono"]);
+    for (const t of BUILTIN) {
+      for (const k of ["--font-ui", "--font-display", "--font-mono"]) expect(cssVariables(derive(t))[k], `${t.id} ${k}`).toMatch(/"Noto Color Emoji"$/);
+    }
   });
 });

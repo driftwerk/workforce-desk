@@ -5,6 +5,7 @@ import { choose, defaultShortcuts, resolve, type ShortcutId } from "../shortcuts
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
+  emoticons: boolean;
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -31,6 +32,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   ungrouped: EMPTY_LAYOUT.ungrouped,
   sessionNames: {},
   layoutOnHub: false,
+  emoticons: true,
   keys: defaultShortcuts(),
   loaded: false,
   load: async () => {
@@ -53,6 +55,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
       sessionNames: s.sessionNames ?? {},
       layoutOnHub: s.layoutOnHub ?? false,
+      emoticons: s.emoticons ?? true,
       loaded: true,
     });
   },
@@ -78,6 +81,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       ungrouped: s.ungrouped,
       sessionNames: s.sessionNames,
       layoutOnHub: s.layoutOnHub,
+      emoticons: s.emoticons,
     });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),

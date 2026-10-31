@@ -18,6 +18,8 @@ import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
+import { EmojiButton } from "../emoji/EmojiButton";
+import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
 import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
@@ -407,20 +409,22 @@ function DmComposer({
   const [draft, setDraft] = useDraft(draftKey.dm(to));
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
+  const emoji = useEmojiInput({ field: composer, value: draft, setValue: setDraft });
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const picked = files.files;
     if (sending || (!draft.trim() && !picked.length)) return;
+    const text = emoji.settle(draft);
     if (!picked.length) {
-      if (send(to, draft)) setDraft("");
+      if (send(to, text)) setDraft("");
       return;
     }
     if (!hub) return;
     setSending(true);
     uploadAll(hub, agent.id, DESK_DM, picked)
       .then((attachments) => {
-        if (!send(to, draft, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         setDraft("");
         files.sent(picked);
       })
@@ -430,17 +434,28 @@ function DmComposer({
   return (
     <form className="composer composer-files" onSubmit={submit}>
       <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+      {emoji.menu}
       <AttachButton onFiles={files.add} disabled={sending} />
       <textarea
         ref={composer}
         rows={1}
         value={draft}
         placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
-        onChange={(e) => setDraft(e.target.value)}
+        {...(emoji.open
+          ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
+          : {})}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          emoji.onChange(e);
+        }}
+        onSelect={emoji.onSelect}
+        onFocus={emoji.onFocus}
         onKeyDown={(e) => {
+          if (emoji.onKeyDown(e)) return;
           if (e.key === "Enter" && !e.shiftKey) submit(e);
         }}
       />
+      <EmojiButton onPick={emoji.insert} disabled={sending} />
       {busy ? (
         <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
           Stop

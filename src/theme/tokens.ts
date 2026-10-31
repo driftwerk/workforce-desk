@@ -209,17 +209,26 @@ const kebab = (token: string): string => token.replace(/[A-Z]/g, (c) => `-${c.to
 
 export const RADII: Record<Corners, number> = { sharp: 4, soft: 14, round: 22 };
 
+/** The colour emoji fonts of macOS, Windows and Linux, which end every
+ *  stack: most fonts a theme can pick have no emoji, and some draw a few
+ *  (❤, ☺) in black and white. */
+export const EMOJI_STACK = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"';
+
 /** The CSS font stack code and terminals are drawn in. */
-export const monoStack = (spec: ThemeSpec): string => `"${spec.fonts.mono}", ui-monospace, monospace`;
+export const monoStack = (spec: ThemeSpec): string => `"${spec.fonts.mono}", ui-monospace, monospace, ${EMOJI_STACK}`;
+
+/** The stack the interface and headings are drawn in. */
+const textStack = (font: string): string => `"${font}", system-ui, sans-serif, ${EMOJI_STACK}`;
 
 export const cssVariables = (theme: Theme): Record<string, string> => {
   const { colors, spec } = theme;
   const r = RADII[spec.corners];
   return {
     ...Object.fromEntries(TOKENS.map((t) => [`--${kebab(t)}`, colors[t]])),
-    "--font-display": `"${spec.fonts.display}", system-ui, sans-serif`,
-    "--font-ui": `"${spec.fonts.ui}", system-ui, sans-serif`,
+    "--font-display": textStack(spec.fonts.display),
+    "--font-ui": textStack(spec.fonts.ui),
     "--font-mono": monoStack(spec),
+    "--font-emoji": EMOJI_STACK,
     "--font-size": `${spec.fonts.size}px`,
     "--font-size-chat": `${spec.fonts.chatSize}px`,
     "--font-size-code": `${spec.fonts.codeSize}px`,
