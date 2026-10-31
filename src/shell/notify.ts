@@ -1,5 +1,5 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { shownState } from "../floor/background";
+import { shownState, waitsOnYou } from "../floor/background";
 import { sessionName } from "../groups/names";
 import type { Session, SessionState } from "../hub/types";
 
@@ -15,7 +15,8 @@ export const notificationFor = (
   const name = sessionName(s.id, s.name, s);
   if (state === "blocked")
     return { title: `${name} needs you`, body: s.pending ? `${s.pending.tool} ${s.pending.detail}`.trim() : "Waiting for an answer" };
-  if (state === "done" && (before === "working" || before === "blocked"))
+  if (state === "asking" && before !== "blocked") return { title: `${name} needs you`, body: s.asked?.ask ?? "Asked you something" };
+  if (state === "done" && (before === "working" || waitsOnYou({ state: before })))
     return { title: `${name} is done`, body: s.lastReply?.split("\n")[0] ?? s.goal };
   return null;
 };

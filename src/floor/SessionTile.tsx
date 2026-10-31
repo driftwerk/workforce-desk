@@ -1,5 +1,5 @@
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, lookOf, shownState } from "./background";
+import { backgroundLine, backgroundOf, lookOf, shownState, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -10,6 +10,7 @@ const LABEL: Record<Session["state"], string> = {
   starting: "starting",
   working: "working",
   blocked: "needs you",
+  asking: "needs you · asked",
   done: "done",
   idle: "idle",
   interrupted: "interrupted",
@@ -24,7 +25,7 @@ export interface Group {
 
 /** How sessions are grouped on the Floor, first match wins. */
 export const GROUPS: Group[] = [
-  { title: "Needs you", match: (s) => s.state === "blocked" },
+  { title: "Needs you", match: waitsOnYou },
   { title: "Working", match: (s) => ["working", "starting"].includes(shownState(s)) },
   { title: "Recently done and idle", match: (s) => ["done", "idle"].includes(shownState(s)) && s.live },
   { title: "In other terminals", match: (s) => s.origin === "external" && s.live === false && s.state !== "closed" },

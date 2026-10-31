@@ -12,7 +12,7 @@ import { useTerminals } from "../grids/terminals";
 import { sessionItem } from "../groups/model";
 import { SidePanel } from "../panels/Stage";
 import { Mark } from "../ui/Mark";
-import { sessionAction } from "./actions";
+import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
@@ -29,7 +29,7 @@ const where = (s: Session): string => {
 export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open, sessions } = useDesk();
   const name = useSessionName(session.id, session.name);
-  const action = sessionAction(session);
+  const actions = sessionActions(session);
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
   const places = placesOf({ order, grids }, sessions, sessionItem(session.id));
@@ -60,11 +60,11 @@ export function SessionCard({ session }: { session: Session }) {
       }
       actions={
         <>
-          {action && (
-            <button type="button" className="link" onClick={action.run}>
-              {action.label}
+          {actions.map((a) => (
+            <button key={a.label} type="button" className="link" onClick={a.run}>
+              {a.label}
             </button>
-          )}
+          ))}
           {!places.length && !loose && <PutInGrid content={{ kind: "session", sessionId: session.id }} label="Put this session in a grid" onShown={() => open(null)} />}
         </>
       }
@@ -86,6 +86,13 @@ export function SessionCard({ session }: { session: Session }) {
           </button>
         )}
       </div>
+      {approvalsSwitchable(session) && (
+        <label className="session-approvals small">
+          <input type="checkbox" checked={session.approvals === "desk"} onChange={(e) => setApprovalsInDesk(session, e.target.checked)} />
+          Answer approvals in Desk
+          <span className="faint"> · else its terminal asks</span>
+        </label>
+      )}
       <SessionBody session={session} />
       <Approval session={session} />
     </SidePanel>

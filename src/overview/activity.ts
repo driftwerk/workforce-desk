@@ -37,6 +37,7 @@ export const toneOf = (e: ActivityEvent): Tone => {
       return "failed";
     case "quiet":
     case "stopped":
+    case "interrupted":
       return "quiet";
     default:
       return "working";

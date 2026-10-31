@@ -1,5 +1,7 @@
 {
-  "modules": ["./usage.ts"],
+  "modules": [
+    "./usage.ts"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -49,6 +51,22 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh",
+              "10"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
       {
         "matcher": "*",
         "hooks": [

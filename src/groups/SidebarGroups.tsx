@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type 
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
-import { lookOf, statusOf } from "../floor/background";
+import { lookOf, statusOf, waitsOnYou } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
 import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
@@ -56,6 +56,7 @@ const STATE: Record<Session["state"], string> = {
   starting: "starting",
   working: "working",
   blocked: "needs you",
+  asking: "needs you · asked",
   done: "done",
   idle: "idle",
   interrupted: "interrupted",
@@ -419,8 +420,8 @@ export function SidebarGroups() {
                   }
                   meta={
                     item.kind === "session"
-                      ? item.session.state === "blocked"
-                        ? STATE.blocked
+                      ? waitsOnYou(item.session)
+                        ? STATE[item.session.state]
                         : ENGINE[item.session.engine]
                       : item.agent.id === managerId && hubs.find((h) => h.id === item.agent.hubId)?.local
                         ? "overseer"
@@ -670,7 +671,7 @@ function ItemRow({
       lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${lookOf(item.session)}`} aria-hidden="true" />}
       name={name}
       nameClass={session ? "mono" : "display"}
-      meta={<span className={`gi-meta small ${session?.state === "blocked" ? "state-blocked" : "faint"}`}>{meta}</span>}
+      meta={<span className={`gi-meta small ${session && waitsOnYou(session) ? "state-blocked" : "faint"}`}>{meta}</span>}
       title={title}
       describedBy={hint}
       data={{ "data-item": item.key }}

@@ -15,7 +15,7 @@ export interface Oversight {
   maxCheckinsPerHour: number;
   /** The ceiling over a day. */
   maxCheckinsPerDay: number;
-  act: { nudge: boolean; resumeRestart: boolean; readOnlyApprovals: boolean; handOutWork: boolean };
+  act: { nudge: boolean; resumeRestart: boolean; readOnlyApprovals: boolean; handOutWork: boolean; interrupt: boolean };
 }
 
 export const DEFAULT_OVERSIGHT: Oversight = {
@@ -26,7 +26,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
   summaries: { morning: "09:00", evening: "" },
   maxCheckinsPerHour: 6,
   maxCheckinsPerDay: 100,
-  act: { nudge: true, resumeRestart: true, readOnlyApprovals: false, handOutWork: false },
+  act: { nudge: true, resumeRestart: true, readOnlyApprovals: false, handOutWork: false, interrupt: false },
 };
 
 const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act"];
@@ -89,6 +89,7 @@ export const oversightOf = (source: string): Oversight => {
       resumeRestart: bool(act.resume_restart, d.act.resumeRestart),
       readOnlyApprovals: bool(act.read_only_approvals, d.act.readOnlyApprovals),
       handOutWork: bool(act.hand_out_work, d.act.handOutWork),
+      interrupt: bool(act.interrupt, d.act.interrupt),
     },
   };
 };
@@ -125,6 +126,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       resume_restart: o.act.resumeRestart,
       read_only_approvals: o.act.readOnlyApprovals,
       hand_out_work: o.act.handOutWork,
+      interrupt: o.act.interrupt,
     },
   };
   return stringify(doc) + "\n";
