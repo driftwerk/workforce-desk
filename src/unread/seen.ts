@@ -2,14 +2,15 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useDesk } from "../hub/store";
 import type { ReadPoint } from "../hub/types";
 import { later } from "../rooms/time";
+import { attending, useDeskFocus } from "./focus";
 import { placeKey, type Place } from "./places";
 import { advance, laterPoint, pointOf, useReads } from "./reads";
 import { useUnread } from "./summary";
 import { release, useWatching, watchOff, watchOn } from "./watching";
 
 // The one rule for read: something is read once it has been on screen for
-// half a second while Desk's window has focus and is visible, wherever it
-// shows, or at once when you click, focus or type in it. A place you talk in
+// half a second while its window is visible and has focus (a detached
+// grid's while any of Desk's windows has), wherever it shows, or at once when you click, focus or type in it. A place you talk in
 // (a room, a thread, a DM, a session) is read whole while it stays on screen,
 // however far it's scrolled, and nothing in it is unread while it does; a
 // list of others' events (Activity) is read through its newest item whose
@@ -18,7 +19,6 @@ import { release, useWatching, watchOff, watchOn } from "./watching";
 /** How long something must be on screen to be read. */
 export const SEEN_MS = 500;
 
-const attending = (): boolean => document.hasFocus() && document.visibilityState === "visible";
 
 /** An item of a list, as its point is written. */
 export interface SeenItem {
@@ -221,8 +221,11 @@ export function useOnScreen(
     window.addEventListener("focus", attended);
     window.addEventListener("blur", attended);
     document.addEventListener("visibilitychange", attended);
+    // Another of Desk's windows gaining or losing focus (see `attending`).
+    const unfocused = useDeskFocus.subscribe(attended);
     for (const type of ["pointerdown", "focusin", "keydown"]) el.addEventListener(type, touched, true);
     return () => {
+      unfocused();
       stop();
       release(key);
       io.disconnect();

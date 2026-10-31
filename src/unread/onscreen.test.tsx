@@ -16,6 +16,7 @@ import { useBadgeData } from "./Marks";
 import { markUnread, useReads } from "./reads";
 import { SEEN_MS } from "./seen";
 import { useUnread } from "./summary";
+import { heardFocus, useDeskFocus } from "./focus";
 import { useWatching } from "./watching";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -81,6 +82,7 @@ const finished = (since: string): SessionUnread => ({ id: "s1", since, urgency: 
 
 let puts: { place: string; point: { at: string; message: string | null }; mark: string }[] = [];
 let focused = true;
+let visibility: DocumentVisibilityState = "visible";
 
 /** The session's sidebar badge, as this window draws it. */
 let badge = { count: 0, dot: false };
@@ -106,12 +108,16 @@ beforeEach(() => {
   FakeObserver.all = [];
   puts = [];
   focused = true;
+  visibility = "visible";
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+  vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+  useDeskFocus.setState({}, true);
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null, filled: {} });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }], roster: [] });
   useDesk.setState({
+    detached: false,
     view: "grids",
     openId: null,
     sessions: { s1: session() },
@@ -253,5 +259,54 @@ describe("a session on screen is read", () => {
     wait(SEEN_MS);
     expect(badge.count).toBe(0);
     expect(lastPut()).toBe("2026-10-31T09:08:00.500Z");
+  });
+
+  it("in a detached grid's window: while it's visible and any Desk window has focus, not minimised nor once you've left Desk", () => {
+    useDesk.setState({ detached: true });
+    focused = false;
+    deliver(MAIN_GRID, own);
+    render(grid());
+    // You work in the main window; the grid shows on another monitor.
+    act(() => heardFocus("main", true));
+    showAll();
+    expect(badge.count).toBe(0);
+    wait(SEEN_MS);
+    expect(lastPut()).toBe("2026-10-31T09:05:00.500Z");
+
+    // Minimised, what it does then isn't read.
+    visibility = "hidden";
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    const later = "2026-10-31T09:10:00Z";
+    vi.setSystemTime(new Date(later));
+    act(() => useDesk.setState({ sessions: { s1: session({ state: "done", updatedAt: later }) } }));
+    act(() => summary([finished(later)]));
+    wait(SEEN_MS * 2);
+    expect(badge.count).toBe(1);
+    expect(lastPut()).toBe("2026-10-31T09:05:00.500Z");
+
+    // Visible again, but no Desk window has focus: still not.
+    act(() => heardFocus("main", false));
+    visibility = "visible";
+    act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    wait(SEEN_MS * 2);
+    expect(badge.count).toBe(1);
+    expect(lastPut()).toBe("2026-10-31T09:05:00.500Z");
+
+    // Back in the main window: read, through now.
+    act(() => heardFocus("main", true));
+    expect(badge.count).toBe(0);
+    wait(SEEN_MS);
+    expect(lastPut()).toBe("2026-10-31T09:10:02.500Z");
+  });
+
+  it("not in the main window while only another Desk window has focus", () => {
+    focused = false;
+    deliver(MAIN_GRID, own);
+    render(grid());
+    act(() => heardFocus("grid-g2", true));
+    showAll();
+    wait(SEEN_MS * 2);
+    expect(badge.count).toBe(1);
+    expect(puts).toEqual([]);
   });
 });
