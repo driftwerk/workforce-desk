@@ -84,10 +84,19 @@ describe("writing read points", () => {
     expect(useReads.getState().dms["dw/allan"]).toEqual({ at: at(7), message: "d7" });
   });
 
-  it("writes no DM point to a hub that keeps none", async () => {
-    useChat.setState({ hubFeatures: {} });
+  it("writes no DM point to a hub that said it keeps none, and asks one not heard from here", async () => {
+    useChat.setState({ hubFeatures: { dw: new Set(["desk.floor"]) } });
     await advance({ kind: "dm", hub: "dw", agent: "allan" }, { at: at(7), message: "d7" });
     expect(conversationReads).toEqual([]);
+    useChat.setState({ hubFeatures: {} });
+    await advance({ kind: "dm", hub: "dw", agent: "allan" }, { at: at(8), message: "d8" });
+    expect(conversationReads).toHaveLength(1);
+  });
+
+  it("drops a DM point its hub can't keep (503) rather than waiting to send it", async () => {
+    const { putConversationRead } = await import("../hubs/surface");
+    vi.mocked(putConversationRead).mockRejectedValueOnce(new HubError(503, "this hub keeps no read points"));
+    await advance({ kind: "dm", hub: "dw", agent: "allan" }, { at: at(9), message: "d9" });
     expect(state.get("unread.pending.dw")).toBeUndefined();
   });
 

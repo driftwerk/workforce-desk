@@ -65,9 +65,9 @@ const pendingOf = (hubId: string): Pending[] => {
 };
 
 /** A write that couldn't reach its hub, kept to send once it's back; one
- *  the hub refused (or has no route for) isn't. */
+ *  the hub refused, has no route for, or keeps no points for (503) isn't. */
 const keep = (hubId: string, w: Pending, e: unknown) => {
-  if (e instanceof HubError && e.status >= 400 && e.status < 500) return;
+  if (e instanceof HubError && ((e.status >= 400 && e.status < 500) || e.status === 503)) return;
   deskState.set(pendingKey(hubId), [...pendingOf(hubId).filter((p) => placeKey(p.place) !== placeKey(w.place)), w]);
 };
 
@@ -100,8 +100,10 @@ const shown = (place: Place, point: ReadPoint) =>
 async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): Promise<void> {
   const hub = hubOf(place);
   if (!hub) return;
-  // Only a hub that keeps DM read points (it says so on its link) takes one.
-  if (place.kind === "dm" && !useChat.getState().hubFeatures[hub.id]?.has("desk.reads")) return;
+  // A hub whose link said what it offers, without DM read points, takes
+  // none; one not heard from here (a detached window has no links) is asked.
+  const offers = useChat.getState().hubFeatures[hub.id];
+  if (place.kind === "dm" && offers && !offers.has("desk.reads")) return;
   try {
     if (place.kind === "dm") {
       await putConversationRead(hub, place.agent, { channel: DESK_DM, at: point.at, message: point.message, mark });

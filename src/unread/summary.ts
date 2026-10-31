@@ -108,7 +108,8 @@ onDmWritten((hub) => void refreshDms(hub));
 /** A hub is linked again: what waited for it is sent. */
 export const hubBack = (hub: HubAccount): Promise<void> => flushPending(hub.id);
 
-/** Unpaired hubs' counts, cache and waiting writes go. */
+/** Unpaired hubs' counts go; their cache and waiting writes are left for
+ *  a hub paired again under the same id. */
 export function forgetHubs(hubs: readonly HubAccount[]): void {
   const ids = new Set(hubs.map((h) => h.id));
   useUnread.setState((s) => ({
