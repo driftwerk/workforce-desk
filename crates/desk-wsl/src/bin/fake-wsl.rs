@@ -1,6 +1,6 @@
 //! A stand-in for `wsl.exe` in tests: answers each call from the
-//! `scenario.json` beside it (each test runs a copy of its own), and notes
-//! every call in its log.
+//! `scenario.json` beside the path it was run by (each test puts it in a
+//! folder of its own), and notes every call in its log.
 //!
 //! A scenario is `{"log": path, "answers": [answer…]}`; an answer is chosen
 //! when its `args` equal the call's, or the call starts with its `starts`
@@ -47,9 +47,12 @@ impl Answer {
 
 fn main() {
     let call: Vec<String> = std::env::args().skip(1).collect();
-    let path = std::env::current_exe()
-        .expect("this program's path")
-        .with_file_name("scenario.json");
+    // The path it was run by, not `current_exe`: the tests link one file
+    // into each folder, and of a file with several names any may be said to
+    // be this program's.
+    let path =
+        std::path::PathBuf::from(std::env::args_os().next().expect("the path it was run by"))
+            .with_file_name("scenario.json");
     let scenario: Scenario =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("the scenario"))
             .expect("a scenario");
