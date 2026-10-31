@@ -159,6 +159,37 @@ describe("a session's pane", () => {
     expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();
   });
 
+  it("interrupts a tracked one while it works, from its terminal pane, and never stops it", () => {
+    const interrupt = vi.fn(() => Promise.resolve());
+    const update = vi.fn(() => Promise.resolve());
+    useDesk.setState((s) => ({
+      hub: { closeTerminal, stop, resume, interrupt, update } as never,
+      sessions: { ...s.sessions, s0: { ...s.sessions.s0!, live: true, state: "working", terminalId: "t1", approvals: "terminal" } },
+    }));
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
+    canvas();
+    const pane = screen.getByRole("region", { name: "task-0" });
+    expect(within(pane).queryByRole("button", { name: "Stop" })).toBeNull();
+    fireEvent.click(within(pane).getByRole("button", { name: "Interrupt" }));
+    fromMenu(pane, "Interrupt");
+    expect(interrupt).toHaveBeenCalledTimes(2);
+    expect(interrupt).toHaveBeenCalledWith("s0");
+    expect(closeTerminal).not.toHaveBeenCalled();
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    const toggle = screen.getByRole("menuitemcheckbox", { name: "Answer approvals in Desk" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(update).toHaveBeenCalledWith("s0", { approvals: "desk" });
+  });
+
+  it("shows what a session asked in its pane", () => {
+    const pane = shown({ live: true, state: "asking", asked: { ask: "Stopped: Bash was not allowed", why: "auto mode refused Bash", options: null, denied: null } });
+    expect(pane.className).toContain("gpane-asking");
+    expect(within(pane).getByText("Stopped: Bash was not allowed")).toBeTruthy();
+    expect(within(pane).getByText(/needs you · asked/)).toBeTruthy();
+  });
+
   it("offers neither for one running in another terminal", () => {
     const pane = shown({ origin: "external" });
     expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();

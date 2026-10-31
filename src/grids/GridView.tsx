@@ -72,7 +72,7 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
     else if (c?.kind === "terminal") s = trackedIn(sessions, c.terminalId);
     else if (c?.kind === "agent" && conversations[c.agent]?.working) working += 1;
     const state = s && shownState(s);
-    if (state === "blocked") needsYou += 1;
+    if (state === "blocked" || state === "asking") needsYou += 1;
     else if (state === "working" || state === "starting") working += 1;
   }
   return { panes: shown.length, working, needsYou };

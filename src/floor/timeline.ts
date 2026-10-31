@@ -66,11 +66,12 @@ const joined = (spans: readonly Span[]): Span[] => {
 
 /** `lanes` as `whoOf` has whose each is: one that turns out to be an
  *  agent's (a session its turn ran as) goes in that agent's lane, which
- *  keeps its own name. */
-export const asWho = (lanes: readonly FloorLane[], whoOf: (lane: FloorLane) => Who): FloorLane[] => {
+ *  keeps its own name; one that is no one's (null) goes. */
+export const asWho = (lanes: readonly FloorLane[], whoOf: (lane: FloorLane) => Who | null): FloorLane[] => {
   const by = new Map<string, { lane: FloorLane; own: boolean }>();
   for (const l of lanes) {
     const who = whoOf(l);
+    if (!who) continue;
     const own = who.kind === l.who.kind && who.id === l.who.id;
     const key = own ? l.key : `${l.hubId}/${who.kind}:${who.id}`;
     const had = by.get(key);

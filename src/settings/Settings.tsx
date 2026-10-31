@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
+import { Chat } from "./Chat";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
 import { Profile } from "./Profile";
@@ -46,6 +47,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       </nav>
       {section === "profile" && <Profile />}
       {section === "appearance" && <Appearance />}
+      {section === "chat" && <Chat />}
       {section === "hubs" && <Hubs />}
       {section === "providers" && <Providers />}
       {section === "voices" && <Voices />}

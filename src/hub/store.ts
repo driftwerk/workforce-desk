@@ -272,6 +272,7 @@ export const useDesk = create<DeskState>((set, get) => ({
 
 const RANK: Record<Session["state"], number> = {
   blocked: 0,
+  asking: 0,
   working: 1,
   starting: 1,
   done: 2,

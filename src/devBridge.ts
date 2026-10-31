@@ -44,6 +44,7 @@ let settings = {
   ungrouped: { collapsed: false, items: [] as string[] },
   sessionNames: {} as Record<string, string>,
   layoutOnHub: false,
+  emoticons: true,
 };
 
 // ── Desk's state file and the hub's state store, for the preview ──────────

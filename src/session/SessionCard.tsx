@@ -5,14 +5,14 @@ import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { PutInGrid } from "../grids/PutInGrid";
-import { shownGrid, useGrids } from "../grids/store";
-import { placesOf, type Place } from "../grids/where";
+import { ShownIn } from "../grids/ShownIn";
+import { useGrids } from "../grids/store";
+import { placesOf } from "../grids/where";
 import { useTerminals } from "../grids/terminals";
-import { addToGrid, goTo } from "../grids/windows";
 import { sessionItem } from "../groups/model";
 import { SidePanel } from "../panels/Stage";
 import { Mark } from "../ui/Mark";
-import { sessionAction } from "./actions";
+import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
@@ -29,7 +29,7 @@ const where = (s: Session): string => {
 export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open, sessions } = useDesk();
   const name = useSessionName(session.id, session.name);
-  const action = sessionAction(session);
+  const actions = sessionActions(session);
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
   const places = placesOf({ order, grids }, sessions, sessionItem(session.id));
@@ -60,11 +60,11 @@ export function SessionCard({ session }: { session: Session }) {
       }
       actions={
         <>
-          {action && (
-            <button type="button" className="link" onClick={action.run}>
-              {action.label}
+          {actions.map((a) => (
+            <button key={a.label} type="button" className="link" onClick={a.run}>
+              {a.label}
             </button>
-          )}
+          ))}
           {!places.length && !loose && <PutInGrid content={{ kind: "session", sessionId: session.id }} label="Put this session in a grid" onShown={() => open(null)} />}
         </>
       }
@@ -86,49 +86,16 @@ export function SessionCard({ session }: { session: Session }) {
           </button>
         )}
       </div>
+      {approvalsSwitchable(session) && (
+        <label className="session-approvals small">
+          <input type="checkbox" checked={session.approvals === "desk"} onChange={(e) => setApprovalsInDesk(session, e.target.checked)} />
+          Answer approvals in Desk
+          <span className="faint"> · else its terminal asks</span>
+        </label>
+      )}
       <SessionBody session={session} />
       <Approval session={session} />
     </SidePanel>
-  );
-}
-
-/** Where the session already is (see `placesOf`), each with a way there:
- *  its own pane in a grid, the terminal in a grid it runs in, or a Desk
- *  terminal no grid shows, which is put in the grid shown now. `onShown`
- *  closes the card once it's in sight. */
-function ShownIn({ places, loose, onShown }: { places: Place[]; loose: string | null; onShown: () => void }) {
-  const grids = useGrids((s) => s.grids);
-  const go = (p: Place) => goTo(p) && onShown();
-  const line = (p: Place, says: string, label: string) => {
-    const grid = grids[p.gridId]?.name ?? "a grid";
-    return (
-      <li key={p.paneId}>
-        <span>
-          {says} <span className="strong">{grid}</span>
-        </span>
-        <button type="button" className="link small" aria-label={`${label} in ${grid}`} onClick={() => go(p)}>
-          {label}
-        </button>
-      </li>
-    );
-  };
-  return (
-    <ul className="session-where small" aria-label="Where it is">
-      {places.filter((p) => p.content.kind !== "terminal").map((p) => line(p, "In grid", "Go to it"))}
-      {places.filter((p) => p.content.kind === "terminal").map((p) => line(p, "Running in a terminal in", "Go to the terminal"))}
-      {loose && (
-        <li>
-          <span>Running in a Desk terminal that isn’t in a grid</span>
-          <button
-            type="button"
-            className="link small"
-            onClick={() => addToGrid({ kind: "terminal", terminalId: loose }, shownGrid(useGrids.getState())?.id ?? null).shown && onShown()}
-          >
-            Show it
-          </button>
-        </li>
-      )}
-    </ul>
   );
 }
 

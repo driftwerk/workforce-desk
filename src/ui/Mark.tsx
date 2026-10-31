@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Look } from "../floor/background";
 import { useAgentImage, useYou } from "../pictures/who";
 import { markFor } from "../theme/tokens";
+import { firstGrapheme } from "./graphemes";
 
 const RING: Partial<Record<Look, string>> = {
   working: "ring-working",
@@ -12,7 +13,7 @@ const RING: Partial<Record<Look, string>> = {
 };
 
 export const initialsFor = (name: string, engine?: string): string =>
-  engine === "claude" ? "cc" : engine === "codex" ? "cx" : ([...name.trim()][0] ?? "?").toUpperCase();
+  engine === "claude" ? "cc" : engine === "codex" ? "cx" : (firstGrapheme(name.trim()) ?? "?").toUpperCase();
 
 export type MarkSize = "xs" | "sm" | "md" | "lg" | "xl";
 

@@ -14,6 +14,8 @@ import { memberKey, memberOf } from "./routing";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import { useUi } from "../shell/ui";
+import { EmojiButton } from "../emoji/EmojiButton";
+import { useEmojiInput } from "../emoji/useEmojiInput";
 import { SidePanel } from "../panels/Stage";
 import { useFocusRequest } from "../shell/focus";
 
@@ -59,6 +61,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
   const listId = useId();
 
   const typing = mentionAt(draft, caret);
+  const emoji = useEmojiInput({ field, value: draft, setValue: setDraft });
   const options = typing && dismissed !== typing.start ? suggestions(typing.query, roster, room.members) : [];
   const open = options.length > 0;
   const current = Math.min(active, options.length - 1);
@@ -80,7 +83,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
   const [sending, setSending] = useState(false);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    const text = draft;
+    const text = emoji.settle(draft);
     const picked = files.files;
     if ((!text.trim() && !picked.length) || sending) return;
     setDraft("");
@@ -123,6 +126,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
           ))}
         </ul>
       )}
+      {emoji.menu}
       <AttachButton onFiles={files.add} disabled={sending} />
       <textarea
         ref={field}
@@ -131,17 +135,23 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
         placeholder={placeholder}
         role="combobox"
         aria-autocomplete="list"
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-        aria-activedescendant={open ? `${listId}-${current}` : undefined}
+        aria-expanded={open || emoji.open}
+        aria-controls={open ? listId : emoji.open ? emoji.listId : undefined}
+        aria-activedescendant={open ? `${listId}-${current}` : emoji.activeId}
         onChange={(e) => {
           setDraft(e.target.value);
           setCaret(e.target.selectionStart ?? e.target.value.length);
           setActive(0);
           setDismissed(null);
+          emoji.onChange(e);
         }}
-        onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+        onSelect={(e) => {
+          setCaret(e.currentTarget.selectionStart ?? 0);
+          emoji.onSelect(e);
+        }}
+        onFocus={emoji.onFocus}
         onKeyDown={(e) => {
+          if (emoji.onKeyDown(e)) return;
           if (open) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
@@ -164,6 +174,7 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
           if (e.key === "Enter" && !e.shiftKey) submit(e);
         }}
       />
+      <EmojiButton onPick={emoji.insert} disabled={sending} />
       <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length)}>
         {sending ? "Sending…" : "Send"}
       </button>

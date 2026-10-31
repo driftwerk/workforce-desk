@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
+import type { Session } from "../hub/types";
+import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote } from "./Row";
@@ -19,17 +21,34 @@ const useFocusKept = () => {
   return ref;
 };
 
-/** What still needs the person, as a row: in Right now it opens where it
- *  is; in Activity it can also be answered there. */
+/** What still needs the person, as a row: it opens where it is (a session
+ *  or a DM beside the Floor); in Activity it can also be answered there. */
 export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: number; actions?: boolean }) {
   const rooms = useDesk((s) => s.rooms);
+  // A session on this computer whose turn ended asking: what Desk read, and
+  // what answers it here.
+  const asking = useDesk((s): Session | null => {
+    const session = need.local && need.who.kind === "session" ? s.sessions[need.who.id] : undefined;
+    return session?.state === "asking" && session.asked ? session : null;
+  });
+  const [acting, setActing] = useState(false);
+  const act = (what: "allowAsked" | "dismissAsked") => () => {
+    const { hub, fail } = useDesk.getState();
+    if (!asking || !hub || acting) return;
+    setActing(true);
+    hub[what](asking.id)
+      .catch(fail)
+      .finally(() => setActing(false));
+  };
+  const denied = asking?.asked?.denied ?? null;
   const deciding = useFloor((s) => s.deciding[need.key]);
   const problem = useFloor((s) => s.problems[need.key]);
   const stale = useStaleNote(need);
   const ref = useFocusKept();
   const target = targetOf(need, rooms);
   const where = placeLabel(need.place, rooms);
-  const open = target ? () => openTarget(target) : undefined;
+  // Beside the Floor, as the Floor's tiles open, even when a grid shows it.
+  const open = target ? () => openTarget(target, { beside: true }) : undefined;
   return (
     <div ref={ref} className={`floor-need ${actions ? "floor-need-acts" : ""}`}>
       <FloorRow
@@ -41,6 +60,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       >
         {need.ask}
         {where && <span className="faint"> · {where}</span>}
+        {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
       </FloorRow>
       {actions && (
         <span className="floor-need-buttons">
@@ -54,6 +74,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               onClick={() => !deciding && void useFloor.getState().decide(need.hubId, need, "allow")}
             >
               {deciding ? "Allowed…" : "Allow"}
+            </button>
+          )}
+          {denied?.allowable && (
+            <button type="button" className="btn btn-signal" disabled={need.stale || acting} title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined} onClick={act("allowAsked")}>
+              {allowLabel(denied)}
             </button>
           )}
           {target && need.answer.kind === "reply" && (
@@ -70,6 +95,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               onClick={() => openTarget(target, { reply: need.answer.kind === "terminal" })}
             >
               Open
+            </button>
+          )}
+          {asking && (
+            <button type="button" className="btn" disabled={need.stale || acting} onClick={act("dismissAsked")}>
+              Dismiss
             </button>
           )}
           <span className="sr-only" role="status">

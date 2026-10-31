@@ -123,6 +123,10 @@ pub struct Settings {
     /// keeps them from then on; they stay here for a hub that can't.
     #[serde(default)]
     pub layout_on_hub: bool,
+    /// Emoticons typed in a message (`<3`, `:)`) become emoji. On unless
+    /// turned off, older files included.
+    #[serde(default = "default_true")]
+    pub emoticons: bool,
     /// Older Desks' hold-to-talk and Ask anyone keys, read once into
     /// `shortcuts` and never written again.
     #[serde(default, skip_serializing)]
@@ -137,6 +141,10 @@ fn default_theme() -> String {
 
 fn default_voice_engine() -> String {
     "cascade".into()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Hold to talk's default, then and now.
@@ -164,6 +172,7 @@ impl Default for Settings {
             ungrouped: Ungrouped::default(),
             session_names: Default::default(),
             layout_on_hub: false,
+            emoticons: true,
             push_to_talk_shortcut: None,
             ask_shortcut: None,
         }
@@ -386,6 +395,26 @@ mod tests {
         let sparse = load_settings(&paths).unwrap();
         assert_eq!(sparse.groups[0].name, "Beta");
         assert!(!sparse.groups[0].collapsed && sparse.groups[0].items.is_empty());
+    }
+
+    #[test]
+    fn emoticons_are_on_unless_turned_off_and_the_choice_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        assert!(load_settings(&paths).unwrap().emoticons);
+        std::fs::write(paths.settings(), r#"{"theme":"system"}"#).unwrap();
+        assert!(load_settings(&paths).unwrap().emoticons);
+        let chosen = Settings {
+            emoticons: false,
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        assert!(
+            std::fs::read_to_string(paths.settings())
+                .unwrap()
+                .contains(r#""emoticons": false"#)
+        );
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 
     #[test]

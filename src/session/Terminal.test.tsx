@@ -7,6 +7,7 @@ import { defaultShortcuts } from "../shortcuts/keys";
 import { useAppShortcut } from "../shortcuts/manager";
 import { NIGHT } from "../theme/builtin";
 import { useThemeStore } from "../theme/store";
+import { EMOJI_STACK } from "../theme/tokens";
 import { Terminal } from "./Terminal";
 
 const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement }[] = [];
@@ -62,10 +63,10 @@ describe("a terminal", () => {
     render(<Terminal sessionId="s1" />);
     const term = terms.at(-1)!;
     expect(term.options.fontSize).toBe(15);
-    expect(term.options.fontFamily).toBe('"Menlo", ui-monospace, monospace');
+    expect(term.options.fontFamily).toBe(`"Menlo", ui-monospace, monospace, ${EMOJI_STACK}`);
     act(() => useThemeStore.setState({ custom: [{ ...mine, fonts: { ...mine.fonts, mono: "Courier", codeSize: 11 } }] }));
     expect(term.options.fontSize).toBe(11);
-    expect(term.options.fontFamily).toBe('"Courier", ui-monospace, monospace');
+    expect(term.options.fontFamily).toBe(`"Courier", ui-monospace, monospace, ${EMOJI_STACK}`);
     vi.unstubAllGlobals();
   });
 

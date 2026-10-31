@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
-import { startGrids, useGrids } from "../grids/store";
+import { deliver, layOut, startGrids, useGrids } from "../grids/store";
 import { EMPTY_LAYOUT } from "../groups/model";
 import type { DeskHub } from "../hub/client";
 import { localIso } from "../hub/floor";
@@ -16,7 +16,7 @@ import { Sidebar } from "../shell/Sidebar";
 import { defaultShortcuts } from "../shortcuts/keys";
 import { Floor } from "./Floor";
 import { SETTLE_MS, TICK_MS, useFloor, watchFloor } from "./store";
-import { NOW, agent, approval, at, fakeFetch, fakeHub, hub, need, session, view, type FakeHub } from "./testing";
+import { NOW, agent, approval, at, fakeFetch, fakeHub, hub, need, session, view, work, type FakeHub } from "./testing";
 import { clock } from "./time";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -242,5 +242,50 @@ describe("the Floor across hubs", () => {
         .getAllByRole("button", { name: "Reply" })
         .every((b) => !(b as HTMLButtonElement).disabled),
     ).toBe(true);
+  });
+});
+
+describe("what's happening, beside what's in a grid", () => {
+  const happeningRow = (name: string) =>
+    within(screen.getByRole("group", { name: "What’s happening" }))
+      .getAllByRole("button")
+      .find((b) => b.querySelector("b")?.textContent === name)!;
+  const sidebarRow = (name: string) =>
+    screen.getAllByRole("button").find((b) => b.dataset.item && b.querySelector(".gi-name")?.textContent === name)!;
+
+  beforeEach(() => {
+    hubs.local!.floor = { ...hubs.local!.floor!, working: [work(session("s1", "api-e7"), { since: at(5) })] };
+    hubs.b!.floor = { ...hubs.b!.floor!, working: [work(agent("scout", "Scout"), { since: at(4) })] };
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    deliver(MAIN_GRID, { kind: "agent", agent: "b/scout" });
+    useChat.setState({ panelAgent: null });
+  });
+
+  it("opens a session that's in a grid in its card beside the Floor, and stays on the Floor", async () => {
+    await shell();
+    fireEvent.click(happeningRow("api-e7"));
+    expect(useDesk.getState().view).toBe("floor");
+    expect(useDesk.getState().openId).toBe("s1");
+    expect(useGrids.getState().flash).toBeNull();
+  });
+
+  it("opens an agent that's in a grid in its DM beside the Floor, and stays on the Floor", async () => {
+    await shell();
+    fireEvent.click(happeningRow("Scout"));
+    expect(useDesk.getState().view).toBe("floor");
+    expect(useChat.getState().panelAgent).toBe("b/scout");
+    expect(useGrids.getState().flash).toBeNull();
+  });
+
+  it("leaves the sidebar taking the person to the grid", async () => {
+    await shell();
+    fireEvent.click(sidebarRow("api-e7"));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(useDesk.getState().openId).toBeNull();
+    useDesk.setState({ view: "floor" });
+    fireEvent.click(sidebarRow("Scout"));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(useChat.getState().panelAgent).toBeNull();
   });
 });

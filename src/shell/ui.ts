@@ -4,6 +4,7 @@ import type { PanelKind } from "../panels/layout";
 export const SETTINGS_SECTIONS = {
   profile: "Profile",
   appearance: "Appearance",
+  chat: "Chat",
   hubs: "Workspaces",
   providers: "Providers",
   voices: "Voices",

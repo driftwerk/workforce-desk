@@ -46,4 +46,14 @@ describe("the Floor's tiles", () => {
       "Recently done and idle": ["scout"],
     });
   });
+
+  it("leave out the sessions a hub ran an agent's turn as, but for one waiting on you", () => {
+    const folder = "/Desk/hub/data/agents/desk/projects/_agent-turn/work/session/at-dm-d4774cbb6c89";
+    const turns = [
+      s("t-1", "done", { name: "at-dm-d4774cbb6c89-2e", origin: "external" }),
+      s("t-2", "working", { name: "repo", cwd: folder }),
+      s("t-3", "blocked", { name: "at-dm-0a1b2c3d4e5f-2e" }),
+    ];
+    expect(titles(floorGroups({ ...overview, items: [] }, [...turns, s("busy", "working")]))).toEqual({ "Needs you": ["t-3"], Working: ["busy"] });
+  });
 });

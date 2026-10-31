@@ -15,7 +15,7 @@ import { Stage, type OpenPanel } from "../panels/Stage";
 import { SessionCard } from "../session/SessionCard";
 import { useSettings } from "../settings/store";
 import { useUi } from "../shell/ui";
-import { AgentPanel, useAgentPanel } from "./AgentPanel";
+import { AgentPanel, openAgentBeside, useAgentPanel } from "./AgentPanel";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -133,6 +133,21 @@ describe("an agent clicked on the Floor", () => {
     expect(shownIn(panel())).toBe("Scout");
   });
 
+  it("from a Floor tile, beside the Floor even when a grid shows the agent", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+    render(
+      <>
+        <ItemTile item={{ kind: "agent", id: "scout", name: "Scout", state: "working", task: "Deploying" }} />
+        <Desk />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Scout.*working/ }));
+    expect(useDesk.getState().view).toBe("floor");
+    expect(useGrids.getState().flash).toBeNull();
+    expect(shownIn(panel())).toBe("Scout");
+  });
+
   it("puts a second agent in the panel in place of the first", () => {
     render(<Desk />);
     fireEvent.click(row("Scout"));
@@ -200,6 +215,21 @@ describe("the DM beside the Floor", () => {
     expect(useGrids.getState().grids[fresh]!.panes.filter((x) => x.rect).map((x) => x.content)).toEqual([{ kind: "agent", agent: "local/scout" }]);
     expect(useGrids.getState().active).toBe(fresh);
     expect(useDesk.getState().view).toBe("grids");
+    expect(useChat.getState().panelAgent).toBeNull();
+  });
+
+  it("says which grid shows the agent, with a way there, in place of Put in grid", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
+    act(() => openAgentBeside("local/scout"));
+    render(<Desk />);
+    const p = within(panel()!);
+    expect(p.getByRole("list", { name: "Where it is" }).textContent).toContain("In grid Main");
+    expect(p.queryByRole("button", { name: "Put Scout in a grid" })).toBeNull();
+    act(() => fireEvent.click(p.getByRole("button", { name: "Go to it in Main" })));
+    const pane = useGrids.getState().grids[MAIN_GRID]!.panes.find((x) => x.content?.kind === "agent")!;
+    expect(useDesk.getState().view).toBe("grids");
+    expect(useGrids.getState().flash).toMatchObject({ gridId: MAIN_GRID, paneIds: [pane.id] });
     expect(useChat.getState().panelAgent).toBeNull();
   });
 

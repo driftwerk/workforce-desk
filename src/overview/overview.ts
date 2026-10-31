@@ -5,6 +5,7 @@ import { plain } from "../ui/plain";
 /** What a session's live state says, in the overview's words. */
 const FROM_LIVE: Record<SessionState, OverviewState> = {
   blocked: "needs_you",
+  asking: "needs_you",
   working: "working",
   starting: "working",
   done: "done",
@@ -57,7 +58,7 @@ export interface Grouped {
 export const group = (items: readonly OverviewItem[], sessions: Record<string, Session>): Grouped => {
   const listed = new Set(items.filter((i) => i.kind === "session").map((i) => i.id));
   const extra = Object.values(sessions)
-    .filter((s) => !listed.has(s.id) && ["blocked", "working", "starting"].includes(shownState(s)))
+    .filter((s) => !listed.has(s.id) && ["blocked", "asking", "working", "starting"].includes(shownState(s)))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(itemOf);
   const out: Grouped = { needsYou: [], working: [], done: [] };

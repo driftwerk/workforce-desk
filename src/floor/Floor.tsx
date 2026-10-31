@@ -3,6 +3,7 @@ import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
+import { waitsOnYou } from "./background";
 import { useFloorTick } from "./store";
 import { RestoreBanner } from "./RestoreBanner";
 import { GROUPS, Tile } from "./SessionTile";
@@ -44,7 +45,7 @@ export function Floor({ onNewSession }: { onNewSession: () => void }) {
 /** Today's sessions, grouped by what they're doing. */
 export function SessionsFloor() {
   const sessions = sortedSessions(useDesk((s) => s.sessions));
-  const blocked = sessions.filter((s) => s.state === "blocked").length;
+  const blocked = sessions.filter(waitsOnYou).length;
   const seen = new Set<string>();
   const groups = GROUPS.map((g) => {
     const tiles = sessions.filter((s) => !seen.has(s.id) && g.match(s));
