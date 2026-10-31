@@ -2,7 +2,7 @@ import type { FloorNeed } from "../floor/merge";
 import { itemKeyOf } from "../floor/needs";
 import { sessionOf, type ItemKey } from "../groups/model";
 import type { RoomDraft } from "../hub/store";
-import type { Count, ReadPoint, RoomSummary, SessionUnread, UnreadSummary } from "../hub/types";
+import type { Count, ReadPoint, RoomSummary, SessionUnread, Unread, UnreadSummary } from "../hub/types";
 import type { ConversationUnread } from "../hubs/surface";
 import { instant } from "../rooms/time";
 
@@ -52,6 +52,48 @@ export const pastPoints = (
     return !!p && !!last && instant(last.at) <= instant(p.at);
   });
   return read.length ? Object.fromEntries(Object.entries(dms).filter(([key]) => !read.includes(key))) : dms;
+};
+
+const NOTHING: Unread = { count: 0, forYou: 0, first: null, lastAt: null };
+
+/** Whether what's counted through `lastAt` is read by `point`. */
+const readBy = (lastAt: string | null | undefined, point: ReadPoint | undefined): boolean => !!lastAt && !!point && instant(lastAt) <= instant(point.at);
+
+/** A room's summary less its timeline and threads on screen here, or read
+ *  past what was counted (in this window or another, before its hub counts
+ *  again). */
+export const roomNotHere = (r: RoomSummary, points: Readonly<Record<string, ReadPoint>>, here: (key: string) => boolean): RoomSummary => {
+  const main = `room:${r.roomId}`;
+  const mainRead = r.main.count > 0 && (here(main) || readBy(r.main.lastAt, points[main]));
+  const threads = r.threads.filter((t) => {
+    const key = `thread:${r.roomId}/${t.parent.id}`;
+    return !(here(key) || readBy(t.unread.lastAt, points[key]));
+  });
+  return mainRead || threads.length !== r.threads.length ? { ...r, main: mainRead ? NOTHING : r.main, threads } : r;
+};
+
+/** What's unread of this computer's places less what's on screen here (a
+ *  place shown has nothing unread while it is) and what's been read past
+ *  what was counted. */
+export const notHere = (
+  local: UnreadSummary | null,
+  points: Readonly<Record<string, ReadPoint>>,
+  here: (key: string) => boolean,
+): UnreadSummary | null => {
+  if (!local) return local;
+  const rooms = local.rooms.map((r) => roomNotHere(r, points, here));
+  const sessions = local.sessions.filter((u) => !(here(`session:${u.id}`) || readBy(u.since, points[`session:${u.id}`])));
+  const same = sessions.length === local.sessions.length && rooms.every((r, i) => r === local.rooms[i]);
+  return same ? local : { ...local, rooms, sessions };
+};
+
+/** DMs less those on screen here. */
+export const dmsNotHere = (
+  dms: Readonly<Record<string, ConversationUnread>>,
+  here: (key: string) => boolean,
+): Readonly<Record<string, ConversationUnread>> => {
+  const shown = Object.keys(dms).filter((key) => here(`dm:${key}`));
+  return shown.length ? Object.fromEntries(Object.entries(dms).filter(([key]) => !shown.includes(key))) : dms;
 };
 
 export const badgeOfDm = (u: ConversationUnread | undefined, needs: readonly FloorNeed[]): Badge =>
