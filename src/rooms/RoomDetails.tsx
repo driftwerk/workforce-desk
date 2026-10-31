@@ -25,7 +25,8 @@ const stateOf = (drafts: readonly RoomDraft[], asked: boolean): string => {
   if (asked || drafts.some((d) => d.prompts.length)) return "Waiting on you";
   if (drafts.some((d) => d.state === "live" || d.state === "stalled")) return "Answering";
   if (drafts.some((d) => d.state === "queued" || d.state === "busy" || d.state === "connecting")) return "Queued";
-  if (drafts.some((d) => d.state === "failed" || d.state === "stopped" || d.state === "interrupted")) return "Failed";
+  if (drafts.some((d) => d.state === "failed" || d.state === "interrupted")) return "Failed";
+  if (drafts.some((d) => d.state === "stopped")) return "Stopped";
   return "Idle";
 };
 
@@ -122,7 +123,7 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
             </button>
           </>
         )}
-        <div role="radiogroup" aria-label="Lead" className="details-members">
+        <div className="details-members">
           {room.members.map((m) => {
             const key = memberKey(m);
             const a = author(key);
@@ -139,9 +140,16 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
                   </span>
                 </span>
                 <label className="small">
-                  <input type="radio" name={`lead-${room.id}`} checked={room.defaultMember === key} onChange={() => void update({ defaultMember: key })} /> Lead
+                  <input
+                    type="radio"
+                    name={`lead-${room.id}`}
+                    aria-label={`${a.name} leads`}
+                    checked={room.defaultMember === key}
+                    onChange={() => void update({ defaultMember: key })}
+                  />{" "}
+                  Lead
                 </label>
-                <button type="button" className="btn btn-danger" onClick={() => remove(m)}>
+                <button type="button" className="btn btn-danger" aria-label={`Remove ${a.name}`} onClick={() => remove(m)}>
                   Remove
                 </button>
               </div>

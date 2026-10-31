@@ -79,15 +79,14 @@ describe("a room's details", () => {
 
   it("sets the lead and clears it", async () => {
     details();
-    const leads = screen.getAllByRole("radio", { name: /Lead|No lead/ });
-    fireEvent.click(leads[1]!);
+    fireEvent.click(screen.getByRole("radio", { name: "Sarah leads" }));
     fireEvent.click(screen.getByRole("radio", { name: /No lead/ }));
     await vi.waitFor(() => expect(patches).toEqual([{ defaultMember: "dw/sarah" }, { defaultMember: null }]));
   });
 
   it("removes a member through the engine, which stops their answer first", async () => {
     details();
-    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Allan" }));
     await vi.waitFor(() => expect(removed).toEqual([{ hub: "local", agent: "allan" }]));
   });
 
