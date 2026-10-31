@@ -30,8 +30,12 @@ import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
 import type { OversightLevel } from "../hub/types";
 import { useFocusRequest } from "../shell/focus";
-import { useMainHidden, useStowed } from "../panels/Stage";
-import { useSeen } from "../unread/seen";
+import { useOutOfSight } from "../panels/Stage";
+import { useOnScreen } from "../unread/seen";
+import { useUnread } from "../unread/summary";
+import { DmVoiceBar, DmVoiceControls } from "../voice/DmVoice";
+import { useDmPresence } from "../voice/dms";
+import { after } from "./time";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -115,6 +119,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // another tab is open is still sending when you come back.
   const sending = useState(false);
   const end = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement | null>(null);
+  // Where "talk here" finds this DM, and lets its microphone go when it goes.
+  useDmPresence(agent ? (activeAgent ?? null) : null, root);
   const scroller = useRef<HTMLDivElement | null>(null);
   const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
   const scrollerRef = useCallback(
@@ -128,16 +135,19 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // messages you were reading stay put as it lands above them.
   const anchor = useRef<number | null>(null);
   const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
-  // What the agent said is read once it's been on screen, wherever this
-  // shows: the hub's copies only, by their own ids and times.
-  const hidden = useMainHidden();
-  const stowed = useStowed();
-  const seenItems = useMemo(
-    () => (history?.messages ?? []).filter((m) => m.role !== "user").map((m) => ({ id: m.id, at: m.at })),
-    [history?.messages],
-  );
-  useSeen(agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null, scroller, seenItems, {
-    enabled: tab === "chat" && !(inPane ? stowed : hidden),
+  // The conversation is read while it's on screen, wherever this shows:
+  // through the newest of the hub's copies of what the agent said, or the
+  // newest its hub counts unread, whichever is later.
+  const outOfSight = useOutOfSight();
+  const counted = useUnread((s) => (activeAgent ? s.dms[activeAgent]?.last : undefined));
+  const newest = useMemo(() => {
+    const said = (history?.messages ?? []).findLast((m) => m.role !== "user");
+    const mine = said ? { at: said.at, message: said.id } : null;
+    if (!counted) return mine;
+    return mine && !after({ createdAt: counted.at }, mine.at) ? mine : { at: counted.at, message: counted.message_id };
+  }, [history?.messages, counted]);
+  useOnScreen(agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null, scroller, newest, {
+    enabled: tab === "chat" && !outOfSight,
   });
   const known = roster.some((a) => agentKey(a) === inPane);
   useEffect(() => {
@@ -238,6 +248,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const chat = tab !== "settings" && !(tab === "files" && local);
   return (
     <Root
+      ref={(el: HTMLElement | null) => {
+        root.current = el;
+      }}
       className={`${inPane ? "room room-in-pane" : "room"} drop-target`}
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
@@ -443,40 +456,44 @@ function DmComposer({
       .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-files" onSubmit={submit} data-composer="">
-      <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
-      {emoji.menu}
-      <AttachButton onFiles={files.add} disabled={sending} />
-      <textarea
-        ref={composer}
-        rows={1}
-        value={draft}
-        placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
-        {...(emoji.open
-          ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
-          : {})}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          emoji.onChange(e);
-        }}
-        onSelect={emoji.onSelect}
-        onFocus={emoji.onFocus}
-        onKeyDown={(e) => {
-          if (emoji.onKeyDown(e)) return;
-          if (e.key === "Enter" && !e.shiftKey) submit(e);
-        }}
-      />
-      <EmojiButton onPick={emoji.insert} disabled={sending} />
-      {busy ? (
-        <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
-          Stop
-        </button>
-      ) : (
-        <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
-          {sending ? "Sending…" : "Send"}
-        </button>
-      )}
-    </form>
+    <>
+      <DmVoiceBar agent={to} name={agent.name} />
+      <form className="composer composer-files" onSubmit={submit} data-composer="">
+        <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+        {emoji.menu}
+        <AttachButton onFiles={files.add} disabled={sending} />
+        <textarea
+          ref={composer}
+          rows={1}
+          value={draft}
+          placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
+          {...(emoji.open
+            ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
+            : {})}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            emoji.onChange(e);
+          }}
+          onSelect={emoji.onSelect}
+          onFocus={emoji.onFocus}
+          onKeyDown={(e) => {
+            if (emoji.onKeyDown(e)) return;
+            if (e.key === "Enter" && !e.shiftKey) submit(e);
+          }}
+        />
+        <EmojiButton onPick={emoji.insert} disabled={sending} />
+        <DmVoiceControls agent={to} name={agent.name} />
+        {busy ? (
+          <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
+            Stop
+          </button>
+        ) : (
+          <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
+            {sending ? "Sending…" : "Send"}
+          </button>
+        )}
+      </form>
+    </>
   );
 }
 

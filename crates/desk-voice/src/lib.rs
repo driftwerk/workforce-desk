@@ -8,6 +8,7 @@ pub mod audio;
 pub mod cascade;
 pub mod conversation;
 pub mod decode;
+pub mod directions;
 pub mod hub;
 pub mod keywords;
 pub mod lookup;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 pub use cascade::Cascade;
+pub use conversation::ListenMode;
 pub use decode::Audio;
 pub use models::Models;
 pub use realtime::Realtime;
@@ -106,6 +108,8 @@ impl Utterance {
 pub trait VoiceEvents: Send + Sync + 'static {
     fn state(&self, state: &VoiceState);
     fn utterance(&self, utterance: &Utterance);
+    /// Push-to-talk was let go and nothing was said: no utterance is coming.
+    fn unheard(&self);
     /// Something went wrong that the person should hear about.
     fn error(&self, message: &str);
 }
@@ -115,10 +119,8 @@ pub trait VoiceEngine: Send + Sync {
     /// Who to wake on (the roster names, as plain text) and their voices.
     fn set_roster(&self, roster: Vec<Member>);
     fn push_to_talk(&self, pressed: bool);
-    /// Say `text` in `voice` (the engine's default when `None`). `more` when
-    /// this is an acknowledgement and the answer is still coming, so the
-    /// conversation stays open for it.
-    fn speak(&self, text: String, more: bool, voice: Option<VoiceSpec>);
+    /// Say `text` in `voice` (the engine's default when `None`).
+    fn speak(&self, text: String, voice: Option<VoiceSpec>);
     /// Play speech that is already synthesised, as if spoken.
     fn play(&self, audio: Audio);
     fn stop_speaking(&self);

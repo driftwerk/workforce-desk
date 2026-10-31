@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { FloorNeed } from "../floor/merge";
 import { useFloor, useNeeds } from "../floor/store";
 import { useDesk, type RoomDraft } from "../hub/store";
 import { Badge, needsYou } from "../ui/Badge";
-import { badgeOfRoom, inRoom, pastPoints, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
+import { badgeOfRoom, dmsNotHere, inRoom, notHere, pastPoints, roomNotHere, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
 import { useReads } from "./reads";
 import { useUnread } from "./summary";
+import { useWatching, watched } from "./watching";
+import type { UnreadSummary } from "../hub/types";
 import { useUpdates } from "../updates/store";
 
 /** A row's mark: the number for you, else a dot for something new. */
@@ -26,19 +28,35 @@ export const useHasFloor = (): ((hub: string) => boolean) => {
   return (hub: string) => hubs[hub]?.state === "ready";
 };
 
+/** Whether a place is on screen in this window now. */
+const useHere = (): ((key: string) => boolean) => {
+  const w = useWatching();
+  return useCallback((key: string) => watched(w, key), [w]);
+};
+
 /** What's unread in each DM, as its hub counted it, less what's been read
- *  here since. */
+ *  here since and what's on screen. */
 export const useUnreadDms = () => {
   const counted = useUnread((s) => s.dms);
   const points = useReads((s) => s.dms);
-  return useMemo(() => pastPoints(counted, points), [counted, points]);
+  const here = useHere();
+  return useMemo(() => dmsNotHere(pastPoints(counted, points), here), [counted, points, here]);
+};
+
+/** This computer's summary less what's on screen here and what's been read
+ *  past what it counted. */
+export const useLocalUnread = (): UnreadSummary | null => {
+  const local = useUnread((s) => s.local);
+  const points = useReads((s) => s.local);
+  const here = useHere();
+  return useMemo(() => notHere(local, points, here), [local, points, here]);
 };
 
 /** What every item's badge is read from. */
 export const useBadgeData = (): BadgeData => {
   const needs = useNeeds();
   const dms = useUnreadDms();
-  const sessions = useUnread((s) => s.local?.sessions);
+  const sessions = useLocalUnread()?.sessions;
   return useMemo(() => ({ needs, dms, sessions: sessions ?? [] }), [needs, dms, sessions]);
 };
 
@@ -46,7 +64,10 @@ const NO_DRAFTS: RoomDraft[] = [];
 
 /** A room's marks: its badge and whether someone is answering in it. */
 export const useRoomMarker = (room: string): RoomMarker => {
-  const summary = useUnread((s) => s.local?.rooms.find((r) => r.roomId === room));
+  const counted = useUnread((s) => s.local?.rooms.find((r) => r.roomId === room));
+  const points = useReads((s) => s.local);
+  const here = useHere();
+  const summary = useMemo(() => counted && roomNotHere(counted, points, here), [counted, points, here]);
   const drafts = useDesk((s) => s.roomDrafts[room]) ?? NO_DRAFTS;
   const needs = useNeeds();
   const hasFloor = useHasFloor();
@@ -66,7 +87,7 @@ export const useTotal = (): Marked => {
   const update = !!useUnreadUpdate();
   const needs: readonly FloorNeed[] = useNeeds();
   const dms = useUnreadDms();
-  const local = useUnread((s) => s.local);
+  const local = useLocalUnread();
   const drafts = useDesk((s) => s.roomDrafts);
   return useMemo(() => totalOf({ needs, dms, local, drafts, update }), [needs, dms, local, drafts, update]);
 };

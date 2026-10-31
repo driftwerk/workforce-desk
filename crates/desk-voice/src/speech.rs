@@ -13,7 +13,7 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
-use crate::conversation::{Conversation, Phase, Timing};
+use crate::conversation::{Conversation, ListenMode, Phase, Timing};
 use crate::decode::Audio;
 use crate::keywords::{Keywords, SentencePiece, vocabulary};
 use crate::models::{ASR, KWS, Models, TTS, VAD};
@@ -36,6 +36,8 @@ pub enum Heard {
     /// A segment is being transcribed.
     Transcribing,
     Utterance(Utterance),
+    /// Push-to-talk was let go with nothing said.
+    Nothing,
 }
 
 struct Spotter {
@@ -285,6 +287,13 @@ impl Listener {
         self.wake.names()
     }
 
+    /// Listens this way from now on (see [`ListenMode`]).
+    pub fn set_mode(&mut self, mode: ListenMode, now: Instant) {
+        tracing::info!(?mode, "voice: listening");
+        self.conversation.set_mode(mode, now);
+        self.wake.reset_spotter();
+    }
+
     pub fn state(&self) -> VoiceState {
         if self.transcribing {
             return VoiceState::Transcribing;
@@ -385,12 +394,14 @@ impl Listener {
         self.conversation.speech_ended(now);
         self.wake.reset();
         if held.len() < SPEECH_RATE as usize / 4 {
+            out(Heard::Nothing);
             return;
         }
         let text = self.transcribe(&held, out);
         let names = self.names().to_vec();
-        if let Some(u) = self.conversation.push_to_talk(&text, &names, now) {
-            out(Heard::Utterance(u));
+        match self.conversation.push_to_talk(&text, &names, now) {
+            Some(u) => out(Heard::Utterance(u)),
+            None => out(Heard::Nothing),
         }
     }
 
@@ -400,8 +411,8 @@ impl Listener {
 
     /// Playback ended; our own voice is still in the spotter's context, so
     /// it starts afresh.
-    pub fn spoken(&mut self, now: Instant, more: bool) {
-        self.conversation.spoken(now, more);
+    pub fn spoken(&mut self, now: Instant) {
+        self.conversation.spoken(now);
         self.wake.reset_spotter();
     }
 

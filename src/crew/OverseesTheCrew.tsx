@@ -377,7 +377,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Hand out work"
-                  sub="Start sessions and give tasks to the crew"
+                  sub="Start sessions for the crew"
                   checked={o.act.handOutWork}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOutWork: v } }))}
                 />
@@ -386,6 +386,18 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   sub="End a session’s turn when it’s stuck, as Esc in its terminal; the session and its terminal keep running"
                   checked={o.act.interrupt}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, interrupt: v } }))}
+                />
+                <Check
+                  label="Message agents"
+                  sub="Nudge agents and hand them tasks without asking. Agents still need you to post or send anything outside Desk, delete anything or change what they remember; their other tools run under their own permissions"
+                  checked={o.act.messageAgents}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageAgents: v } }))}
+                />
+                <Check
+                  label="Message sessions from other terminals"
+                  sub="Nudge sessions started outside Desk without asking. They may have been started not to ask before they act"
+                  checked={o.act.messageTerminalSessions}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageTerminalSessions: v } }))}
                 />
               </div>
               <span className="oversee-sub">

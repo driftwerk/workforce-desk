@@ -186,3 +186,108 @@
     animation: none;
   }
 }
+
+/* A DM has the microphone: voice by name waits. */
+.voice-held {
+  border-color: var(--signal);
+}
+.voice-held .voice-ring::before {
+  border-color: var(--signal);
+}
+
+/* ── A DM's voice ─────────────────────────────────────────────────────── */
+
+.dm-voice {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.dm-voice .on {
+  background: var(--signal);
+  color: var(--on-signal);
+  border-radius: 50%;
+}
+.dm-voice-talk.on {
+  animation: voice-pulse 1.6s ease-in-out infinite;
+}
+.dm-voice-more {
+  width: 18px;
+}
+
+.dm-voice-bar {
+  margin: 0 28px 8px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  font-size: 13px;
+}
+.dm-voice-bar.live {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.dm-voice-bar.problem {
+  border-color: var(--blocked);
+  color: var(--blocked);
+}
+.dm-voice-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.dm-voice-bar.live .dm-voice-dot {
+  background: var(--signal);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+.dm-voice-bar.problem .dm-voice-dot {
+  background: var(--blocked);
+}
+.dm-voice-line {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dm-voice-detail {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.dm-voice-fill {
+  flex: 1;
+}
+.room-in-pane .dm-voice-bar {
+  margin: 0 10px 6px;
+}
+
+/* In a grid, the pane with the microphone. */
+.gpane-mic {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--signal);
+  color: var(--on-signal);
+}
+.gpane-mic svg {
+  width: 11px;
+  height: 11px;
+}
+.gpane:has(.gpane-mic) .gpane-box {
+  box-shadow: 0 0 0 2px var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm-voice-talk.on,
+  .dm-voice-bar.live .dm-voice-dot {
+    animation: none;
+  }
+}

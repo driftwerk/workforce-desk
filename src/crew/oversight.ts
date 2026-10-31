@@ -15,7 +15,19 @@ export interface Oversight {
   maxCheckinsPerHour: number;
   /** The ceiling over a day. */
   maxCheckinsPerDay: number;
-  act: { nudge: boolean; resumeRestart: boolean; readOnlyApprovals: boolean; handOutWork: boolean; interrupt: boolean };
+  act: {
+    nudge: boolean;
+    resumeRestart: boolean;
+    readOnlyApprovals: boolean;
+    handOutWork: boolean;
+    interrupt: boolean;
+    /** Nudge agents and hand them tasks; their turns still can't post or
+     *  send outside Desk, delete, or change memory without the person. */
+    messageAgents: boolean;
+    /** Nudge sessions started in another terminal, which may not ask before
+     *  they act. */
+    messageTerminalSessions: boolean;
+  };
 }
 
 export const DEFAULT_OVERSIGHT: Oversight = {
@@ -26,7 +38,15 @@ export const DEFAULT_OVERSIGHT: Oversight = {
   summaries: { morning: "09:00", evening: "" },
   maxCheckinsPerHour: 6,
   maxCheckinsPerDay: 100,
-  act: { nudge: true, resumeRestart: true, readOnlyApprovals: false, handOutWork: false, interrupt: false },
+  act: {
+    nudge: true,
+    resumeRestart: true,
+    readOnlyApprovals: false,
+    handOutWork: false,
+    interrupt: false,
+    messageAgents: false,
+    messageTerminalSessions: false,
+  },
 };
 
 const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act"];
@@ -90,6 +110,8 @@ export const oversightOf = (source: string): Oversight => {
       readOnlyApprovals: bool(act.read_only_approvals, d.act.readOnlyApprovals),
       handOutWork: bool(act.hand_out_work, d.act.handOutWork),
       interrupt: bool(act.interrupt, d.act.interrupt),
+      messageAgents: bool(act.message_agents, d.act.messageAgents),
+      messageTerminalSessions: bool(act.message_terminal_sessions, d.act.messageTerminalSessions),
     },
   };
 };
@@ -127,6 +149,8 @@ export const withOversight = (source: string, o: Oversight): string => {
       read_only_approvals: o.act.readOnlyApprovals,
       hand_out_work: o.act.handOutWork,
       interrupt: o.act.interrupt,
+      message_agents: o.act.messageAgents,
+      message_terminal_sessions: o.act.messageTerminalSessions,
     },
   };
   return stringify(doc) + "\n";

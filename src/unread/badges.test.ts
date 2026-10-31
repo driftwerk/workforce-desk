@@ -11,7 +11,9 @@ import {
   badgeOfSession,
   countLabel,
   inRoom,
+  dmsNotHere,
   itemBadge,
+  notHere,
   ofItem,
   pastPoints,
   totalOf,
@@ -94,5 +96,32 @@ describe("badges", () => {
   it("says 99+ past 99", () => {
     expect(countLabel(99)).toBe("99");
     expect(countLabel(100)).toBe("99+");
+  });
+
+  it("leaves out what's on screen here, and what's been read past what was counted", () => {
+    const at = (s: number) => `2026-10-31T09:00:0${s}Z`;
+    const local = {
+      floor: at(0),
+      rooms: [
+        { roomId: "r1", main: { count: 2, forYou: 1, first: "m1", lastAt: at(2) }, threads: [{ parent, unread: { count: 1, forYou: 0, first: "m3", lastAt: at(3) } }] },
+        { roomId: "r2", main: { count: 1, forYou: 0, first: "m4", lastAt: at(4) }, threads: [] },
+      ],
+      sessions: [
+        { id: "s1", since: at(5), urgency: "forYou" as const },
+        { id: "s2", since: at(6), urgency: "forYou" as const },
+      ],
+      activity: { count: 0, lastAt: null },
+      brief: null,
+      update: null,
+    };
+    const shown = new Set(["room:r1", "session:s1"]);
+    const out = notHere(local, { "room:r2": { at: at(4), message: "m4" }, "session:s2": { at: at(5), message: null } }, (k) => shown.has(k))!;
+    expect(out.rooms.map((r) => [r.roomId, r.main.count, r.threads.length])).toEqual([
+      ["r1", 0, 1],
+      ["r2", 0, 0],
+    ]);
+    expect(out.sessions.map((u) => u.id)).toEqual(["s2"]);
+    expect(notHere(local, {}, () => false)).toBe(local);
+    expect(dmsNotHere({ "dw/allan": dm(1, 1), "dw/kev": dm(1, 0) }, (k) => k === "dm:dw/allan")).toEqual({ "dw/kev": dm(1, 0) });
   });
 });

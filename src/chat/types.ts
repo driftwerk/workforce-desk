@@ -136,8 +136,19 @@ export interface DeskTurn {
   context: DeskLine[];
   /** The room message it answers. */
   message?: string;
-  /** Spoken rather than typed. */
+  /** Its answer is heard. Kept in step with `voice` for hubs that predate it. */
   spoken: boolean;
+  /** Said rather than typed: how the answer comes back, and the voice that
+   *  reads it when it's heard. The hub turns this into how the agent talks. */
+  voice?: DeskVoice;
+}
+
+/** How a spoken turn is answered: aloud, in `speech` (the voice Desk will
+ *  read it in, so the agent can use what that voice performs), or in
+ *  writing (dictation). */
+export interface DeskVoice {
+  reply: "spoken" | "written";
+  speech?: { provider: string; model?: string };
 }
 
 /** What a saved message is in a Desk conversation, beyond its text. */

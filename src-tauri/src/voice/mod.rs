@@ -4,6 +4,11 @@
 //! (the cascade, in the agent's voice) or hands the agent's answer back
 //! (`voice_tool_result`, the cloud engines). Cloud voices are spoken by the
 //! local hub, which holds the keys; the gateway token never reaches JS.
+//!
+//! One engine has the microphone at a time, chosen by what's wanted: while a
+//! conversation holds it (`voice_claim`, a DM's talk or hold) the on-device
+//! cascade listens for that conversation alone; otherwise voice by name runs
+//! on the engine Settings name, if it's on.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -19,15 +24,45 @@ use desk_voice::realtime::gpt_live::GptLive;
 use desk_voice::speech::Speaker;
 use desk_voice::voices::{Provider, VoiceInfo, engine_voices, kokoro_voices};
 use desk_voice::{
-    Audio, Cascade, EngineKind, Member, Models, Realtime, SharedAudioOut, Utterance, VoiceEngine,
-    VoiceEvents, VoiceSpec, VoiceState,
+    Audio, Cascade, EngineKind, ListenMode, Member, Models, Realtime, SharedAudioOut, Utterance,
+    VoiceEngine, VoiceEvents, VoiceSpec, VoiceState,
 };
 use eyre::eyre;
 use tauri::{AppHandle, Emitter, State};
 
 type CommandResult<T> = Result<T, String>;
 
-type Running = (EngineKind, Box<dyn VoiceEngine>);
+/// The engine with the microphone: the cascade, which can listen for one
+/// conversation, or a live engine, which listens by name.
+enum Running {
+    Cascade(Cascade),
+    Live(EngineKind, Box<dyn VoiceEngine>),
+}
+
+impl Running {
+    fn kind(&self) -> EngineKind {
+        match self {
+            Running::Cascade(_) => EngineKind::Cascade,
+            Running::Live(kind, _) => *kind,
+        }
+    }
+
+    fn engine(&self) -> &dyn VoiceEngine {
+        match self {
+            Running::Cascade(cascade) => cascade,
+            Running::Live(_, engine) => engine.as_ref(),
+        }
+    }
+
+    /// Listens `mode`'s way. Only the cascade is ever asked for anything
+    /// but names (see [`Voice::desired`]).
+    fn listen(&self, mode: ListenMode) {
+        match self {
+            Running::Cascade(cascade) => cascade.set_mode(mode),
+            Running::Live(..) => debug_assert_eq!(mode, ListenMode::Names),
+        }
+    }
+}
 
 pub struct Voice {
     models: Models,
@@ -39,8 +74,16 @@ pub struct Voice {
     kokoro: Arc<Mutex<Option<Arc<Speaker>>>>,
     /// The speaker-only output samples play through while voice is off.
     trial: Mutex<Option<SharedAudioOut>>,
-    /// Whether voice is wanted off; a download or start in flight checks it.
-    off: Arc<AtomicBool>,
+    /// Whether voice by name is wanted off.
+    off: AtomicBool,
+    /// How the conversation holding the microphone listens; `None` while
+    /// none does.
+    claim: Mutex<Option<ListenMode>>,
+    /// Whether nothing at all is wanted; a download or start in flight
+    /// checks it.
+    idle: Arc<AtomicBool>,
+    /// Push-to-talk is held: an engine that starts meanwhile takes it.
+    held: AtomicBool,
     enabling: AtomicBool,
 }
 
@@ -58,14 +101,22 @@ impl Voice {
             }),
             kokoro: Arc::new(Mutex::new(None)),
             trial: Mutex::new(None),
-            off: Arc::new(AtomicBool::new(true)),
+            off: AtomicBool::new(true),
+            claim: Mutex::new(None),
+            idle: Arc::new(AtomicBool::new(true)),
+            held: AtomicBool::new(false),
             enabling: AtomicBool::new(false),
         }
     }
 
-    fn with_engine(&self, f: impl FnOnce(&dyn VoiceEngine)) {
-        if let Some((_, engine)) = lock(&self.engine).as_ref() {
-            f(engine.as_ref());
+    /// Runs `f` on the engine; false when none is running.
+    fn with_engine(&self, f: impl FnOnce(&dyn VoiceEngine)) -> bool {
+        match lock(&self.engine).as_ref() {
+            Some(running) => {
+                f(running.engine());
+                true
+            }
+            None => false,
         }
     }
 
@@ -73,11 +124,36 @@ impl Voice {
         *lock(&self.wanted)
     }
 
+    /// The engine that should have the microphone, and how it listens: the
+    /// cascade for the conversation holding it, else voice by name on the
+    /// engine Settings name, else none.
+    fn desired(&self) -> Option<(EngineKind, ListenMode)> {
+        desired(
+            *lock(&self.claim),
+            !self.off.load(Ordering::SeqCst),
+            self.wanted(),
+        )
+    }
+
     fn shared(&self) -> Shared {
         Shared {
             hub: self.hub.clone(),
             kokoro: self.kokoro.clone(),
         }
+    }
+}
+
+/// What has the microphone, from who claims it: a conversation's claim beats
+/// voice by name, which runs only while it's on.
+fn desired(
+    claim: Option<ListenMode>,
+    by_name: bool,
+    engine: EngineKind,
+) -> Option<(EngineKind, ListenMode)> {
+    match claim {
+        Some(mode) => Some((EngineKind::Cascade, mode)),
+        None if by_name => Some((engine, ListenMode::Names)),
+        None => None,
     }
 }
 
@@ -98,6 +174,10 @@ impl VoiceEvents for Events {
 
     fn utterance(&self, utterance: &Utterance) {
         let _ = self.app.emit("voice-utterance", utterance);
+    }
+
+    fn unheard(&self) {
+        let _ = self.app.emit("voice-unheard", ());
     }
 
     fn error(&self, message: &str) {
@@ -181,7 +261,7 @@ fn start(
     shared: &Shared,
     events: Arc<Events>,
     off: &AtomicBool,
-) -> eyre::Result<Option<Box<dyn VoiceEngine>>> {
+) -> eyre::Result<Option<Running>> {
     if let Err(e) = models.ensure(kind.models(), off, &mut downloading(&events)) {
         return if off.load(Ordering::SeqCst) {
             Ok(None)
@@ -199,112 +279,146 @@ fn start(
                 kokoro: kokoro(&shared.kokoro, models)?,
                 cloud: Some(shared.hub.clone()),
             };
-            Box::new(Cascade::start(models, voices, events, open)?)
+            Running::Cascade(Cascade::start(models, voices, events, open)?)
         }
-        EngineKind::GptLive => Box::new(Realtime::start(
-            models,
-            Arc::new(GptLive),
-            shared.hub.clone(),
-            events,
-            open,
-        )?),
-        EngineKind::GeminiLive => Box::new(Realtime::start(
-            models,
-            Arc::new(GeminiLive),
-            shared.hub.clone(),
-            events,
-            open,
-        )?),
+        EngineKind::GptLive => Running::Live(
+            kind,
+            Box::new(Realtime::start(
+                models,
+                Arc::new(GptLive),
+                shared.hub.clone(),
+                events,
+                open,
+            )?),
+        ),
+        EngineKind::GeminiLive => Running::Live(
+            kind,
+            Box::new(Realtime::start(
+                models,
+                Arc::new(GeminiLive),
+                shared.hub.clone(),
+                events,
+                open,
+            )?),
+        ),
     }))
 }
 
-/// Turns voice on with `engine` ("cascade", "gpt-live", "gemini-live"; an
-/// unknown name is the cascade): fetches its models the first time
-/// (reporting progress as `voice-state` events), then starts listening.
-/// Asking for another engine replaces the running one. Turning voice off
-/// meanwhile cancels; turning it back on before that has wound down starts
-/// again.
+/// Brings the engine in line with what's wanted ([`Voice::desired`]): the
+/// running one changes how it listens, or is replaced, or stops. Fetches an
+/// engine's models the first time (reporting progress as `voice-state`
+/// events). A change while an engine starts is picked up when it's up.
+async fn reconcile(app: AppHandle, voice: &Voice) -> CommandResult<()> {
+    let events = Arc::new(Events {
+        app,
+        state: voice.state.clone(),
+    });
+    loop {
+        let want = voice.desired();
+        voice.idle.store(want.is_none(), Ordering::SeqCst);
+        let replaced = {
+            let mut running = lock(&voice.engine);
+            match (running.as_ref(), want) {
+                (Some(r), Some((kind, mode))) if r.kind() == kind => {
+                    r.listen(mode);
+                    return Ok(());
+                }
+                (None, None) => {
+                    if !voice.enabling.load(Ordering::SeqCst) {
+                        events.state(&VoiceState::Off);
+                    }
+                    return Ok(());
+                }
+                _ => running.take(),
+            }
+        };
+        let trial = lock(&voice.trial).take();
+        tauri::async_runtime::spawn_blocking(move || drop((replaced, trial)))
+            .await
+            .map_err(|e| e.to_string())?;
+        if want.is_none() {
+            events.state(&VoiceState::Off);
+            return Ok(());
+        }
+        if voice.enabling.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let started = loop {
+            let Some((kind, _)) = voice.desired() else {
+                break Ok(None);
+            };
+            let (models, shared, events, idle) = (
+                voice.models.clone(),
+                voice.shared(),
+                events.clone(),
+                voice.idle.clone(),
+            );
+            let attempt = tauri::async_runtime::spawn_blocking(move || {
+                start(kind, &models, &shared, events, &idle)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r.map_err(|e| format!("{e:#}")));
+            match attempt {
+                _ if voice.desired().is_none() => break Ok(None),
+                Ok(None) => continue,
+                Ok(Some(_)) if voice.desired().map(|(k, _)| k) != Some(kind) => continue,
+                Ok(Some(running)) => break Ok(Some(running)),
+                Err(e) => break Err(e),
+            }
+        };
+        voice.enabling.store(false, Ordering::SeqCst);
+        match started {
+            Ok(Some(running)) => {
+                running.engine().set_roster(lock(&voice.roster).clone());
+                if voice.held.load(Ordering::SeqCst) {
+                    running.engine().push_to_talk(true);
+                }
+                *lock(&voice.engine) = Some(running);
+            }
+            Ok(None) => events.state(&VoiceState::Off),
+            Err(e) => {
+                events.state(&VoiceState::Off);
+                return Err(e);
+            }
+        }
+    }
+}
+
+/// Turns voice by name on with `engine` ("cascade", "gpt-live",
+/// "gemini-live"; an unknown name is the cascade). Asking for another engine
+/// replaces the running one; turning voice off meanwhile cancels. While a
+/// conversation holds the microphone, this is what it goes back to.
 #[tauri::command]
 pub async fn voice_enable(
     app: AppHandle,
     voice: State<'_, Voice>,
     engine: Option<String>,
 ) -> CommandResult<()> {
-    let kind = engine.as_deref().map(EngineKind::parse).unwrap_or_default();
-    *lock(&voice.wanted) = kind;
+    *lock(&voice.wanted) = engine.as_deref().map(EngineKind::parse).unwrap_or_default();
     voice.off.store(false, Ordering::SeqCst);
-    let replaced = {
-        let mut running = lock(&voice.engine);
-        match running.as_ref() {
-            Some((k, _)) if *k == kind => return Ok(()),
-            Some(_) => running.take(),
-            None => None,
-        }
-    };
-    let trial = lock(&voice.trial).take();
-    tauri::async_runtime::spawn_blocking(move || drop((replaced, trial)))
-        .await
-        .map_err(|e| e.to_string())?;
-    if voice.enabling.swap(true, Ordering::SeqCst) {
-        return Ok(());
-    }
-    let events = Arc::new(Events {
-        app,
-        state: voice.state.clone(),
-    });
-    let started = loop {
-        let kind = voice.wanted();
-        let (models, shared, events, off) = (
-            voice.models.clone(),
-            voice.shared(),
-            events.clone(),
-            voice.off.clone(),
-        );
-        let attempt = tauri::async_runtime::spawn_blocking(move || {
-            start(kind, &models, &shared, events, &off)
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r.map_err(|e| format!("{e:#}")));
-        match attempt {
-            _ if voice.off.load(Ordering::SeqCst) => break Ok(None),
-            Ok(None) => continue,
-            Ok(Some(_)) if voice.wanted() != kind => continue,
-            Ok(Some(engine)) => break Ok(Some((kind, engine))),
-            Err(e) => break Err(e),
-        }
-    };
-    voice.enabling.store(false, Ordering::SeqCst);
-    match started {
-        Ok(Some((kind, engine))) => {
-            engine.set_roster(lock(&voice.roster).clone());
-            *lock(&voice.engine) = Some((kind, engine));
-            Ok(())
-        }
-        Ok(None) => {
-            events.state(&VoiceState::Off);
-            Ok(())
-        }
-        Err(e) => {
-            events.state(&VoiceState::Off);
-            Err(e)
-        }
-    }
+    reconcile(app, &voice).await
 }
 
+/// Turns voice by name off. A conversation holding the microphone keeps it.
 #[tauri::command]
 pub async fn voice_disable(app: AppHandle, voice: State<'_, Voice>) -> CommandResult<()> {
     voice.off.store(true, Ordering::SeqCst);
-    let engine = lock(&voice.engine).take();
-    tauri::async_runtime::spawn_blocking(move || drop(engine))
-        .await
-        .map_err(|e| e.to_string())?;
-    Events {
-        app,
-        state: voice.state.clone(),
-    }
-    .state(&VoiceState::Off);
-    Ok(())
+    reconcile(app, &voice).await
+}
+
+/// A conversation takes the microphone (`"open"`: everything said is for
+/// it; `"held"`: only push-to-talk), or gives it back (`null`) to voice by
+/// name. It runs on the on-device cascade, which hears every word as said;
+/// a live engine running by name is set aside until it's given back.
+#[tauri::command]
+pub async fn voice_claim(
+    app: AppHandle,
+    voice: State<'_, Voice>,
+    mode: Option<ListenMode>,
+) -> CommandResult<()> {
+    *lock(&voice.claim) = mode;
+    reconcile(app, &voice).await
 }
 
 /// The roster: the names to wake on (plain text) and each agent's voice,
@@ -315,22 +429,21 @@ pub fn voice_set_roster(voice: State<'_, Voice>, roster: Vec<Member>) {
     voice.with_engine(|e| e.set_roster(roster));
 }
 
+/// Push-to-talk pressed or let go. Pressed while an engine is starting, it
+/// is taken once the engine is up; let go before then, nothing was heard.
 #[tauri::command]
-pub fn voice_push_to_talk(voice: State<'_, Voice>, pressed: bool) {
-    voice.with_engine(|e| e.push_to_talk(pressed));
+pub fn voice_push_to_talk(app: AppHandle, voice: State<'_, Voice>, pressed: bool) {
+    voice.held.store(pressed, Ordering::SeqCst);
+    if !voice.with_engine(|e| e.push_to_talk(pressed)) && !pressed {
+        let _ = app.emit("voice-unheard", ());
+    }
 }
 
 /// Speaks `text` in `voice` (the agent's; the engine's default when
-/// absent). `more` marks an acknowledgement with the answer still to come,
-/// which keeps the conversation open while the agent works.
+/// absent).
 #[tauri::command]
-pub fn voice_speak(
-    desk: State<'_, Voice>,
-    text: String,
-    more: Option<bool>,
-    voice: Option<VoiceSpec>,
-) {
-    desk.with_engine(|e| e.speak(text, more.unwrap_or(false), voice));
+pub fn voice_speak(desk: State<'_, Voice>, text: String, voice: Option<VoiceSpec>) {
+    desk.with_engine(|e| e.speak(text, voice));
 }
 
 #[tauri::command]
@@ -388,8 +501,8 @@ pub async fn voice_try(
     })
     .await
     .map_err(|e| e.to_string())??;
-    if let Some((_, engine)) = lock(&desk.engine).as_ref() {
-        engine.play(audio);
+    if let Some(running) = lock(&desk.engine).as_ref() {
+        running.engine().play(audio);
         return Ok(());
     }
     let mut trial = lock(&desk.trial);
@@ -455,7 +568,39 @@ pub fn voice_tool_result(voice: State<'_, Voice>, call_id: String, text: String)
 #[tauri::command]
 pub fn voice_status(voice: State<'_, Voice>) -> VoiceState {
     match lock(&voice.engine).as_ref() {
-        Some((_, engine)) => engine.state(),
+        Some(running) => running.engine().state(),
         None => lock(&voice.state).clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_conversation_holding_the_microphone_runs_the_cascade() {
+        for engine in [
+            EngineKind::Cascade,
+            EngineKind::GptLive,
+            EngineKind::GeminiLive,
+        ] {
+            for by_name in [true, false] {
+                for mode in [ListenMode::Open, ListenMode::Held] {
+                    assert_eq!(
+                        desired(Some(mode), by_name, engine),
+                        Some((EngineKind::Cascade, mode))
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn voice_by_name_has_it_otherwise_while_on() {
+        assert_eq!(
+            desired(None, true, EngineKind::GptLive),
+            Some((EngineKind::GptLive, ListenMode::Names))
+        );
+        assert_eq!(desired(None, false, EngineKind::GptLive), None);
     }
 }
