@@ -1,6 +1,8 @@
 import type { Background, Place, Who } from "../hub/types";
 import { backgroundTasks } from "./background";
 import type { FloorWork, Merged, Tagged } from "./merge";
+import { ownName } from "./needs";
+import { since } from "./time";
 
 /** How long an agent or session that finished stays in what's happening. */
 export const DONE_FOR_MS = 2 * 60 * 60_000;
@@ -22,92 +24,37 @@ export interface FloorEntry extends Tagged {
 
 const RANK: Record<EntryState, number> = { working: 0, waiting: 1, done: 2, failed: 2 };
 
-/** Words that only name the identifier after them. */
-const NAMING = new Set(["pr", "prs", "issue", "issues", "commit", "commits", "pid", "branch", "ticket", "file", "path", "tool"]);
-/** Words a clause can't end on. */
-const DANGLING = new Set(["the", "a", "an", "in", "on", "at", "to", "of", "with", "for", "from", "into", "and", "or", "via", "as", "by"]);
-const EXTENSIONS = /\.(rs|tsx?|jsx?|json|toml|md|sql|py|css|html|ya?ml|sh|lock|go|rb|kt|swift|txt|log)$/i;
-
-/** Whether `word` (its punctuation off) is an identifier, not a word: an
- *  issue number, commit id, path, branch, file, code or tool mark. */
-const identifier = (word: string): boolean =>
-  /^[#●]/.test(word) ||
-  /^at-(?:dm|ses|wf)-/i.test(word) ||
-  /#\d/.test(word) ||
-  /:\/\/|::|\(\)|=|[{}]|--|_/.test(word) ||
-  EXTENSIONS.test(word) ||
-  (word.includes("/") && (/^(\/|\.\/|\.\.\/|~\/)/.test(word) || (word.match(/\//g)?.length ?? 0) >= 2 || /[._-]/.test(word) || !/[A-Z]/.test(word))) ||
-  (/^[0-9a-f]{7,40}$/i.test(word) && /\d/.test(word) && /[a-f]/i.test(word)) ||
-  /^\d{5,}$/.test(word);
-
-/** `text` without the identifiers it names (and the words that only name
- *  them), its clauses closed where one was cut; empty when nothing worth
- *  saying is left. The hub's own reading, for hubs that send no gist. */
-export const plain = (text: string): string => {
-  const words = text
-    .replace(/[`*]/g, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((token) => {
-      const [, lead = "", core = "", trail = ""] = /^([(["'“‘]*)(.*?)([.,;:!?)\]"'”’]*)$/u.exec(token) ?? [];
-      return { lead, core, trail, dropped: core !== "" && identifier(core) };
-    });
-  words.forEach((w, i) => {
-    const before = words[i - 1];
-    if (w.dropped && before && before.trail === "" && NAMING.has(before.core.toLowerCase())) before.dropped = true;
-  });
-  const kept: string[] = [];
-  for (const w of words) {
-    if (!w.dropped) {
-      kept.push(`${w.lead}${w.core}${w.trail}`);
-      continue;
-    }
-    const stop = [...w.trail].find((c) => ".,;:!?".includes(c));
-    if (!stop) continue;
-    while (kept.length && DANGLING.has(kept[kept.length - 1]!.toLowerCase())) kept.pop();
-    const last = kept.length - 1;
-    if (last >= 0 && !/[.,;:!?]$/.test(kept[last]!)) kept[last] += stop;
-  }
-  while (kept.length && (DANGLING.has(kept[kept.length - 1]!.replace(/[.,;:!?)\]"'”’]+$/u, "").toLowerCase()) || !/[\p{L}\p{N}]/u.test(kept[kept.length - 1]!)))
-    kept.pop();
-  let out = kept.join(" ");
-  if ((out.match(/\(/g)?.length ?? 0) !== (out.match(/\)/g)?.length ?? 0)) out = out.replace(/[()]/g, "");
-  out = out.replace(/^[,;:. ]+/, "").trim();
-  const worth = out.split(" ").some((w) => {
-    const bare = w.replace(/[^\p{L}\p{N}]/gu, "");
-    return (bare.match(/\p{L}/gu)?.length ?? 0) >= 2 && !DANGLING.has(bare.toLowerCase());
-  });
-  return worth ? out : "";
-};
-
-/** `text` as a sentence: its first letter up, closed with a full stop. */
-const sentence = (text: string): string => {
-  const t = text.trim().replace(/[,;:]+$/, "");
-  const up = t.charAt(0).toUpperCase() + t.slice(1);
-  return /[.!?…]$/.test(up) ? up : `${up}.`;
-};
-
 const stateOf = (w: FloorWork): EntryState =>
   w.endedAt === null ? (w.background ? "waiting" : "working") : w.outcome === "failed" || w.outcome === "limit" ? "failed" : "done";
 
-/** What a turn says without a gist from its hub, plainly. */
-const plainly = (w: FloorWork, state: EntryState): string => {
-  const said = w.what.startsWith("● ") ? "" : plain(w.what.split("\n")[0] ?? "");
+/** "12 min ago", "just now". */
+const ago = (iso: string | null, now: number): string => {
+  const t = since(iso, now);
+  return t === "just now" || !t ? t : `${t} ago`;
+};
+
+/** What Desk says of a turn its hub sent no gist for, from what it knows
+ *  and never from what the turn was asked: "Working on acme-web.", "Waiting
+ *  on 2 background tasks.", "Finished 12 min ago." `subject` names what a
+ *  session is about. */
+const plainly = (w: FloorWork, state: EntryState, subject: string | null, now: number): string => {
+  const when = ago(w.endedAt, now);
+  const at = (said: string) => `${said}${when ? ` ${when}` : ""}.`;
   switch (state) {
     case "working":
-      return said ? `Now working on: ${sentence(said)}` : "Working on it now.";
+      return subject ? `Working on ${subject}.` : "Working on it now.";
     case "waiting":
-      return `Its turn is done; it is waiting on ${backgroundTasks(w.background!)} it started.`;
+      return `Waiting on ${backgroundTasks(w.background!)}.`;
     case "done":
-      return said ? `Finished: ${sentence(said)}` : "Finished what it was asked.";
+      return at("Finished");
     case "failed":
-      return w.outcome === "limit" ? "It stopped at its plan’s limit." : said ? `It stopped with an error: ${sentence(said)}` : "It stopped with an error.";
+      return at(w.outcome === "limit" ? "Stopped at its plan’s limit" : "Stopped with an error");
   }
 };
 
 const keyOf = (w: FloorWork, who: Who): string => `${w.hubId}/${who.kind}:${who.id}`;
 
-const entryOf = (w: FloorWork, who: Who): FloorEntry => {
+const entryOf = (w: FloorWork, who: Who, subject: string | null, now: number): FloorEntry => {
   const state = stateOf(w);
   return {
     hubId: w.hubId,
@@ -119,7 +66,7 @@ const entryOf = (w: FloorWork, who: Who): FloorEntry => {
     state,
     background: w.background ?? null,
     purpose: w.gist?.purpose ?? null,
-    now: w.gist?.now ?? plainly(w, state),
+    now: w.gist?.now ?? plainly(w, state, subject, now),
     at: w.gist?.at ?? w.endedAt ?? w.heardAt,
   };
 };
@@ -129,13 +76,21 @@ const entryOf = (w: FloorWork, who: Who): FloorEntry => {
  *  working first, then waiting, then finished, each most recently written
  *  first. Of a subject's turns, the one furthest along that order, and of
  *  those one its hub said a gist of, then the latest, speaks for it. `whoOf` says who a turn is, so a
- *  session an agent's turn ran as is that agent's entry. */
-export const happening = (m: Pick<Merged, "working" | "done">, now: number, whoOf: (w: FloorWork) => Who = (w) => w.who): FloorEntry[] => {
+ *  session an agent's turn ran as is that agent's entry, and one that is no
+ *  one's (null) has none; `subjectOf`, what a session is about, for a turn
+ *  with no gist. */
+export const happening = (
+  m: Pick<Merged, "working" | "done">,
+  now: number,
+  whoOf: (w: FloorWork) => Who | null = (w) => w.who,
+  subjectOf: (item: { local: boolean; who: Who }) => string | null = ({ who }) => (who.kind === "session" ? ownName(who) : null),
+): FloorEntry[] => {
   const lately = m.done.filter((w) => w.endedAt !== null && now - Date.parse(w.endedAt) <= DONE_FOR_MS);
   const when = (w: FloorWork): string => w.endedAt ?? w.since;
   const chosen = new Map<string, { w: FloorWork; who: Who }>();
   for (const w of [...m.working, ...lately]) {
     const who = whoOf(w);
+    if (!who) continue;
     const key = keyOf(w, who);
     const have = chosen.get(key)?.w;
     const said = (x: FloorWork): number => Number(!!x.gist);
@@ -146,6 +101,6 @@ export const happening = (m: Pick<Merged, "working" | "done">, now: number, whoO
     if (better) chosen.set(key, { w, who });
   }
   return [...chosen.values()]
-    .map(({ w, who }) => entryOf(w, who))
+    .map(({ w, who }) => entryOf(w, who, subjectOf({ local: w.local, who }), now))
     .sort((a, b) => RANK[a.state] - RANK[b.state] || b.at.localeCompare(a.at) || a.who.name.localeCompare(b.who.name));
 };

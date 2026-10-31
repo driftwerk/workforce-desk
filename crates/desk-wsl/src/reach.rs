@@ -100,7 +100,8 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         assert!(connects(&format!("http://127.0.0.1:{port}")));
-        drop(listener);
-        assert!(!connects(&format!("http://127.0.0.1:{port}")));
+        // Not the port just let go: another connection can take it, or on
+        // Linux the probe can connect to itself. Nothing listens on port 1.
+        assert!(!connects("http://127.0.0.1:1"));
     }
 }

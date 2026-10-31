@@ -16,10 +16,12 @@ struct Fake {
     wsl: WslExe,
 }
 
-/// A `wsl.exe` that answers as `answers` say: a copy of the fake with its
-/// scenario beside it.
+/// A `wsl.exe` that answers as `answers` say: the fake, in a folder of its
+/// own with its scenario beside it.
 fn fake(answers: Value) -> Fake {
-    let dir = tempfile::tempdir().unwrap();
+    // In the target folder, beside the fake, so it can be linked there (see
+    // `place`).
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let log = dir.path().join("calls.jsonl");
     std::fs::write(
         dir.path().join("scenario.json"),
@@ -29,11 +31,26 @@ fn fake(answers: Value) -> Fake {
     let exe = dir
         .path()
         .join(format!("wsl{}", std::env::consts::EXE_SUFFIX));
-    std::fs::copy(env!("CARGO_BIN_EXE_fake-wsl"), &exe).unwrap();
+    place(Path::new(env!("CARGO_BIN_EXE_fake-wsl")), &exe);
     Fake {
         wsl: WslExe::at(exe),
         dir,
     }
+}
+
+/// Puts the fake at `exe`. On Linux a copy written here would be open to
+/// write in every child another test thread forks meanwhile, until that
+/// child execs (`O_CLOEXEC` closes it only then), and running the copy can
+/// then fail with "Text file busy" (ETXTBSY); writing it beside and renaming
+/// it into place keeps the same file, so it wouldn't help. A hard link is the
+/// file cargo wrote, under a new name, so nothing here ever writes it.
+/// Elsewhere it's copied, as it always was: the race is Linux's, and macOS
+/// runs one file linked under several names at once unreliably.
+fn place(fake: &Path, exe: &Path) {
+    if cfg!(target_os = "linux") && std::fs::hard_link(fake, exe).is_ok() {
+        return;
+    }
+    std::fs::copy(fake, exe).unwrap();
 }
 
 impl Fake {
@@ -230,19 +247,19 @@ fn a_failed_connection_says_why() {
 
 #[test]
 fn a_hub_wsl_reaches_and_windows_doesnt_is_a_port_problem() {
-    let closed = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
-    let url = format!("http://127.0.0.1:{closed}");
+    // A port nothing listens on, below the ones handed out for a connection's
+    // own end: a free one of those (as a listener bound and let go was) can be
+    // taken meanwhile by another test's connection, or by the very connection
+    // that tries it, which on Linux then connects to itself.
+    let url = "http://127.0.0.1:1";
     let answers =
         |code: &str| json!([{"starts": into("/bin/sh"), "contains": "curl", "stdout": code}]);
     assert_eq!(
-        reach::check(&fake(answers("401")).wsl, &sarah(), &url),
+        reach::check(&fake(answers("401")).wsl, &sarah(), url),
         Reach::PortUnreachable
     );
     assert_eq!(
-        reach::check(&fake(answers("000")).wsl, &sarah(), &url),
+        reach::check(&fake(answers("000")).wsl, &sarah(), url),
         Reach::Starting
     );
 }

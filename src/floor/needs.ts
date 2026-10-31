@@ -28,17 +28,33 @@ export const turnAgentOf = (cwd: string): string | null => {
   return null;
 };
 
+/** What the Claude Code CLI names a hub's agent-turn session, after its
+ *  folder: `at-dm-d4774cbb6c89`, `at-dm-d4774cbb6c89-2e`. */
+const TURN_NAME = /^at-[a-z]+-[0-9a-f]{12}(?:-[0-9a-f]{2})?$/i;
+
+/** Whether a session is one a hub ran an agent's turn as: by its folder,
+ *  when Desk knows it, else by its name. */
+export const isAgentTurn = ({ name, cwd }: { name: string; cwd?: string | null }): boolean =>
+  (!!cwd && turnAgentOf(cwd) !== null) || TURN_NAME.test(name.trim());
+
 /** A name that is no one's to read: an agent's turn's folder, a bare id. */
 const UNNAMED = /^at-(?:dm|ses|wf)-|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** What the hub calls an agent or session, when that is a name to read. */
+export const ownName = (who: Pick<Who, "name">): string | null => {
+  const name = who.name.trim();
+  return name && !UNNAMED.test(name) ? name : null;
+};
 
 const ENGINE_SESSION: Record<Engine, string> = { claude: "Claude Code session", codex: "Codex session" };
 
 /** What the hub calls an agent or session, or what it is when the hub sent
  *  no name to read. */
 export const readableName = (who: Who): string => {
-  const name = who.name.trim();
-  if (name && !UNNAMED.test(name)) return name;
+  const own = ownName(who);
+  if (own) return own;
   if (who.kind === "agent") return "Agent";
+  const name = who.name.trim();
   return name.startsWith("at-") ? "Agent turn" : who.engine ? ENGINE_SESSION[who.engine] : "Session";
 };
 

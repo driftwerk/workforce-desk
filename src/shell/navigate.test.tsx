@@ -6,7 +6,7 @@ import { reveal } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMessage, Session } from "../hub/types";
 import { openUrl } from "../platform";
-import { openAgent } from "../rooms/AgentPanel";
+import { openAgent, openAgentBeside } from "../rooms/AgentPanel";
 import { requestFocus, useFocus, useFocusRequest } from "./focus";
 import { openTarget, targetOfItem } from "./navigate";
 import { useUi } from "./ui";
@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../grids/windows", () => ({ reveal: vi.fn(() => false) }));
 vi.mock("../platform", () => ({ openUrl: vi.fn() }));
-vi.mock("../rooms/AgentPanel", () => ({ openAgent: vi.fn() }));
+vi.mock("../rooms/AgentPanel", () => ({ openAgent: vi.fn(), openAgentBeside: vi.fn() }));
 
 const message = (id: string): RoomMessage => ({ id, roomId: "r1", threadId: null, author: "you", content: "hi", hop: 0, createdAt: "" });
 
@@ -34,6 +34,8 @@ beforeEach(() => {
   useFocus.setState({ where: null, nonce: 0 });
   useUi.setState({ roomThreads: {} });
   vi.mocked(openAgent).mockClear();
+  vi.mocked(openAgentBeside).mockClear();
+  vi.mocked(reveal).mockClear();
 });
 afterEach(cleanup);
 
@@ -56,6 +58,16 @@ describe("going to a target", () => {
     expect(useFocus.getState().where).toBe("agent:b/scout");
     openTarget({ kind: "agent", key: "b/nobody" });
     expect(openAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a session's card or an agent's DM beside, even where a grid shows it", () => {
+    vi.mocked(reveal).mockReturnValue(true);
+    openTarget({ kind: "session", sessionId: "s-1" }, { beside: true });
+    expect(useDesk.getState().openId).toBe("s-1");
+    openTarget({ kind: "agent", key: "b/scout" }, { beside: true });
+    expect(openAgentBeside).toHaveBeenCalledWith("b/scout");
+    expect(openAgent).not.toHaveBeenCalled();
+    expect(reveal).not.toHaveBeenCalled();
   });
 
   it("opens a room at its thread, or its main timeline when the thread is gone", async () => {

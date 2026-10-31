@@ -19,8 +19,8 @@ const useFocusKept = () => {
   return ref;
 };
 
-/** What still needs the person, as a row: in Right now it opens where it
- *  is; in Activity it can also be answered there. */
+/** What still needs the person, as a row: it opens where it is (a session
+ *  or a DM beside the Floor); in Activity it can also be answered there. */
 export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: number; actions?: boolean }) {
   const rooms = useDesk((s) => s.rooms);
   const deciding = useFloor((s) => s.deciding[need.key]);
@@ -29,7 +29,8 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   const ref = useFocusKept();
   const target = targetOf(need, rooms);
   const where = placeLabel(need.place, rooms);
-  const open = target ? () => openTarget(target) : undefined;
+  // Beside the Floor, as the Floor's tiles open, even when a grid shows it.
+  const open = target ? () => openTarget(target, { beside: true }) : undefined;
   return (
     <div ref={ref} className={`floor-need ${actions ? "floor-need-acts" : ""}`}>
       <FloorRow

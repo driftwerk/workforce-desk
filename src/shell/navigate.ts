@@ -4,7 +4,7 @@ import { reveal } from "../grids/windows";
 import { sessionOf, type ItemKey } from "../groups/model";
 import { useDesk } from "../hub/store";
 import { openUrl } from "../platform";
-import { openAgent } from "../rooms/AgentPanel";
+import { openAgent, openAgentBeside } from "../rooms/AgentPanel";
 import { requestFocus } from "./focus";
 import { useUi } from "./ui";
 
@@ -45,18 +45,20 @@ const openRoom = async (roomId: string, threadId: string | null): Promise<boolea
 };
 
 /** Takes the person to `t`: where it shows in a grid, else where it opens;
- *  with `reply`, its composer (or terminal) takes focus. */
-export const openTarget = (t: Target, opts: { reply?: boolean } = {}): void => {
+ *  with `beside`, a session's card or an agent's DM opens beside the Floor
+ *  even when a grid shows it (the card says where, with a way there); with
+ *  `reply`, its composer (or terminal) takes focus. */
+export const openTarget = (t: Target, opts: { reply?: boolean; beside?: boolean } = {}): void => {
   const focus = (key: string | null) => opts.reply && key && requestFocus(key);
   switch (t.kind) {
     case "session": {
       if (!useDesk.getState().sessions[t.sessionId]) return;
-      if (!reveal({ kind: "session", sessionId: t.sessionId })) useDesk.getState().open(t.sessionId);
+      if (opts.beside || !reveal({ kind: "session", sessionId: t.sessionId })) useDesk.getState().open(t.sessionId);
       return void focus(focusKeyOf(t));
     }
     case "agent": {
       if (!useChat.getState().roster.some((a) => agentKey(a) === t.key)) return;
-      openAgent(t.key);
+      (opts.beside ? openAgentBeside : openAgent)(t.key);
       return void focus(focusKeyOf(t));
     }
     case "room":
