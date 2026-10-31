@@ -71,8 +71,11 @@ fn hub_env(
     Ok(env)
 }
 
-async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<PostgreSQL> {
-    let settings = Settings {
+/// The local Postgres's settings. `max_connections` is given on every
+/// start rather than written into the data directory, so an install made
+/// with the default of 100 takes it at its next start.
+fn postgres_settings(paths: &Paths, port: u16, password: String) -> Settings {
+    Settings {
         installation_dir: paths.postgres_install(),
         data_dir: paths.postgres_data(),
         password_file: paths.hub().join(".pgpass"),
@@ -84,8 +87,17 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
         // The first start unpacks Postgres and runs initdb, which takes
         // longer than the default 5 s on a busy or older computer.
         timeout: Some(POSTGRES_TIMEOUT),
+        configuration: [(
+            "max_connections".to_string(),
+            config::MAX_CONNECTIONS.to_string(),
+        )]
+        .into(),
         ..Settings::default()
-    };
+    }
+}
+
+async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<PostgreSQL> {
+    let settings = postgres_settings(paths, port, password);
     // A first initdb that didn't finish leaves a data directory that looks
     // made but isn't; the marker says to start it over.
     let first_run = paths.hub().join("postgres.initializing");
@@ -488,6 +500,20 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
+
+    #[test]
+    fn postgres_is_started_with_room_for_the_hubs_pools() {
+        let paths = Paths::at("/Users/k/Library/Application Support/Desk");
+        let settings = postgres_settings(&paths, 54001, "unused".into());
+        assert_eq!(
+            settings
+                .configuration
+                .get("max_connections")
+                .map(String::as_str),
+            Some("200")
+        );
+        assert_eq!(settings.data_dir, paths.postgres_data());
+    }
 
     #[derive(Default)]
     struct Memory(RefCell<HashMap<Secret, String>>);

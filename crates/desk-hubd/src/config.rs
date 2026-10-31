@@ -25,6 +25,16 @@ const POSTGRES_STORES: &[&str] = &[
 
 pub const DATABASE: &str = "workforce";
 
+/// The connections the local Postgres takes. Its default of 100 was less
+/// than the hub's pools may open between them, which filled it within hours
+/// of a start; the hub says at startup what they may open against this.
+pub const MAX_CONNECTIONS: u32 = 200;
+
+/// The most connections each of the hub's busy stores opens, for the one
+/// person a local hub serves (the hub's default is 16 each). The stores
+/// that are seldom asked take at most 4 whatever this says.
+pub const POOL_SIZE: i64 = 6;
+
 /// Where the hub keeps memories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Memories {
@@ -325,6 +335,7 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
                 "password",
                 s(&format!("${{{}}}", Secret::PostgresPassword.env())),
             ),
+            ("pool_size", int(POOL_SIZE)),
         ]),
     );
     for store in POSTGRES_STORES {
@@ -529,6 +540,23 @@ mod tests {
                 .and_then(|p| p.get("enabled"))
                 .is_none(),
             "the permission cascade stays off"
+        );
+    }
+
+    /// The hub's pools are sized for one person, and between them fit the
+    /// connections the local Postgres takes: the busy stores at
+    /// `pool_size`, the seldom-asked ones at 4, the few fixed small ones
+    /// and the local memory store's own, under `max_connections` less
+    /// Postgres's 3 reserved slots.
+    #[test]
+    fn the_hubs_pools_fit_the_local_postgres() {
+        let doc = rendered(Memories::Sqlite);
+        assert_eq!(doc["postgres"]["pool_size"].as_integer(), Some(POOL_SIZE));
+        let (busy, small, fixed, memory) = (10, 15, 14, 2);
+        let most = busy * POOL_SIZE + small * 4 + fixed + memory;
+        assert!(
+            most <= i64::from(MAX_CONNECTIONS) - 3,
+            "{most} of {MAX_CONNECTIONS}"
         );
     }
 
