@@ -1,6 +1,9 @@
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { PutInGrid } from "../grids/PutInGrid";
+import { ShownIn } from "../grids/ShownIn";
+import { useGrids } from "../grids/store";
+import { placesOf } from "../grids/where";
 import { reveal } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
@@ -43,11 +46,15 @@ export function useAgentPanel(): Agent | undefined {
   return useChat((s) => (floor && s.panelAgent ? s.roster.find((a) => agentKey(a) === s.panelAgent) : undefined));
 }
 
-/** A DM beside the Floor: the conversation, which can go to a grid or open
- *  in full in Rooms. */
+/** A DM beside the Floor: the conversation, which says where a grid shows
+ *  it, else can go to one, and can open in full in Rooms. */
 export function AgentPanel({ agent }: { agent: Agent }) {
   const key = agentKey(agent);
   const hub = useChat((s) => s.hubs.find((h) => h.id === agent.hubId));
+  const sessions = useDesk((s) => s.sessions);
+  const order = useGrids((s) => s.order);
+  const grids = useGrids((s) => s.grids);
+  const places = placesOf({ order, grids }, sessions, `agent:${key}`);
   const close = () => useChat.getState().setPanelAgent(null);
   return (
     <SidePanel
@@ -79,10 +86,11 @@ export function AgentPanel({ agent }: { agent: Agent }) {
           >
             Open full
           </button>
-          <PutInGrid content={{ kind: "agent", agent: key }} label={`Put ${agent.name} in a grid`} onShown={close} />
+          {!places.length && <PutInGrid content={{ kind: "agent", agent: key }} label={`Put ${agent.name} in a grid`} onShown={close} />}
         </>
       }
     >
+      {places.length > 0 && <ShownIn places={places} loose={null} onShown={close} />}
       <DirectMessage key={key} agent={key} />
     </SidePanel>
   );

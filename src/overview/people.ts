@@ -15,14 +15,16 @@ export const useLocalAgent = (id: string | null | undefined): Agent | undefined 
   return useChat((s) => (id && hub ? s.roster.find((a) => a.hubId === hub.id && a.id === id) : undefined));
 };
 
-/** Opens your DM with an agent on this computer. */
+/** Opens your DM with an agent on this computer: beside the Floor, where
+ *  everything clicked on it opens, even when a grid shows it. */
 export const openLocalDm = (id: string): void => {
   const key = localKey(id);
-  if (key) openTarget({ kind: "agent", key });
+  if (key) openTarget({ kind: "agent", key }, { beside: true });
 };
 
 /** Whether Desk lists the session, so its card can open. */
 export const useKnownSession = (id: string | null | undefined): boolean => useDesk((s) => !!id && !!s.sessions[id]);
 
-/** Opens a session, if Desk lists it (else it would open nothing). */
-export const openSession = (id: string): void => openTarget({ kind: "session", sessionId: id });
+/** Opens a session's card beside the Floor, even when a grid shows it, if
+ *  Desk lists it (else it would open nothing). */
+export const openSession = (id: string): void => openTarget({ kind: "session", sessionId: id }, { beside: true });
