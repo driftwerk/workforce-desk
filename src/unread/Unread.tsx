@@ -19,7 +19,7 @@ import { Menu } from "../ui/Menu";
 import { isLive, useUpdates } from "../updates/store";
 import { advance, markEverythingRead, markUnread } from "./reads";
 import { unreadRows, type UnreadRow } from "./rows";
-import { useUnreadUpdate } from "./Marks";
+import { useUnreadDms, useUnreadUpdate } from "./Marks";
 import { useUnread } from "./summary";
 
 // Everything new for you, in one place: what needs you, what's unread in
@@ -101,7 +101,11 @@ function Row({ row, dim, now, onRead }: { row: UnreadRow; dim: boolean; now: num
           </button>
         </>
       )}
-      {row.urgency === "forYou" && row.count > 0 ? <Badge count={row.count} says={needsYou(row.count)} /> : <span className="side-dot" />}
+      {row.urgency === "forYou" && row.count > 0 ? <Badge count={row.count} says={needsYou(row.count)} /> : (
+        <span className="side-dot">
+          <span className="sr-only">new</span>
+        </span>
+      )}
       <span className="faint small">{row.at ? dayClock(row.at, now) : ""}</span>
       {!dim && !row.version && (
         <button type="button" className="link small" onClick={() => onRead(row)}>
@@ -141,7 +145,7 @@ export function Unread() {
   const needs = useNeeds();
   const local = useUnread((s) => s.local);
   const localAt = useUnread((s) => s.localAt);
-  const dms = useUnread((s) => s.dms);
+  const dms = useUnreadDms();
   const connected = useDesk((s) => s.connected);
   const rooms = useDesk((s) => s.rooms);
   const sessions = useDesk((s) => s.sessions);
@@ -161,7 +165,7 @@ export function Unread() {
   );
   // A row read during this visit stays, dimmed, until you leave, so Mark
   // unread is still at hand.
-  const [kept, setKept] = useState<UnreadRow[]>([]);
+  const [kept, setKept] = useState<UnreadRow[]>(rows);
   useEffect(() => setKept((was) => [...rows, ...was.filter((r) => !rows.some((x) => x.key === r.key))]), [rows]);
   const live = new Set(rows.map((r) => r.key));
   const [shown, setShown] = useState(PAGE);

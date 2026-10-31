@@ -48,7 +48,8 @@ import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
  *  is in it, else the room's newest live one; else the open DM's turn. */
 const stopNearest = () => {
   const desk = useDesk.getState();
-  if (desk.view !== "rooms") return;
+  // Nothing is answering on the Unread page, whatever room it stands over.
+  if (desk.view !== "rooms" || desk.inbox) return;
   const room = desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
   if (room) {
     const inThread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room.id] ?? null) : null;
@@ -63,7 +64,7 @@ const stopNearest = () => {
 /** The open room's pill: the open thread's when focus is in it. */
 const jumpNearest = () => {
   const desk = useDesk.getState();
-  const room = desk.view === "rooms" ? desk.activeRoom : null;
+  const room = desk.view === "rooms" && !desk.inbox ? desk.activeRoom : null;
   if (!room) return;
   const thread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room] ?? null) : null;
   jumpers.get(placeKey(room, thread))?.();
