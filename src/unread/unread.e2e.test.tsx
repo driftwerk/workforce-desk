@@ -57,6 +57,7 @@ beforeEach(() => {
     view: "rooms",
     rooms: { [ROOM]: { id: ROOM, slug: "atlas-launch", name: "Atlas launch", members: [], defaultMember: null, createdAt: "", updatedAt: "" } },
     roomDrafts: {},
+    inbox: false,
   });
   useUnread.setState({ local: null, localAt: null, dms: {}, dmsAt: {} });
 });
@@ -81,7 +82,43 @@ describe("unread, end to end", () => {
     expect(screen.getByText(/as of/)).toBeTruthy();
     expect(invoked).toContainEqual(["set_unread_badge", expect.objectContaining({ count: 2, dot: false })]);
     act(() => useUnread.setState({ local: { ...summary, rooms: [] } }));
-    expect(invoked.at(-1)).toEqual(["set_unread_badge", expect.objectContaining({ count: 0, dot: false })]);
+    expect(invoked.at(-1)).toEqual(["set_unread_badge", expect.objectContaining({ count: 0, dot: false, overlay: null })]);
     stop();
+  });
+
+  it("hides the sidebar's Unread row and clears the app's badge when the page lists nothing, whatever else is new", () => {
+    // Activity, a room this window doesn't know, and a session it doesn't
+    // either: none of them is on the Unread page, so none lights anything.
+    useUnread.setState({
+      local: {
+        ...summary,
+        rooms: [{ roomId: "gone", main: { count: 2, forYou: 0, first: "m1", lastAt: at(9) }, threads: [] }],
+        sessions: [{ id: "unknown", since: at(3), urgency: "new" }],
+        activity: { count: 5, lastAt: at(8) },
+      },
+    });
+    render(
+      <>
+        <Sidebar onAsk={() => {}} onNewSession={() => {}} onNewRoom={() => {}} onNewCrew={() => {}} onSettings={() => {}} />
+        <Badge />
+      </>,
+    );
+    expect(screen.queryByRole("button", { name: /^Unread/ })).toBeNull();
+    expect(invoked.at(-1)).toEqual(["set_unread_badge", expect.objectContaining({ count: 0, dot: false, overlay: null })]);
+    // Something listed only new: a dot, on the row and the icon.
+    act(() => useUnread.setState((s) => ({ local: { ...s.local!, rooms: [{ roomId: ROOM, main: { count: 1, forYou: 0, first: "m1", lastAt: at(9) }, threads: [] }] } })));
+    expect(within(screen.getByRole("button", { name: /^Unread/ })).getByText("unread")).toBeTruthy();
+    expect(invoked.at(-1)).toEqual(["set_unread_badge", expect.objectContaining({ count: 0, dot: true })]);
+    // Read, it all goes again.
+    act(() => useUnread.setState((s) => ({ local: { ...s.local!, rooms: [] } })));
+    expect(screen.queryByRole("button", { name: /^Unread/ })).toBeNull();
+    expect(invoked.at(-1)).toEqual(["set_unread_badge", expect.objectContaining({ count: 0, dot: false })]);
+  });
+
+  it("keeps the sidebar's Unread row while the page is open", () => {
+    useDesk.setState({ inbox: true });
+    useUnread.setState({ local: { ...summary, rooms: [] } });
+    render(<Sidebar onAsk={() => {}} onNewSession={() => {}} onNewRoom={() => {}} onNewCrew={() => {}} onSettings={() => {}} />);
+    expect(screen.getByRole("button", { name: /^Unread/ }).getAttribute("aria-current")).toBe("true");
   });
 });

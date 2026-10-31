@@ -9,6 +9,10 @@ import { useUnread } from "./summary";
 import { useWatching, watched } from "./watching";
 import type { UnreadSummary } from "../hub/types";
 import { useUpdates } from "../updates/store";
+import { useChat } from "../chat/store";
+import { useSessionNames } from "../groups/names";
+import { useOverview } from "../overview/store";
+import { unreadRows, type UnreadRow } from "./rows";
 
 /** A row's mark: the number for you, else a dot for something new. */
 export function Marks({ badge }: { badge: Marked }) {
@@ -82,12 +86,36 @@ export const useUnreadUpdate = (): string | null => {
   return version && seen !== version ? version : null;
 };
 
-/** Everything unread, each item once. */
-export const useTotal = (): Marked => {
-  const update = !!useUnreadUpdate();
-  const needs: readonly FloorNeed[] = useNeeds();
-  const dms = useUnreadDms();
+/** When each ready version was first seen here, for its point. */
+const readySince = new Map<string, string>();
+const readyAt = (version: string | null): string => {
+  if (!version) return "";
+  if (!readySince.has(version)) readySince.set(version, new Date().toISOString());
+  return readySince.get(version)!;
+};
+
+/** The Unread page's rows, as every badge of the total reads them. */
+export const useUnreadRows = (): UnreadRow[] => {
   const local = useLocalUnread();
+  const dms = useUnreadDms();
+  const rooms = useDesk((s) => s.rooms);
+  const sessions = useDesk((s) => s.sessions);
+  const timelines = useDesk((s) => s.timelines);
+  const roster = useChat((s) => s.roster);
+  const hubs = useChat((s) => s.hubs);
+  const sessionNames = useSessionNames();
+  const brief = useOverview((s) => s.overview?.brief ?? null);
+  const ready = useUnreadUpdate();
+  return useMemo(
+    () => unreadRows({ local, dms, rooms, roster, hubs, sessions, sessionNames, timelines, brief, ready, readyAt: readyAt(ready) }),
+    [local, dms, rooms, roster, hubs, sessions, sessionNames, timelines, brief, ready],
+  );
+};
+
+/** Everything the Unread page lists, each item once. */
+export const useTotal = (): Marked => {
+  const needs: readonly FloorNeed[] = useNeeds();
+  const rows = useUnreadRows();
   const drafts = useDesk((s) => s.roomDrafts);
-  return useMemo(() => totalOf({ needs, dms, local, drafts, update }), [needs, dms, local, drafts, update]);
+  return useMemo(() => totalOf({ needs, rows, drafts }), [needs, rows, drafts]);
 };
