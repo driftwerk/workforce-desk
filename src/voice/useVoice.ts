@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { useChat } from "../chat/store";
-import { agentKey, type Agent } from "../chat/types";
+import { agentKey, type Agent, type DeskVoice } from "../chat/types";
 import { useSettings } from "../settings/store";
-import { useGlobalShortcut } from "../shortcuts/manager";
+import { useAppHold, useAppShortcut, useGlobalShortcut } from "../shortcuts/manager";
 import {
+  claimVoice,
   disableVoice,
   enableVoice,
+  onUnheard,
   onUtterance,
   onVoiceError,
   onVoiceState,
@@ -17,32 +19,41 @@ import {
   type Utterance,
   type VoiceStatus,
 } from "./api";
+import { targetDm } from "./dms";
 import { voiceEngine } from "./engines";
+import { claimMode, holdDone, micFailed, owner, pressHold, releaseHold, toggleTalk, useMic } from "./mic";
 import type { VoiceSpec } from "../platform";
-import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
+import { forModel, missingAgent, outcome, resolveAgent, speechOf, voiceFor, voiceRoster, wakeNames } from "./route";
 import { DETAILS_IN_DESK, speakable } from "./speakable";
 import { useVoiceStore } from "./store";
 
-const ACK_AFTER_MS = 2_000;
 const ANSWER_WAIT_MS = 10 * 60_000;
 const SEND_TRIES = 60;
 const SEND_RETRY_MS = 150;
 
 const failed = (e: unknown) => useVoiceStore.setState({ error: e instanceof Error ? e.message : String(e) });
 
-/** Where an answer goes: read aloud (the cascade), or back to the cloud
- *  voice model that asked, which says it in its own words. */
+/** Where an answer goes: read aloud (the cascade), back to the cloud voice
+ *  model that asked, which says it in its own words, or nowhere but the
+ *  DM, where it's read. */
 interface Reply {
   answer: (text: string) => void;
-  /** Said while a slow answer is on its way; the cloud models do their own. */
-  ack?: (text: string) => void;
 }
 
-/** Read aloud in `voice`, the agent's own. */
-const aloud = (voice?: VoiceSpec): Reply => ({
-  answer: (text) => void speak(text, false, voice).catch(failed),
-  ack: (text) => void speak(text, true, voice).catch(failed),
+/** Read aloud in `voice`, `agent`'s own. */
+const aloud = (agent: string | null, voice?: VoiceSpec): Reply => ({
+  answer: (text) => {
+    useVoiceStore.setState({ speakingFor: agent });
+    void speak(text, voice).catch(failed);
+  },
 });
+
+const toModel = (callId: string): Reply => ({
+  answer: (text) => void toolResult(callId, text).catch(failed),
+});
+
+/** Dictated: the answer is on screen in the DM. */
+const inWriting: Reply = { answer: () => undefined };
 
 /** The voice an agent's answers are read in, from Desk's settings. */
 const voiceOf = (agent: Agent): VoiceSpec => {
@@ -50,47 +61,77 @@ const voiceOf = (agent: Agent): VoiceSpec => {
   return voiceFor(agent, agentVoices, defaultVoice);
 };
 
+/** How `agent` (by key) answers what's said in its DM. */
+export const replyOf = (agent: string): "spoken" | "written" =>
+  useSettings.getState().writtenReplies.includes(agent) ? "written" : "spoken";
+
+/** Has `agent` answer what's said in its DM aloud or in writing, from now on. */
+export const setReply = (agent: string, reply: "spoken" | "written"): void => {
+  const { writtenReplies, set } = useSettings.getState();
+  const others = writtenReplies.filter((a) => a !== agent);
+  set({ writtenReplies: reply === "written" ? [...others, agent] : others });
+};
+
 /** Reads `text`, something delivered to be spoken, aloud in `agent`'s voice
  *  while voice is on. */
 export const readAloud = (agent: Agent, text: string): void => {
   if (!useSettings.getState().voice || useVoiceStore.getState().status.state === "off") return;
-  aloud(voiceOf(agent)).answer(speakable(text));
+  aloud(agentKey(agent), voiceOf(agent)).answer(speakable(text));
 };
 
-const toModel = (callId: string): Reply => ({
-  answer: (text) => void toolResult(callId, text).catch(failed),
-});
+/** Hold to talk in `agent`'s DM: the microphone is its until what's said
+ *  has gone. */
+export const startHold = (agent: string): void => {
+  pressHold(agent);
+  void pushToTalk(true).catch(failed);
+};
+
+export const endHold = (): void => {
+  if (!useMic.getState().pressed) return;
+  releaseHold();
+  void pushToTalk(false).catch(failed);
+};
 
 /** Spoken turns: each utterance goes to its agent's DM through the chat
- *  store, and the answer goes back when it finishes. */
+ *  store — the DM holding the microphone's, else the agent it named — and
+ *  the answer goes back when it finishes. */
 export class Turns {
   private current: Agent | null = null;
-  private turn = 0;
   private waiting = new Map<string, () => void>();
 
   status(s: VoiceStatus) {
     if (s.state === "off" || (s.state === "listening" && s.conversation === null)) this.current = null;
+    if (s.state !== "speaking" && useVoiceStore.getState().speakingFor) useVoiceStore.setState({ speakingFor: null });
   }
 
   heard(u: Utterance) {
     const chat = useChat.getState();
-    const agent = resolveAgent(u.agent, chat.roster, this.current, chat.activeAgent);
-    const reply = u.callId ? toModel(u.callId) : aloud(agent ? voiceOf(agent) : undefined);
+    const mic = owner();
+    if (mic?.mode === "hold") holdDone();
+    const agent = mic ? (chat.roster.find((a) => agentKey(a) === mic.agent) ?? null) : resolveAgent(u.agent, chat.roster, this.current, chat.activeAgent);
+    const written = !!mic && !u.callId && replyOf(mic.agent) === "written";
+    const reply = u.callId ? toModel(u.callId) : written ? inWriting : aloud(agent ? agentKey(agent) : null, agent ? voiceOf(agent) : undefined);
     useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null });
     if (!agent) {
       reply.answer(missingAgent(u.agent, wakeNames(chat.roster)));
       return;
     }
-    this.current = agent;
     const key = agentKey(agent);
-    chat.openDm(key);
+    if (!mic) {
+      this.current = agent;
+      chat.openDm(key);
+    }
+    const voice: DeskVoice = written
+      ? { reply: "written" }
+      : { reply: "spoken", speech: u.callId ? { provider: voiceEngine(useSettings.getState().voiceEngine).id } : speechOf(voiceOf(agent)) };
     const done = this.awaitAnswer(key, agent.name, reply, Boolean(u.callId));
     const attempt = (n: number) => {
-      if (useChat.getState().send(key, u.text, { spoken: true })) return;
+      if (useChat.getState().send(key, u.text, { voice })) return;
       if (n < SEND_TRIES) setTimeout(() => attempt(n + 1), SEND_RETRY_MS);
       else {
         done();
-        reply.answer(`I couldn't reach ${agent.name}.`);
+        if (written) useVoiceStore.setState({ error: `Couldn’t reach ${agent.name}.` });
+        else reply.answer(`I couldn't reach ${agent.name}.`);
       }
     };
     attempt(0);
@@ -98,7 +139,6 @@ export class Turns {
 
   private awaitAnswer(key: string, name: string, reply: Reply, cloud: boolean): () => void {
     this.waiting.get(key)?.();
-    const ack = reply.ack && setTimeout(() => reply.ack?.(acknowledgement(name, this.turn++)), ACK_AFTER_MS);
     const giveUp = setTimeout(() => done(), ANSWER_WAIT_MS);
     const unsubscribe = useChat.subscribe((s, prev) => {
       const before = prev.conversations[key];
@@ -111,14 +151,16 @@ export class Turns {
       else reply.answer(cloud ? forModel(o.text) : speakable(o.text));
     });
     const done = () => {
-      clearTimeout(ack);
       clearTimeout(giveUp);
       unsubscribe();
       if (this.waiting.get(key) === done) this.waiting.delete(key);
-      useVoiceStore.setState({ thinking: this.waiting.size > 0 });
+      useVoiceStore.setState((s) => {
+        const { [key]: _gone, ...waiting } = s.waiting;
+        return { thinking: this.waiting.size > 0, waiting };
+      });
     };
     this.waiting.set(key, done);
-    useVoiceStore.setState({ thinking: true });
+    useVoiceStore.setState((s) => ({ thinking: true, waiting: { ...s.waiting, [key]: true } }));
     return done;
   }
 
@@ -128,11 +170,32 @@ export class Turns {
   }
 }
 
+/** Gives the engine to whoever has the microphone (see `mic.ts`) whenever
+ *  that changes; one that can't be had goes back to voice by name, saying
+ *  why in the DM that asked. */
+const followMic = (): (() => void) => {
+  let mode = claimMode();
+  const claim = (next: typeof mode) =>
+    claimVoice(next).catch((e: unknown) => {
+      const who = owner();
+      if (who) micFailed(who.agent, e instanceof Error ? e.message : String(e));
+    });
+  if (mode) void claim(mode);
+  return useMic.subscribe((s) => {
+    const next = claimMode(s);
+    if (next === mode) return;
+    mode = next;
+    void claim(next);
+  });
+};
+
 /** Voice, while `enabled`: wake on roster names, push-to-talk on the
  *  `pushToTalk` shortcut, requests to the named agent, answers read
  *  aloud or handed back to the cloud voice model, on the engine Desk's
- *  settings name.
- *  Mount once in the shell, e.g. `useVoice(useSettings((s) => s.voice))`. */
+ *  settings name. Whatever `enabled` is, a DM can take the microphone
+ *  (`talkHere`, `holdToTalkHere`, or its own buttons), pausing voice by
+ *  name until it gives it back.
+ *  Mount once in the main window, e.g. `useVoice(useSettings((s) => s.voice))`. */
 export function useVoice(enabled: boolean) {
   const engine = voiceEngine(useSettings((s) => s.voiceEngine)).id;
   const roster = useChat((s) => s.roster);
@@ -160,17 +223,39 @@ export function useVoice(enabled: boolean) {
         useVoiceStore.setState({ status });
       }),
       onUtterance((u) => turns.heard(u)),
+      onUnheard(holdDone),
       onVoiceError((message) => useVoiceStore.setState({ error: message })),
     ];
+    const unfollow = followMic();
+    useVoiceStore.setState({ here: true });
     voiceStatus()
       .then((status) => useVoiceStore.setState({ status }))
       .catch(failed);
     return () => {
       turns.stop();
+      unfollow();
+      useVoiceStore.setState({ here: false });
       for (const stop of stops) void stop.then((f) => f());
     };
   }, []);
 
   const holdKeys = useSettings((s) => (s.loaded ? s.keys.pushToTalk : null));
   useGlobalShortcut("pushToTalk", enabled ? holdKeys : null, (e) => void pushToTalk(e.state === "Pressed").catch(failed));
+  useAppShortcut(
+    "talkHere",
+    () => {
+      const dm = targetDm();
+      if (dm) toggleTalk(dm);
+    },
+    true,
+    { fromFields: false },
+  );
+  useAppHold(
+    "holdToTalkHere",
+    () => {
+      const dm = targetDm();
+      if (dm) startHold(dm);
+    },
+    endHold,
+  );
 }

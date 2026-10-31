@@ -66,6 +66,9 @@ export interface Settings {
   /** Voices added by id, by provider (`fish_audio`, `elevenlabs`). */
   customVoices: Record<string, CustomVoice[]>;
   voice: boolean;
+  /** Agents, by agent key, who answer in writing when talked to in their
+   *  DM; the rest answer aloud. Older files have none. */
+  writtenReplies?: string[];
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;
   /** The keyboard shortcuts chosen in place of their defaults, by id

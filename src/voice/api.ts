@@ -34,10 +34,12 @@ export const setVoiceRoster = (roster: RosterMember[]): Promise<void> => invoke(
 
 export const pushToTalk = (pressed: boolean): Promise<void> => invoke("voice_push_to_talk", { pressed });
 
-/** `more`: an acknowledgement, with the answer still to come. `voice`: the
- *  agent's own; the engine's default without one. */
-export const speak = (text: string, more = false, voice?: VoiceSpec): Promise<void> =>
-  invoke("voice_speak", { text, more, voice });
+/** `voice`: the agent's own; the engine's default without one. */
+export const speak = (text: string, voice?: VoiceSpec): Promise<void> => invoke("voice_speak", { text, voice });
+
+/** A DM takes the microphone: `"open"`, everything said is for it;
+ *  `"held"`, only push-to-talk. `null` gives it back to voice by name. */
+export const claimVoice = (mode: "open" | "held" | null): Promise<void> => invoke("voice_claim", { mode });
 
 export const stopSpeaking = (): Promise<void> => invoke("voice_stop_speaking");
 
@@ -51,6 +53,9 @@ export const onVoiceState = (f: (s: VoiceStatus) => void): Promise<() => void> =
 
 export const onUtterance = (f: (u: Utterance) => void): Promise<() => void> =>
   listen<Utterance>("voice-utterance", (e) => f(e.payload));
+
+/** Push-to-talk was let go and nothing was said. */
+export const onUnheard = (f: () => void): Promise<() => void> => listen("voice-unheard", () => f());
 
 export const onVoiceError = (f: (message: string) => void): Promise<() => void> =>
   listen<string>("voice-error", (e) => f(e.payload));

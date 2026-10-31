@@ -31,6 +31,15 @@ export const useMainHidden = (): boolean => useContext(MainHiddenContext);
  *  of sight. */
 export const useStowed = (): boolean => useContext(SlotContext)?.docked ?? false;
 
+/** Whether what this is in is out of sight though mounted: its column
+ *  docked as a tab, or the main area behind a focused column. Either is
+ *  laid out still, so it reads as on screen to an IntersectionObserver. */
+export const useOutOfSight = (): boolean => {
+  const slot = useContext(SlotContext);
+  const mainHidden = useContext(MainHiddenContext);
+  return slot ? slot.docked : mainHidden;
+};
+
 /** A key pressed in a terminal is the terminal's: Esc there interrupts
  *  Claude Code, and doesn't leave a view. */
 export const inTerminal = (target: EventTarget | null): boolean => target instanceof Element && !!target.closest(".terminal-frame, .xterm");

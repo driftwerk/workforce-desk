@@ -19,7 +19,7 @@ import { Menu } from "../ui/Menu";
 import { isLive, useUpdates } from "../updates/store";
 import { advance, markEverythingRead, markUnread } from "./reads";
 import { unreadRows, type UnreadRow } from "./rows";
-import { useUnreadDms, useUnreadUpdate } from "./Marks";
+import { useLocalUnread, useUnreadDms, useUnreadUpdate } from "./Marks";
 import { useUnread } from "./summary";
 
 // Everything new for you, in one place: what needs you, what's unread in
@@ -143,7 +143,7 @@ function Row({ row, dim, now, onRead }: { row: UnreadRow; dim: boolean; now: num
 export function Unread() {
   const now = useMinute();
   const needs = useNeeds();
-  const local = useUnread((s) => s.local);
+  const local = useLocalUnread();
   const localAt = useUnread((s) => s.localAt);
   const dms = useUnreadDms();
   const connected = useDesk((s) => s.connected);

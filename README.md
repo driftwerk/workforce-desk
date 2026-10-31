@@ -17,8 +17,9 @@ Design: `workforce-public/docs/DESK_DESIGN.md`.
   each hub's `/ws` on the `desk` channel.
 - **`desk-core`** is what both share: paths under
   `~/Library/Application Support/Desk` (`DESK_HOME` overrides) and the keychain.
-- **`desk-tuple`** follows Tuple calls; **`desk-voice`** does wake-by-name,
-  speech-to-text and text-to-speech.
+- **`desk-tuple`** follows Tuple calls; **`desk-voice`** does wake-by-name (or
+  listens for the one DM holding the microphone), speech-to-text and
+  text-to-speech.
 - **`@workforce/rich`** (from `workforce-public/packages/rich`) renders agents'
   tables, charts, forms, maps, diagrams and images.
 

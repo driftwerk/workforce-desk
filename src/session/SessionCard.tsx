@@ -10,7 +10,7 @@ import { useGrids } from "../grids/store";
 import { placesOf } from "../grids/where";
 import { useTerminals } from "../grids/terminals";
 import { sessionItem } from "../groups/model";
-import { SidePanel, useStowed } from "../panels/Stage";
+import { SidePanel, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
 import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actions";
@@ -107,10 +107,10 @@ export function SessionCard({ session }: { session: Session }) {
  *  was started in, for a tracked one), else why it isn't running and the
  *  last thing it said. */
 export function SessionBody({ session, autoFocus = true }: { session: Session; autoFocus?: boolean }) {
-  // What it did since it was last seen is read once the card or pane it is
-  // in has shown.
+  // It's read while the card or pane it is in is on screen: the element
+  // around it, whether it runs or not.
   const host = useRef<HTMLElement | null>(null);
-  useSeenSession(session.id, host, { enabled: !useStowed() });
+  useSeenSession(session.id, host, { enabled: !useOutOfSight() });
   const seen = <span hidden ref={(el) => void (host.current = el?.parentElement ?? null)} />;
   return session.live ? (
     <>
@@ -122,20 +122,22 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
       )}
     </>
   ) : (
-    <div className="terminal-idle">
+    <>
       {seen}
-      <p className="muted">
-        {session.origin === "external"
-          ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."
-          : session.state === "interrupted"
-            ? "This session was working when it stopped. Resume picks up the same conversation."
-            : "Not running. Resume picks up the same conversation."}
-      </p>
-      {session.lastReply && (
-        <div className="transcript-tail rich">
-          <RichMarkdown text={session.lastReply} />
-        </div>
-      )}
-    </div>
+      <div className="terminal-idle">
+        <p className="muted">
+          {session.origin === "external"
+            ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."
+            : session.state === "interrupted"
+              ? "This session was working when it stopped. Resume picks up the same conversation."
+              : "Not running. Resume picks up the same conversation."}
+        </p>
+        {session.lastReply && (
+          <div className="transcript-tail rich">
+            <RichMarkdown text={session.lastReply} />
+          </div>
+        )}
+      </div>
+    </>
   );
 }
