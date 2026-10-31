@@ -39,9 +39,9 @@ const items = [
   { id: "m3", at: "2026-10-27T09:00:03Z" },
 ];
 
-function List({ enabled = true }: { enabled?: boolean }) {
+function List({ enabled = true, room = "r1" }: { enabled?: boolean; room?: string }) {
   const root = useRef<HTMLDivElement>(null);
-  useSeen({ kind: "room", room: "r1" }, root, items, { enabled });
+  useSeen({ kind: "room", room }, root, items, { enabled });
   return (
     <div ref={root}>
       {items.map((it) => (
@@ -117,6 +117,28 @@ describe("what's on screen is read", () => {
     act(() => observer().show(el("m1"), false, 0));
     act(() => void vi.advanceTimersByTime(SEEN_MS));
     expect(advanced).toEqual([]);
+  });
+
+  it("by the place it showed in: one shown next isn't read through what the last showed", () => {
+    const { rerender } = render(<List />);
+    act(() => observer().show(el("m2"), true));
+    act(() => void vi.advanceTimersByTime(SEEN_MS / 2));
+    rerender(<List room="r2" />);
+    act(() => void vi.advanceTimersByTime(SEEN_MS));
+    expect(advanced).toEqual([]);
+  });
+
+  it("through a row taller than the pane once scrolling brings its bottom into sight", () => {
+    const { container } = render(<List />);
+    act(() => observer().show(el("m3"), false, 0.3));
+    act(() => void vi.advanceTimersByTime(SEEN_MS));
+    expect(advanced).toEqual([]);
+    const pane = container.firstElementChild as HTMLElement;
+    vi.spyOn(pane, "getBoundingClientRect").mockReturnValue({ bottom: 200 } as DOMRect);
+    vi.spyOn(el("m3"), "getBoundingClientRect").mockReturnValue({ bottom: 190 } as DOMRect);
+    act(() => void pane.dispatchEvent(new Event("scroll")));
+    act(() => void vi.advanceTimersByTime(SEEN_MS));
+    expect(advanced).toEqual([{ place: { kind: "room", room: "r1" }, point: { at: items[2]!.at, message: "m3" } }]);
   });
 
   it("not in a stowed pane", () => {

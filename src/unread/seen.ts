@@ -20,17 +20,20 @@ export interface SeenItem {
   at: string;
 }
 
-/** Waits `SEEN_MS` while `still()` holds and the window is attended, then runs `then`. */
+/** Waits `SEEN_MS` while `still()` holds and the window is attended, then
+ *  runs `then`; `cancel` lets go of what's waiting. */
 function useAttention() {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  return (still: () => boolean, then: () => void) => {
+  const wait = (still: () => boolean, then: () => void) => {
     clearTimeout(timer.current);
     if (!attending() || !still()) return;
     timer.current = setTimeout(() => {
       if (attending() && still()) then();
     }, SEEN_MS);
   };
+  const cancel = () => clearTimeout(timer.current);
+  return { wait, cancel };
 }
 
 /** Reads `place` through the newest of `items` (oldest first) whose bottom
@@ -40,13 +43,17 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
   const key = place && placeKey(place);
   const where = useRef(place);
   where.current = place;
-  const wait = useAttention();
-  const waitRef = useRef(wait);
-  waitRef.current = wait;
+  const attention = useAttention();
+  const attentionRef = useRef(attention);
+  attentionRef.current = attention;
   useEffect(() => {
     const el = root.current;
-    if (!key || !enabled || !el || !items.length || typeof IntersectionObserver === "undefined") return;
+    // The place this run reads: one shown next waits its own half second.
+    const here = where.current;
+    if (!key || !here || !enabled || !el || !items.length || typeof IntersectionObserver === "undefined") return;
     const order = new Map(items.map((it, i) => [it.id, i]));
+    /** Rows on screen at all, and those whose bottom has shown. */
+    const inView = new Map<string, Element>();
     const showing = new Set<string>();
     const newest = (): SeenItem | null => {
       let best = -1;
@@ -56,9 +63,9 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
     const check = () => {
       const item = newest();
       if (!item) return;
-      waitRef.current(
+      attentionRef.current.wait(
         () => showing.has(item.id),
-        () => where.current && void advance(where.current, { at: item.at, message: item.id }),
+        () => void advance(here, { at: item.at, message: item.id }),
       );
     };
     const io = new IntersectionObserver(
@@ -67,6 +74,8 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
           const id = (e.target as HTMLElement).dataset.messageId;
           if (!id) continue;
           const bottom = e.rootBounds ? e.boundingClientRect.bottom <= e.rootBounds.bottom + 1 : e.intersectionRatio >= 1;
+          if (e.isIntersecting) inView.set(id, e.target);
+          else inView.delete(id);
           if (e.isIntersecting && bottom) showing.add(id);
           else showing.delete(id);
         }
@@ -74,11 +83,27 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
       },
       { root: el, threshold: [0, 0.25, 0.5, 0.75, 1] },
     );
+    // A row taller than the pane crosses no threshold as its bottom comes
+    // into sight, so scrolling looks again at the rows on screen.
+    const onScroll = () => {
+      if (!inView.size) return;
+      const bottom = el.getBoundingClientRect().bottom;
+      let more = false;
+      for (const [id, row] of inView)
+        if (!showing.has(id) && row.getBoundingClientRect().bottom <= bottom + 1) {
+          showing.add(id);
+          more = true;
+        }
+      if (more) check();
+    };
     for (const node of el.querySelectorAll<HTMLElement>("[data-message-id]")) if (order.has(node.dataset.messageId!)) io.observe(node);
+    el.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
     return () => {
+      attentionRef.current.cancel();
       io.disconnect();
+      el.removeEventListener("scroll", onScroll);
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
     };
@@ -90,19 +115,20 @@ export function useSeenWhole(place: Place | null, point: ReadPoint | null, ref: 
   const key = place && placeKey(place);
   const where = useRef(place);
   where.current = place;
-  const wait = useAttention();
-  const waitRef = useRef(wait);
-  waitRef.current = wait;
+  const attention = useAttention();
+  const attentionRef = useRef(attention);
+  attentionRef.current = attention;
   const at = point?.at;
   const message = point?.message ?? null;
   useEffect(() => {
     const el = ref.current;
-    if (!key || !enabled || !el || !at || typeof IntersectionObserver === "undefined") return;
+    const here = where.current;
+    if (!key || !here || !enabled || !el || !at || typeof IntersectionObserver === "undefined") return;
     let half = false;
     const check = () =>
-      waitRef.current(
+      attentionRef.current.wait(
         () => half,
-        () => where.current && void advance(where.current, { at, message }),
+        () => void advance(here, { at, message }),
       );
     const io = new IntersectionObserver(
       (entries) => {
@@ -115,6 +141,7 @@ export function useSeenWhole(place: Place | null, point: ReadPoint | null, ref: 
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
     return () => {
+      attentionRef.current.cancel();
       io.disconnect();
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
