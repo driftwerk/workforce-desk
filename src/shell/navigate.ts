@@ -46,8 +46,9 @@ const openRoom = async (roomId: string, threadId: string | null): Promise<boolea
 
 /** Takes the person to `t`: where it shows in a grid, else where it opens;
  *  with `beside`, a session's card or an agent's DM opens beside the Floor
- *  even when a grid shows it (the card says where, with a way there); with
- *  `reply`, its composer (or terminal) takes focus. */
+ *  even when a grid shows it (the card says where, with a way there), and a
+ *  room or Slack, which the side panel can't show, opens where it is; with
+ *  `reply`, its composer (or terminal) takes focus, beside too. */
 export const openTarget = (t: Target, opts: { reply?: boolean; beside?: boolean } = {}): void => {
   const focus = (key: string | null) => opts.reply && key && requestFocus(key);
   switch (t.kind) {
