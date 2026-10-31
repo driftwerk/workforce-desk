@@ -27,6 +27,7 @@ import { WINDOW_MODES, type WindowMode } from "./model";
 import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
 import { loadCustomThemes } from "../theme/custom";
+import { startUnread } from "../unread/summary";
 
 /** How long a moved window waits to be still before its monitor is read. */
 const SETTLE_MS = 700;
@@ -44,6 +45,9 @@ export function GridWindow({ gridId }: { gridId: string }) {
   placement.current = grid?.placement;
 
   useEffect(() => applyTheme(theme), [theme]);
+  // What its panes show is read here too: sessions by what the summary says
+  // they did since, with the points every window writes.
+  useEffect(() => startUnread(), []);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");

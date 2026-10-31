@@ -1,6 +1,7 @@
 import { register, unregister, type ShortcutEvent } from "@tauri-apps/plugin-global-shortcut";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { inTerminal as inTerminalAt } from "../panels/Stage";
 import { inApp } from "../platform";
 import { useSettings } from "../settings/store";
 import { matches, pluginKeys, shortcutLabel, SHORTCUTS, terminalKeys, type GlobalShortcutId, type ShortcutId } from "./keys";
@@ -67,26 +68,38 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
 
 /** Whether a key press was made in a terminal pane (Terminal marks its
  *  host `data-terminal`): a shell reads keys there first. */
-const inTerminal = (e: Event): boolean => e.target instanceof Element && e.target.closest("[data-terminal]") !== null;
+const inTerminal = (target: EventTarget | null): boolean =>
+  (target instanceof Element && target.closest("[data-terminal]") !== null) || inTerminalAt(target);
+
+const isField = (target: Element): boolean =>
+  !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+
+/** Whether a room shortcut may act on a key pressed at `target`: never in a
+ *  terminal; in a field only when it is a room composer. */
+export const allowedFrom = (target: EventTarget | null): boolean =>
+  !inTerminal(target) && (!(target instanceof Element) || !isField(target) || target.closest("[data-composer]") !== null);
 
 /** Runs `onPress` when shortcut `id`'s keys are pressed while Desk is in
  *  front — in a terminal pane, the keys it takes there — unless `enabled`
- *  is false or a shortcut is being recorded. */
-export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true) {
+ *  is false or a shortcut is being recorded. With
+ *  `fromFields: false`, keys pressed in a terminal or a field other than a
+ *  room composer are left to it. */
+export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true, opts?: { fromFields: false }) {
   const handler = useRef(onPress);
   handler.current = onPress;
   const keys = useSettings((s) => s.keys[id]);
   const recording = useShortcuts((s) => s.recording);
+  const guarded = opts?.fromFields === false;
   useEffect(() => {
     if (!enabled || recording) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || !matches(e, inTerminal(e) ? terminalKeys(keys) : keys)) return;
+      if (e.repeat || !matches(e, inTerminal(e.target) ? terminalKeys(keys) : keys) || (guarded && !allowedFrom(e.target))) return;
       e.preventDefault();
       handler.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keys, enabled, recording]);
+  }, [keys, enabled, recording, guarded]);
 }
 
 /** Waits for every queued register and unregister (tests). */

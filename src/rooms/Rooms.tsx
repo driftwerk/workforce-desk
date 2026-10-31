@@ -8,6 +8,7 @@ import { withHistory } from "../chat/history";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
+import { Unread as UnreadPage } from "../unread/Unread";
 import { agentKey, describeAgent, DESK_DM } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
@@ -29,6 +30,8 @@ import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
 import type { OversightLevel } from "../hub/types";
 import { useFocusRequest } from "../shell/focus";
+import { useMainHidden, useStowed } from "../panels/Stage";
+import { useSeen } from "../unread/seen";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
 
@@ -45,6 +48,8 @@ export function Rooms() {
   const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
   const loaded = useDesk((s) => s.loaded);
   const activeAgent = useChat((s) => s.activeAgent);
+  const inbox = useDesk((s) => s.inbox);
+  if (inbox) return <UnreadPage />;
   // Each keyed by what it shows, so nothing typed or picked for one shows in another.
   if (room) return <RoomView key={room.id} room={room} />;
   // A room put back on launch shows once the hub says what rooms it has.
@@ -79,14 +84,13 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const person = useChat((s) => (agent ? (s.me[agent.hubId]?.name ?? null) : null));
   const convo = useChat((s) => (activeAgent ? s.conversations[activeAgent] : undefined));
   const history = useChat((s) => (activeAgent ? s.histories[activeAgent] : undefined));
-  const { send, loadHistory, loadEarlier, watchDm, answerPrompt, seenDm } = useChat(
+  const { send, loadHistory, loadEarlier, watchDm, answerPrompt } = useChat(
     useShallow((s) => ({
       send: s.send,
       loadHistory: s.loadHistory,
       loadEarlier: s.loadEarlier,
       watchDm: s.watchDm,
       answerPrompt: s.answerPrompt,
-      seenDm: s.seenDm,
     })),
   );
   const hub = hubs.find((h) => h.id === agent?.hubId);
@@ -124,6 +128,17 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // messages you were reading stay put as it lands above them.
   const anchor = useRef<number | null>(null);
   const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
+  // What the agent said is read once it's been on screen, wherever this
+  // shows: the hub's copies only, by their own ids and times.
+  const hidden = useMainHidden();
+  const stowed = useStowed();
+  const seenItems = useMemo(
+    () => (history?.messages ?? []).filter((m) => m.role !== "user").map((m) => ({ id: m.id, at: m.at })),
+    [history?.messages],
+  );
+  useSeen(agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null, scroller, seenItems, {
+    enabled: tab === "chat" && !(inPane ? stowed : hidden),
+  });
   const known = roster.some((a) => agentKey(a) === inPane);
   useEffect(() => {
     if (inPane && known) watchDm(inPane);
@@ -138,10 +153,6 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   useEffect(() => {
     if (tab === "chat") toEnd();
   }, [convo?.messages, convo?.working?.step, convo?.prompts.length, tab, toEnd]);
-  // Shown: what was delivered into it isn't unread any more.
-  useEffect(() => {
-    if (activeAgent && tab === "chat") seenDm(activeAgent);
-  }, [activeAgent, tab, history?.messages, seenDm]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -432,7 +443,7 @@ function DmComposer({
       .finally(() => setSending(false));
   };
   return (
-    <form className="composer composer-files" onSubmit={submit}>
+    <form className="composer composer-files" onSubmit={submit} data-composer="">
       <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
       {emoji.menu}
       <AttachButton onFiles={files.add} disabled={sending} />

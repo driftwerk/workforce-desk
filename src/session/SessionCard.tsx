@@ -1,5 +1,5 @@
 import { RichMarkdown } from "@workforce/rich";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { backgroundLine, backgroundOf, lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
@@ -10,7 +10,8 @@ import { useGrids } from "../grids/store";
 import { placesOf } from "../grids/where";
 import { useTerminals } from "../grids/terminals";
 import { sessionItem } from "../groups/model";
-import { SidePanel } from "../panels/Stage";
+import { SidePanel, useStowed } from "../panels/Stage";
+import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
 import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
@@ -103,14 +104,23 @@ export function SessionCard({ session }: { session: Session }) {
  *  was started in, for a tracked one), else why it isn't running and the
  *  last thing it said. */
 export function SessionBody({ session, autoFocus = true }: { session: Session; autoFocus?: boolean }) {
+  // What it did since it was last seen is read once the card or pane it is
+  // in has shown.
+  const host = useRef<HTMLElement | null>(null);
+  useSeenSession(session.id, host, { enabled: !useStowed() });
+  const seen = <span hidden ref={(el) => void (host.current = el?.parentElement ?? null)} />;
   return session.live ? (
-    session.terminalId ? (
-      <Terminal key={session.terminalId} terminalId={session.terminalId} autoFocus={autoFocus} />
-    ) : (
-      <Terminal key={session.id} sessionId={session.id} autoFocus={autoFocus} />
-    )
+    <>
+      {seen}
+      {session.terminalId ? (
+        <Terminal key={session.terminalId} terminalId={session.terminalId} autoFocus={autoFocus} />
+      ) : (
+        <Terminal key={session.id} sessionId={session.id} autoFocus={autoFocus} />
+      )}
+    </>
   ) : (
     <div className="terminal-idle">
+      {seen}
       <p className="muted">
         {session.origin === "external"
           ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."

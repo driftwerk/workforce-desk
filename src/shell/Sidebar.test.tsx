@@ -42,10 +42,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New session ⌘N");
     expect(screen.getByRole("button", { name: /^Settings/ }).textContent).toBe("Settings ⌘,");
     cleanup();
-    useSettings.getState().set({ shortcuts: { ask: "Alt+Space", newSession: "Super+J", settings: "Control+Alt+Comma" } });
+    useSettings.getState().set({ shortcuts: { ask: "Alt+Space", newSession: "Super+Y", settings: "Control+Alt+Comma" } });
     sidebar();
     expect(screen.getByRole("button", { name: /Ask anyone/ }).textContent).toBe("Ask anyone ⌥Space");
-    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New session ⌘J");
+    expect(screen.getByRole("button", { name: "New session" }).textContent).toBe("New session ⌘Y");
     expect(screen.getByRole("button", { name: /^Settings/ }).textContent).toBe("Settings ⌃⌥,");
   });
 
@@ -303,5 +303,59 @@ describe("deleting from the sidebar", () => {
     fireEvent.click(you);
     expect(useUi.getState().settings).toBe("profile");
     vi.unstubAllGlobals();
+  });
+});
+
+describe("unread in the sidebar", () => {
+  it("badges agent, session, group, room and grid rows from one count", async () => {
+    const { useUnread } = await import("../unread/summary");
+    useChat.setState({
+      hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }],
+      roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
+    });
+    useSettings.setState({ loaded: true, groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["agent:local/allan", "session:s1"] }], ungrouped: { collapsed: false, items: [] } });
+    useDesk.setState({
+      view: "rooms",
+      rooms: { r1: { id: "r1", slug: "atlas-launch", name: "Atlas launch", members: [], defaultMember: null, createdAt: "", updatedAt: "" } },
+      sessions: { s1: { id: "s1", engine: "claude", name: "acme-web", goal: "", cwd: "/tmp", state: "stopped", live: false, createdAt: "", updatedAt: "" } as never },
+    });
+    useRoomOrder.setState({ order: ["r1"] });
+    const unread = (count: number, forYou: number) => ({ count, forYou, first: null, lastAt: null });
+    useUnread.setState({
+      dms: { "local/allan": { count: 3, for_you: 2, first: null, last: null, capped: false } },
+      local: {
+        floor: "",
+        rooms: [{ roomId: "r1", main: unread(4, 1), threads: [] }],
+        sessions: [{ id: "s1", since: "", urgency: "new" }],
+        activity: { count: 0, lastAt: null },
+        brief: null,
+        update: null,
+      },
+    });
+    sidebar();
+    const rowOf = (name: string) => screen.getAllByRole("button").find((b) => b.classList.contains("gi") && b.querySelector(".gi-name")?.textContent === name)!;
+    expect(within(rowOf("Allan")).getByText("2 need you")).toBeTruthy();
+    expect(rowOf("acme-web").querySelector(".side-dot")).not.toBeNull();
+    expect(within(rowOf("Atlas launch")).getByText("1 needs you")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Acme" })).getByText("2 need you", { selector: ".grp-toggle .badge > *" })).toBeTruthy();
+    cleanup();
+    act(() => useDesk.setState({ view: "grids" }));
+    act(() => {
+      const g = useGrids.getState().grids[MAIN_GRID]!;
+      useGrids.setState({ grids: { [MAIN_GRID]: { ...g, panes: [{ ...g.panes[0]!, content: { kind: "agent", agent: "local/allan" } }, ...g.panes.slice(1)] } } });
+    });
+    sidebar();
+    expect(within(rowOf("Main")).getByText("2 need you")).toBeTruthy();
+  });
+
+  it("opens the Unread page from its row, which counts everything once", async () => {
+    const { useUnread } = await import("../unread/summary");
+    useUnread.setState({ dms: { "local/allan": { count: 1, for_you: 1, first: null, last: null, capped: false } }, local: null });
+    useDesk.setState({ view: "floor", inbox: false });
+    sidebar();
+    const row = screen.getByRole("button", { name: /^Unread/ });
+    expect(within(row).getByText("1 needs you")).toBeTruthy();
+    fireEvent.click(row);
+    expect(useDesk.getState()).toMatchObject({ view: "rooms", inbox: true });
   });
 });

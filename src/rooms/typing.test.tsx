@@ -27,6 +27,19 @@ vi.mock("../ui/Mark", async (real) => {
     },
   };
 });
+// How often something asks who wrote what: every row's thread bar does,
+// so a row rendered again counts here.
+let named = 0;
+vi.mock("./names", async (real) => {
+  const names = await real<typeof import("./names")>();
+  return {
+    ...names,
+    useAuthor: () => {
+      named++;
+      return names.useAuthor();
+    },
+  };
+});
 vi.mock("./engine", () => ({
   say: vi.fn(async () => {}),
   prune: () => {},
@@ -198,6 +211,8 @@ describe("typing in a room with a long timeline", () => {
       id: "d1",
       member: "dw/allan",
       threadId: null,
+      asked: "m0",
+      since: 0,
       text,
       working: null,
       tools: [],
@@ -205,7 +220,10 @@ describe("typing in a room with a long timeline", () => {
       prompts: [],
       state: "live",
     });
+    named = 0;
     for (const text of ["All", "All green", "All green so far"]) act(() => useDesk.setState({ roomDrafts: { r1: [draft(text)] } }));
     expect(drawn).toBe(3);
+    // The timeline and the answer, not the rows above it.
+    expect(named).toBeLessThan(LONG / 10);
   });
 });

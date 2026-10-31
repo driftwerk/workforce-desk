@@ -14,7 +14,7 @@ import { useUi } from "./ui";
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../grids/windows", () => ({ reveal: vi.fn(() => false) }));
-vi.mock("../platform", () => ({ openUrl: vi.fn() }));
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: vi.fn() }));
 vi.mock("../rooms/AgentPanel", () => ({ openAgent: vi.fn(), openAgentBeside: vi.fn() }));
 
 const message = (id: string): RoomMessage => ({ id, roomId: "r1", threadId: null, author: "you", content: "hi", hop: 0, createdAt: "" });
@@ -70,6 +70,22 @@ describe("going to a target", () => {
     expect(reveal).not.toHaveBeenCalled();
   });
 
+  it("replies beside, its composer or terminal focused there; a room or Slack, which the panel can't show, opens where it is", async () => {
+    vi.mocked(reveal).mockReturnValue(true);
+    openTarget({ kind: "session", sessionId: "s-1" }, { beside: true, reply: true });
+    expect(useDesk.getState().openId).toBe("s-1");
+    expect(useFocus.getState().where).toBe("session:s-1");
+    openTarget({ kind: "agent", key: "b/scout" }, { beside: true, reply: true });
+    expect(openAgentBeside).toHaveBeenCalledWith("b/scout");
+    expect(useFocus.getState().where).toBe("agent:b/scout");
+    expect(reveal).not.toHaveBeenCalled();
+    openTarget({ kind: "room", roomId: "r1", threadId: "m-1" }, { beside: true, reply: true });
+    await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));
+    expect(useDesk.getState().activeRoom).toBe("r1");
+    openTarget({ kind: "slack", url: "https://slack.com/app_redirect?channel=C1" }, { beside: true, reply: true });
+    expect(openUrl).toHaveBeenCalledWith("https://slack.com/app_redirect?channel=C1");
+  });
+
   it("opens a room at its thread, or its main timeline when the thread is gone", async () => {
     openTarget({ kind: "room", roomId: "r1", threadId: "m-1" }, { reply: true });
     await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));
@@ -83,11 +99,23 @@ describe("going to a target", () => {
   it("opens a thread older than the room's latest messages at the thread", async () => {
     const reply = { ...message("m-r"), threadId: "m-old" };
     useDesk.setState({
-      hub: { roomMessages: vi.fn(async (_: string, thread?: string) => (thread === "m-old" ? [reply] : [])) } as never,
+      hub: { roomMessages: vi.fn(async (_: string, q?: { thread?: string }) => (q?.thread === "m-old" ? [reply] : [])) } as never,
     });
     openTarget({ kind: "room", roomId: "r1", threadId: "m-old" }, { reply: true });
     await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-old"));
     expect(useUi.getState().roomThreads).toEqual({ r1: "m-old" });
+  });
+
+  it("opens a room at a message, in its thread when it's a reply, and flashes it", async () => {
+    const reveal = vi.fn(async (_room: string, id: string) => (id === "m-reply" ? { thread: "m-1" } : null));
+    const fail = vi.fn();
+    useDesk.setState({ reveal, fail } as never);
+    openTarget({ kind: "room", roomId: "r1", threadId: null, messageId: "m-reply" }, { reply: true });
+    await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));
+    expect(useUi.getState().roomThreads).toEqual({ r1: "m-1" });
+    expect(useUi.getState().flash).toMatchObject({ id: "m-reply" });
+    openTarget({ kind: "room", roomId: "r1", threadId: null, messageId: "m-gone" });
+    await vi.waitFor(() => expect(fail).toHaveBeenCalledWith("That message isn’t there any more."));
   });
 
   it("opens Slack in the browser", () => {

@@ -219,6 +219,8 @@ export class Drainer {
       source: p.source,
       ...(delivery ? { delivery } : {}),
       ...(said.mark?.request_id ? { requestId: said.mark.request_id } : {}),
+      ...(said.mark?.in_reply_to ? { inReplyTo: said.mark.in_reply_to } : {}),
+      ...(said.mark?.steps?.length && !delivery ? { steps: said.mark.steps } : {}),
     });
     if (created && !delivery) this.deps.replied(p.room, hub, agentId, message, said);
   }

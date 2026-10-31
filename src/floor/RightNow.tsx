@@ -9,6 +9,9 @@ import { localKey, openLocalDm } from "../overview/people";
 import { useOverview } from "../overview/store";
 import { openTarget } from "../shell/navigate";
 import { AgentMark } from "../ui/Mark";
+import { useMainHidden } from "../panels/Stage";
+import { useSeenWhole } from "../unread/seen";
+import { useUnread } from "../unread/summary";
 import { plainError } from "../ui/plainError";
 import { backgroundTasks } from "./background";
 import { happening, type FloorEntry } from "./happening";
@@ -62,8 +65,11 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
         label={`Needs you · ${m.needs.length}`}
         tone="blocked"
         empty="Nothing is waiting on you."
+        list="Waiting on you"
         rows={m.needs.map((n) => (
-          <NeedRow key={n.key} need={n} now={now} />
+          <div key={n.key} role="listitem">
+            <NeedRow need={n} now={now} actions />
+          </div>
         ))}
       />
       <Column
@@ -79,12 +85,21 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
 }
 
 /** One of Right now's lists; a long one scrolls in place, under its label,
- *  so what follows stays in view. */
-function Column({ label, tone, empty, rows }: { label: string; tone: string; empty: string; rows: ReactNode[] }) {
+ *  so what follows stays in view. With `list`, its rows are a list's items
+ *  (named so), and the list stays, empty too, so focus left by a row that
+ *  goes lands on it. */
+function Column({ label, tone, empty, rows, list }: { label: string; tone: string; empty: string; rows: ReactNode[]; list?: string }) {
   return (
     <div className="right-now-col" role="group" aria-label={label}>
       <h3 className={`ov-label state-${tone}`}>{label}</h3>
-      {rows.length ? <div className="right-now-list">{rows}</div> : <p className="faint small">{empty}</p>}
+      {list ? (
+        <div className="right-now-list" role="list" aria-label={list} tabIndex={-1}>
+          {rows}
+        </div>
+      ) : (
+        rows.length > 0 && <div className="right-now-list">{rows}</div>
+      )}
+      {rows.length === 0 && <p className="faint small">{empty}</p>}
     </div>
   );
 }
@@ -141,6 +156,10 @@ export function BriefCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Desk's report is read once half of it has shown; until then it's new.
+  const card = useRef<HTMLElement>(null);
+  const unread = useUnread((s) => !!s.local?.brief);
+  useSeenWhole({ kind: "brief" }, unread ? { at: brief.at, message: null } : null, card, { enabled: !useMainHidden() });
   const pause = async () => {
     setBusy(true);
     setProblem(null);
@@ -153,12 +172,13 @@ export function BriefCard({
     setBusy(false);
   };
   return (
-    <section className="brief" aria-label={`${name}’s brief`}>
+    <section ref={card} className="brief" aria-label={`${name}’s brief`}>
       <AgentMark agent={localKey(managerId) ?? ""} name={name} />
       <div className="brief-body">
         <span className="brief-head">
           <b>{name}</b>
           <span className="faint small">overseeing your crew · updated {clock(brief.at)}</span>
+          {unread && <span className="chip msg-delivery brief-new">New</span>}
         </span>
         <div className="brief-text rich">
           <RichMarkdown text={brief.text} />

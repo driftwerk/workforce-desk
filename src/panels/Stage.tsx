@@ -17,6 +17,7 @@ const DOCK = 44;
 interface Slot {
   kind: PanelKind;
   focused: boolean;
+  docked: boolean;
 }
 
 const SlotContext = createContext<Slot | null>(null);
@@ -25,6 +26,10 @@ const MainHiddenContext = createContext(false);
 /** Whether the main area is out of sight, behind a focused panel: what it
  *  holds stays mounted, but shouldn't answer keys. */
 export const useMainHidden = (): boolean => useContext(MainHiddenContext);
+
+/** Whether the column this is in is docked as a tab: still mounted, out
+ *  of sight. */
+export const useStowed = (): boolean => useContext(SlotContext)?.docked ?? false;
 
 /** A key pressed in a terminal is the terminal's: Esc there interrupts
  *  Claude Code, and doesn't leave a view. */
@@ -143,7 +148,7 @@ export function Stage({ main, mainKey, mainName, panels }: { main: ReactNode; ma
                     onCommit={(w) => commit(p.kind, w)}
                   />
                 )}
-                <SlotContext.Provider value={{ kind: p.kind, focused: place === "focused" }}>{p.element}</SlotContext.Provider>
+                <SlotContext.Provider value={{ kind: p.kind, focused: place === "focused", docked: place === "docked" }}>{p.element}</SlotContext.Provider>
               </div>
             );
           })}

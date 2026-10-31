@@ -1,10 +1,12 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
+import type { Choice } from "../hub/floor";
 import type { Session } from "../hub/types";
 import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
+import { plainError } from "../ui/plainError";
 import type { FloorNeed } from "./merge";
-import { FloorRow, useStaleNote } from "./Row";
+import { FloorRow, useStaleNote, useWhoName } from "./Row";
 import { useFloor } from "./store";
 import { placeLabel, targetOf } from "./target";
 import { dayClock, durationOf } from "./time";
@@ -21,8 +23,14 @@ const useFocusKept = () => {
   return ref;
 };
 
+const DECIDING: Record<Choice, { busy: string; done: string }> = {
+  allow: { busy: "Allowed…", done: "Allowed" },
+  deny: { busy: "Denied…", done: "Denied" },
+};
+
 /** What still needs the person, as a row: it opens where it is (a session
- *  or a DM beside the Floor); in Activity it can also be answered there. */
+ *  or a DM beside the Floor); with `actions` (Right now and Activity) it is
+ *  answered there too, each button naming whose need it answers. */
 export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: number; actions?: boolean }) {
   const rooms = useDesk((s) => s.rooms);
   // A session on this computer whose turn ended asking: what Desk read, and
@@ -32,18 +40,21 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
     return session?.state === "asking" && session.asked ? session : null;
   });
   const [acting, setActing] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const act = (what: "allowAsked" | "dismissAsked") => () => {
-    const { hub, fail } = useDesk.getState();
+    const hub = useDesk.getState().hub;
     if (!asking || !hub || acting) return;
     setActing(true);
+    setRefused(null);
     hub[what](asking.id)
-      .catch(fail)
+      .catch((e: unknown) => setRefused(plainError(e)))
       .finally(() => setActing(false));
   };
   const denied = asking?.asked?.denied ?? null;
   const deciding = useFloor((s) => s.deciding[need.key]);
-  const problem = useFloor((s) => s.problems[need.key]);
+  const problem = useFloor((s) => s.problems[need.key]) ?? refused;
   const stale = useStaleNote(need);
+  const name = useWhoName(need);
   const ref = useFocusKept();
   const target = targetOf(need, rooms);
   const where = placeLabel(need.place, rooms);
@@ -64,46 +75,67 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       </FloorRow>
       {actions && (
         <span className="floor-need-buttons">
-          {need.answer.kind === "decide" && (
+          {need.answer.kind === "decide" &&
+            (["allow", "deny"] as const).map((choice) => {
+              const word = deciding === choice ? DECIDING[choice].busy : choice === "allow" ? "Allow" : "Deny";
+              return (
+                <button
+                  key={choice}
+                  type="button"
+                  className={choice === "allow" ? "btn btn-signal" : "btn"}
+                  aria-label={`${word} “${need.ask}” for ${name}`}
+                  disabled={need.stale}
+                  aria-disabled={!!deciding}
+                  title={stale}
+                  onClick={() => !deciding && void useFloor.getState().decide(need.hubId, need, choice)}
+                >
+                  {word}
+                </button>
+              );
+            })}
+          {denied?.allowable && (
             <button
               type="button"
               className="btn btn-signal"
-              disabled={need.stale}
-              aria-disabled={!!deciding}
-              title={stale}
-              onClick={() => !deciding && void useFloor.getState().decide(need.hubId, need, "allow")}
+              aria-label={`${allowLabel(denied)}: ${name}`}
+              disabled={need.stale || acting}
+              title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined}
+              onClick={act("allowAsked")}
             >
-              {deciding ? "Allowed…" : "Allow"}
-            </button>
-          )}
-          {denied?.allowable && (
-            <button type="button" className="btn btn-signal" disabled={need.stale || acting} title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined} onClick={act("allowAsked")}>
               {allowLabel(denied)}
             </button>
           )}
           {target && need.answer.kind === "reply" && (
-            <button type="button" className="btn btn-signal" disabled={need.stale || !!deciding} title={stale} onClick={() => openTarget(target, { reply: true })}>
-              Reply
+            <button
+              type="button"
+              className="btn btn-signal"
+              aria-label={`Reply to ${name}…`}
+              disabled={need.stale || !!deciding}
+              title={stale}
+              onClick={() => openTarget(target, { beside: true, reply: true })}
+            >
+              Reply…
             </button>
           )}
           {target && (
             <button
               type="button"
               className="btn"
+              aria-label={need.answer.kind === "terminal" ? `Open ${name} to answer in the terminal` : `Open ${name}`}
               disabled={need.stale || !!deciding}
               title={need.answer.kind === "terminal" ? "Answer in the terminal" : stale}
-              onClick={() => openTarget(target, { reply: need.answer.kind === "terminal" })}
+              onClick={() => openTarget(target, { beside: true, reply: need.answer.kind === "terminal" })}
             >
               Open
             </button>
           )}
           {asking && (
-            <button type="button" className="btn" disabled={need.stale || acting} onClick={act("dismissAsked")}>
+            <button type="button" className="btn" aria-label={`Dismiss what ${name} asked`} disabled={need.stale || acting} onClick={act("dismissAsked")}>
               Dismiss
             </button>
           )}
           <span className="sr-only" role="status">
-            {deciding ? "Allowed" : ""}
+            {deciding ? DECIDING[deciding].done : ""}
           </span>
           {problem && (
             <span className="small state-blocked" role="alert">

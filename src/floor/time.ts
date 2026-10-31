@@ -52,6 +52,17 @@ export const dayClock = (iso: string | number | Date, now = Date.now()): string 
   return `${day} ${time}`;
 };
 
+/** The day `iso` is in, said against today: "Today", "Yesterday", else
+ *  "Tue 27 Oct", in this computer's time. */
+export const dayName = (iso: string, now = Date.now()): string => {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const days = Math.round((startOfDay(t) - startOfDay(now)) / DAY_MS);
+  if (days === 0) return "Today";
+  if (days === -1) return "Yesterday";
+  return new Date(t).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+};
+
 /** How long from `from` to `to`: "48m", "1h 05m"; never below none. */
 export const durationOf = (from: string | number | Date, to: string | number | Date): string => {
   const ms = new Date(to).getTime() - new Date(from).getTime();

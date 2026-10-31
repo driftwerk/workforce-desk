@@ -47,6 +47,7 @@ const saved: MainUi = {
   panelWidths: { session: 640 },
   panelFocus: { kind: "session", beside: "thread" },
   activity: false,
+  inbox: false,
 };
 
 const room = (id: string) => ({ id, name: id, members: [] }) as unknown as Room;
@@ -88,6 +89,9 @@ describe("ui.main", () => {
     expect(sanitize(undefined)).toEqual(DEFAULT_UI);
     expect(sanitize("nonsense")).toEqual(DEFAULT_UI);
     expect(sanitize(saved)).toEqual(saved);
+    expect(sanitize({ ...saved, inbox: true }).inbox).toBe(true);
+    const { inbox: _older, ...fromOlderDesk } = saved;
+    expect(sanitize(fromOlderDesk).inbox).toBe(false);
     expect(
       sanitize({
         view: "grid",

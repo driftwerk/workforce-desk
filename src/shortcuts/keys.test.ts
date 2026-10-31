@@ -38,12 +38,17 @@ describe("shortcut keys on macOS", () => {
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
       saveFile: "Primary+S",
+      stopAnswer: "Primary+Period",
+      jumpNew: "Primary+J",
+      searchRoom: "Primary+F",
+      searchRooms: "Primary+Shift+F",
+      unread: "Primary+Shift+U",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
-    expect(new Set(Object.values(MAC)).size).toBe(7);
+    for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
   it("warns about ⌥Space, which launchers take, without refusing it", () => {
@@ -87,9 +92,9 @@ describe("shortcut keys on macOS", () => {
   });
 
   it("moves ⌘ saved before Primary over to it once", () => {
-    expect(resolve({ newSession: "Super+J", fillPane: "Shift+Super+Enter" }, "macos")).toEqual({
-      keys: { ...MAC, newSession: "Primary+J" },
-      chosen: { newSession: "Primary+J" },
+    expect(resolve({ newSession: "Super+Y", fillPane: "Shift+Super+Enter" }, "macos")).toEqual({
+      keys: { ...MAC, newSession: "Primary+Y" },
+      chosen: { newSession: "Primary+Y" },
     });
   });
 
@@ -169,13 +174,20 @@ describe("shortcut keys on Windows and Linux", () => {
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
       saveFile: "Primary+S",
+      stopAnswer: "Primary+Period",
+      jumpNew: "Primary+J",
+      searchRoom: "Primary+F",
+      searchRooms: "Primary+Shift+F",
+      unread: "Primary+Shift+U",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
     for (const platform of ["windows", "linux"] as const) {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile"] as const) expect(refusal(d[id], "app", platform)).toBeNull();
+      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
+        expect(refusal(d[id], "app", platform)).toBeNull();
+      expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }
   });
 

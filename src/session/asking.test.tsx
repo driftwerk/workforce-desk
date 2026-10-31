@@ -131,10 +131,10 @@ describe("a session that stopped to ask", () => {
     const n = { ...need("question:t1", who("s1", "keychain-check"), { ask: denied.ask }), hubId: "local", local: true, key: "local/question:t1", stale: false };
     render(<NeedRow need={n} now={Date.now()} actions />);
     expect(screen.getByText(/auto mode refused Bash/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Allow this command for this session and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow this command for this session and continue: keychain-check" }));
     expect(hub.allowAsked).toHaveBeenCalledWith("s1");
     await act(() => Promise.resolve());
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss what keychain-check asked" }));
     expect(hub.dismissAsked).toHaveBeenCalledWith("s1");
   });
 

@@ -13,7 +13,6 @@ import {
   type PermissionChoice,
 } from "./types";
 import { hubFetch } from "../hub/net";
-import { useDesk } from "../hub/store";
 import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -51,11 +50,6 @@ interface ChatStore {
   /** What each hub offers Desk, by hub id, as its connections and link say. */
   hubFeatures: Record<string, ReadonlySet<string>>;
   learnFeatures: (hubId: string, features: ReadonlySet<string>) => void;
-  /** Messages delivered into DMs you haven't opened since, by agent key. */
-  dmUnread: Record<string, number>;
-  /** One more message in a DM; none while it is on screen. */
-  bumpDm: (key: string) => void;
-  seenDm: (key: string) => void;
   setHubs: (hubs: HubAccount[]) => void;
   refreshRoster: () => Promise<void>;
   openDm: (key: string) => void;
@@ -234,19 +228,6 @@ export const useChat = create<ChatStore>((set, get) => ({
       const same = had && had.size === features.size && [...features].every((f) => had.has(f));
       return same ? s : { hubFeatures: { ...s.hubFeatures, [hubId]: features } };
     }),
-  dmUnread: {},
-  bumpDm: (key) =>
-    set((s) => {
-      const desk = useDesk.getState();
-      const shown = s.panelAgent === key || (s.activeAgent === key && desk.view === "rooms" && !desk.activeRoom);
-      return shown ? s : { dmUnread: { ...s.dmUnread, [key]: (s.dmUnread[key] ?? 0) + 1 } };
-    }),
-  seenDm: (key) =>
-    set((s) => {
-      if (!(key in s.dmUnread)) return s;
-      const { [key]: _seen, ...dmUnread } = s.dmUnread;
-      return { dmUnread };
-    }),
   rosterRead: false,
   setHubs: (hubs) => {
     const before = get().hubs;
@@ -304,12 +285,10 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   setPanelAgent: (key) => {
     set((s) => (s.panelAgent === key ? s : { panelAgent: key }));
-    if (key) get().seenDm(key);
   },
   openDm: (key) => {
     if (!ensure(key)) return;
     set({ activeAgent: key });
-    get().seenDm(key);
     get().watchDm(key);
   },
   watchDm: (key) => {

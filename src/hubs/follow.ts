@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { textOf } from "../chat/history";
 import { useChat } from "../chat/store";
-import { DESK_DM, type DeliveryKind, type HubAccount } from "../chat/types";
+import { DESK_DM, type HubAccount } from "../chat/types";
 import { floorHeard, floorUnheard, ask as readFloor } from "../floor/store";
 import { deskState } from "../restore/boot";
 import { drainer } from "../rooms/engine";
-import { notify } from "../shell/notify";
+import { DELIVERY_LABEL, firstLine, notifyPlace, QUIET } from "../unread/notices";
+import { cachedDms, dmsFrom, hubBack, refreshDms } from "../unread/summary";
 import { readAloud } from "../voice/useVoice";
 import { DRAIN_PREFIX } from "./drain";
 import { HubLink, type Delivered } from "./link";
@@ -22,15 +23,6 @@ import { activeConversations } from "./surface";
 export const SINCE_MARGIN_MS = 5 * 60_000;
 
 const seenKey = (hubId: string) => `${DRAIN_PREFIX}${hubId}.seen`;
-
-/** What a delivery is called when you're told of it; kinds not here aren't
- *  worth a notification. */
-const NOTIFIED: Partial<Record<DeliveryKind, string>> = {
-  reminder: "Reminder",
-  job: "Scheduled job",
-  approval: "Needs your approval",
-  check_in: "Check-in",
-};
 
 /** The `since` to drain a hub from, as Desk last looked at it. */
 export const sinceOf = (seen: unknown): string | null => {
@@ -59,6 +51,7 @@ async function catchUp(hub: HubAccount, link: HubLink, wait = CATCH_UP_RETRY_MS)
   let done = false;
   try {
     const active = await activeConversations(hub, sinceOf(deskState.get(seenKey(hub.id))));
+    if (active) dmsFrom(hub, active);
     const drained = await Promise.allSettled((active ?? []).map((c) => drainer.drain(hub, c.agent_id, c.channel)));
     done = drained.every((d) => d.status === "fulfilled" && d.value);
   } catch (e) {
@@ -73,13 +66,21 @@ async function catchUp(hub: HubAccount, link: HubLink, wait = CATCH_UP_RETRY_MS)
 async function arrived(hub: HubAccount, d: Delivered) {
   await drainer.drain(hub, d.agentId, d.channel).catch(() => false);
   const said = drainer.said(hub.id, d.agentId, d.messageId);
-  const key = `${hub.id}/${d.agentId}`;
-  const { roster, bumpDm } = useChat.getState();
+  const { roster } = useChat.getState();
   const agent = roster.find((a) => a.hubId === hub.id && a.id === d.agentId);
-  if (d.channel === DESK_DM) bumpDm(key);
-  const label = NOTIFIED[d.kind];
   const text = said ? textOf(said) : "";
-  if (label) void notify({ title: `${agent?.name ?? d.agentId} · ${label}`, body: text.split("\n")[0]?.slice(0, 200) ?? "" });
+  // A room's is told of once it's kept in the room.
+  if (d.channel === DESK_DM) {
+    void refreshDms(hub);
+    notifyPlace({
+      place: { kind: "dm", hub: hub.id, agent: d.agentId },
+      urgency: d.kind === "notice" ? "new" : "forYou",
+      quiet: QUIET.has(d.kind),
+      id: `dm:${hub.id}/${d.agentId}/${d.messageId}`,
+      title: `${agent?.name ?? d.agentId} · ${DELIVERY_LABEL[d.kind] ?? "Message"}`,
+      body: firstLine(text),
+    });
+  }
   if (d.spoken && agent && text) readAloud(agent, text);
 }
 
@@ -105,14 +106,16 @@ export function followHubs(hubs: readonly HubAccount[]) {
   for (const hub of hubs) {
     if (links.has(hub.id) || unlinked.get(hub.id) === hub.token) continue;
     unlinked.delete(hub.id);
+    cachedDms(hub);
     const link: HubLink = new HubLink(hub, {
       hello: (features) => {
         floorHeard(hub.id, features);
         useChat.getState().learnFeatures(hub.id, features);
+        void hubBack(hub);
         void catchUp(hub, link);
       },
       delivered: (d) => void arrived(hub, d),
-      changed: () => readFloor([hub.id]),
+      changed: (what) => (what === "reads" ? void refreshDms(hub) : readFloor([hub.id])),
       closed: () => {
         stopRetrying(hub.id);
         floorUnheard(hub.id);

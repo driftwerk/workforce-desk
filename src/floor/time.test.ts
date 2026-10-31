@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { clock, dayClock, durationOf, nextLocalMidnight, since, startOfLocalDay } from "./time";
+import { clock, dayClock, dayName, durationOf, nextLocalMidnight, since, startOfLocalDay } from "./time";
 
 beforeAll(() => void vi.stubEnv("TZ", "Europe/London"));
 afterAll(() => void vi.unstubAllEnvs());
@@ -32,5 +32,16 @@ describe("the floor's clock words", () => {
   it("keep the overview's own words", () => {
     expect(since(new Date(now - 6 * 60_000).toISOString(), now)).toBe("6 min");
     expect(since(new Date(now - 72 * 60_000).toISOString(), now)).toBe("1h 12m");
+  });
+});
+
+describe("dayName", () => {
+  it("says Today, Yesterday, else the weekday and date", () => {
+    const now = new Date(2026, 9, 30, 9, 0).getTime();
+    expect(dayName(new Date(2026, 9, 30, 0, 5).toISOString(), now)).toBe("Today");
+    expect(dayName(new Date(2026, 9, 29, 23, 55).toISOString(), now)).toBe("Yesterday");
+    const older = new Date(2026, 9, 27, 14, 0);
+    expect(dayName(older.toISOString(), now)).toBe(older.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }));
+    expect(dayName("not a time", now)).toBe("");
   });
 });

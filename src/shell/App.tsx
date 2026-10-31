@@ -13,13 +13,19 @@ import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/ma
 import { useTuple } from "../tuple/useTuple";
 import { useVoice } from "../voice";
 import { useHubLinks } from "../hubs/follow";
-import { prune } from "../rooms/engine";
+import { forgetHubs, startUnread } from "../unread/summary";
+import { useAppBadge } from "../unread/icon";
+import { prune, stop, stopTarget } from "../rooms/engine";
+import { jumpers } from "../rooms/unread";
+import { placeKey } from "../rooms/window";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
 import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { SearchPanel } from "../rooms/SearchPanel";
+import { OpenRoomDetails } from "../rooms/RoomDetails";
 import { AgentPanel, useAgentPanel } from "../rooms/AgentPanel";
 import { Stage, type OpenPanel } from "../panels/Stage";
 import { useSessionName } from "../groups/names";
@@ -33,12 +39,47 @@ import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
+import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
 import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
+
+/** Stops the answer nearest: in the open room, the open thread's when focus
+ *  is in it, else the room's newest live one; else the open DM's turn. */
+const stopNearest = () => {
+  const desk = useDesk.getState();
+  // Nothing is answering on the Unread page, whatever room it stands over.
+  if (desk.view !== "rooms" || desk.inbox) return;
+  const room = desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
+  if (room) {
+    const inThread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room.id] ?? null) : null;
+    const draft = stopTarget(desk.roomDrafts[room.id] ?? [], inThread);
+    if (draft) stop(room.id, draft.id);
+    return;
+  }
+  const chat = useChat.getState();
+  if (chat.activeAgent && chat.conversations[chat.activeAgent]?.working) chat.cancel(chat.activeAgent);
+};
+
+/** Opens search: on the open room, or every room. */
+const searchHere = (inRoom: boolean) => {
+  const desk = useDesk.getState();
+  const room = inRoom && desk.view === "rooms" && !desk.inbox && desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
+  useUi.getState().setSearch(room ? `in:#${room.slug} ` : "");
+  requestFocus("search");
+};
+
+/** The open room's pill: the open thread's when focus is in it. */
+const jumpNearest = () => {
+  const desk = useDesk.getState();
+  const room = desk.view === "rooms" && !desk.inbox ? desk.activeRoom : null;
+  if (!room) return;
+  const thread = document.activeElement?.closest(".thread-panel") ? (useUi.getState().roomThreads[room] ?? null) : null;
+  jumpers.get(placeKey(room, thread))?.();
+};
 
 /** How often the agents every workspace lists are read again. */
 const ROSTER_EVERY_MS = 60_000;
@@ -57,6 +98,9 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   useHubLinks();
+  useEffect(() => startUnread(), []);
+  useAppBadge();
+  useEffect(() => forgetHubs(hubs), [hubs]);
   const settings = useUi((u) => u.settings !== null);
   const platform = useHost((h) => h.platform);
   const needsSetup = useHost((h) => h.platform === "windows" && h.host === null);
@@ -167,6 +211,14 @@ export function App() {
     newTerminalHere();
   });
   useAppShortcut("settings", () => (useUi.getState().settings ? closeSettings() : openSettings()));
+  useAppShortcut("stopAnswer", stopNearest, true, { fromFields: false });
+  useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
+  useAppShortcut("searchRoom", () => searchHere(true), true, { fromFields: false });
+  useAppShortcut("searchRooms", () => searchHere(false), true, { fromFields: false });
+  useAppShortcut("unread", () => {
+    useUi.getState().closeSettings();
+    useDesk.getState().setInbox(true);
+  }, true, { fromFields: false });
 
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
@@ -175,6 +227,7 @@ export function App() {
   const mainName = useMainName();
   const mainKey = useMainKey();
   const panels: OpenPanel[] = [];
+  const searching = useUi((u) => u.search !== null);
   if (thread) {
     panels.push({
       kind: "thread",
@@ -193,6 +246,17 @@ export function App() {
       element: (
         <ErrorBoundary name="agent">
           <AgentPanel agent={beside} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (searching) {
+    panels.push({
+      kind: "search",
+      label: "Search",
+      element: (
+        <ErrorBoundary name="search">
+          <SearchPanel />
         </ErrorBoundary>
       ),
     });
@@ -249,6 +313,7 @@ export function App() {
       {newSession && <NewSession onClose={() => setNewSession(false)} />}
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
+      <OpenRoomDetails />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <UpdateNotice />
       {error && (

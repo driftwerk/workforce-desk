@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   clash,
   defaultShortcuts,
+  inTerminals,
   isGlobal,
   pressed,
   refusal,
@@ -70,7 +71,7 @@ export function ShortcutField({ id }: { id: ShortcutId }) {
   }, [recording, id, keys, setShortcut]);
 
   const caution = warning(value);
-  const inTerminal = isGlobal(id) ? value : terminalKeys(value);
+  const inTerminal = isGlobal(id) || !inTerminals(id) ? value : terminalKeys(value);
   return (
     <div className="setting-card">
       <span className="card-text">

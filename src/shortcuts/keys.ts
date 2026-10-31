@@ -17,6 +17,8 @@ export interface ShortcutSpec {
   /** The default keys. */
   keys: string;
   scope: Scope;
+  /** Left to a terminal pane altogether: pressed in one, it's the shell's. */
+  terminal?: false;
 }
 
 /** Every shortcut Desk has, in the order Settings lists them. Esc, Enter
@@ -48,6 +50,25 @@ export const SHORTCUTS = [
   },
   { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Primary+Comma", scope: "app" },
   { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Primary+S", scope: "app" },
+  {
+    id: "stopAnswer",
+    name: "Stop an answer",
+    about: "Stops the answer being written in the room or DM you’re in: the open thread’s first.",
+    keys: "Primary+Period",
+    scope: "app",
+    terminal: false,
+  },
+  {
+    id: "jumpNew",
+    name: "Jump to new messages",
+    about: "Takes you to what’s new in the room or thread you’re in.",
+    keys: "Primary+J",
+    scope: "app",
+    terminal: false,
+  },
+  { id: "searchRoom", name: "Search this room", about: "Searches the room you’re in; Esc closes it.", keys: "Primary+F", scope: "app", terminal: false },
+  { id: "searchRooms", name: "Search all rooms", about: "Searches every room.", keys: "Shift+Primary+F", scope: "app", terminal: false },
+  { id: "unread", name: "Unread", about: "Opens the Unread page: everything new for you, everywhere.", keys: "Shift+Primary+U", scope: "app", terminal: false },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];
@@ -65,6 +86,9 @@ export const scopeOf = (id: ShortcutId): Scope => SPEC[id].scope;
 export const isGlobal = (id: ShortcutId): id is GlobalShortcutId => scopeOf(id) === "global";
 
 export const isShortcutId = (id: string): id is ShortcutId => id in SPEC;
+
+/** Whether shortcut `id` acts in a terminal pane at all. */
+export const inTerminals = (id: ShortcutId): boolean => !("terminal" in SPEC[id]);
 
 const platformNow = (): Platform => useHost.getState().platform;
 
@@ -243,10 +267,10 @@ export const terminalKeys = (accel: string, platform: Platform = platformNow()):
 type Place = "desk" | "terminal";
 
 /** Shortcut `id`'s keys in each place: one that works from any app has the
- *  same keys in a terminal. */
+ *  same keys in a terminal, and one left to terminals has none there. */
 const keysByPlace = (id: ShortcutId, accel: string, platform: Platform): Record<Place, string | null> => {
   const desk = normalize(accel, platform);
-  return { desk, terminal: desk && !isGlobal(id) ? terminalKeys(desk, platform) : desk };
+  return { desk, terminal: !inTerminals(id) ? null : desk && !isGlobal(id) ? terminalKeys(desk, platform) : desk };
 };
 
 const modifierLabels = (mods: Set<Modifier>, platform: Platform): string[] =>
@@ -427,7 +451,7 @@ export const clash = (keys: Record<ShortcutId, string>, id: ShortcutId, accel: s
   const others = SHORTCUT_IDS.filter((o) => o !== id).map((o) => [o, keysByPlace(o, keys[o], platform)] as const);
   const other = others.find(([, k]) => k.desk === mine.desk)?.[0];
   if (other) return `${shortcutLabel(accel, platform)} is already ${SHORTCUT_NAMES[other]} — choose another`;
-  const inTerminal = others.find(([, k]) => k.terminal === mine.terminal)?.[0];
+  const inTerminal = mine.terminal === null ? undefined : others.find(([, k]) => k.terminal === mine.terminal)?.[0];
   return inTerminal
     ? `In a terminal, ${shortcutLabel(mine.terminal!, platform)} is already ${SHORTCUT_NAMES[inTerminal]} — choose another`
     : null;
@@ -460,7 +484,7 @@ export const resolve = (
     const seen = new Map<string, ShortcutId>();
     let drop: ShortcutId | null = null;
     for (const id of SHORTCUT_IDS) {
-      const places = Object.entries(keysByPlace(id, keys[id], platform)).map(([place, k]) => `${place} ${k}`);
+      const places = Object.entries(keysByPlace(id, keys[id], platform)).flatMap(([place, k]) => (k === null ? [] : [`${place} ${k}`]));
       const first = places.map((p) => seen.get(p)).find((o) => o !== undefined);
       if (first === undefined) {
         for (const p of places) seen.set(p, id);

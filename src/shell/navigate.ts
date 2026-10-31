@@ -13,7 +13,7 @@ import { useUi } from "./ui";
 export type Target =
   | { kind: "session"; sessionId: string }
   | { kind: "agent"; key: string }
-  | { kind: "room"; roomId: string; threadId: string | null }
+  | { kind: "room"; roomId: string; threadId: string | null; messageId?: string }
   | { kind: "slack"; url: string };
 
 /** The composer or terminal a target types into. */
@@ -28,6 +28,25 @@ export const focusKeyOf = (t: Target): string | null => {
     case "slack":
       return null;
   }
+};
+
+/** Opens a room at message `messageId`, in its thread when it's a reply,
+ *  and flashes it. */
+const openAtMessage = async (roomId: string, messageId: string): Promise<string | null> => {
+  const desk = useDesk.getState();
+  await desk.openRoom(roomId);
+  const at = await desk.reveal(roomId, messageId).catch((e: unknown) => {
+    desk.fail(e);
+    return undefined;
+  });
+  if (at === undefined) return null;
+  if (!at) {
+    desk.fail("That message isn’t there any more.");
+    return null;
+  }
+  useUi.getState().setRoomThread(roomId, at.thread);
+  useUi.getState().setFlash(messageId);
+  return at.thread;
 };
 
 const openRoom = async (roomId: string, threadId: string | null): Promise<boolean> => {
@@ -46,8 +65,9 @@ const openRoom = async (roomId: string, threadId: string | null): Promise<boolea
 
 /** Takes the person to `t`: where it shows in a grid, else where it opens;
  *  with `beside`, a session's card or an agent's DM opens beside the Floor
- *  even when a grid shows it (the card says where, with a way there); with
- *  `reply`, its composer (or terminal) takes focus. */
+ *  even when a grid shows it (the card says where, with a way there), and a
+ *  room or Slack, which the side panel can't show, opens where it is; with
+ *  `reply`, its composer (or terminal) takes focus, beside too. */
 export const openTarget = (t: Target, opts: { reply?: boolean; beside?: boolean } = {}): void => {
   const focus = (key: string | null) => opts.reply && key && requestFocus(key);
   switch (t.kind) {
@@ -62,7 +82,9 @@ export const openTarget = (t: Target, opts: { reply?: boolean; beside?: boolean 
       return void focus(focusKeyOf(t));
     }
     case "room":
-      void openRoom(t.roomId, t.threadId).then((exact) => focus(focusKeyOf(exact ? t : { ...t, threadId: null })));
+      if (t.messageId)
+        void openAtMessage(t.roomId, t.messageId).then((thread) => focus(focusKeyOf({ ...t, threadId: thread })));
+      else void openRoom(t.roomId, t.threadId).then((exact) => focus(focusKeyOf(exact ? t : { ...t, threadId: null })));
       return;
     case "slack":
       return openUrl(t.url);

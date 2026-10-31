@@ -39,11 +39,11 @@ describe("settings", () => {
     await useSettings.getState().load();
     expect(useSettings.getState().keys).toMatchObject({ pushToTalk: "Control+Alt+K", ask: "Alt+Space" });
     useSettings.getState().setShortcut("ask", "Control+Shift+K");
-    useSettings.getState().setShortcut("newSession", "Super+J");
+    useSettings.getState().setShortcut("newSession", "Super+Y");
     expect(saveSettings).toHaveBeenLastCalledWith(
-      expect.objectContaining({ voice: true, shortcuts: { pushToTalk: "Control+Alt+K", newSession: "Primary+J" } }),
+      expect.objectContaining({ voice: true, shortcuts: { pushToTalk: "Control+Alt+K", newSession: "Primary+Y" } }),
     );
-    expect(useSettings.getState().keys).toMatchObject({ ask: "Control+Shift+K", newSession: "Primary+J" });
+    expect(useSettings.getState().keys).toMatchObject({ ask: "Control+Shift+K", newSession: "Primary+Y" });
   });
 });
 
