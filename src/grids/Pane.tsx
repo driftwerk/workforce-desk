@@ -168,9 +168,9 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
               title: "Close this pane?",
               says: !shown
                 ? "The session is no longer on the hub; nothing else changes."
-                : shown.state === "stopped" || shown.state === "closed"
-                  ? "The session stays as it is."
-                  : "The session keeps running.",
+                : shown.live
+                  ? "The session keeps running."
+                  : "The session stays as it is.",
               action: "Close pane",
             }
           : { title: "Close this empty pane?", says: "It holds nothing, so nothing is lost.", action: "Close pane" };

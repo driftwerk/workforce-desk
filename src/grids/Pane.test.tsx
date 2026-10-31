@@ -89,7 +89,7 @@ describe("a pane's header", () => {
     const remove = within(pane).getByRole("button", { name: "Remove from grid" });
     expect(remove.getAttribute("title")).toBe("Remove from grid");
     fireEvent.click(remove);
-    expect(screen.getByText("The session keeps running.")).toBeTruthy();
+    expect(screen.getByText("The session stays as it is.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
     expect(grid().panes.some((p) => p.content?.kind === "session" && p.content.sessionId === "s0")).toBe(false);
     expect(useDesk.getState().sessions.s0).toBeTruthy();
@@ -143,7 +143,7 @@ describe("closing a pane", () => {
 
   it("asks first whatever the pane holds, saying what closing does and doesn't", () => {
     scout();
-    useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "stopped" } } }));
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s0: { ...s.sessions.s0!, live: true }, s1: { ...s.sessions.s1!, state: "interrupted" } } }));
     layOut(MAIN_GRID, "quarters");
     deliver(MAIN_GRID, sess("s0"));
     deliver(MAIN_GRID, sess("s1"));
@@ -216,7 +216,7 @@ describe("closing a pane", () => {
     const last = document.activeElement as HTMLElement;
     expect(last.textContent).toBe("Remove from grid");
     fireEvent.click(last);
-    expect(asked()).toEqual(["Close this pane?", "The session keeps running."]);
+    expect(asked()).toEqual(["Close this pane?", "The session stays as it is."]);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(pane.contains(document.activeElement)).toBe(true);
     expect(panes()).toBe(2);
@@ -224,7 +224,7 @@ describe("closing a pane", () => {
     layOutFrom(paneOf("s1").id, "one");
     const tray = screen.getByRole("region", { name: "Parked (1)" });
     fireEvent.click(within(tray).getByRole("button", { name: "Remove task-0 from grid" }));
-    expect(asked()).toEqual(["Close this pane?", "The session keeps running."]);
+    expect(asked()).toEqual(["Close this pane?", "The session stays as it is."]);
     fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
     expect(panes()).toBe(2);
     fireEvent.click(within(tray).getByRole("button", { name: "Remove task-0 from grid" }));
