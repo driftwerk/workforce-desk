@@ -112,7 +112,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               aria-label={`Reply to ${name}…`}
               disabled={need.stale || !!deciding}
               title={stale}
-              onClick={() => openTarget(target, { reply: true })}
+              onClick={() => openTarget(target, { beside: true, reply: true })}
             >
               Reply…
             </button>

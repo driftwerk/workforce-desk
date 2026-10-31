@@ -70,6 +70,22 @@ describe("going to a target", () => {
     expect(reveal).not.toHaveBeenCalled();
   });
 
+  it("replies beside, its composer or terminal focused there; a room or Slack, which the panel can't show, opens where it is", async () => {
+    vi.mocked(reveal).mockReturnValue(true);
+    openTarget({ kind: "session", sessionId: "s-1" }, { beside: true, reply: true });
+    expect(useDesk.getState().openId).toBe("s-1");
+    expect(useFocus.getState().where).toBe("session:s-1");
+    openTarget({ kind: "agent", key: "b/scout" }, { beside: true, reply: true });
+    expect(openAgentBeside).toHaveBeenCalledWith("b/scout");
+    expect(useFocus.getState().where).toBe("agent:b/scout");
+    expect(reveal).not.toHaveBeenCalled();
+    openTarget({ kind: "room", roomId: "r1", threadId: "m-1" }, { beside: true, reply: true });
+    await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));
+    expect(useDesk.getState().activeRoom).toBe("r1");
+    openTarget({ kind: "slack", url: "https://slack.com/app_redirect?channel=C1" }, { beside: true, reply: true });
+    expect(openUrl).toHaveBeenCalledWith("https://slack.com/app_redirect?channel=C1");
+  });
+
   it("opens a room at its thread, or its main timeline when the thread is gone", async () => {
     openTarget({ kind: "room", roomId: "r1", threadId: "m-1" }, { reply: true });
     await vi.waitFor(() => expect(useFocus.getState().where).toBe("room:r1/m-1"));

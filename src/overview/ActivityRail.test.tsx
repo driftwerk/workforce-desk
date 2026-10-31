@@ -149,11 +149,11 @@ describe("Activity with the floor", () => {
     expect(within(rail()).getByText("1 already answered elsewhere")).toBeTruthy();
   });
 
-  it("replies where the question was asked, its composer focused", () => {
+  it("replies where the question was asked, beside the Floor, its composer focused", () => {
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
     fireEvent.click(within(rail()).getByRole("button", { name: "Reply to Scout…" }));
-    expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "b/scout" }, { reply: true });
+    expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "b/scout" }, { beside: true, reply: true });
   });
 
   it("puts what's open above everything that happened, each past request marked with what became of it", async () => {

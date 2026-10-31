@@ -332,7 +332,7 @@ describe("Right now's needs, answered in place", () => {
     await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
   });
 
-  it("opens from the row's body, beside the Floor, and replies where it was asked", () => {
+  it("opens from the row's body, beside the Floor, and replies there too", () => {
     show([npmTest, need("question:t2", agent("scout", "Scout"), { ask: "Main or release?", since: at(9) })]);
     render(<RightNow brief={null} />);
     fireEvent.click(within(needRows()[0]!).getAllByRole("button")[0]!);
@@ -341,7 +341,7 @@ describe("Right now's needs, answered in place", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open acme-web" }));
     expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" }, { beside: true, reply: false });
     fireEvent.click(screen.getByRole("button", { name: "Reply to Scout…" }));
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" }, { reply: true });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" }, { beside: true, reply: true });
   });
 
   it("holds both answers while one is on its way, and answers once however often it's pressed", async () => {
