@@ -1,51 +1,57 @@
 import { describe, expect, it } from "vitest";
-import type { Merged } from "./merge";
-import { sentence } from "./summary";
-import { NOW, agent, approval, at, need, session, work } from "./testing";
+import type { FloorEntry } from "./happening";
+import { SUMMARY_EVERY_MS, needsLine, paragraphOf, refreshed } from "./summary";
+import { agent, at, session } from "./testing";
 
-const day = Date.parse("2026-10-29T00:00:00Z");
-const tag = <T>(x: T) => ({ ...x, hubId: "local", local: true, key: Math.random().toString(), stale: false });
-const m = (over: Partial<Pick<Merged, "needs" | "working" | "done">>): Pick<Merged, "needs" | "working" | "done"> => ({
-  needs: [],
-  working: [],
-  done: [],
-  ...over,
+const entry = (who: FloorEntry["who"], state: FloorEntry["state"]): FloorEntry => ({
+  hubId: "local",
+  local: true,
+  stale: false,
+  key: `local/${who.kind}:${who.id}`,
+  who,
+  place: { kind: "dm" },
+  state,
+  background: null,
+  purpose: null,
+  now: "Working on it now.",
+  at: at(1),
 });
 
-describe("Desk's own summary", () => {
+describe("Desk's own paragraph", () => {
   it("says when nothing is going on", () => {
-    expect(sentence(m({}), day)).toBe("Nothing needs you, and nothing is running.");
+    expect(paragraphOf([])).toBe("Nothing is running right now.");
   });
 
-  it("says one of each", () => {
+  it("names who is under way and who finished lately, three at most, by the person's names", () => {
     expect(
-      sentence(
-        m({
-          needs: [tag(approval("ap", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm test?" }))],
-          working: [tag(work(agent("ledger", "Ledger"), { what: "Comparing spend" }))],
-          done: [tag(work(agent("herald", "Herald"), { what: "Labelled 3 issues.", endedAt: at(30), outcome: "finished" }))],
-        }),
-        day,
+      paragraphOf(
+        [
+          entry(agent("scout", "Scout"), "working"),
+          entry(session("s-1", "hub-name"), "waiting"),
+          entry(agent("lens", "Lens"), "working"),
+          entry(agent("atlas", "Atlas"), "working"),
+          entry(agent("herald", "Herald"), "done"),
+        ],
+        { "s-1": "auth-fix" },
       ),
-    ).toBe(
-      "One thing is waiting on you: acme-web wants to run npm test. Ledger is working on “Comparing spend”. Since this morning: Herald finished “Labelled 3 issues”.",
-    );
+    ).toBe("Scout, auth-fix, Lens and 1 more are under way. Herald finished lately.");
+    expect(paragraphOf([entry(agent("scout", "Scout"), "working")])).toBe("Scout is under way.");
   });
 
-  it("names three of each at most, uses the person's names for sessions, and says background work", () => {
-    const needs = ["a", "b", "c", "d", "e"].map((id) => tag(need(id, agent(id, id.toUpperCase()), { ask: "Which one?" })));
-    const text = sentence(
-      m({
-        needs: [tag(approval("ap", "s-1", { who: session("s-1", "hub-name") })), ...needs],
-        working: [tag(work(session("s-2", "repo"), { background: { count: 2, since: at(5) } })), tag(work(agent("l", "Ledger")))],
-        done: [tag(work(agent("y", "Old"), { endedAt: new Date(day - 60_000).toISOString(), outcome: "finished" }))],
-      }),
-      day,
-      { "s-1": "my-session" },
-    );
-    expect(text).toBe(
-      "Six things are waiting on you: my-session wants to run npm test; A asks “Which one”; B asks “Which one”; and 3 more. repo is waiting on 2 background tasks; Ledger is running Bash cargo test.",
-    );
-    expect(NOW).toBeGreaterThan(day);
+  it("says what needs the person as it is now", () => {
+    expect(needsLine(0)).toBe("Nothing needs you.");
+    expect(needsLine(1)).toBe("One thing needs you.");
+    expect(needsLine(3)).toBe("Three things need you.");
+  });
+
+  it("changes at most every ten minutes, and only when it would say something else", () => {
+    const first = refreshed(null, "Scout is under way.", 0);
+    expect(first).toEqual({ text: "Scout is under way.", at: 0 });
+    expect(refreshed(first, "Scout is under way.", SUMMARY_EVERY_MS * 3)).toBe(first);
+    expect(refreshed(first, "Nothing is running right now.", SUMMARY_EVERY_MS - 1)).toBe(first);
+    expect(refreshed(first, "Nothing is running right now.", SUMMARY_EVERY_MS)).toEqual({
+      text: "Nothing is running right now.",
+      at: SUMMARY_EVERY_MS,
+    });
   });
 });

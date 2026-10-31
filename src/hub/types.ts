@@ -364,6 +364,22 @@ export interface Work {
   outcome: Outcome | null;
   /** Its main turn ended but work it started still runs; absent from older hubs. */
   background?: Background | null;
+  /** What its agent or session is for and doing, in plain words; absent from older hubs. */
+  gist?: Gist | null;
+}
+
+/** What an agent or session is for (`purpose`) and what it is doing or did
+ *  (`now`), for someone with no context; `at`, when either was last written. */
+export interface Gist {
+  purpose: string | null;
+  now: string;
+  at: string;
+}
+
+/** The floor in one paragraph, as the hub wrote it. */
+export interface FloorSummary {
+  text: string;
+  at: string;
 }
 
 /** `background`: the main turn was idle while work it started ran. */
@@ -394,6 +410,8 @@ export interface FloorView {
   counts: Counts;
   /** How many the hub left out of `done` and `lanes`. */
   more: { done: number; lanes: number };
+  /** Absent from older hubs; null until one is written. */
+  summary?: FloorSummary | null;
 }
 
 export type PlanKind = "claude" | "chatgpt";

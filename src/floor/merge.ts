@@ -1,5 +1,5 @@
 import type { HubAccount } from "../chat/types";
-import type { Counts, Lane, Need, Span, Work } from "../hub/types";
+import type { Counts, FloorSummary, Lane, Need, Span, Work } from "../hub/types";
 import type { HubFloor } from "./store";
 
 /** Which hub an item came from (and whether it's this computer's), its key
@@ -15,6 +15,7 @@ export interface Tagged {
 export type FloorNeed = Need & Tagged;
 export type FloorWork = Work & Tagged;
 export type FloorLane = Lane & Tagged;
+export type FloorParagraph = FloorSummary & Pick<Tagged, "hubId" | "local">;
 
 export interface Merged {
   /** Oldest first. */
@@ -27,6 +28,8 @@ export interface Merged {
   /** The hubs' own, but for what needs you: how many `needs` there are. */
   counts: Counts;
   more: { done: number; lanes: number };
+  /** Each hub's paragraph, this computer's first. */
+  summaries: FloorParagraph[];
 }
 
 /** A hub's time in this computer's, as `toISOString` writes it (so times from
@@ -40,13 +43,22 @@ const work = (w: Work, offset: number): Work => ({
   heardAt: shift(w.heardAt, offset),
   endedAt: shiftOrNull(w.endedAt, offset),
   background: w.background ? { ...w.background, since: shift(w.background.since, offset) } : null,
+  gist: w.gist ? { ...w.gist, at: shift(w.gist.at, offset) } : null,
 });
 
 const span = (s: Span, offset: number): Span => ({ ...s, from: shift(s.from, offset), to: shiftOrNull(s.to, offset) });
 
 const whoKey = (hubId: string, w: Work | Lane): string => `${hubId}/${w.who.kind}:${w.who.id}`;
 
-const ZERO: Merged = { needs: [], working: [], done: [], lanes: [], counts: { working: 0, needsYou: 0, doneToday: 0 }, more: { done: 0, lanes: 0 } };
+const ZERO: Merged = {
+  needs: [],
+  working: [],
+  done: [],
+  lanes: [],
+  counts: { working: 0, needsYou: 0, doneToday: 0 },
+  more: { done: 0, lanes: 0 },
+  summaries: [],
+};
 
 /** Every hub's floor as one, in this computer's time; hubs that have none (yet,
  *  or at all) add nothing, and one that couldn't be reached last time adds
@@ -64,6 +76,9 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
       lanes: [...m.lanes, ...view.lanes.map((l) => ({ ...l, spans: l.spans.map((s) => span(s, f.offset)), ...tag, key: whoKey(hub.id, l) }))],
       counts: { ...m.counts, working: m.counts.working + view.counts.working, doneToday: m.counts.doneToday + view.counts.doneToday },
       more: { done: m.more.done + view.more.done, lanes: m.more.lanes + view.more.lanes },
+      summaries: view.summary
+        ? [...m.summaries, { text: view.summary.text, at: shift(view.summary.at, f.offset), hubId: hub.id, local: hub.local }]
+        : m.summaries,
     };
   }, ZERO);
   return {
@@ -72,5 +87,6 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     needs: all.needs.sort((a, b) => a.since.localeCompare(b.since)),
     working: all.working.sort((a, b) => b.since.localeCompare(a.since)),
     done: all.done.sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? "")),
+    summaries: all.summaries.sort((a, b) => Number(b.local) - Number(a.local)),
   };
 };
