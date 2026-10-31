@@ -1,12 +1,15 @@
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
-import { openUrl } from "../platform";
+import { linkParts, openLink } from "../shell/links";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
 import { AgentMark, Mark, YouMark } from "../ui/Mark";
+import type { Step } from "../hub/types";
+import { stepsOf } from "./progress";
+import { Steps } from "./ProgressCard";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -22,6 +25,38 @@ const time = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
+/** Link schemes agent markdown keeps besides the web's: links to room messages. */
+const LINK_SCHEMES = ["desk"] as const;
+
+/** Plain text with its links clickable: the web's, and Desk's own. */
+function Linked({ text }: { text: string }) {
+  return (
+    <>
+      {linkParts(text).map((p, i) =>
+        p.kind === "text" ? (
+          p.text
+        ) : (
+          <a
+            key={i}
+            href={p.url}
+            onClick={(e) => {
+              e.preventDefault();
+              openLink(p.url);
+            }}
+          >
+            {p.text}
+          </a>
+        ),
+      )}
+    </>
+  );
+}
+
+const fullTime = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? undefined : d.toLocaleString([], { dateStyle: "full", timeStyle: "short" });
+};
+
 /** A message, rendered again only when what it's given changes: so those
  *  who show it keep what they give it the same. */
 export const Message = memo(function Message({
@@ -32,6 +67,9 @@ export const Message = memo(function Message({
   home,
   relayed,
   origin,
+  steps,
+  answered,
+  chips,
   onSubmitForm,
 }: {
   message: ChatMessage;
@@ -49,14 +87,23 @@ export const Message = memo(function Message({
   /** A turn the overseer sent on, shown as from it (or from you, saying yes
    *  to it), not as something you typed. */
   relayed?: Relayed | null;
-  onSubmitForm: (summary: string, values: Record<string, unknown>) => boolean;
+  /** The tools an agent's turn ran for it, shown folded away. */
+  steps?: readonly Step[];
+  /** A form in it was answered already: it stays locked. */
+  answered?: boolean;
+  /** Notes beside its time: where an answer went, where a copy came from. */
+  chips?: ReactNode;
+  /** Resolves true once the answer is on its way; false unlocks the form. */
+  onSubmitForm: (summary: string, values: Record<string, unknown>) => boolean | Promise<boolean>;
 }) {
   const host = useMemo<RichHost>(
     () => ({
-      openUrl,
+      openUrl: openLink,
+      linkSchemes: LINK_SCHEMES,
+      answered,
       submitForm: async (summary, values) => onSubmitForm(summary, values),
     }),
-    [onSubmitForm],
+    [onSubmitForm, answered],
   );
   const fromOverseer = relayed?.by === "overseer";
   const you = message.role === "user" && !fromOverseer;
@@ -76,10 +123,11 @@ export const Message = memo(function Message({
             </>
           )}
           {badge && <span className="chip msg-delivery">{badge}</span>}{" "}
-          <span className="faint small">
+          <span className="faint small" title={fullTime(message.at)}>
             {home ? `${home} · ` : ""}
             {time(message.at)}
           </span>
+          {chips}
         </span>
         {message.tools.length > 0 && (
           <span className="msg-tools">
@@ -91,13 +139,23 @@ export const Message = memo(function Message({
           </span>
         )}
         {!message.content.trim() ? null : message.role !== "assistant" ? (
-          <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>{relayed?.text ?? message.content}</p>
+          <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>
+            <Linked text={relayed?.text ?? message.content} />
+          </p>
         ) : (
           <RichHostProvider host={host}>
             <div className="msg-text rich">
               <RichMarkdown text={message.content} streaming={message.status === "streaming"} />
             </div>
           </RichHostProvider>
+        )}
+        {steps && steps.length > 0 && (
+          <details className="msg-steps">
+            <summary className="small">
+              What {name} did · {steps.length} step{steps.length === 1 ? "" : "s"}
+            </summary>
+            <Steps steps={stepsOf(steps)} />
+          </details>
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}

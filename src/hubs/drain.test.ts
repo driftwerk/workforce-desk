@@ -225,4 +225,19 @@ describe("draining a conversation", () => {
     await d.drain(hub, "allan", "desk");
     expect(deps.dm).toHaveBeenCalledWith(hub, "allan", [expect.objectContaining({ id: "a1" })]);
   });
+
+  it("posts what an answer answers and the tools its turn ran, as its mark says; one without them posts neither", async () => {
+    const steps = [{ tool: "repo.search", ok: true, ms: 1200 }];
+    const { d, posted } = drainer([
+      said("a1", { room: MINE, in_reply_to: "q1", steps }),
+      said("a2", { room: MINE }),
+      said("d1", { room: MINE, delivery: "job", in_reply_to: "q2", steps }),
+    ]);
+    await d.drain(hub, "allan", channel);
+    expect(posted[0]).toMatchObject({ inReplyTo: "q1", steps });
+    expect(posted[1]).not.toHaveProperty("inReplyTo");
+    expect(posted[1]).not.toHaveProperty("steps");
+    expect(posted[2]).toMatchObject({ inReplyTo: "q2" });
+    expect(posted[2]).not.toHaveProperty("steps");
+  });
 });

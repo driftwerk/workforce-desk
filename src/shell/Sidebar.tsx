@@ -2,8 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { GridsSection } from "../grids/Grids";
 import { SortList, SortRow } from "../groups/rows";
-import { arranged, forgetRoom, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
-import { closeRoom } from "../rooms/engine";
+import { arranged, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
+import { DeleteRoom } from "../rooms/DeleteRoom";
+import { markRoomRead } from "../unread/reads";
+import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
@@ -12,16 +14,36 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
-import { Confirm } from "../ui/Confirm";
 import { Menu } from "../ui/Menu";
 import { YouMark } from "../ui/Mark";
 import { useYou } from "../pictures/who";
 import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge } from "../ui/Badge";
+import { RoomMarks } from "../unread/RoomMarks";
+import { Marks, useTotal } from "../unread/Marks";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
+
+/** The Unread page's row: everything new for you, each item once. */
+function UnreadRow() {
+  const on = useDesk((s) => s.view === "rooms" && s.inbox);
+  const setInbox = useDesk((s) => s.setInbox);
+  const keys = useSettings((s) => s.keys);
+  const total = useTotal();
+  return (
+    <button
+      type="button"
+      className={`side-unread${on ? " on" : ""}`}
+      aria-current={on ? "true" : undefined}
+      title={`Unread (${shortcutLabel(keys.unread)})`}
+      onClick={() => setInbox(true)}
+    >
+      <span className="gi-name">Unread</span>
+      <Marks badge={total} />
+    </button>
+  );
+}
 
 /** Whether a scroller has more above and below what shows. */
 export const scrollEdges = (el: Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">): { above: boolean; below: boolean } => ({
@@ -86,7 +108,7 @@ export function Sidebar({
   onNewCrew: () => void;
   onSettings: () => void;
 }) {
-  const { view, setView, connected, activeRoom, openRoom, unread } = useDesk();
+  const { view, setView, connected, activeRoom, openRoom } = useDesk();
   const roomOrder = useRoomOrder((s) => s.order);
   const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -95,18 +117,6 @@ export function Sidebar({
   /** Deletes a room on the hub, and here at once (the hub says so too).
    *  Its members' hubs are told first, so what was set up there reaches
    *  your DM instead. */
-  const deleteRoom = async (id: string) => {
-    const { hub, rooms } = useDesk.getState();
-    if (!hub) throw new Error("Desk isn't connected to its hub.");
-    const room = rooms[id];
-    if (room) await closeRoom(room);
-    await hub.deleteRoom(id);
-    useDesk.setState((s) => {
-      const { [id]: _gone, ...rest } = s.rooms;
-      return { rooms: rest, activeRoom: s.activeRoom === id ? null : s.activeRoom };
-    });
-    forgetRoom(id);
-  };
   const [roomSaid, setRoomSaid] = useState("");
   const roomRows = useRef(new Map<string, HTMLElement>());
   const roomDragged = useRef(false);
@@ -150,6 +160,7 @@ export function Sidebar({
             </button>
           ))}
         </div>
+        <UnreadRow />
       </div>
       <div className="side-mid">
         <div ref={middle} className="side-scroll">
@@ -197,7 +208,7 @@ export function Sidebar({
                       onNudge={(by) => nudgeRoomBy(id, by)}
                       onMenu={(at, from) => setRoomMenu({ id, at, from })}
                     >
-                      {(unread[id] ?? 0) > 0 && <Badge count={unread[id]!} says={`${unread[id]} unread`} />}
+                      <RoomMarks room={r} />
                     </SortRow>
                   );
                 }}
@@ -209,23 +220,29 @@ export function Sidebar({
                 <Menu
                   label={`${roomsById[roomMenu.id]!.name} options`}
                   at={roomMenu.at}
-                  entries={[{ kind: "item", label: "Delete room…", onSelect: () => setDeletingRoom(roomMenu.id) }]}
+                  entries={[
+                    { kind: "item", label: "Details…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: false }) },
+                    { kind: "item", label: "Rename…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: true }) },
+                    { kind: "item", label: "Mark all read", onSelect: () => void markRoomRead(roomMenu.id).catch(useDesk.getState().fail) },
+                    {
+                      kind: "item",
+                      label: "Notifications",
+                      submenu: NOTIFY_LEVELS.map((l) => ({
+                        kind: "item" as const,
+                        label: `${levelOf({ kind: "room", room: roomMenu.id }) === l.id ? "✓ " : ""}${l.label}`,
+                        onSelect: () => setLevel({ kind: "room", room: roomMenu.id }, l.id),
+                      })),
+                    },
+                    { kind: "separator" },
+                    { kind: "item", label: "Delete room…", onSelect: () => setDeletingRoom(roomMenu.id) },
+                  ]}
                   onClose={(refocus) => {
                     if (refocus) roomMenu.from?.focus();
                     setRoomMenu(null);
                   }}
                 />
               )}
-              {deletingRoom && roomsById[deletingRoom] && (
-                <Confirm
-                  title={`Delete “${roomsById[deletingRoom]!.name}”?`}
-                  action="Delete room"
-                  onConfirm={() => deleteRoom(deletingRoom)}
-                  onClose={() => setDeletingRoom(null)}
-                >
-                  <p className="muted">Its messages are deleted for everyone in it. The agents in it stay in your crew.</p>
-                </Confirm>
-              )}
+              {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
             </div>
           )}
           <SidebarGroups />

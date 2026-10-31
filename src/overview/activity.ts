@@ -1,4 +1,5 @@
-import type { ActivityEvent, ActivityFilter, ActivityKind, ActivityParty, Need } from "../hub/types";
+import type { ActivityEvent, ActivityFilter, ActivityKind, ActivityParty, Need, Room } from "../hub/types";
+import type { Target } from "../shell/navigate";
 
 /** Kinds the "Needs you" filter shows. */
 const NEEDS_YOU = new Set<ActivityKind>(["needs_you", "question"]);
@@ -30,7 +31,10 @@ export const toneOf = (e: ActivityEvent): Tone => {
     case "finished":
     case "answered":
     case "approved":
+    case "replied":
       return "done";
+    case "delivered":
+      return e.approvalId ? "blocked" : "quiet";
     case "failed":
     case "limit":
     case "denied":
@@ -55,8 +59,8 @@ export interface Line {
 /** An event as a sentence: "Desk asked workforce-e7 …", "Scout asked which
  *  branch to deploy". Sessions you've named in Desk (`names`, by session
  *  id) go by that name; the hub's text is still split at the name it used. */
-export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>> = {}): Line => {
-  const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : p.name);
+export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>> = {}, agentName: (id: string) => string | undefined = () => undefined): Line => {
+  const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : p.kind === "agent" ? (agentName(p.id) ?? p.name) : p.name);
   const acting = e.actor.kind === "manager" || e.actor.kind === "you" || !e.subject;
   const who = acting ? e.actor : e.subject!;
   const lead = who.kind === "you" ? { name: "You", session: false } : { name: shown(who), session: who.kind === "session" };
@@ -112,3 +116,19 @@ export const needStates = (events: readonly ActivityEvent[], needs: readonly Pic
       }),
   );
 };
+
+/** Where an event's row takes you: the room message it's about, when it
+ *  happened in a room this computer has. */
+export const eventTarget = (e: ActivityEvent, rooms: Readonly<Record<string, Room>>): Target | null =>
+  e.place?.kind === "room" && rooms[e.place.room]
+    ? { kind: "room", roomId: e.place.room, threadId: e.place.thread, ...(e.message ? { messageId: e.message } : {}) }
+    : null;
+
+/** An agent party's name from the roster: a `hub/agent` id on that hub, a
+ *  bare one on this computer's (the desk crate knows no agents' names). */
+export const agentNamer =
+  (roster: readonly { hubId: string; id: string; name: string }[], localHub: string | undefined) =>
+  (id: string): string | undefined => {
+    const [hub, agent] = id.includes("/") ? [id.slice(0, id.indexOf("/")), id.slice(id.indexOf("/") + 1)] : [localHub, id];
+    return roster.find((a) => a.hubId === hub && a.id === agent)?.name;
+  };

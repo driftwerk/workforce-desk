@@ -9,6 +9,9 @@ import { localKey, openLocalDm } from "../overview/people";
 import { useOverview } from "../overview/store";
 import { openTarget } from "../shell/navigate";
 import { AgentMark } from "../ui/Mark";
+import { useMainHidden } from "../panels/Stage";
+import { useSeenWhole } from "../unread/seen";
+import { useUnread } from "../unread/summary";
 import { plainError } from "../ui/plainError";
 import { backgroundTasks } from "./background";
 import { happening, type FloorEntry } from "./happening";
@@ -153,6 +156,10 @@ export function BriefCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Desk's report is read once half of it has shown; until then it's new.
+  const card = useRef<HTMLElement>(null);
+  const unread = useUnread((s) => !!s.local?.brief);
+  useSeenWhole({ kind: "brief" }, unread ? { at: brief.at, message: null } : null, card, { enabled: !useMainHidden() });
   const pause = async () => {
     setBusy(true);
     setProblem(null);
@@ -165,12 +172,13 @@ export function BriefCard({
     setBusy(false);
   };
   return (
-    <section className="brief" aria-label={`${name}’s brief`}>
+    <section ref={card} className="brief" aria-label={`${name}’s brief`}>
       <AgentMark agent={localKey(managerId) ?? ""} name={name} />
       <div className="brief-body">
         <span className="brief-head">
           <b>{name}</b>
           <span className="faint small">overseeing your crew · updated {clock(brief.at)}</span>
+          {unread && <span className="chip msg-delivery brief-new">New</span>}
         </span>
         <div className="brief-text rich">
           <RichMarkdown text={brief.text} />

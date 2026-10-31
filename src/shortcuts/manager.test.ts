@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import { defaultShortcuts } from "./keys";
-import { settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
+import { allowedFrom, settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({
@@ -81,14 +81,14 @@ describe("shortcuts in Desk", () => {
     renderHook(() => useAppShortcut("newSession", onPress));
     press({ code: "KeyN", key: "n", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(1);
-    act(() => useSettings.getState().setShortcut("newSession", "Super+J"));
+    act(() => useSettings.getState().setShortcut("newSession", "Super+Y"));
     press({ code: "KeyN", key: "n", metaKey: true });
-    press({ code: "KeyJ", key: "j", metaKey: true, shiftKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true, shiftKey: true });
     expect(onPress).toHaveBeenCalledTimes(1);
-    press({ code: "KeyJ", key: "j", metaKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(2);
     act(() => useShortcuts.setState({ recording: true }));
-    press({ code: "KeyJ", key: "j", metaKey: true });
+    press({ code: "KeyY", key: "y", metaKey: true });
     expect(onPress).toHaveBeenCalledTimes(2);
   });
 
@@ -114,5 +114,35 @@ describe("shortcuts in Desk", () => {
     expect(session).toHaveBeenCalledTimes(2);
     pane.remove();
     useHost.setState(DEFAULT_HOST);
+  });
+});
+
+describe("room shortcuts' guard", () => {
+  const el = (html: string, pick: string): Element => {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    return host.querySelector(pick)!;
+  };
+
+  it("never acts on keys typed in a terminal or a settings field, and does in a room composer", () => {
+    expect(allowedFrom(el(`<div class="xterm"><textarea></textarea></div>`, "textarea"))).toBe(false);
+    expect(allowedFrom(el(`<div class="terminal-frame"><span></span></div>`, "span"))).toBe(false);
+    expect(allowedFrom(el(`<label>Name <input></label>`, "input"))).toBe(false);
+    expect(allowedFrom(el(`<div contenteditable="true"></div>`, "div"))).toBe(false);
+    expect(allowedFrom(el(`<form data-composer><textarea></textarea></form>`, "textarea"))).toBe(true);
+    expect(allowedFrom(el(`<main><button>Thread</button></main>`, "button"))).toBe(true);
+    expect(allowedFrom(document.body)).toBe(true);
+  });
+
+  it("leaves a key pressed in a field alone, with the guard", () => {
+    const pressed = vi.fn();
+    const { unmount } = renderHook(() => useAppShortcut("stopAnswer", pressed, true, { fromFields: false }));
+    const input = document.body.appendChild(document.createElement("input"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { code: "Period", metaKey: true, bubbles: true }));
+    expect(pressed).not.toHaveBeenCalled();
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "Period", metaKey: true }));
+    expect(pressed).toHaveBeenCalledTimes(1);
+    input.remove();
+    unmount();
   });
 });

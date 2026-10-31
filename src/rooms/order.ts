@@ -9,6 +9,7 @@ import { useDesk } from "../hub/store";
 import type { Room } from "../hub/types";
 import type { Restorable } from "../restore/boot";
 import { moved, nudged } from "../ui/reorder";
+import { forgetRoomLevel } from "../unread/prefs";
 
 export const ROOMS_PREFIX = "rooms.";
 export const ROOM_ORDER_KEY = "rooms.order";
@@ -50,8 +51,10 @@ export const nudgeRoom = (id: string, by: -1 | 1): boolean => {
 };
 
 /** Room `id` is gone: out of the order. */
-export const forgetRoom = (id: string): void =>
+export const forgetRoom = (id: string): void => {
   useRoomOrder.setState((s) => (s.order.includes(id) ? { order: s.order.filter((x) => x !== id) } : s));
+  forgetRoomLevel(id);
+};
 
 /** Rooms deleted elsewhere (the hub says so) drop out of the order. Only
  *  once the hub has said which rooms it has: until then there are none,

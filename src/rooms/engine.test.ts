@@ -10,10 +10,14 @@ vi.mock("../restore/boot", () => ({
   },
 }));
 
+const notified = vi.hoisted(() => [] as { title: string; body: string }[]);
+vi.mock("../shell/notify", () => ({ notify: async (n: { title: string; body: string }) => void notified.push(n), notificationFor: () => null }));
+
 const { useChat } = await import("../chat/store");
 const { emptyConversation } = await import("../chat/conversation");
 const { useDesk } = await import("../hub/store");
-const { say, answerForm, prune, closeRoom, retry, RECONNECT_GRACE_MS } = await import("./engine");
+const { say, answerForm, prune, closeRoom, retry, stop, cancelAsk, stopAll, stopTarget, askAgain, postToRoom, removeMember, RECONNECT_GRACE_MS } =
+  await import("./engine");
 const { MAX_HOPS } = await import("./routing");
 
 const ROOM_ID = "6f1c2a4e-0b7d-4c55-9a51-3d2e8f9b1c07";
@@ -41,6 +45,7 @@ interface Posted {
   hop?: number;
   source?: string;
   delivery?: string;
+  inReplyTo?: string;
 }
 
 const posts: Posted[] = [];
@@ -82,6 +87,7 @@ beforeEach(() => {
   sources.clear();
   saved.clear();
   closed.length = 0;
+  notified.length = 0;
   prune({});
   vi.stubGlobal(
     "fetch",
@@ -118,6 +124,7 @@ beforeEach(() => {
   useDesk.setState({
     rooms: { [ROOM_ID]: room },
     timelines: { [ROOM_ID]: [] },
+    windows: {},
     roomDrafts: {},
     hub: {
       post: async (roomId: string, m: Posted) => {
@@ -172,6 +179,23 @@ describe("asking a room's members", () => {
     expect(drafts()).toMatchObject([{ member: "dw/allan", threadId: "root", state: "live" }]);
   });
 
+  it("tells an ask only the newest unbroken run of its place, never across a gap", async () => {
+    const at = (sec: number) => new Date(Date.UTC(2026, 9, 27, 9, 0, sec)).toISOString();
+    useDesk.setState({
+      timelines: {
+        [ROOM_ID]: [
+          { id: "old", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "Before the gap", hop: 0, createdAt: at(1) },
+          { id: "new", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "After it", hop: 0, createdAt: at(5) },
+        ],
+      },
+      windows: { [ROOM_ID]: { older: { kind: "at", id: "new", at: at(5) }, newer: { kind: "end" } } },
+    });
+    await say(room, "@allan which?", null);
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    expect((allan.chats[0]!.desk as { context: unknown[] }).context).toEqual([{ from: "Scout (agent)", text: "After it" }]);
+  });
+
   it("answers a form in a thread to the agent that posted it, there, and its answer lands in the thread", async () => {
     const form = { id: "f1", roomId: ROOM_ID, threadId: "t1", author: "local/scout", content: "Pick a branch", hop: 0, createdAt: "1" };
     useDesk.setState({ timelines: { [ROOM_ID]: [form] } });
@@ -179,7 +203,7 @@ describe("asking a room's members", () => {
     const scout = await connect("scout");
     await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
     expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeUndefined();
-    expect(posts).toEqual([expect.objectContaining({ author: "you", content: "Branch: main (mentions @allan)", threadId: "t1" })]);
+    expect(posts).toEqual([expect.objectContaining({ author: "you", content: "Branch: main (mentions @allan)", threadId: "t1", inReplyTo: "f1" })]);
     const chat = scout.chats[0]!;
     expect(chat).toMatchObject({ desk: { place: { kind: "room", room: ROOM_ID, name: "Release", thread: "t1" }, speaker: { kind: "person" } } });
     keep("scout", { id: "m5", from: "agent", text: "Using main.", mark: { room: ROOM_ID, thread: "t1" } });
@@ -268,7 +292,7 @@ describe("asking a room's members", () => {
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
     answer(allan, allan.chats[0]!.turn_ref as string, "m1", "All green");
     await vi.waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts[1]).toMatchObject({ author: "dw/allan", content: "All green", source: "dw/allan/m1" });
+    expect(posts[1]).toMatchObject({ author: "dw/allan", content: "All green", source: "dw/allan/m1", inReplyTo: "p1" });
   });
 
   it("speaks a hub without structured turns in the room's own words, and posts its answer", async () => {
@@ -447,4 +471,195 @@ describe("asking a room's members", () => {
     ]);
     expect(first.readyState).toBe(FakeSocket.CLOSING);
   });
+
+  it("stops a live answer: its turn is cancelled, its text kept as stopped, and the next thread's ask sent", async () => {
+    await say(room, "@allan one", "t1");
+    await say(room, "@allan two", "t2");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const ref = allan.chats[0]!.turn_ref as string;
+    allan.receive({ type: "stream_start", turn_ref: ref, id: "m1" });
+    allan.receive({ type: "stream_delta", turn_ref: ref, id: "m1", content: "Halfway" });
+    stop(ROOM_ID, drafts()[0]!.id);
+    expect(allan.sent.filter((m) => m.type === "cancel")).toHaveLength(1);
+    expect(drafts()[0]).toMatchObject({ threadId: "t1", state: "stopped", text: "Halfway", working: null });
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(2));
+    expect((allan.chats[1]!.desk as { place: { thread: string } }).place.thread).toBe("t2");
+    allan.receive({ type: "stream_delta", turn_ref: ref, id: "m1", content: " and more" });
+    expect(drafts()[0]).toMatchObject({ state: "stopped", text: "Halfway" });
+  });
+
+  it("cancels a queued ask and leaves the live one", async () => {
+    await say(room, "@allan one", "t1");
+    await say(room, "@allan two", "t2");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const [live, queued] = drafts();
+    cancelAsk(ROOM_ID, live!.id);
+    cancelAsk(ROOM_ID, queued!.id);
+    expect(drafts().map((d) => [d.threadId, d.state])).toEqual([["t1", "live"]]);
+    answer(allan, allan.chats[0]!.turn_ref as string, "a1", "first");
+    await vi.waitFor(() => expect(drafts()).toEqual([]));
+    expect(allan.chats).toHaveLength(1);
+  });
+
+  it("stops every live answer in the room and cancels what's queued, so nothing starts next", async () => {
+    await say(room, "@allan @scout one", "t1");
+    await say(room, "@allan two", "t2");
+    const allan = await connect("allan");
+    const scout = await connect("scout");
+    await vi.waitFor(() => expect(drafts().filter((d) => d.state === "live")).toHaveLength(2));
+    stopAll(ROOM_ID);
+    expect(drafts().map((d) => d.state)).toEqual(["stopped", "stopped"]);
+    await flush();
+    expect(allan.chats).toHaveLength(1);
+    expect(scout.chats).toHaveLength(1);
+  });
+
+  it("stops an ask still connecting too, so it never goes out once the room's answers are stopped", async () => {
+    await say(room, "@allan hi", null);
+    await vi.waitFor(() => expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeDefined());
+    expect(drafts()[0]).toMatchObject({ state: "connecting" });
+    stopAll(ROOM_ID);
+    expect(drafts()).toEqual([]);
+    const allan = await connect("allan");
+    await flush();
+    expect(allan.chats).toHaveLength(0);
+  });
+
+  it("lets a stopped draft go when its answer arrives anyway", async () => {
+    await say(room, "@allan one", null);
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const asked = (allan.chats[0]!.desk as { message: string }).message;
+    stop(ROOM_ID, drafts()[0]!.id);
+    useDesk.getState().keep({ id: "late", roomId: ROOM_ID, threadId: null, author: "dw/allan", content: "Done before the stop.", hop: 0, createdAt: "", inReplyTo: asked });
+    expect(drafts()).toEqual([]);
+  });
+
+  it("asks the newest message a stopped answer had taken in, on Retry", async () => {
+    await say(room, "@allan check CI", "t1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const ref = allan.chats[0]!.turn_ref as string;
+    allan.receive({ type: "typing", turn_ref: ref, id: "m1" });
+    await say(room, "@allan and the docs", "t1");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(2));
+    allan.receive({ type: "injected", content: "Follow-up absorbed into active run" });
+    expect(drafts()).toHaveLength(1);
+    stop(ROOM_ID, drafts()[0]!.id);
+    expect(drafts()[0]).toMatchObject({ state: "stopped", took: 1 });
+    retry(ROOM_ID, drafts()[0]!.id);
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(3));
+    expect(allan.chats[2]).toMatchObject({ content: "@allan and the docs", desk: { message: "p2" } });
+  });
+
+  it("stops the open thread's answer first, else the room's newest", () => {
+    const d = (id: string, threadId: string | null, state: RoomDraftState): RoomDraft => ({
+      id,
+      member: "dw/allan",
+      threadId,
+      asked: "q",
+      since: 0,
+      text: "",
+      working: null,
+      tools: [],
+      attachments: [],
+      prompts: [],
+      state,
+    });
+    const all = [d("a", "t1", "live"), d("b", null, "live"), d("c", "t2", "stalled")];
+    expect(stopTarget(all, "t1")?.id).toBe("a");
+    expect(stopTarget(all, null)?.id).toBe("b");
+    expect(stopTarget(all, "t2")?.id).toBe("b");
+    expect(stopTarget([d("c", "t2", "stalled")], null)).toBeNull();
+  });
 });
+
+type RoomDraft = import("../hub/store").RoomDraft;
+
+describe("telling you of a room's answers", () => {
+  it("tells you of an answer to your ask that took over a minute, not a quick one, and not a hand-off's", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    await say(room, "@allan long one", null);
+    const allan = await connect("allan", ["desk.place", "desk.stream"]);
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    vi.setSystemTime(Date.now() + 70_000);
+    answer(allan, allan.chats[0]!.turn_ref as string, "m1", "Done, @scout check it.\nMore.");
+    await vi.waitFor(() => expect(notified).toEqual([{ title: "Allan answered · Release", body: "Done, @scout check it." }]));
+    const scout = await connect("scout", ["desk.place", "desk.stream"]);
+    await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
+    vi.setSystemTime(Date.now() + 70_000);
+    answer(scout, scout.chats[0]!.turn_ref as string, "m2", "Checked.");
+    await vi.waitFor(() => expect(posts.filter((p) => p.author === "local/scout")).toHaveLength(1));
+    expect(notified).toHaveLength(1);
+    vi.useRealTimers();
+  });
+});
+
+describe("acting on a room's messages", () => {
+  it("asks again what an answer answered, of who answered it, fetching it when it isn't loaded", async () => {
+    const asked = { id: "q1", roomId: ROOM_ID, threadId: "t1", author: "you", content: "@allan is CI green?", hop: 0, createdAt: "" };
+    const roomMessage = vi.fn(async () => asked);
+    const toNewest = vi.fn(async () => {});
+    const real = useDesk.getState().toNewest;
+    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage } as never, toNewest }));
+    await askAgain(room, { id: "a1", roomId: ROOM_ID, threadId: "t1", author: "dw/allan", content: "Yes.", hop: 0, createdAt: "", inReplyTo: "q1" });
+    expect(roomMessage).toHaveBeenCalledWith(ROOM_ID, "q1");
+    expect(toNewest).toHaveBeenCalledWith(ROOM_ID, "t1");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    expect(allan.chats[0]).toMatchObject({ content: "@allan is CI green?", desk: { message: "q1", hop: 0, speaker: { kind: "person" }, place: { thread: "t1" } } });
+    useDesk.setState({ toNewest: real });
+  });
+
+  it("fails a form's answer with no hub to send it to, so the form unlocks", async () => {
+    useDesk.setState({ hub: null });
+    await expect(answerForm(room, { id: "f1", roomId: ROOM_ID, threadId: null, author: "dw/allan", content: "", hop: 0, createdAt: "" }, "main")).rejects.toThrow(
+      "Desk isn’t connected to its hub.",
+    );
+  });
+
+  it("says so when what an answer answered was deleted", async () => {
+    const { HubError } = await import("../hub/client");
+    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage: vi.fn(async () => Promise.reject(new HubError(404, "gone"))) } as never }));
+    await expect(askAgain(room, { id: "a1", roomId: ROOM_ID, threadId: null, author: "dw/allan", content: "", hop: 0, createdAt: "", inReplyTo: "q1" })).rejects.toThrow(
+      "The message it answered was deleted.",
+    );
+  });
+
+  it("keeps a thread message's copy in the room, and shows the original as also in it", async () => {
+    const reply = { id: "r1", roomId: ROOM_ID, threadId: "t1", author: "dw/allan", content: "Shipped.", hop: 0, createdAt: "" };
+    const copyToRoom = vi.fn(async () => ({ message: { ...reply, id: "c1", threadId: null, hop: MAX_HOPS, copyOf: "r1" }, created: true }));
+    useDesk.setState((s) => ({ hub: { ...s.hub!, copyToRoom } as never, timelines: { [ROOM_ID]: [reply] } }));
+    await postToRoom(room, reply);
+    const timeline = useDesk.getState().timelines[ROOM_ID]!;
+    expect(timeline.find((m) => m.id === "c1")).toMatchObject({ copyOf: "r1", threadId: null });
+    expect(timeline.find((m) => m.id === "r1")?.postedToRoom).toBe(true);
+  });
+
+  it("posts a thread reply to the room too when asked, and only from a thread", async () => {
+    const seen: unknown[] = [];
+    useDesk.setState((s) => ({ hub: { ...s.hub!, post: async (_r: string, m: Posted) => (seen.push(m), { message: { ...m, id: "x", roomId: ROOM_ID, threadId: m.threadId ?? null, hop: 0, createdAt: "" }, created: true }) } as never }));
+    await say(room, "noted", "t1", [], { alsoInRoom: true });
+    await say(room, "noted", null, [], { alsoInRoom: true });
+    expect(seen).toEqual([expect.objectContaining({ threadId: "t1", alsoInRoom: true }), expect.not.objectContaining({ alsoInRoom: true })]);
+  });
+
+  it("stops a member's answer before taking it out of the room", async () => {
+    const updates: unknown[] = [];
+    useDesk.setState((s) => ({
+      hub: { ...s.hub!, updateRoom: async (id: string, patch: { members: typeof room.members }) => (updates.push(patch), { ...useDesk.getState().rooms[id]!, ...patch }) } as never,
+    }));
+    await say(room, "@allan one", "t1");
+    await say(room, "@allan two", "t2");
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    await removeMember(room, { hub: "dw", agent: "allan" });
+    expect(allan.sent.filter((m) => m.type === "cancel")).toHaveLength(1);
+    expect(drafts().map((d) => d.state)).toEqual(["stopped"]);
+    expect(updates).toEqual([{ members: [{ hub: "local", agent: "scout" }] }]);
+    expect(allan.chats).toHaveLength(1);
+  });
+});
+type RoomDraftState = RoomDraft["state"];

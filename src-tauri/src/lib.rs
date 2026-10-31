@@ -1,4 +1,5 @@
 mod attachments;
+mod badge;
 mod files;
 mod fonts;
 mod frame;
@@ -710,6 +711,7 @@ pub fn run() {
             hub_connection,
             fonts::fonts_list,
             host_info,
+            badge::set_unread_badge,
             settings_load,
             settings_save,
             themes_list,

@@ -1,6 +1,7 @@
 import type { Layout } from "../groups/model";
 import { preview } from "../preview";
 import type { Provider } from "./providers";
+import type { SearchFilters } from "../rooms/search";
 import type {
   ActivityFilter,
   ActivityPage,
@@ -11,12 +12,16 @@ import type {
   NewSession,
   NewTerminal,
   Overview,
+  ReadPut,
+  ReadRow,
   Room,
   RoomMemberRef,
   RoomMessage,
+  SearchHit,
   Session,
   Suggestion,
   TerminalInfo,
+  UnreadSummary,
 } from "./types";
 import { hubFetch } from "./net";
 import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
@@ -323,17 +328,53 @@ export class DeskHub {
     patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null },
   ): Promise<Room> => this.call("PATCH", `/api/desk/rooms/${id}`, patch);
   deleteRoom = (id: string): Promise<void> => this.call("DELETE", `/api/desk/rooms/${id}`);
-  /** A room's newest messages (of one thread, when named), at most a page. */
-  roomMessages = (id: string, thread?: string): Promise<RoomMessage[]> =>
-    this.call("GET", `/api/desk/rooms/${id}/messages?${new URLSearchParams({ limit: String(ROOM_PAGE), ...(thread ? { thread } : {}) })}`);
+  /** A page of a room's main timeline (or of one thread), oldest first: its
+   *  newest, or those `before` or `after` a message, or `around` one. */
+  roomMessages = (
+    id: string,
+    q: { thread?: string; before?: string; after?: string; around?: string; limit?: number } = {},
+  ): Promise<RoomMessage[]> => {
+    const params = new URLSearchParams({ limit: String(q.limit ?? ROOM_PAGE) });
+    for (const k of ["thread", "before", "after", "around"] as const) if (q[k]) params.set(k, q[k]);
+    return this.call("GET", `/api/desk/rooms/${id}/messages?${params}`);
+  };
+  /** One message of a room. */
+  roomMessage = (roomId: string, id: string): Promise<RoomMessage> =>
+    this.call("GET", `/api/desk/rooms/${roomId}/messages/${encodeURIComponent(id)}`);
   /** Keeps a message in a room; `created` is false when one with its
    *  source was kept already (a hub that keeps no sources keeps it anew). */
   post = async (id: string, m: NewRoomMessage): Promise<{ message: RoomMessage; created: boolean }> => {
     const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${id}/messages`, m);
     return { message: body, created: status === 201 || (!!m.source && !body.source) };
   };
-  search = (q: string): Promise<{ roomId: string; message: RoomMessage }[]> =>
-    this.call("GET", `/api/desk/rooms/search?q=${encodeURIComponent(q)}`);
+  /** Posts thread message `id` to its room's timeline; `created` is false
+   *  when it was posted there already, and the copy then is the first. */
+  copyToRoom = async (roomId: string, id: string): Promise<{ message: RoomMessage; created: boolean }> => {
+    const { status, body } = await this.request<RoomMessage>("POST", `/api/desk/rooms/${roomId}/messages/${encodeURIComponent(id)}/copy`);
+    return { message: body, created: status === 201 };
+  };
+  /** What's unread of this computer's places. */
+  unread = (): Promise<UnreadSummary> => this.call("GET", "/api/desk/unread");
+  /** Every read point this computer's hub keeps. */
+  reads = async (): Promise<ReadRow[]> => (await this.call<{ reads: ReadRow[] }>("GET", "/api/desk/reads")).reads;
+  /** Moves read points; answers the ones that moved. */
+  putReads = async (puts: ReadPut[]): Promise<ReadRow[]> => (await this.call<{ reads: ReadRow[] }>("PUT", "/api/desk/reads", { puts })).reads;
+  /** Every place with something unread (or a room's, with its threads)
+   *  read through its newest; answers the points that moved. */
+  markAllRead = async (scope: "everything" | { room: string }): Promise<ReadRow[]> =>
+    (await this.call<{ reads: ReadRow[] }>("POST", "/api/desk/reads/all", { scope })).reads;
+  /** Room messages matching `f`'s text and filters: by rank with text,
+   *  else newest first. */
+  search = (f: SearchFilters, limit = 50): Promise<SearchHit[]> => {
+    const params = new URLSearchParams({ q: f.q, limit: String(limit) });
+    if (f.room) params.set("room", f.room);
+    if (f.from) params.set("from", f.from);
+    if (f.has.length) params.set("has", f.has.join(","));
+    if (f.inThread) params.set("inThread", "true");
+    if (f.after) params.set("after", f.after);
+    if (f.before) params.set("before", f.before);
+    return this.call("GET", `/api/desk/rooms/search?${params}`);
+  };
 
   /** Desk's restorable state on this hub (see restore/store.ts); a hub
    *  without a state store answers 404. */

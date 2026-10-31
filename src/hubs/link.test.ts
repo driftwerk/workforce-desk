@@ -32,13 +32,13 @@ vi.mock("../floor/store", () => ({
 const { HubLink, linkUrl } = await import("./link");
 const { CATCH_UP_RETRY_MS, followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
 const { useChat } = await import("../chat/store");
-const { useDesk } = await import("../hub/store");
+const { useUnread } = await import("../unread/summary");
 
 const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "tok" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-let conversations: { agent_id: string; channel: string; updated_at: string }[] = [];
+let conversations: import("./surface").Active[] = [];
 const sinces: (string | null)[] = [];
 
 beforeEach(() => {
@@ -71,8 +71,8 @@ beforeEach(() => {
     roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     activeAgent: null,
     panelAgent: null,
-    dmUnread: {},
   });
+  useUnread.setState({ dms: {}, dmsAt: {} });
 });
 afterEach(() => {
   followHubs([]);
@@ -132,9 +132,18 @@ describe("a hub link", () => {
     expect(sinces).toHaveLength(2);
   });
 
-  it("drains a delivery's conversation, counts it unread in its DM, tells you, and reads a spoken one aloud", async () => {
+  it("drains a delivery's conversation, reads its DM's count from the hub, tells you, and reads a spoken one aloud", async () => {
     said.messages = [{ id: "m1", from: "agent", text: "🔔 Reminder: stand-up\nin five" }];
     const s = await link();
+    conversations = [
+      {
+        agent_id: "allan",
+        channel: "desk",
+        updated_at: "2026-10-30T10:01:00Z",
+        read: { at: "2026-10-30T09:00:00Z", message_id: "m0" },
+        unread: { count: 1, for_you: 1, first: "m1", last: { at: "2026-10-30T10:01:00Z", message_id: "m1" }, capped: false },
+      },
+    ];
     s.receive({
       type: "desk_delivered",
       agent_id: "allan",
@@ -148,19 +157,8 @@ describe("a hub link", () => {
     await vi.waitFor(() => expect(notified).toHaveLength(1));
     expect(drained).toEqual([{ hub: "dw", agent: "allan", channel: "desk" }]);
     expect(notified[0]).toEqual({ title: "Allan · Reminder", body: "🔔 Reminder: stand-up" });
-    expect(useChat.getState().dmUnread["dw/allan"]).toBe(1);
+    await vi.waitFor(() => expect(useUnread.getState().dms["dw/allan"]).toMatchObject({ count: 1, for_you: 1 }));
     expect(spoken).toEqual(["🔔 Reminder: stand-up\nin five"]);
-  });
-
-  it("counts unread for the DM last opened while a room or the Floor is shown instead, and none while it's shown", () => {
-    useChat.setState({ activeAgent: "dw/allan", panelAgent: null, dmUnread: {} });
-    useDesk.setState({ view: "floor", activeRoom: null });
-    useChat.getState().bumpDm("dw/allan");
-    useDesk.setState({ view: "rooms", activeRoom: "6f1c" });
-    useChat.getState().bumpDm("dw/allan");
-    useDesk.setState({ activeRoom: null });
-    useChat.getState().bumpDm("dw/allan");
-    expect(useChat.getState().dmUnread["dw/allan"]).toBe(2);
   });
 
   it("tells you of nothing a notice says, and counts no unread for a room", async () => {
@@ -169,7 +167,7 @@ describe("a hub link", () => {
     await vi.waitFor(() => expect(drained).toHaveLength(1));
     await flush();
     expect(notified).toEqual([]);
-    expect(useChat.getState().dmUnread).toEqual({});
+    expect(useUnread.getState().dms).toEqual({});
   });
 
   it("is given up on a hub too old to have one, until it is paired again", async () => {
@@ -239,5 +237,16 @@ describe("a hub link", () => {
   it("looks back a little before when it last looked", () => {
     expect(sinceOf(undefined)).toBeNull();
     expect(sinceOf("2026-10-30T10:05:00.000Z")).toBe("2026-10-30T10:00:00.000Z");
+  });
+});
+
+describe("read points across Desks", () => {
+  it("reads a DM's count again when another Desk of yours read it", async () => {
+    const s = await link();
+    s.receive({ type: "hello", features: ["desk.reads"] });
+    await vi.waitFor(() => expect(sinces).toHaveLength(1));
+    s.receive({ type: "read_changed", agent_id: "allan", channel: "desk" });
+    await vi.waitFor(() => expect(sinces).toHaveLength(2));
+    expect(floor.asked).toEqual([]);
   });
 });

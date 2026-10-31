@@ -1,40 +1,45 @@
-import { useEffect, useMemo, useState, type Ref } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useMainHidden } from "../panels/Stage";
+import { badgeOfFloor } from "../unread/badges";
+import { Marks } from "../unread/Marks";
+import { useSeen } from "../unread/seen";
+import { useUnread } from "../unread/summary";
 import { useChat } from "../chat/store";
 import type { FloorNeed } from "../floor/merge";
 import { NeedRow } from "../floor/NeedRow";
 import { useMinute } from "../floor/RightNow";
 import { useWhoName } from "../floor/Row";
 import { useFloor, useLocalFloor, useNeeds, type Answered } from "../floor/store";
-import { clock } from "../floor/time";
+import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
-import { lineOf, needStates, toneOf, type NeedState } from "./activity";
+import { agentNamer, eventTarget, lineOf, needStates, toneOf, type NeedState } from "./activity";
+import { useDesk } from "../hub/store";
+import { placeLabel } from "../floor/target";
+import { openTarget } from "../shell/navigate";
 import { useOverview } from "./store";
-
-const dayOf = (iso: string): string => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-};
 
 /** "allowed by you 16:31", "no longer waiting". */
 const resolvedText = (state: Extract<NeedState, { open: false }>): string => (state.at ? `${state.how} ${clock(state.at)}` : state.how);
 
 export function ActivityRow({ event, need }: { event: ActivityEvent; need?: NeedState }) {
-  const line = lineOf(event, useSessionNames());
+  const roster = useChat((s) => s.roster);
+  const localHub = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  const line = lineOf(event, useSessionNames(), agentNamer(roster, localHub));
+  const rooms = useDesk((s) => s.rooms);
+  const target = eventTarget(event, rooms);
+  const where = event.place ? placeLabel(event.place, rooms) : null;
+  const thread = event.place?.kind === "room" && event.place.thread ? " ▸ thread" : "";
+  // A row about a room message opens it.
+  const Text = target ? "button" : "span";
   return (
-    <li className={`ev ${need?.open ? "ev-open" : need ? "ev-resolved" : ""}`}>
+    <li className={`ev ${need?.open ? "ev-open" : need ? "ev-resolved" : ""}`} data-message-id={event.id}>
       <time className="ev-time" dateTime={event.at}>
         {clock(event.at)}
       </time>
       <span className={`ev-dot ev-${toneOf(event)}`} aria-hidden="true" />
-      <span className="ev-text">
+      <Text className={target ? "ev-text ev-link" : "ev-text"} {...(target ? { type: "button" as const, onClick: () => openTarget(target) } : {})}>
         {line.lead && (line.lead.session ? <span className="mono ev-who">{line.lead.name}</span> : <b>{line.lead.name}</b>)}{" "}
         {line.parts.map((p, i) =>
           p.name ? (
@@ -49,9 +54,16 @@ export function ActivityRow({ event, need }: { event: ActivityEvent; need?: Need
             <span key={i}>{p.text}</span>
           ),
         )}
+        {where && (
+          <span className="faint">
+            {" "}
+            {where}
+            {thread}
+          </span>
+        )}
         {event.reason && <span className="ev-reason">{event.reason}</span>}
         {need && <span className="ev-reason">{need.open ? "Still waiting on you" : `Resolved · ${resolvedText(need)}`}</span>}
-      </span>
+      </Text>
     </li>
   );
 }
@@ -140,6 +152,13 @@ export function ActivityRail({
   const current = options.findIndex((o) => o.id === shown);
   const events = feed?.events ?? NO_EVENTS;
   const earlier = () => void loadEarlier(shown);
+  // What happened is read as its rows show; the newest row seen is the point.
+  const scroller = useRef<HTMLDivElement>(null);
+  const seenItems = useMemo(() => [...events].reverse().map((e) => ({ id: e.id, at: e.at })), [events]);
+  useSeen(shown === "all" ? { kind: "activity" } : null, scroller, seenItems, { enabled: !useMainHidden() });
+  const activity = useUnread((s) => s.local?.activity);
+  const brief = useUnread((s) => s.local?.brief);
+  const floorBadge = badgeOfFloor(needs, activity, brief);
   const states = useMemo(
     () =>
       floorOn && shown === "all"
@@ -167,8 +186,8 @@ export function ActivityRail({
       ) : (
         <ol className="ev-list" aria-label={`Activity: ${options[current]?.label ?? "All"}`}>
           {events.map((e, i) => {
-            const day = dayOf(e.at);
-            const heading = day !== "Today" && day !== (i > 0 ? dayOf(events[i - 1]!.at) : "Today");
+            const day = dayName(e.at);
+            const heading = day !== "Today" && day !== (i > 0 ? dayName(events[i - 1]!.at) : "Today");
             return [
               heading && (
                 <li key={`day-${e.id}`} className="ev-day">
@@ -206,6 +225,7 @@ export function ActivityRail({
           <h2 id="activity-head" className="display">
             Activity
           </h2>
+          <Marks badge={floorBadge} />
           <button ref={closeRef} type="button" className="icon-btn-sm" aria-label="Close Activity" title="Close (it waits on the right)" onClick={onClose}>
             <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
               <path d="M3 3l8 8M11 3l-8 8" />
@@ -235,6 +255,7 @@ export function ActivityRail({
         </div>
       </div>
       <div
+        ref={scroller}
         className="activity-scroll"
         onScroll={(e) => {
           const el = e.currentTarget;

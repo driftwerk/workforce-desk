@@ -178,6 +178,37 @@ export interface RoomMessage {
    *  when the last came; absent from a hub that doesn't count them. */
   replyCount?: number;
   lastReplyAt?: string | null;
+  /** Who wrote its thread's replies, latest first (at most three). */
+  replyAuthors?: string[];
+  /** The message it answers: the ask an agent's answer is to, the form
+   *  your answer fills in, the post a hand-off answers. */
+  inReplyTo?: string | null;
+  /** The thread message this main-timeline copy was posted from. */
+  copyOf?: string | null;
+  /** The tools the agent's turn ran on the way, in order. */
+  steps?: Step[];
+  /** Whether it is for you: what Desk wrote, an answer to you, a delivery
+   *  to you. Absent from a hub that doesn't say. */
+  forYou?: boolean;
+  /** A form you have answered. */
+  answered?: boolean;
+  /** A thread message with a copy in the room's timeline. */
+  postedToRoom?: boolean;
+}
+
+/** A room message search found, and the text around its matches, each
+ *  match between U+E000 and U+E001. */
+export interface SearchHit {
+  roomId: string;
+  message: RoomMessage;
+  snippet: string;
+}
+
+/** One tool an agent's turn ran: what it was, whether it worked, how long. */
+export interface Step {
+  tool: string;
+  ok: boolean;
+  ms: number;
 }
 
 /** A room message to keep. */
@@ -190,6 +221,10 @@ export interface NewRoomMessage {
   source?: string;
   delivery?: DeliveryKind;
   requestId?: string;
+  inReplyTo?: string;
+  steps?: Step[];
+  /** A thread reply of yours, also posted to the room's timeline. */
+  alsoInRoom?: boolean;
 }
 
 export type DeskEvent =
@@ -213,7 +248,78 @@ export type DeskEvent =
   | { type: "roomMessage"; message: RoomMessage }
   | { type: "activity"; event: ActivityEvent }
   /** A key of Desk's restorable state changed on the hub (null: removed). */
-  | { type: "state"; key: string; value: unknown };
+  | { type: "state"; key: string; value: unknown }
+  /** A place's read point moved, in this window or another. */
+  | { type: "read"; place: string; point: ReadPoint };
+
+// ── Unread: read points and what's after them ────────────────────────────
+
+/** Read through `at`: the message, event or version seen last, when there is one. */
+export interface ReadPoint {
+  at: string;
+  message: string | null;
+}
+
+/** How a write moves a point: never back, or exactly there (Mark unread). */
+export type ReadMark = "advance" | "set";
+
+export interface ReadPut {
+  /** A place's string form (`room:<id>`, `thread:<room>/<thread>`, …). */
+  place: string;
+  point: ReadPoint;
+  mark: ReadMark;
+}
+
+/** A read point the hub keeps. */
+export interface ReadRow extends ReadPoint {
+  place: string;
+}
+
+export type Urgency = "needs" | "forYou" | "new";
+
+/** What's unread in a room's main timeline or a thread. */
+export interface Unread {
+  count: number;
+  forYou: number;
+  /** The earliest unread message, to jump to when it isn't loaded. */
+  first: string | null;
+  lastAt: string | null;
+}
+
+export interface ThreadUnread {
+  parent: RoomMessage;
+  unread: Unread;
+}
+
+export interface RoomSummary {
+  roomId: string;
+  main: Unread;
+  threads: ThreadUnread[];
+}
+
+export interface SessionUnread {
+  id: string;
+  since: string;
+  urgency: Urgency;
+}
+
+export interface Count {
+  count: number;
+  lastAt: string | null;
+}
+
+/** `GET /api/desk/unread`: what's unread of this computer's places. */
+export interface UnreadSummary {
+  /** When Desk began keeping read points: older content counts as read. */
+  floor: string;
+  rooms: RoomSummary[];
+  sessions: SessionUnread[];
+  activity: Count;
+  /** The brief's time, while it's unread. */
+  brief: string | null;
+  /** The update's point, for Desk to compare with its updater. */
+  update: ReadPoint | null;
+}
 
 export type Decision = "allow" | "deny" | "terminal";
 
@@ -248,7 +354,11 @@ export type ActivityKind =
   | "suggested"
   | "dismissed"
   | "summary"
-  | "assigned";
+  | "assigned"
+  /** An agent on another hub answered in one of your rooms. */
+  | "replied"
+  /** A delivery reached one of your rooms. */
+  | "delivered";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -264,6 +374,10 @@ export interface ActivityEvent {
   reason?: string | null;
   suggestionId?: string | null;
   approvalId?: string | null;
+  /** Where in Desk it happened: a room, its thread. */
+  place?: Place | null;
+  /** The room message it's about. */
+  message?: string | null;
 }
 
 export type ActivityFilter = "all" | "needs_you" | "manager";
