@@ -6,7 +6,15 @@ const opened = vi.hoisted(() => [] as unknown[][]);
 const saved = vi.hoisted(() => [] as unknown[][]);
 const uploads = vi.hoisted(() => ({ fail: null as Error | null, sent: [] as string[] }));
 const saveFails = vi.hoisted(() => ({ error: null as Error | null }));
+const charts = vi.hoisted(() => ({ asked: [] as string[], answer: (_url: string): Response => new Response("{}") }));
+vi.mock("../hub/net", () => ({
+  hubFetch: async (url: URL, init: RequestInit) => {
+    charts.asked.push(`${String(url)} ${new Headers(init.headers).get("authorization")}`);
+    return charts.answer(String(url));
+  },
+}));
 vi.mock("../platform", () => ({
+  openUrl: () => {},
   fileUrl: (hub: { id: string }, agent: string, artifact: string) => `deskfile://localhost/${hub.id}/${agent}/${artifact}`,
   openFile: async (...args: unknown[]) => void opened.push(args),
   saveFileAs: async (...args: unknown[]) => {
@@ -59,6 +67,7 @@ describe("what a file is", () => {
       family: "sheet",
     });
     expect(kindOf("application/octet-stream", "blob")).toMatchObject({ label: "File", badge: "OCTE" });
+    expect(kindOf("application/vnd.workforce.chart+json", "signups.json")).toMatchObject({ shown: "chart", label: "Chart" });
   });
 
   it("says its size and length in plain figures", () => {
@@ -71,6 +80,42 @@ describe("what a file is", () => {
     expect(thumbnailOf("/api/agents/scout/attachments/art_thumb")).toBe("art_thumb");
     expect(thumbnailOf(null)).toBeNull();
     expect(thumbnailOf("/api/agents/scout/attachments/art%E0%A4%A")).toBeNull();
+  });
+});
+
+describe("a chart an agent drew", () => {
+  const CHART = "application/vnd.workforce.chart+json";
+  const spec = { kind: "bar", title: "Signups by plan", labels: ["Free", "Pro"], series: [{ data: [420, 180] }] };
+  beforeEach(() => {
+    charts.asked.length = 0;
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    });
+    Object.defineProperty(window, "ResizeObserver", { writable: true, value: class { observe() {} disconnect() {} } });
+  });
+
+  it("is drawn from its spec, read from the hub with its token in the header", async () => {
+    charts.answer = () => new Response(JSON.stringify(spec));
+    const { container } = render(<Attachments files={[file("signups.json", CHART, { artifact_id: "art_c1" })]} home={{ hub: "dw", agent: "allan" }} />);
+    // The chart's renderer is a lazy chunk, slow to load the first time.
+    await vi.waitFor(() => expect(container.querySelector(".wf-chart")).not.toBeNull(), { timeout: 15000 });
+    expect(charts.asked).toEqual(["https://dw.example.com/api/agents/allan/attachments/art_c1 Bearer t"]);
+    expect(container.querySelector(".wf-chart-plot")!.getAttribute("aria-label")).toBe("bar chart: Signups by plan");
+    expect(screen.getByRole("button", { name: "Show data" })).toBeTruthy();
+  }, 20000);
+
+  it("is a card when its spec is gone or is not a chart", async () => {
+    charts.answer = (url) => (url.endsWith("art_gone") ? new Response("", { status: 404 }) : new Response('{"kind":"donut"}'));
+    const { container } = render(
+      <Attachments
+        files={[file("gone.json", CHART, { artifact_id: "art_gone" }), file("odd.json", CHART, { artifact_id: "art_odd" })]}
+        home={{ hub: "dw", agent: "allan" }}
+      />,
+    );
+    await vi.waitFor(() => expect(container.querySelectorAll(".att-badge")).toHaveLength(2));
+    expect(container.querySelector(".wf-chart")).toBeNull();
+    expect(screen.getByText("gone.json")).toBeTruthy();
   });
 });
 

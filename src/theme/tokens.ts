@@ -243,7 +243,7 @@ export const cssVariables = (theme: Theme): Record<string, string> => {
     "--rich-muted": colors.muted,
     "--rich-border": colors.border,
     "--rich-accent": colors.signal,
-    ...Object.fromEntries(SERIES.map((c, i) => [`--rich-series-${i + 1}`, c])),
+    ...Object.fromEntries(chartSeries(theme.dark).map((c, i) => [`--rich-series-${i + 1}`, c])),
     ...Object.fromEntries(Object.entries(codeColors(colors)).map(([k, v]) => [`--rich-code-${k}`, v])),
   };
 };
@@ -269,7 +269,15 @@ export const codeColors = (c: Palette): Record<string, string> => ({
 });
 
 export const MARKS = ["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"] as const;
-const SERIES = [...MARKS, "#D4FF3A", "#8FD8E8"];
+
+/** The colours a chart's series are drawn in, slot by slot: one categorical
+ *  palette, validated for colour-vision deficiency, stepped for a light
+ *  ground or a dark one. Its slot order keeps neighbours apart, so a theme
+ *  changes the steps and never the order. */
+const SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"] as const;
+const SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"] as const;
+
+export const chartSeries = (dark: boolean): readonly string[] => (dark ? SERIES_DARK : SERIES_LIGHT);
 
 export const markFor = (name: string): string => {
   let h = 0;

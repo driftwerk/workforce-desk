@@ -1,7 +1,7 @@
 import { differenceEuclidean, oklch } from "culori";
 import { describe, expect, it } from "vitest";
 import { BUILTIN, DAY, HARBOUR, NIGHT } from "./builtin";
-import { codeColors, contrast, contrastChecks, cssVariables, derive, EMOJI_STACK, markFor, MARKS, monoStack, type ThemeSpec } from "./tokens";
+import { chartSeries, codeColors, contrast, contrastChecks, cssVariables, derive, EMOJI_STACK, markFor, MARKS, monoStack, type ThemeSpec } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 
 describe("themes", () => {
@@ -63,6 +63,22 @@ describe("themes", () => {
     const vars = cssVariables(derive(HARBOUR));
     expect(vars["--rich-code-bg"]).toBe("#0A121A");
     expect(vars["--rich-code-keyword"]).toBe("#FF8F8F");
+  });
+
+  it("charts draw in the palette's steps for the theme's ground, in one slot order", () => {
+    const series = (t: ThemeSpec) => Array.from({ length: 8 }, (_, i) => cssVariables(derive(t))[`--rich-series-${i + 1}`]!);
+    const [day, night] = [series(DAY), series(NIGHT)];
+    expect(day).toEqual(chartSeries(false));
+    expect(night).toEqual(chartSeries(true));
+    expect(new Set(day).size).toBe(8);
+    // The same hue in each slot, light and dark: a theme switch never swaps
+    // which series is which colour.
+    day.forEach((light, i) => {
+      const [a, b] = [oklch(light)!, oklch(night[i]!)!];
+      expect(Math.abs(((a.h ?? 0) - (b.h ?? 0) + 540) % 360 - 180), `slot ${i + 1}`).toBeLessThan(25);
+    });
+    // Every dark step stands out from a dark ground.
+    for (const ink of night) expect(contrast(ink, derive(NIGHT).colors.bg), ink).toBeGreaterThanOrEqual(3);
   });
 
   it("an agent keeps the same mark colour", () => {

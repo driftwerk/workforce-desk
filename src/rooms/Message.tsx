@@ -2,6 +2,7 @@ import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { memo, useMemo, type ReactNode } from "react";
 import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
+import { saveMadeFile } from "../attachments/save";
 import { linkParts, openLink } from "../shell/links";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
@@ -101,6 +102,7 @@ export const Message = memo(function Message({
       openUrl: openLink,
       linkSchemes: LINK_SCHEMES,
       answered,
+      saveFile: saveMadeFile,
       submitForm: async (summary, values) => onSubmitForm(summary, values),
     }),
     [onSubmitForm, answered],

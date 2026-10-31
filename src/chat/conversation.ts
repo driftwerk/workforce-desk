@@ -508,13 +508,17 @@ export const disconnected = (s: ConversationState): ConversationState => ({
  *  ones it has enabled. */
 export const RICH_KINDS = ["tables", "charts", "forms", "maps", "diagrams", "images"] as const;
 
+/** What Desk draws besides the blocks: a chart an agent's chart tool made,
+ *  from its spec, in place of its picture. */
+const DRAWN = ["chart_specs"] as const;
+
 export const wsUrl = (hub: HubAccount, agentId: string, channel = "desk"): string => {
   const u = new URL("/ws", hub.url);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   u.searchParams.set("token", hub.token);
   u.searchParams.set("agent_id", agentId);
   u.searchParams.set("channel", channel);
-  u.searchParams.set("rich", RICH_KINDS.join(","));
+  u.searchParams.set("rich", [...RICH_KINDS, ...DRAWN].join(","));
   u.searchParams.set("desk", "1");
   u.searchParams.set("accept", "*/*");
   return u.toString();

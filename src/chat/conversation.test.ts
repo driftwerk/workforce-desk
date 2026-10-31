@@ -93,7 +93,7 @@ describe("conversation", () => {
     expect(url.pathname).toBe("/ws");
     expect(url.searchParams.get("channel")).toBe("desk");
     expect(url.searchParams.get("agent_id")).toBe("allan");
-    expect(url.searchParams.get("rich")).toBe("tables,charts,forms,maps,diagrams,images");
+    expect(url.searchParams.get("rich")).toBe("tables,charts,forms,maps,diagrams,images,chart_specs");
     const room = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan", "desk:release"));
     expect(room.searchParams.get("channel")).toBe("desk:release");
     expect(url.searchParams.get("desk")).toBe("1");

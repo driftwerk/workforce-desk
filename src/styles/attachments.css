@@ -84,6 +84,12 @@
   background: color-mix(in srgb, var(--working) 16%, var(--surface));
 }
 
+/* A chart drawn from its spec: as wide as a reply, never wider. */
+.att-chart {
+  max-width: 640px;
+  min-width: 0;
+}
+
 .att-figure {
   margin: 0;
   max-width: 520px;
