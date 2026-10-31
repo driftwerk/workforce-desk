@@ -38,6 +38,7 @@ import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
+import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
 import { WindowsSetup } from "../setup/WindowsSetup";
@@ -65,8 +66,9 @@ const stopNearest = () => {
 /** Opens search: on the open room, or every room. */
 const searchHere = (inRoom: boolean) => {
   const desk = useDesk.getState();
-  const room = inRoom && desk.view === "rooms" && desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
+  const room = inRoom && desk.view === "rooms" && !desk.inbox && desk.activeRoom ? desk.rooms[desk.activeRoom] : undefined;
   useUi.getState().setSearch(room ? `in:#${room.slug} ` : "");
+  requestFocus("search");
 };
 
 /** The open room's pill: the open thread's when focus is in it. */

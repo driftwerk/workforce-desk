@@ -5,6 +5,7 @@ import { dayClock } from "../floor/time";
 import { useDesk } from "../hub/store";
 import type { SearchHit } from "../hub/types";
 import { SidePanel } from "../panels/Stage";
+import { useFocusRequest } from "../shell/focus";
 import { openTarget } from "../shell/navigate";
 import { useUi } from "../shell/ui";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -36,8 +37,11 @@ export const snippetParts = (snippet: string): { text: string; match: boolean }[
 
 type Result = { state: "idle" } | { state: "loading" } | { state: "done"; hits: SearchHit[] } | { state: "failed"; why: string };
 
-const DAY_MS = 86_400_000;
-const daysAgo = (n: number) => new Date(new Date().setHours(0, 0, 0, 0) - n * DAY_MS).toISOString();
+/** The start of this computer's day `n` days ago, across clock changes. */
+const daysAgo = (n: number) => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n).toISOString();
+};
 
 /** Search: what's typed, its filters, and what matches; a result opens where it is. */
 export function SearchPanel() {
@@ -55,8 +59,9 @@ export function SearchPanel() {
   const key = JSON.stringify(filters);
   useEffect(() => {
     const hub = useDesk.getState().hub;
-    if (!hub || isEmpty(filters)) return setResult({ state: "idle" });
+    // A search still on its way is let go of, cleared or not.
     const n = ++asked.current;
+    if (!hub || isEmpty(filters)) return setResult({ state: "idle" });
     const t = setTimeout(() => {
       setResult({ state: "loading" });
       hub.search(filters).then(
@@ -70,6 +75,8 @@ export function SearchPanel() {
 
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
+  // Asked for again (Primary+F with search open): back to the field.
+  useFocusRequest("search", field);
   const edit = (f: Partial<SearchFilters>) => setSearch(filtersText({ ...filters, ...f }, rooms, (k) => handle(author(k).name)));
   const [menu, setMenu] = useState<{ entries: MenuEntry[]; label: string; at: { x: number; y: number } } | null>(null);
   const open = (label: string, entries: MenuEntry[]) => (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -149,7 +156,7 @@ export function SearchPanel() {
             {p}
           </p>
         ))}
-        <div className="search-results" role="list" aria-label="Results">
+        <div className="search-results">
           {result.state === "idle" && <p className="faint small">Search messages in your rooms. Try from:@allan or has:file.</p>}
           {result.state === "loading" && <p className="faint small">Searching…</p>}
           {result.state === "failed" && (
@@ -161,31 +168,34 @@ export function SearchPanel() {
             </p>
           )}
           {result.state === "done" && result.hits.length === 0 && <p className="faint small">Nothing matches.</p>}
-          {result.state === "done" &&
-            result.hits.map((h) => (
-              <button
-                key={h.message.id}
-                type="button"
-                role="listitem"
-                className="search-hit"
-                onClick={() => openTarget({ kind: "room", roomId: h.roomId, threadId: null, messageId: h.message.id })}
-              >
-                <MemberMark member={h.message.author} name={author(h.message.author).name} size="sm" />
-                <span className="search-hit-body">
-                  <span className="search-hit-head">
-                    <b>{author(h.message.author).name}</b>
-                    <span className="faint small">
-                      {roomsById[h.roomId]?.name ?? "A room"}
-                      {h.message.threadId ? " ▸ thread" : ""}
+          {result.state === "done" && result.hits.length > 0 && (
+            <ul className="search-hits" aria-label="Results">
+              {result.hits.map((h) => (
+                <li key={h.message.id}>
+                  <button
+                    type="button"
+                    className="search-hit"
+                    onClick={() => openTarget({ kind: "room", roomId: h.roomId, threadId: null, messageId: h.message.id })}
+                  >
+                    <MemberMark member={h.message.author} name={author(h.message.author).name} size="sm" />
+                    <span className="search-hit-body">
+                      <span className="search-hit-head">
+                        <b>{author(h.message.author).name}</b>
+                        <span className="faint small">
+                          {roomsById[h.roomId]?.name ?? "A room"}
+                          {h.message.threadId ? " ▸ thread" : ""}
+                        </span>
+                        <span className="faint small">{dayClock(h.message.createdAt)}</span>
+                      </span>
+                      <span className="search-snippet small">
+                        {snippetParts(h.snippet).map((p, i) => (p.match ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+                      </span>
                     </span>
-                    <span className="faint small">{dayClock(h.message.createdAt)}</span>
-                  </span>
-                  <span className="search-snippet small">
-                    {snippetParts(h.snippet).map((p, i) => (p.match ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
-                  </span>
-                </span>
-              </button>
-            ))}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
       {menu && <Menu label={menu.label} at={menu.at} entries={menu.entries} onClose={() => setMenu(null)} />}

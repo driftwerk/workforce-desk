@@ -56,11 +56,22 @@ describe("search", () => {
     render(<SearchPanel />);
     await settle();
     expect(screen.getByText("rollback").tagName).toBe("MARK");
-    fireEvent.click(screen.getByRole("listitem"));
+    fireEvent.click(screen.getByRole("button", { name: /rollback/ }));
     await act(async () => void (await vi.runAllTimersAsync()));
     expect(useUi.getState().roomThreads).toEqual({ r1: "t1" });
     expect(useUi.getState().flash).toMatchObject({ id: "m9" });
     expect(useUi.getState().search).not.toBeNull();
+  });
+
+  it("lets go of a search on its way once the field is cleared", async () => {
+    let answer: (hits: unknown[]) => void = () => {};
+    search.mockImplementationOnce(() => new Promise((r) => (answer = r as never)));
+    render(<SearchPanel />);
+    await settle();
+    act(() => useUi.getState().setSearch(""));
+    await act(async () => answer([{ roomId: "r1", message: reply, snippet: "the rollback note" }]));
+    expect(screen.queryByRole("list", { name: "Results" })).toBeNull();
+    expect(screen.getByText(/Search messages in your rooms/)).toBeTruthy();
   });
 
   it("says what a filter names nothing, and closes on Escape", () => {

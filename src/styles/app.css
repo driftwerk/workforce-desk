@@ -2178,7 +2178,16 @@ button.thread-bar:hover {
   overflow-y: auto;
   min-height: 0;
 }
+.search-hits {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .search-hit {
+  width: 100%;
   display: flex;
   gap: 10px;
   padding: 8px;

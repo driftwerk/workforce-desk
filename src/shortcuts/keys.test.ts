@@ -176,6 +176,8 @@ describe("shortcut keys on Windows and Linux", () => {
       saveFile: "Primary+S",
       stopAnswer: "Primary+Period",
       jumpNew: "Primary+J",
+      searchRoom: "Primary+F",
+      searchRooms: "Primary+Shift+F",
       unread: "Primary+Shift+U",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
@@ -183,7 +185,8 @@ describe("shortcut keys on Windows and Linux", () => {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "unread"] as const) expect(refusal(d[id], "app", platform)).toBeNull();
+      for (const id of ["newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
+        expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }
   });
