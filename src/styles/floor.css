@@ -134,7 +134,11 @@
   flex-wrap: wrap;
   padding: 0 10px;
 }
+/* A long answer ("Allow this command for this session and continue") wraps
+   in a narrow column rather than running out of it. */
 .floor-need-buttons .btn {
+  max-width: 100%;
+  white-space: normal;
   min-height: 28px;
   padding: 0 11px;
   font-size: 12px;

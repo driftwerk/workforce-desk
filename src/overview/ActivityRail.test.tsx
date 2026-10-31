@@ -87,7 +87,7 @@ describe("Activity with the floor", () => {
     };
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
-    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
+    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow “Run npm test?” for acme-web" })));
     expect(hubs.local!.decided).toEqual([{ at: { kind: "session", sessionId: "s-1", approvalId: "wait:t1:ap-2" }, choice: "allow" }]);
     await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
     await act(() => useFloor.getState().load("local"));
@@ -99,9 +99,9 @@ describe("Activity with the floor", () => {
     hubs.local!.decide = () => 409;
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
-    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
+    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow “Run npm test?” for acme-web" })));
     expect(within(rail()).getByText("Already answered")).toBeTruthy();
-    expect(within(rail()).queryByRole("button", { name: "Allow" })).toBeNull();
+    expect(within(rail()).queryByRole("button", { name: /^Allow/ })).toBeNull();
   });
 
   it("keeps the log's own Needs you while this computer's hub has no floor, whatever other hubs have", async () => {
@@ -125,7 +125,7 @@ describe("Activity with the floor", () => {
     );
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
-    const allow = within(rail()).getByRole("button", { name: "Allow" });
+    const allow = within(rail()).getByRole("button", { name: "Allow “Run npm test?” for acme-web" });
     allow.focus();
     await act(async () => fireEvent.click(allow));
     await act(async () => fireEvent.click(allow));
@@ -142,7 +142,7 @@ describe("Activity with the floor", () => {
     hubs.local!.decide = () => 409;
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
-    const allow = within(rail()).getByRole("button", { name: "Allow" });
+    const allow = within(rail()).getByRole("button", { name: "Allow “Run npm test?” for acme-web" });
     allow.focus();
     await act(async () => fireEvent.click(allow));
     expect(document.activeElement).toBe(within(rail()).getByRole("list", { name: "Still waiting on you" }));
@@ -152,7 +152,7 @@ describe("Activity with the floor", () => {
   it("replies where the question was asked, its composer focused", () => {
     render(<ActivityRail managerName={null} onClose={() => {}} />);
     fireEvent.click(within(rail()).getByRole("radio", { name: /Needs you/ }));
-    fireEvent.click(within(rail()).getByRole("button", { name: "Reply" }));
+    fireEvent.click(within(rail()).getByRole("button", { name: "Reply to Scout…" }));
     expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "b/scout" }, { reply: true });
   });
 

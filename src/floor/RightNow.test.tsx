@@ -1,13 +1,14 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
+import { HubError, type DeskHub } from "../hub/client";
 import type { Room, Session } from "../hub/types";
 import { openTarget } from "../shell/navigate";
 import { RightNow } from "./RightNow";
 import { useFloor } from "./store";
-import { NOW, agent, approval, at, hub, need, ready, session, view, work } from "./testing";
+import { NOW, agent, approval, at, fakeFetch, fakeHub, hub, need, ready, session, view, work, type FakeHub } from "./testing";
 import { clock, dayClock } from "./time";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
@@ -62,15 +63,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
+
+/** Right now's needs, each its own list item. */
+const needRows = () => within(screen.getByRole("list", { name: "Waiting on you" })).getAllByRole("listitem");
 
 const gist = (now: string, purpose: string | null, min: number) => ({ purpose, now, at: at(min) });
 
 describe("Right now", () => {
   it("lists what needs you, then one entry per agent or session, working, waiting, then done", () => {
     render(<RightNow brief={null} />);
-    const needs = screen.getByRole("group", { name: "Needs you · 2" });
-    const [first, second] = within(needs).getAllByRole("button");
+    const [first, second] = needRows().map((r) => within(r).getAllByRole("button")[0]);
     expect(first!.textContent).toContain("Scout");
     expect(first!.textContent).toContain(`waiting 30m · since ${dayClock(at(30), NOW)}`);
     expect(first!.textContent).toContain("Main or release? · in Launch");
@@ -204,12 +208,13 @@ describe("Right now", () => {
         ),
       },
     });
-    const { container } = render(<RightNow brief={null} />);
+    render(<RightNow brief={null} />);
     const group = screen.getByRole("group", { name: "What’s happening" });
     const list = group.querySelector(".right-now-list")!;
     expect(within(list as HTMLElement).getAllByRole("button")).toHaveLength(30);
     expect(within(group).getByRole("heading").closest(".right-now-list")).toBeNull();
-    expect(container.querySelectorAll(".right-now-list")).toHaveLength(1);
+    expect(group.querySelectorAll(".right-now-list")).toHaveLength(1);
+    expect(within(screen.getByRole("list", { name: "Waiting on you" })).queryAllByRole("listitem")).toHaveLength(0);
   });
 
   it("says so with nothing in either list", () => {
@@ -250,9 +255,10 @@ describe("Right now", () => {
   it("opens each row beside the Floor, or where it is when that's a room or Slack", () => {
     render(<RightNow brief={null} />);
     const click = (group: string, i: number) => fireEvent.click(within(screen.getByRole("group", { name: group })).getAllByRole("button")[i]!);
-    click("Needs you · 2", 0);
+    const open = (i: number) => fireEvent.click(within(needRows()[i]!).getAllByRole("button")[0]!);
+    open(0);
     expect(openTarget).toHaveBeenLastCalledWith({ kind: "room", roomId: "r1", threadId: "m-1" }, { beside: true });
-    click("Needs you · 2", 1);
+    open(1);
     expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" }, { beside: true });
     click("What’s happening", 0);
     expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "b/ledger" }, { beside: true });
@@ -261,5 +267,165 @@ describe("Right now", () => {
     // An agent's entry is the agent: its DM, wherever its turn was.
     click("What’s happening", 2);
     expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "b/ops" }, { beside: true });
+  });
+});
+
+describe("Right now's needs, answered in place", () => {
+  const asked = { id: "s-4", engine: "claude", name: "keychain-check", cwd: "/tmp", origin: "desk", state: "asking" } as Session;
+  const refused = {
+    ask: "Stopped: Bash was not allowed",
+    why: "auto mode refused Bash",
+    options: null,
+    denied: { tool: "Bash(security find-generic-password)", detail: "security find-generic-password", reason: "[Credential Exploration]", allowable: true },
+  };
+  let hubs: Record<string, FakeHub>;
+  const show = (needs: ReturnType<typeof need>[]) => {
+    hubs = { local: fakeHub({ floor: view({ needs }) }) };
+    vi.stubGlobal("fetch", fakeFetch(hubs));
+    useChat.setState({ hubs: [hub("local")], roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: "claude-code", isDefault: false }] });
+    useFloor.setState({ hubs: { local: ready(structuredClone(hubs.local!.floor!)) } });
+  };
+  const npmTest = approval("ap-1", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm test?" });
+  /** What a row's buttons say they do, but its body's, which the mouse opens it by. */
+  const actions = (row: HTMLElement) =>
+    within(row)
+      .getAllByRole("button")
+      .filter((b) => b.tabIndex !== -1)
+      .map((b) => b.getAttribute("aria-label"));
+  beforeEach(() => {
+    useDesk.setState({ sessions: { "s-1": { id: "s-1", name: "acme-web", cwd: "/tmp", origin: "desk", state: "blocked" } as Session } });
+  });
+  afterEach(() => useDesk.setState({ sessions: {}, hub: null }));
+
+  it("offers each kind of need its answers, every button naming whose need it answers", () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, "s-4": { ...asked, asked: refused }, "s-3": { ...asked, id: "s-3", name: "repo", state: "blocked" } } }));
+    show([
+      npmTest,
+      need("question:t2", agent("scout", "Scout"), { ask: "Main or release?", since: at(9) }),
+      approval("wait:t3", "s-3", { who: session("s-3", "repo"), ask: "Run rm -rf build?", answer: { kind: "terminal" }, since: at(8) }),
+      need("question:t4", session("s-4", "keychain-check"), { ask: refused.ask, since: at(7) }),
+    ]);
+    render(<RightNow brief={null} />);
+    expect(needRows().map(actions)).toEqual([
+      ["Allow “Run npm test?” for acme-web", "Deny “Run npm test?” for acme-web", "Open acme-web"],
+      ["Reply to Scout…", "Open Scout"],
+      ["Open repo to answer in the terminal"],
+      ["Allow this command for this session and continue: keychain-check", "Reply to keychain-check…", "Open keychain-check", "Dismiss what keychain-check asked"],
+    ]);
+    // What the buttons show stays short; the row says whose it is.
+    expect(within(needRows()[0]!).getByRole("button", { name: /^Allow/ }).textContent).toBe("Allow");
+    expect(within(needRows()[1]!).getByRole("button", { name: /^Reply/ }).textContent).toBe("Reply…");
+    // Each row is one item; its buttons sit beside its body, never in it.
+    for (const row of needRows()) expect(row.querySelector("button button")).toBeNull();
+  });
+
+  it("allows and denies through the floor's own answer, without opening the row", async () => {
+    show([npmTest, approval("ap-2", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm install?", since: at(5) })]);
+    render(<RightNow brief={null} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Deny “Run npm install?” for acme-web" })));
+    expect(hubs.local!.decided).toEqual([
+      { at: { kind: "session", sessionId: "s-1", approvalId: "ap-1" }, choice: "allow" },
+      { at: { kind: "session", sessionId: "s-1", approvalId: "ap-2" }, choice: "deny" },
+    ]);
+    expect(openTarget).not.toHaveBeenCalled();
+    await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
+  });
+
+  it("opens from the row's body, beside the Floor, and replies where it was asked", () => {
+    show([npmTest, need("question:t2", agent("scout", "Scout"), { ask: "Main or release?", since: at(9) })]);
+    render(<RightNow brief={null} />);
+    fireEvent.click(within(needRows()[0]!).getAllByRole("button")[0]!);
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" }, { beside: true });
+    // Its Open, the way there from the keyboard, opens it beside the Floor too.
+    fireEvent.click(screen.getByRole("button", { name: "Open acme-web" }));
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" }, { beside: true, reply: false });
+    fireEvent.click(screen.getByRole("button", { name: "Reply to Scout…" }));
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" }, { reply: true });
+  });
+
+  it("holds both answers while one is on its way, and answers once however often it's pressed", async () => {
+    show([npmTest]);
+    let answer = (_: Response) => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL, init?: RequestInit) =>
+        init?.method === "POST" ? new Promise<Response>((r) => (answer = r)) : fakeFetch(hubs)(input, init),
+      ),
+    );
+    render(<RightNow brief={null} />);
+    const deny = screen.getByRole("button", { name: "Deny “Run npm test?” for acme-web" });
+    deny.focus();
+    await act(async () => fireEvent.click(deny));
+    await act(async () => fireEvent.click(deny));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Allow/ })));
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(deny.textContent).toBe("Denied…");
+    expect(deny.getAttribute("aria-label")).toBe("Denied… “Run npm test?” for acme-web");
+    expect(screen.getByRole("button", { name: /^Allow/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(deny.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(deny);
+    expect(screen.getAllByRole("status").map((r) => r.textContent)).toContain("Denied");
+    await act(async () => answer(new Response(null, { status: 204 })));
+    await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
+  });
+
+  it("says plainly why an answer didn't go through, and lets it be tried again", async () => {
+    show([npmTest]);
+    hubs.local!.decide = () => 403;
+    render(<RightNow brief={null} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" })));
+    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk isn’t allowed to do that on this computer.");
+    const allow = screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" });
+    expect(allow.getAttribute("aria-disabled")).toBe("false");
+    expect(openTarget).not.toHaveBeenCalled();
+  });
+
+  it("drops the row once it's answered, its focus left on the list", async () => {
+    show([npmTest]);
+    hubs.local!.decide = () => {
+      hubs.local!.floor = view();
+      return 204;
+    };
+    render(<RightNow brief={null} />);
+    const allow = screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" });
+    allow.focus();
+    await act(async () => fireEvent.click(allow));
+    await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
+    await act(() => useFloor.getState().load("local"));
+    expect(screen.queryByRole("button", { name: /Run npm test/ })).toBeNull();
+    expect(screen.getByRole("group", { name: "Needs you · 0" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("list", { name: "Waiting on you" }));
+  });
+
+  it("allows a refused tool for an asked session, or dismisses it, holding both while it goes", async () => {
+    let done = () => {};
+    const allowAsked = vi.fn(() => new Promise<Session>((r) => (done = () => r(asked))));
+    const dismissAsked = vi.fn(() => Promise.resolve(asked));
+    useDesk.setState({ hub: { allowAsked, dismissAsked } as unknown as DeskHub, sessions: { "s-4": { ...asked, asked: refused } } });
+    show([need("question:t4", session("s-4", "keychain-check"), { ask: refused.ask })]);
+    render(<RightNow brief={null} />);
+    const allow = screen.getByRole("button", { name: "Allow this command for this session and continue: keychain-check" });
+    const dismiss = screen.getByRole("button", { name: "Dismiss what keychain-check asked" });
+    fireEvent.click(allow);
+    expect(allowAsked).toHaveBeenCalledWith("s-4");
+    expect((allow as HTMLButtonElement).disabled).toBe(true);
+    expect((dismiss as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => done());
+    fireEvent.click(dismiss);
+    expect(dismissAsked).toHaveBeenCalledWith("s-4");
+    expect(openTarget).not.toHaveBeenCalled();
+  });
+
+  it("says plainly, on its row, why an asked session's answer didn't go through", async () => {
+    const allowAsked = vi.fn(() => Promise.reject(new HubError(403, "not_yours")));
+    useDesk.setState({ hub: { allowAsked } as unknown as DeskHub, sessions: { "s-4": { ...asked, asked: refused } }, error: null });
+    show([need("question:t4", session("s-4", "keychain-check"), { ask: refused.ask })]);
+    render(<RightNow brief={null} />);
+    const allow = screen.getByRole("button", { name: "Allow this command for this session and continue: keychain-check" });
+    await act(async () => fireEvent.click(allow));
+    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk isn’t allowed to do that on this computer.");
+    expect((allow as HTMLButtonElement).disabled).toBe(false);
+    expect(useDesk.getState().error).toBeNull();
   });
 });

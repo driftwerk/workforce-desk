@@ -183,7 +183,7 @@ describe("the Floor across hubs", () => {
     await shell();
     fireEvent.click(needsTab());
     hubs.local!.decide = () => 409;
-    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: "Allow" })));
+    await act(async () => fireEvent.click(within(rail()).getByRole("button", { name: /^Allow “/ })));
     expect(hubs.local!.decided).toEqual([{ at: { kind: "session", sessionId: "s1", approvalId: "wait:t1:ap-1" }, choice: "allow" }]);
     expect(within(rail()).getByText("Already answered")).toBeTruthy();
     expect(counts()).toBe("0 working · 2 need you · 2 done today");
@@ -231,7 +231,7 @@ describe("the Floor across hubs", () => {
     fireEvent.click(needsTab());
     hubs.b!.down = true;
     await act(() => vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS));
-    const reply = within(rail()).getAllByRole("button", { name: "Reply" });
+    const reply = within(rail()).getAllByRole("button", { name: /^Reply to / });
     expect(reply.every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
     expect(reply[0]!.title).toMatch(/^Hub b unreachable since /);
     expect(counts()).toBe("0 working · 3 need you · 2 done today");
@@ -239,7 +239,7 @@ describe("the Floor across hubs", () => {
     await act(() => vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS));
     expect(
       within(rail())
-        .getAllByRole("button", { name: "Reply" })
+        .getAllByRole("button", { name: /^Reply to / })
         .every((b) => !(b as HTMLButtonElement).disabled),
     ).toBe(true);
   });
