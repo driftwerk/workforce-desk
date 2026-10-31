@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use desk_core::Paths;
+use desk_core::backend::Backend;
 use percent_encoding::percent_decode_str;
 use reqwest::{StatusCode, Url};
 use tauri::http::{self, HeaderMap, HeaderName, HeaderValue, header};
@@ -53,14 +54,16 @@ impl std::fmt::Display for Failure {
 /// or one turns a token away, and the client every request shares.
 pub struct Files {
     paths: Paths,
+    backend: Backend,
     client: reqwest::Client,
     hubs: Mutex<Option<Arc<Vec<HubAccount>>>>,
 }
 
 impl Files {
-    pub fn new(paths: Paths) -> Self {
+    pub fn new(paths: Paths, backend: Backend) -> Self {
         Self {
             paths,
+            backend,
             client: reqwest::Client::new(),
             hubs: Mutex::new(None),
         }
@@ -76,7 +79,7 @@ impl Files {
         if let Some(hubs) = kept.as_ref() {
             return Ok(hubs.clone());
         }
-        let read = Arc::new(hubs::accounts(&self.paths)?);
+        let read = Arc::new(hubs::accounts(&self.paths, &self.backend)?);
         *kept = Some(read.clone());
         Ok(read)
     }

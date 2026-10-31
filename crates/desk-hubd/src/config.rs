@@ -35,7 +35,7 @@ pub enum Memories {
     Store,
 }
 
-/// The memory store's tenant: everything this Mac remembers.
+/// The memory store's tenant: everything this computer remembers.
 pub const MEMORY_TENANT: &str = "desk";
 
 /// bge-base's certainty mapped onto the scale the recall floors were tuned
@@ -72,7 +72,7 @@ const PROGRAM_READ_TOOLS: [&str; 14] = [
 ];
 
 /// Claude Code subprocesses at once across the hub (second opinions and
-/// coding fan-outs): enough for one panel of second opinions on one Mac.
+/// coding fan-outs): enough for one panel of second opinions on one computer.
 pub const MAX_CLAUDE_CODE_AT_ONCE: i64 = 3;
 
 /// The local agent Desk's hub always has.
@@ -151,7 +151,7 @@ fn strings(v: &[&str]) -> Value {
 /// and `[claim_grounding]` in place of these. Background work runs on the
 /// cheap tier and Claude Code where it can, so it is paid for by the
 /// person's plan; each falls back to the agent's own model when Claude Code
-/// can't serve it (a ChatGPT-only Mac).
+/// can't serve it (a ChatGPT-only computer).
 fn learning(doc: &mut Table, ports: &HubPorts, memories: Memories) {
     let mut memory = vec![
         ("passive", b(true)),

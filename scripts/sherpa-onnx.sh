@@ -36,6 +36,9 @@ archive_for() {
   case "$1" in
     aarch64-apple-darwin) echo "sherpa-onnx-v$2-osx-arm64-static-lib.tar.bz2" ;;
     x86_64-apple-darwin) echo "sherpa-onnx-v$2-osx-x64-static-lib.tar.bz2" ;;
+    x86_64-unknown-linux-gnu) echo "sherpa-onnx-v$2-linux-x64-static-lib.tar.bz2" ;;
+    aarch64-unknown-linux-gnu) echo "sherpa-onnx-v$2-linux-aarch64-static-lib.tar.bz2" ;;
+    x86_64-pc-windows-msvc) echo "sherpa-onnx-v$2-win-x64-static-MT-Release-lib.tar.bz2" ;;
     *) echo "sherpa-onnx.sh: no sherpa-onnx archive known for $1" >&2; return 1 ;;
   esac
 }
@@ -66,8 +69,9 @@ prepare() {
     url="https://github.com/k2-fsa/sherpa-onnx/releases/download/v$v/$archive"
     echo "$archive: downloading $url"
     curl -fsSL --retry 3 -o "$dir/$archive.part" "$url"
-    # A truncated download must not be cached as the archive.
-    tar -tjf "$dir/$archive.part" > /dev/null
+    # A truncated download must not be cached as the archive. (Read from
+    # stdin: GNU tar takes "D:\..." for a remote host.)
+    tar -tjf - < "$dir/$archive.part" > /dev/null
     mv "$dir/$archive.part" "$dir/$archive"
   done
 

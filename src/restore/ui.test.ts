@@ -136,7 +136,7 @@ describe("ui.main", () => {
 });
 
 describe("the DM put back beside the Floor", () => {
-  const LOCAL = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+  const LOCAL = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
   const OFFICE = { id: "office", label: "Office", url: "http://127.0.0.1:2", local: false, token: "t" };
   /** Each hub's agents, as `/api/agents` lists them; a hub missing here
    *  doesn't answer. */

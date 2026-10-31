@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Provider {
-    /// On this Mac.
+    /// On this computer.
     Kokoro,
     #[serde(rename = "fish_audio")]
     FishAudio,

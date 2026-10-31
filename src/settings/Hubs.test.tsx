@@ -20,7 +20,7 @@ vi.mock("../platform", async (original) => ({
 }));
 
 const acme: HubAccount = { id: "hub-example-com", label: "Acme", url: "https://hub.example.com", local: false, token: "wfp_old" };
-const thisMac: HubAccount = { id: "local", label: "This Mac", url: "http://127.0.0.1:4100", local: true, token: "local-token" };
+const thisComputer: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, token: "local-token" };
 const PAGE = "https://hub.example.com/pair/K7Q2";
 
 const json = (body: unknown, status = 200) =>
@@ -47,7 +47,7 @@ const approved = { status: "approved", token: "wfp_new", identity: { display_nam
 beforeEach(() => {
   deskState.remove("pairing.email");
   deskState.remove("pairing.pending");
-  useChat.setState({ hubs: [thisMac, acme], roster: [], rosterErrors: {} });
+  useChat.setState({ hubs: [thisComputer, acme], roster: [], rosterErrors: {} });
   vi.mocked(saveHub).mockClear();
   vi.mocked(openUrl).mockClear();
 });

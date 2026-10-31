@@ -36,7 +36,7 @@ const show = (hub: DeskHub, toml = START) => {
 };
 
 beforeEach(() => {
-  useChat.setState({ hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }], roster: [desk, ledger] });
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }], roster: [desk, ledger] });
   useOverview.setState({ manager: { agentId: "desk", level: "watch" }, managerSupport: "yes", overviewSupport: "unknown" });
 });
 afterEach(cleanup);

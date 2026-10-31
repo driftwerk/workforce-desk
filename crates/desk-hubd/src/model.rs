@@ -247,7 +247,7 @@ fn fetch_file(
 
 /// Fetches the model until it is in `models`, writing how far it has got to
 /// `state` (at most a few times a second), and trying again with a growing
-/// wait after a failure, as when the Mac is offline. Blocking; whether the
+/// wait after a failure, as when the computer is offline. Blocking; whether the
 /// model is here, which it is not when Desk Helper stopped first.
 pub fn fetch_until_installed(models: &Path, state: &Path, fetch: &dyn Fetch) -> bool {
     let total = total();

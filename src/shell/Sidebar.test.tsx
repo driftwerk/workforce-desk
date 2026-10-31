@@ -289,7 +289,7 @@ describe("deleting from the sidebar", () => {
 
   it("shows agents with their pictures, and you round at the bottom, opening your Profile", async () => {
     servePictures();
-    const local = { id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" };
+    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
     useChat.setState({
       hubs: [local],
       roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "chosen", at: "" } }],

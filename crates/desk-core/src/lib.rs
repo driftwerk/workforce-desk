@@ -1,21 +1,31 @@
 //! What the Desk app and `desk-hubd` share: where Desk keeps its files, the
-//! local hub's ports, its secrets in the macOS keychain, its PTY holder,
-//! and what this computer and its person are called.
+//! local hub's ports and secrets, how to reach the backend wherever it runs,
+//! its PTY holder, and what this computer and its person are called.
 
+pub mod backend;
+#[cfg(unix)]
 pub mod holder;
+pub mod host;
+#[cfg(unix)]
+pub mod process;
 pub mod redact;
 pub mod shell;
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use base64::Engine;
 use eyre::{Context, Result};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
-/// Desk.app's bundle identifier.
+use crate::host::Host;
+
+/// Desk's bundle identifier.
 pub const BUNDLE_ID: &str = "xyz.driftwerk.desk";
-pub const KEYCHAIN_SERVICE: &str = "xyz.driftwerk.desk";
+/// The service Desk's items are kept under in the keychain, Credential
+/// Manager or Secret Service.
+pub const KEYRING_SERVICE: &str = "xyz.driftwerk.desk";
 /// The login item that keeps Desk's helper running: registered with
 /// `SMAppService` from the plist inside the app bundle.
 pub const LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.helper";
@@ -23,16 +33,32 @@ pub const LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.helper";
 /// moved to [`LAUNCH_AGENT_LABEL`] once.
 pub const LEGACY_LAUNCH_AGENT_LABEL: &str = "xyz.driftwerk.desk.hub";
 
-/// The supervisor's executable in `Desk.app/Contents/MacOS` — the name
-/// Activity Monitor shows.
-pub const HELPER_EXECUTABLE: &str = "Desk Helper";
-/// The local hub's executable beside it.
-pub const HUB_EXECUTABLE: &str = "Desk Agents";
-/// The local hub's memory store (a vellev node) beside them.
-pub const MEMORY_EXECUTABLE: &str = "Desk Memory";
+/// The backend's programs on Linux, natively and inside WSL.
+pub const LINUX_HELPER_EXECUTABLE: &str = "desk-helper";
+pub const LINUX_HUB_EXECUTABLE: &str = "desk-agents";
+pub const LINUX_MEMORY_EXECUTABLE: &str = "desk-memory";
 
-/// `~/Library/Application Support/Desk` and what lives under it.
-#[derive(Debug, Clone)]
+/// The supervisor: in `Desk.app/Contents/MacOS` the name Activity Monitor
+/// shows; on Windows the launcher that runs the Linux one inside WSL.
+#[cfg(any(target_os = "macos", windows))]
+pub const HELPER_EXECUTABLE: &str = "Desk Helper";
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const HELPER_EXECUTABLE: &str = LINUX_HELPER_EXECUTABLE;
+/// The local hub's executable beside it.
+#[cfg(target_os = "macos")]
+pub const HUB_EXECUTABLE: &str = "Desk Agents";
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const HUB_EXECUTABLE: &str = LINUX_HUB_EXECUTABLE;
+/// The local hub's memory store (a vellev node) beside them.
+#[cfg(target_os = "macos")]
+pub const MEMORY_EXECUTABLE: &str = "Desk Memory";
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const MEMORY_EXECUTABLE: &str = LINUX_MEMORY_EXECUTABLE;
+
+/// Desk's folder and what lives under it: `~/Library/Application
+/// Support/Desk` on macOS, `~/.local/share/Desk` on Linux and inside WSL,
+/// `%APPDATA%\Desk` on Windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
     pub root: PathBuf,
 }
@@ -44,7 +70,7 @@ impl Paths {
             return Ok(Self::at(home));
         }
         let root = dirs::data_dir()
-            .ok_or_else(|| eyre::eyre!("no Application Support folder"))?
+            .ok_or_else(|| eyre::eyre!("no folder for applications' data"))?
             .join("Desk");
         Ok(Self { root })
     }
@@ -73,6 +99,18 @@ impl Paths {
     }
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
+    }
+    /// Where Desk Helper writes its process id while it runs.
+    pub fn helper_pid(&self) -> PathBuf {
+        self.hub().join("run").join("desk-hubd.pid")
+    }
+    /// The backend's installed versions, inside WSL.
+    pub fn bin(&self) -> PathBuf {
+        self.root.join("bin")
+    }
+    /// Which store this folder's secrets are in, once chosen.
+    pub fn keys(&self) -> PathBuf {
+        self.root.join("keys.toml")
     }
     /// The memory store's folder: its data, its cache, and the embedding
     /// model it runs.
@@ -149,23 +187,27 @@ pub fn write_ports(path: &Path, ports: &HubPorts) -> Result<()> {
     write_private(path, &toml::to_string(ports)?)
 }
 
-/// Writes a file only the user can read, atomically.
+/// Writes a file only the user can read, atomically (on Windows the
+/// folder's own access list keeps it the user's).
 pub fn write_private(path: &Path, contents: &str) -> Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
     let dir = path
         .parent()
         .ok_or_else(|| eyre::eyre!("{} has no folder", path.display()))?;
     std::fs::create_dir_all(dir)?;
     let tmp = path.with_extension("tmp");
     let mut f = std::fs::File::create(&tmp)?;
-    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
     f.write_all(contents.as_bytes())?;
     f.sync_all()?;
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
 }
 
-/// The local hub's secrets, each one keychain item.
+/// The local hub's secrets, each one item in the secret store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Secret {
     GatewayToken,
@@ -184,7 +226,7 @@ impl Secret {
         Secret::MemoryKey,
     ];
 
-    /// Its keychain account.
+    /// Its account in the secret store.
     pub fn account(self) -> &'static str {
         match self {
             Secret::GatewayToken => "hub-gateway-token",
@@ -233,40 +275,56 @@ pub trait SecretStore {
     }
 }
 
-pub struct Keychain;
+/// The system's own store: the keychain on macOS, Credential Manager on
+/// Windows, the Secret Service on a Linux desktop.
+pub struct Keyring;
 
-impl Keychain {
-    /// A keychain item by account name, for secrets beyond [`Secret`] (one
-    /// device token per paired hub).
+impl Keyring {
+    /// An item by account name, for secrets beyond [`Secret`] (one device
+    /// token per paired hub).
     pub fn get_account(&self, account: &str) -> Result<Option<String>> {
-        match keyring::Entry::new(KEYCHAIN_SERVICE, account)?.get_password() {
+        match keyring::Entry::new(KEYRING_SERVICE, account)?.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e).with_context(|| format!("reading {account} from the keychain")),
+            Err(e) => Err(e)
+                .with_context(|| format!("reading {account} from {}", KeyStore::System.name())),
         }
     }
 
     pub fn set_account(&self, account: &str, value: &str) -> Result<()> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, account)?
+        keyring::Entry::new(KEYRING_SERVICE, account)?
             .set_password(value)
-            .with_context(|| format!("saving {account} to the keychain"))
+            .with_context(|| format!("saving {account} to {}", KeyStore::System.name()))
     }
 
     pub fn delete_account(&self, account: &str) -> Result<()> {
-        match keyring::Entry::new(KEYCHAIN_SERVICE, account)?.delete_credential() {
+        match keyring::Entry::new(KEYRING_SERVICE, account)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e).with_context(|| format!("removing {account} from the keychain")),
+            Err(e) => Err(e)
+                .with_context(|| format!("removing {account} from {}", KeyStore::System.name())),
         }
+    }
+
+    /// Whether the store answers within `within`: a Linux session may have
+    /// no Secret Service, or one that never replies.
+    pub fn answers(within: Duration) -> bool {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let answered =
+                keyring::Entry::new(KEYRING_SERVICE, "probe").and_then(|e| e.get_password());
+            let _ = tx.send(matches!(answered, Ok(_) | Err(keyring::Error::NoEntry)));
+        });
+        rx.recv_timeout(within).unwrap_or(false)
     }
 }
 
-/// Secrets in a private file, for development runs with `DESK_HOME` set: a
-/// rebuilt, unsigned binary is a new keychain identity, so every build
-/// would otherwise stop at a keychain prompt.
+/// Secrets in a private file: inside WSL, on a Linux session with no
+/// Secret Service, and for development runs with `DESK_HOME` set (a rebuilt,
+/// unsigned binary is a new keychain identity, so every build would
+/// otherwise stop at a keychain prompt).
 pub struct FileSecrets {
     path: PathBuf,
 }
-
 impl FileSecrets {
     pub fn new(paths: &Paths) -> Self {
         Self {
@@ -305,40 +363,128 @@ impl FileSecrets {
     }
 }
 
-/// Where secrets live: the keychain, or a private file under `DESK_HOME`.
+/// Where a secret store is, as Settings → Help says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyStore {
+    /// The system's own store ([`Keyring`]).
+    System,
+    File,
+}
+
+impl KeyStore {
+    /// The system store's name on this platform, or the file's.
+    pub fn name(self) -> &'static str {
+        match self {
+            KeyStore::File => "Desk's private file",
+            KeyStore::System if cfg!(target_os = "macos") => "the keychain",
+            KeyStore::System if cfg!(windows) => "Credential Manager",
+            KeyStore::System => "your keyring",
+        }
+    }
+}
+
+/// The choice a Linux session made once, kept so a later session where the
+/// Secret Service answers (or stops answering) still finds the secrets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+struct KeysChoice {
+    store: KeyStore,
+}
+
+fn read_keys_choice(path: &Path) -> Result<Option<KeyStore>> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Ok(Some(
+            toml::from_str::<KeysChoice>(&s)
+                .with_context(|| format!("reading {}", path.display()))?
+                .store,
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// The store `keys.toml` names, or, the first time, the system's when it
+/// `answers` and else the file, kept there.
+fn chosen(paths: &Paths, answers: impl FnOnce() -> bool) -> Result<KeyStore> {
+    if let Some(store) = read_keys_choice(&paths.keys())? {
+        return Ok(store);
+    }
+    let store = if answers() {
+        KeyStore::System
+    } else {
+        KeyStore::File
+    };
+    write_private(&paths.keys(), &toml::to_string(&KeysChoice { store })?)?;
+    Ok(store)
+}
+
+/// How long a Linux session's Secret Service gets to answer.
+const KEYRING_PROBE: Duration = Duration::from_secs(2);
+
+/// Where secrets live.
 pub enum Secrets {
-    Keychain(Keychain),
+    Keyring(Keyring),
     File(FileSecrets),
 }
 
 impl Secrets {
-    pub fn for_paths(paths: &Paths) -> Self {
-        if std::env::var_os("DESK_HOME").is_some() {
-            Secrets::File(FileSecrets::new(paths))
-        } else {
-            Secrets::Keychain(Keychain)
+    /// The store for the secrets of a process on `host`:
+    /// - `DESK_HOME` set (development): a private file;
+    /// - inside WSL: a private file (no session bus or keyring there by
+    ///   default, and the distro's files are already the person's);
+    /// - macOS and Windows: the keychain or Credential Manager;
+    /// - a Linux desktop: the Secret Service when it answers the first time,
+    ///   else a private file, chosen once and kept in `keys.toml`.
+    pub fn for_host(paths: &Paths, host: &Host) -> Result<Self> {
+        let store = match (std::env::var_os("DESK_HOME"), host) {
+            (Some(_), _) | (None, Host::Wsl(_)) => KeyStore::File,
+            (None, Host::Native) if cfg!(any(target_os = "macos", windows)) => KeyStore::System,
+            (None, Host::Native) => chosen(paths, || Keyring::answers(KEYRING_PROBE))?,
+        };
+        Ok(Self::of(paths, store))
+    }
+
+    pub fn of(paths: &Paths, store: KeyStore) -> Self {
+        match store {
+            KeyStore::System => Secrets::Keyring(Keyring),
+            KeyStore::File => Secrets::File(FileSecrets::new(paths)),
+        }
+    }
+
+    pub fn store(&self) -> KeyStore {
+        match self {
+            Secrets::Keyring(_) => KeyStore::System,
+            Secrets::File(_) => KeyStore::File,
         }
     }
 
     pub fn get_account(&self, account: &str) -> Result<Option<String>> {
         match self {
-            Secrets::Keychain(k) => k.get_account(account),
+            Secrets::Keyring(k) => k.get_account(account),
             Secrets::File(f) => f.get_account(account),
         }
     }
 
     pub fn set_account(&self, account: &str, value: &str) -> Result<()> {
         match self {
-            Secrets::Keychain(k) => k.set_account(account, value),
+            Secrets::Keyring(k) => k.set_account(account, value),
             Secrets::File(f) => f.set_account(account, value),
         }
     }
 
     pub fn delete_account(&self, account: &str) -> Result<()> {
         match self {
-            Secrets::Keychain(k) => k.delete_account(account),
+            Secrets::Keyring(k) => k.delete_account(account),
             Secrets::File(f) => f.delete_account(account),
         }
+    }
+
+    /// Deletes the local hub's secrets and Desk's token for it.
+    pub fn forget_backend(&self) -> Result<()> {
+        for s in Secret::ALL {
+            self.delete_account(s.account())?;
+        }
+        self.delete_account(&device_token_account(LOCAL_HUB_ID))
     }
 }
 
@@ -352,7 +498,7 @@ impl SecretStore for Secrets {
     }
 }
 
-/// The keychain account holding a hub's paired-device token.
+/// The account holding a hub's paired-device token.
 pub fn device_token_account(hub_id: &str) -> String {
     format!("hub-{hub_id}-device-token")
 }
@@ -360,32 +506,25 @@ pub fn device_token_account(hub_id: &str) -> String {
 pub const LOCAL_HUB_ID: &str = "local";
 
 /// A name the system gave, if it gave one that says anything.
-fn named(name: whoami::Result<String>) -> Option<String> {
+fn named<E>(name: std::result::Result<String, E>) -> Option<String> {
     name.ok()
         .map(|name| name.trim().to_string())
         .filter(|name| !name.is_empty())
 }
 
-/// What this computer is called, as its system names it to people: its
-/// device name, else its host name.
+/// What this computer is called, as its system names it to people: the
+/// name WSL's launcher passes in from Windows, else its device name, else
+/// its host name.
 pub fn computer_name() -> Option<String> {
-    named(whoami::devicename()).or_else(|| named(whoami::hostname()))
+    named(std::env::var(host::COMPUTER_NAME_ENV))
+        .or_else(|| named(whoami::devicename()))
+        .or_else(|| named(whoami::hostname()))
 }
 
 /// Who uses this computer, as its system names them: their full name, else
 /// their account's.
 pub fn person_name() -> Option<String> {
     named(whoami::realname()).or_else(|| named(whoami::username()))
-}
-
-impl SecretStore for Keychain {
-    fn get(&self, secret: Secret) -> Result<Option<String>> {
-        self.get_account(secret.account())
-    }
-
-    fn set(&self, secret: Secret, value: &str) -> Result<()> {
-        self.set_account(secret.account(), value)
-    }
 }
 
 #[cfg(test)]
@@ -422,7 +561,6 @@ mod tests {
 
     #[test]
     fn file_secrets_are_private_and_persist() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         let f = FileSecrets::new(&paths);
@@ -438,16 +576,86 @@ mod tests {
         );
         f.delete_account("a").unwrap();
         assert_eq!(f.get_account("a").unwrap(), None);
-        let mode = std::fs::metadata(dir.path().join("secrets.toml"))
-            .unwrap()
-            .permissions()
-            .mode();
+        assert_private(&dir.path().join("secrets.toml"));
+    }
+
+    #[cfg(unix)]
+    fn assert_private(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(not(unix))]
+    fn assert_private(path: &Path) {
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn a_linux_session_keeps_the_store_it_first_chose() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        assert_eq!(chosen(&paths, || false).unwrap(), KeyStore::File);
+        // A keyring that answers later doesn't move the secrets.
+        assert_eq!(chosen(&paths, || true).unwrap(), KeyStore::File);
+        assert_private(&paths.keys());
+        let other = tempfile::tempdir().unwrap();
+        let paths = Paths::at(other.path());
+        assert_eq!(chosen(&paths, || true).unwrap(), KeyStore::System);
+        assert_eq!(chosen(&paths, || false).unwrap(), KeyStore::System);
+    }
+
+    #[test]
+    fn wsl_keeps_its_secrets_in_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let wsl = Host::Wsl(host::Wsl {
+            distro: "Ubuntu".into(),
+            user: "sarah".into(),
+            home: "/home/sarah".into(),
+            automount: host::DEFAULT_AUTOMOUNT.into(),
+        });
+        assert_eq!(
+            Secrets::for_host(&paths, &wsl).unwrap().store(),
+            KeyStore::File
+        );
+        assert!(!paths.keys().exists());
+    }
+
+    #[test]
+    fn the_backends_secrets_are_forgotten_and_others_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = Secrets::of(&Paths::at(dir.path()), KeyStore::File);
+        for s in Secret::ALL {
+            secrets.get_or_create(s).unwrap();
+        }
+        secrets
+            .set_account(&device_token_account(LOCAL_HUB_ID), "local")
+            .unwrap();
+        secrets
+            .set_account(&device_token_account("acme"), "remote")
+            .unwrap();
+        secrets.forget_backend().unwrap();
+        for s in Secret::ALL {
+            assert_eq!(secrets.get(s).unwrap(), None);
+        }
+        assert_eq!(
+            secrets
+                .get_account(&device_token_account(LOCAL_HUB_ID))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            secrets
+                .get_account(&device_token_account("acme"))
+                .unwrap()
+                .as_deref(),
+            Some("remote")
+        );
     }
 
     #[test]
     fn ports_round_trip_through_a_private_file() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hub/state.toml");
         assert_eq!(read_ports(&path).unwrap(), None);
@@ -459,8 +667,7 @@ mod tests {
         };
         write_ports(&path, &ports).unwrap();
         assert_eq!(read_ports(&path).unwrap(), Some(ports));
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        assert_private(&path);
     }
 
     #[test]

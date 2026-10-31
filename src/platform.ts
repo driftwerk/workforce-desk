@@ -264,7 +264,7 @@ export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): 
   });
 
 /** Desk Helper — what keeps the agents and sessions on this computer running —
- *  as a login item. */
+ *  started at login. */
 export type HelperStatus =
   | { state: "running" }
   | { state: "needs-approval" }
@@ -291,8 +291,8 @@ export const onInstallProgress = (f: (plan: PlanName, p: InstallProgress) => voi
 /** Saves a zip of recent logs, secrets taken out, where the person chose. */
 export const saveReport = (path: string, about: string): Promise<void> => invoke("report_save", { path, about });
 
-/** Stops Desk Helper and takes it out of Login Items; with `everything`,
- *  also deletes Desk's folder and keychain items. */
+/** Stops Desk Helper and takes it out of what starts at login; with
+ *  `everything`, also deletes Desk's folders and the secrets it keeps. */
 export const removeDeskData = (everything: boolean): Promise<void> => invoke("data_remove", { everything });
 
 /** Sessions to resume once Desk has restarted into an update. */

@@ -1,13 +1,15 @@
 // Lets `vite dev` run the UI in a plain browser against a running local hub,
 // for checking screens without the app: open
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
+// (and &platform=linux or windows to see another system's screens).
 // Only reachable from development builds.
 
 import { HubError } from "./hub/client";
 import { deskListeners } from "./hub/store";
+import { DEFAULT_HOST } from "./shell/host";
 
 const params = (() => {
-  const keys = ["hub", "admin", "device"] as const;
+  const keys = ["hub", "admin", "device", "platform"] as const;
   const fromUrl = new URLSearchParams(location.search);
   const read = (k: string) => {
     const v = fromUrl.get(k);
@@ -143,8 +145,10 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
   switch (cmd) {
     case "hub_connection":
       return answer({ url: need("hub"), token: need("admin") });
+    case "host_info":
+      return answer({ ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform });
     case "hubs_list":
-      return answer([{ id: "local", label: "This Mac", url: need("hub"), local: true, token: need("device") }]);
+      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, token: need("device") }]);
     case "settings_load":
       return answer(settings);
     case "settings_save":

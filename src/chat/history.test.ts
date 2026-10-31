@@ -33,7 +33,7 @@ vi.mock("./conversation", async (original) => ({
   },
 }));
 
-const hub: HubAccount = { id: "local", label: "This Mac", url: "http://127.0.0.1:4100", local: true, token: "tok" };
+const hub: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, token: "tok" };
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

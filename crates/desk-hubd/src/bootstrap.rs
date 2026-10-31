@@ -1,9 +1,10 @@
 //! Makes Desk a paired device of its own local hub, linked to the person
-//! who owns the Mac, so chat works (`/ws` refuses the admin token). Uses the
+//! who owns this computer, so chat works (`/ws` refuses the admin token). Uses the
 //! hub's existing admin endpoints; idempotent, so it runs on every start.
 
 use std::time::Duration;
 
+use desk_core::host::Host;
 use desk_core::{LOCAL_HUB_ID, Paths, Secrets, device_token_account};
 use eyre::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -232,7 +233,8 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
     }
     let person = person();
     let owner = ensure_owner(&hub, paths, &person).await?;
-    let secrets = Secrets::for_paths(paths);
+    let env = std::env::vars().collect();
+    let secrets = Secrets::for_host(paths, &Host::running_here(&env))?;
     let account = device_token_account(LOCAL_HUB_ID);
     if let Some(token) = secrets.get_account(&account)?
         && let Ok((200, me)) = hub

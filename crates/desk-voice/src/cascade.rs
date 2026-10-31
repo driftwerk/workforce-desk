@@ -1,5 +1,5 @@
 //! The local cascade engine: VAD → keyword spotting → ASR in; speech out in
-//! the agent's voice (Kokoro on this Mac, or a cloud voice through the
+//! the agent's voice (Kokoro on this computer, or a cloud voice through the
 //! hub), on two threads. The listener thread owns the models and the
 //! conversation; the speaker thread synthesises sentence by sentence so long
 //! answers start playing quickly, and stops the moment the user talks over it.

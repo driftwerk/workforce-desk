@@ -8,7 +8,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use desk_core::{Paths, Secret, SecretStore, Secrets};
+use desk_core::Paths;
+use desk_core::backend::Backend;
 use desk_voice::cascade::Voices;
 use desk_voice::hub::{CloudSpeech, Grant, Hub, Sessions, SpeechError};
 use desk_voice::lookup::{self, Endpoints, Lookup};
@@ -44,7 +45,7 @@ pub struct Voice {
 }
 
 impl Voice {
-    pub fn new(paths: &Paths) -> Self {
+    pub fn new(paths: &Paths, backend: Backend) -> Self {
         Self {
             models: Models::new(default_dir(paths)),
             engine: Mutex::new(None),
@@ -52,7 +53,7 @@ impl Voice {
             roster: Mutex::new(Vec::new()),
             state: Arc::new(Mutex::new(VoiceState::Off)),
             hub: Arc::new(LocalHub {
-                paths: paths.clone(),
+                backend,
                 hub: Mutex::new(None),
             }),
             kokoro: Arc::new(Mutex::new(None)),
@@ -122,7 +123,7 @@ fn downloading(events: &Events) -> impl FnMut(Progress) + '_ {
 /// The local hub, which holds the provider keys: found when first needed,
 /// since it may start after Desk.
 struct LocalHub {
-    paths: Paths,
+    backend: Backend,
     hub: Mutex<Option<Arc<Hub>>>,
 }
 
@@ -132,13 +133,12 @@ impl LocalHub {
         if let Some(h) = hub.as_ref() {
             return Ok(h.clone());
         }
-        let ports = desk_core::read_ports(&self.paths.hub_state())?
-            .ok_or_else(|| eyre!("Desk is still starting"))?;
-        let token = Secrets::for_paths(&self.paths)
-            .get(Secret::GatewayToken)?
+        let c = self
+            .backend
+            .connection()?
             .ok_or_else(|| eyre!("Desk is still starting"))?;
         Ok(hub
-            .insert(Arc::new(Hub::new(ports.gateway_url(), token)))
+            .insert(Arc::new(Hub::new(c.gateway_url, c.admin_token)))
             .clone())
     }
 }
@@ -190,7 +190,7 @@ fn start(
     if off.load(Ordering::SeqCst) {
         return Ok(None);
     }
-    let open = desk_voice::mac::open;
+    let open = desk_voice::audio::open;
     Ok(Some(match kind {
         EngineKind::Cascade => {
             let voices = Voices {
@@ -394,7 +394,7 @@ pub async fn voice_try(
     let out = match trial.as_ref() {
         Some(out) => out.clone(),
         None => trial
-            .insert(desk_voice::mac::output().map_err(|e| format!("{e:#}"))?)
+            .insert(desk_voice::audio::output().map_err(|e| format!("{e:#}"))?)
             .clone(),
     };
     out.play(&audio.samples, audio.rate, Box::new(|| {}));

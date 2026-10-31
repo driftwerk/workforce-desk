@@ -9,9 +9,8 @@
 //! for a moment after, so Desk never hears itself.
 
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use block2::RcBlock;
 use eyre::{Result, eyre};
@@ -21,48 +20,13 @@ use objc2_avf_audio::{
     AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode, AVAudioTime,
 };
 
+use super::SharedIn;
+use super::gate::Speaking;
 use crate::resample::Resampler;
 use crate::{AudioIn, AudioOut, SharedAudioOut};
 
 const TAP_FRAMES: u32 = 4096;
 const PLAYBACK_RATE: u32 = 48_000;
-/// How long the microphone stays quiet after Desk stops speaking, when there
-/// is no echo canceller: the tail of the speech still in the room.
-const ECHO_TAIL_MS: u64 = 400;
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
-}
-
-/// Whether Desk is speaking, for a microphone without an echo canceller.
-#[derive(Default)]
-struct Speaking {
-    queued: AtomicUsize,
-    quiet_after: AtomicU64,
-}
-
-impl Speaking {
-    fn started(&self) {
-        self.queued.fetch_add(1, Ordering::SeqCst);
-    }
-    fn finished(&self) {
-        let _ = self
-            .queued
-            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
-        self.quiet_after
-            .store(now_ms() + ECHO_TAIL_MS, Ordering::SeqCst);
-    }
-    fn stopped(&self) {
-        self.queued.store(0, Ordering::SeqCst);
-        self.quiet_after
-            .store(now_ms() + ECHO_TAIL_MS, Ordering::SeqCst);
-    }
-    fn now(&self) -> bool {
-        self.queued.load(Ordering::SeqCst) > 0 || now_ms() < self.quiet_after.load(Ordering::SeqCst)
-    }
-}
 
 struct Engine {
     engine: Retained<AVAudioEngine>,
@@ -119,8 +83,6 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
 pub fn output() -> Result<SharedAudioOut> {
     Ok(Arc::new(build(None)?))
 }
-
-type SharedIn = Arc<dyn Fn(&[f32], u32) + Send + Sync>;
 
 /// The engine, with the microphone when `input` is given: voice-processed
 /// (echo cancelled), or plain and quiet while Desk speaks.
@@ -218,10 +180,9 @@ unsafe fn listen(
                 // processed voice (the 3-mic array and the speaker reference
                 // come out as one signal), so the first is the voice.
                 let voice = std::slice::from_raw_parts((*data).as_ptr(), frames);
-                if gate.as_ref().is_some_and(|g| g.now()) {
-                    input(&vec![0.0; frames], rate);
-                } else {
-                    input(voice, rate);
+                match &gate {
+                    Some(gate) => input(gate.gated(voice, &mut Vec::new()), rate),
+                    None => input(voice, rate),
                 }
             },
         );
@@ -383,6 +344,7 @@ fn pcm(format: &AVAudioFormat, samples: &[f32]) -> Option<Retained<AVAudioPCMBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
@@ -421,28 +383,6 @@ mod tests {
             per_second.iter().skip(1).all(|n| *n > 10_000),
             "{per_second:?}"
         );
-    }
-
-    #[test]
-    fn the_microphone_is_quiet_while_desk_speaks_and_just_after() {
-        let s = Speaking::default();
-        assert!(!s.now());
-        s.started();
-        s.started();
-        assert!(s.now());
-        s.finished();
-        assert!(s.now(), "one buffer still playing");
-        s.finished();
-        assert!(s.now(), "the tail of the speech is still in the room");
-        s.quiet_after.store(0, Ordering::SeqCst);
-        assert!(!s.now());
-        s.started();
-        s.stopped();
-        s.quiet_after.store(0, Ordering::SeqCst);
-        assert!(!s.now(), "stopping clears what was queued");
-        s.finished();
-        s.quiet_after.store(0, Ordering::SeqCst);
-        assert!(!s.now(), "a late completion after stop never goes negative");
     }
 
     /// Opens the real microphone (the terminal running the test needs

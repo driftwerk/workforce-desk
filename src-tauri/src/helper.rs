@@ -16,6 +16,9 @@ use desk_core::{LAUNCH_AGENT_LABEL, LEGACY_LAUNCH_AGENT_LABEL, Paths};
 use eyre::Result;
 use serde::Serialize;
 
+// Only macOS's login item says Running or NeedsApproval until Linux and
+// Windows have theirs.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Status {
@@ -35,16 +38,25 @@ pub enum Status {
     },
 }
 
+/// Where the person turns Desk Helper back on.
+pub const STARTUP_SETTINGS: &str = if cfg!(target_os = "macos") {
+    "System Settings → General → Login Items"
+} else if cfg!(windows) {
+    "Settings → Apps → Startup"
+} else {
+    "your session's autostart settings"
+};
+
 impl Status {
     /// Why the helper can't run, in the person's words, when it can't.
     pub fn blocked(&self) -> Option<String> {
         match self {
-            Status::MoveToApplications => Some(
-                "Move Desk to your Applications folder, then open it from there.".into(),
-            ),
-            Status::NeedsApproval => Some(
-                "Desk Helper is turned off. Turn Desk on in System Settings → General → Login Items, then open Desk again.".into(),
-            ),
+            Status::MoveToApplications => {
+                Some("Move Desk to your Applications folder, then open it from there.".into())
+            }
+            Status::NeedsApproval => Some(format!(
+                "Desk Helper is turned off. Turn Desk on in {STARTUP_SETTINGS}, then open Desk again."
+            )),
             Status::Failed { message } => Some(format!("Desk Helper couldn't start: {message}")),
             Status::Running | Status::NotRegistered | Status::Development => None,
         }
@@ -313,13 +325,14 @@ mod tests {
             Status::NeedsApproval
                 .blocked()
                 .unwrap()
-                .contains("Login Items")
+                .contains(STARTUP_SETTINGS)
         );
         for s in [Status::MoveToApplications, Status::NeedsApproval] {
             assert!(!s.blocked().unwrap().to_lowercase().contains("workforce"));
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_bundled_plist_runs_the_helper_from_the_bundle() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
