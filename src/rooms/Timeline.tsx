@@ -203,8 +203,10 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     }
   });
 
-  // The New line stays where the place was read to when it was shown, and
-  // moves when Desk comes back into focus with something unread.
+  // The New line stays where the place was read to when it was shown (once
+  // the summary says where Desk began keeping points), and moves when Desk
+  // comes back into focus with something unread.
+  const floorKnown = floor !== undefined;
   useEffect(() => {
     if (!readsLoaded) return;
     setDivider(key, effective(pointOf(readPlace), useUnread.getState().local?.floor));
@@ -220,7 +222,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
       const { [key]: _gone, ...rest } = useDividers.getState();
       useDividers.setState(rest, true);
     };
-  }, [readsLoaded, key, readPlace, room.id, thread]);
+  }, [readsLoaded, floorKnown, key, readPlace, room.id, thread]);
 
   const seenItems = useMemo(() => messages.map((m) => ({ id: m.id, at: m.createdAt })), [messages]);
   useSeen(readPlace, scroller, seenItems, { enabled: !(thread ? stowed : hidden) });
@@ -236,7 +238,9 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     for (const r of el.querySelectorAll<HTMLElement>("[data-row]")) if (r.getBoundingClientRect().top < bottom) last = r.dataset.row ?? last;
     setLastVisible(last);
   }, []);
-  useLayoutEffect(measure);
+  // Measured as the messages change, the pane scrolls or resizes: not as
+  // an answer streams in below them.
+  useLayoutEffect(measure, [measure, messages]);
   const shownPill = pill({ shown: messages, read: readNow, lastVisible, window, unread: summary, name: (a) => author(a).name });
   const jump = useCallback(async () => {
     const desk = useDesk.getState();
@@ -423,7 +427,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
         </div>
       </div>
       {shownPill && (
-        <button type="button" className="jump-pill" title="Jump to new messages" onClick={() => void jump()}>
+        <button type="button" className="jump-pill" title="Jump to new messages" aria-live="polite" onClick={() => void jump()}>
           {pillText(shownPill)} <span aria-hidden="true">{shownPill.dir === "up" ? "↑" : "↓"}</span>
         </button>
       )}
