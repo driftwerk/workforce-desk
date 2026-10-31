@@ -190,14 +190,13 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
       )}
     >
       <footer className="dialog-foot">
-        <button type="button" className="btn btn-ghost" onClick={keep}>
+        {/* Focused, so Enter or Esc keeps it: only a deliberate choice closes. */}
+        <button type="button" className="btn btn-ghost" data-autofocus onClick={keep}>
           Keep it
         </button>
-        {/* Focused, so Enter closes; Esc keeps it. */}
         <button
           type="button"
           className="btn btn-danger"
-          data-autofocus
           onClick={() => {
             setConfirm(false);
             close();

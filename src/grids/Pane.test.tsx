@@ -118,6 +118,8 @@ describe("a pane's header", () => {
     fireEvent.click(within(pane).getByRole("button", { name: "Remove from grid" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByText("vim is still running in it.")).toBeTruthy();
+    // Enter keeps it.
+    expect(document.activeElement!.textContent).toBe("Keep it");
     expect(closeTerminal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(closeTerminal).toHaveBeenCalledWith("t1");
@@ -179,7 +181,7 @@ describe("closing a pane", () => {
     expect(grid().panes).toHaveLength(1);
   });
 
-  it("keeps it on Keep it or Esc, focus back in the pane, and closes it on the red button, which Enter presses", () => {
+  it("keeps it on Keep it, Esc or Enter, focus back in the pane, and closes it only on the red button", () => {
     scout();
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, sess("s0"));
@@ -195,11 +197,16 @@ describe("closing a pane", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(pane.contains(document.activeElement)).toBe(true);
     expect(panes()).toBe(2);
+    // Enter presses the focused button: Keep it.
     closeFrom(pane);
-    // Enter presses the focused button: the red one.
     const focused = document.activeElement as HTMLElement;
-    expect(focused.textContent).toBe("Close pane");
+    expect(focused.textContent).toBe("Keep it");
     fireEvent.click(focused);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pane.contains(document.activeElement)).toBe(true);
+    expect(panes()).toBe(2);
+    closeFrom(pane);
+    fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(grid().panes.some((p) => p.content?.kind === "agent")).toBe(false);
     expect(useChat.getState().roster).toHaveLength(1);
