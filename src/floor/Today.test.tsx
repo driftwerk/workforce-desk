@@ -97,6 +97,23 @@ describe("Today", () => {
       expect(screen.getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Scout"]);
     });
 
+    it("has no lane when its folder names an agent its hub doesn't list, once the hub has been read", () => {
+      ranIn(folder);
+      useChat.setState({ roster: [], rosterRead: false, rosterErrors: {} });
+      show([{ who: turn, spans: [{ kind: "working", from: at(29), to: null }] }]);
+      const { unmount } = render(<Today now={NOW} />);
+      expect(screen.getAllByRole("group")).toHaveLength(1);
+      unmount();
+      useChat.setState({ rosterRead: true, rosterErrors: { local: "unreachable" } });
+      render(<Today now={NOW} />);
+      expect(screen.getAllByRole("group")).toHaveLength(1);
+      cleanup();
+      useChat.setState({ rosterErrors: {} });
+      render(<Today now={NOW} />);
+      expect(screen.getByText("Nothing has run yet today.")).toBeTruthy();
+      useChat.setState({ rosterRead: false });
+    });
+
     it("has no lane when Desk can't tell whose it is: its folder says no agent, or Desk knows no folder for it", () => {
       ranIn("/somewhere/else/at-dm-d4774cbb6c89");
       show([

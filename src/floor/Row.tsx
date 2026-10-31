@@ -14,22 +14,27 @@ type Whose = { hubId?: string; local: boolean; who: Who };
 /** Who an item is, as Desk can best tell: one of this computer's sessions
  *  that an agent's turn ran as (see `turnAgentOf`) is that agent, and an
  *  agent the hub sent no name for is called as its hub lists it. An agent's
- *  turn Desk can't put to its agent (it knows no folder for it) is no one
- *  the person can do anything with: null. */
+ *  turn Desk can't put to its agent (it knows no folder for it, or the
+ *  agent's hub lists no such agent) is no one the person can do anything
+ *  with: null. */
 export const useWho = (): ((item: Whose) => Who | null) => {
   const sessions = useDesk((s) => s.sessions);
   const restore = useDesk((s) => s.restore);
   const roster = useChat((s) => s.roster);
+  const rosterRead = useChat((s) => s.rosterRead);
+  const rosterErrors = useChat((s) => s.rosterErrors);
   return useCallback(
     ({ hubId, local, who }: Whose): Who | null => {
       const listed = (id: string) => roster.find((a) => a.hubId === hubId && a.id === id)?.name ?? "";
       if (who.kind === "agent") return who.name.trim() ? who : { ...who, name: listed(who.id) };
       const known = local ? (sessions[who.id] ?? restore.find((r) => r.id === who.id)) : undefined;
       const agent = known?.cwd ? turnAgentOf(known.cwd) : null;
-      if (agent) return { kind: "agent", id: agent, name: listed(agent), engine: null };
+      // An agent its hub has been read without is no one's either.
+      const unknown = (id: string) => rosterRead && !(hubId && rosterErrors[hubId]) && !roster.some((a) => a.hubId === hubId && a.id === id);
+      if (agent) return unknown(agent) ? null : { kind: "agent", id: agent, name: listed(agent), engine: null };
       return isAgentTurn({ name: who.name }) || (known && isAgentTurn({ name: known.name ?? "" })) ? null : who;
     },
-    [sessions, restore, roster],
+    [sessions, restore, roster, rosterRead, rosterErrors],
   );
 };
 
