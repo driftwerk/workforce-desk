@@ -18,6 +18,7 @@ import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
 import { ENGINE_TITLE } from "../engines/engines";
+import { SpendStrip } from "../spend/SpendStrip";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -88,6 +89,7 @@ export function SessionCard({ session }: { session: Session }) {
           </button>
         )}
       </div>
+      <SpendStrip sessionId={session.id} />
       {approvalsSwitchable(session) && (
         <label className="session-approvals small">
           <input type="checkbox" checked={session.approvals === "desk"} onChange={(e) => setApprovalsInDesk(session, e.target.checked)} />

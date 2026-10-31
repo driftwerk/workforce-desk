@@ -230,6 +230,60 @@
   margin: 0;
 }
 
+/* ── Spend ──────────────────────────────────────────────────────────────── */
+
+.spend-card .floor-card-head .seg {
+  margin-left: auto;
+}
+.spend-card p {
+  margin: 0;
+}
+.spend-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.spend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 4px;
+}
+.spend-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.spend-usd {
+  font-variant-numeric: tabular-nums;
+}
+.spend-bar {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sunken);
+}
+.spend-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--working);
+}
+.spend-strip {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Today ──────────────────────────────────────────────────────────────── */
 
 .today-legend {

@@ -7,6 +7,9 @@ import type {
   ActivityPage,
   Decision,
   EngineInfo,
+  SpendBy,
+  SpendPeriod,
+  SpendView,
   DeskEvent,
   Manager,
   NewRoomMessage,
@@ -227,6 +230,16 @@ export class DeskHub {
 
   sessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions");
   start = (s: NewSession): Promise<Session> => this.call("POST", "/api/desk/sessions", s);
+  /** What sessions spent since `period` began, grouped `by`, the costliest
+   *  first; null from a hub without a ledger. */
+  spend = async (period: SpendPeriod, by: SpendBy, limit: number): Promise<SpendView | null> => {
+    try {
+      return await this.call<SpendView>("GET", `/api/desk/spend?period=${period}&by=${by}&limit=${limit}`);
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return null;
+      throw e;
+    }
+  };
   /** Every engine the hub knows: installed, its version and sign-in, and
    *  where it starts it; null from a hub that doesn't say (an older one). */
   engines = async (): Promise<EngineInfo[] | null> => {
