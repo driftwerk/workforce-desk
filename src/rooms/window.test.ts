@@ -49,6 +49,14 @@ describe("a place's window after a page", () => {
     const jumped: Window = { older: at(all[1]!), newer: at(all[3]!) };
     expect(afterPage(jumped, "newest", all.slice(7), 3)).toEqual({ older: at(all[7]!), newer: END });
   });
+
+  it("joins a newest page to a live window only where it reaches back to what was loaded", () => {
+    const live: Window = { older: at(all[0]!), newer: END };
+    expect(afterPage(live, "newest", all.slice(3, 6), 3, all.slice(0, 4))).toEqual({ older: at(all[0]!), newer: END });
+    // More came while away than a page holds: what was loaded stays out of it.
+    expect(afterPage(live, "newest", all.slice(7), 3, all.slice(0, 4))).toEqual({ older: at(all[7]!), newer: END });
+    expect(afterPage(live, "newest", all.slice(8), 3, all.slice(0, 4))).toEqual({ older: START, newer: END });
+  });
 });
 
 describe("what a window shows", () => {

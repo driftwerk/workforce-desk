@@ -5,7 +5,7 @@ import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, HubError, ROOM_PAGE, type HubConnection } from "./client";
 import { byTime, later } from "../rooms/time";
-import { afterPage, inWindow, isLive, placeKey, type PageDir, type PlaceKey, type Window } from "../rooms/window";
+import { afterPage, inWindow, isLive, ofPlace, placeKey, shown, type PageDir, type PlaceKey, type Window } from "../rooms/window";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
 /** The main window's views: the Floor, Rooms, and Grids. */
@@ -317,7 +317,8 @@ export const useDesk = create<DeskState>((set, get) => ({
       try {
         const page = await hub.roomMessages(roomId, { ...(thread ? { thread } : {}), ...q, limit: ROOM_PAGE });
         set((s) => {
-          const window = afterPage(s.windows[key], dir, page, ROOM_PAGE);
+          const was = s.windows[key];
+          const window = afterPage(was, dir, page, ROOM_PAGE, dir === "newest" ? shown(ofPlace(s.timelines[roomId] ?? [], thread), was) : []);
           const merged = merge(s.timelines[roomId] ?? [], page);
           // A thread's loaded replies are its count only once they're all of it.
           const whole = window.older.kind === "start" && window.newer.kind === "end";

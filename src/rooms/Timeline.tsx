@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type KeyboardEvent, type UIEvent } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type UIEvent } from "react";
 import { formAnswer } from "../chat/forms";
 import type { ChatMessage } from "../chat/types";
 import { dayName } from "../floor/time";
@@ -11,7 +11,7 @@ import { answerForm } from "./engine";
 import { Message } from "./Message";
 import { useAuthor } from "./names";
 import { memberOf } from "./routing";
-import { isLive, ofPlace, placeKey, shown } from "./window";
+import { isLive, ofPlace, placeKey, shown, type Window } from "./window";
 
 // One timeline for a room's main messages and for each of its threads: what
 // of the place is loaded without a gap, with a day before each day's first
@@ -136,15 +136,28 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     },
     [anchored, followed.pane],
   );
-  // Distance from the bottom when an earlier page was asked for, so the
-  // messages being read stay put as it lands above them.
-  const hold = useRef<{ distance: number; before: readonly RoomMessage[] } | null>(null);
+  // What you send shows: a message of yours new at the end of a live
+  // window takes the view to the end, wherever it was.
+  const mine = live ? messages.findLast((m) => m.author === "you")?.id : undefined;
+  const sentLast = useRef(mine);
+  useLayoutEffect(() => {
+    if (mine === sentLast.current) return;
+    sentLast.current = mine;
+    if (mine && messages.at(-1)?.id === mine) setAtEnd(true);
+  }, [mine, messages, setAtEnd]);
+  // Where the reader was when an earlier page was asked for: the first row
+  // in sight and how far down it sat (else the distance from the bottom),
+  // so what's being read stays put as the page lands above it, whatever
+  // arrives meanwhile.
+  const hold = useRef<{ window: Window | undefined; distance: number; row: InSight | null } | null>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
     const held = hold.current;
     if (!held) followed.follow();
-    else if (el && held.before !== messages) {
-      el.scrollTop = el.scrollHeight - held.distance;
+    else if (el && held.window !== window) {
+      const row = held.row && rowOf(el, held.row.id);
+      if (row && held.row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - held.row.offset;
+      else el.scrollTop = el.scrollHeight - held.distance;
       hold.current = null;
     }
   });
@@ -153,7 +166,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const earlier = () => {
     if (!more || paging === "loading") return;
     const el = scroller.current;
-    if (el) hold.current = { distance: el.scrollHeight - el.scrollTop, before: messages };
+    if (el) hold.current = { window, distance: el.scrollHeight - el.scrollTop, row: firstInSight(el) };
     void useDesk
       .getState()
       .page(room.id, thread, "older")
@@ -163,8 +176,10 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     if (e.currentTarget.scrollTop < EARLIER_PX && more && !paging) earlier();
   };
 
-  // A message jumped to scrolls to the middle and flashes.
-  const flashing = flash && (messages.some((m) => m.id === flash.id) || parent?.id === flash.id) ? flash : null;
+  // A message jumped to scrolls to the middle and flashes, once: a timeline
+  // shown again later leaves the reader where they were.
+  const flashing =
+    flash && Date.now() - flash.at < FLASH_MS && (messages.some((m) => m.id === flash.id) || parent?.id === flash.id) ? flash : null;
   useEffect(() => {
     const el = flashing && [...(scroller.current?.querySelectorAll<HTMLElement>("[data-row]") ?? [])].find((r) => r.dataset.row === flashing.id);
     if (!el) return;
@@ -172,8 +187,20 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     el.scrollIntoView?.({ block: "center" });
     el.classList.add("msg-flash");
     const t = setTimeout(() => el.classList.remove("msg-flash"), FLASH_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      el.classList.remove("msg-flash");
+    };
   }, [flashing, setAtEnd]);
+
+  // One message is reached with Tab, the last focused (else the newest);
+  // the arrows move between them from there.
+  const [current, setCurrent] = useState<string | null>(null);
+  const tabTo = current && messages.some((m) => m.id === current) ? current : (messages.at(-1)?.id ?? null);
+  const onFocus = (e: FocusEvent<HTMLDivElement>) => {
+    const row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-row]") : null;
+    if (row?.dataset.row && row.dataset.row !== parent?.id) setCurrent(row.dataset.row);
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (typing(e.target) || !(e.target instanceof Element)) return;
@@ -205,7 +232,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   };
 
   return (
-    <div ref={pane} className="room-scroll" onScroll={onScroll} onKeyDown={onKeyDown}>
+    <div ref={pane} className="room-scroll" onScroll={onScroll} onKeyDown={onKeyDown} onFocus={onFocus}>
       <div ref={followed.list} className="room-list">
         {parent && (
           <>
@@ -224,7 +251,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
             return (
               <Fragment key={m.id}>
                 {divider}
-                <div className="room-msg" data-row={m.id} tabIndex={-1}>
+                <div className="room-msg" data-row={m.id} tabIndex={m.id === tabTo ? 0 : -1}>
                   <RoomMessageView room={room} m={m} name={a.name} home={home} />
                 </div>
               </Fragment>
@@ -236,7 +263,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
           return (
             <Fragment key={m.id}>
               {divider}
-              <div className="room-msg" data-row={m.id} tabIndex={-1}>
+              <div className="room-msg" data-row={m.id} tabIndex={m.id === tabTo ? 0 : -1}>
                 <RoomMessageView room={room} m={m} name={a.name} home={home} />
                 <button type="button" className="link small thread-link" onClick={() => setRoomThread(room.id, m.id)}>
                   {n ? `${n} repl${n === 1 ? "y" : "ies"}` : "Reply in thread"}
@@ -259,12 +286,13 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
             <button
               type="button"
               className="link small"
-              onClick={() =>
+              onClick={() => {
+                setAtEnd(true);
                 void useDesk
                   .getState()
                   .toNewest(room.id, thread)
-                  .catch((e: unknown) => useDesk.getState().fail(e))
-              }
+                  .catch((e: unknown) => useDesk.getState().fail(e));
+              }}
             >
               Jump to the newest
             </button>
@@ -274,3 +302,19 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     </div>
   );
 }
+
+/** A row in sight: its id, and how far below the pane's top it sits. */
+type InSight = { id: string; offset: number };
+
+/** The first message row in sight in `el`. */
+const firstInSight = (el: HTMLElement): InSight | null => {
+  const top = el.getBoundingClientRect().top;
+  for (const r of el.querySelectorAll<HTMLElement>("[data-row]")) {
+    const b = r.getBoundingClientRect();
+    if (b.bottom > top && r.dataset.row) return { id: r.dataset.row, offset: b.top - top };
+  }
+  return null;
+};
+
+const rowOf = (el: HTMLElement, id: string): HTMLElement | undefined =>
+  [...el.querySelectorAll<HTMLElement>("[data-row]")].find((r) => r.dataset.row === id);

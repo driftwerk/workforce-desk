@@ -55,8 +55,17 @@ export const aroundSplit = (limit: number): { before: number; after: number } =>
 /** The window a fetched page (oldest first) leaves `w` with. A short page
  *  reached the start or the end; an `around` page is split at its target to
  *  tell which side was short. A page that touches `w` extends it, and one
- *  that doesn't replaces it. */
-export const afterPage = (w: Window | undefined, dir: PageDir, page: readonly RoomMessage[], limit: number): Window => {
+ *  that doesn't replaces it. `loaded` is what `w` showed before: a newest
+ *  page joins a live window only where it reaches back to it, so more
+ *  arriving than a page while Desk was away leaves a gap, not a window
+ *  that hides one. */
+export const afterPage = (
+  w: Window | undefined,
+  dir: PageDir,
+  page: readonly RoomMessage[],
+  limit: number,
+  loaded: readonly RoomMessage[] = [],
+): Window => {
   const sorted = [...page].sort(byTime);
   const first = sorted[0];
   const last = sorted.at(-1);
@@ -70,6 +79,8 @@ export const afterPage = (w: Window | undefined, dir: PageDir, page: readonly Ro
     return { older: w.older, newer: short || !last ? END : at(last) };
   } else if (dir === "newest") {
     read = { older: short || !first ? START : at(first), newer: END };
+    const ids = new Set(page.map((m) => m.id));
+    if (w && !short && loaded.length && !loaded.some((m) => ids.has(m.id))) return read;
   } else {
     const target = sorted.find((m) => m.id === dir.around);
     const split = aroundSplit(limit);
