@@ -8,6 +8,7 @@ vi.mock("../restore/boot", () => ({
 const { useChat } = await import("../chat/store");
 const { deskListeners, useDesk } = await import("../hub/store");
 const { useReads } = await import("./reads");
+const { emptyConversation } = await import("../chat/conversation");
 const { dmsFrom, startUnread, SUMMARY_DEBOUNCE_MS, useUnread } = await import("./summary");
 
 const dw = { id: "dw", label: "Atlas", url: "https://atlas.example.com", local: false, token: "t" };
@@ -70,5 +71,37 @@ describe("this computer's summary", () => {
     expect(state.get("unread.cache.local")).toMatchObject({ local: summary });
     stop();
     vi.useRealTimers();
+  });
+});
+
+describe("in a detached grid's window", () => {
+  it("reads the summary and the points, and keeps nothing for while the hub is away", async () => {
+    const unread = vi.fn(async () => summary);
+    const reads = vi.fn(async () => []);
+    useDesk.setState({ hub: { unread, reads } as never, detached: true });
+    const stop = startUnread();
+    for (const f of deskListeners) f({ type: "snapshot", sessions: [], restore: [], rooms: [] });
+    await vi.waitFor(() => expect(useUnread.getState().local).toEqual(summary));
+    expect(useReads.getState().loaded).toBe(true);
+    expect(state.get("unread.cache.local")).toBeUndefined();
+    stop();
+    useDesk.setState({ detached: false });
+  });
+});
+
+describe("a DM's answer", () => {
+  it("has its hub count again once its turn ends", async () => {
+    vi.useFakeTimers();
+    const listed = vi.fn(async () => new Response(JSON.stringify({ conversations: [row("allan", 1)] }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", listed);
+    const stop = startUnread();
+    const working = { ...emptyConversation(), working: { step: "thinking" } } as never;
+    useChat.setState({ conversations: { "dw/allan": working } });
+    useChat.setState({ conversations: { "dw/allan": emptyConversation() } });
+    await vi.advanceTimersByTimeAsync(SUMMARY_DEBOUNCE_MS);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(useUnread.getState().dms["dw/allan"]).toMatchObject({ count: 1 }));
+    stop();
+    vi.unstubAllGlobals();
   });
 });

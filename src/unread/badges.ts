@@ -2,8 +2,9 @@ import type { FloorNeed } from "../floor/merge";
 import { itemKeyOf } from "../floor/needs";
 import { sessionOf, type ItemKey } from "../groups/model";
 import type { RoomDraft } from "../hub/store";
-import type { Count, RoomSummary, SessionUnread, UnreadSummary } from "../hub/types";
+import type { Count, ReadPoint, RoomSummary, SessionUnread, UnreadSummary } from "../hub/types";
 import type { ConversationUnread } from "../hubs/surface";
+import { instant } from "../rooms/time";
 
 // Every badge Desk shows, from one set of rules: a number counts what needs
 // you and what's for you, a dot means only something new. Each item is
@@ -38,6 +39,20 @@ export const inRoom = (needs: readonly FloorNeed[], room: string): FloorNeed[] =
  *  in a room, which the room carries. */
 export const ofItem = (needs: readonly FloorNeed[], item: string): FloorNeed[] =>
   needs.filter((n) => n.place.kind !== "room" && itemKeyOf(n) === item);
+
+/** DMs still unread past how far they were read here: one read on this Desk
+ *  since its hub last counted it (or while that hub is away) is read. */
+export const pastPoints = (
+  dms: Readonly<Record<string, ConversationUnread>>,
+  points: Readonly<Record<string, ReadPoint>>,
+): Readonly<Record<string, ConversationUnread>> => {
+  const read = Object.keys(dms).filter((key) => {
+    const p = points[key];
+    const last = dms[key]!.last;
+    return !!p && !!last && instant(last.at) <= instant(p.at);
+  });
+  return read.length ? Object.fromEntries(Object.entries(dms).filter(([key]) => !read.includes(key))) : dms;
+};
 
 export const badgeOfDm = (u: ConversationUnread | undefined, needs: readonly FloorNeed[]): Badge =>
   badge((u?.for_you ?? 0) + needs.length, !!u && u.count > u.for_you);

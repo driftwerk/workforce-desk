@@ -57,6 +57,8 @@ const pendingKey = (hubId: string) => `unread.pending.${hubId}`;
 interface Pending {
   place: Place;
   point: ReadPoint;
+  /** Absent in what was kept before Mark unread waited too: an advance. */
+  mark?: "advance" | "set";
 }
 
 const pendingOf = (hubId: string): Pending[] => {
@@ -114,7 +116,7 @@ async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): P
       heard(await desk.putReads([{ place: placeKey(place), point, mark }]));
     }
   } catch (e) {
-    keep(hub.id, { place, point }, e);
+    keep(hub.id, { place, point, mark }, e);
   }
 }
 
@@ -138,10 +140,11 @@ export const markRoomRead = async (room: string): Promise<void> => {
   if (desk) heard(await desk.markAllRead({ room }));
 };
 
-/** Sends what waited for `hubId` while it was away. */
+/** Sends what waited for `hubId` while it was away: the last write to
+ *  each place, so a Mark unread made meanwhile still moves it back. */
 export async function flushPending(hubId: string): Promise<void> {
   const waiting = pendingOf(hubId);
   if (!waiting.length) return;
   deskState.remove(pendingKey(hubId));
-  for (const w of waiting) await write(w.place, w.point, "advance");
+  for (const w of waiting) await write(w.place, w.point, w.mark ?? "advance");
 }

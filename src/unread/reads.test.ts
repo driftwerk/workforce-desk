@@ -100,7 +100,7 @@ describe("writing read points", () => {
     expect(state.get("unread.pending.dw")).toBeUndefined();
   });
 
-  it("keeps what the hub couldn't take while it was away, and sends it as advances when it's back", async () => {
+  it("keeps what the hub couldn't take while it was away, and sends each as it was made when it's back", async () => {
     reachable = false;
     await advance(ROOM, { at: at(5), message: "m5" });
     await markUnread({ kind: "thread", room: "r1", thread: "t1" }, { at: at(1), message: null });
@@ -109,7 +109,7 @@ describe("writing read points", () => {
     await flushPending("local");
     expect(puts.flat()).toEqual([
       { place: "room:r1", point: { at: at(5), message: "m5" }, mark: "advance" },
-      { place: "thread:r1/t1", point: { at: at(1), message: null }, mark: "advance" },
+      { place: "thread:r1/t1", point: { at: at(1), message: null }, mark: "set" },
     ]);
     expect(state.get("unread.pending.local")).toBeUndefined();
   });

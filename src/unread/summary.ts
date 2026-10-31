@@ -53,8 +53,9 @@ export async function refreshLocal(): Promise<void> {
     const local = await hub.unread();
     const at = Date.now();
     useUnread.setState({ local, localAt: at });
+    // The main window keeps what was counted, for while the hub is away.
     const id = localHubId();
-    if (id) deskState.set(cacheKey(id), { ...cached(id), at, local } satisfies Cached);
+    if (id && !useDesk.getState().detached) deskState.set(cacheKey(id), { ...cached(id), at, local } satisfies Cached);
   } catch {
     /* Its last counts stand until the hub answers. */
   }
@@ -105,6 +106,31 @@ export async function refreshDms(hub: HubAccount): Promise<void> {
 
 onDmWritten((hub) => void refreshDms(hub));
 
+const counting = new Map<string, ReturnType<typeof setTimeout>>();
+/** Reads `hub`'s DM counts again once things settle. */
+const refreshDmsSoon = (hub: HubAccount): void => {
+  clearTimeout(counting.get(hub.id));
+  counting.set(
+    hub.id,
+    setTimeout(() => {
+      counting.delete(hub.id);
+      void refreshDms(hub);
+    }, SUMMARY_DEBOUNCE_MS),
+  );
+};
+
+/** A DM's turn that ended left an answer its hub now counts, wherever you
+ *  are: the main window asks it (a detached grid's has no links). */
+const watchDmTurns = (): (() => void) =>
+  useChat.subscribe((s, was) => {
+    if (s.conversations === was.conversations || useDesk.getState().detached) return;
+    for (const [key, c] of Object.entries(s.conversations)) {
+      if (!was.conversations[key]?.working || c.working) continue;
+      const hub = s.hubs.find((h) => key.startsWith(`${h.id}/`));
+      if (hub) refreshDmsSoon(hub);
+    }
+  });
+
 /** A hub is linked again: what waited for it is sent. */
 export const hubBack = (hub: HubAccount): Promise<void> => flushPending(hub.id);
 
@@ -135,16 +161,21 @@ const onEvent = (e: DeskEvent) => {
   } else if (CHANGES.has(e.type)) refreshLocalSoon();
 };
 
-/** The main window keeps the counts: from the events socket, and from what
- *  was last counted while the hubs are away. */
+/** Each window keeps the counts: from the events socket, and in the main
+ *  window from what was last counted while the hubs are away. A detached
+ *  grid's tells nobody (`notifyPlace` sends from the main window only). */
 export function startUnread(): () => void {
   const id = localHubId();
   const kept = id ? cached(id) : null;
   if (kept?.local && !useUnread.getState().local) useUnread.setState({ local: kept.local, localAt: kept.at });
   deskListeners.add(onEvent);
+  const unwatch = watchDmTurns();
   return () => {
     deskListeners.delete(onEvent);
+    unwatch();
     clearTimeout(soon);
+    for (const t of counting.values()) clearTimeout(t);
+    counting.clear();
   };
 }
 

@@ -13,6 +13,7 @@ import {
   inRoom,
   itemBadge,
   ofItem,
+  pastPoints,
   totalOf,
 } from "./badges";
 
@@ -44,6 +45,14 @@ describe("badges", () => {
     expect(ofItem(needs, "agent:dw/allan")).toEqual([dmNeed]);
     expect(inRoom(needs, "r1")).toEqual([inRoomNeed]);
     expect(badgeOfDm(dm(4, 1), ofItem(needs, "agent:dw/allan"))).toEqual({ count: 2, dot: false });
+  });
+
+  it("leaves out a DM read here past its newest message since its hub counted it", () => {
+    const last = (at: string) => ({ ...dm(2, 2), last: { at, message_id: "m9" } });
+    const dms = { "dw/allan": last("2026-10-30T09:00:00Z"), "dw/sarah": last("2026-10-30T09:00:00Z"), "dw/atlas": dm(1, 1) };
+    const points = { "dw/allan": { at: "2026-10-30T09:00:00.000Z", message: "m9" }, "dw/sarah": { at: "2026-10-30T08:00:00Z", message: "m1" } };
+    expect(Object.keys(pastPoints(dms, points)).sort()).toEqual(["dw/atlas", "dw/sarah"]);
+    expect(pastPoints(dms, {})).toBe(dms);
   });
 
   it("shows only a dot for what's new and none of it for you", () => {

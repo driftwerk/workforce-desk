@@ -3,7 +3,8 @@ import type { FloorNeed } from "../floor/merge";
 import { useFloor, useNeeds } from "../floor/store";
 import { useDesk, type RoomDraft } from "../hub/store";
 import { Badge, needsYou } from "../ui/Badge";
-import { badgeOfRoom, inRoom, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
+import { badgeOfRoom, inRoom, pastPoints, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
+import { useReads } from "./reads";
 import { useUnread } from "./summary";
 
 /** A row's mark: the number for you, else a dot for something new. */
@@ -24,10 +25,18 @@ export const useHasFloor = (): ((hub: string) => boolean) => {
   return (hub: string) => hubs[hub]?.state === "ready";
 };
 
+/** What's unread in each DM, as its hub counted it, less what's been read
+ *  here since. */
+export const useUnreadDms = () => {
+  const counted = useUnread((s) => s.dms);
+  const points = useReads((s) => s.dms);
+  return useMemo(() => pastPoints(counted, points), [counted, points]);
+};
+
 /** What every item's badge is read from. */
 export const useBadgeData = (): BadgeData => {
   const needs = useNeeds();
-  const dms = useUnread((s) => s.dms);
+  const dms = useUnreadDms();
   const sessions = useUnread((s) => s.local?.sessions);
   return useMemo(() => ({ needs, dms, sessions: sessions ?? [] }), [needs, dms, sessions]);
 };
@@ -46,7 +55,7 @@ export const useRoomMarker = (room: string): RoomMarker => {
 /** Everything unread, each item once. */
 export const useTotal = (update = false): Marked => {
   const needs: readonly FloorNeed[] = useNeeds();
-  const dms = useUnread((s) => s.dms);
+  const dms = useUnreadDms();
   const local = useUnread((s) => s.local);
   const drafts = useDesk((s) => s.roomDrafts);
   return useMemo(() => totalOf({ needs, dms, local, drafts, update }), [needs, dms, local, drafts, update]);
