@@ -6,6 +6,7 @@ import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
   emoticons: boolean;
+  writtenReplies: string[];
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -26,6 +27,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   agentVoices: {},
   customVoices: {},
   voice: false,
+  writtenReplies: [],
   voiceEngine: "cascade",
   shortcuts: {},
   groups: EMPTY_LAYOUT.groups,
@@ -56,6 +58,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       sessionNames: s.sessionNames ?? {},
       layoutOnHub: s.layoutOnHub ?? false,
       emoticons: s.emoticons ?? true,
+      writtenReplies: s.writtenReplies ?? [],
       loaded: true,
     });
   },
@@ -75,6 +78,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       agentVoices: s.agentVoices,
       customVoices: s.customVoices,
       voice: s.voice,
+      writtenReplies: s.writtenReplies,
       voiceEngine: s.voiceEngine,
       shortcuts: s.shortcuts,
       groups: s.groups,

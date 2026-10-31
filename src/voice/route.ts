@@ -23,10 +23,6 @@ export const resolveAgent = (
   return current ?? roster.find((a) => agentKey(a) === activeKey) ?? null;
 };
 
-/** What to say while a slow answer is on its way. */
-export const acknowledgement = (name: string, turn: number): string =>
-  [`On it.`, `${name}'s on it.`, `Working on it.`][turn % 3]!;
-
 export type Outcome = { kind: "answer"; text: string } | { kind: "error"; text: string };
 
 /** What a conversation update means for a spoken turn: an answer finished,
@@ -69,3 +65,9 @@ export const voiceRoster = (roster: Agent[], agentVoices: Record<string, VoiceSp
       .find((v) => v && LIVE.has(v.provider));
     return voice ? { name, voice } : { name };
   });
+
+/** The voice an answer is heard in, as a turn tells the hub: the agent's
+ *  own (or Desk's default) when Desk reads it, the live engine when a
+ *  cloud voice model relays it. */
+export const speechOf = (spec: VoiceSpec): { provider: string; model?: string } =>
+  spec.model ? { provider: spec.provider, model: spec.model } : { provider: spec.provider };

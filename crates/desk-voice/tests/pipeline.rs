@@ -76,7 +76,7 @@ fn listen(listener: &mut Listener, audio: &[f32]) -> Vec<Utterance> {
         });
         if said.len() > before {
             listener.speaking();
-            listener.spoken(at(fed), false);
+            listener.spoken(at(fed));
         }
         listener.tick(at(fed));
     }
@@ -202,6 +202,7 @@ impl VoiceEvents for Recorded {
     fn utterance(&self, utterance: &Utterance) {
         self.said.lock().unwrap().push(utterance.clone());
     }
+    fn unheard(&self) {}
     fn error(&self, message: &str) {
         self.errors.lock().unwrap().push(message.into());
     }
@@ -263,8 +264,7 @@ fn the_engine_stops_talking_when_talked_over_and_takes_push_to_talk() {
     engine.set_roster(roster());
 
     engine.speak(
-        "Atlas is on it. The nightly build failed in the integration suite.".into(),
-        false,
+        "The nightly build failed in the integration suite, in the payments tests.".into(),
         None,
     );
     wait_for("playback", || !out.played.lock().unwrap().is_empty());
@@ -355,11 +355,10 @@ fn each_answer_is_spoken_in_its_agents_voice() {
         out.stop();
         out.played.lock().unwrap()[n - 1]
     };
-    engine.speak("Two tests failed.".into(), false, Some(fish));
+    engine.speak("Two tests failed.".into(), Some(fish));
     assert_eq!(played(1), 44_100, "the cloud voice, at its own rate");
     engine.speak(
         "Two tests failed.".into(),
-        false,
         Some(VoiceSpec::kokoro("am_adam")),
     );
     assert_eq!(played(2), speaker().sample_rate());
@@ -368,7 +367,7 @@ fn each_answer_is_spoken_in_its_agents_voice() {
         model: None,
         voice: Some("x".into()),
     };
-    engine.speak("Two tests failed.".into(), false, Some(eleven));
+    engine.speak("Two tests failed.".into(), Some(eleven));
     assert_eq!(
         played(3),
         speaker().sample_rate(),

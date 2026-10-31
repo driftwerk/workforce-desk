@@ -3,7 +3,10 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { useShortcuts } from "../shortcuts/manager";
 import { Mark } from "../ui/Mark";
+import { useChat } from "../chat/store";
+import { agentKey } from "../chat/types";
 import { stopSpeaking } from "./api";
+import { owner, useMic } from "./mic";
 import { useVoiceStore } from "./store";
 import { pillView, STEPS } from "./view";
 import "../styles/voice.css";
@@ -25,12 +28,20 @@ export function VoicePill() {
   const setSettings = useSettings((s) => s.set);
   const holdKeys = useSettings((s) => s.keys.pushToTalk);
   const holdTaken = useShortcuts((s) => s.status.pushToTalk.state === "taken");
-  const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken });
+  // A DM with the microphone, by its agent's name.
+  const holder = owner(useMic());
+  const holderName = useChat((s) => (holder ? (s.roster.find((a) => agentKey(a) === holder.agent)?.name ?? null) : null));
+  const mic = holder && holderName ? { name: holderName, byName: on } : null;
+  const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken }, mic);
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;
   const ring = { "--voice-progress": view.progress ?? 0 } as CSSProperties;
 
   return (
-    <section className={`voice-pill voice-${status.state}${thinking ? " voice-thinking" : ""}`} aria-label="Voice" aria-live="polite">
+    <section
+      className={`voice-pill voice-${status.state}${thinking ? " voice-thinking" : ""}${mic ? " voice-held" : ""}`}
+      aria-label="Voice"
+      aria-live="polite"
+    >
       <div className="voice-row">
         <span className="voice-ring" style={ring}>
           {view.agent ? <Mark name={view.agent} size="sm" /> : <span className="voice-face"><MicIcon /></span>}

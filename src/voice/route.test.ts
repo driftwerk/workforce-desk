@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyConversation, type ConversationState } from "../chat/conversation";
 import type { Agent, ChatMessage } from "../chat/types";
-import { acknowledgement, forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
+import { forModel, missingAgent, outcome, resolveAgent, voiceFor, voiceRoster, wakeNames } from "./route";
 
 const roster: Agent[] = [
   { hubId: "acme", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false },
@@ -35,12 +35,6 @@ describe("voice routing", () => {
     expect(resolveAgent(null, roster, roster[2]!, "acme/atlas")?.id).toBe("allan");
     expect(resolveAgent(null, roster, null, "acme/atlas")?.id).toBe("atlas");
     expect(resolveAgent(null, roster, null, null)).toBeNull();
-  });
-
-  it("varies the acknowledgement", () => {
-    expect(acknowledgement("Atlas", 0)).toBe("On it.");
-    expect(acknowledgement("Atlas", 1)).toBe("Atlas's on it.");
-    expect(acknowledgement("Atlas", 5)).toBe("Working on it.");
   });
 
   it("notices a finished answer or an error, and nothing else", () => {

@@ -101,6 +101,10 @@ pub struct Settings {
     /// Wake-by-name and push-to-talk.
     #[serde(default)]
     pub voice: bool,
+    /// Agents, by agent key, who answer in writing when talked to in their
+    /// DM; the rest answer aloud.
+    #[serde(default)]
+    pub written_replies: Vec<String>,
     /// Which voice engine: "cascade" (on-device), "gpt-live" or
     /// "gemini-live". Kept as text so a newer Desk's choice survives.
     #[serde(default = "default_voice_engine")]
@@ -166,6 +170,7 @@ impl Default for Settings {
             agent_voices: Default::default(),
             custom_voices: Default::default(),
             voice: false,
+            written_replies: Vec::new(),
             voice_engine: default_voice_engine(),
             shortcuts: Default::default(),
             groups: Vec::new(),

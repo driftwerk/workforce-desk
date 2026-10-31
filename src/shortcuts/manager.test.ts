@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import { defaultShortcuts } from "./keys";
-import { allowedFrom, settled, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
+import { allowedFrom, settled, useAppHold, useAppShortcut, useGlobalShortcut, useShortcuts } from "./manager";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({
@@ -143,6 +143,51 @@ describe("room shortcuts' guard", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "Period", metaKey: true }));
     expect(pressed).toHaveBeenCalledTimes(1);
     input.remove();
+    unmount();
+  });
+});
+
+describe("held shortcuts", () => {
+  const key = (type: "keydown" | "keyup", init: KeyboardEventInit, at: EventTarget = window) =>
+    act(() => void at.dispatchEvent(new KeyboardEvent(type, { bubbles: true, ...init })));
+  const hold = { code: "KeyM", ctrlKey: true, shiftKey: true };
+
+  it("go down once on their keys and up when any key comes up", () => {
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts("macos") });
+    const down = vi.fn();
+    const up = vi.fn();
+    const { unmount } = renderHook(() => useAppHold("holdToTalkHere", down, up));
+    key("keydown", hold);
+    key("keydown", { ...hold, repeat: true });
+    expect([down.mock.calls.length, up.mock.calls.length]).toEqual([1, 0]);
+    key("keyup", { code: "ControlLeft" });
+    expect(up).toHaveBeenCalledTimes(1);
+    key("keyup", { code: "KeyM" });
+    expect(up).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("are let go when Desk loses the keyboard or is unmounted mid-hold", () => {
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts("macos") });
+    const up = vi.fn();
+    const { unmount } = renderHook(() => useAppHold("holdToTalkHere", () => {}, up));
+    key("keydown", hold);
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(up).toHaveBeenCalledTimes(1);
+    key("keydown", hold);
+    unmount();
+    expect(up).toHaveBeenCalledTimes(2);
+  });
+
+  it("leave a terminal's keys to it", () => {
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts("macos") });
+    const down = vi.fn();
+    const { unmount } = renderHook(() => useAppHold("holdToTalkHere", down, () => {}));
+    const pane = document.body.appendChild(document.createElement("div"));
+    pane.setAttribute("data-terminal", "");
+    key("keydown", hold, pane);
+    expect(down).not.toHaveBeenCalled();
+    pane.remove();
     unmount();
   });
 });

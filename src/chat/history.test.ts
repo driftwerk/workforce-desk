@@ -247,11 +247,32 @@ describe("a DM's history in the store", () => {
     await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
     const dm = opened.at(-1)!;
     const file = { artifact_id: "art_1", media_type: "text/plain", filename: "a.txt", size: 1 };
-    expect(useChat.getState().send("local/scout", "status?", { spoken: true, attachments: [file] })).toBe(true);
+    const aloud = { reply: "spoken", speech: { provider: "fish_audio", model: "s1" } } as const;
+    expect(useChat.getState().send("local/scout", "status?", { voice: aloud, attachments: [file] })).toBe(true);
     expect(dm.sent.at(-1)).toEqual([
       "status?",
-      { turn: { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: true }, attachments: [file] },
+      {
+        turn: { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: true, voice: aloud },
+        attachments: [file],
+      },
     ]);
+  });
+
+  it("sends a dictated turn as not spoken, and a typed one with no voice", async () => {
+    answer(() => json({ messages: [], more: false }));
+    useChat.getState().openDm("local/scout");
+    await vi.waitFor(() => expect(useChat.getState().histories["local/scout"]?.state).toBe("ready"));
+    const dm = opened.at(-1)!;
+    useChat.getState().send("local/scout", "note this", { voice: { reply: "written" } });
+    expect(dm.sent.at(-1)?.[1]).toEqual({
+      turn: { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: false, voice: { reply: "written" } },
+      attachments: undefined,
+    });
+    useChat.getState().send("local/scout", "typed");
+    expect(dm.sent.at(-1)?.[1]).toEqual({
+      turn: { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: false },
+      attachments: undefined,
+    });
   });
 
   it("reads it again once a turn ends, then forgets the turn", async () => {

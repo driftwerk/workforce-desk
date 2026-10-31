@@ -104,3 +104,48 @@ export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = tr
 
 /** Waits for every queued register and unregister (tests). */
 export const settled = (): Promise<void> => queue;
+
+/** Runs `onDown` when shortcut `id`'s keys go down while Desk is in front,
+ *  and `onUp` once they're let go: any of its keys coming up, Desk losing
+ *  the keyboard, or the window going out of sight, so a release is never
+ *  missed. Keys pressed in a terminal, or in a field other than a room
+ *  composer, are left to it. */
+export function useAppHold(id: ShortcutId, onDown: () => void, onUp: () => void, enabled = true) {
+  const down = useRef(onDown);
+  const up = useRef(onUp);
+  down.current = onDown;
+  up.current = onUp;
+  const keys = useSettings((s) => s.keys[id]);
+  const recording = useShortcuts((s) => s.recording);
+  useEffect(() => {
+    if (!enabled || recording) return;
+    let held = false;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      up.current();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!matches(e, keys) || !allowedFrom(e.target)) return;
+      e.preventDefault();
+      if (e.repeat || held) return;
+      held = true;
+      down.current();
+    };
+    const onKeyUp = () => release();
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") release();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", onHidden);
+      release();
+    };
+  }, [keys, enabled, recording]);
+}

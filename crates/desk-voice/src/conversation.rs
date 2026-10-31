@@ -1,6 +1,8 @@
 //! Who the user is talking to, and when they've stopped: wake by name, then
-//! follow-ups without it until a farewell or a stretch of silence. Pure, with
-//! time passed in, so every rule is tested without audio.
+//! follow-ups without it until a farewell or a stretch of silence. Or, while
+//! one conversation holds the microphone, everything said (or only what's
+//! held) is for it. Pure, with time passed in, so every rule is tested
+//! without audio.
 
 use std::time::{Duration, Instant};
 
@@ -27,6 +29,21 @@ impl Default for Timing {
     }
 }
 
+/// How the microphone is listened to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ListenMode {
+    /// Wake on a roster name, then follow-ups until a farewell or silence.
+    #[default]
+    Names,
+    /// Every utterance is for the conversation holding the microphone: no
+    /// name, no silence that ends it, no farewell. It lasts until the app
+    /// lets the microphone go.
+    Open,
+    /// Only push-to-talk is heard.
+    Held,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
     Idle,
@@ -42,6 +59,7 @@ pub enum Phase {
 
 pub struct Conversation {
     timing: Timing,
+    mode: ListenMode,
     phase: Phase,
     last: Instant,
     in_speech: bool,
@@ -54,6 +72,7 @@ impl Conversation {
     pub fn new(timing: Timing, now: Instant) -> Self {
         Self {
             timing,
+            mode: ListenMode::Names,
             phase: Phase::Idle,
             last: now,
             in_speech: false,
@@ -65,6 +84,21 @@ impl Conversation {
 
     pub fn phase(&self) -> &Phase {
         &self.phase
+    }
+
+    pub fn mode(&self) -> ListenMode {
+        self.mode
+    }
+
+    /// Listens this way from now on. Whatever conversation was going on by
+    /// name is over: the microphone has a new owner, or is given back.
+    pub fn set_mode(&mut self, mode: ListenMode, now: Instant) {
+        if self.mode == mode {
+            return;
+        }
+        self.mode = mode;
+        self.end();
+        self.last = now;
     }
 
     pub fn is_speaking(&self) -> bool {
@@ -80,9 +114,12 @@ impl Conversation {
     }
 
     /// The spotter heard `agent`. False when it's taken as our own voice:
-    /// during playback and just after it.
+    /// during playback and just after it, and when names don't wake us.
     pub fn keyword(&mut self, agent: &str, now: Instant) -> bool {
-        if self.speaking || self.quiet_until.is_some_and(|t| now < t) {
+        if self.mode != ListenMode::Names
+            || self.speaking
+            || self.quiet_until.is_some_and(|t| now < t)
+        {
             return false;
         }
         self.phase = Phase::Named {
@@ -113,12 +150,24 @@ impl Conversation {
 
     /// Whether a finished speech segment is worth transcribing.
     pub fn wants_transcript(&self) -> bool {
-        self.phase != Phase::Idle
+        match self.mode {
+            ListenMode::Names => self.phase != Phase::Idle,
+            ListenMode::Open => true,
+            ListenMode::Held => false,
+        }
     }
 
     /// A speech segment's transcript; what to send, if anything.
     pub fn transcript(&mut self, text: &str, now: Instant) -> Option<Utterance> {
         self.last = now;
+        match self.mode {
+            ListenMode::Names => {}
+            ListenMode::Open => {
+                let text = text.trim();
+                return (!text.is_empty()).then(|| Utterance::new(None, text));
+            }
+            ListenMode::Held => return None,
+        }
         match std::mem::replace(&mut self.phase, Phase::Idle) {
             Phase::Idle => None,
             Phase::Named {
@@ -164,7 +213,9 @@ impl Conversation {
         Some(Utterance::new(named, text))
     }
 
-    /// Push-to-talk: always sent. A leading roster name addresses it.
+    /// Push-to-talk: always sent. Listening by name, a leading roster name
+    /// addresses it; otherwise it is the microphone owner's whatever it
+    /// opens with.
     pub fn push_to_talk(
         &mut self,
         text: &str,
@@ -172,7 +223,8 @@ impl Conversation {
         now: Instant,
     ) -> Option<Utterance> {
         self.last = now;
-        let (agent, text) = match addressed(text, names) {
+        let (agent, text) = match addressed(text, names).filter(|_| self.mode == ListenMode::Names)
+        {
             Some((name, rest)) => (Some(name.to_string()), rest),
             None => (None, text.trim()),
         };
@@ -193,20 +245,21 @@ impl Conversation {
         self.speaking = true;
     }
 
-    /// Playback finished; `more` when a reply is still to come (the
-    /// acknowledgement was spoken, the answer wasn't).
-    pub fn spoken(&mut self, now: Instant, more: bool) {
+    /// Playback finished: the reply has been said.
+    pub fn spoken(&mut self, now: Instant) {
         self.speaking = false;
         self.quiet_until = Some(now + self.timing.echo_tail);
         self.last = now;
-        if !more {
-            self.awaiting = None;
-        }
+        self.awaiting = None;
     }
 
     /// Ends the conversation after the silence; true when it did.
     pub fn tick(&mut self, now: Instant) -> bool {
-        if self.phase == Phase::Idle || self.in_speech || self.speaking {
+        if self.mode != ListenMode::Names
+            || self.phase == Phase::Idle
+            || self.in_speech
+            || self.speaking
+        {
             return false;
         }
         if self
@@ -272,7 +325,7 @@ mod tests {
             u(Some("Atlas"), "what failed overnight?")
         );
         c.speaking();
-        c.spoken(clock.at(6_000), false);
+        c.spoken(clock.at(6_000));
         assert_eq!(
             said(&mut c, &clock, 7_000, 8_000, "And the night before?"),
             u(None, "And the night before?")
@@ -356,7 +409,7 @@ mod tests {
         c.speech_ended(clock.at(1_000));
         c.transcript("Atlas, status?", clock.at(1_000));
         c.speaking();
-        c.spoken(clock.at(3_000), false);
+        c.spoken(clock.at(3_000));
         assert!(!c.tick(clock.at(10_900)));
         assert!(c.tick(clock.at(11_000)));
         assert_eq!(c.phase(), &Phase::Idle);
@@ -380,11 +433,9 @@ mod tests {
         c.keyword("Atlas", clock.at(300));
         c.speech_ended(clock.at(1_000));
         c.transcript("Atlas, run the suite", clock.at(1_000));
-        c.speaking();
-        c.spoken(clock.at(3_500), true);
         assert!(!c.tick(clock.at(30_000)));
         c.speaking();
-        c.spoken(clock.at(40_000), false);
+        c.spoken(clock.at(40_000));
         assert!(!c.tick(clock.at(47_000)));
         assert!(c.tick(clock.at(48_000)));
     }
@@ -427,7 +478,7 @@ mod tests {
         let (mut c, clock) = start();
         c.speaking();
         assert!(!c.keyword("Atlas", clock.at(100)));
-        c.spoken(clock.at(1_000), false);
+        c.spoken(clock.at(1_000));
         assert!(!c.keyword("Atlas", clock.at(1_400)));
         assert!(c.keyword("Atlas", clock.at(1_700)));
     }
@@ -457,5 +508,68 @@ mod tests {
         );
         assert_eq!(c.push_to_talk("  ", &names, clock.at(0)), None);
         assert_eq!(c.phase(), &Phase::Idle);
+    }
+
+    fn open(c: &mut Conversation, clock: &Clock) {
+        c.set_mode(ListenMode::Open, clock.at(0));
+        assert_eq!(c.mode(), ListenMode::Open);
+    }
+
+    #[test]
+    fn an_open_microphone_sends_everything_without_a_name() {
+        let (mut c, clock) = start();
+        open(&mut c, &clock);
+        assert!(c.wants_transcript());
+        assert_eq!(
+            said(&mut c, &clock, 0, 1_000, " what failed overnight? "),
+            u(None, "what failed overnight?")
+        );
+        // A leading name is part of what was said, not who it's for.
+        assert_eq!(
+            said(&mut c, &clock, 2_000, 3_000, "Allan, and yours?"),
+            u(None, "Allan, and yours?")
+        );
+        assert_eq!(said(&mut c, &clock, 4_000, 4_300, "  "), None);
+    }
+
+    #[test]
+    fn an_open_microphone_is_not_ended_by_silence_or_thanks() {
+        let (mut c, clock) = start();
+        open(&mut c, &clock);
+        assert!(!c.keyword("Atlas", clock.at(100)), "names don't wake it");
+        assert!(!c.tick(clock.at(600_000)));
+        assert_eq!(
+            said(&mut c, &clock, 600_000, 601_000, "Thanks, that's all."),
+            u(None, "Thanks, that's all.")
+        );
+        assert!(!c.tick(clock.at(700_000)));
+    }
+
+    #[test]
+    fn a_held_microphone_hears_only_push_to_talk() {
+        let (mut c, clock) = start();
+        c.set_mode(ListenMode::Held, clock.at(0));
+        assert!(!c.wants_transcript());
+        assert!(!c.keyword("Atlas", clock.at(100)));
+        assert_eq!(said(&mut c, &clock, 0, 1_000, "Atlas, status?"), None);
+        let names = ["Atlas", "Allan"].map(String::from);
+        assert_eq!(
+            c.push_to_talk("Allan, what's left?", &names, clock.at(2_000)),
+            u(None, "Allan, what's left?")
+        );
+    }
+
+    #[test]
+    fn handing_the_microphone_over_ends_a_conversation_by_name() {
+        let (mut c, clock) = start();
+        c.speech_started(clock.at(0));
+        c.keyword("Atlas", clock.at(300));
+        c.speech_ended(clock.at(1_000));
+        c.transcript("Atlas, status?", clock.at(1_000));
+        assert_eq!(c.phase(), &Phase::Engaged("Atlas".into()));
+        open(&mut c, &clock);
+        c.set_mode(ListenMode::Names, clock.at(2_000));
+        assert_eq!(c.phase(), &Phase::Idle);
+        assert_eq!(said(&mut c, &clock, 3_000, 4_000, "and then?"), None);
     }
 }
