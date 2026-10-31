@@ -4,6 +4,7 @@ import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
+import { isAgentTurn } from "../floor/needs";
 import { useLocalFloor, useMerged, useNeedCounts } from "../floor/store";
 import { Today } from "../floor/Today";
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
@@ -41,8 +42,9 @@ interface FloorGroup {
  *  where it would be were it not waiting. */
 const NOT_WAITING: Partial<Record<OverviewItem["state"], OverviewItem["state"]>> = { needs_you: "idle" };
 
-/** Every session Desk knows, grouped as the Floor always has, with the crew's
- *  agents beside them in the matching group. With `needs` (this computer's hub's
+/** Every session Desk knows but the ones a hub ran an agent's turn as,
+ *  grouped as the Floor always has, with the crew's agents beside them in
+ *  the matching group. With `needs` (this computer's hub's
  *  floor), an item needs you iff it has an open need. */
 export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyMap<ItemKey, number> | null = null, hubId: string | null = null): FloorGroup[] => {
   const groups = new Map<string, FloorGroup>(ORDER.map((title) => [title, { title, agents: [], sessions: [] }]));
@@ -52,6 +54,9 @@ export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyM
     return GROUPS.find((g) => g.title !== "Needs you" && g.match(s))?.title ?? (s.state === "blocked" ? "Working" : undefined);
   };
   for (const s of all) {
+    // An agent's turn is its agent's, on its tile; only one waiting on you
+    // shows on its own.
+    if (isAgentTurn(s) && !(needs ? needs.has(sessionItem(s.id)) : s.state === "blocked")) continue;
     const title = sessionGroup(s);
     if (title) groups.get(title)?.sessions.push(s);
   }

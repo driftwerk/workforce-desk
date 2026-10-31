@@ -22,12 +22,18 @@ export const openAgentSettings = (key: string): void => {
   openInRooms(key);
 };
 
-/** Opens your DM with agent `key`: where it shows in a grid, if it does;
- *  else beside the Floor, on the Floor, and in Rooms anywhere else. */
-export const openAgent = (key: string): void => {
-  if (reveal({ kind: "agent", agent: key })) return;
+/** Opens your DM with agent `key` beside the Floor, on the Floor, even
+ *  when a grid shows it; in Rooms anywhere else. */
+export const openAgentBeside = (key: string): void => {
   if (useDesk.getState().view === "floor") useChat.getState().setPanelAgent(key);
   else openInRooms(key);
+};
+
+/** Opens your DM with agent `key`: where it shows in a grid, if it does;
+ *  else as `openAgentBeside`. */
+export const openAgent = (key: string): void => {
+  if (reveal({ kind: "agent", agent: key })) return;
+  openAgentBeside(key);
 };
 
 /** The agent whose DM shows beside the Floor: only on the Floor, and once

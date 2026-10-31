@@ -133,29 +133,63 @@ describe("Right now", () => {
     expect(rows.map((r) => r.querySelector("b")!.textContent)).toEqual(["Scout"]);
     expect(screen.getByText(/^Scout is under way\./)).toBeTruthy();
     fireEvent.click(rows[0]!);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "local/scout" }, { beside: true });
   });
 
-  it("says plainly what a hub without gists sent, its identifiers dropped", () => {
+  describe("an agent's turn the hub ran as a session", () => {
+    const turn = session("s-9", "at-dm-d4774cbb6c89-2e");
+    const cwd = "/Users/me/Library/Application Support/Desk/hub/data/agents/desk/projects/_agent-turn/work/session/at-dm-d4774cbb6c89";
+    const show = (works: ReturnType<typeof work>[]) =>
+      useFloor.setState({ hubs: { local: ready(view({ done: works, lanes: [{ who: turn, spans: [{ kind: "working", from: at(40), to: at(10) }] }] })) } });
+    beforeEach(() => {
+      useChat.setState({ roster: [{ hubId: "local", id: "desk", name: "Desk", model: null, provider: "claude-code", isDefault: false }] });
+    });
+    afterEach(() => useDesk.setState({ sessions: {}, restore: [] }));
+
+    it("is not shown when Desk knows no folder for it, as it has ended", () => {
+      useDesk.setState({ sessions: {}, restore: [] });
+      show([work(turn, { endedAt: at(10), outcome: "limit" })]);
+      render(<RightNow brief={null} />);
+      const list = screen.getByRole("group", { name: "What’s happening" });
+      expect(within(list).queryAllByRole("button")).toHaveLength(0);
+      expect(document.body.textContent).not.toMatch(/Agent turn|at-dm-/);
+    });
+
+    it("is its agent's entry when its folder says whose it is, failed at the limit too", () => {
+      useDesk.setState({ sessions: { "s-9": { id: "s-9", engine: "claude", name: turn.name, cwd, origin: "external" } as Session } });
+      show([work(turn, { endedAt: at(10), outcome: "limit" }), work(agent("desk", "Desk"), { endedAt: at(40), outcome: "finished" })]);
+      render(<RightNow brief={null} />);
+      const rows = within(screen.getByRole("group", { name: "What’s happening" })).getAllByRole("button");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.querySelector("b")!.textContent).toBe("Desk");
+      expect(rows[0]!.textContent).toContain(`failed · updated ${clock(at(10))}`);
+      expect(rows[0]!.textContent).toContain("Stopped at its plan’s limit 10 min ago.");
+      expect(rows[0]!.querySelector(".dot-failed")).toBeTruthy();
+    });
+  });
+
+  it("says, for a hub without gists, what Desk knows: never the person's prompt", () => {
+    useDesk.setState({ sessions: { "s-4": { id: "s-4", engine: "claude", name: "", cwd: "/Users/me/dev/acme-web", origin: "desk" } as Session } });
     useFloor.setState({
       hubs: {
         local: ready(
           view({
-            working: [work(agent("scout", "Scout"), { what: "Look at #12 and land it", heardAt: at(4) })],
-            done: [
-              work(agent("lens", "Lens"), { what: "#123", endedAt: at(9), outcome: "finished" }),
-              work(agent("ops", "Ops"), { what: "Merged PR #5 into main.", endedAt: at(8), outcome: "finished" }),
+            working: [
+              work(session("s-4", ""), { what: "classify is off - merge it", heardAt: at(2) }),
+              work(agent("scout", "Scout"), { what: "Look at #12 and land it", heardAt: at(4) }),
             ],
+            done: [work(agent("ops", "Ops"), { what: "Merged PR #5 into main.", endedAt: at(8), outcome: "finished" })],
           }),
         ),
       },
     });
     render(<RightNow brief={null} />);
     const list = screen.getByRole("group", { name: "What’s happening" });
-    expect(within(list).getByText("Now working on: Look at and land it.")).toBeTruthy();
-    expect(within(list).getByText(`working · updated ${clock(at(4))}`)).toBeTruthy();
-    expect(within(list).getByText("Finished: Merged into main.")).toBeTruthy();
-    expect(within(list).getByText("Finished what it was asked.")).toBeTruthy();
+    expect(within(list).getByText("Working on acme-web.")).toBeTruthy();
+    expect(within(list).getByText("Working on it now.")).toBeTruthy();
+    expect(within(list).getByText("Finished 8 min ago.")).toBeTruthy();
+    expect(list.textContent).not.toMatch(/classify|land it|Merged/);
+    useDesk.setState({ sessions: {} });
   });
 
   it("keeps a long list in one place of its own, which scrolls", () => {
@@ -213,18 +247,19 @@ describe("Right now", () => {
     expect(screen.getByText(`updated ${clock(at(7))}`)).toBeTruthy();
   });
 
-  it("opens each row where it is", () => {
+  it("opens each row beside the Floor, or where it is when that's a room or Slack", () => {
     render(<RightNow brief={null} />);
     const click = (group: string, i: number) => fireEvent.click(within(screen.getByRole("group", { name: group })).getAllByRole("button")[i]!);
     click("Needs you · 2", 0);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "room", roomId: "r1", threadId: "m-1" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "room", roomId: "r1", threadId: "m-1" }, { beside: true });
     click("Needs you · 2", 1);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-1" }, { beside: true });
     click("What’s happening", 0);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "b/ledger" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "b/ledger" }, { beside: true });
     click("What’s happening", 1);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-2" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "session", sessionId: "s-2" }, { beside: true });
+    // An agent's entry is the agent: its DM, wherever its turn was.
     click("What’s happening", 2);
-    expect(openTarget).toHaveBeenLastCalledWith({ kind: "slack", url: "https://slack.com/app_redirect?channel=C1" });
+    expect(openTarget).toHaveBeenLastCalledWith({ kind: "agent", key: "b/ops" }, { beside: true });
   });
 });

@@ -97,16 +97,17 @@ describe("Today", () => {
       expect(screen.getAllByRole("group").map((g) => g.getAttribute("aria-label"))).toEqual(["Scout"]);
     });
 
-    it("is called what it is, never by its folder, when Desk can't tell whose it is", () => {
+    it("has no lane when Desk can't tell whose it is: its folder says no agent, or Desk knows no folder for it", () => {
       ranIn("/somewhere/else/at-dm-d4774cbb6c89");
       show([
         { who: turn, spans: [{ kind: "working", from: at(29), to: null }] },
+        { who: session("s-gone", "at-dm-0a1b2c3d4e5f-2e"), spans: [{ kind: "working", from: at(25), to: at(5) }] },
         { who: session("7a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d", ""), spans: [{ kind: "working", from: at(20), to: null }] },
       ]);
       render(<Today now={NOW} />);
       const names = screen.getAllByRole("group").map((g) => g.getAttribute("aria-label"));
-      expect(names).toEqual(["Agent turn", "Claude Code session"]);
-      expect(document.body.textContent).not.toMatch(/at-dm-|7a0b1c2d/);
+      expect(names).toEqual(["Claude Code session"]);
+      expect(document.body.textContent).not.toMatch(/Agent turn|at-dm-|7a0b1c2d/);
     });
   });
 

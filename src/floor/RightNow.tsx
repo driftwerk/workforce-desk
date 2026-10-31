@@ -14,10 +14,10 @@ import { backgroundTasks } from "./background";
 import { happening, type FloorEntry } from "./happening";
 import type { Merged } from "./merge";
 import { NeedRow } from "./NeedRow";
-import { FloorRow, useWho } from "./Row";
+import { FloorRow, useSubject, useWho } from "./Row";
 import { useMerged } from "./store";
 import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
-import { targetOf } from "./target";
+import { besideOf } from "./target";
 import { clock } from "./time";
 
 /** The clock the floor's times are said against, moving every minute. */
@@ -45,7 +45,7 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
   const m = useMerged();
   const now = useMinute();
   const names = useSessionNames();
-  const entries = happening(m, now, useWho());
+  const entries = happening(m, now, useWho(), useSubject());
   const paragraph = useParagraph(m, entries, names);
   return (
     <section className="floor-card right-now" aria-label="Right now">
@@ -94,13 +94,18 @@ const STATE_WORD: Record<FloorEntry["state"], string> = { working: "working", wa
 const LOOK = { working: "working", waiting: "background", done: "done", failed: "failed" } as const;
 
 /** An agent or session as what's happening says it: its state, what it is
- *  for and what it is doing, and when that was written. */
+ *  for and what it is doing, and when that was written. It opens beside the
+ *  Floor, as the Floor's tiles do, even when a grid shows it. */
 function EntryRow({ entry }: { entry: FloorEntry }) {
-  const rooms = useDesk((s) => s.rooms);
-  const target = targetOf(entry, rooms);
+  const target = besideOf(entry);
   const state = entry.state === "waiting" && entry.background ? `waiting on ${backgroundTasks(entry.background)}` : STATE_WORD[entry.state];
   return (
-    <FloorRow item={entry} look={LOOK[entry.state]} time={`${state} · updated ${clock(entry.at)}`} onOpen={target ? () => openTarget(target) : undefined}>
+    <FloorRow
+      item={entry}
+      look={LOOK[entry.state]}
+      time={`${state} · updated ${clock(entry.at)}`}
+      onOpen={target ? () => openTarget(target, { beside: true }) : undefined}
+    >
       {entry.purpose && <span className="floor-entry-purpose">{entry.purpose} </span>}
       {entry.now}
     </FloorRow>
