@@ -327,6 +327,12 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   };
   const run = (id: ActionId, m: RoomMessage) => runAction(id, room, m, { thread, name: author(m.author).name, markUnread: () => unreadFromHere(m) });
   const [menu, setMenu] = useState<{ m: RoomMessage; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
+  // Each row's bar is handed the same two callbacks while the timeline
+  // stands, so it renders again only when its message does.
+  const latestRun = useRef(run);
+  latestRun.current = run;
+  const onAction = useCallback((id: ActionId, m: RoomMessage) => latestRun.current(id, m), []);
+  const onActions = useCallback((m: RoomMessage, from: HTMLElement) => setMenu({ m, at: below(from), from }), []);
   const divider = dividerBefore(messages, readAtOpen);
   const unreadNow = (m: RoomMessage) => countsAsUnread(m) && (!readNow || after(m, readNow.at));
 
@@ -437,8 +443,8 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
                 room={room}
                 m={m}
                 thread={thread}
-                onRun={(id) => run(id, m)}
-                onMore={(from) => setMenu({ m, at: below(from), from })}
+                onRun={onAction}
+                onMore={onActions}
               />
             );
             const fresh = m.id === divider && (

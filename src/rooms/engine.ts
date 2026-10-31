@@ -617,7 +617,9 @@ export async function say(
 export async function answerForm(room: Room, form: RoomMessage, answer: string): Promise<void> {
   const hub = useDesk.getState().hub;
   const author = memberOf(form.author);
-  if (!hub || !author) return;
+  if (!author) return;
+  // The form unlocks again: nothing was sent.
+  if (!hub) throw new Error("Desk isn’t connected to its hub.");
   await speak(hub, room, answer, form.threadId, [], [author], { inReplyTo: form.id });
 }
 
@@ -637,6 +639,11 @@ export async function askAgain(room: Room, answer: RoomMessage): Promise<void> {
     }
   }
   const by = memberOf(asked.author);
+  // The ask carries what came before it, as one sent from the newest does.
+  await useDesk
+    .getState()
+    .toNewest(room.id, answer.threadId)
+    .catch(() => undefined);
   ask(room, member, {
     text: asked.content,
     threadId: answer.threadId,

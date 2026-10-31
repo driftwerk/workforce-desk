@@ -578,12 +578,23 @@ describe("acting on a room's messages", () => {
   it("asks again what an answer answered, of who answered it, fetching it when it isn't loaded", async () => {
     const asked = { id: "q1", roomId: ROOM_ID, threadId: "t1", author: "you", content: "@allan is CI green?", hop: 0, createdAt: "" };
     const roomMessage = vi.fn(async () => asked);
-    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage } as never }));
+    const toNewest = vi.fn(async () => {});
+    const real = useDesk.getState().toNewest;
+    useDesk.setState((s) => ({ hub: { ...s.hub!, roomMessage } as never, toNewest }));
     await askAgain(room, { id: "a1", roomId: ROOM_ID, threadId: "t1", author: "dw/allan", content: "Yes.", hop: 0, createdAt: "", inReplyTo: "q1" });
     expect(roomMessage).toHaveBeenCalledWith(ROOM_ID, "q1");
+    expect(toNewest).toHaveBeenCalledWith(ROOM_ID, "t1");
     const allan = await connect("allan");
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
     expect(allan.chats[0]).toMatchObject({ content: "@allan is CI green?", desk: { message: "q1", hop: 0, speaker: { kind: "person" }, place: { thread: "t1" } } });
+    useDesk.setState({ toNewest: real });
+  });
+
+  it("fails a form's answer with no hub to send it to, so the form unlocks", async () => {
+    useDesk.setState({ hub: null });
+    await expect(answerForm(room, { id: "f1", roomId: ROOM_ID, threadId: null, author: "dw/allan", content: "", hop: 0, createdAt: "" }, "main")).rejects.toThrow(
+      "Desk isn’t connected to its hub.",
+    );
   });
 
   it("says so when what an answer answered was deleted", async () => {

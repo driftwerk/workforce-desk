@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useDesk } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
 import { requestFocus } from "../shell/focus";
@@ -10,7 +11,9 @@ import { askAgain, postToRoom, removeMember } from "./engine";
 import { memberOf } from "./routing";
 
 const copy = (text: string, what: string) =>
-  void navigator.clipboard.writeText(text).catch(() => useDesk.getState().fail(`Couldn’t copy the ${what}.`));
+  void Promise.resolve()
+    .then(() => navigator.clipboard.writeText(text))
+    .catch(() => useDesk.getState().fail(`Couldn’t copy the ${what}.`));
 
 /** Does action `id` on room message `m`, shown in `thread` (null: the main
  *  timeline). `markUnread` is the timeline's own. */
@@ -55,8 +58,8 @@ export const menuEntries = (actions: Action[], run: (id: ActionId) => void): Men
 const ICON: Partial<Record<ActionId, string>> = { thread: "↳ Thread", copyText: "Copy", askSomeone: "Ask…" };
 
 /** The bar on a message while it's hovered or focused: its first actions,
- *  and More for the rest. */
-export function MessageActions({
+ *  and More for the rest. Rendered again only when what it's given changes. */
+export const MessageActions = memo(function MessageActions({
   room,
   m,
   thread,
@@ -66,20 +69,20 @@ export function MessageActions({
   room: Room;
   m: RoomMessage;
   thread: string | null;
-  onRun: (id: ActionId) => void;
-  onMore: (from: HTMLElement) => void;
+  onRun: (id: ActionId, m: RoomMessage) => void;
+  onMore: (m: RoomMessage, from: HTMLElement) => void;
 }) {
   const actions = actionsFor(m, { inThread: !!thread, room, name: "" }).slice(0, ON_BAR);
   return (
     <span className="msg-actions" role="toolbar" aria-label="Message actions">
       {actions.map((a) => (
-        <button key={a.id} type="button" className="msg-action" title={a.key ? `${a.label} (${a.key})` : a.label} onClick={() => onRun(a.id)}>
+        <button key={a.id} type="button" className="msg-action" title={a.key ? `${a.label} (${a.key})` : a.label} onClick={() => onRun(a.id, m)}>
           {ICON[a.id] ?? a.label}
         </button>
       ))}
-      <button type="button" className="msg-action" aria-haspopup="menu" title="More (Shift+F10)" aria-label="More actions" onClick={(e) => onMore(e.currentTarget)}>
+      <button type="button" className="msg-action" aria-haspopup="menu" title="More (Shift+F10)" aria-label="More actions" onClick={(e) => onMore(m, e.currentTarget)}>
         ⋯
       </button>
     </span>
   );
-}
+});

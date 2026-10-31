@@ -11,10 +11,19 @@ vi.mock("./engine", () => ({
   dismiss: () => {},
   answerPrompt: () => true,
 }));
-vi.mock("@workforce/rich", () => ({
-  RichHostProvider: ({ children }: { children: unknown }) => children,
-  RichMarkdown: ({ text }: { text: string }) => text,
-}));
+// What each message hands rich, by its text: a form's lock and its submit.
+const hosts = vi.hoisted(() => new Map<string, { answered?: boolean; submitForm?: (s: string, v: Record<string, unknown>) => Promise<boolean> }>());
+vi.mock("@workforce/rich", async () => {
+  const { createContext, useContext } = await import("react");
+  const Host = createContext<unknown>(null);
+  return {
+    RichHostProvider: ({ host, children }: { host: unknown; children: unknown }) => <Host.Provider value={host}>{children as never}</Host.Provider>,
+    RichMarkdown: ({ text }: { text: string }) => {
+      hosts.set(text, useContext(Host) as never);
+      return text;
+    },
+  };
+});
 
 const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
@@ -23,6 +32,7 @@ const { Timeline } = await import("./Timeline");
 const { RoomView } = await import("./RoomView");
 const { useReads } = await import("../unread/reads");
 const { useUnread } = await import("../unread/summary");
+const { answerForm } = await import("./engine");
 
 const room = {
   id: "r1",
@@ -306,6 +316,22 @@ describe("acting on a message", () => {
       "Message Allan",
       "Remove from room",
     ]);
+  });
+
+  it("locks a form only once its answer is sent, unlocks it when that fails, and keeps it locked from the hub", async () => {
+    const form = msg("f", now - 1000, { content: "Pick a branch" });
+    useDesk.setState({ timelines: { r1: [form] }, fail: vi.fn() });
+    const { unmount } = render(<Timeline room={room} thread={null} />);
+    const host = () => hosts.get("Pick a branch")!;
+    expect(host().answered).toBeFalsy();
+    await expect(host().submitForm!("main", { branch: "main" })).resolves.toBe(true);
+    vi.mocked(answerForm).mockRejectedValueOnce(new Error("Couldn’t reach Allan."));
+    await expect(host().submitForm!("main", { branch: "main" })).resolves.toBe(false);
+    expect(useDesk.getState().fail).toHaveBeenCalled();
+    unmount();
+    useDesk.setState({ timelines: { r1: [{ ...form, answered: true }] } });
+    render(<Timeline room={room} thread={null} />);
+    expect(host().answered).toBe(true);
   });
 
   it("says where your answer went, and that a copy came from a thread", () => {
