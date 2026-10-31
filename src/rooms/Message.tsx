@@ -2,6 +2,7 @@ import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { memo, useMemo } from "react";
 import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
+import { saveMadeFile } from "../attachments/save";
 import { openUrl } from "../platform";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
@@ -54,6 +55,7 @@ export const Message = memo(function Message({
   const host = useMemo<RichHost>(
     () => ({
       openUrl,
+      saveFile: saveMadeFile,
       submitForm: async (summary, values) => onSubmitForm(summary, values),
     }),
     [onSubmitForm],

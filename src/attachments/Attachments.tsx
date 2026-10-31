@@ -1,7 +1,10 @@
-import { useRef, useState } from "react";
+import { RichBlock, RichHostProvider, type RichHost } from "@workforce/rich";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import type { Attachment, HubAccount } from "../chat/types";
-import { fileUrl, openFile, saveFileAs } from "../platform";
+import { fileUrl, openFile, openUrl, saveFileAs } from "../platform";
+import { chartText } from "./chart";
+import { saveMadeFile } from "./save";
 import { CloseButton, useModal } from "../ui/Dialog";
 import { describe, kindOf, type Kind } from "./kinds";
 
@@ -33,7 +36,7 @@ export const thumbnailOf = (url: string | null | undefined): string | null => {
 };
 
 /** The files of a message, as the design shows them: images inline (click
- *  to zoom), PDFs as a card with their first page, audio and video as a
+ *  to zoom), charts drawn from their spec, PDFs as a card with their first page, audio and video as a
  *  player, anything else as a card to open or save. */
 export function Attachments({ files, home }: { files: readonly Attachment[]; home?: FileHome }) {
   const hubs = useChat((s) => s.hubs);
@@ -58,6 +61,8 @@ function AttachmentView({ held }: { held: Held }) {
   switch (held.kind.shown) {
     case "image":
       return <ImageFile held={held} />;
+    case "chart":
+      return <ChartFile held={held} />;
     case "pdf":
       return <PdfCard held={held} />;
     case "video":
@@ -173,6 +178,36 @@ function Zoom({ held, url, onClose }: { held: Held; url: string; onClose: () => 
       </div>
       <img className="att-zoom-image" src={url} alt={held.file.filename} onMouseDown={(e) => e.stopPropagation()} />
     </div>
+  );
+}
+
+/** A chart an agent drew, drawn here from its spec: hover for values, the
+ *  data as a table, copied or saved as a picture. Until the spec is read it
+ *  is the chart's skeleton; a spec that is gone or isn't a chart is a card. */
+function ChartFile({ held }: { held: Held }) {
+  const [read, setRead] = useState<{ text: string } | "failed" | null>(null);
+  const { hub, agent, file } = held;
+  const host = useMemo<RichHost>(() => ({ openUrl, saveFile: saveMadeFile }), []);
+  useEffect(() => {
+    if (!hub) return;
+    let live = true;
+    setRead(null);
+    chartText(hub, agent, file.artifact_id).then(
+      (text) => live && setRead({ text }),
+      () => live && setRead("failed"),
+    );
+    return () => {
+      live = false;
+    };
+  }, [hub, agent, file.artifact_id]);
+  const card = <FileCard held={held} />;
+  if (!hub || read === "failed") return card;
+  return (
+    <RichHostProvider host={host}>
+      <div className="att-chart rich">
+        <RichBlock kind="chart" payload={read?.text ?? ""} streaming={read === null} fallback={card} />
+      </div>
+    </RichHostProvider>
   );
 }
 

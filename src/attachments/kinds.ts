@@ -1,6 +1,10 @@
 /** What kind of file something is, as Desk shows it: how it is shown in a
  *  conversation, what it's called, and the badge on its card. */
-export type Shown = "image" | "pdf" | "video" | "audio" | "file";
+export type Shown = "image" | "chart" | "pdf" | "video" | "audio" | "file";
+
+/** A chart an agent drew, delivered as the spec it was drawn from (the
+ *  hub's chart tool, to a Desk that says it draws them). */
+export const CHART_MEDIA_TYPE = "application/vnd.workforce.chart+json";
 
 export interface Kind {
   shown: Shown;
@@ -64,6 +68,7 @@ export const kindOf = (mediaType: string, filename: string): Kind => {
   const ext = extensionOf(filename);
   const badge = (ext || type.split("/")[1] || "file").slice(0, 4).toUpperCase();
   if (type.startsWith("image/")) return { shown: "image", label: "Image", badge, family: "media" };
+  if (type === CHART_MEDIA_TYPE) return { shown: "chart", label: "Chart", badge: "CHRT", family: "sheet" };
   if (type === "application/pdf" || ext === "pdf") return { shown: "pdf", label: "PDF", badge: "PDF", family: "doc" };
   if (type.startsWith("video/")) return { shown: "video", label: "Video", badge, family: "media" };
   if (type.startsWith("audio/")) return { shown: "audio", label: "Audio", badge, family: "media" };
