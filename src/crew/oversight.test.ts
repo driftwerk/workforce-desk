@@ -36,7 +36,15 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
       summaries: { morning: "08:30", evening: "" },
       maxCheckinsPerHour: 3,
       maxCheckinsPerDay: 12,
-      act: { nudge: false, resumeRestart: true, readOnlyApprovals: true, handOutWork: false, interrupt: true },
+      act: {
+        nudge: false,
+        resumeRestart: true,
+        readOnlyApprovals: true,
+        handOutWork: false,
+        interrupt: true,
+        messageAgents: false,
+        messageTerminalSessions: false,
+      },
     });
   });
 
@@ -74,7 +82,15 @@ wake = { waiting_minutes = 2.5 }
       summaries: { morning: "09:00", evening: "18:00" },
       max_checkins_per_hour: 6,
       max_checkins_per_day: 100,
-      act: { nudge: true, resume_restart: true, read_only_approvals: false, hand_out_work: false, interrupt: false },
+      act: {
+        nudge: true,
+        resume_restart: true,
+        read_only_approvals: false,
+        hand_out_work: false,
+        interrupt: false,
+        message_agents: false,
+        message_terminal_sessions: false,
+      },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
   });
@@ -84,6 +100,30 @@ wake = { waiting_minutes = 2.5 }
     const toml = withOversight(CONFIG, off);
     expect((parse(toml) as { oversight: { wake: unknown } }).oversight.wake).toMatchObject({ waiting_minutes: 0, quiet_minutes: 0 });
     expect(oversightOf(toml).wake).toMatchObject({ waitingMinutes: 0, quietMinutes: 0 });
+  });
+
+  it("keeps messaging agents and other terminals' sessions off until switched on, and writes them as the hub reads them", () => {
+    expect(DEFAULT_OVERSIGHT.act).toMatchObject({ messageAgents: false, messageTerminalSessions: false });
+    const read = oversightOf(`[oversight]
+level = "act"
+[oversight.act]
+message_agents = true
+message_terminal_sessions = "yes"
+`);
+    expect(read.act).toMatchObject({ messageAgents: true, messageTerminalSessions: false });
+    for (const act of [
+      { messageAgents: true, messageTerminalSessions: false },
+      { messageAgents: false, messageTerminalSessions: true },
+      { messageAgents: true, messageTerminalSessions: true },
+    ]) {
+      const o = { ...DEFAULT_OVERSIGHT, enabled: true, level: "act" as const, act: { ...DEFAULT_OVERSIGHT.act, ...act } };
+      const toml = withOversight(CONFIG, o);
+      expect((parse(toml) as { oversight: { act: unknown } }).oversight.act).toMatchObject({
+        message_agents: act.messageAgents,
+        message_terminal_sessions: act.messageTerminalSessions,
+      });
+      expect(oversightOf(toml)).toEqual(o);
+    }
   });
 
   it("won't take a file it can't read", () => {
