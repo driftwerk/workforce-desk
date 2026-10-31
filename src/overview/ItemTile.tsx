@@ -2,15 +2,16 @@ import { useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
-import type { Engine, OverviewItem, OverviewState, SessionState } from "../hub/types";
+import type { OverviewItem, OverviewState, SessionState } from "../hub/types";
 import { AgentMark, Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { backgroundLine } from "../floor/background";
 import { since } from "../floor/time";
 import { localKey, openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
+import { ENGINE_TITLE } from "../engines/engines";
 
-const ENGINE: Record<Engine, string> = { claude: "Claude Code", codex: "Codex" };
+const ENGINE = ENGINE_TITLE;
 
 const RING: Partial<Record<OverviewState, SessionState>> = {
   needs_you: "blocked",

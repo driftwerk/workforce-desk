@@ -1,5 +1,6 @@
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
 import type { Engine, Who } from "../hub/types";
+import { ENGINES, sessionOf } from "../engines/engines";
 
 /** An agent or session on a hub, and whether that hub is this computer's. */
 export interface OnHub {
@@ -46,7 +47,7 @@ export const ownName = (who: Pick<Who, "name">): string | null => {
   return name && !UNNAMED.test(name) ? name : null;
 };
 
-const ENGINE_SESSION: Record<Engine, string> = { claude: "Claude Code session", codex: "Codex session" };
+const ENGINE_SESSION = Object.fromEntries(ENGINES.map((e) => [e, sessionOf(e)])) as Record<Engine, string>;
 
 /** What the hub calls an agent or session, or what it is when the hub sent
  *  no name to read. */

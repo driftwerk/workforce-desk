@@ -27,8 +27,9 @@ import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalP
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
 import { baseName, homeShort } from "../ui/paths";
+import { ENGINE_TITLE } from "../engines/engines";
 
-const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
+const ENGINE = ENGINE_TITLE;
 
 export const STATE_LABEL: Record<SessionState, string> = {
   starting: "starting",

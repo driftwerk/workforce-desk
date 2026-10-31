@@ -1,7 +1,43 @@
 import type { Attachment, DeliveryKind } from "../chat/types";
 import type { Layout } from "../groups/model";
 
-export type Engine = "claude" | "codex";
+export type Engine = "claude" | "codex" | "gemini" | "copilot" | "opencode" | "cursor" | "devin" | "custom";
+
+/** Where a session runs: a terminal, or Desk's own view of it. */
+export type View = "terminal" | "desk";
+
+/** What an engine can do in a view, as the hub drives it today. */
+export interface Caps {
+  state: "hooks" | "server" | "none";
+  approvals: "desk" | "terminal" | "none";
+  resume: "byId" | "none";
+  interrupt: "keys" | "none";
+  /** Whose plan windows its sessions report. */
+  plan: "claude" | "codex" | null;
+  /** What the person reads beside it. */
+  notes: string[];
+}
+
+/** Who an engine on the hub's computer is signed in as. `plan` is the
+ *  plan's name as the engine says it ("ultra", "pro"): shown as it is. */
+export type SignIn =
+  | { state: "in"; via: "plan" | "key" | "vendor"; who: string | null; plan: string | null }
+  | { state: "out" }
+  | { state: "unknown" };
+
+/** One engine as Settings → Engines and the new session dialog show it. */
+export interface EngineInfo {
+  engine: Engine;
+  title: string;
+  program: string | null;
+  /** Whether its program runs; null until the hub has looked. */
+  installed: boolean | null;
+  version: string | null;
+  signIn: SignIn;
+  /** The views the hub starts it in, the default first: none while it can't. */
+  views: View[];
+  caps: Partial<Record<View, Caps>>;
+}
 
 export type SessionState =
   | "starting"
@@ -59,6 +95,9 @@ export interface Asked {
 export interface Session {
   id: string;
   engine: Engine;
+  /** Where it runs and what Desk can do with it; absent from older hubs. */
+  view?: View;
+  caps?: Caps;
   name: string;
   goal: string;
   cwd: string;
@@ -90,6 +129,7 @@ export interface Session {
 
 export interface NewSession {
   engine: Engine;
+  view?: View;
   name: string;
   cwd: string;
   goal?: string;
