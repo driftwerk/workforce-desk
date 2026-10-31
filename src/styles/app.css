@@ -895,6 +895,12 @@ button {
   line-height: 1.55;
   white-space: pre-wrap;
 }
+/* The rich renderer draws code in the system's monospace: the emoji fonts
+   go after it, as they do in every stack. */
+.rich :not(pre) > code,
+.rich pre code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace, var(--font-emoji);
+}
 .msg-text pre code {
   font-family: var(--font-mono);
   font-size: var(--font-size-code);

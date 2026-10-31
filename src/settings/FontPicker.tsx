@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { EMOJI_STACK } from "../theme/tokens";
 import { listboxKey } from "../ui/listbox";
 
 /** The fonts Desk carries itself, offered first. */
@@ -23,7 +24,7 @@ export const matching = (options: readonly FontOption[], query: string): FontOpt
 };
 
 /** A CSS font stack that draws `name`, or the system's face without it. */
-export const faceOf = (name: string): string => `"${name.replace(/["\\]/g, "")}", system-ui`;
+export const faceOf = (name: string): string => `"${name.replace(/["\\]/g, "")}", system-ui, ${EMOJI_STACK}`;
 
 /** The most options drawn at once (each loads its own face); typing finds the rest. */
 const SHOWN = 80;

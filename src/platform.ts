@@ -83,6 +83,9 @@ export interface Settings {
   /** The groups and names above were handed to the local hub, which keeps
    *  them from then on; they stay here for a hub that can't. */
   layoutOnHub?: boolean;
+  /** Emoticons typed in a message (`<3`, `:)`) become emoji; older files
+   *  have none (on). */
+  emoticons?: boolean;
 }
 
 export interface ThemeFile {

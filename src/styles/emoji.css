@@ -1,0 +1,143 @@
+/* ── Emoji in composers: the :shortcode list and the picker ─────────────── */
+
+/* The list and the picker open over the composer, from its edge. */
+.composer {
+  position: relative;
+}
+
+.emoji-glyph {
+  flex: none;
+  width: 22px;
+  font-family: var(--font-emoji);
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
+}
+
+/* Over everything, placed from the button (see EmojiButton). */
+.emoji-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 336px;
+  max-width: calc(100vw - 32px);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.25);
+  overflow: hidden;
+}
+.emoji-picker {
+  display: flex;
+  flex-direction: column;
+  height: 380px;
+  max-height: 100%;
+  min-height: 0;
+}
+.emoji-search {
+  margin: 10px 10px 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  color: var(--text);
+  outline: none;
+}
+.emoji-search:focus-visible {
+  border-color: var(--signal);
+}
+.emoji-categories {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.emoji-categories button {
+  flex: 1;
+  padding: 4px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-emoji);
+  font-size: 16px;
+  line-height: 1.2;
+  filter: grayscale(0.6);
+}
+.emoji-categories button:hover,
+.emoji-categories button:focus-visible {
+  background: var(--sunken);
+  filter: none;
+}
+.emoji-recent {
+  padding: 4px 6px 0;
+}
+.emoji-recent-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+.emoji-viewport {
+  flex: 1;
+  min-height: 0;
+  outline: none;
+}
+.emoji-category {
+  display: block;
+  padding: 6px 6px 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--faint);
+  background: var(--raised);
+}
+.emoji-list {
+  padding: 0 6px 6px;
+}
+.emoji-cell,
+.emoji-list [frimousse-emoji] {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-emoji);
+  font-size: 20px;
+  line-height: 1;
+}
+.emoji-cell:hover,
+.emoji-cell:focus-visible,
+.emoji-list [frimousse-emoji][data-active] {
+  background: var(--sunken);
+}
+.emoji-note {
+  display: block;
+  padding: 16px;
+  text-align: center;
+}
+.emoji-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+}
+.emoji-active {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.emoji-tones {
+  flex: none;
+  padding: 2px;
+}
+.emoji-tones button {
+  flex: none;
+  min-height: 26px;
+  padding: 2px 4px;
+  font-family: var(--font-emoji);
+  font-size: 15px;
+}

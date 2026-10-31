@@ -13,6 +13,7 @@ import {
   type TurnPhase,
 } from "./types";
 import { backoff, detach, keepAlive } from "../hub/socket";
+import { clip } from "../ui/graphemes";
 
 /** What a turn is doing: sending, waiting on the model, writing, running a
  *  tool, tidying its context, or held by a rate limit or a model switch. */
@@ -97,7 +98,7 @@ export const emptyConversation = (): ConversationState => ({
 export const toolStep = (raw: string): string => {
   const [name, ...rest] = raw.split(": ");
   const detail = rest.join(": ").trim();
-  return detail ? `${name} — ${detail.length > 80 ? `${detail.slice(0, 80)}…` : detail}` : (name ?? raw);
+  return detail ? `${name} — ${clip(detail, 80)}` : (name ?? raw);
 };
 
 const STEPS: Record<TurnPhase, string> = {
