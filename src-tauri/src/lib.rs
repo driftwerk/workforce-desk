@@ -758,6 +758,7 @@ pub fn run() {
             attachments::attachment_upload,
             voice::voice_enable,
             voice::voice_disable,
+            voice::voice_claim,
             voice::voice_set_roster,
             voice::voice_push_to_talk,
             voice::voice_speak,

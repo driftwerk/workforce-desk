@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use eyre::Result;
 
-use crate::conversation::Timing;
+use crate::conversation::{ListenMode, Timing};
 use crate::decode::Audio;
 use crate::hub::CloudSpeech;
 use crate::resample::{Resampler, SPEECH_RATE};
@@ -23,10 +23,11 @@ use crate::{AudioIn, Models, SharedAudioOut, VoiceEngine, VoiceEvents, VoiceStat
 enum Input {
     Audio(Vec<f32>, u32),
     Names(Vec<String>),
+    Mode(ListenMode),
     PushToTalk(bool),
-    Speak(Speech, bool),
+    Speak(Speech),
     StopSpeaking,
-    Spoken { generation: u64, more: bool },
+    Spoken { generation: u64 },
     Shutdown,
 }
 
@@ -38,7 +39,6 @@ enum Speech {
 
 struct Job {
     speech: Speech,
-    more: bool,
     generation: u64,
 }
 
@@ -113,6 +113,12 @@ impl Cascade {
     fn send(&self, input: Input) {
         let _ = self.tx.send(input);
     }
+
+    /// Listens this way from now on: by name, or for the one conversation
+    /// that holds the microphone (see [`ListenMode`]).
+    pub fn set_mode(&self, mode: ListenMode) {
+        self.send(Input::Mode(mode));
+    }
 }
 
 impl VoiceEngine for Cascade {
@@ -124,12 +130,12 @@ impl VoiceEngine for Cascade {
         self.send(Input::PushToTalk(pressed));
     }
 
-    fn speak(&self, text: String, more: bool, voice: Option<VoiceSpec>) {
-        self.send(Input::Speak(Speech::Text(text, voice), more));
+    fn speak(&self, text: String, voice: Option<VoiceSpec>) {
+        self.send(Input::Speak(Speech::Text(text, voice)));
     }
 
     fn play(&self, audio: Audio) {
-        self.send(Input::Speak(Speech::Audio(audio), false));
+        self.send(Input::Speak(Speech::Audio(audio)));
     }
 
     fn stop_speaking(&self) {
@@ -201,31 +207,28 @@ impl Worker {
                     tracing::warn!("voice: {e:#}");
                 }
             }
+            Input::Mode(mode) => self.listener.set_mode(mode, now),
             Input::PushToTalk(true) => {
                 if self.listener.start_push_to_talk(now) {
                     self.silence();
                 }
             }
             Input::PushToTalk(false) => self.listen(|l, out| l.finish_push_to_talk(now, out)),
-            Input::Speak(speech, more) => {
+            Input::Speak(speech) => {
                 self.pending += 1;
                 self.listener.speaking();
                 let generation = self.generation.load(Ordering::SeqCst);
-                let _ = self.jobs.send(Job {
-                    speech,
-                    more,
-                    generation,
-                });
+                let _ = self.jobs.send(Job { speech, generation });
             }
             Input::StopSpeaking => {
                 self.silence();
-                self.listener.spoken(now, false);
+                self.listener.spoken(now);
             }
-            Input::Spoken { generation, more } => {
+            Input::Spoken { generation } => {
                 if generation == self.generation.load(Ordering::SeqCst) && self.pending > 0 {
                     self.pending -= 1;
                     if self.pending == 0 {
-                        self.listener.spoken(now, more);
+                        self.listener.spoken(now);
                     }
                 }
             }
@@ -246,6 +249,7 @@ impl Worker {
             }
             Heard::Transcribing => set_state(state, events, VoiceState::Transcribing),
             Heard::Utterance(u) => events.utterance(&u),
+            Heard::Nothing => events.unheard(),
         });
         if barged {
             self.pending = 0;
@@ -311,12 +315,7 @@ struct Mouth {
 
 impl Mouth {
     fn run(&self, jobs: &Receiver<Job>) {
-        while let Ok(Job {
-            speech,
-            more,
-            generation,
-        }) = jobs.recv()
-        {
+        while let Ok(Job { speech, generation }) = jobs.recv() {
             let parts = match speech {
                 Speech::Audio(audio) => vec![Part::Audio(audio)],
                 Speech::Text(text, voice) => sentences(&text)
@@ -324,11 +323,11 @@ impl Mouth {
                     .map(|s| Part::Text(s, voice.clone()))
                     .collect(),
             };
-            self.say(parts, generation, more);
+            self.say(parts, generation);
         }
     }
 
-    fn say(&self, parts: Vec<Part>, generation: u64, more: bool) {
+    fn say(&self, parts: Vec<Part>, generation: u64) {
         let current = || self.generation.load(Ordering::SeqCst) == generation;
         let mut cloud_failed = false;
         let mut scheduled = false;
@@ -347,7 +346,7 @@ impl Mouth {
             let done: Box<dyn FnOnce() + Send> = if last {
                 let tx = self.tx.clone();
                 Box::new(move || {
-                    let _ = tx.send(Input::Spoken { generation, more });
+                    let _ = tx.send(Input::Spoken { generation });
                 })
             } else {
                 Box::new(|| {})
@@ -356,12 +355,13 @@ impl Mouth {
             scheduled = last;
         }
         if !scheduled {
-            let _ = self.tx.send(Input::Spoken { generation, more });
+            let _ = self.tx.send(Input::Spoken { generation });
         }
     }
 
     /// A sentence as audio, in its voice. A cloud voice that can't speak is
-    /// reported once, and Kokoro says the rest.
+    /// reported once, and Kokoro says the rest, without the cloud voice's
+    /// directions, which Kokoro would read out.
     fn render(&self, part: Part, cloud_failed: &mut bool) -> Option<Audio> {
         let (text, voice) = match part {
             Part::Audio(audio) => return Some(audio),
@@ -382,6 +382,10 @@ impl Mouth {
             .as_ref()
             .filter(|v| v.provider == crate::voices::Provider::Kokoro)
             .and_then(|v| v.voice.as_deref());
+        let text = crate::directions::without_directions(&text);
+        if text.trim().is_empty() {
+            return None;
+        }
         self.voices.kokoro.synthesize(&text, kokoro)
     }
 }

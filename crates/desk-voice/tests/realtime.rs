@@ -153,6 +153,7 @@ impl VoiceEvents for Recorded {
     fn utterance(&self, utterance: &Utterance) {
         self.said.lock().unwrap().push(utterance.clone());
     }
+    fn unheard(&self) {}
     fn error(&self, message: &str) {
         self.errors.lock().unwrap().push(message.into());
     }
