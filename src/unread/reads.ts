@@ -100,6 +100,8 @@ const shown = (place: Place, point: ReadPoint) =>
 async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): Promise<void> {
   const hub = hubOf(place);
   if (!hub) return;
+  // Only a hub that keeps DM read points (it says so on its link) takes one.
+  if (place.kind === "dm" && !useChat.getState().hubFeatures[hub.id]?.has("desk.reads")) return;
   try {
     if (place.kind === "dm") {
       await putConversationRead(hub, place.agent, { channel: DESK_DM, at: point.at, message: point.message, mark });

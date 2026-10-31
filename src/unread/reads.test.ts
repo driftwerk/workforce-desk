@@ -30,6 +30,7 @@ beforeEach(() => {
       { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
       { id: "dw", label: "Atlas", url: "https://atlas.example.com", local: false, token: "t" },
     ],
+    hubFeatures: { dw: new Set(["desk.reads"]) },
   });
   useDesk.setState({
     hub: {
@@ -81,6 +82,13 @@ describe("writing read points", () => {
     await advance({ kind: "dm", hub: "dw", agent: "allan" }, { at: at(7), message: "d7" });
     expect(conversationReads).toEqual([{ agent: "allan", read: { channel: "desk", at: at(7), message: "d7", mark: "advance" } }]);
     expect(useReads.getState().dms["dw/allan"]).toEqual({ at: at(7), message: "d7" });
+  });
+
+  it("writes no DM point to a hub that keeps none", async () => {
+    useChat.setState({ hubFeatures: {} });
+    await advance({ kind: "dm", hub: "dw", agent: "allan" }, { at: at(7), message: "d7" });
+    expect(conversationReads).toEqual([]);
+    expect(state.get("unread.pending.dw")).toBeUndefined();
   });
 
   it("keeps what the hub couldn't take while it was away, and sends it as advances when it's back", async () => {
