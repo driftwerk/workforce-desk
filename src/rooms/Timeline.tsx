@@ -1,12 +1,14 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type UIEvent } from "react";
 import { formAnswer } from "../chat/forms";
 import type { ChatMessage } from "../chat/types";
+import { useNeeds } from "../floor/store";
 import { clock, dayName } from "../floor/time";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
 import { useMainHidden, useStowed } from "../panels/Stage";
 import { AT_NEWEST_PX, useAnchoredScroll, useFollowEnd } from "../restore/scroll";
 import { useUi } from "../shell/ui";
+import { inRoom } from "../unread/badges";
 import { placeKey as readKey, type Place } from "../unread/places";
 import { advance, effective, markRoomRead, markUnread, pointOf, unreadFrom, useReads } from "../unread/reads";
 import { useSeen } from "../unread/seen";
@@ -54,6 +56,7 @@ const FLASH_MS = 2_000;
 
 const NO_DRAFTS: RoomDraft[] = [];
 const NO_MESSAGES: RoomMessage[] = [];
+const NO_AUTHORS: string[] = [];
 
 /** A room message as the room shows it; a form an agent posted in it is
  *  answered to that agent, where the form is. Rendered again only when it
@@ -161,6 +164,9 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     return by;
   }, [all]);
   const byThread = useMemo(() => draftsByThread(drafts, all), [drafts, all]);
+  // The Floor's needs placed in the room, read once for every thread's bar.
+  const floorNeeds = useNeeds();
+  const needs = useMemo(() => inRoom(floorNeeds, room.id), [floorNeeds, room.id]);
   const here = byThread.get(thread) ?? NO_DRAFTS;
 
   const anchorKey = thread ? null : `room:${room.id}`;
@@ -392,8 +398,9 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
                     parent={m}
                     count={n}
                     drafts={there}
-                    authors={m.replyAuthors ?? []}
-                    onOpen={() => setRoomThread(room.id, m.id)}
+                    authors={m.replyAuthors ?? NO_AUTHORS}
+                    needs={needs}
+                    opens
                   />
                 </div>
               </Fragment>

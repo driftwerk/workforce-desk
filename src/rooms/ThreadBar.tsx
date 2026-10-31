@@ -1,8 +1,9 @@
+import { memo } from "react";
 import type { FloorNeed } from "../floor/merge";
-import { useNeeds } from "../floor/store";
 import { dayClock } from "../floor/time";
 import type { RoomDraft } from "../hub/store";
 import type { RoomMessage } from "../hub/types";
+import { useUi } from "../shell/ui";
 import { effective, useReads } from "../unread/reads";
 import { useUnread } from "../unread/summary";
 import { MemberMark } from "./MemberMark";
@@ -41,14 +42,16 @@ export const repliesText = (n: number, lastAt: string | null | undefined): strin
 
 /** A thread's bar: who replied, how many and when last, and what's going
  *  on in it; bold while its latest reply is unread. As a button under its
- *  first message, or the thread column's header. */
-export function ThreadBar({
+ *  first message (`opens`), or the thread column's header. Rendered again
+ *  only when what it's given changes, not as an answer streams elsewhere. */
+export const ThreadBar = memo(function ThreadBar({
   room,
   parent,
   count,
   drafts,
   authors,
-  onOpen,
+  needs,
+  opens = false,
 }: {
   room: string;
   parent: RoomMessage;
@@ -56,10 +59,11 @@ export function ThreadBar({
   drafts: readonly RoomDraft[];
   /** Who wrote its replies, latest first. */
   authors: readonly string[];
-  onOpen?: () => void;
+  /** The Floor's needs placed in the room. */
+  needs: readonly FloorNeed[];
+  opens?: boolean;
 }) {
   const author = useAuthor();
-  const needs = useNeeds();
   const point = useReads((s) => s.local[`thread:${room}/${parent.id}`]);
   const floor = useUnread((s) => s.local?.floor);
   const read = effective(point, floor);
@@ -78,11 +82,11 @@ export function ThreadBar({
       {live && <span className={`thread-live thread-${live.kind}`}>· {live.text}</span>}
     </>
   );
-  return onOpen ? (
-    <button type="button" className={`thread-bar small${unread ? " thread-unread" : ""}`} onClick={onOpen}>
+  return opens ? (
+    <button type="button" className={`thread-bar small${unread ? " thread-unread" : ""}`} onClick={() => useUi.getState().setRoomThread(room, parent.id)}>
       {inner}
     </button>
   ) : (
     <span className={`thread-bar thread-bar-head small${unread ? " thread-unread" : ""}`}>{inner}</span>
   );
-}
+});

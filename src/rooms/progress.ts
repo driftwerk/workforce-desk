@@ -10,8 +10,12 @@ export type StepState = "running" | "done" | "failed" | "unfinished";
 export interface Progress {
   /** Chips while short; a step list once long. */
   mode: "chips" | "steps";
-  /** "Working · 4m 10s · 6 steps", "Waiting on you", "Stalled · 40s". */
+  /** "Working · 4m 10s · 6 steps", "Waiting on you", "Stalled · 40s",
+   *  "Stopped · 2 steps". */
   header: string;
+  /** The header without its clock, for a screen reader: it changes only as
+   *  the answer's state or its steps do. */
+  status: string;
   waiting: boolean;
   steps: { name: string; state: StepState; secs: number | null }[];
 }
@@ -30,8 +34,12 @@ const count = (n: number) => `${n} step${n === 1 ? "" : "s"}`;
 
 /** A draft's progress at `now`; `asked` when a Floor need placed in its
  *  thread names its member. */
+const OVER: Partial<Record<RoomDraft["state"], string>> = { failed: "Failed", interrupted: "Interrupted", stopped: "Stopped" };
+
 export const progressOf = (d: RoomDraft, now: number, asked = false): Progress => {
   const over = d.state === "failed" || d.state === "interrupted" || d.state === "stopped";
+  // Asked but not yet answering: nothing has run, and no clock is started.
+  const waitingTurn = d.state === "queued" || d.state === "connecting" || d.state === "busy";
   const waiting = !over && (d.prompts.length > 0 || asked);
   const steps = d.tools.map((t) => ({
     name: t.name,
@@ -39,13 +47,21 @@ export const progressOf = (d: RoomDraft, now: number, asked = false): Progress =
     secs:
       t.startedAt === undefined ? null : t.done ? (t.endedAt === undefined ? null : (t.endedAt - t.startedAt) / 1000) : over ? null : (now - t.startedAt) / 1000,
   }));
-  const header = waiting
-    ? "Waiting on you"
-    : d.state === "stalled"
-      ? `Stalled · ${elapsed(now - (d.stalledSince ?? now))}`
-      : `Working · ${elapsed(now - d.since)}${steps.length ? ` · ${count(steps.length)}` : ""}`;
-  const long = now - d.since > STEP_LIST_AFTER_MS || d.tools.length > STEP_LIST_AFTER_TOOLS;
-  return { mode: long || waiting ? "steps" : "chips", header, waiting, steps };
+  const counted = steps.length ? count(steps.length) : null;
+  const [label, clock, steps_] = waiting
+    ? ["Waiting on you", null, null]
+    : over
+      ? [OVER[d.state]!, null, counted]
+      : waitingTurn
+        ? ["Queued", null, null]
+        : d.state === "stalled"
+          ? ["Stalled", elapsed(now - (d.stalledSince ?? now)), null]
+          : ["Working", elapsed(now - d.since), counted];
+  const header = [label, clock, steps_].filter(Boolean).join(" · ");
+  // A step list once it has run long or run many tools; one over keeps it
+  // only for the steps it had, and one not yet answering has none.
+  const long = !waitingTurn && (now - d.since > STEP_LIST_AFTER_MS || d.tools.length > STEP_LIST_AFTER_TOOLS) && (!over || steps.length > 0);
+  return { mode: long || waiting ? "steps" : "chips", header, status: [label, steps_].filter(Boolean).join(" · "), waiting, steps };
 };
 
 /** A posted message's steps, for its disclosure. */

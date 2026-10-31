@@ -52,6 +52,20 @@ describe("an answer's progress", () => {
     expect(p.waiting).toBe(false);
   });
 
+  it("stops its clock once it's over, and starts none before it answers", () => {
+    const tools = [tool("a", T0, T0 + 10), tool("b", T0 + 20)];
+    expect(progressOf(draft({ state: "stopped", tools }), T0 + 60_000)).toMatchObject({ header: "Stopped · 2 steps", mode: "steps" });
+    expect(progressOf(draft({ state: "failed" }), T0 + 60_000)).toMatchObject({ header: "Failed", mode: "chips" });
+    expect(progressOf(draft({ state: "interrupted", tools }), T0 + 1000)).toMatchObject({ header: "Interrupted · 2 steps", mode: "chips" });
+    for (const state of ["queued", "connecting", "busy"] as const) expect(progressOf(draft({ state }), T0 + 60_000)).toMatchObject({ header: "Queued", mode: "chips" });
+  });
+
+  it("tells a screen reader its state and steps, not its ticking time", () => {
+    const tools = [tool("a", T0, T0 + 10)];
+    expect(progressOf(draft({ tools }), T0 + 25_000).status).toBe("Working · 1 step");
+    expect(progressOf(draft({ tools }), T0 + 26_000).status).toBe("Working · 1 step");
+  });
+
   it("reads a posted answer's steps", () => {
     expect(stepsOf([{ tool: "ci.status", ok: false, ms: 1500 }])).toEqual([{ name: "ci.status", state: "failed", secs: 1.5 }]);
     expect(secsLabel(1.5)).toBe("1.5s");

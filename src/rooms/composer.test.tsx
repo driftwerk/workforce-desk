@@ -128,7 +128,8 @@ describe("answers on their way in a room", () => {
     render(<RoomView room={room} />);
     expect(screen.getByText("Two PRs are")).toBeTruthy();
     // It asks you something first: its card says it's waiting on you.
-    expect(screen.getByText("Waiting on you")).toBeTruthy();
+    // Shown, and said to a screen reader without its clock.
+    expect(screen.getAllByText("Waiting on you")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Always allow" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retried).toEqual(["a2"]);

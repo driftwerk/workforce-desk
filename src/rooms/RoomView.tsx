@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
+import { useNeeds } from "../floor/store";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMessage } from "../hub/types";
 import { AgentMark } from "../ui/Mark";
@@ -18,6 +19,7 @@ import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { SidePanel } from "../panels/Stage";
 import { useFocusRequest } from "../shell/focus";
+import { inRoom } from "../unread/badges";
 
 /** Files dropped anywhere on a room or thread go with its next message. */
 type Files = ReturnType<typeof usePendingFiles>;
@@ -188,6 +190,8 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
   const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const author = useAuthor();
+  const floorNeeds = useNeeds();
+  const needs = useMemo(() => inRoom(floorNeeds, room.id), [floorNeeds, room.id]);
   if (!parent) return null;
   const replies = all.filter((m) => m.threadId === parent.id);
   const writers = [...new Set([parent.author, ...replies.map((m) => m.author)])];
@@ -213,6 +217,7 @@ export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
             count={parent.replyCount ?? replies.length}
             drafts={drafts.filter((d) => d.threadId === parent.id)}
             authors={parent.replyAuthors ?? []}
+            needs={needs}
           />
         </span>
       }

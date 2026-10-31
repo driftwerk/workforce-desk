@@ -43,9 +43,14 @@ export function Progress({ draft, asked = false, onStop }: { draft: RoomDraft; a
       </>
     );
   return (
-    <div className={`prog${p.waiting ? " prog-waiting" : ""}`} aria-live="polite">
+    <div className={`prog${p.waiting ? " prog-waiting" : ""}`}>
       <span className="prog-head">
-        <span className={p.waiting ? "state-blocked" : draft.state === "stalled" ? "faint" : "state-working"}>{p.header}</span>
+        <span className={p.waiting ? "state-blocked" : draft.state === "live" ? "state-working" : "faint"} aria-hidden="true">
+          {p.header}
+        </span>
+        <span className="sr-only" aria-live="polite">
+          {p.status}
+        </span>
         {stop}
       </span>
       <Steps steps={p.steps} />
