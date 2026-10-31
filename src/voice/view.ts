@@ -1,4 +1,5 @@
 import type { VoiceStatus } from "./api";
+import type { MicState } from "./mic";
 
 export type Step = "heard" | "transcribing" | "thinking" | "speaking";
 
@@ -26,6 +27,13 @@ export interface HoldToTalk {
   available: boolean;
 }
 
+/** A DM has the microphone: its agent's name, and whether voice by name
+ *  is on (and so paused until it's given back). */
+export interface MicHeld {
+  name: string;
+  byName: boolean;
+}
+
 /** What the voice pill says for the engine's state. */
 export const pillView = (
   s: VoiceStatus,
@@ -33,8 +41,17 @@ export const pillView = (
   heardBy: string | null,
   transcript: string,
   hold: HoldToTalk,
+  mic: MicHeld | null = null,
 ): PillView => {
   const quoted = transcript ? `“${transcript}”` : "";
+  if (mic && s.state !== "downloading")
+    return {
+      agent: mic.name,
+      title: `${mic.name} has the mic`,
+      detail: mic.byName ? "Voice by name is paused until you finish in the DM" : `Talking with ${mic.name} in the DM`,
+      step: null,
+      progress: null,
+    };
   switch (s.state) {
     case "off":
       return { agent: null, title: "Voice is off", detail: "Turn it on to talk to agents by name", step: null, progress: null };
@@ -89,4 +106,46 @@ export const pillView = (
         progress: null,
       };
   }
+};
+
+/** What a DM's voice bar says. */
+export interface DmVoiceView {
+  line: string;
+  detail: string | null;
+  /** The bar says what went wrong. */
+  problem: boolean;
+  /** Its answer is being read aloud: it can be stopped. */
+  speaking: boolean;
+  /** This DM has the microphone. */
+  live: boolean;
+}
+
+/** The voice bar for agent `key` (`name`), or null when its DM has nothing
+ *  to say about voice: it doesn't have the microphone, nothing said to it
+ *  is waiting, and it isn't being read aloud. */
+export const dmVoiceView = (
+  key: string,
+  name: string,
+  mic: MicState,
+  status: VoiceStatus,
+  waiting: boolean,
+  speakingFor: string | null,
+  written: boolean,
+): DmVoiceView | null => {
+  if (mic.problem?.agent === key) return { line: mic.problem.message, detail: null, problem: true, speaking: false, live: false };
+  const live = mic.hold === key || (mic.talk === key && !mic.hold);
+  const speaking = status.state === "speaking" && speakingFor === key;
+  const view = (line: string, detail: string | null = null): DmVoiceView => ({ line, detail, problem: false, speaking, live });
+  const answers = written ? `${name} answers in writing` : `${name} answers aloud`;
+  if (speaking) return view(`${name} is speaking`, "Talk over it, or stop it");
+  if (live) {
+    if (status.state === "downloading") return view("Getting voice ready", `${Math.round(status.progress * 100)}% · a one-time download, kept on this computer`);
+    if (status.state === "off") return view("Starting the microphone…");
+    if (mic.hold === key && mic.pressed) return view("Listening — let go to send", answers);
+    if (status.state === "transcribing" || mic.hold === key) return view("Transcribing…", answers);
+    if (waiting) return view(`${name} is thinking`, answers);
+    return view(`${name} is listening`, answers);
+  }
+  if (waiting) return view(`${name} is thinking`);
+  return null;
 };

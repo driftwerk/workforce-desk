@@ -4,6 +4,8 @@ import { emptyConversation, type ConversationState } from "../chat/conversation"
 import { useChat } from "../chat/store";
 import { useSettings } from "../settings/store";
 import type { Agent, ChatMessage } from "../chat/types";
+import { useMic } from "./mic";
+import { useVoiceStore } from "./store";
 import { Turns } from "./useVoice";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -23,6 +25,9 @@ const calls = (command: string) => vi.mocked(invoke).mock.calls.filter(([c]) => 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(invoke).mockClear();
+  useMic.setState({ talk: null, hold: null, pressed: false, problem: null });
+  useSettings.setState({ agentVoices: {}, writtenReplies: [], voiceEngine: "cascade" });
+  useVoiceStore.setState({ waiting: {}, speakingFor: null, thinking: false });
   useChat.setState({
     roster: [atlas],
     activeAgent: null,
@@ -39,9 +44,12 @@ const heart = { provider: "kokoro", voice: "af_heart" };
 
 describe("spoken turns", () => {
   it("hands a cloud model's request to the agent and its answer back as a tool result", () => {
+    useSettings.setState({ voiceEngine: "gpt-live" });
     const turns = new Turns();
     turns.heard({ agent: "Atlas", text: "what failed overnight?", callId: "fc-1" });
-    expect(useChat.getState().send).toHaveBeenCalledWith(key, "what failed overnight?", { spoken: true });
+    expect(useChat.getState().send).toHaveBeenCalledWith(key, "what failed overnight?", {
+      voice: { reply: "spoken", speech: { provider: "gpt-live" } },
+    });
     vi.advanceTimersByTime(3_000);
     expect(calls("voice_speak")).toHaveLength(0);
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("**Two** tests failed.") } }));
@@ -49,14 +57,19 @@ describe("spoken turns", () => {
     expect(calls("voice_speak")).toHaveLength(0);
   });
 
-  it("reads the cascade's answers aloud, with an acknowledgement when slow", () => {
+  it("reads the cascade's answers aloud, and says nothing before them", () => {
     const turns = new Turns();
     turns.heard({ agent: "Atlas", text: "what failed overnight?" });
-    vi.advanceTimersByTime(2_100);
-    expect(calls("voice_speak")).toEqual([["voice_speak", { text: "On it.", more: true, voice: fish }]]);
+    expect(useChat.getState().send).toHaveBeenCalledWith(key, "what failed overnight?", {
+      voice: { reply: "spoken", speech: { provider: "fish_audio" } },
+    });
+    expect(useVoiceStore.getState().waiting).toEqual({ [key]: true });
+    vi.advanceTimersByTime(60_000);
+    expect(calls("voice_speak")).toHaveLength(0);
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("Two tests failed.") } }));
-    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "Two tests failed.", more: false, voice: fish }]);
+    expect(calls("voice_speak")).toEqual([["voice_speak", { text: "Two tests failed.", voice: fish }]]);
     expect(calls("voice_tool_result")).toHaveLength(0);
+    expect(useVoiceStore.getState()).toMatchObject({ waiting: {}, speakingFor: key, thinking: false });
   });
 
   it("tells the model when it named someone who isn't there", () => {
@@ -71,6 +84,55 @@ describe("spoken turns", () => {
     useSettings.setState({ agentVoices: { [key]: heart } });
     new Turns().heard({ agent: "Atlas", text: "status?" });
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("All green.") } }));
-    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "All green.", more: false, voice: heart }]);
+    expect(calls("voice_speak").at(-1)).toEqual(["voice_speak", { text: "All green.", voice: heart }]);
+  });
+
+  it("tells the hub the voice an answer is read in, model and all", () => {
+    useSettings.setState({ agentVoices: { [key]: { provider: "fish_audio", model: "s1", voice: "v" } } });
+    new Turns().heard({ agent: "Atlas", text: "status?" });
+    expect(useChat.getState().send).toHaveBeenCalledWith(key, "status?", {
+      voice: { reply: "spoken", speech: { provider: "fish_audio", model: "s1" } },
+    });
+  });
+});
+
+describe("spoken turns in a DM with the microphone", () => {
+  const scout: Agent = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
+  const scoutKey = "local/scout";
+
+  let turns: Turns;
+  beforeEach(() => {
+    turns = new Turns();
+    useChat.setState((s) => ({
+      roster: [atlas, scout],
+      conversations: { ...s.conversations, [scoutKey]: { ...emptyConversation(), connected: true } },
+    }));
+  });
+  afterEach(() => turns.stop());
+
+  it("go to the DM talking, whatever name they open with, without opening anything", () => {
+    useMic.setState({ talk: scoutKey });
+    turns.heard({ agent: "Atlas", text: "Atlas, what about yours?" });
+    expect(useChat.getState().send).toHaveBeenCalledWith(scoutKey, "Atlas, what about yours?", {
+      voice: { reply: "spoken", speech: { provider: "fish_audio" } },
+    });
+    expect(useChat.getState().openDm).not.toHaveBeenCalled();
+  });
+
+  it("go to the DM holding to talk, which then gives the microphone back", () => {
+    useMic.setState({ talk: scoutKey, hold: key, pressed: false });
+    turns.heard({ agent: null, text: "and the build?" });
+    expect(useChat.getState().send).toHaveBeenCalledWith(key, "and the build?", expect.anything());
+    expect(useMic.getState()).toMatchObject({ hold: null, talk: scoutKey });
+  });
+
+  it("are answered in writing when the DM says so: sent as dictated, never read aloud", () => {
+    useMic.setState({ talk: scoutKey });
+    useSettings.setState({ writtenReplies: [scoutKey] });
+    turns.heard({ agent: null, text: "note the release date" });
+    expect(useChat.getState().send).toHaveBeenCalledWith(scoutKey, "note the release date", { voice: { reply: "written" } });
+    useChat.setState((s) => ({ conversations: { ...s.conversations, [scoutKey]: answer("Noted: the 14th.") } }));
+    expect(calls("voice_speak")).toHaveLength(0);
+    expect(useVoiceStore.getState().waiting).toEqual({});
   });
 });
