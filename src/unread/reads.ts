@@ -1,10 +1,12 @@
 import { create } from "zustand";
+import { readConversation } from "../chat/history";
 import { useChat } from "../chat/store";
 import { DESK_DM, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { ReadPoint, ReadRow, RoomMessage } from "../hub/types";
 import { putConversationRead } from "../hubs/surface";
+import { useOverview } from "../overview/store";
 import { deskState } from "../restore/boot";
 import { instant, justBefore } from "../rooms/time";
 import { parsePlace, placeKey, type Place } from "./places";
@@ -127,8 +129,41 @@ async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): P
 export const advance = (place: Place, point: ReadPoint): Promise<void> => {
   if (!laterPoint(point, pointOf(place))) return Promise.resolve();
   shown(place, point);
-  return write(place, point, "advance");
+  return Promise.all([write(place, point, "advance"), checkInRead(place, point)]).then(() => undefined);
 };
+
+// The overseer's check-in is one thing in two places: the brief (the
+// Floor's "Desk report") and its answer in the overseer's DM. The check-in
+// is kept as its turn begins and the answer lands in the DM after, so the
+// DM read through the brief's time has read it, and the brief read has
+// read the first answer after that time in the DM.
+
+/** The brief as a check-in: its time, and the overseer's DM it was said in. */
+export const checkInOf = (): { at: string; dm: Extract<Place, { kind: "dm" }> } | null => {
+  const brief = useOverview.getState().overview?.brief;
+  const hub = localHub();
+  return brief?.at && brief.by.id && hub ? { at: brief.at, dm: { kind: "dm", hub: hub.id, agent: brief.by.id } } : null;
+};
+
+/** Messages read back for the check-in's answer: enough for a check-in's
+ *  turn and what followed it. */
+export const CHECK_IN_PAGE = 20;
+
+/** What reading `place` through `point` reads of the check-in elsewhere. */
+async function checkInRead(place: Place, point: ReadPoint): Promise<void> {
+  const c = checkInOf();
+  if (!c || instant(point.at) < instant(c.at)) return;
+  if (place.kind === "dm" && place.hub === c.dm.hub && place.agent === c.dm.agent) return advance({ kind: "brief" }, { at: c.at, message: null });
+  if (place.kind !== "brief") return;
+  const hub = localHub();
+  const page = hub && (await readConversation(hub, c.dm.agent, { limit: CHECK_IN_PAGE }).catch(() => null));
+  if (!page) return;
+  const after = (m: { at?: string }) => !!m.at && instant(m.at) >= instant(c.at);
+  // Only a page that reaches back before the check-in says which answer is its.
+  if (page.more && page.messages.every(after)) return;
+  const answer = page.messages.find((m) => m.from !== "user" && after(m));
+  if (answer?.at) await advance(c.dm, { at: answer.at, message: answer.id });
+}
 
 /** `place` is unread again from just after `point`: on screen here, it
  *  stays so until it's shown again. */

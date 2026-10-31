@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { FloorNeed } from "../floor/merge";
 import { agent, need, session } from "../floor/testing";
 import type { RoomDraft } from "../hub/store";
-import type { RoomMessage, RoomSummary } from "../hub/types";
+import type { RoomMessage, RoomSummary, Session } from "../hub/types";
+import { unreadRows, type RowSources } from "./rows";
 import {
   badgeOfDm,
   badgeOfFloor,
@@ -39,6 +40,8 @@ const draft = (state: RoomDraft["state"], prompts = 0): RoomDraft => ({
   prompts: Array.from({ length: prompts }, (_, i) => ({ requestId: `p${i}`, tool: "t", content: "", options: {} as never, turnRef: null })),
   state,
 });
+const at = (min: number) => new Date(Date.UTC(2026, 9, 30, 9, min)).toISOString();
+const sources: RowSources = { local: null, dms: {}, rooms: {}, roster: [], sessions: {}, sessionNames: {}, timelines: {}, brief: null, ready: null, readyAt: at(0) };
 const dm = (count: number, forYou: number) => ({ count, for_you: forYou, first: null, last: null, capped: false });
 
 describe("badges", () => {
@@ -81,10 +84,34 @@ describe("badges", () => {
     expect(badgeOfFloor([], { count: 4, lastAt: null }, null)).toEqual({ count: 0, dot: true });
   });
 
-  it("totals each item once, with a dot only for what's only new", () => {
-    const local = { floor: "", rooms: [summary], sessions: [{ id: "s1", since: "", urgency: "forYou" as const }], activity: { count: 0, lastAt: null }, brief: "x", update: null };
-    expect(totalOf({ needs: [inRoomNeed, dmNeed, blocked], dms: { "dw/allan": dm(4, 1) }, local, drafts: { r1: [draft("failed")] }, update: false })).toEqual({ count: 10, dot: false });
-    expect(totalOf({ needs: [], dms: {}, local: null, drafts: {}, update: true })).toEqual({ count: 0, dot: true });
+  it("totals each item once, as the Unread page lists it, with a dot only for a listed row that's only new", () => {
+    const room = { id: "r1", slug: "r1", name: "Atlas launch", members: [], defaultMember: null, createdAt: "", updatedAt: "" };
+    const local = { floor: "", rooms: [summary], sessions: [{ id: "s1", since: at(1), urgency: "forYou" as const }], activity: { count: 0, lastAt: null }, brief: at(2), update: null };
+    const rows = unreadRows({
+      ...sources,
+      local,
+      dms: { "dw/allan": dm(4, 1) },
+      rooms: { r1: room },
+      sessions: { s1: { id: "s1", name: "fix", engine: "claude", state: "done" } as Session },
+      brief: { text: "Morning", at: at(2), by: { id: "desk", name: "Desk" } },
+    });
+    // 3 needs, 1 in the DM, 1 + 2 in the room and its thread, the session, the brief, a failed draft.
+    expect(totalOf({ needs: [inRoomNeed, dmNeed, blocked], rows, drafts: { r1: [draft("failed")] } })).toEqual({ count: 10, dot: false });
+  });
+
+  it("lights nothing for what the page doesn't list: Activity, an update before the hub is read, a place this window doesn't know", () => {
+    const local = {
+      floor: "",
+      rooms: [{ roomId: "gone", main: unread(2, 0), threads: [] }],
+      sessions: [{ id: "unknown", since: at(1), urgency: "new" as const }],
+      activity: { count: 7, lastAt: at(3) },
+      brief: at(2),
+      update: null,
+    };
+    expect(totalOf({ needs: [], rows: unreadRows({ ...sources, local }), drafts: {} })).toEqual({ count: 0, dot: false });
+    expect(totalOf({ needs: [], rows: unreadRows({ ...sources, ready: "1.4.0" }), drafts: {} })).toEqual({ count: 0, dot: false });
+    // Listed, the update is a dot.
+    expect(totalOf({ needs: [], rows: unreadRows({ ...sources, local, ready: "1.4.0" }), drafts: {} })).toEqual({ count: 0, dot: true });
   });
 
   it("reads an item's badge from its key", () => {

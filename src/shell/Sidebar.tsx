@@ -25,12 +25,14 @@ import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
 
-/** The Unread page's row: everything new for you, each item once. */
+/** The Unread page's row: everything new for you, each item once; with
+ *  nothing to show it goes, but while the page is open. */
 function UnreadRow() {
   const on = useDesk((s) => s.view === "rooms" && s.inbox);
   const setInbox = useDesk((s) => s.setInbox);
   const keys = useSettings((s) => s.keys);
   const total = useTotal();
+  if (!total.count && !total.dot && !on) return null;
   return (
     <button
       type="button"

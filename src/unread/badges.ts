@@ -5,6 +5,7 @@ import type { RoomDraft } from "../hub/store";
 import type { Count, ReadPoint, RoomSummary, SessionUnread, Unread, UnreadSummary } from "../hub/types";
 import type { ConversationUnread } from "../hubs/surface";
 import { instant } from "../rooms/time";
+import { countRows, type UnreadRow } from "./rows";
 
 // Every badge Desk shows, from one set of rules: a number counts what needs
 // you and what's for you, a dot means only something new. Each item is
@@ -83,8 +84,10 @@ export const notHere = (
   if (!local) return local;
   const rooms = local.rooms.map((r) => roomNotHere(r, points, here));
   const sessions = local.sessions.filter((u) => !(here(`session:${u.id}`) || readBy(u.since, points[`session:${u.id}`])));
-  const same = sessions.length === local.sessions.length && rooms.every((r, i) => r === local.rooms[i]);
-  return same ? local : { ...local, rooms, sessions };
+  // The brief read here (or through the overseer's DM) before its hub counts again.
+  const brief = readBy(local.brief, points.brief) ? null : local.brief;
+  const same = sessions.length === local.sessions.length && rooms.every((r, i) => r === local.rooms[i]) && brief === local.brief;
+  return same ? local : { ...local, rooms, sessions, brief };
 };
 
 /** DMs less those on screen here. */
@@ -137,36 +140,23 @@ export const badgeOfGrid = badgeOfGroup;
 export const badgeOfFloor = (needs: readonly FloorNeed[], activity: Count | undefined, brief: string | null | undefined): Badge =>
   badge(needs.length + (brief ? 1 : 0), (activity?.count ?? 0) > 0);
 
-/** Everything, each item once: every need on every hub, then what's for you
- *  in DMs, rooms and threads, sessions, the brief, failed and stopped
- *  drafts; a dot for anything only new. */
+/** Everything, each item once, as the Unread page lists it: every need on
+ *  every hub, failed and stopped drafts, and what's for you in the page's
+ *  rows; a dot only for a row that's only new. What the page doesn't list
+ *  (Activity, a place this window doesn't know) lights nothing. */
 export const totalOf = (all: {
   needs: readonly FloorNeed[];
-  dms: Readonly<Record<string, ConversationUnread>>;
-  local: UnreadSummary | null;
+  rows: readonly UnreadRow[];
   drafts: Readonly<Record<string, readonly RoomDraft[]>>;
-  update: boolean;
 }): Badge => {
-  const dms = Object.values(all.dms);
-  const rooms = all.local?.rooms ?? [];
-  const sessions = all.local?.sessions ?? [];
-  const drafts = Object.values(all.drafts).flat();
-  const roomsFor = rooms.reduce((n, r) => n + r.main.forYou + r.threads.reduce((m, t) => m + t.unread.forYou, 0), 0);
-  const count =
-    all.needs.length +
-    dms.reduce((n, u) => n + u.for_you, 0) +
-    roomsFor +
-    sessions.filter((u) => u.urgency !== "new").length +
-    (all.local?.brief ? 1 : 0) +
-    drafts.filter(settledBadly).length;
-  const anyNew =
-    dms.some((u) => u.count > u.for_you) ||
-    rooms.some((r) => newIn(r.main) > 0 || r.threads.some((t) => newIn(t.unread) > 0)) ||
-    sessions.some((u) => u.urgency === "new") ||
-    (all.local?.activity.count ?? 0) > 0 ||
-    all.update;
-  return badge(count, anyNew);
+  const listed = countRows(all.rows);
+  const count = all.needs.length + listed.forYou + stuckOf(all.drafts).length;
+  return badge(count, listed.anyNew);
 };
+
+/** The failed and stopped answers in every room, which need you. */
+export const stuckOf = (drafts: Readonly<Record<string, readonly RoomDraft[]>>): { room: string; draft: RoomDraft }[] =>
+  Object.entries(drafts).flatMap(([room, ds]) => ds.filter(settledBadly).map((draft) => ({ room, draft })));
 
 /** What a sidebar item's badge is read from. */
 export interface BadgeData {
