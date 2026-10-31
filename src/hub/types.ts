@@ -290,7 +290,56 @@ export type DeskEvent =
   /** A key of Desk's restorable state changed on the hub (null: removed). */
   | { type: "state"; key: string; value: unknown }
   /** A place's read point moved, in this window or another. */
-  | { type: "read"; place: string; point: ReadPoint };
+  | { type: "read"; place: string; point: ReadPoint }
+  /** A session's spend changed: what its engine recorded was read. */
+  | { type: "spend"; session: string };
+
+// ── Spend: what sessions cost, from the hub's ledger ─────────────────────
+
+/** A call's tokens; `reasoning` is already inside `output`. */
+export interface Tokens {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+}
+
+export type Billing = "plan" | "key" | "vendor" | "unknown";
+
+export interface SpendTotals {
+  tokens: Tokens;
+  /** At API list prices from the hub's table: what a key pays, and what a
+   *  plan's calls are worth ("API-equivalent"). */
+  usd: number;
+  calls: number;
+  unpricedCalls: number;
+  /** Models with no price in the hub's table. */
+  unpricedModels: string[];
+  billing: Billing[];
+}
+
+export interface SpendRow {
+  key: string;
+  label: string;
+  session: string | null;
+  engine: Engine | null;
+  folder: string | null;
+  totals: SpendTotals;
+}
+
+export type SpendBy = "session" | "project" | "day" | "engine" | "account";
+export type SpendPeriod = "five_hours" | "day" | "week" | "month";
+
+export interface SpendView {
+  from: string;
+  to: string;
+  by: SpendBy;
+  total: SpendTotals;
+  rows: SpendRow[];
+  /** Rows past the limit, left out. */
+  more: number;
+}
 
 // ── Unread: read points and what's after them ────────────────────────────
 

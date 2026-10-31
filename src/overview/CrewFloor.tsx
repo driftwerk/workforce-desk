@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
+import { SpendCard } from "../spend/SpendCard";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
 import { isAgentTurn } from "../floor/needs";
@@ -136,6 +137,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
             <>
               <RightNow brief={brief || null} />
               <PlanCards />
+              <SpendCard />
               <Today now={now} />
             </>
           ) : (
