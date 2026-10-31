@@ -6,6 +6,7 @@ import type {
   ActivityFilter,
   ActivityPage,
   Decision,
+  EngineInfo,
   DeskEvent,
   Manager,
   NewRoomMessage,
@@ -226,6 +227,16 @@ export class DeskHub {
 
   sessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions");
   start = (s: NewSession): Promise<Session> => this.call("POST", "/api/desk/sessions", s);
+  /** Every engine the hub knows: installed, its version and sign-in, and
+   *  where it starts it; null from a hub that doesn't say (an older one). */
+  engines = async (): Promise<EngineInfo[] | null> => {
+    try {
+      return await this.call<EngineInfo[]>("GET", "/api/desk/engines");
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return null;
+      throw e;
+    }
+  };
   update = (id: string, patch: { name?: string; goal?: string; approvals?: "desk" | "terminal" }): Promise<Session> =>
     this.call("PATCH", `/api/desk/sessions/${id}`, patch);
   stop = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/stop`);

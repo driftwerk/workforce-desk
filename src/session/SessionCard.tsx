@@ -17,8 +17,9 @@ import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actio
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
+import { ENGINE_TITLE } from "../engines/engines";
 
-const ENGINE: Record<Session["engine"], string> = { claude: "Claude Code", codex: "Codex" };
+const ENGINE = ENGINE_TITLE;
 
 const where = (s: Session): string => {
   const background = backgroundOf(s);

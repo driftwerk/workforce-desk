@@ -7,6 +7,7 @@ export const SETTINGS_SECTIONS = {
   chat: "Chat",
   hubs: "Workspaces",
   providers: "Providers",
+  engines: "Engines",
   voices: "Voices",
   calls: "Calls and voice",
   shortcuts: "Shortcuts",

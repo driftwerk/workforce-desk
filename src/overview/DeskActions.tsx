@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
-import type { DeskExtras, Engine } from "../hub/types";
+import type { DeskExtras } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { since } from "../floor/time";
 import { openLocalDm, openSession, useKnownSession, useLocalAgent } from "./people";
 import { useOverview } from "./store";
 import { homeShort } from "../ui/paths";
+import { ENGINE_TITLE } from "../engines/engines";
 
-const ENGINE: Record<Engine, string> = { claude: "Claude Code", codex: "Codex" };
+const ENGINE = ENGINE_TITLE;
 
 type Approval = NonNullable<DeskExtras["approvals"]>[number];
 type Mentioned = NonNullable<DeskExtras["suggestions"]>[number];

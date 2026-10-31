@@ -50,8 +50,9 @@ import {
   renameGroup,
   useLayout,
 } from "./store";
+import { ENGINE_SHORT } from "../engines/engines";
 
-const ENGINE: Record<Session["engine"], string> = { claude: "Claude", codex: "Codex" };
+const ENGINE = ENGINE_SHORT;
 
 const STATE: Record<Session["state"], string> = {
   starting: "starting",

@@ -3,6 +3,7 @@ import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
 import { Chat } from "./Chat";
+import { Engines } from "./Engines";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
 import { Profile } from "./Profile";
@@ -50,6 +51,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "chat" && <Chat />}
       {section === "hubs" && <Hubs />}
       {section === "providers" && <Providers />}
+      {section === "engines" && <Engines />}
       {section === "voices" && <Voices />}
       {section === "calls" && <Calls />}
       {section === "shortcuts" && <Shortcuts />}

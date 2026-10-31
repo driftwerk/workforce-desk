@@ -762,3 +762,29 @@ legend.set-label {
   align-items: baseline;
   gap: 10px;
 }
+
+/* Settings → Engines: one row per engine, its version, sign-in and what
+   Desk does with it. */
+.engine-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+}
+.engine-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.engine-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}

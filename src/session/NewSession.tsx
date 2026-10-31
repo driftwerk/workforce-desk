@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useDesk } from "../hub/store";
-import type { Engine } from "../hub/types";
+import type { Engine, EngineInfo } from "../hub/types";
 import { pickFolder } from "../platform";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
@@ -15,6 +16,20 @@ export function NewSession({ onClose }: { onClose: () => void }) {
   const [worktree, setWorktree] = useState("");
   const [approvals, setApprovals] = useState<"desk" | "terminal">("desk");
   const [busy, setBusy] = useState(false);
+  const [engines, setEngines] = useState<EngineInfo[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    hub
+      ?.engines()
+      .then((e) => live && setEngines(e))
+      .catch(() => live && setEngines(null));
+    return () => {
+      live = false;
+    };
+  }, [hub]);
+  const offered = startable(engines);
+  const caps = defaultCaps(engines?.find((e) => e.engine === engine));
+  const inDesk = answersInDesk(engine, caps);
 
   const choose = async () => {
     const dir = await pickFolder();
@@ -33,7 +48,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
         cwd,
         name: name || nameFrom(cwd),
         goal,
-        approvals,
+        approvals: inDesk ? approvals : undefined,
         worktree: worktree.trim() || undefined,
         env: await pluginEnv(),
       });
@@ -51,9 +66,9 @@ export function NewSession({ onClose }: { onClose: () => void }) {
       <form className="sheet" onSubmit={submit} aria-label="New session">
         <h2 className="display-md">New session</h2>
         <div className="seg" role="radiogroup" aria-label="Engine">
-          {(["claude", "codex"] as const).map((k) => (
+          {offered.map((k) => (
             <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
-              {k === "claude" ? "Claude Code" : "Codex"}
+              {ENGINE_TITLE[k]}
             </button>
           ))}
         </div>
@@ -78,17 +93,24 @@ export function NewSession({ onClose }: { onClose: () => void }) {
           <span>New worktree (optional branch name)</span>
           <input className="mono" value={worktree} onChange={(e) => setWorktree(e.target.value)} placeholder="desk/auth-fix" />
         </label>
-        <div className="field">
-          <span>Approvals</span>
-          <div className="seg" role="radiogroup" aria-label="Approvals">
-            <button type="button" role="radio" aria-checked={approvals === "desk"} onClick={() => setApprovals("desk")}>
-              In Desk
-            </button>
-            <button type="button" role="radio" aria-checked={approvals === "terminal"} onClick={() => setApprovals("terminal")}>
-              In the terminal
-            </button>
+        {caps?.notes.map((n) => (
+          <p key={n} className="muted small">
+            {n}
+          </p>
+        ))}
+        {inDesk && (
+          <div className="field">
+            <span>Approvals</span>
+            <div className="seg" role="radiogroup" aria-label="Approvals">
+              <button type="button" role="radio" aria-checked={approvals === "desk"} onClick={() => setApprovals("desk")}>
+                In Desk
+              </button>
+              <button type="button" role="radio" aria-checked={approvals === "terminal"} onClick={() => setApprovals("terminal")}>
+                In the terminal
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         <footer className="sheet-foot">
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
