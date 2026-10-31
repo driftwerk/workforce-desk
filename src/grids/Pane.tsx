@@ -121,52 +121,89 @@ export function usePaneLabel(content: PaneContent | null): Label {
   };
 }
 
-/** Taking pane `pane` out of the grid: a session or a conversation just
- *  leaves it (nothing ends); a terminal with something still running in it
- *  asks first, as closing it ends that. A session shown in place of the
- *  terminal it runs in, where no other pane shows that terminal, is that
- *  terminal here: it closes with the pane. */
-function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: () => void; dialog: ReactNode } {
+/** What closing a pane asks: its question, what closing does and doesn't,
+ *  and the red button's label. */
+interface CloseAsk {
+  title: string;
+  says: string;
+  action: string;
+}
+
+/** Taking pane `pane` out of the grid, which always asks first, as a pane's
+ *  close is easily taken for a sidebar item's. A session or a conversation
+ *  just leaves it (nothing ends); a terminal closes, ending what runs in it.
+ *  A session shown in place of the terminal it runs in, where no other pane
+ *  shows that terminal, is that terminal here: it closes with the pane.
+ *  `remove` takes the element focus goes back to if it's kept. */
+function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: (from?: HTMLElement | null) => void; dialog: ReactNode } {
   const [confirm, setConfirm] = useState(false);
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
   const terminalId = pane.content?.kind === "terminal" ? pane.content.terminalId : hosted;
   const running = useTerminals((s) => (terminalId ? describeTerminal(s.byId[terminalId], s.programs[terminalId]).running : null));
-  const shown = useDesk((s) => (hosted && pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined));
-  const inIt = label.tracked ?? (shown?.live ? shown : null);
+  const shown = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined));
+  const inIt = label.tracked ?? (hosted && shown?.live ? shown : null);
   const close = () => closePane(gridId, pane.id, (c) => closeContent(hosted ? { kind: "terminal", terminalId: hosted } : c));
-  const remove = () => {
-    const busy = (pane.content?.kind === "terminal" || hosted) && (inIt || running);
-    if (busy) setConfirm(true);
-    else close();
+  const remove = (from?: HTMLElement | null) => {
+    // Clicking a button doesn't focus it everywhere (WebKit): focused, it's
+    // where the dialog puts focus back when it's kept.
+    from?.focus();
+    setConfirm(true);
   };
+  const keep = () => setConfirm(false);
+  const ask: CloseAsk =
+    pane.content?.kind === "terminal" || hosted
+      ? {
+          title: "Close this terminal?",
+          says: inIt
+            ? `${label.name} is still running in it, and stops when it closes.`
+            : running
+              ? `${running} is still running in it.`
+              : "Its shell stops when it closes.",
+          action: "Close terminal",
+        }
+      : pane.content?.kind === "agent"
+        ? { title: `Close ${label.name}’s pane?`, says: "The conversation stays; you can open it again from the sidebar.", action: "Close pane" }
+        : pane.content?.kind === "session"
+          ? {
+              title: "Close this pane?",
+              says: !shown
+                ? "The session is no longer on the hub; nothing else changes."
+                : shown.state === "stopped" || shown.state === "closed"
+                  ? "The session stays as it is."
+                  : "The session keeps running.",
+              action: "Close pane",
+            }
+          : { title: "Close this empty pane?", says: "It holds nothing, so nothing is lost.", action: "Close pane" };
   const dialog = confirm && (
     <Dialog
-      onClose={() => setConfirm(false)}
+      onClose={keep}
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
             <h1 id={id} className="display-md">
-              Close this terminal?
+              {ask.title}
             </h1>
-            <p>{inIt ? `${label.name} is still running in it, and stops when it closes.` : `${running ?? "A program"} is still running in it.`}</p>
+            <p>{ask.says}</p>
           </span>
-          <CloseButton onClose={() => setConfirm(false)} />
+          <CloseButton onClose={keep} />
         </header>
       )}
     >
       <footer className="dialog-foot">
-        <button type="button" className="btn btn-ghost" data-autofocus onClick={() => setConfirm(false)}>
+        <button type="button" className="btn btn-ghost" onClick={keep}>
           Keep it
         </button>
+        {/* Focused, so Enter closes; Esc keeps it. */}
         <button
           type="button"
           className="btn btn-danger"
+          data-autofocus
           onClick={() => {
             setConfirm(false);
             close();
           }}
         >
-          Close terminal
+          {ask.action}
         </button>
       </footer>
     </Dialog>
@@ -227,7 +264,7 @@ export function GridPane({
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
   const actions = session ? sessionActions(session) : [];
-  const entries = usePaneMenu(gridId, pane, actions, session ?? null, remove);
+  const entries = usePaneMenu(gridId, pane, actions, session ?? null, () => remove(menu?.from));
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
@@ -311,7 +348,7 @@ export function GridPane({
             </svg>
           </button>
           {!(alone && !pane.content) && (
-            <button type="button" className="icon-btn-sm gpane-remove" aria-label="Remove from grid" title="Remove from grid" onClick={remove}>
+            <button type="button" className="icon-btn-sm gpane-remove" aria-label="Remove from grid" title="Remove from grid" onClick={(e) => remove(e.currentTarget)}>
               <RemoveIcon />
             </button>
           )}
@@ -388,7 +425,7 @@ function ParkedItem({ gridId, pane }: { gridId: string; pane: PaneData }) {
         <span className={`gtray-name ${label.mono ? "mono" : ""}`}>{label.name}</span>
         {asking && <span className="state-blocked small">needs you</span>}
       </button>
-      <button type="button" className="icon-btn-sm gtray-remove" aria-label={`Remove ${label.name} from grid`} title="Remove from grid" onClick={remove}>
+      <button type="button" className="icon-btn-sm gtray-remove" aria-label={`Remove ${label.name} from grid`} title="Remove from grid" onClick={(e) => remove(e.currentTarget)}>
         <RemoveIcon />
       </button>
       {dialog}

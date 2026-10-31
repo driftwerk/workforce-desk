@@ -89,6 +89,8 @@ describe("a pane's header", () => {
     const remove = within(pane).getByRole("button", { name: "Remove from grid" });
     expect(remove.getAttribute("title")).toBe("Remove from grid");
     fireEvent.click(remove);
+    expect(screen.getByText("The session keeps running.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
     expect(grid().panes.some((p) => p.content?.kind === "session" && p.content.sessionId === "s0")).toBe(false);
     expect(useDesk.getState().sessions.s0).toBeTruthy();
     expect(closeTerminal).not.toHaveBeenCalled();
@@ -119,6 +121,144 @@ describe("a pane's header", () => {
     expect(closeTerminal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
     expect(closeTerminal).toHaveBeenCalledWith("t1");
+  });
+});
+
+describe("closing a pane", () => {
+  const regionOf = (name: string) => screen.getByRole("region", { name });
+  const closeFrom = (pane: HTMLElement) => fireEvent.click(within(pane).getByRole("button", { name: "Remove from grid" }));
+  const asked = () => {
+    const dialog = screen.getByRole("dialog");
+    return [dialog.querySelector("h1")!.textContent, dialog.querySelector("p")!.textContent];
+  };
+  const panes = () => grid().panes.filter((p) => p.content).length;
+  const scout = () => {
+    vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
+    useChat.setState({
+      roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    });
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("asks first whatever the pane holds, saying what closing does and doesn't", () => {
+    scout();
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "stopped" } } }));
+    layOut(MAIN_GRID, "quarters");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/allan" });
+    deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
+    useTerminals.setState({ programs: { t1: ["zsh"] } });
+    canvas();
+    const said = (pane: HTMLElement) => {
+      closeFrom(pane);
+      const what = asked();
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      return what;
+    };
+    expect(said(regionOf("task-0"))).toEqual(["Close this pane?", "The session keeps running."]);
+    expect(said(regionOf("task-1"))).toEqual(["Close this pane?", "The session stays as it is."]);
+    expect(said(regionOf("Allan"))).toEqual(["Close Allan’s pane?", "The conversation stays; you can open it again from the sidebar."]);
+    const shell = screen.getAllByRole("region").find((r) => r.dataset.dropPane && within(r).queryByText(/Terminal/))!;
+    expect(said(shell)).toEqual(["Close this terminal?", "Its shell stops when it closes."]);
+    expect(panes()).toBe(4);
+    act(() => useDesk.setState((s) => ({ sessions: { s1: s.sessions.s1! } })));
+    expect(said(regionOf("Session"))).toEqual(["Close this pane?", "The session is no longer on the hub; nothing else changes."]);
+    expect(panes()).toBe(4);
+    expect(closeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("asks before closing an empty pane", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    canvas();
+    closeFrom(regionOf("Empty pane"));
+    expect(asked()).toEqual(["Close this empty pane?", "It holds nothing, so nothing is lost."]);
+    fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
+    expect(grid().panes).toHaveLength(1);
+  });
+
+  it("keeps it on Keep it or Esc, focus back in the pane, and closes it on the red button, which Enter presses", () => {
+    scout();
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, { kind: "agent", agent: "local/allan" });
+    canvas();
+    const pane = regionOf("Allan");
+    closeFrom(pane);
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pane.contains(document.activeElement)).toBe(true);
+    closeFrom(pane);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pane.contains(document.activeElement)).toBe(true);
+    expect(panes()).toBe(2);
+    closeFrom(pane);
+    // Enter presses the focused button: the red one.
+    const focused = document.activeElement as HTMLElement;
+    expect(focused.textContent).toBe("Close pane");
+    fireEvent.click(focused);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(grid().panes.some((p) => p.content?.kind === "agent")).toBe(false);
+    expect(useChat.getState().roster).toHaveLength(1);
+  });
+
+  it("asks from the pane's options, chosen from the keyboard, and from the parked tray", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    canvas();
+    const pane = regionOf("task-0");
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    const last = document.activeElement as HTMLElement;
+    expect(last.textContent).toBe("Remove from grid");
+    fireEvent.click(last);
+    expect(asked()).toEqual(["Close this pane?", "The session keeps running."]);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(pane.contains(document.activeElement)).toBe(true);
+    expect(panes()).toBe(2);
+
+    layOutFrom(paneOf("s1").id, "one");
+    const tray = screen.getByRole("region", { name: "Parked (1)" });
+    fireEvent.click(within(tray).getByRole("button", { name: "Remove task-0 from grid" }));
+    expect(asked()).toEqual(["Close this pane?", "The session keeps running."]);
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(panes()).toBe(2);
+    fireEvent.click(within(tray).getByRole("button", { name: "Remove task-0 from grid" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
+    expect(panes()).toBe(1);
+  });
+
+  it("doesn't ask when a pane is given something else, or moved within its grid or to another", () => {
+    layOut(MAIN_GRID, "thirds");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
+    const other = createGrid();
+    useGrids.setState({ active: MAIN_GRID });
+    canvas();
+    // Replace, from its options.
+    fireEvent.click(within(regionOf("task-0")).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Replace" }));
+    act(() => fireEvent.click(within(screen.getByRole("menu", { name: "Replace" })).getByRole("menuitem", { name: /^task-2/ })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Move to grid, from its options.
+    fireEvent.click(within(regionOf("task-2")).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to grid" }));
+    act(() => fireEvent.click(within(screen.getByRole("menu", { name: "Move to grid" })).getByRole("menuitem", { name: useGrids.getState().grids[other]!.name })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGrids.getState().grids[other]!.panes.some((p) => p.content?.kind === "session" && p.content.sessionId === "s2")).toBe(true);
+    // Dragged, within the grid and to the other grid's row.
+    const t = grid().panes.find((p) => p.content?.kind === "terminal")!;
+    const s1 = paneOf("s1");
+    act(() => void dropPane({ gridId: MAIN_GRID, paneId: t.id }, { kind: "pane", gridId: MAIN_GRID, paneId: s1.id, zone: "top" }));
+    act(() => void dropPane({ gridId: MAIN_GRID, paneId: t.id }, { kind: "row", gridId: other }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGrids.getState().grids[other]!.panes.some((p) => p.content?.kind === "terminal")).toBe(true);
+    expect(closeTerminal).not.toHaveBeenCalled();
   });
 });
 
