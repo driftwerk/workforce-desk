@@ -389,7 +389,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Message agents"
-                  sub="Nudge agents and hand them tasks without asking. Agents still ask you before they post or send anything outside Desk; their other tools run under their own permissions"
+                  sub="Nudge agents and hand them tasks without asking. Agents still need you to post or send anything outside Desk, delete anything or change what they remember; their other tools run under their own permissions"
                   checked={o.act.messageAgents}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageAgents: v } }))}
                 />

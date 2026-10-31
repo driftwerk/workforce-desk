@@ -22,7 +22,7 @@ export interface Oversight {
     handOutWork: boolean;
     interrupt: boolean;
     /** Nudge agents and hand them tasks; their turns still can't post or
-     *  send outside Desk without the person. */
+     *  send outside Desk, delete, or change memory without the person. */
     messageAgents: boolean;
     /** Nudge sessions started in another terminal, which may not ask before
      *  they act. */
