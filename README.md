@@ -39,6 +39,34 @@ bundles them. To run the hub supervisor on its own against a scratch folder:
 DESK_HOME=/tmp/desk ./target/debug/desk-hubd --workforce ../workforce-public-desk/target/debug/workforce
 ```
 
+### The keychain in development
+
+Desk keeps its secrets in the keychain as two items under `xyz.driftwerk.desk`.
+`desk-helper-secrets` holds the local hub's secrets and is written only by desk-hubd.
+`desk-app-secrets` holds remote workspaces' device tokens and is written only by the app.
+Each process reads each item once, so reloading the page reads nothing. Secrets
+an older Desk kept one item each are moved into these items the first time
+they're read, and the old items are left for older versions.
+
+The keychain remembers "Always Allow" by a binary's signature. A development
+build only has the linker's ad-hoc signature, which changes with every
+rebuild, so the first run after each rebuild asks once per item. To make
+"Always Allow" stick, sign development builds with a code-signing identity of
+your own:
+
+```sh
+security find-identity -v -p codesigning   # e.g. "Apple Development: …"
+export DESK_DEV_SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)"
+npm run tauri dev
+```
+
+Through Cargo's runner (`scripts/dev-run.sh`), `cargo run` signs `desk` as
+`xyz.driftwerk.desk.dev`, and `stage-sidecars.sh` signs desk-hubd as
+`xyz.driftwerk.desk.helper.dev`. Click "Always Allow" once for each item, and
+later rebuilds don't ask. An ad-hoc identity (`-`) doesn't help, because it
+changes with the build. With `DESK_HOME` set, secrets go to a file instead.
+Signed releases don't ask again after the first "Always Allow".
+
 ## Checks
 
 ```sh

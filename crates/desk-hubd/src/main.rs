@@ -31,6 +31,8 @@ mod supervise;
 #[cfg(unix)]
 fn main() -> eyre::Result<()> {
     use commands::Command;
+    // Desk Helper writes the local hub's secrets, and migrates them.
+    desk_core::vault::writes_as(desk_core::vault::KeyOwner::Helper);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env = std::env::vars().collect();
     let paths = desk_core::Paths::new()?;

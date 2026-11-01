@@ -2,7 +2,7 @@
 //! paired-device token lives with the app's secrets. The local hub is always
 //! first, once `desk-hubd` has paired Desk with it.
 
-use desk_core::backend::Backend;
+use desk_core::backend::{Backend, Connection};
 use desk_core::host::Host;
 use desk_core::{LOCAL_HUB_ID, Paths, Secrets, device_token_account};
 use eyre::Result;
@@ -62,10 +62,24 @@ pub fn app_secrets(paths: &Paths) -> Result<Secrets> {
     Secrets::for_host(paths, &Host::Native)
 }
 
+/// Every hub Desk can reach, with its device token: what each page load
+/// asks. Secrets are read from the store once per process (`desk_core::vault`),
+/// so a reload reads none.
 pub fn accounts(paths: &Paths, backend: Option<&Backend>) -> Result<Vec<HubAccount>> {
+    let local = match backend {
+        Some(b) => b.connection()?,
+        None => None,
+    };
+    accounts_with(paths, local, &app_secrets(paths)?)
+}
+
+fn accounts_with(
+    paths: &Paths,
+    local: Option<Connection>,
+    secrets: &Secrets,
+) -> Result<Vec<HubAccount>> {
     let mut out = Vec::new();
-    if let Some(backend) = backend
-        && let Some(c) = backend.connection()?
+    if let Some(c) = local
         && let Some(token) = c.device_token
     {
         out.push(HubAccount {
@@ -76,7 +90,6 @@ pub fn accounts(paths: &Paths, backend: Option<&Backend>) -> Result<Vec<HubAccou
             token,
         });
     }
-    let secrets = app_secrets(paths)?;
     for r in read_records(paths)? {
         if let Some(token) = secrets.get_account(&device_token_account(&r.id))? {
             out.push(HubAccount {
@@ -143,6 +156,96 @@ pub fn remove(paths: &Paths, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store that counts what it is asked.
+    #[derive(Default)]
+    struct Counted {
+        items: std::sync::Mutex<std::collections::HashMap<String, String>>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl desk_core::vault::Items for Counted {
+        fn get(&self, account: &str) -> Result<Option<String>> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.items.lock().unwrap().get(account).cloned())
+        }
+        fn set(&self, account: &str, value: &str) -> Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.items
+                .lock()
+                .unwrap()
+                .insert(account.into(), value.into());
+            Ok(())
+        }
+        fn delete(&self, account: &str) -> Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.items.lock().unwrap().remove(account);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reloading_the_page_reads_nothing_from_the_keychain() {
+        use desk_core::vault::{KeyOwner, Vault};
+        use std::sync::atomic::Ordering;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        desk_core::write_ports(
+            &paths.hub_state(),
+            &desk_core::HubPorts {
+                postgres: 1,
+                admin: 2,
+                gateway: 3,
+                memory: 4,
+            },
+        )
+        .unwrap();
+        // As an older Desk left them: one item per secret, the helper's and
+        // a remote hub's.
+        let store = std::sync::Arc::new(Counted::default());
+        for (k, v) in [
+            ("hub-gateway-token", "gateway"),
+            ("hub-local-device-token", "local"),
+            ("hub-a-example-com-device-token", "remote"),
+        ] {
+            store.items.lock().unwrap().insert(k.into(), v.into());
+        }
+        write_records(
+            &paths,
+            &[HubRecord {
+                id: "a-example-com".into(),
+                label: "Acme".into(),
+                url: "https://a.example.com".into(),
+            }],
+        )
+        .unwrap();
+        let secrets = Secrets::Keyring(desk_core::Keyring::with(std::sync::Arc::new(
+            Vault::new_as(dir.path(), store.clone(), KeyOwner::App),
+        )));
+        // What a page load asks: the local hub's connection, then every hub.
+        let load = || {
+            let c = desk_core::backend::read_connection(&paths, &secrets)
+                .unwrap()
+                .unwrap();
+            assert_eq!(c.admin_token, "gateway");
+            let all = accounts_with(&paths, Some(c), &secrets).unwrap();
+            assert_eq!(
+                all.iter().map(|a| a.token.as_str()).collect::<Vec<_>>(),
+                ["local", "remote"]
+            );
+        };
+        load();
+        let first = store.calls.load(Ordering::SeqCst);
+        assert!(first > 0);
+        for _ in 0..5 {
+            load();
+        }
+        assert_eq!(
+            store.calls.load(Ordering::SeqCst),
+            first,
+            "a reload reads nothing"
+        );
+    }
 
     #[test]
     fn hub_ids_come_from_the_host() {
