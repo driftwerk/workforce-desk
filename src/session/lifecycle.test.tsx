@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useDesk } from "../hub/store";
+import { deskListeners, useDesk } from "../hub/store";
 import type { HiddenSession, Session } from "../hub/types";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
@@ -141,6 +141,24 @@ describe("removing a session", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(hub.remove).toHaveBeenCalled());
     await waitFor(() => expect(useGrids.getState().grids[MAIN_GRID]!.panes.some((p) => p.content?.kind === "session")).toBe(false));
+  });
+});
+
+describe("a session gone from the hub", () => {
+  it("leaves the panes here however it went: cleared, or removed in another window", () => {
+    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
+    startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+    const showing = () =>
+      useGrids
+        .getState()
+        .grids[MAIN_GRID]!.panes.flatMap((p) => (p.content?.kind === "session" ? [p.content.sessionId] : []))
+        .sort();
+    expect(showing()).toEqual(["s1", "s2"]);
+    for (const f of deskListeners) f({ type: "removed", id: "s1" });
+    expect(showing()).toEqual(["s2"]);
   });
 });
 

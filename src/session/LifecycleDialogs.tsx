@@ -14,6 +14,11 @@ import { clearFinished, closeLifecycle, endSessionNow, removeSession, useLifecyc
 export function LifecycleDialogs() {
   const asking = useLifecycle((s) => s.asking);
   const session = useDesk((s) => (asking && asking.kind !== "clear" ? s.sessions[asking.sessionId] : undefined));
+  // Gone meanwhile (removed in another window): nothing is left to ask.
+  const gone = !!asking && asking.kind !== "clear" && !session;
+  useEffect(() => {
+    if (gone) closeLifecycle();
+  }, [gone]);
   if (!asking) return null;
   if (asking.kind === "clear") return <ClearFinished onClose={closeLifecycle} />;
   if (!session) return null;
@@ -65,6 +70,8 @@ export function RemoveSession({ session, onClose, onRemoved }: { session: Sessio
 }
 
 const DEFAULT_DAYS = 7;
+/** A century: further back than any session, and well within the hub's. */
+const MAX_DAYS = 36500;
 
 /** Asks before removing every session that finished more than N days ago,
  *  saying how many that is. */
@@ -74,7 +81,7 @@ export function ClearFinished({ onClose }: { onClose: () => void }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState(false);
   const daysId = useId();
-  const valid = Number.isInteger(days) && days >= 0;
+  const valid = Number.isInteger(days) && days >= 0 && days <= MAX_DAYS;
   useEffect(() => {
     if (!valid) return;
     let current = true;
@@ -101,7 +108,7 @@ export function ClearFinished({ onClose }: { onClose: () => void }) {
       <p className="muted">Removes every session that stopped or was closed before then, as Remove does: Desk forgets them and won't pick them up again.</p>
       <label className="confirm-days small" htmlFor={daysId}>
         <span>Finished more than</span>
-        <input id={daysId} type="number" min={0} step={1} value={Number.isNaN(days) ? "" : days} onChange={(e) => setDays(e.target.valueAsNumber)} />
+        <input id={daysId} type="number" min={0} max={MAX_DAYS} step={1} value={Number.isNaN(days) ? "" : days} onChange={(e) => setDays(e.target.valueAsNumber)} />
         <span>days ago</span>
       </label>
       <label className="confirm-check small">

@@ -1827,6 +1827,7 @@ button.thread-bar:hover {
 }
 .confirm-check input {
   margin-top: 4px;
+  accent-color: var(--signal);
 }
 .confirm-check input:disabled + span {
   color: var(--faint);

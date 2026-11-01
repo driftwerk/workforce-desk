@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { findContent } from "../grids/engine";
 import { changePanes, useGrids, writes } from "../grids/store";
-import { useDesk } from "../hub/store";
+import { deskListeners, useDesk } from "../hub/store";
 import type { Removed } from "../hub/types";
 
 /** What Desk is asking before it changes a session's life. */
@@ -26,6 +26,12 @@ const emptyPanesOf = (id: string): void => {
     });
   }
 };
+
+// Gone from the hub (removed here or in another window, or cleared in
+// bulk): the panes this window writes stop showing it.
+deskListeners.add((e) => {
+  if (e.type === "removed") emptyPanesOf(e.id);
+});
 
 const hubOf = () => {
   const { hub } = useDesk.getState();
