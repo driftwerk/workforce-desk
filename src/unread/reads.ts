@@ -95,12 +95,101 @@ export const pointOf = (place: Place): ReadPoint | undefined => {
   return place.kind === "dm" ? s.dms[`${place.hub}/${place.agent}`] : s.local[placeKey(place)];
 };
 
-const shown = (place: Place, point: ReadPoint) =>
+// A DM's point moved here is kept here too, until its hub says it has it:
+// a listing that left before the write landed, a hub that refused it or
+// couldn't keep it (a 503), and a restart meanwhile all leave the DM read
+// as you read it, not as the hub last said.
+
+/** DM points moved here that their hubs haven't said they have, by agent
+ *  key, with how they were moved. */
+const KEPT_DMS = "unread.dms.kept";
+
+interface KeptDm {
+  point: ReadPoint;
+  mark: "advance" | "set";
+  /** When this Desk moved it (ms). */
+  since: number;
+  /** When its hub took the write (ms), if it has. */
+  landed?: number;
+}
+
+/** How long a point is kept at most: a hub that never takes it (a DM gone,
+ *  a hub that refuses) doesn't keep it for good. */
+export const KEPT_DM_MS = 14 * 24 * 60 * 60 * 1000;
+/** How long after its hub took a point a listing that says otherwise is
+ *  believed: before that it may have left before the write landed. */
+export const LANDED_GRACE_MS = 30_000;
+
+/** The kept points that are whole; anything else kept is let go. */
+const keptDms = (): Record<string, KeptDm> => {
+  const v = deskState.get(KEPT_DMS);
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const now = Date.now();
+  const out: Record<string, KeptDm> = {};
+  for (const [key, k] of Object.entries(v as Record<string, Partial<KeptDm> | null>)) {
+    const p = k?.point;
+    const whole =
+      !!k &&
+      (k.mark === "advance" || k.mark === "set") &&
+      !!p &&
+      typeof p.at === "string" &&
+      instant(p.at) > 0n &&
+      (p.message === null || typeof p.message === "string") &&
+      typeof k.since === "number" &&
+      now - k.since < KEPT_DM_MS;
+    if (whole) out[key] = k as KeptDm;
+  }
+  return out;
+};
+
+const keepDm = (key: string, kept: KeptDm | null): void => {
+  const { [key]: _was, ...rest } = keptDms();
+  deskState.set(KEPT_DMS, kept ? { ...rest, [key]: kept } : rest);
+};
+
+/** The DM points to show from what `hub` says it holds (`said`, by agent
+ *  key): the hub's, but where this Desk moved one the hub hasn't caught up
+ *  with, this Desk's. One the hub now holds, or has moved past (read on
+ *  another Desk of yours), it no longer keeps. */
+export function dmPointsFrom(hubId: string, said: Readonly<Record<string, ReadPoint>>): Record<string, ReadPoint> {
+  const kept = keptDms();
+  const out: Record<string, ReadPoint> = { ...said };
+  for (const [key, k] of Object.entries(kept)) {
+    if (!key.startsWith(`${hubId}/`)) continue;
+    const theirs = said[key];
+    const caught = theirs && (k.mark === "advance" ? !laterPoint(k.point, theirs) : instant(theirs.at) === instant(k.point.at));
+    // The hub took it and has said something else since: read or marked on
+    // another Desk of yours, which is the hub's to say.
+    const moved = k.landed !== undefined && Date.now() - k.landed > LANDED_GRACE_MS;
+    if (caught || moved) keepDm(key, null);
+    else out[key] = k.point;
+  }
+  return out;
+}
+
+/** The DM points this Desk keeps, shown as they were before a restart. */
+export const restoreKeptDms = (): void => {
+  const kept = keptDms();
+  if (Object.keys(kept).length)
+    useReads.setState((s) => ({ dms: { ...s.dms, ...Object.fromEntries(Object.entries(kept).map(([key, k]) => [key, k.point])) } }));
+};
+
+const shown = (place: Place, point: ReadPoint, mark: "advance" | "set" = "advance") => {
+  if (place.kind === "dm") keepDm(`${place.hub}/${place.agent}`, { point, mark, since: Date.now() });
   useReads.setState((s) =>
     place.kind === "dm"
       ? { dms: { ...s.dms, [`${place.hub}/${place.agent}`]: point } }
       : { local: { ...s.local, [placeKey(place)]: point } },
   );
+};
+
+/** Its hub took `point` for the DM `place`, if that is still the one kept. */
+function landed(place: Place, point: ReadPoint): void {
+  if (place.kind !== "dm") return;
+  const key = `${place.hub}/${place.agent}`;
+  const k = keptDms()[key];
+  if (k && k.point.at === point.at && k.point.message === point.message) deskState.set(KEPT_DMS, { ...keptDms(), [key]: { ...k, landed: Date.now() } });
+}
 
 /** Writes `point` for `place` on its hub, as `mark`. */
 async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): Promise<void> {
@@ -113,6 +202,7 @@ async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): P
   try {
     if (place.kind === "dm") {
       await putConversationRead(hub, place.agent, { channel: DESK_DM, at: point.at, message: point.message, mark });
+      landed(place, point);
       dmWritten(hub);
     } else {
       const desk = useDesk.getState().hub;
@@ -178,7 +268,7 @@ async function checkInRead(place: Place, point: ReadPoint): Promise<void> {
  *  stays so until it's shown again. */
 export const markUnread = (place: Place, point: ReadPoint): Promise<void> => {
   hold(place);
-  shown(place, point);
+  shown(place, point, "set");
   return write(place, point, "set");
 };
 

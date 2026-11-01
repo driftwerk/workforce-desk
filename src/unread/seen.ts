@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useDesk } from "../hub/store";
 import type { ReadPoint } from "../hub/types";
 import { later } from "../rooms/time";
@@ -18,6 +18,19 @@ import { release, useWatching, watchOff, watchOn } from "./watching";
 
 /** How long something must be on screen to be read. */
 export const SEEN_MS = 500;
+
+/** The element `ref` holds, as state, so an effect on it runs again once it
+ *  mounts or changes. A view that first shows a placeholder (a DM still
+ *  connecting, waiting for its hub's roster) mounts its element a render
+ *  later than the hooks that watch it run: an effect that read `ref.current`
+ *  then found nothing, and never looked again. */
+export function useElement<T extends HTMLElement>(ref: RefObject<T | null>): T | null {
+  const [el, setEl] = useState<T | null>(null);
+  useLayoutEffect(() => {
+    if (ref.current !== el) setEl(ref.current);
+  });
+  return el;
+}
 
 
 /** An item of a list, as its point is written. */
@@ -52,8 +65,8 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
   const attention = useAttention();
   const attentionRef = useRef(attention);
   attentionRef.current = attention;
+  const el = useElement(root);
   useEffect(() => {
-    const el = root.current;
     // The place this run reads: one shown next waits its own half second.
     const here = where.current;
     if (!key || !here || !enabled || !el || !items.length || typeof IntersectionObserver === "undefined") return;
@@ -113,7 +126,7 @@ export function useSeen(place: Place | null, root: RefObject<HTMLElement | null>
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [key, enabled, items, root]);
+  }, [key, enabled, items, el]);
 }
 
 /** Reads `place` through `point` once half of `ref`'s element has shown. */
@@ -126,8 +139,8 @@ export function useSeenWhole(place: Place | null, point: ReadPoint | null, ref: 
   attentionRef.current = attention;
   const at = point?.at;
   const message = point?.message ?? null;
+  const el = useElement(ref);
   useEffect(() => {
-    const el = ref.current;
     const here = where.current;
     if (!key || !here || !enabled || !el || !at || typeof IntersectionObserver === "undefined") return;
     let half = false;
@@ -152,7 +165,7 @@ export function useSeenWhole(place: Place | null, point: ReadPoint | null, ref: 
       window.removeEventListener("focus", check);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [key, enabled, at, message, ref]);
+  }, [key, enabled, at, message, el]);
 }
 
 /** Reads `place` while half of `ref`'s element is on screen in this window
@@ -173,8 +186,8 @@ export function useOnScreen(
   where.current = place;
   /** The place being read, once it has stood long enough. */
   const [reading, setReading] = useState<string | null>(null);
+  const el = useElement(ref);
   useEffect(() => {
-    const el = ref.current;
     if (!key || !enabled || !el || typeof IntersectionObserver === "undefined") return;
     let shown = false;
     let on = false;
@@ -234,7 +247,7 @@ export function useOnScreen(
       document.removeEventListener("visibilitychange", attended);
       for (const type of ["pointerdown", "focusin", "keydown"]) el.removeEventListener(type, touched, true);
     };
-  }, [key, enabled, ref]);
+  }, [key, enabled, el]);
 
   const held = useWatching((s) => !!key && !!s.held[key]);
   // This computer's points are written once they're known, so a place's

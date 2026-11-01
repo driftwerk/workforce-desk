@@ -6,8 +6,12 @@ import type { DeskEvent, UnreadSummary } from "../hub/types";
 import { activeConversations, type Active, type ConversationUnread } from "../hubs/surface";
 import { deskState } from "../restore/boot";
 import { shareFocus } from "./focus";
+import { merged } from "../floor/merge";
+import { useFloor } from "../floor/store";
+import { NEEDS_SEEN_KEY, noteSeen, seenFrom, useNeedsSeen } from "./needsSeen";
+import { useWatching } from "./watching";
 import { noticesFrom } from "./notices";
-import { checkInDmRead, flushPending, heard, loadLocal, onDmWritten, useReads } from "./reads";
+import { checkInDmRead, dmPointsFrom, flushPending, heard, loadLocal, onDmWritten, restoreKeptDms, useReads } from "./reads";
 
 // What's unread, as the hubs that own it count it: this computer's hub's
 // summary of its places, and each agent hub's count of your DMs. Read on
@@ -87,12 +91,9 @@ export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
     deskState.set(cacheKey(hub.id), { ...cached(hub.id), at, dms: mine } satisfies Cached);
     return { dms, dmsAt: { ...s.dmsAt, [hub.id]: at } };
   });
-  useReads.setState((s) => ({
-    dms: {
-      ...s.dms,
-      ...Object.fromEntries(dmRows.flatMap((r) => (r.read ? [[`${hub.id}/${r.agent_id}`, { at: r.read.at, message: r.read.message_id }]] : []))),
-    },
-  }));
+  // Forward of what this Desk read and the hub hasn't caught up with.
+  const said = Object.fromEntries(dmRows.flatMap((r) => (r.read ? [[`${hub.id}/${r.agent_id}`, { at: r.read.at, message: r.read.message_id }]] : [])));
+  useReads.setState((s) => ({ dms: { ...s.dms, ...dmPointsFrom(hub.id, said) } }));
   // The overseer's DM read elsewhere has read its check-in, the brief.
   for (const r of dmRows)
     if (r.read) void checkInDmRead({ kind: "dm", hub: hub.id, agent: r.agent_id }, { at: r.read.at, message: r.read.message_id });
@@ -174,17 +175,39 @@ export function startUnread(): () => void {
   const id = localHubId();
   const kept = id ? cached(id) : null;
   if (kept?.local && !useUnread.getState().local) useUnread.setState({ local: kept.local, localAt: kept.at });
+  restoreKeptDms();
   deskListeners.add(onEvent);
   const unwatch = watchDmTurns();
   const unshare = shareFocus();
+  const unsee = watchNeedsSeen();
   return () => {
     deskListeners.delete(onEvent);
     unwatch();
     unshare();
+    unsee();
     clearTimeout(soon);
     for (const t of counting.values()) clearTimeout(t);
     counting.clear();
   };
+}
+
+/** An agent's question in a DM shown here is seen: as the needs and what's
+ *  on screen change. */
+function watchNeedsSeen(): () => void {
+  // As kept with Desk's state, and as another window keeps it.
+  useNeedsSeen.setState({ seen: seenFrom(deskState.get(NEEDS_SEEN_KEY)) });
+  const heard = deskState.subscribe(NEEDS_SEEN_KEY, (key, value) => {
+    if (key === NEEDS_SEEN_KEY) useNeedsSeen.setState({ seen: seenFrom(value) });
+  });
+  const note = () => {
+    // Nothing seen and nothing on screen: nothing to note, or to let go.
+    if (!useNeedsSeen.getState().seen.size && !Object.keys(useWatching.getState().on).length) return;
+    const hubs = useFloor.getState().hubs;
+    if (noteSeen(merged(hubs, useChat.getState().hubs).needs, (hub) => hubs[hub]?.state === "ready"))
+      deskState.set(NEEDS_SEEN_KEY, [...useNeedsSeen.getState().seen]);
+  };
+  const stops = [useFloor.subscribe(note), useWatching.subscribe(note), heard];
+  return () => stops.forEach((stop) => stop());
 }
 
 /** DM counts kept from before, for a hub not heard from yet. */
