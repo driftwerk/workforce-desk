@@ -16,6 +16,7 @@ import {
 } from "../platform";
 import { deskState } from "../restore/boot";
 import { useSettings } from "../settings/store";
+import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut } from "../shortcuts/manager";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
 import { dragWindow } from "../ui/drag";
@@ -116,6 +117,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
   }, [gridId]);
 
   useAppShortcut("newTerminal", () => newTerminal(gridId), !!grid);
+  useAppShortcut("reload", reloadDesk);
   useFillKeys(gridId, !!grid);
 
   if (!ready) return <div className="grid-window" />;

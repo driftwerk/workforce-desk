@@ -65,6 +65,13 @@ export const SHORTCUTS = [
     scope: "app",
   },
   { id: "settings", name: "Settings", about: "Opens Settings, and goes back to your desk.", keys: "Primary+Comma", scope: "app" },
+  {
+    id: "reload",
+    name: "Reload Desk",
+    about: "Reloads Desk’s window, picking up changes. Sessions and terminals keep running.",
+    keys: "Primary+R",
+    scope: "app",
+  },
   { id: "saveFile", name: "Save a file", about: "Saves the agent file you’re editing.", keys: "Primary+S", scope: "app" },
   {
     id: "stopAnswer",
