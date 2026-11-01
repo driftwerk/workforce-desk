@@ -90,6 +90,7 @@ export function SortRow({
   onStartRename,
   onNudge,
   onMenu,
+  onRemove,
   onHover,
   children,
 }: {
@@ -121,6 +122,8 @@ export function SortRow({
   onStartRename?: () => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
+  /** Delete or Backspace on it. */
+  onRemove?: () => void;
   /** The pointer came onto it (true), or left it (false). */
   onHover?: (over: boolean) => void;
   /** After the name and meta: a badge. */
@@ -167,6 +170,9 @@ export function SortRow({
               } else if (e.key === "F2" && onStartRename) {
                 e.preventDefault();
                 onStartRename();
+              } else if ((e.key === "Delete" || e.key === "Backspace") && onRemove && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
+                onRemove();
               } else if (isMenuKey(e)) {
                 e.preventDefault();
                 onMenu(below(e.currentTarget), e.currentTarget);

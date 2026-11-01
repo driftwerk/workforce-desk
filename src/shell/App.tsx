@@ -38,6 +38,7 @@ import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
 import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
+import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
 import { requestFocus } from "./focus";
@@ -316,6 +317,7 @@ export function App() {
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
       <OpenRoomDetails />
+      <LifecycleDialogs />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <UpdateNotice />
       {error && (

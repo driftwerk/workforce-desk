@@ -13,6 +13,7 @@ import type {
   DeskEvent,
   Manager,
   NewRoomMessage,
+  HiddenSession,
   NewSession,
   NewTerminal,
   Overview,
@@ -22,6 +23,7 @@ import type {
   RoomMemberRef,
   RoomMessage,
   SearchHit,
+  Removed,
   Session,
   Suggestion,
   TerminalInfo,
@@ -262,7 +264,24 @@ export class DeskHub {
   dismissAsked = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/asked/dismiss`);
   resume = (id: string, prompt?: string): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/resume`, { prompt });
-  forget = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${id}`);
+  /** Removes a session from Desk: its record, Activity, read points and
+   *  floor turns; never adopted again. Its engine's transcript is deleted
+   *  only when `transcript` (it can't be resumed then). */
+  remove = (id: string, transcript = false): Promise<Removed> => this.call("POST", `/api/desk/sessions/${id}/remove`, { transcript });
+  /** Stops it if it runs here and closes it: it leaves the sidebar and
+   *  stays resumable from Settings → Sessions. */
+  end = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/end`);
+  /** The most recently closed sessions, newest first. */
+  closedSessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions/closed");
+  /** Sessions removed from Desk, which it no longer tracks. */
+  hiddenSessions = (): Promise<HiddenSession[]> => this.call("GET", "/api/desk/sessions/hidden");
+  /** Tracks a removed session again, the next time it runs. */
+  trackAgain = (h: Pick<HiddenSession, "engine" | "cliSessionId">): Promise<void> =>
+    this.call("DELETE", `/api/desk/sessions/hidden/${h.engine}/${encodeURIComponent(h.cliSessionId)}`);
+  /** Removes every session finished more than `olderThanDays` ago, or only
+   *  counts them (`dryRun`). */
+  clearFinished = (c: { olderThanDays: number; dryRun?: boolean; transcripts?: boolean }): Promise<Removed> =>
+    this.call("POST", "/api/desk/sessions/clear", c);
   decide = (id: string, approval: string, decision: Decision): Promise<Session> =>
     this.desk("POST", `/api/desk/sessions/${id}/approvals/${approval}`, { decision });
   /** The person's own name for a session (null or blank: none, so the

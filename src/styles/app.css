@@ -1816,6 +1816,39 @@ button.thread-bar:hover {
   margin: 0;
   line-height: 1.5;
 }
+.confirm-body > * + * {
+  margin-top: 12px;
+}
+.confirm-check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.5;
+}
+.confirm-check input {
+  margin-top: 4px;
+  accent-color: var(--signal);
+}
+.confirm-check input:disabled + span {
+  color: var(--faint);
+}
+.confirm-days {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.confirm-days input {
+  width: 72px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 6px 10px;
+  outline: none;
+  font: inherit;
+}
+.confirm-days input:focus {
+  border-color: var(--signal);
+}
 
 /* Text people may need to copy, in a UI that otherwise isn't selectable. */
 .selectable {

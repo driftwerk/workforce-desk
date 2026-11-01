@@ -51,6 +51,8 @@ import {
   useLayout,
 } from "./store";
 import { ENGINE_SHORT } from "../engines/engines";
+import { lifecycleActions, sessionActions } from "../session/actions";
+import { askLifecycle } from "../session/lifecycle";
 
 const ENGINE = ENGINE_SHORT;
 
@@ -290,6 +292,15 @@ export function SidebarGroups() {
         : []),
       { kind: "separator" },
       { kind: "item", label: "Open", onSelect: () => openItem(item) },
+      ...(item.kind === "session"
+        ? [
+            ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+            { kind: "separator" as const },
+            ...lifecycleActions(item.session).map(
+              (a): MenuEntry => ({ kind: "item", label: a.label, kbd: a.label === "End session…" ? undefined : "⌫", onSelect: a.run }),
+            ),
+          ]
+        : []),
       ...(item.kind === "agent" ? [{ kind: "item" as const, label: "Settings", onSelect: () => openAgentSettings(agentKey(item.agent)) }] : []),
       ...(item.kind === "agent"
         ? [
@@ -306,10 +317,16 @@ export function SidebarGroups() {
     ];
   };
 
-  const groupMenu = (id: string): MenuEntry[] => [
-    { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
-    { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
-  ];
+  const clearing: MenuEntry = { kind: "item", label: "Clear finished sessions…", onSelect: () => askLifecycle({ kind: "clear" }) };
+  const groupMenu = (id: string): MenuEntry[] =>
+    id === UNGROUPED
+      ? [clearing]
+      : [
+          { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
+          { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
+          { kind: "separator" },
+          clearing,
+        ];
 
   const closeMenu = useCallback(
     (refocus: boolean) =>
@@ -383,7 +400,7 @@ export function SidebarGroups() {
           </button>
         </span>
         <span id={`${hint}-session`} className="sr-only">
-          Alt+Up and Alt+Down move it. F2 renames. Shift+F10 opens its menu.
+          Alt+Up and Alt+Down move it. F2 renames. Delete removes it. Shift+F10 opens its menu.
         </span>
         <span id={`${hint}-agent`} className="sr-only">
           Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
@@ -411,7 +428,7 @@ export function SidebarGroups() {
             }}
             onStartRename={() => g.id !== UNGROUPED && setEditing({ kind: "group", id: g.id })}
             onNudge={(by) => g.id !== UNGROUPED && nudgeGroupBy(g.id, by)}
-            onMenu={(at, from) => g.id !== UNGROUPED && setMenu({ kind: "group", id: g.id, at, from })}
+            onMenu={(at, from) => setMenu({ kind: "group", id: g.id, at, from })}
           >
             {g.items.map((key) => {
               const item = items.get(key)!;
@@ -456,6 +473,7 @@ export function SidebarGroups() {
                   }}
                   onNudge={(by) => nudge(key, by)}
                   onMenu={(at, from) => setMenu({ kind: "item", key, at, from })}
+                  onRemove={item.kind === "session" ? () => lifecycleActions(item.session).at(-1)!.run() : undefined}
                   onHover={(over) => hover(over ? key : null)}
                 />
               );
@@ -591,7 +609,6 @@ function GroupSection({
                 }
               }}
               onContextMenu={(e: MouseEvent) => {
-                if (fixed) return;
                 e.preventDefault();
                 onMenu({ x: e.clientX, y: e.clientY }, toggle.current);
               }}
@@ -606,17 +623,15 @@ function GroupSection({
               <Marks badge={badge} />
             </button>
           )}
-          {!fixed && (
-            <button
-              type="button"
-              className="icon-btn-sm grp-more"
-              aria-label={`${group.name} options`}
-              aria-haspopup="menu"
-              onClick={(e) => onMenu(below(e.currentTarget), e.currentTarget)}
-            >
-              <MoreIcon />
-            </button>
-          )}
+          <button
+            type="button"
+            className="icon-btn-sm grp-more"
+            aria-label={`${group.name} options`}
+            aria-haspopup="menu"
+            onClick={(e) => onMenu(below(e.currentTarget), e.currentTarget)}
+          >
+            <MoreIcon />
+          </button>
         </div>
         {open && (
           <ul id={listId} className="grp-items" aria-label={group.name}>
@@ -650,6 +665,7 @@ function ItemRow({
   onRename,
   onNudge,
   onMenu,
+  onRemove,
   onHover,
 }: {
   item: Item;
@@ -669,6 +685,8 @@ function ItemRow({
   onRename: (name: string | null) => void;
   onNudge: (by: -1 | 1) => void;
   onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
+  /** Delete or Backspace on it: asks before removing it. */
+  onRemove?: () => void;
   onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
@@ -693,6 +711,7 @@ function ItemRow({
       onStartRename={session ? onStartRename : undefined}
       onNudge={onNudge}
       onMenu={onMenu}
+      onRemove={onRemove}
       onHover={onHover}
     >
       <Marks badge={badge} />

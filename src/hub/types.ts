@@ -127,6 +127,23 @@ export interface Session {
   updatedAt: string;
 }
 
+/** A session removed from Desk: Desk no longer tracks it, and never takes
+ *  it back from another terminal until it's tracked again. */
+export interface HiddenSession {
+  engine: Engine;
+  cliSessionId: string;
+  /** What Desk called it, and where it ran, when it was removed. */
+  name: string;
+  cwd: string;
+  hiddenAt: string;
+}
+
+/** What a removal did: sessions removed, transcript files deleted. */
+export interface Removed {
+  removed: number;
+  transcripts: number;
+}
+
 export interface NewSession {
   engine: Engine;
   view?: View;

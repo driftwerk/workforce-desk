@@ -13,7 +13,7 @@ import { sessionItem } from "../groups/model";
 import { SidePanel, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
-import { approvalsSwitchable, sessionActions, setApprovalsInDesk } from "./actions";
+import { approvalsSwitchable, lifecycleActions, runs, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
@@ -33,6 +33,7 @@ export function SessionCard({ session }: { session: Session }) {
   const { hub, fail, open, sessions } = useDesk();
   const name = useSessionName(session.id, session.name);
   const actions = sessionActions(session);
+  const lifecycle = lifecycleActions(session);
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
   const places = placesOf({ order, grids }, sessions, sessionItem(session.id));
@@ -69,6 +70,11 @@ export function SessionCard({ session }: { session: Session }) {
             </button>
           ))}
           {!places.length && !loose && <PutInGrid content={{ kind: "session", sessionId: session.id }} label="Put this session in a grid" onShown={() => open(null)} />}
+          {lifecycle.map((a) => (
+            <button key={a.label} type="button" className="link" onClick={a.run}>
+              {a.label}
+            </button>
+          ))}
         </>
       }
     >
@@ -126,11 +132,13 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
       {seen}
       <div className="terminal-idle">
         <p className="muted">
-          {session.origin === "external"
+          {runs(session)
             ? "Running in another terminal. Desk shows its progress; once it's closed you can resume it here."
             : session.state === "interrupted"
               ? "This session was working when it stopped. Resume picks up the same conversation."
-              : "Not running. Resume picks up the same conversation."}
+              : session.origin === "external"
+                ? "Closed in its own terminal. Resume in Desk picks up the same conversation here."
+                : "Not running. Resume picks up the same conversation."}
         </p>
         {session.lastReply && (
           <div className="transcript-tail rich">

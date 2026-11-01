@@ -14,6 +14,7 @@ import { createGrid, deleteGrid, deliver, layOut, setActive, setFocus, startGrid
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { HOVER_MS, SidebarGroups } from "./SidebarGroups";
+import { LifecycleDialogs } from "../session/LifecycleDialogs";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -172,7 +173,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Stop tracking…⌫"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
@@ -237,11 +238,31 @@ describe("groups in the sidebar", () => {
     expect((lastSaved().groups as DeskGroup[]).map((g) => g.id)).toEqual(["beta"]);
   });
 
-  it("Ungrouped has no handle, options or rename", () => {
+  it("Ungrouped has no handle or rename, and its options only clear finished sessions", () => {
     groups();
-    expect(screen.queryByRole("button", { name: "Ungrouped options" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));
+    const menu = screen.getByRole("menu", { name: "Ungrouped options" });
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Clear finished sessions…"]);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     fireEvent.keyDown(header("Ungrouped"), { key: "F2" });
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("asks before removing a session, from its menu or with Delete", () => {
+    render(
+      <>
+        <SidebarGroups />
+        <LifecycleDialogs />
+      </>,
+    );
+    fireEvent.contextMenu(row("api-e7"), { clientX: 40, clientY: 200 });
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Stop tracking…/ }));
+    expect(screen.getByRole("dialog", { name: "Stop tracking “api-e7”?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "stopped" } } })));
+    fireEvent.keyDown(row("api-e7"), { key: "Delete" });
+    expect(screen.getByRole("dialog", { name: "Remove “api-e7”?" })).toBeTruthy();
   });
 
   it("a session the hub closes drops out; a new one lands in Ungrouped", () => {

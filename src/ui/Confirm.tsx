@@ -10,6 +10,7 @@ export function Confirm({
   action,
   onConfirm,
   onClose,
+  disabled = false,
 }: {
   title: string;
   children: ReactNode;
@@ -17,6 +18,8 @@ export function Confirm({
   action: string;
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
+  /** The red button can't be pressed yet (nothing to do). */
+  disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export function Confirm({
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel
         </button>
-        <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void go()}>
+        <button type="button" className="btn btn-danger" disabled={busy || disabled} onClick={() => void go()}>
           {busy ? `${action}…` : action}
         </button>
       </footer>
