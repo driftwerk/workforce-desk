@@ -1681,7 +1681,6 @@ button.thread-bar:hover {
   align-items: center;
   margin-left: -1px;
   color: var(--faint);
-  opacity: 0.85;
 }
 .gi:hover .gi-grid,
 .gi.on .gi-grid {
@@ -2213,7 +2212,6 @@ button.thread-bar:hover {
 }
 .urow-read:hover,
 .urow-read:focus-within {
-  opacity: 0.85;
 }
 .urow-open {
   flex: 1;

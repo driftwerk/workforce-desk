@@ -124,9 +124,23 @@ describe("the in-a-grid mark on sidebar rows", () => {
   it("is a grid once however many of its panes are in it", () => {
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    // s1 also runs in terminal t1: two panes of one grid.
+    act(() => useDesk.setState({ sessions: { ...useDesk.getState().sessions, s1: session("s1", "api-e7", { terminalId: "t1", live: true } as Partial<Session>) } }));
     deliver(MAIN_GRID, { kind: "terminal", terminalId: "t1" });
+    expect(useGrids.getState().grids[MAIN_GRID]!.panes.filter((p) => p.content).length).toBe(2);
     const { result } = renderHook(() => useGridNames("session:s1"));
     expect(result.current).toEqual(["Main"]);
+  });
+
+  it("follows a terminal becoming a session's, with no grid changing", () => {
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "terminal", terminalId: "t9" });
+    const { result } = renderHook(() => useGridNames("session:s1"));
+    expect(result.current).toEqual([]);
+    act(() => useDesk.setState({ sessions: { ...useDesk.getState().sessions, s1: session("s1", "api-e7", { terminalId: "t9", live: true } as Partial<Session>) } }));
+    expect(result.current).toEqual(["Main"]);
+    act(() => useDesk.setState({ sessions: { ...useDesk.getState().sessions, s1: session("s1", "api-e7", { terminalId: "t9", live: false } as Partial<Session>) } }));
+    expect(result.current).toEqual([]);
   });
 
   it("leaves a row alone when an unrelated grid changes", () => {
