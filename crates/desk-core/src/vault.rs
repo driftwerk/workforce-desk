@@ -418,10 +418,10 @@ impl Vault {
     /// may: deleting an item doesn't make the other its writer.
     pub fn forget(&self, owner: KeyOwner, accounts: &[String]) -> Result<()> {
         let mut st = self.lock();
+        if let Some(a) = accounts.iter().find(|a| KeyOwner::of(a) != owner) {
+            eyre::bail!("{a} isn't one of {}'s secrets", owner.name());
+        }
         for a in accounts {
-            if KeyOwner::of(a) != owner {
-                eyre::bail!("{a} isn't one of {}'s secrets", owner.name());
-            }
             self.items.delete(a)?;
         }
         if self.layout == Layout::Bundled {
@@ -747,11 +747,13 @@ pub(crate) mod tests {
     fn the_rev_says_nothing_secret() {
         let dir = tempfile::tempdir().unwrap();
         let items = Counted::with(&[]);
-        helper(dir.path(), &items).set(GATEWAY, "g").unwrap();
+        helper(dir.path(), &items)
+            .set(GATEWAY, "0123456789abcdef")
+            .unwrap();
         let rev = std::fs::read_to_string(dir.path().join(REV_FILE)).unwrap();
         assert_eq!(rev.len(), 32);
         assert!(rev.bytes().all(|b| b.is_ascii_hexdigit()));
-        assert!(!rev.contains('g'));
+        assert!(!rev.contains("0123456789abcdef"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
