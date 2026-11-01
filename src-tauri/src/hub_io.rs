@@ -19,6 +19,7 @@ use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody};
 use crate::CommandResult;
 use crate::broker::socket::{self, Dial, Legacy, LegacyHubs, Pool, Sockets};
 use crate::broker::{BODY_TYPES, MAX_BODY, header};
+use crate::pair_gate::PairGate;
 use crate::paired::Paired;
 
 /// The most of a hub's answer the page is given.
@@ -445,13 +446,27 @@ pub async fn pairing_standing(url: &str, code: &str) -> Result<Standing, String>
     })
 }
 
+/// Asks for a pairing code, but only at a hub the person agreed to pair with
+/// (see [`PairGate`]): nothing is sent before they have.
 #[tauri::command]
 pub async fn pair_request(
+    gate: tauri::State<'_, PairGate>,
     url: String,
     device_name: String,
     identity_hint: Option<String>,
 ) -> CommandResult<PairingAnswer> {
-    request_pairing(&url, &device_name, identity_hint.as_deref()).await
+    request_confirmed(&gate, &url, &device_name, identity_hint.as_deref()).await
+}
+
+/// [`request_pairing`], after `gate` has allowed the address.
+async fn request_confirmed(
+    gate: &PairGate,
+    url: &str,
+    device_name: &str,
+    identity_hint: Option<&str>,
+) -> Result<PairingAnswer, String> {
+    gate.allow(url).await?;
+    request_pairing(url, device_name, identity_hint).await
 }
 
 /// Collects pairing `code` at `url`: once approved, the hub is kept as
@@ -460,10 +475,12 @@ pub async fn pair_request(
 pub async fn pair_collect(
     app: tauri::State<'_, crate::App>,
     io: tauri::State<'_, HubIo>,
+    gate: tauri::State<'_, PairGate>,
     url: String,
     code: String,
     label: String,
 ) -> CommandResult<Collected> {
+    gate.allow(&url).await?;
     Ok(match pairing_standing(&url, &code).await? {
         Standing::Pending => Collected::Pending,
         Standing::Rejected => Collected::Rejected,
@@ -471,12 +488,14 @@ pub async fn pair_collect(
         Standing::Used => Collected::Used,
         Standing::Approved { token, identity } => {
             let paths: Paths = app.paths.clone();
+            let kept = url.clone();
             let hub = tauri::async_runtime::spawn_blocking(move || {
                 crate::hubs::save(&paths, &label, &url, &token)
             })
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
+            gate.spent(&kept);
             io.forget();
             Collected::Approved {
                 hub: hub.id,
@@ -625,6 +644,43 @@ mod tests {
         let io = io_for(vec![account("plain", "http://hub.example.com", false, "t")]);
         let e = io.fetch("plain", "GET", "/api/me", None).await.unwrap_err();
         assert!(e.contains("https"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn pairing_a_new_hub_asks_the_person_first_and_sends_nothing_on_cancel() {
+        use crate::pair_gate::tests::gate;
+        let (url, mut seen) = hub(vec![ok("application/json", r#"{"code":"AB-12"}"#)]).await;
+        let (declined, mock, _dir) = gate(false);
+        let err = request_confirmed(&declined, &url, "My Mac", None)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Pairing was cancelled.");
+        assert_eq!(mock.asked.lock().unwrap().len(), 1);
+        assert!(seen.try_recv().is_err(), "the hub was never contacted");
+
+        let (agreed, mock, _dir) = gate(true);
+        let answer = request_confirmed(&agreed, &url, "My Mac", None)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        assert!(
+            seen.try_recv()
+                .unwrap()
+                .contains("/api/pair/device/request")
+        );
+        assert_eq!(mock.asked.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pairing_a_hub_desk_has_already_paired_does_not_ask() {
+        use crate::pair_gate::tests::{gate, pair};
+        let (url, _seen) = hub(vec![ok("application/json", r#"{"code":"AB-12"}"#)]).await;
+        let (gate, mock, dir) = gate(false);
+        pair(&dir, &url);
+        request_confirmed(&gate, &url, "My Mac", None)
+            .await
+            .unwrap();
+        assert_eq!(mock.asked.lock().unwrap().len(), 0);
     }
 
     #[tokio::test]

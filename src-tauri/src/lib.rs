@@ -12,6 +12,7 @@ mod hub_io;
 mod hubs;
 mod logins;
 mod navigation;
+mod pair_gate;
 mod paired;
 mod state;
 mod support;
@@ -690,6 +691,10 @@ pub fn run() {
             app.manage(attachments::Files::new(Arc::clone(&paired)));
             app.manage(broker::Broker::new(backend.clone(), Arc::clone(&sockets)));
             app.manage(hub_io::HubIo::new(paired, Arc::clone(&sockets)));
+            app.manage(pair_gate::PairGate::new(
+                paths.clone(),
+                Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
+            ));
             app.manage(sockets);
             app.manage(App {
                 paths,
@@ -892,6 +897,7 @@ mod tests {
         };
         for cmd in [
             "data_remove",
+            "pair_request",
             "pair_collect",
             "hubs_remove",
             "wsl_install",
