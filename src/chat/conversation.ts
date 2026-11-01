@@ -377,7 +377,11 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     case "stream_delta": {
       const last = s.messages.at(-1);
       if (!last || last.status !== "streaming") return s;
-      return { ...s, messages: [...s.messages.slice(0, -1), { ...last, content: last.content + (msg.content ?? "") }] };
+      const speech =
+        msg.speech === undefined && last.speech === undefined
+          ? {}
+          : { speech: (last.speech ?? last.content) + (msg.speech ?? msg.content ?? "") };
+      return { ...s, messages: [...s.messages.slice(0, -1), { ...last, content: last.content + (msg.content ?? ""), ...speech }] };
     }
     case "stream_discard":
       return { ...s, streaming: false, typing: true, messages: s.messages.filter((m) => m.status !== "streaming") };
@@ -422,12 +426,12 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     }
     case "message": {
       const content = msg.content ?? "";
-      const desk = msg.desk ? { desk: msg.desk } : {};
+      const desk = { ...(msg.desk ? { desk: msg.desk } : {}), ...(msg.speech ? { speech: msg.speech } : {}) };
       if (msg.id && s.messages.some((m) => m.id === msg.id)) {
         const merged = update(s.messages, msg.id, (m) => ({ ...m, content: content || m.content, status: "complete", ...desk }));
         return outOfBand ? { ...s, messages: merged } : { ...s, typing: false, streaming: false, working: null, messages: merged };
       }
-      if (outOfBand) return { ...s, messages: [...s.messages, { ...message("assistant", content), ...(msg.id ? { id: msg.id } : {}) }] };
+      if (outOfBand) return { ...s, messages: [...s.messages, { ...message("assistant", content), ...(msg.id ? { id: msg.id } : {}), ...(msg.speech ? { speech: msg.speech } : {}) }] };
       const last = s.messages.at(-1);
       // On a hub without ids: a non-streamed answer that repeats what just
       // streamed is the same answer (what it mentions to act on may come
@@ -438,7 +442,7 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
           typing: false,
           streaming: false,
           working: null,
-          messages: msg.desk ? [...s.messages.slice(0, -1), { ...last, ...desk }] : s.messages,
+          messages: msg.desk || msg.speech ? [...s.messages.slice(0, -1), { ...last, ...desk }] : s.messages,
         };
       // Tools ran ahead of the answer: the answer belongs to that message.
       if (last?.role === "assistant" && last.status === "streaming" && last.content === "")

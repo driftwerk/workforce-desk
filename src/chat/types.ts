@@ -78,6 +78,10 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** How a spoken answer is said, voice directions and all, where that differs
+   *  from `content`, which never has them. Only for the voice: nothing shows,
+   *  copies or searches it. */
+  speech?: string;
   at: string;
   status: "complete" | "streaming" | "error";
   tools: ToolCall[];
@@ -225,6 +229,9 @@ export interface ServerMessage {
   features?: string[];
   /** The client's own id for the turn a frame belongs to. */
   turn_ref?: string;
+  /** On a spoken turn's `stream_delta` and `message`: what to say for this
+   *  frame, where that differs from `content`. */
+  speech?: string;
   /** On `turn_snapshot`. */
   status?: TurnPhase;
   since?: string;

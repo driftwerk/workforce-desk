@@ -30,6 +30,34 @@ describe("conversation", () => {
     expect(s.streaming).toBe(false);
   });
 
+  it("keeps what a spoken answer says beside what it shows", () => {
+    const s = run([
+      { type: "stream_start" },
+      { type: "stream_delta", content: "", speech: "(excited) " },
+      { type: "stream_delta", content: "Found it. ", speech: "Found it. " },
+      { type: "stream_delta", content: "Well, " },
+      { type: "stream_delta", content: "yes.", speech: "(sighing) yes." },
+      { type: "stream_end" },
+    ]);
+    expect(s.messages[0]).toMatchObject({ content: "Found it. Well, yes.", speech: "(excited) Found it. Well, (sighing) yes." });
+    const whole = run([{ type: "message", content: "Done.", speech: "(calm) Done." }]);
+    expect(whole.messages[0]).toMatchObject({ content: "Done.", speech: "(calm) Done." });
+  });
+
+  it("has no speech for an answer that says what it shows", () => {
+    const s = run([{ type: "stream_start" }, { type: "stream_delta", content: "Plain." }, { type: "stream_end" }]);
+    expect(s.messages[0]).toMatchObject({ content: "Plain." });
+    expect(s.messages[0]!.speech).toBeUndefined();
+  });
+
+  it("says what was shown before a reconnect, and what's spoken after it", () => {
+    const s = run([
+      { type: "turn_snapshot", id: "r", text: "Found it. " },
+      { type: "stream_delta", content: "Well.", speech: "(sighing) Well." },
+    ]);
+    expect(s.messages[0]).toMatchObject({ content: "Found it. Well.", speech: "Found it. (sighing) Well." });
+  });
+
   it("does not repeat a streamed answer the hub also sends whole", () => {
     const s = run([{ type: "stream_start" }, { type: "stream_delta", content: "Done." }, { type: "stream_end" }, { type: "message", content: "Done." }]);
     expect(s.messages).toHaveLength(1);

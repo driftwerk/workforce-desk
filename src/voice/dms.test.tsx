@@ -20,7 +20,7 @@ function Dm({ agent }: { agent: string }) {
 
 beforeEach(() => {
   resetShown();
-  useMic.setState({ talk: null, hold: null, pressed: false, problem: null });
+  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null });
 });
 afterEach(cleanup);
 

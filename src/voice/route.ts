@@ -1,6 +1,6 @@
 import type { ConversationState } from "../chat/conversation";
 import { finishedAnswers } from "../chat/conversation";
-import { agentKey, type Agent } from "../chat/types";
+import { agentKey, FEATURES, type Agent, type ChatMessage } from "../chat/types";
 import type { VoiceSpec } from "../platform";
 import type { RosterMember } from "./api";
 import { speakable } from "./speakable";
@@ -23,21 +23,51 @@ export const resolveAgent = (
   return current ?? roster.find((a) => agentKey(a) === activeKey) ?? null;
 };
 
-export type Outcome = { kind: "answer"; text: string } | { kind: "error"; text: string };
-
-/** What a conversation update means for a spoken turn: an answer finished,
- *  or the hub reported an error. */
-export const outcome = (before: ConversationState, after: ConversationState): Outcome | null => {
-  const answer = finishedAnswers(before, after).at(-1);
-  if (answer) return { kind: "answer", text: answer.content };
+/** The answers that finished in this update of a conversation, given it was
+ *  being waited on since `since` (ms): one that was already under way when the
+ *  wait began counts; history brought in meanwhile isn't anything finishing. */
+export const newAnswers = (before: ConversationState, after: ConversationState, since: number): ChatMessage[] => {
   const known = new Set(before.messages.map((m) => m.id));
-  const failure = after.messages.find((m) => !known.has(m.id) && m.status === "error");
-  return failure ? { kind: "error", text: failure.content } : null;
+  return finishedAnswers(before, after).filter((m) => known.has(m.id) || !m.at || Date.parse(m.at) >= since);
 };
 
-/** Enough of an agent's answer for a voice model to relay: formatting
- *  dropped, code left on screen, longer than what Desk reads aloud itself. */
-export const forModel = (answer: string): string => speakable(answer, 1_500);
+/** What a failed turn said, if this update brought one. */
+export const failureIn = (before: ConversationState, after: ConversationState): string | null => {
+  const known = new Set(before.messages.map((m) => m.id));
+  return after.messages.find((m) => !known.has(m.id) && m.status === "error")?.content ?? null;
+};
+
+/** What's being waited on when a wait begins, to tell later what's its own. */
+export interface Asked {
+  turns: ReadonlySet<string>;
+  absorbed: number;
+}
+
+export const asked = (s: ConversationState | undefined): Asked => ({
+  turns: new Set(Object.keys(s?.turns ?? {})),
+  absorbed: s?.absorbed ?? 0,
+});
+
+/** Whether this update ended what was said to the agent. The hub sends an
+ *  answer's parts as separate streams, a line before a tool and the answer
+ *  after it, so nothing but the turn's end says it's over. A thing said while
+ *  a turn runs is absorbed into that turn, whose frames carry on, and gets none
+ *  of its own; one that isn't starts its own, not ended yet. */
+export const turnsOver = (before: ConversationState, after: ConversationState, since: Asked): boolean => {
+  const turns = Object.values(after.turns);
+  const ended = turns.some((t) => (t.state === "ended" || t.state === "failed") && before.turns[t.ref]?.state !== t.state);
+  if (!ended) return false;
+  const going = turns.filter((t) => t.state === "live" || t.state === "stalled");
+  if (going.some((t) => t.acked)) return false;
+  return going.filter((t) => !since.turns.has(t.ref)).length <= after.absorbed - since.absorbed;
+};
+
+/** Whether this conversation's hub says when turns end. */
+export const saysWhenTurnsEnd = (s: ConversationState): boolean => !!s.features?.has(FEATURES.stream);
+
+/** An agent's answer for a voice model to relay: formatting dropped, code left
+ *  on screen, all of it. */
+export const forModel = (answer: string): string => speakable(answer);
 
 /** What a voice model hears when the agent it named isn't on the roster. */
 export const missingAgent = (named: string | null, roster: string[]): string =>
