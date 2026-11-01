@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("../restore/boot", () => ({
-  deskState: { get: (k: string) => state.get(k), set: (k: string, v: unknown) => void state.set(k, v), remove: (k: string) => void state.delete(k) },
+  deskState: {
+    get: (k: string) => state.get(k),
+    set: (k: string, v: unknown) => void state.set(k, v),
+    remove: (k: string) => void state.delete(k),
+    subscribe: () => () => {},
+  },
 }));
 
 const { useChat } = await import("../chat/store");

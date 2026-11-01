@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("../restore/boot", () => ({
-  deskState: { get: (k: string) => state.get(k), set: (k: string, v: unknown) => void state.set(k, v), remove: (k: string) => void state.delete(k) },
+  deskState: {
+    get: (k: string) => state.get(k),
+    set: (k: string, v: unknown) => void state.set(k, v),
+    remove: (k: string) => void state.delete(k),
+    subscribe: () => () => {},
+  },
 }));
 const invoked = vi.hoisted(() => [] as [string, unknown][]);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (cmd: string, args: unknown) => void invoked.push([cmd, args])) }));

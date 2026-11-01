@@ -8,6 +8,8 @@ import { floorOf, type Choice } from "../hub/floor";
 import type { DeskEvent, FloorView, Need, UsageView } from "../hub/types";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
+import { useWatching, watched } from "../unread/watching";
+import { stillNeeds, useNeedsSeen } from "../unread/needsSeen";
 import { merged, type Merged } from "./merge";
 import { countsByItem } from "./needs";
 import { nextLocalMidnight, startOfLocalDay } from "./time";
@@ -282,11 +284,18 @@ export const useLocalFloor = (): boolean => {
   return useFloor((s) => !!localId && s.hubs[localId]?.state === "ready");
 };
 
-/** Every hub's floor as one. */
+/** Every hub's floor as one, less the questions agents asked in DMs that
+ *  are on screen here or were opened since (see `needsSeen`). */
 export const useMerged = (): Merged => {
   const hubs = useFloor((s) => s.hubs);
   const list = useChat((s) => s.hubs);
-  return useMemo(() => merged(hubs, list), [hubs, list]);
+  const seen = useNeedsSeen((s) => s.seen);
+  const w = useWatching();
+  return useMemo(() => {
+    const all = merged(hubs, list);
+    const needs = all.needs.filter((n) => stillNeeds(n, seen, (key) => watched(w, key)));
+    return needs.length === all.needs.length ? all : { ...all, needs, counts: { ...all.counts, needsYou: needs.length } };
+  }, [hubs, list, seen, w]);
 };
 
 /** What's still waiting on the person, on every hub, oldest first. */
