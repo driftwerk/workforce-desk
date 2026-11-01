@@ -7,8 +7,10 @@ export interface HubAccount {
   label: string;
   url: string;
   local: boolean;
-  /** Paired-device token: chat and the roster. */
-  token: string;
+  /** Changes whenever Desk's token for the hub does (paired again, or
+   *  renewed): an opaque value, never the token, which only Desk's native
+   *  side holds. */
+  revision: string;
 }
 
 export interface Agent {

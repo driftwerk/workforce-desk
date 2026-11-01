@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
-import { hubAccounts, openUrl, saveHub } from "../platform";
+import { hubAccounts, openUrl } from "../platform";
 import { deskState } from "../restore/boot";
 import {
   collectPairing,
@@ -27,9 +27,9 @@ type Step =
 
 const host = (url: string) => url.replace(/^https?:\/\//, "");
 
-/** Saves a paired hub and shows its agents. */
-export const savePairedHub = async (label: string, url: string, token: string): Promise<void> => {
-  await saveHub(label, url, token);
+/** Shows a hub just paired (kept, with its token, by Desk's native side)
+ *  and its agents. */
+export const savePairedHub = async (): Promise<void> => {
   useChat.getState().setHubs(await hubAccounts());
 };
 
@@ -46,7 +46,7 @@ const knownEmail = async (): Promise<string | null> => {
   if (remembered) return remembered;
   const hubs = [...useChat.getState().hubs].sort((a, b) => Number(b.local) - Number(a.local));
   for (const hub of hubs) {
-    const who = await whoAmI(hub.url, hub.token);
+    const who = await whoAmI(hub);
     if (who.state === "person" && who.email?.includes("@")) return who.email;
   }
   return null;

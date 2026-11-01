@@ -1,6 +1,7 @@
 // The local hub's admin surface through Desk's native side
 // (src-tauri/src/broker), which holds the hub's gateway token: the page asks
 // for a request by method and path, and never has a token to put in it.
+// Its sockets, and every paired hub's (./net.ts), are `BridgedSocket`s.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
@@ -40,21 +41,26 @@ const safely = (handler: () => void): void => {
   try {
     handler();
   } catch (e) {
-    console.error("A handler of the local hub's connection failed:", e);
+    console.error("A handler of a hub connection failed:", e);
   }
 };
 
 /** What the native side says of a socket; `n` is a text frame's size as
  *  the native side counts it. */
-type Said =
+export type Said =
   | { type: "open" }
   | { type: "text"; data: string; n: number }
   | { type: "error" }
   | { type: "close"; code: number; reason: string; clean: boolean };
 
-/** A socket the native side holds open to the local hub, shaped like the
- *  WebSocket the page would otherwise open: frames arrive in order, and
- *  the page's go one after another.
+/** Opens a socket on the native side, its frames to arrive on `events`;
+ *  the socket's id. */
+export type OpenSocket = (events: Channel<Said | ArrayBuffer>) => Promise<number>;
+
+/** A socket the native side holds open to a hub (with the hub's token in
+ *  its handshake, never in its URL), shaped like the WebSocket the page
+ *  would otherwise open: frames arrive in order, and the page's go one
+ *  after another.
  *
  *  The native side gives a socket's frames only as fast as the page takes
  *  them: each is acknowledged once its handler has run (or, if the handler
@@ -82,10 +88,10 @@ export class BridgedSocket implements DeskSocket {
   /** The frame being heard, until its handler holds it. */
   private hearing: { n: number; held: boolean } | null = null;
 
-  constructor(path: string) {
+  constructor(open: OpenSocket) {
     const events = new Channel<Said | ArrayBuffer>();
     events.onmessage = (m) => this.heard(m);
-    this.id = invoke<number>("local_hub_socket_open", { path, events }).catch((e: unknown) => {
+    this.id = open(events).catch((e: unknown) => {
       safely(() => this.onerror?.(new Event("error")));
       this.ended(1006, String(e), false);
       return null;
@@ -101,14 +107,14 @@ export class BridgedSocket implements DeskSocket {
         ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
         : new Uint8Array(data).slice();
     this.then((id) =>
-      invoke("local_hub_socket_send", bytes, { headers: { "x-desk-socket": String(id), "x-desk-frame": text ? "text" : "binary" } }),
+      invoke("socket_send", bytes, { headers: { "x-desk-socket": String(id), "x-desk-frame": text ? "text" : "binary" } }),
     );
   }
 
   close(): void {
     if (this.readyState === BridgedSocket.CLOSING || this.readyState === BridgedSocket.CLOSED) return;
     this.readyState = BridgedSocket.CLOSING;
-    this.then((id) => invoke("local_hub_socket_close", { id }));
+    this.then((id) => invoke("socket_close", { id }));
   }
 
   /** Called from `onmessage`, holds back the acknowledgement of the frame
@@ -137,8 +143,8 @@ export class BridgedSocket implements DeskSocket {
       this.owed = 0;
       if (bytes > 0 && this.readyState !== BridgedSocket.CLOSED)
         void this.id
-          .then((id) => (id === null ? undefined : invoke("local_hub_socket_ack", { id, bytes })))
-          .catch((e: unknown) => console.warn("the local hub's connection:", e));
+          .then((id) => (id === null ? undefined : invoke("socket_ack", { id, bytes })))
+          .catch((e: unknown) => console.warn("a hub connection:", e));
     }, 0);
   }
 
@@ -154,7 +160,7 @@ export class BridgedSocket implements DeskSocket {
     this.queue = this.queue
       .then(() => this.id)
       .then((id) => (id === null ? undefined : f(id)))
-      .catch((e: unknown) => console.warn("the local hub's connection:", e));
+      .catch((e: unknown) => console.warn("a hub connection:", e));
   }
 
   private heard(m: Said | ArrayBuffer): void {
@@ -190,5 +196,5 @@ export class BridgedSocket implements DeskSocket {
 /** The local hub, in the app. */
 export const brokered: DeskTransport = {
   fetch: fetchVia,
-  socket: (path) => new BridgedSocket(path),
+  socket: (path) => new BridgedSocket((events) => invoke<number>("local_hub_socket_open", { path, events })),
 };

@@ -36,7 +36,7 @@ describe("room routing", () => {
   it("reads names with punctuation after them, names with spaces, and workspaces by name", () => {
     const crew = [...roster, { hubId: "local", id: "release-captain", name: "Release Captain", model: null, provider: null, isDefault: false }];
     const room = [...members, { hub: "local", agent: "release-captain" }];
-    const hubs = [{ id: "acme", label: "Acme", url: "https://acme", local: false, token: "t" }];
+    const hubs = [{ id: "acme", label: "Acme", url: "https://acme", local: false, revision: "t" }];
     expect(addressees("thanks @scout.", room, crew, null).map(memberKey)).toEqual(["local/scout"]);
     expect(addressees("@release-captain, ship it", room, crew, null).map(memberKey)).toEqual(["local/release-captain"]);
     expect(addressees("@atlas@acme hi", room, crew, null, undefined, hubs).map(memberKey)).toEqual(["acme/atlas"]);

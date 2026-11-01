@@ -195,13 +195,16 @@ pub fn open<R: Runtime>(
     };
     let rect = rect_for(mode, &label, screen, &screens, &store.all());
     // The page tells a grid's window by its label.
-    let builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title(title)
-        .visible(false)
-        .position(rect.x, rect.y)
-        .inner_size(rect.width, rect.height)
-        .min_inner_size(MIN.0, MIN.1)
-        .disable_drag_drop_handler();
+    let builder = crate::navigation::guard(
+        WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into())),
+        crate::navigation::dev_url(app),
+    )
+    .title(title)
+    .visible(false)
+    .position(rect.x, rect.y)
+    .inner_size(rect.width, rect.height)
+    .min_inner_size(MIN.0, MIN.1)
+    .disable_drag_drop_handler();
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)

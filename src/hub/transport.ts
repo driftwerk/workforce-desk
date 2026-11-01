@@ -1,12 +1,11 @@
-// How `DeskHub` reaches the local hub's admin surface.
+// How the page reaches a hub: requests and sockets.
 //
-// In the app that is `brokered` (./broker.ts): Desk's native side holds the
-// hub's gateway token and sends only the requests `DeskHub` makes, so the
-// page never has the token. In the browser preview, which has no native
-// side, and in tests, it is `direct`, with a token of its own.
+// In the app that is through Desk's native side, which holds every token:
+// `brokered` (./broker.ts) for the local hub's admin surface, `pairedHub`
+// (./net.ts) for every paired hub by id. In the browser preview, which has
+// no native side, and in tests, it is `direct`, with a token of its own.
 
 import type { HubConnection } from "./client";
-import { hubFetch } from "./net";
 
 /** A request's body: its bytes or text, and what they are. */
 export interface Body {
@@ -43,10 +42,11 @@ const wsUrl = (base: string, path: string, token: string): string => {
   return u.toString();
 };
 
-/** Straight to the hub at `conn`, with its token: the preview, and tests. */
+/** Straight to the hub at `conn`, with its token: the browser preview,
+ *  and tests. Never in the app, where the page holds no token. */
 export const direct = (conn: HubConnection): DeskTransport => ({
   fetch: (method, path, body) =>
-    hubFetch(new URL(path, conn.url), {
+    globalThis.fetch(new URL(path, conn.url), {
       method,
       headers: { authorization: `Bearer ${conn.token}`, ...(body ? { "content-type": body.type } : {}) },
       body: body?.data,

@@ -250,7 +250,7 @@ describe("a bridged socket", () => {
     expect(heard.messages[0]).toBeInstanceOf(ArrayBuffer);
   });
 
-  const acks = () => native.calls.filter((c) => c.cmd === "local_hub_socket_ack").map((c) => c.args);
+  const acks = () => native.calls.filter((c) => c.cmd === "socket_ack").map((c) => c.args);
 
   it("acknowledges what its handler heard, many frames at once", async () => {
     const { say } = await opened();
@@ -321,7 +321,7 @@ describe("a bridged socket", () => {
     let release: () => void = () => {};
     let first = true;
     native.answer = (cmd) => {
-      if (cmd !== "local_hub_socket_send" || !first) return undefined;
+      if (cmd !== "socket_send" || !first) return undefined;
       first = false;
       return new Promise<void>((r) => (release = r));
     };
@@ -330,11 +330,11 @@ describe("a bridged socket", () => {
     ws.send(new Uint8Array([9]).buffer);
     await settle();
     // The first is still with the native side: the rest wait for it.
-    expect(native.calls.filter((c) => c.cmd === "local_hub_socket_send")).toHaveLength(1);
+    expect(native.calls.filter((c) => c.cmd === "socket_send")).toHaveLength(1);
     release();
     await settle();
     await settle();
-    const sends = native.calls.filter((c) => c.cmd === "local_hub_socket_send");
+    const sends = native.calls.filter((c) => c.cmd === "socket_send");
     expect(sends.map((c) => [c.options!.headers!["x-desk-socket"], c.options!.headers!["x-desk-frame"], Array.from(c.args as Uint8Array)])).toEqual([
       ["7", "binary", [97]],
       ["7", "text", Array.from(new TextEncoder().encode('{"type":"claim"}'))],
@@ -350,7 +350,7 @@ describe("a bridged socket", () => {
     expect(ws.readyState).toBe(WebSocket.CLOSING);
     await settle();
     await settle();
-    expect(native.calls.map((c) => c.cmd)).toEqual(["local_hub_socket_open", "local_hub_socket_send", "local_hub_socket_close"]);
+    expect(native.calls.map((c) => c.cmd)).toEqual(["local_hub_socket_open", "socket_send", "socket_close"]);
     expect(native.calls[2]!.args).toEqual({ id: 7 });
     say({ type: "close", code: 1000, reason: "", clean: true });
     say({ type: "text", data: "late", n: 4 });
@@ -404,7 +404,7 @@ describe("the desk over the broker", () => {
     expect(useDesk.getState().connected).toBe(true);
     stop();
     await vi.advanceTimersByTimeAsync(0);
-    expect(native.calls.at(-1)).toMatchObject({ cmd: "local_hub_socket_close", args: { id: 2 } });
+    expect(native.calls.at(-1)).toMatchObject({ cmd: "socket_close", args: { id: 2 } });
     // Nothing the page sent or was given carried a token.
     expect(JSON.stringify(native.calls.map((c) => [c.cmd, c.args, c.options]))).not.toMatch(/token|bearer|authorization/i);
   });

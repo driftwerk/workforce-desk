@@ -22,16 +22,16 @@ export function Hubs() {
   const [who, setWho] = useState<Record<string, Who>>({});
   const remote = hubs.filter((h) => !h.local);
   /** Read again whenever a workspace's token changes (paired again). */
-  const tokens = remote.map((h) => `${h.id}:${h.token}`).join("\n");
+  const revisions = remote.map((h) => `${h.id}:${h.revision}`).join("\n");
 
   useEffect(() => {
     let live = true;
     for (const h of useChat.getState().hubs.filter((x) => !x.local))
-      void whoAmI(h.url, h.token).then((w) => live && setWho((all) => ({ ...all, [h.id]: w })));
+      void whoAmI(h).then((w) => live && setWho((all) => ({ ...all, [h.id]: w })));
     return () => {
       live = false;
     };
-  }, [tokens]);
+  }, [revisions]);
 
   const remove = async (hub: HubAccount) => {
     try {

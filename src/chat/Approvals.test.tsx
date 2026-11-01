@@ -8,7 +8,7 @@ const { useChat } = await import("./store");
 const { PromptCard, RoutedApproval } = await import("./Approvals");
 
 beforeEach(() => {
-  useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t" }] });
+  useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, revision: "t" }] });
   vi.mocked(decideApproval).mockReset();
 });
 afterEach(cleanup);

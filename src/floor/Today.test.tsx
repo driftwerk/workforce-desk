@@ -8,7 +8,6 @@ import { NOW, agent, at, hub, need, ready, session, view } from "./testing";
 import { clock } from "./time";
 import { Today } from "./Today";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 const DAY = new Date(NOW);

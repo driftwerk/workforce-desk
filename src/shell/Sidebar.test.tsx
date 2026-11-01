@@ -247,7 +247,7 @@ describe("deleting from the sidebar", () => {
         return new Response("{}", { headers: { "content-type": "application/json" } });
       }),
     );
-    useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" }] });
+    useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" }] });
     const deleteRoom = vi.fn(() => {
       expect(closed).toEqual(['/api/desk/conversations/allan/close {"channel":"desk:r1-channel","undelivered":[]}']);
       return Promise.resolve();
@@ -289,7 +289,7 @@ describe("deleting from the sidebar", () => {
 
   it("shows agents with their pictures, and you round at the bottom, opening your Profile", async () => {
     servePictures();
-    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
+    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
     useChat.setState({
       hubs: [local],
       roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "chosen", at: "" } }],
@@ -310,7 +310,7 @@ describe("unread in the sidebar", () => {
   it("badges agent, session, group, room and grid rows from one count", async () => {
     const { useUnread } = await import("../unread/summary");
     useChat.setState({
-      hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }],
+      hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }],
       roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     });
     useSettings.setState({ loaded: true, groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["agent:local/allan", "session:s1"] }], ungrouped: { collapsed: false, items: [] } });

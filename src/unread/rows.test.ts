@@ -17,7 +17,7 @@ const base: RowSources = {
   dms: { "dw/allan": { count: 3, for_you: 2, first: "d1", last: { at: at(7), message_id: "d3" }, capped: false } },
   rooms: { r1: room },
   roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
-  hubs: [{ id: "dw", label: "Atlas", url: "", local: false, token: "" }],
+  hubs: [{ id: "dw", label: "Atlas", url: "", local: false, revision: "" }],
   sessions: { s1: { id: "s1", name: "acme-web", state: "done" } as Session },
   sessionNames: {},
   timelines: {},

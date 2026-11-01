@@ -65,9 +65,15 @@ pub struct Hub {
 }
 
 impl Hub {
+    /// The hub at `base`, which the caller has checked is on this computer
+    /// (`desk_core::net::loopback_url`). The token goes nowhere else: never
+    /// through a proxy set in the environment, never after a redirect.
     pub fn new(base: impl Into<String>, token: impl Into<String>) -> Self {
         let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            .proxy(None)
+            .max_redirects(0)
+            .timeout_connect(Some(desk_core::net::CONNECT_TIMEOUT))
             .timeout_global(Some(Duration::from_secs(60)))
             .build()
             .into();
@@ -285,6 +291,32 @@ mod tests {
                 "provider": "fish_audio", "model": "s1",
                 "voice": "802e3bc2b27e49c2995d23ef70e6ac89", "text": "Two tests failed."
             })
+        );
+    }
+
+    #[test]
+    fn a_redirect_is_never_followed_with_the_gateway_token() {
+        let elsewhere = TcpListener::bind("127.0.0.1:0").unwrap();
+        elsewhere.set_nonblocking(true).unwrap();
+        let to = format!("http://{}/steal", elsewhere.local_addr().unwrap());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            write!(
+                stream,
+                "HTTP/1.1 307 Temporary Redirect\r\nlocation: {to}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let hub = Hub::new(base, "gateway-token");
+        assert!(hub.speak(&fish(), "hi").is_err());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            elsewhere.accept().is_err(),
+            "the redirect's target was never asked"
         );
     }
 

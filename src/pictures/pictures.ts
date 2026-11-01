@@ -1,12 +1,11 @@
 // Agents' and people's pictures, as each hub resolves them: one chosen for
 // them, else their Slack picture, else none (the letter shows). The images
-// come through `hubFetch` with the hub's token in the header, never in a
-// URL, and are shown from `blob:` URLs kept per version: a new version
-// fetches once, and the old one's URL is let go.
+// come through the native side, which adds the hub's token (`pairedHub`),
+// and are shown from `blob:` URLs kept per version: a new version fetches
+// once, and the old one's URL is let go.
 
 import { useEffect, useState } from "react";
-import type { HubConnection } from "../hub/client";
-import { hubFetch } from "../hub/net";
+import { pairedHub, type HubRef } from "../hub/net";
 
 export interface Picture {
   /** Changes whenever the image does. */
@@ -39,7 +38,7 @@ export const MY_PICTURE = "/api/me/picture";
  *  in which version. */
 export interface ImageRef {
   hubId: string;
-  conn: HubConnection;
+  conn: HubRef;
   path: string;
   version: string;
 }
@@ -48,8 +47,8 @@ const loaded = new Map<string, Promise<string | null>>();
 /** The version each place was last asked for. */
 const latest = new Map<string, string>();
 
-const fetchImage = async (conn: HubConnection, path: string): Promise<Blob | null> => {
-  const res = await hubFetch(new URL(path, conn.url), { headers: { authorization: `Bearer ${conn.token}` } });
+const fetchImage = async (conn: HubRef, path: string): Promise<Blob | null> => {
+  const res = await pairedHub(conn).fetch("GET", path);
   // An older hub answers a route it hasn't with its web page.
   if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) return null;
   return res.blob();

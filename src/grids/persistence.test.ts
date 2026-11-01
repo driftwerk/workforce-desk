@@ -6,7 +6,6 @@ import { gridKey, INDEX_KEY, MAIN_GRID, type Grid } from "./model";
 import { GRID_PREFIX } from "./storage";
 import { createGrid, deleteGrid, layOut, moveGrid, newTerminal, nudgeGrid, setPlacement, setTerminal, startGrids, useGrids } from "./store";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
 /** Desk's file, as its native side keeps it (adopt refuses a dirty key). */
 const fakeFile = (initial: Record<string, StateEntry> = {}) => {

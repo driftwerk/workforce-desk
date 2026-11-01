@@ -56,7 +56,7 @@ const blank = (): HubFloor => ({ state: "loading", floor: null, usage: null, off
 
 const accountOf = (hubId: string): HubAccount | undefined => useChat.getState().hubs.find((h) => h.id === hubId);
 
-const sameAccount = (a: HubAccount | undefined, b: HubAccount | undefined): boolean => !!a && !!b && a.url === b.url && a.token === b.token;
+const sameAccount = (a: HubAccount | undefined, b: HubAccount | undefined): boolean => !!a && !!b && a.url === b.url && a.revision === b.revision;
 
 const running = new Map<string, Promise<void>>();
 const again = new Set<string>();

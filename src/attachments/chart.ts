@@ -1,9 +1,9 @@
-// A chart an agent drew, delivered as its spec: fetched as text with the
-// hub's token in the header, never parsed here. The chart block validates it
+// A chart an agent drew, delivered as its spec: fetched as text through the
+// native side, which adds the hub's token, and never parsed here. The chart block validates it
 // before anything is drawn, so a spec is only ever data.
 
 import type { HubAccount } from "../chat/types";
-import { hubFetch } from "../hub/net";
+import { pairedHub } from "../hub/net";
 
 /** The most a chart's spec may be: eight series of a thousand points, with
  *  room to spare. Anything bigger is not a chart the hub made. */
@@ -13,7 +13,7 @@ const fetched = new Map<string, Promise<string>>();
 
 const read = async (hub: HubAccount, agent: string, artifact: string): Promise<string> => {
   const path = `/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`;
-  const res = await hubFetch(new URL(path, hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+  const res = await pairedHub(hub).fetch("GET", path);
   if (!res.ok) throw new Error(`the workspace answered ${res.status}`);
   const length = Number(res.headers.get("content-length") ?? 0);
   if (length > MAX_CHART_BYTES) throw new Error("the chart is too big");

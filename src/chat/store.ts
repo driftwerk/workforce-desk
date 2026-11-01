@@ -13,7 +13,7 @@ import {
   type Me,
   type PermissionChoice,
 } from "./types";
-import { hubFetch } from "../hub/net";
+import { pairedHub } from "../hub/net";
 import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -113,7 +113,7 @@ interface AgentsResponse {
 }
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
-  const res = await hubFetch(new URL("/api/agents", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+  const res = await pairedHub(hub).fetch("GET", "/api/agents");
   if (!res.ok) throw new Error(`${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
   const body = (await res.json()) as AgentsResponse;
   return body.agents.map((a) => ({
@@ -131,7 +131,7 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
  *  couldn't say (unreachable, or failing). */
 const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
   try {
-    const res = await hubFetch(new URL("/api/me", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+    const res = await pairedHub(hub).fetch("GET", "/api/me");
     if (res.status >= 500) return undefined;
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
     const body = (await res.json()) as { id?: unknown; display_name?: unknown; picture?: unknown };
@@ -239,7 +239,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     for (const [key, c] of live) {
       const hub = hubs.find((h) => key.startsWith(`${h.id}/`));
       const was = hub && before.find((h) => h.id === hub.id);
-      if (!hub || (was && (was.token !== hub.token || was.url !== hub.url))) {
+      if (!hub || (was && (was.revision !== hub.revision || was.url !== hub.url))) {
         c.close();
         live.delete(key);
         if (hub) reopen.push(key);
@@ -255,7 +255,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         Object.entries(s.me).filter(([id]) => {
           const now = hubs.find((h) => h.id === id);
           const was = before.find((h) => h.id === id);
-          return now && was && now.token === was.token && now.url === was.url;
+          return now && was && now.revision === was.revision && now.url === was.url;
         }),
       ),
     }));

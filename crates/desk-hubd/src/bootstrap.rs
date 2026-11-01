@@ -211,7 +211,11 @@ async fn device_token(hub: &Hub, owner: &Owner, person: &Person) -> Result<Strin
 /// resolves to the owner.
 pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> {
     let hub = Hub {
+        // The admin token goes to the hub on this computer only: never
+        // through a proxy, never after a redirect.
         http: reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(20))
             .build()?,
         base: gateway.trim_end_matches('/').to_string(),

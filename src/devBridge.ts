@@ -6,6 +6,7 @@
 
 import { HubError } from "./hub/client";
 import { deskListeners } from "./hub/store";
+import { setDevToken } from "./hub/devTokens";
 import { DEFAULT_HOST } from "./shell/host";
 
 const params = (() => {
@@ -156,7 +157,10 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     case "wsl_detect":
       return answer(WSL_FIXTURE);
     case "hubs_list":
-      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, token: need("device") }]);
+      // The preview reaches the hub itself, with this token (in the app the
+      // native side holds every hub's, and the page has none).
+      setDevToken("local", need("device"));
+      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, revision: "preview" }]);
     case "settings_load":
       return answer(settings);
     case "settings_save":

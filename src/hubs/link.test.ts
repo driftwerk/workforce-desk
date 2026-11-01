@@ -29,12 +29,12 @@ vi.mock("../floor/store", () => ({
   ask: (hubIds: readonly string[]) => void floor.asked.push([...hubIds]),
 }));
 
-const { HubLink, linkUrl } = await import("./link");
+const { HubLink, LINK_PATH } = await import("./link");
 const { CATCH_UP_RETRY_MS, followHubs, sinceOf, SINCE_MARGIN_MS } = await import("./follow");
 const { useChat } = await import("../chat/store");
 const { useUnread } = await import("../unread/summary");
 
-const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "tok" };
+const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "tok" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -97,8 +97,8 @@ const link = async () => {
 };
 
 describe("a hub link", () => {
-  it("connects to the hub's link with the device's token", () => {
-    expect(linkUrl(hub)).toBe("wss://dw.example.com/ws/desk?token=tok");
+  it("connects to the hub's link, naming no token", () => {
+    expect(LINK_PATH).toBe("/ws/desk");
   });
 
   it("drains everything that changed since Desk last looked when it says hello", async () => {

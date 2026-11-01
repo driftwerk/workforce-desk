@@ -5,7 +5,6 @@ import { useDesk } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
 import { Engines } from "./Engines";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 afterEach(cleanup);

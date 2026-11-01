@@ -1,6 +1,7 @@
 import type { DeliveryKind, DeskPlace, HubAccount, ServerMessage } from "../chat/types";
-import { hubFetch } from "../hub/net";
+import { pairedHub } from "../hub/net";
 import { backoff, detach, keepAlive } from "../hub/socket";
+import type { DeskSocket } from "../hub/transport";
 import { whoAmI } from "./pairing";
 
 // The hub link: one socket per paired hub (`/ws/desk`), over which the hub
@@ -40,25 +41,22 @@ export interface LinkEvents {
   unavailable: (why: Unlinked) => void;
 }
 
-export const linkUrl = (hub: HubAccount): string => {
-  const u = new URL("/ws/desk", hub.url);
-  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  u.searchParams.set("token", hub.token);
-  return u.toString();
-};
+/** The link's socket on a hub. It names no token: the native side puts
+ *  the hub's in the handshake's header. */
+export const LINK_PATH = "/ws/desk";
 
 /** Why a link that wouldn't open didn't: the route is missing, the hub
  *  takes this computer for nobody, or neither (try again). A socket can't say
  *  how its upgrade was refused, so the hub is asked over HTTP. */
 export const probeLink = async (hub: HubAccount): Promise<Unlinked | null> => {
   try {
-    const res = await hubFetch(new URL("/ws/desk", hub.url), { headers: { authorization: `Bearer ${hub.token}` } });
+    const res = await pairedHub(hub).fetch("GET", LINK_PATH);
     const page = res.ok && !(res.headers.get("content-type") ?? "").includes("json");
     if (res.status === 404 || page) return "legacy";
   } catch {
     return null;
   }
-  return (await whoAmI(hub.url, hub.token)).state === "nobody" ? "unlinked" : null;
+  return (await whoAmI(hub)).state === "nobody" ? "unlinked" : null;
 };
 
 const delivered = (m: ServerMessage): Delivered | null =>
@@ -77,7 +75,7 @@ const delivered = (m: ServerMessage): Delivered | null =>
 /** One hub's link, reconnecting with the same back-off as a conversation
  *  until closed, or until the hub turns out to have none. */
 export class HubLink {
-  private ws: WebSocket | null = null;
+  private ws: DeskSocket | null = null;
   private closed = false;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -92,7 +90,7 @@ export class HubLink {
   }
 
   private open() {
-    const ws = new WebSocket(linkUrl(this.hub));
+    const ws = pairedHub(this.hub).socket(LINK_PATH);
     this.ws = ws;
     let opened = false;
     ws.onopen = () => {

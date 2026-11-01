@@ -6,7 +6,7 @@ import { forgetImages } from "../pictures/pictures";
 import { PNG_BYTES } from "../pictures/testing";
 import { Profile } from "./Profile";
 
-const hub = (id: string, label: string, local = false): HubAccount => ({ id, label, url: `https://${id}.example`, local, token: `t-${id}` });
+const hub = (id: string, label: string, local = false): HubAccount => ({ id, label, url: `https://${id}.example`, local, revision: `t-${id}` });
 const HUBS = [hub("local", "This computer", true), hub("dw", "Driftwerk"), hub("acme", "Acme"), hub("lab", "Lab")];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 

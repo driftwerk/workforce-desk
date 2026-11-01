@@ -11,7 +11,6 @@ import { useFloor } from "./store";
 import { NOW, agent, approval, at, fakeFetch, fakeHub, hub, need, ready, session, view, work, type FakeHub } from "./testing";
 import { clock, dayClock } from "./time";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("@workforce/rich", () => ({
   RichMarkdown: ({ text }: { text: string }) => text,

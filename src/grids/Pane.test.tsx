@@ -138,7 +138,7 @@ describe("closing a pane", () => {
     vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
     useChat.setState({
       roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
-      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
     });
   };
   afterEach(() => vi.unstubAllGlobals());
@@ -572,7 +572,7 @@ describe("an agent's pane", () => {
     vi.stubGlobal("WebSocket", class { readyState = 0; send() {} close() {} });
     useChat.setState({
       roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false }],
-      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
       activeAgent: null,
     });
     deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
@@ -589,7 +589,7 @@ describe("an agent's pane", () => {
     servePictures(() => new Response(JSON.stringify({ messages: [], more: false }), { headers: { "content-type": "application/json" } }));
     useChat.setState({
       roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false, picture: { version: "v1", source: "slack", at: "" } }],
-      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
     });
     deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
     canvas();

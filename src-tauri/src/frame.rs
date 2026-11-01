@@ -364,8 +364,11 @@ impl Tracker {
                 config.min_height.unwrap_or(0.0),
             ),
         );
-        let mut builder =
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.visible(false);
+        let mut builder = crate::navigation::guard(
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?,
+            crate::navigation::dev_url(app.handle()),
+        )
+        .visible(false);
         if let Some(p) = placement {
             builder = builder
                 .position(p.rect.x, p.rect.y)

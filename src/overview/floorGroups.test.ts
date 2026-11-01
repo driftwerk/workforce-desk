@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { Overview, Session } from "../hub/types";
 import { floorGroups } from "./CrewFloor";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("@workforce/rich", () => ({ RichMarkdown: () => null }));
 

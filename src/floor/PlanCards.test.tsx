@@ -8,7 +8,6 @@ import { useFloor } from "./store";
 import { NOW, at, hub, ready, view } from "./testing";
 import { clock } from "./time";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
   cancelLogin: vi.fn(),

@@ -7,7 +7,6 @@ import { SpendCard } from "./SpendCard";
 import { SpendStrip } from "./SpendStrip";
 import { useSpend } from "./store";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 afterEach(cleanup);

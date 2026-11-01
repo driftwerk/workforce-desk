@@ -19,7 +19,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   search.mockClear();
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }],
+    hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }],
     roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
   });
   useUi.setState({ search: { text: "from:@allan rollback" }, roomThreads: {}, flash: null });

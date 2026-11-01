@@ -1,11 +1,12 @@
-import { deskCall, type HubConnection } from "./client";
+import { deskCall } from "./client";
+import type { HubRef } from "./net";
 import type { DecideRef, FloorView, UsageView } from "./types";
 
 export type Choice = "allow" | "deny";
 
 /** A hub's floor: what's waiting on the person, what's running, today's
  *  lanes, and the plans' usage, all as the person; and answering a need. */
-export const floorOf = (hub: HubConnection) => ({
+export const floorOf = (hub: HubRef) => ({
   /** `day`: the start of the person's day, in their own time. */
   floor: (day: Date): Promise<FloorView> => deskCall(hub, "GET", `/api/desk/floor?${new URLSearchParams({ day: localIso(day) })}`),
   usage: (): Promise<UsageView> => deskCall(hub, "GET", "/api/desk/usage"),

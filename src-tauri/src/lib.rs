@@ -1,13 +1,18 @@
 mod attachments;
 mod badge;
 mod broker;
+#[cfg(test)]
+mod commands;
 mod files;
 mod fonts;
 mod frame;
 mod grid_windows;
 mod helper;
+mod hub_io;
 mod hubs;
 mod logins;
+mod navigation;
+mod paired;
 mod state;
 mod support;
 mod terminals;
@@ -180,27 +185,12 @@ async fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> 
         .map_err(text)
 }
 
+/// Forgets a paired hub and its token. (A hub is paired, and its token
+/// kept, by `hub_io::pair_collect`: the page never holds one to hand over.)
 #[tauri::command]
-fn hubs_save(
-    app: State<'_, App>,
-    files: State<'_, attachments::Files>,
-    label: String,
-    url: String,
-    token: String,
-) -> CommandResult<hubs::HubRecord> {
-    let saved = hubs::save(&app.paths, &label, &url, &token).map_err(text);
-    files.forget();
-    saved
-}
-
-#[tauri::command]
-fn hubs_remove(
-    app: State<'_, App>,
-    files: State<'_, attachments::Files>,
-    id: String,
-) -> CommandResult<()> {
+fn hubs_remove(app: State<'_, App>, io: State<'_, hub_io::HubIo>, id: String) -> CommandResult<()> {
     let removed = hubs::remove(&app.paths, &id).map_err(text);
-    files.forget();
+    io.forget();
     removed
 }
 
@@ -630,6 +620,11 @@ pub fn run() {
     // A workspace build can give reqwest rustls without a crypto provider
     // (postgresql_embedded asks for that); every client shares this one.
     let _ = rustls::crypto::ring::default_provider().install_default();
+    // The hubs' sockets are held in this process, not the webview's.
+    #[cfg(unix)]
+    if let Err(e) = desk_core::process::raise_open_files(4096) {
+        eprintln!("Couldn't raise the open-files limit: {e}");
+    }
     // `Desk.AppImage --helper`: what the AppImage's login service runs.
     #[cfg(target_os = "linux")]
     if std::env::args().any(|a| a == "--helper") {
@@ -659,7 +654,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
@@ -689,8 +683,14 @@ pub fn run() {
             tracing::info!(host = ?backend.as_ref().map(|b| &b.host), version = %app.package_info().version, "Desk starting");
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths, backend.clone()));
-            app.manage(attachments::Files::new(paths.clone(), backend.clone()));
-            app.manage(broker::Broker::new(backend.clone()));
+            // Every hub socket the page holds, the local hub's admin ones
+            // and every paired hub's, and the hubs it reaches by id.
+            let sockets = Arc::new(broker::socket::Sockets::default());
+            let paired = Arc::new(paired::Paired::new(paths.clone(), backend.clone()));
+            app.manage(attachments::Files::new(Arc::clone(&paired)));
+            app.manage(broker::Broker::new(backend.clone(), Arc::clone(&sockets)));
+            app.manage(hub_io::HubIo::new(paired, Arc::clone(&sockets)));
+            app.manage(sockets);
             app.manage(App {
                 paths,
                 backend,
@@ -713,29 +713,33 @@ pub fn run() {
             });
             Ok(())
         })
-        // A page loading again, or a window gone, holds none of the local
-        // hub's sockets any more.
+        // A page loading again, or a window gone, holds none of its hub
+        // sockets any more.
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started
-                && let Some(broker) = webview.try_state::<broker::Broker>()
+                && let Some(sockets) = webview.try_state::<Arc<broker::socket::Sockets>>()
             {
-                broker.sockets.close_owned(webview.label());
+                sockets.close_owned(webview.label());
             }
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event
-                && let Some(broker) = window.try_state::<broker::Broker>()
+                && let Some(sockets) = window.try_state::<Arc<broker::socket::Sockets>>()
             {
-                broker.sockets.close_owned(window.label());
+                sockets.close_owned(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
             hub_connection,
             broker::local_hub_fetch,
             broker::local_hub_socket_open,
-            broker::local_hub_socket_send,
-            broker::local_hub_socket_ack,
-            broker::local_hub_socket_close,
+            broker::socket_send,
+            broker::socket_ack,
+            broker::socket_close,
+            hub_io::hub_fetch,
+            hub_io::hub_socket_open,
+            hub_io::pair_request,
+            hub_io::pair_collect,
             fonts::fonts_list,
             host_info,
             badge::set_unread_badge,
@@ -745,7 +749,6 @@ pub fn run() {
             themes_write,
             themes_reveal,
             hubs_list,
-            hubs_save,
             hubs_remove,
             tuple_enable,
             tuple_disable,
@@ -822,6 +825,100 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    /// Every command `generate_handler!` registers is declared to the ACL
+    /// (`commands.rs`, read by build.rs), and nothing else: one left out
+    /// would be refused in every window.
+    #[test]
+    fn every_command_is_declared_to_the_acl() {
+        let src = include_str!("lib.rs");
+        let list = &src[src.find("generate_handler![").unwrap() + "generate_handler![".len()..];
+        let list = &list[..list.find(']').unwrap()];
+        let registered: BTreeSet<&str> = list
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| c.rsplit("::").next().unwrap())
+            .collect();
+        let declared: BTreeSet<&str> = commands::COMMANDS.iter().copied().collect();
+        assert_eq!(registered, declared);
+        assert_eq!(
+            declared.len(),
+            commands::COMMANDS.len(),
+            "declared once each"
+        );
+    }
+
+    /// The capabilities as the build resolved them: a grid's window is
+    /// refused what only the main window may do, which the main window
+    /// gets past the ACL for.
+    ///
+    /// Not on Windows: building an app links in its menus, which need the
+    /// Common Controls v6 that only the app's manifest asks for, and a test
+    /// binary has none (it fails to load, `STATUS_ENTRYPOINT_NOT_FOUND`).
+    /// The capabilities are the same files on every system.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_grid_window_is_refused_what_only_the_main_window_may_do() {
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder};
+        use tauri::webview::InvokeRequest;
+        let app = mock_builder()
+            .build(tauri::generate_context!("tauri.conf.json", test = true))
+            .unwrap();
+        let ask = |label: &str, cmd: &str| {
+            let webview = app.get_webview_window(label).unwrap_or_else(|| {
+                tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                    .build()
+                    .unwrap()
+            });
+            let answer = get_ipc_response(
+                &webview,
+                InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: CallbackFn(0),
+                    error: CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: InvokeBody::default(),
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.to_string(),
+                },
+            );
+            match answer {
+                Ok(_) => String::new(),
+                Err(e) => e.to_string(),
+            }
+        };
+        for cmd in [
+            "data_remove",
+            "pair_collect",
+            "hubs_remove",
+            "wsl_install",
+            "report_save",
+        ] {
+            let refused = ask("grid-a", cmd);
+            assert!(
+                refused.contains("not allowed"),
+                "{cmd} in a grid: {refused}"
+            );
+            let main = ask("main", cmd);
+            assert!(!main.contains("not allowed"), "{cmd} in main: {main}");
+        }
+        // What a grid's panes use, it gets past the ACL for.
+        for cmd in [
+            "hub_fetch",
+            "hub_socket_open",
+            "desk_state_put",
+            "attachment_upload",
+        ] {
+            let grid = ask("grid-b", cmd);
+            assert!(!grid.contains("not allowed"), "{cmd} in a grid: {grid}");
+        }
+        // And a window that is neither gets nothing.
+        let other = ask("elsewhere", "hub_fetch");
+        assert!(other.contains("not allowed"), "{other}");
+    }
 
     /// What `hub_connection` hands the page, serialized as the IPC sends it.
     #[test]

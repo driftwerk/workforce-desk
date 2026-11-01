@@ -114,7 +114,7 @@ beforeEach(() => {
   });
   useDesk.setState({ sessions: {}, restore: [], openId: null, view: "floor" });
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
     roster: [
       { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true },
       { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false },

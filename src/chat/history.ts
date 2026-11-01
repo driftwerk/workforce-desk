@@ -2,7 +2,7 @@ import type { DeskExtras } from "../hub/types";
 import { preview } from "../preview";
 import type { Attachment, Author, ChatMessage, DeskMark, HubAccount } from "./types";
 import { refusal } from "../hub/client";
-import { hubFetch } from "../hub/net";
+import { pairedHub } from "../hub/net";
 
 /** One message of a Desk conversation as the hub keeps it. */
 export interface HubMessage {
@@ -84,7 +84,7 @@ export async function readConversation(
   if (at.channel) url.searchParams.set("channel", at.channel);
   if (at.before) url.searchParams.set("before", at.before);
   if (at.after) url.searchParams.set("after", at.after);
-  const res = await hubFetch(url, { headers: { authorization: `Bearer ${hub.token}` } });
+  const res = await pairedHub(hub).fetch("GET", `${url.pathname}${url.search}`);
   if (absent(res)) return null;
   if (!res.ok) throw await refusal(res);
   const body = (await res.json()) as { messages?: HubMessage[]; more?: boolean };

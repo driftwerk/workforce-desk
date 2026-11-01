@@ -110,8 +110,8 @@ beforeEach(() => {
   );
   useChat.setState({
     hubs: [
-      { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" },
-      { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, token: "t" },
+      { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" },
+      { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, revision: "t" },
     ],
     roster: [
       { hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false },
@@ -413,7 +413,7 @@ describe("asking a room's members", () => {
     await say(room, "@allan hi", null);
     await vi.waitFor(() => expect(FakeSocket.find("/ws", "allan", CHANNEL)).toBeDefined());
     expect(drafts()[0]).toMatchObject({ state: "connecting" });
-    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, token: "new" } : h));
+    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, revision: "new" } : h));
     useChat.setState({ hubs });
     prune(useDesk.getState().rooms, hubs);
     expect(drafts()).toHaveLength(1);
@@ -433,7 +433,7 @@ describe("asking a room's members", () => {
     keep("allan", { id: "m1", from: "agent", text: "ok", mark: { room: ROOM_ID, thread: "t1" } });
     answer(allan, ref, "m1", "ok");
     await vi.waitFor(() => expect(drafts()).toEqual([]));
-    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, token: "new" } : h));
+    const hubs = useChat.getState().hubs.map((h) => (h.id === "dw" ? { ...h, revision: "new" } : h));
     useChat.setState({ hubs });
     prune(useDesk.getState().rooms, hubs);
     await say(room, "@allan c", "t1");
@@ -466,8 +466,8 @@ describe("asking a room's members", () => {
     await say(room, "hello", null);
     const first = await connect("allan");
     prune(useDesk.getState().rooms, [
-      { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "new" },
-      { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, token: "t" },
+      { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "new" },
+      { id: "local", label: "Local", url: "http://127.0.0.1:1", local: true, revision: "t" },
     ]);
     expect(first.readyState).toBe(FakeSocket.CLOSING);
   });

@@ -3,6 +3,7 @@ import { emptyConversation, type ConversationState } from "./conversation";
 import { covered, cursorIn, fetchHistory, prepend, readConversation, withHistory } from "./history";
 import { useChat } from "./store";
 import type { ChatMessage, HubAccount } from "./types";
+import { setDevToken } from "../hub/devTokens";
 
 /** The DMs opened, to tell what they hear and see what they're told. */
 const opened = vi.hoisted(
@@ -33,7 +34,10 @@ vi.mock("./conversation", async (original) => ({
   },
 }));
 
-const hub: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, token: "tok" };
+const hub: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, revision: "tok" };
+// Outside the app the page reaches hubs itself, with these.
+setDevToken("local", "tok");
+setDevToken("dw", "tok");
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

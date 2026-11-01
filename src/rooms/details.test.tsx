@@ -41,7 +41,7 @@ beforeEach(() => {
   patches = [];
   removed.length = 0;
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }],
+    hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }],
     roster: [
       { hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false },
       { hubId: "dw", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false },

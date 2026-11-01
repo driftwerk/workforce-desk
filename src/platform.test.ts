@@ -7,7 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const { fileUrl, safeFilename } = await import("./platform");
 
-const hub = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" };
+const hub = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" };
 
 describe("files in conversations", () => {
   it("are shown from where the webview serves Desk's file scheme, each part of the path kept apart", () => {

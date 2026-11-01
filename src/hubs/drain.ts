@@ -85,7 +85,7 @@ const RECENT = 200;
 const FINAL = new Set([400, 403, 404, 409, 413, 422]);
 const refused = (e: unknown): boolean => e instanceof HubError && FINAL.has(e.status);
 
-const sameAccount = (a: HubAccount, b: HubAccount): boolean => a.url === b.url && a.token === b.token;
+const sameAccount = (a: HubAccount, b: HubAccount): boolean => a.url === b.url && a.revision === b.revision;
 
 /** A drain of one conversation, and whether it has begun reading. */
 interface Queued {

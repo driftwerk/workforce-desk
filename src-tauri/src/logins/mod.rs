@@ -81,8 +81,12 @@ fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
     let hub = backend
         .connection()?
         .ok_or_else(|| eyre::eyre!("Desk is still starting"))?;
-    let url = format!("{}/api/vault/{}", hub.gateway_url, plan.vault_path());
-    let res = reqwest::blocking::Client::new()
+    // The admin token goes to the hub on this computer and nowhere else:
+    // its address checked, never through a proxy, never after a redirect.
+    let base = desk_core::net::loopback_url(&hub.gateway_url).map_err(|e| eyre::eyre!(e))?;
+    let url = desk_core::net::at(&base, &format!("/api/vault/{}", plan.vault_path()), None)
+        .map_err(|e| eyre::eyre!(e))?;
+    let res = desk_core::net::loopback_blocking()
         .post(url)
         .bearer_auth(hub.admin_token)
         .json(&serde_json::json!({ "value": value }))

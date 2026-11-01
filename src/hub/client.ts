@@ -29,12 +29,13 @@ import type {
   TerminalInfo,
   UnreadSummary,
 } from "./types";
-import { direct, type Body, type DeskSocket, type DeskTransport } from "./transport";
+import { pairedHub, type HubRef } from "./net";
+import type { Body, DeskSocket, DeskTransport } from "./transport";
 import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
 
-/** A hub and the token to reach it with: a paired hub's device token, or
- *  in the browser preview the local hub's own. In the app the local hub's
- *  admin surface is reached through `brokered` instead, with no token here. */
+/** A hub and the token to reach it with, outside the app: the browser
+ *  preview's local hub and its admin token. In the app every hub is reached
+ *  through the native side, which holds the tokens; the page has none. */
 export interface HubConnection {
   url: string;
   token: string;
@@ -145,8 +146,8 @@ export const refusal = async (res: Response): Promise<HubError> => {
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
  *  so its Slack picture, if any, shows again); the picture shown after. */
-export const sendPicture = (conn: HubConnection, path: string, image: Blob | null): Promise<Picture | null> =>
-  pictureVia(direct(conn), path, image);
+export const sendPicture = (hub: HubRef, path: string, image: Blob | null): Promise<Picture | null> =>
+  pictureVia(pairedHub(hub), path, image);
 
 const pictureVia = async (t: DeskTransport, path: string, image: Blob | null): Promise<Picture | null> => {
   const res = await t.fetch(image ? "PUT" : "DELETE", path, image ? { type: image.type || "application/octet-stream", data: image } : undefined);
@@ -181,24 +182,20 @@ const withDevBridge = async <T>(method: string, path: string, body: unknown, cal
   }
 };
 
-/** One call to a hub's API, as `conn`: its status and JSON answer (none
+/** One call to paired hub `hub`'s API: its status and JSON answer (none
  *  for a 204), and a `HubError` for a refusal or a route the hub doesn't
  *  have. */
-export const hubRequest = async <T>(
-  conn: HubConnection,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<{ status: number; body: T }> => answer<T>(await direct(conn).fetch(method, path, json(body)));
+export const hubRequest = async <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
+  answer<T>(await pairedHub(hub).fetch(method, path, json(body)));
 
-/** One call to a hub's API, as `conn`: its JSON answer, nothing for a 204. */
-export const hubCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
-  (await hubRequest<T>(conn, method, path, body)).body;
+/** One call to paired hub `hub`'s API: its JSON answer, nothing for a 204. */
+export const hubCall = async <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
+  (await hubRequest<T>(hub, method, path, body)).body;
 
 /** A Desk route; in the browser preview, the dev bridge answers the ones
  *  the running hub doesn't have yet. */
-export const deskCall = <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
-  withDevBridge(method, path, body, () => hubCall<T>(conn, method, path, body));
+export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
+  withDevBridge(method, path, body, () => hubCall<T>(hub, method, path, body));
 
 /** The most messages one read of a room or thread returns. */
 export const ROOM_PAGE = 100;

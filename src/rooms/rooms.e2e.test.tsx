@@ -101,7 +101,7 @@ beforeEach(() => {
   prune({});
   useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
   useChat.setState({
-    hubs: [{ id: "dw", label: "Acme", url: "https://acme.example.com", local: false, token: "t" }],
+    hubs: [{ id: "dw", label: "Acme", url: "https://acme.example.com", local: false, revision: "t" }],
     roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     me: { local: { id: "p", name: "You", picture: null } },
   });

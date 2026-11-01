@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { Session, TerminalInfo } from "../hub/types";
 import { describeTerminal, heardTerminals, pluginEnv, trackedIn, useTerminals } from "./terminals";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
   inApp: false,

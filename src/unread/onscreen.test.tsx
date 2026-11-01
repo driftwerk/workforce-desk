@@ -115,7 +115,7 @@ beforeEach(() => {
   useDeskFocus.setState({}, true);
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null, filled: {} });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
-  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }], roster: [] });
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }], roster: [] });
   useDesk.setState({
     detached: false,
     view: "grids",

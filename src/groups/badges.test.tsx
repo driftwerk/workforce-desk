@@ -12,7 +12,6 @@ import { SidebarGroups } from "./SidebarGroups";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
 vi.mock("../shell/navigate", async (actual) => ({ ...(await actual<typeof import("../shell/navigate")>()), openTarget: vi.fn() }));

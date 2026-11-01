@@ -54,7 +54,7 @@ beforeEach(() => {
   state.clear();
   invoked.length = 0;
   useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
-  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }], roster: [] });
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }], roster: [] });
   useRoomOrder.setState({ order: [ROOM] });
   useDesk.setState({
     connected: false,

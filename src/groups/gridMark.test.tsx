@@ -51,7 +51,7 @@ beforeEach(() => {
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }],
+    hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }],
     roster: [agent("local", "scout", "Scout")],
   });
   useDesk.setState({ sessions: { s1: session("s1", "api-e7"), s2: session("s2", "web-release", { terminalId: "t2", live: true } as Partial<Session>) }, openId: null });
