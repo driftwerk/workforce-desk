@@ -840,17 +840,17 @@ pub(crate) mod tests {
     fn a_damaged_bundle_is_an_error_that_quotes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         for damaged in [
-            r#"{"secrets":"s3cret-vault-key"}"#,
+            r#"{"secrets":"leaked leaked"}"#,
             r#"{"secrets":{"hub-vault-key":7357}}"#,
-            r#"{"secrets":{"hub-vault-key":"s3cret"#,
-            "s3cret",
+            r#"{"secrets":{"hub-vault-key":"leaked"#,
+            "leaked",
         ] {
             let items = Counted::with(&[(HELPER_BUNDLE, damaged)]);
             let secrets =
                 crate::Secrets::Keyring(crate::Keyring::with(Arc::new(helper(dir.path(), &items))));
             let e = crate::SecretStore::get_or_create(&secrets, Secret::VaultKey).unwrap_err();
             let said = format!("{e:#} {e:?}");
-            assert!(!said.contains("s3cret") && !said.contains("7357"), "{said}");
+            assert!(!said.contains("leaked") && !said.contains("7357"), "{said}");
             assert_eq!(
                 items.writes.load(Ordering::SeqCst),
                 0,

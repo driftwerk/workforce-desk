@@ -1,0 +1,3 @@
+# A test fixture in a commit already pushed: a damaged bundle whose value
+# reads to gitleaks as an API key (crates/desk-core/src/vault.rs).
+088db7780fffa9ffd504a653a4c087ed7c9674ef:crates/desk-core/src/vault.rs:generic-api-key:841
