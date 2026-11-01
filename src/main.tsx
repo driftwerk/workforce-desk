@@ -14,6 +14,7 @@ import { mainUi } from "./restore/ui";
 import { followRooms, roomOrder, ROOMS_PREFIX } from "./rooms/order";
 import { App } from "./shell/App";
 import { loadHost } from "./shell/host";
+import { DeskRichHost } from "./shell/richHost";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/overview.css";
@@ -52,7 +53,7 @@ void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder]), loadHost
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      {grid ? <GridWindow gridId={grid} /> : <App />}
+      <DeskRichHost>{grid ? <GridWindow gridId={grid} /> : <App />}</DeskRichHost>
       <Ready />
     </StrictMode>,
   );
