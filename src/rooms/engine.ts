@@ -167,7 +167,7 @@ const lineFor = (room: Room, m: RoomMemberRef): Line | null => {
   if (!hub) return null;
   const key = lineKey(room, m);
   const had = lines.get(key);
-  if (had && had.hub.token === hub.token && had.hub.url === hub.url) return had;
+  if (had && had.hub.revision === hub.revision && had.hub.url === hub.url) return had;
   had?.convo.close();
   const convo: Conversation = new Conversation(
     hub,
@@ -756,7 +756,7 @@ export function prune(rooms: Record<string, Room>, hubs: readonly HubAccount[] =
   const closed = new Set<string>();
   for (const [key, line] of lines) {
     const now = hubs.find((h) => h.id === line.hub.id);
-    if (wanted.has(key) && now?.token === line.hub.token && now.url === line.hub.url) continue;
+    if (wanted.has(key) && now?.revision === line.hub.revision && now.url === line.hub.url) continue;
     line.convo.close();
     lines.delete(key);
     closed.add(key);

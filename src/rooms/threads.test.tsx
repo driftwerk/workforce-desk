@@ -66,7 +66,7 @@ const draft = (threadId: string): RoomDraft => ({
 
 beforeEach(() => {
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
     roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false }],
   });
   useUi.setState({ roomThreads: {} });

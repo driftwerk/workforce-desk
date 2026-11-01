@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { setDevToken } from "../hub/devTokens";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import type { HubAccount, Me } from "../chat/types";
@@ -7,9 +8,12 @@ import { forgetImages, imageUrl, pictureOf, type Picture } from "./pictures";
 import { servePictures } from "./testing";
 import { youOn } from "./who";
 
-const LOCAL: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t-local" };
-const DW: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t-dw" };
-const ACME: HubAccount = { id: "acme", label: "Acme", url: "https://acme.example", local: false, token: "t-acme" };
+const LOCAL: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t-local" };
+const DW: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, revision: "t-dw" };
+// Outside the app the page reaches the hub itself, with this; in the app the
+// native side adds the hub's token (src/hub/native.test.ts).
+setDevToken("dw", "t-dw");
+const ACME: HubAccount = { id: "acme", label: "Acme", url: "https://acme.example", local: false, revision: "t-acme" };
 const pic = (version: string, source: Picture["source"] = "chosen"): Picture => ({ version, source, at: "2026-10-30T09:00:00Z", slack: null });
 const me = (name: string, picture: Picture | null): Me => ({ id: `u-${name}`, name, picture });
 

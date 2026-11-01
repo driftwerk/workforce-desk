@@ -100,7 +100,7 @@ beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   vi.spyOn(document, "hasFocus").mockImplementation(() => true);
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
     roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
   });
   useUi.setState({ roomThreads: {}, anchors: {}, flash: null });
@@ -219,7 +219,7 @@ describe("a DM on screen", () => {
   it("stays read while the agent streams and answers", () => {
     useDesk.setState({ activeRoom: null });
     useChat.setState({
-      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, token: "t" }],
+      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, revision: "t" }],
       roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
       activeAgent: "dw/allan",
       conversations: { "dw/allan": { ...emptyConversation(), connected: true } },

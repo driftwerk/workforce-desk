@@ -5,16 +5,14 @@
 //! person chooses, and uploaded from the page's own bytes.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use desk_core::Paths;
-use desk_core::backend::Backend;
 use percent_encoding::percent_decode_str;
-use reqwest::{StatusCode, Url};
+use reqwest::Url;
 use tauri::http::{self, HeaderMap, HeaderName, HeaderValue, header};
 use tokio::io::AsyncWriteExt;
 
-use crate::hubs::{self, HubAccount};
+use crate::paired::{Failure, Paired};
 
 /// The scheme the page shows files through.
 pub const SCHEME: &str = "deskfile";
@@ -32,93 +30,15 @@ pub struct FileRef {
     pub artifact: String,
 }
 
-/// Why a file couldn't be fetched.
-#[derive(Debug)]
-enum Failure {
-    /// No such hub, or nothing Desk could ask for.
-    Unknown,
-    /// The hub couldn't be reached.
-    Unreachable(String),
-}
-
-impl std::fmt::Display for Failure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unknown => f.write_str("That file's workspace isn't connected to Desk any more."),
-            Self::Unreachable(why) => write!(f, "Couldn't reach the workspace: {why}"),
-        }
-    }
-}
-
-/// The hubs Desk is paired with, read once and again whenever they change
-/// or one turns a token away, and the client every request shares.
+/// The hubs Desk is paired with, by id: each file is fetched from its own
+/// hub with that hub's token, by the client for where it is.
 pub struct Files {
-    paths: Paths,
-    /// Where the local hub runs; none until Desk has one (Windows before
-    /// WSL is set up).
-    backend: Option<Backend>,
-    client: reqwest::Client,
-    hubs: Mutex<Option<Arc<Vec<HubAccount>>>>,
+    paired: Arc<Paired>,
 }
 
 impl Files {
-    pub fn new(paths: Paths, backend: Option<Backend>) -> Self {
-        Self {
-            paths,
-            backend,
-            client: reqwest::Client::new(),
-            hubs: Mutex::new(None),
-        }
-    }
-
-    /// Forgets the hubs read, after one is paired or removed.
-    pub fn forget(&self) {
-        *self.hubs.lock().expect("hubs") = None;
-    }
-
-    fn hubs(&self) -> eyre::Result<Arc<Vec<HubAccount>>> {
-        let mut kept = self.hubs.lock().expect("hubs");
-        if let Some(hubs) = kept.as_ref() {
-            return Ok(hubs.clone());
-        }
-        let read = Arc::new(hubs::accounts(&self.paths, self.backend.as_ref())?);
-        *kept = Some(read.clone());
-        Ok(read)
-    }
-
-    /// Hub `id`, read again when it isn't among those already read (it may
-    /// have just been paired).
-    fn hub(&self, id: &str) -> Option<HubAccount> {
-        let find = |hubs: Arc<Vec<HubAccount>>| hubs.iter().find(|h| h.id == id).cloned();
-        self.hubs().ok().and_then(find).or_else(|| {
-            self.forget();
-            self.hubs().ok().and_then(find)
-        })
-    }
-
-    /// Sends `build`'s request to hub `id` with its token; a token the hub
-    /// turns away is read again once (the local hub's is renewed by Desk
-    /// Helper).
-    async fn send(
-        &self,
-        id: &str,
-        build: impl Fn(&HubAccount) -> Option<reqwest::RequestBuilder>,
-    ) -> Result<reqwest::Response, Failure> {
-        let build = &build;
-        let attempt = |hub: HubAccount| async move {
-            let request = build(&hub).ok_or(Failure::Unknown)?;
-            request
-                .bearer_auth(&hub.token)
-                .send()
-                .await
-                .map_err(|e| Failure::Unreachable(e.without_url().to_string()))
-        };
-        let response = attempt(self.hub(id).ok_or(Failure::Unknown)?).await?;
-        if response.status() != StatusCode::UNAUTHORIZED {
-            return Ok(response);
-        }
-        self.forget();
-        attempt(self.hub(id).ok_or(Failure::Unknown)?).await
+    pub fn new(paired: Arc<Paired>) -> Self {
+        Self { paired }
     }
 
     async fn download(
@@ -126,15 +46,16 @@ impl Files {
         file: &FileRef,
         range: Option<&str>,
     ) -> Result<reqwest::Response, Failure> {
-        self.send(&file.hub, |hub| {
-            let url = download_url(&hub.url, &file.agent, &file.artifact)?;
-            let request = self.client.get(url);
-            Some(match range {
-                Some(range) => request.header(header::RANGE, bounded_range(range)),
-                None => request,
+        self.paired
+            .send(&file.hub, |hub| {
+                let url = download_url(hub.base.as_str(), &file.agent, &file.artifact)?;
+                let request = hub.client.get(url);
+                Some(match range {
+                    Some(range) => request.header(header::RANGE, bounded_range(range)),
+                    None => request,
+                })
             })
-        })
-        .await
+            .await
     }
 
     /// What the scheme answers `request` with.
@@ -148,7 +69,9 @@ impl Files {
             .and_then(|v| v.to_str().ok());
         let response = match self.download(&file, range).await {
             Ok(response) => response,
-            Err(Failure::Unknown) => return empty(http::StatusCode::NOT_FOUND),
+            Err(Failure::Unknown | Failure::Refused(_)) => {
+                return empty(http::StatusCode::NOT_FOUND);
+            }
             Err(Failure::Unreachable(why)) => {
                 tracing::warn!(%why, hub = %file.hub, "a file's workspace is unreachable");
                 return empty(http::StatusCode::BAD_GATEWAY);
@@ -478,10 +401,11 @@ pub async fn attachment_upload(
     let (hub, agent, channel, filename) = (hub?, agent?, channel?, filename?);
     let body = bytes::Bytes::copy_from_slice(bytes);
     let response = files
+        .paired
         .send(&hub, |account| {
-            let url = upload_url(&account.url, &agent, &channel, &filename)?;
+            let url = upload_url(account.base.as_str(), &agent, &channel, &filename)?;
             Some(
-                files
+                account
                     .client
                     .post(url)
                     .header(header::CONTENT_TYPE, "application/octet-stream")

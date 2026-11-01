@@ -3,7 +3,7 @@ import type { HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { spreadPicture, spreadSaid } from "./everywhere";
 
-const hub = (id: string, label: string): HubAccount => ({ id, label, url: `https://${id}.example`, local: false, token: id });
+const hub = (id: string, label: string): HubAccount => ({ id, label, url: `https://${id}.example`, local: false, revision: id });
 
 describe("using one picture everywhere", () => {
   it("sets it on every hub that takes it, and says which one didn't", async () => {

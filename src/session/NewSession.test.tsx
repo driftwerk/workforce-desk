@@ -5,7 +5,6 @@ import type { Caps, EngineInfo, View } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { NewSession } from "./NewSession";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
   inApp: false,

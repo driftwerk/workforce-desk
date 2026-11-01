@@ -8,10 +8,12 @@ const uploads = vi.hoisted(() => ({ fail: null as Error | null, sent: [] as stri
 const saveFails = vi.hoisted(() => ({ error: null as Error | null }));
 const charts = vi.hoisted(() => ({ asked: [] as string[], answer: (_url: string): Response => new Response("{}") }));
 vi.mock("../hub/net", () => ({
-  hubFetch: async (url: URL, init: RequestInit) => {
-    charts.asked.push(`${String(url)} ${new Headers(init.headers).get("authorization")}`);
-    return charts.answer(String(url));
-  },
+  pairedHub: (hub: { id: string }) => ({
+    fetch: async (method: string, path: string, body?: unknown) => {
+      charts.asked.push(`${method} ${hub.id} ${path}${body === undefined ? "" : " with a body"}`);
+      return charts.answer(path);
+    },
+  }),
 }));
 vi.mock("../platform", () => ({
   openUrl: () => {},
@@ -35,7 +37,7 @@ const { adding, AttachButton, DropOverlay, PendingFiles, useFileDrop, usePending
 const { describe: describeKind, formatDuration, formatSize, kindOf } = await import("./kinds");
 const { MAX_FILE_BYTES, MAX_FILES, tooBig, uploadAll, uploadError } = await import("./upload");
 
-const hub = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" };
+const hub = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" };
 const file = (filename: string, media_type: string, more: Partial<Attachment> = {}): Attachment => ({
   artifact_id: `art_${filename}`,
   media_type,
@@ -95,12 +97,12 @@ describe("a chart an agent drew", () => {
     Object.defineProperty(window, "ResizeObserver", { writable: true, value: class { observe() {} disconnect() {} } });
   });
 
-  it("is drawn from its spec, read from the hub with its token in the header", async () => {
+  it("is drawn from its spec, read from its hub by id", async () => {
     charts.answer = () => new Response(JSON.stringify(spec));
     const { container } = render(<Attachments files={[file("signups.json", CHART, { artifact_id: "art_c1" })]} home={{ hub: "dw", agent: "allan" }} />);
     // The chart's renderer is a lazy chunk, slow to load the first time.
     await vi.waitFor(() => expect(container.querySelector(".wf-chart")).not.toBeNull(), { timeout: 15000 });
-    expect(charts.asked).toEqual(["https://dw.example.com/api/agents/allan/attachments/art_c1 Bearer t"]);
+    expect(charts.asked).toEqual(["GET dw /api/agents/allan/attachments/art_c1"]);
     expect(container.querySelector(".wf-chart-plot")!.getAttribute("aria-label")).toBe("bar chart: Signups by plan");
     expect(screen.getByRole("button", { name: "Show data" })).toBeTruthy();
   }, 20000);

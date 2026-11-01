@@ -26,7 +26,7 @@ const { dmsFrom } = await import("./summary");
 
 const at = (min: number) => new Date(Date.UTC(2026, 9, 30, 9, min)).toISOString();
 const brief = { text: "Three things moved overnight.", at: at(10), by: { id: "desk", name: "Desk" } };
-const hubs = [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }];
+const hubs = [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }];
 let puts: { place: string; point: unknown }[] = [];
 
 beforeEach(() => {

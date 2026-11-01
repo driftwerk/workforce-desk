@@ -1,11 +1,16 @@
-import { hubFetch } from "../hub/net";
+import { pairedHub, type HubRef } from "../hub/net";
+import { invoke } from "../platform";
 
 /** Pairing Desk with a remote hub: ask for a code, the person signs in to
  *  that hub in their browser and approves it there (which links Desk to
  *  their account), Desk collects a device token once. A hub that predates
  *  browser approval gives no page to open: its code is approved in its
  *  Pairing page, and the account is the one named by email when the code
- *  was asked for. */
+ *  was asked for.
+ *
+ *  The requests go through Desk's native side (src-tauri/src/hub_io.rs),
+ *  which collects the token and keeps it: the page is told the pairing
+ *  went through, never the token. */
 
 /** Who a hub says approved a pairing. */
 export interface PairedAs {
@@ -13,11 +18,13 @@ export interface PairedAs {
   email: string | null;
 }
 
+/** How a pairing stands. An approved one has been kept, as hub `hub`. */
 export type PairStatus =
   | { status: "pending" }
-  | { status: "approved"; token: string; identity: PairedAs | null }
+  | { status: "approved"; hub: string; identity: PairedAs | null }
   | { status: "rejected" }
-  | { status: "expired" };
+  | { status: "expired" }
+  | { status: "used" };
 
 export const normaliseHubUrl = (raw: string): string => {
   const trimmed = raw.trim().replace(/\/+$/, "");
@@ -25,13 +32,6 @@ export const normaliseHubUrl = (raw: string): string => {
   const u = new URL(withScheme);
   return `${u.protocol}//${u.host}`;
 };
-
-/** The kind of device Desk pairs as. The hub links a device to its person
- *  under this key and looks devices up only under the kinds it knows
- *  (`DEVICE_KINDS` in the hub's pairing crate: `ios_device`, `voice_device`,
- *  `desktop_device`); any other kind pairs and then never resolves to
- *  anyone. Desk's own hub pairs it as this too. */
-export const DEVICE_KIND = "desktop_device";
 
 /** A code asked for, and the page to approve it on — null from a hub that
  *  predates browser approval. */
@@ -59,41 +59,33 @@ const approvePage = (raw: unknown, hub: string): string | null => {
  *  approved, the only time such a hub does. */
 export const requestPairing = async (url: string, deviceName: string, email?: string): Promise<PairingCode> => {
   const identity = email?.trim();
-  const res = await hubFetch(`${url}/api/pair/device/request`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ device_name: deviceName, device_kind: DEVICE_KIND, ...(identity ? { identity_hint: identity } : {}) }),
+  const res = await invoke<{ status: number; body: { code?: unknown; approve_url?: unknown } | null }>("pair_request", {
+    url,
+    deviceName,
+    identityHint: identity || null,
   });
   if (res.status === 404) throw new Error("That workspace doesn't accept new devices.");
   if (res.status === 429) throw new Error("Too many pairing attempts — wait a minute and try again.");
-  if (!res.ok) throw new Error(`The workspace refused the request (${res.status}).`);
-  const body = (await res.json()) as { code: string; approve_url?: unknown };
-  return { code: body.code, approveUrl: approvePage(body.approve_url, url) };
+  if (res.status < 200 || res.status >= 300) throw new Error(`The workspace refused the request (${res.status}).`);
+  if (typeof res.body?.code !== "string" || !res.body.code) throw new Error("The workspace gave no code.");
+  return { code: res.body.code, approveUrl: approvePage(res.body.approve_url, url) };
 };
+
+/** How pairing `code` at `url` stands; once approved, the native side has
+ *  kept the hub as `label` with its token. */
+export const pairingStatus = (url: string, code: string, label: string): Promise<PairStatus> =>
+  invoke<PairStatus>("pair_collect", { url, code, label });
 
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-
-export const pairingStatus = async (url: string, code: string): Promise<PairStatus> => {
-  const res = await hubFetch(`${url}/api/pair/device/status/${encodeURIComponent(code)}`);
-  if (res.status === 404) return { status: "expired" };
-  if (!res.ok) throw new Error(`The workspace could not say how the request went (${res.status}).`);
-  const body = (await res.json()) as { status: string; token?: string; identity?: { display_name?: unknown; email?: unknown } | null };
-  if (body.status === "approved") {
-    if (!body.token) throw new Error("Approved, but that code was already used. Try connecting again.");
-    const who = body.identity && { name: text(body.identity.display_name), email: text(body.identity.email) };
-    return { status: "approved", token: body.token, identity: who && (who.name || who.email) ? who : null };
-  }
-  return body.status === "rejected" ? { status: "rejected" } : { status: "pending" };
-};
 
 /** Who a hub takes Desk's token to be (`GET /api/me`): a person; nobody —
  *  the device is paired but linked to no account (401); or unknown, when
  *  the hub couldn't say. */
 export type Who = { state: "person"; name: string | null; email: string | null } | { state: "nobody" } | { state: "unknown"; why: string };
 
-export const whoAmI = async (url: string, token: string): Promise<Who> => {
+export const whoAmI = async (hub: HubRef): Promise<Who> => {
   try {
-    const res = await hubFetch(new URL("/api/me", url), { headers: { authorization: `Bearer ${token}` } });
+    const res = await pairedHub(hub).fetch("GET", "/api/me");
     if (res.status === 401) return { state: "nobody" };
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return { state: "unknown", why: `${res.status}` };
     const body = (await res.json()) as { display_name?: unknown; email?: unknown };
@@ -162,26 +154,28 @@ export interface Paired {
  *  the dialog and the resume at launch share it. */
 const collecting = new Map<string, Promise<Paired>>();
 
-/** Waits for `p` to be approved, then saves the hub with its token (`save`)
- *  and forgets the pending pairing. A refusal or expiry forgets it too and
- *  throws `PairingEnded`; anything else throws and keeps it for next time. */
+/** Waits for `p` to be approved (when the native side keeps the hub and
+ *  its token), then tells `saved` and forgets the pending pairing. A
+ *  refusal or expiry forgets it too and throws `PairingEnded`; anything
+ *  else throws and keeps it for next time. */
 export function collectPairing(
   store: PendingStore,
   p: PendingPairing,
-  save: (label: string, url: string, token: string) => Promise<unknown>,
+  saved: (hub: string) => Promise<unknown>,
   every = 2000,
 ): Promise<Paired> {
   const running = collecting.get(p.code);
   if (running) return running;
   const run = (async () => {
+    const label = p.label || new URL(p.url).hostname;
     for (;;) {
-      const s = await pairingStatus(p.url, p.code);
+      const s = await pairingStatus(p.url, p.code, label);
       if (s.status === "approved") {
-        const label = p.label || new URL(p.url).hostname;
-        await save(label, p.url, s.token);
         dropPending(store, p.code);
+        await saved(s.hub);
         return { label, as: s.identity };
       }
+      if (s.status === "used") throw new Error("Approved, but that code was already used. Try connecting again.");
       if (s.status !== "pending") {
         dropPending(store, p.code);
         throw new PairingEnded(s.status === "rejected" ? "The workspace turned the request down." : "The code expired. Ask for a new one.");

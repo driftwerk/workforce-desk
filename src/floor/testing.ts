@@ -12,7 +12,7 @@ export const hub = (id: string, over: Partial<HubAccount> = {}): HubAccount => (
   label: id === "local" ? "This computer" : `Hub ${id}`,
   url: `http://${id}.test`,
   local: id === "local",
-  token: `t-${id}`,
+  revision: `t-${id}`,
   ...over,
 });
 

@@ -1,21 +1,14 @@
 import { absent } from "../chat/history";
 import type { HubAccount, PermissionChoice } from "../chat/types";
 import { refusal } from "../hub/client";
-import { hubFetch } from "../hub/net";
+import { jsonBody, pairedHub } from "../hub/net";
 
 /** The Desk surface's routes on a paired hub: which conversations changed,
  *  closing a deleted room's, deciding a routed approval, and a device
  *  unpairing itself. */
 
 const call = (hub: HubAccount, method: string, path: string, body?: unknown): Promise<Response> =>
-  hubFetch(new URL(path, hub.url), {
-    method,
-    headers: {
-      authorization: `Bearer ${hub.token}`,
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  pairedHub(hub).fetch(method, path, jsonBody(body));
 
 /** How far you've read a conversation, as its hub keeps it. */
 export interface ConversationRead {

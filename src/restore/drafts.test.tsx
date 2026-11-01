@@ -9,7 +9,6 @@ vi.mock("../rooms/engine", () => ({
   }),
   prune: () => {},
 }));
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 // Desk's file, as the native side keeps it.
 const file: Record<string, unknown> = {};

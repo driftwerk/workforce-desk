@@ -1,6 +1,9 @@
 //! The hubs Desk talks to. The list lives in `hubs.json`; each hub's
 //! paired-device token lives with the app's secrets. The local hub is always
 //! first, once `desk-hubd` has paired Desk with it.
+//!
+//! The page is told each hub but never its token: it reaches a hub by id,
+//! through `hub_io`, which adds the token on this side.
 
 use desk_core::backend::{Backend, Connection};
 use desk_core::host::Host;
@@ -15,13 +18,51 @@ pub struct HubRecord {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// A hub as Desk reaches it. Serialized for the page without its token;
+/// deliberately not `Debug`, which would print it.
+#[derive(Clone, Serialize)]
 pub struct HubAccount {
     pub id: String,
     pub label: String,
     pub url: String,
     pub local: bool,
+    /// Changes whenever the token does, so the page can tell a hub paired
+    /// again (or a renewed token) from the one it had; see [`revision`].
+    pub revision: String,
+    #[serde(skip)]
     pub token: String,
+}
+
+impl HubAccount {
+    fn new(id: String, label: String, url: String, local: bool, token: String) -> Self {
+        Self {
+            revision: revision(&token),
+            id,
+            label,
+            url,
+            local,
+            token,
+        }
+    }
+}
+
+/// An opaque stand-in for `token`: a hash of it under a key this run of
+/// Desk picked at random. It tells tokens apart, says nothing about them,
+/// and can't be matched with one from another run or another computer.
+pub fn revision(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    static KEY: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(|| {
+        use rand::RngExt;
+        let mut key = [0u8; 32];
+        rand::rng().fill(&mut key);
+        key
+    });
+    let digest = Sha256::new()
+        .chain_update(key)
+        .chain_update(token.as_bytes())
+        .finalize();
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn read_records(paths: &Paths) -> Result<Vec<HubRecord>> {
@@ -82,23 +123,17 @@ fn accounts_with(
     if let Some(c) = local
         && let Some(token) = c.device_token
     {
-        out.push(HubAccount {
-            id: LOCAL_HUB_ID.into(),
-            label: desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
-            url: c.gateway_url,
-            local: true,
+        out.push(HubAccount::new(
+            LOCAL_HUB_ID.into(),
+            desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
+            c.gateway_url,
+            true,
             token,
-        });
+        ));
     }
     for r in read_records(paths)? {
         if let Some(token) = secrets.get_account(&device_token_account(&r.id))? {
-            out.push(HubAccount {
-                id: r.id,
-                label: r.label,
-                url: r.url,
-                local: false,
-                token,
-            });
+            out.push(HubAccount::new(r.id, r.label, r.url, false, token));
         }
     }
     Ok(out)
@@ -119,13 +154,12 @@ fn save_with(
     url: &str,
     token: &str,
 ) -> Result<HubRecord> {
-    let url = url.trim_end_matches('/').to_string();
-    if !url.starts_with("https://")
-        && !url.starts_with("http://127.0.0.1")
-        && !url.starts_with("http://localhost")
-    {
-        eyre::bail!("remote hubs must be https");
-    }
+    // https, or a hub on this computer by address: where its token may go.
+    let url = desk_core::net::hub_url(url)
+        .map_err(|e| eyre::eyre!(e))?
+        .as_str()
+        .trim_end_matches('/')
+        .to_string();
     let record = HubRecord {
         id: id_for(&url)?,
         label: label.trim().to_string(),
@@ -248,9 +282,10 @@ mod tests {
     }
 
     /// What `hubs_list` hands the page, serialized as the IPC sends it: each
-    /// hub's device token, never the local hub's gateway (admin) token.
+    /// hub, and no token of any kind: not the local hub's gateway (admin)
+    /// token, nor any hub's device token.
     #[test]
-    fn the_page_is_never_given_the_admin_token() {
+    fn the_page_is_never_given_a_token() {
         const SENTINEL: &str = "SENTINEL-ADMIN-7c41";
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
@@ -268,7 +303,14 @@ mod tests {
         secrets
             .set_account(desk_core::Secret::GatewayToken.account(), SENTINEL)
             .unwrap();
-        save_with(&secrets, &paths, "Acme", "https://a.example.com", "remote").unwrap();
+        save_with(
+            &secrets,
+            &paths,
+            "Acme",
+            "https://a.example.com",
+            "remote-device",
+        )
+        .unwrap();
         let ipc = |local: Option<Connection>| {
             serde_json::to_string(&accounts_with(&paths, local, &secrets).unwrap()).unwrap()
         };
@@ -289,10 +331,56 @@ mod tests {
             .unwrap()
             .unwrap();
         let json = ipc(Some(paired));
-        assert!(!json.contains(SENTINEL), "{json}");
+        for secret in [SENTINEL, "local-device", "remote-device"] {
+            assert!(!json.contains(secret), "{json}");
+        }
         let listed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
-        assert_eq!(listed[0]["token"], "local-device");
-        assert_eq!(listed[1]["token"], "remote");
+        assert_eq!(listed[0]["id"], "local");
+        assert_eq!(listed[1]["id"], "a-example-com");
+        assert!(listed.iter().all(|h| h.get("token").is_none()));
+        // The revision tells the tokens apart, and changes with a new one.
+        let (local, remote) = (listed[0]["revision"].clone(), listed[1]["revision"].clone());
+        assert_ne!(local, remote);
+        assert_eq!(local.as_str().unwrap().len(), 16);
+        save_with(
+            &secrets,
+            &paths,
+            "Acme",
+            "https://a.example.com",
+            "remote-again",
+        )
+        .unwrap();
+        let again: Vec<serde_json::Value> =
+            serde_json::from_str(&ipc(Some(read_connection_now(&paths, &secrets)))).unwrap();
+        assert_eq!(again[0]["revision"], local);
+        assert_ne!(again[1]["revision"], remote);
+    }
+
+    fn read_connection_now(paths: &Paths, secrets: &Secrets) -> Connection {
+        desk_core::backend::read_connection(paths, secrets)
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_hub_is_kept_only_where_its_token_may_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let secrets = Secrets::of(&paths, desk_core::KeyStore::File);
+        for refused in [
+            "http://hub.example.com",
+            "http://localhost:3",
+            "https://user:pw@hub.example.com",
+            "https://hub.example.com/prefix",
+        ] {
+            assert!(
+                save_with(&secrets, &paths, "X", refused, "t").is_err(),
+                "{refused}"
+            );
+        }
+        assert!(read_records(&paths).unwrap().is_empty());
+        let kept = save_with(&secrets, &paths, "Dev", "http://127.0.0.1:8080/", "t").unwrap();
+        assert_eq!(kept.url, "http://127.0.0.1:8080");
     }
 
     #[test]

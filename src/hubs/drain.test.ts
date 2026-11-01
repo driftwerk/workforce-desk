@@ -20,7 +20,7 @@ const room: Room = {
   createdAt: "",
   updatedAt: "",
 };
-const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" };
+const hub: HubAccount = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" };
 
 const said = (id: string, mark: HubMessage["mark"], from = "agent", text = id): HubMessage => ({ id, from, text, mark });
 const where = { hubId: "dw", agentId: "allan", channel, rooms: { [MINE]: room }, deleted: new Set([GONE]) };

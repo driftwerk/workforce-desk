@@ -20,7 +20,6 @@ vi.mock("../chat/history", async (real) => ({
 }));
 const opened = vi.hoisted(() => [] as unknown[]);
 vi.mock("../shell/navigate", async (real) => ({ ...(await real<object>()), openTarget: (t: unknown, o: unknown) => void opened.push([t, o]) }));
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 const { useChat } = await import("../chat/store");
@@ -60,8 +59,8 @@ beforeEach(() => {
   forgetPreviews();
   useChat.setState({
     hubs: [
-      { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "" },
-      { id: "dw", label: "Atlas", url: "http://atlas.test", local: false, token: "" },
+      { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "" },
+      { id: "dw", label: "Atlas", url: "http://atlas.test", local: false, revision: "" },
     ],
     roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     histories: {},

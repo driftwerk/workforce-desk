@@ -39,7 +39,7 @@ const history = (over: Partial<History>): History => ({
 
 const show = (h: History | undefined, live: ChatMessage[] = []) => {
   useChat.setState({
-    hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, token: "t" }],
+    hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, revision: "t" }],
     roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     activeAgent: "dw/allan",
     conversations: { "dw/allan": { ...emptyConversation(), connected: true, messages: live } },
@@ -89,7 +89,7 @@ describe("a DM turn the overseer sent on", () => {
   const showLocal = (messages: ChatMessage[], live: ChatMessage[] = [], me: Record<string, Me> = {}) => {
     useOverview.setState({ manager: { agentId: "atlas", level: "act" } });
     useChat.setState({
-      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
       roster: [atlas, scout],
       me,
       activeAgent: "local/scout",
@@ -211,8 +211,8 @@ describe("pictures in a DM", () => {
     const pic = (version: string) => ({ version, source: "chosen" as const, at: "" });
     useChat.setState({
       hubs: [
-        { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
-        { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, token: "t-dw" },
+        { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" },
+        { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, revision: "t-dw" },
       ],
       roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false, picture: pic("a1") }],
       me: { local: { id: "u-local", name: "Sam", picture: pic("l1") }, dw: { id: "u-dw", name: "Sam", picture: pic("d1") } },

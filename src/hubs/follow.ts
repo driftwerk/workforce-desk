@@ -99,12 +99,12 @@ const unfollow = (id: string) => {
 export function followHubs(hubs: readonly HubAccount[]) {
   for (const [id, link] of links) {
     const now = hubs.find((h) => h.id === id);
-    if (now && now.token === link.hub.token && now.url === link.hub.url) continue;
+    if (now && now.revision === link.hub.revision && now.url === link.hub.url) continue;
     unfollow(id);
     floorUnheard(id);
   }
   for (const hub of hubs) {
-    if (links.has(hub.id) || unlinked.get(hub.id) === hub.token) continue;
+    if (links.has(hub.id) || unlinked.get(hub.id) === hub.revision) continue;
     unlinked.delete(hub.id);
     cachedDms(hub);
     const link: HubLink = new HubLink(hub, {
@@ -122,7 +122,7 @@ export function followHubs(hubs: readonly HubAccount[]) {
       },
       unavailable: () => {
         unfollow(hub.id);
-        unlinked.set(hub.id, hub.token);
+        unlinked.set(hub.id, hub.revision);
       },
     });
     links.set(hub.id, link);

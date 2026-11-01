@@ -12,7 +12,9 @@ import {
   type ToolCall,
   type TurnPhase,
 } from "./types";
-import { backoff, detach, keepAlive } from "../hub/socket";
+import { pairedHub } from "../hub/net";
+import { backoff, detach, keepAlive, OPEN } from "../hub/socket";
+import type { DeskSocket } from "../hub/transport";
 import { clip } from "../ui/graphemes";
 
 /** What a turn is doing: sending, waiting on the model, writing, running a
@@ -512,17 +514,16 @@ export const RICH_KINDS = ["tables", "charts", "forms", "maps", "diagrams", "ima
  *  from its spec, in place of its picture. */
 const DRAWN = ["chart_specs"] as const;
 
-export const wsUrl = (hub: HubAccount, agentId: string, channel = "desk"): string => {
-  const u = new URL("/ws", hub.url);
-  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  u.searchParams.set("token", hub.token);
-  u.searchParams.set("agent_id", agentId);
-  u.searchParams.set("channel", channel);
-  u.searchParams.set("rich", [...RICH_KINDS, ...DRAWN].join(","));
-  u.searchParams.set("desk", "1");
-  u.searchParams.set("accept", "*/*");
-  return u.toString();
-};
+/** A conversation's socket on its hub, with what it asks for. It names no
+ *  token: the native side puts the hub's in the handshake's header. */
+export const wsPath = (agentId: string, channel = "desk"): string =>
+  `/ws?${new URLSearchParams({
+    agent_id: agentId,
+    channel,
+    rich: [...RICH_KINDS, ...DRAWN].join(","),
+    desk: "1",
+    accept: "*/*",
+  })}`;
 
 /** Answers that finished in this step: assistant messages that became
  *  complete with something to say, by id. */
@@ -545,7 +546,7 @@ export interface Ask {
 /** One conversation with an agent: a `/ws` connection on a Desk channel,
  *  reconnecting until closed. */
 export class Conversation {
-  private ws: WebSocket | null = null;
+  private ws: DeskSocket | null = null;
   private state: ConversationState = emptyConversation();
   private closed = false;
   private retry = 0;
@@ -578,7 +579,7 @@ export class Conversation {
   }
 
   private open() {
-    const ws = new WebSocket(wsUrl(this.hub, this.agentId, this.channel));
+    const ws = pairedHub(this.hub).socket(wsPath(this.agentId, this.channel));
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;
@@ -606,7 +607,7 @@ export class Conversation {
   send(content: string, ask: Ask = {}): { turnRef: string | null } | false {
     const files = ask.attachments ?? [];
     const features = this.state.features;
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !features || (!content.trim() && !files.length)) return false;
+    if (!this.ws || this.ws.readyState !== OPEN || !features || (!content.trim() && !files.length)) return false;
     const structured = !!ask.turn && features.has(FEATURES.place);
     const turnRef = structured ? crypto.randomUUID() : null;
     this.ws.send(
@@ -635,14 +636,14 @@ export class Conversation {
 
   /** Answers a permission prompt. */
   answer(requestId: string, choice: PermissionChoice): boolean {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    if (!this.ws || this.ws.readyState !== OPEN) return false;
     this.ws.send(JSON.stringify({ type: "permission_response", request_id: requestId, choice }));
     this.set({ ...this.state, prompts: this.state.prompts.filter((p) => p.requestId !== requestId) });
     return true;
   }
 
   cancel() {
-    if (this.ws?.readyState === WebSocket.OPEN && this.state.sessionId)
+    if (this.ws?.readyState === OPEN && this.state.sessionId)
       this.ws.send(JSON.stringify({ type: "cancel", session_id: this.state.sessionId }));
     this.set({
       ...this.state,

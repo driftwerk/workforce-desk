@@ -5,15 +5,14 @@
 //! sockets (session and terminal PTYs, the event stream) are held here too,
 //! in [`socket`].
 //!
-//! What the page holds for hubs is each one's paired-device token (see
-//! `hubs.rs`): scoped to the person and the device, and refused by the
-//! hub's shell-grade desk routes.
+//! Every other hub request the page makes (to the local hub as the person,
+//! with its paired-device token, and to every paired hub) goes through
+//! `hub_io`, which holds those tokens the same way.
 
 pub mod routes;
 pub mod socket;
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use desk_core::backend::{Backend, Connection};
 use percent_encoding::percent_decode_str;
@@ -26,7 +25,7 @@ use crate::CommandResult;
 
 /// The kinds of body the page sends: `DeskHub`'s JSON, its text files
 /// (identity files, an agent's TOML), and an agent's picture.
-const BODY_TYPES: &[&str] = &[
+pub(crate) const BODY_TYPES: &[&str] = &[
     "application/json",
     "text/plain",
     "image/png",
@@ -37,7 +36,7 @@ const BODY_TYPES: &[&str] = &[
 ];
 
 /// The largest body the page sends: a picture, at most.
-const MAX_BODY: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BODY: usize = 16 * 1024 * 1024;
 
 /// Reads the local hub's connection; blocking (on Windows it asks WSL).
 type Source = Arc<dyn Fn() -> eyre::Result<Option<Connection>> + Send + Sync>;
@@ -57,7 +56,7 @@ pub struct Broker {
     source: Source,
     local: Kept,
     client: reqwest::Client,
-    pub sockets: socket::Sockets,
+    sockets: Arc<socket::Sockets>,
 }
 
 /// The hub's answer, as the page reads it.
@@ -70,28 +69,26 @@ pub struct Answer {
 }
 
 impl Broker {
-    /// The broker for `backend`'s hub; none until Windows has one.
-    pub fn new(backend: Option<Backend>) -> Self {
-        Self::with_source(Arc::new(move || match &backend {
-            Some(b) => b.connection(),
-            None => Err(eyre::eyre!(crate::NOT_SET_UP)),
-        }))
+    /// The broker for `backend`'s hub; none until Windows has one. Its
+    /// sockets are kept with every other hub socket the page holds.
+    pub fn new(backend: Option<Backend>, sockets: Arc<socket::Sockets>) -> Self {
+        Self::with_source(
+            Arc::new(move || match &backend {
+                Some(b) => b.connection(),
+                None => Err(eyre::eyre!(crate::NOT_SET_UP)),
+            }),
+            sockets,
+        )
     }
 
-    fn with_source(source: Source) -> Self {
-        let client = reqwest::Client::builder()
-            // The token goes to the hub on this computer and nowhere else:
-            // never through a proxy, never after a redirect.
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .expect("an HTTP client");
+    fn with_source(source: Source, sockets: Arc<socket::Sockets>) -> Self {
         Self {
             source,
             local: Kept::default(),
-            client,
-            sockets: socket::Sockets::default(),
+            // The token goes to the hub on this computer and nowhere else:
+            // never through a proxy, never after a redirect.
+            client: desk_core::net::loopback(),
+            sockets,
         }
     }
 
@@ -208,49 +205,20 @@ async fn read(source: &Source, kept: &Kept) -> Result<Local, String> {
 
 /// The hub's address when it is on this computer: plain `http` to a
 /// loopback address, with nothing else in it. The admin token goes nowhere
-/// else. An address, not a name: nothing a resolver answers decides where
-/// the token goes (Desk writes the hub's as `127.0.0.1`).
+/// else (Desk writes the hub's as `127.0.0.1`).
 fn loopback(gateway_url: &str) -> Result<Url, String> {
-    let refuse = || "This computer's hub isn't at an address on this computer.".to_string();
-    let url = Url::parse(gateway_url).map_err(|_| refuse())?;
-    let local_host = url
-        .host_str()
-        .unwrap_or_default()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse::<std::net::IpAddr>()
-        .is_ok_and(|ip| ip.is_loopback());
-    if url.scheme() != "http"
-        || !local_host
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || !matches!(url.path(), "" | "/")
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(refuse());
-    }
-    Ok(url)
+    desk_core::net::loopback_url(gateway_url)
 }
 
 /// `base` at `path` and `query`, exactly as allowed: a URL the parser would
 /// normalise into another path isn't sent.
 fn at(base: &Url, path: &str, query: Option<&str>) -> Result<Url, String> {
-    let mut url = base.clone();
-    url.set_path(path);
-    url.set_query(query);
-    if url.path() != path
-        || url.query() != query
-        || url.host() != base.host()
-        || url.port() != base.port()
-    {
-        return Err(format!("Desk doesn't send {path} to this computer's hub."));
-    }
-    Ok(url)
+    desk_core::net::at(base, path, query)
+        .map_err(|_| format!("Desk doesn't send {path} to this computer's hub."))
 }
 
 /// A request header the page sent, percent-decoded.
-fn header(headers: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
         .and_then(|v| v.to_str().ok())
@@ -294,12 +262,12 @@ pub async fn local_hub_socket_open(
     broker.open_socket(webview.label(), &path, events).await
 }
 
-/// Sends the raw body down socket `x-desk-socket`, as a text frame or a
-/// binary one (`x-desk-frame`).
+/// Sends the raw body down socket `x-desk-socket` (any hub's), as a text
+/// frame or a binary one (`x-desk-frame`).
 #[tauri::command]
-pub fn local_hub_socket_send(
+pub fn socket_send(
     webview: tauri::Webview,
-    broker: tauri::State<'_, Broker>,
+    sockets: tauri::State<'_, Arc<socket::Sockets>>,
     request: tauri::ipc::Request<'_>,
 ) -> CommandResult<()> {
     let headers = request.headers();
@@ -316,29 +284,34 @@ pub fn local_hub_socket_send(
         ),
         _ => return Err("The frame didn't say its kind.".into()),
     };
-    broker.sockets.send(webview.label(), id, frame)
+    sockets.send(webview.label(), id, frame)
 }
 
 /// The page has taken `bytes` more of what socket `id` gave it: the hub's
 /// socket is read again while it has room.
 #[tauri::command]
-pub fn local_hub_socket_ack(
+pub fn socket_ack(
     webview: tauri::Webview,
-    broker: tauri::State<'_, Broker>,
+    sockets: tauri::State<'_, Arc<socket::Sockets>>,
     id: u32,
     bytes: usize,
 ) {
-    broker.sockets.ack(webview.label(), id, bytes);
+    sockets.ack(webview.label(), id, bytes);
 }
 
 #[tauri::command]
-pub fn local_hub_socket_close(webview: tauri::Webview, broker: tauri::State<'_, Broker>, id: u32) {
-    broker.sockets.close(webview.label(), id);
+pub fn socket_close(
+    webview: tauri::Webview,
+    sockets: tauri::State<'_, Arc<socket::Sockets>>,
+    id: u32,
+) {
+    sockets.close(webview.label(), id);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -403,18 +376,21 @@ mod tests {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let url = url.to_string();
         let tokens = Arc::new(Mutex::new(tokens.into_iter()));
-        Broker::with_source(Arc::new(move || {
-            Ok(Some(Connection {
-                gateway_url: url.clone(),
-                admin_token: tokens
-                    .lock()
-                    .unwrap()
-                    .next()
-                    .unwrap_or(SENTINEL)
-                    .to_string(),
-                device_token: Some("device".into()),
-            }))
-        }))
+        Broker::with_source(
+            Arc::new(move || {
+                Ok(Some(Connection {
+                    gateway_url: url.clone(),
+                    admin_token: tokens
+                        .lock()
+                        .unwrap()
+                        .next()
+                        .unwrap_or(SENTINEL)
+                        .to_string(),
+                    device_token: Some("device".into()),
+                }))
+            }),
+            Arc::default(),
+        )
     }
 
     const OK_JSON: &str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]";

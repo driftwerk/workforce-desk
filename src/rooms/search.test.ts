@@ -13,8 +13,8 @@ const rooms = [room("r1", "release", "Release"), room("r2", "acme-web", "acme-we
 const agent = (hubId: string, id: string, name: string): Agent => ({ hubId, id, name, model: null, provider: null, isDefault: false });
 const roster = [agent("local", "allan", "Allan"), agent("dw", "sarah", "Sarah"), agent("local", "atlas", "Atlas"), agent("dw", "atlas", "Atlas")];
 const hubs: HubAccount[] = [
-  { id: "local", label: "This computer", url: "", local: true, token: "" },
-  { id: "dw", label: "Acme", url: "", local: false, token: "" },
+  { id: "local", label: "This computer", url: "", local: true, revision: "" },
+  { id: "dw", label: "Acme", url: "", local: false, revision: "" },
 ];
 const parse = (text: string) => parseSearch(text, rooms, roster, hubs);
 

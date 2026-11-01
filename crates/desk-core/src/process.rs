@@ -45,6 +45,30 @@ pub fn is_program(comm: &str, name: &str) -> bool {
     !name.is_empty() && (base == name || (base.len() == 15 && name.starts_with(base)))
 }
 
+/// Raises this process's soft limit on open files to `want` (or its hard
+/// limit, when that is lower); the limit it has after. A GUI app on macOS
+/// starts with 256, and Desk holds its hubs' sockets itself.
+pub fn raise_open_files(want: libc::rlim_t) -> io::Result<libc::rlim_t> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit writes only the struct it is given.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let target = want.min(limit.rlim_max);
+    if limit.rlim_cur >= target {
+        return Ok(limit.rlim_cur);
+    }
+    limit.rlim_cur = target;
+    // SAFETY: setrlimit reads only the struct it is given.
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +113,16 @@ mod tests {
     fn process_one_and_none_are_never_signalled() {
         assert!(terminate(1).is_err());
         assert!(kill(0).is_err());
+    }
+
+    #[test]
+    fn the_open_files_limit_is_raised_and_never_lowered() {
+        let now = raise_open_files(64).unwrap();
+        assert!(now >= 64);
+        assert_eq!(
+            raise_open_files(64).unwrap(),
+            now,
+            "a lower ask changes nothing"
+        );
     }
 }

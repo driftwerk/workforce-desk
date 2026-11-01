@@ -103,7 +103,7 @@ const showAll = (ratio = 1) => act(() => FakeObserver.all.forEach((o) => o.show(
 const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 const settle = () => act(async () => void (await vi.advanceTimersByTimeAsync(0)));
 
-const HUB = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, token: "t" };
+const HUB = { id: "dw", label: "Driftwerk", url: "https://dw.example.com", local: false, revision: "t" };
 const ALLAN = { hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false };
 const KEY = "dw/allan";
 const T1 = "2026-11-01T09:01:00Z";
@@ -192,7 +192,7 @@ beforeEach(() => {
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null, filled: {} });
   startGrids(memory() as never, { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }, HUB],
+    hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }, HUB],
     roster: [ALLAN],
     hubFeatures: { dw: new Set(["desk.reads"]) },
     histories: { [KEY]: { state: "ready", messages: [said("a1", T1)], more: false, earlier: "idle", loadedAt: T1 } },

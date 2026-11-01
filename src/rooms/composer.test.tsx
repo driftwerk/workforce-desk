@@ -43,8 +43,8 @@ beforeEach(() => {
   said.length = 0;
   useChat.setState({
     hubs: [
-      { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" },
-      { id: "dw", label: "Driftwerk", url: "https://dw", local: false, token: "t" },
+      { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" },
+      { id: "dw", label: "Driftwerk", url: "https://dw", local: false, revision: "t" },
     ],
     roster: [
       { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false },

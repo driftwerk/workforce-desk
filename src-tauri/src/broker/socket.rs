@@ -1,6 +1,10 @@
-//! The local hub's sockets, held on this side: the page sees their frames
-//! through a `Channel` and sends its own one at a time, and the hub's token
-//! goes in the handshake's header, never in a URL the page sees.
+//! The page's sockets to hubs, held on this side: the local hub's admin
+//! sockets (session and terminal PTYs, the event stream) and every paired
+//! hub's conversations and links. The page sees their frames through a
+//! `Channel` and sends its own one at a time, and the hub's token goes in
+//! the handshake's header, never in a URL (and so never in an access log).
+//! A hub older than that is sent it in the URL only after it has turned
+//! the header away; see [`Legacy`].
 //!
 //! What the hub sends is paced by what the page takes: a socket whose page
 //! hasn't acknowledged [`WINDOW`] bytes isn't read until it does, so a
@@ -9,7 +13,7 @@
 //! Binary frames the hub has already sent go to the page together, so a
 //! flood costs the page one message per [`BATCH`], not one per frame.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -19,16 +23,22 @@ use futures_util::{SinkExt, StreamExt};
 use reqwest::Url;
 use tauri::ipc::InvokeResponseBody;
 use tokio::sync::{Notify, mpsc};
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-/// The most sockets the page may hold open at once, in all its windows:
-/// well under the file descriptors a Mac gives an app by default.
+/// The most of the local hub's admin sockets the page may hold open at
+/// once, in all its windows.
 pub const MAX_SOCKETS: usize = 96;
 /// The most one window may hold: a grid's nine panes, its event stream and
 /// room to reconnect, so no window can leave the others without.
 pub const MAX_PER_WINDOW: usize = 32;
+/// The most conversations and links to hubs the page may hold open at once:
+/// a DM with every agent and a line for each room member.
+pub const MAX_HUB_SOCKETS: usize = 192;
+/// The most of those one window may hold.
+pub const MAX_HUB_PER_WINDOW: usize = 128;
 /// Frames the page has sent that the hub hasn't taken yet.
 const OUTBOX: usize = 1024;
 /// How long a socket the page closed waits for the hub to close too.
@@ -50,6 +60,67 @@ pub type Events = Arc<dyn Fn(InvokeResponseBody) + Send + Sync>;
 /// The hub's token for a handshake: the one read, or (`true`) read again
 /// because the hub turned the last one away.
 pub type Bearer = Arc<dyn Fn(bool) -> BoxFuture<'static, Result<Arc<str>, String>> + Send + Sync>;
+
+/// Which share of sockets one counts against: the local hub's admin
+/// sockets, or conversations and links to hubs. A page with many
+/// conversations open can't leave its terminals without, nor the other way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pool {
+    Local,
+    Hubs,
+}
+
+impl Pool {
+    fn limits(self) -> (usize, usize) {
+        match self {
+            Pool::Local => (MAX_SOCKETS, MAX_PER_WINDOW),
+            Pool::Hubs => (MAX_HUB_SOCKETS, MAX_HUB_PER_WINDOW),
+        }
+    }
+}
+
+/// The hubs, by id, that have been found to read a socket's token only
+/// from its URL: older than reading it from the handshake's header.
+#[derive(Default)]
+pub struct LegacyHubs(Mutex<HashSet<String>>);
+
+impl LegacyHubs {
+    fn known(&self, hub: &str) -> bool {
+        self.0.lock().expect("legacy").contains(hub)
+    }
+
+    fn remember(&self, hub: &str) {
+        if self.0.lock().expect("legacy").insert(hub.to_string()) {
+            tracing::warn!(
+                hub,
+                "this workspace reads a socket's token only from its URL: it is older than Desk expects, and its access log may keep the token"
+            );
+        }
+    }
+
+    fn forget(&self, hub: &str) {
+        self.0.lock().expect("legacy").remove(hub);
+    }
+}
+
+/// A hub that may be older than reading a socket's token from the header:
+/// which one, and where that is remembered.
+#[derive(Clone)]
+pub struct Legacy {
+    pub hub: String,
+    pub hubs: Arc<LegacyHubs>,
+}
+
+/// A socket to open: where, with which token, counted in which pool.
+pub struct Dial {
+    pub url: Url,
+    pub bearer: Bearer,
+    pub pool: Pool,
+    /// For a paired hub's socket: the token may go in the URL to a hub that
+    /// turned the header away (none for the local hub's admin sockets,
+    /// whose hub is always new enough).
+    pub legacy: Option<Legacy>,
+}
 
 /// What the page sends down a socket.
 #[derive(Debug)]
@@ -79,6 +150,7 @@ impl Credit {
 struct Handle {
     /// The webview that opened it; only it may use or close it.
     owner: String,
+    pool: Pool,
     out: mpsc::Sender<Said>,
     credit: Arc<Credit>,
     events: Events,
@@ -129,9 +201,9 @@ impl Sockets {
             .unwrap_or(0)
     }
 
-    /// Opens `url` with the hub's token in its handshake for webview
-    /// `owner`, asked for by its page `page`; its frames, and then its
-    /// close, go to `events`.
+    /// Opens one of the local hub's admin sockets; see [`dial`].
+    ///
+    /// [`dial`]: Self::dial
     pub fn open(
         &self,
         owner: &str,
@@ -140,6 +212,19 @@ impl Sockets {
         bearer: Bearer,
         events: Events,
     ) -> Result<u32, String> {
+        let dial = Dial {
+            url,
+            bearer,
+            pool: Pool::Local,
+            legacy: None,
+        };
+        self.dial(owner, page, dial, events)
+    }
+
+    /// Opens `dial` with the hub's token in its handshake for webview
+    /// `owner`, asked for by its page `page`; its frames, and then its
+    /// close, go to `events`.
+    pub fn dial(&self, owner: &str, page: u64, dial: Dial, events: Events) -> Result<u32, String> {
         let (tx, rx) = mpsc::channel(OUTBOX);
         let credit = Arc::new(Credit::default());
         let mut open = self.open.lock().expect("sockets");
@@ -148,10 +233,17 @@ impl Sockets {
         if self.page(owner) != page {
             return Err("That page has gone.".into());
         }
-        if open.len() >= MAX_SOCKETS
-            || open.values().filter(|h| h.owner == owner).count() >= MAX_PER_WINDOW
+        let pool = dial.pool;
+        let (total, per_window) = pool.limits();
+        let pooled = open.values().filter(|h| h.pool == pool);
+        if pooled.clone().count() >= total
+            || pooled.filter(|h| h.owner == owner).count() >= per_window
         {
-            return Err("Desk has too many connections to this computer's hub open.".into());
+            return Err(match pool {
+                Pool::Local => "Desk has too many connections to this computer's hub open.",
+                Pool::Hubs => "Desk has too many conversations open.",
+            }
+            .into());
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         // Held while spawning: the task's removal of itself waits for this
@@ -165,13 +257,14 @@ impl Sockets {
             let credit = Arc::clone(&credit);
             async move {
                 let _forget = forget;
-                relay(url, bearer, rx, events, credit).await;
+                relay(dial, rx, events, credit).await;
             }
         });
         open.insert(
             id,
             Handle {
                 owner: owner.to_string(),
+                pool,
                 out: tx,
                 credit,
                 events,
@@ -273,42 +366,117 @@ fn closed(code: u16, reason: &str) -> InvokeResponseBody {
     )
 }
 
-/// What a failed handshake says to the page: the status the hub answered,
-/// never the request.
-fn unreachable(e: &WsError) -> String {
-    match e {
-        WsError::Http(response) => format!(
-            "This computer's hub refused the connection ({}).",
-            response.status()
-        ),
-        _ => "Desk couldn't reach this computer's hub.".into(),
-    }
-}
-
 type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-/// The socket at `url`, its handshake carrying the hub's token: read again
-/// once if the hub turns it away (Desk Helper renews it).
-async fn handshake(url: &Url, bearer: &Bearer) -> Result<Ws, String> {
-    let mut fresh = false;
-    loop {
-        let token = bearer(fresh).await?;
-        let mut request = url
-            .as_str()
-            .into_client_request()
-            .map_err(|_| "That isn't a socket Desk can open.".to_string())?;
-        let mut auth = HeaderValue::from_str(&format!("Bearer {token}"))
-            .map_err(|_| "This computer's hub has a token Desk can't send.".to_string())?;
+/// Where a handshake carries the token.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Carry {
+    /// `Authorization: Bearer`, marked sensitive.
+    Header,
+    /// `?token=`: only to a hub that turned the header away.
+    Query,
+}
+
+/// Why one handshake didn't open a socket.
+enum Failed {
+    Late,
+    Refused(StatusCode),
+    Other,
+    Unsendable,
+}
+
+impl Failed {
+    /// What the page is told: the status the hub answered, never the
+    /// request (which, to an older hub, has the token in its URL).
+    fn said(&self, pool: Pool) -> String {
+        let hub = match pool {
+            Pool::Local => "This computer's hub",
+            Pool::Hubs => "The workspace",
+        };
+        match self {
+            Failed::Late => format!("{hub} didn't answer in time."),
+            Failed::Refused(status) => format!("{hub} refused the connection ({status})."),
+            Failed::Other => format!("Desk couldn't reach {}.", hub.to_lowercase()),
+            Failed::Unsendable => format!("{hub} has a token Desk can't send."),
+        }
+    }
+}
+
+/// The TLS a `wss` socket is opened with: the system's trust store, as
+/// Desk's other requests to hubs use.
+fn tls() -> Result<Arc<rustls::ClientConfig>, Failed> {
+    use rustls_platform_verifier::ConfigVerifierExt;
+    static CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    if let Some(c) = CONFIG.get() {
+        return Ok(c.clone());
+    }
+    let config = rustls::ClientConfig::with_platform_verifier().map_err(|e| {
+        tracing::warn!(error = %e, "no TLS for sockets");
+        Failed::Other
+    })?;
+    Ok(CONFIG.get_or_init(|| Arc::new(config)).clone())
+}
+
+/// One handshake to `url` with `token` carried as `carry` says.
+async fn attempt(url: &Url, token: &str, carry: Carry) -> Result<Ws, Failed> {
+    let mut url = url.clone();
+    if carry == Carry::Query {
+        url.query_pairs_mut().append_pair("token", token);
+    }
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|_| Failed::Other)?;
+    if carry == Carry::Header {
+        let mut auth =
+            HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Failed::Unsendable)?;
         auth.set_sensitive(true);
         request.headers_mut().insert(AUTHORIZATION, auth);
-        match tokio::time::timeout(HANDSHAKE, tokio_tungstenite::connect_async(request)).await {
-            Err(_) => return Err("This computer's hub didn't answer in time.".into()),
-            Ok(Ok((ws, _))) => return Ok(ws),
-            Ok(Err(WsError::Http(r))) if r.status() == StatusCode::UNAUTHORIZED && !fresh => {
-                fresh = true;
+    }
+    let connector = match url.scheme() {
+        "wss" => Some(Connector::Rustls(tls()?)),
+        _ => None,
+    };
+    let connect = tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector);
+    match tokio::time::timeout(HANDSHAKE, connect).await {
+        Err(_) => Err(Failed::Late),
+        Ok(Ok((ws, _))) => Ok(ws),
+        Ok(Err(WsError::Http(r))) => Err(Failed::Refused(r.status())),
+        Ok(Err(_)) => Err(Failed::Other),
+    }
+}
+
+/// The socket `dial` names, its handshake carrying the hub's token in the
+/// header: read again once if the hub turns it away (Desk Helper renews
+/// the local hub's; a hub paired again has a new one). A paired hub that
+/// still turns it away is asked once more with it in the URL, as hubs
+/// before header auth read it; if that opens, the hub is remembered as one
+/// of those, and asked that way from then on.
+async fn handshake(dial: &Dial) -> Result<Ws, Failed> {
+    let legacy = dial.legacy.as_ref();
+    if let Some(l) = legacy.filter(|l| l.hubs.known(&l.hub)) {
+        let token = (dial.bearer)(false).await.map_err(|_| Failed::Other)?;
+        return attempt(&dial.url, &token, Carry::Query)
+            .await
+            .inspect_err(|_| {
+                // Perhaps upgraded since: the header is tried first next time.
+                l.hubs.forget(&l.hub);
+            });
+    }
+    let mut fresh = false;
+    loop {
+        let token = (dial.bearer)(fresh).await.map_err(|_| Failed::Other)?;
+        match attempt(&dial.url, &token, Carry::Header).await {
+            Err(Failed::Refused(StatusCode::UNAUTHORIZED)) if !fresh => fresh = true,
+            Err(Failed::Refused(StatusCode::UNAUTHORIZED)) if legacy.is_some() => {
+                let ws = attempt(&dial.url, &token, Carry::Query).await?;
+                if let Some(l) = legacy {
+                    l.hubs.remember(&l.hub);
+                }
+                return Ok(ws);
             }
-            Ok(Err(e)) => return Err(unreachable(&e)),
+            other => return other,
         }
     }
 }
@@ -327,18 +495,12 @@ fn flush(events: &Events, credit: &Credit, batch: &mut Vec<u8>) {
     }
 }
 
-async fn relay(
-    url: Url,
-    bearer: Bearer,
-    mut said: mpsc::Receiver<Said>,
-    events: Events,
-    credit: Arc<Credit>,
-) {
-    let mut ws = match handshake(&url, &bearer).await {
+async fn relay(dial: Dial, mut said: mpsc::Receiver<Said>, events: Events, credit: Arc<Credit>) {
+    let mut ws = match handshake(&dial).await {
         Ok(ws) => ws,
         Err(why) => {
             events(event(serde_json::json!({ "type": "error" })));
-            events(closed(1006, &why));
+            events(closed(1006, &why.said(dial.pool)));
             return;
         }
     };

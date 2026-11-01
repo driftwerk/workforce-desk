@@ -10,7 +10,6 @@ import { openTarget } from "../shell/navigate";
 import { ActivityRail } from "./ActivityRail";
 import { useOverview } from "./store";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../shell/navigate", () => ({ openTarget: vi.fn() }));
 

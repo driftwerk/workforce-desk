@@ -16,7 +16,7 @@ const { useReads } = await import("./reads");
 const { emptyConversation } = await import("../chat/conversation");
 const { dmsFrom, startUnread, SUMMARY_DEBOUNCE_MS, useUnread } = await import("./summary");
 
-const dw = { id: "dw", label: "Atlas", url: "https://atlas.example.com", local: false, token: "t" };
+const dw = { id: "dw", label: "Atlas", url: "https://atlas.example.com", local: false, revision: "t" };
 const row = (agent: string, count: number, forYou = count) => ({
   agent_id: agent,
   channel: "desk",
@@ -30,7 +30,7 @@ beforeEach(() => {
   state.clear();
   useUnread.setState({ local: null, localAt: null, dms: { "local/scout": { count: 1, for_you: 1, first: null, last: null, capped: false } }, dmsAt: {} });
   useReads.setState({ local: {}, dms: {}, loaded: false });
-  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, token: "" }, dw] });
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }, dw] });
 });
 
 describe("DM counts", () => {

@@ -11,7 +11,6 @@ import { requestFocus, useFocus, useFocusRequest } from "./focus";
 import { openTarget, targetOfItem } from "./navigate";
 import { useUi } from "./ui";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../grids/windows", () => ({ reveal: vi.fn(() => false) }));
 vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: vi.fn() }));

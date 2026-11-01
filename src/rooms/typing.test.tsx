@@ -88,7 +88,7 @@ afterEach(cleanup);
 describe("typing in a DM with a long history", () => {
   const show = () => {
     useChat.setState({
-      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, token: "t" }],
+      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, revision: "t" }],
       roster: [
         { hubId: "dw", id: "desk", name: "Desk", model: null, provider: null, isDefault: true },
         { hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false },
@@ -142,7 +142,7 @@ describe("typing in a DM with a long history", () => {
   it("renders none of them on this computer, with turns the overseer sent on", () => {
     useOverview.setState({ manager: { agentId: "atlas", level: "act" } });
     useChat.setState({
-      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, token: "t" }],
+      hubs: [{ id: "local", label: "This Mac", url: "http://127.0.0.1:1", local: true, revision: "t" }],
       roster: [
         { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: true },
         { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false },
@@ -190,7 +190,7 @@ describe("typing in a room with a long timeline", () => {
     }));
   const show = () => {
     useChat.setState({
-      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, token: "t" }],
+      hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw", local: false, revision: "t" }],
       roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
     });
     useDesk.setState({ activeRoom: "r1", rooms: { r1: room }, timelines: { r1: timeline() }, roomDrafts: {} });

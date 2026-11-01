@@ -7,7 +7,7 @@ import {
   finishedAnswers,
   reduce,
   statusOf,
-  wsUrl,
+  wsPath,
   type ConversationState,
 } from "./conversation";
 import type { DeskTurn, HubAccount, ServerMessage } from "./types";
@@ -87,14 +87,15 @@ describe("conversation", () => {
     expect(finishedAnswers(done, reduce(done, { type: "message", content: "Done." }))).toEqual([]);
   });
 
-  it("connects on the desk channel", () => {
-    const url = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan"));
-    expect(url.protocol).toBe("ws:");
+  it("connects on the desk channel, naming no token", () => {
+    const url = new URL(wsPath("allan"), "ws://hub.invalid");
     expect(url.pathname).toBe("/ws");
+    expect(url.searchParams.has("token")).toBe(false);
+    expect([...url.searchParams.keys()].sort()).toEqual(["accept", "agent_id", "channel", "desk", "rich"]);
     expect(url.searchParams.get("channel")).toBe("desk");
     expect(url.searchParams.get("agent_id")).toBe("allan");
     expect(url.searchParams.get("rich")).toBe("tables,charts,forms,maps,diagrams,images,chart_specs");
-    const room = new URL(wsUrl({ id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" }, "allan", "desk:release"));
+    const room = new URL(wsPath("allan", "desk:release"), "ws://hub.invalid");
     expect(room.searchParams.get("channel")).toBe("desk:release");
     expect(url.searchParams.get("desk")).toBe("1");
     expect(url.searchParams.get("accept")).toBe("*/*");
@@ -248,7 +249,7 @@ describe("a Desk connection's turns", () => {
 
 describe("sending on a Desk connection", () => {
   afterEach(() => vi.unstubAllGlobals());
-  const hub: HubAccount = { id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, token: "t" };
+  const hub: HubAccount = { id: "local", label: "Local", url: "http://127.0.0.1:9", local: true, revision: "t" };
   const turn: DeskTurn = { place: { kind: "dm" }, speaker: { kind: "person" }, hop: 0, context: [], spoken: true };
   const open = async (connected: ServerMessage) => {
     vi.stubGlobal("WebSocket", FakeSocket);

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubError, stateRows } from "../hub/client";
 import { DeskStateStore, stable, STATE_PREFIXES, type HubState, type LocalState, type StateEntry } from "./store";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 
 /** Desk's file, as the native side keeps it (adopt refuses a dirty key). */
 const fakeFile = (initial: Record<string, StateEntry> = {}) => {

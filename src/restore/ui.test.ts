@@ -9,7 +9,6 @@ import { followHub, restore, restoreBeforeRender } from "./boot";
 import { DeskStateStore, type LocalState, type StateEntry } from "./store";
 import { capture, DEFAULT_UI, MAIN_UI_KEY, mainUi, sanitize, type MainUi } from "./ui";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
   onNativeState: vi.fn(() => Promise.resolve(() => {})),
@@ -141,8 +140,8 @@ describe("ui.main", () => {
 });
 
 describe("the DM put back beside the Floor", () => {
-  const LOCAL = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, token: "t" };
-  const OFFICE = { id: "office", label: "Office", url: "http://127.0.0.1:2", local: false, token: "t" };
+  const LOCAL = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+  const OFFICE = { id: "office", label: "Office", url: "http://127.0.0.1:2", local: false, revision: "t" };
   /** Each hub's agents, as `/api/agents` lists them; a hub missing here
    *  doesn't answer. */
   const agentsOn = (lists: Record<string, string[]>) =>

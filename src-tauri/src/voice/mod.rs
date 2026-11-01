@@ -219,9 +219,10 @@ impl LocalHub {
             .ok_or_else(|| eyre!("Desk isn't set up on this computer yet"))?
             .connection()?
             .ok_or_else(|| eyre!("Desk is still starting"))?;
-        Ok(hub
-            .insert(Arc::new(Hub::new(c.gateway_url, c.admin_token)))
-            .clone())
+        // Its admin token goes only to an address on this computer.
+        let base = desk_core::net::loopback_url(&c.gateway_url).map_err(|e| eyre!(e))?;
+        let base = base.as_str().trim_end_matches('/').to_string();
+        Ok(hub.insert(Arc::new(Hub::new(base, c.admin_token))).clone())
     }
 }
 

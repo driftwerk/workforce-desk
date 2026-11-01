@@ -54,8 +54,8 @@ beforeEach(() => {
   vi.mocked(invoke).mockClear();
   useChat.setState({
     hubs: [
-      { id: "local", label: "This computer", url: "", local: true, token: "" },
-      { id: "remote", label: "Office", url: "", local: false, token: "" },
+      { id: "local", label: "This computer", url: "", local: true, revision: "" },
+      { id: "remote", label: "Office", url: "", local: false, revision: "" },
     ],
     roster: [agent("local", "scout", "Scout"), agent("remote", "ada", "Ada")],
   });

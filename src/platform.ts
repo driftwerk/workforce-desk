@@ -7,6 +7,7 @@ import type { BrainChoice } from "./crew/brain";
 import type { DeskGroup, Ungrouped } from "./groups/model";
 import type { HubConnection } from "./hub/client";
 import { brokered } from "./hub/broker";
+import { devToken } from "./hub/devTokens";
 import { direct, type DeskTransport } from "./hub/transport";
 import { preview } from "./preview";
 
@@ -180,15 +181,12 @@ export const openUrl = (url: string): void => {
   else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
 };
 
-export const saveHub = (label: string, url: string, token: string): Promise<{ id: string }> =>
-  invoke("hubs_save", { label, url, token });
-
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
 
 // ── Files in conversations ────────────────────────────────────────────────
 // Their bytes come through Desk's native side, which holds each hub's
-// token: the page never puts a token in a URL. The browser preview, which
-// has no native side, asks the hub directly.
+// token: the page has none. The browser preview, which has no native side,
+// asks the hub directly with a development token of its own.
 
 /** Where a file of agent `agent` on hub `hub` is shown from: an image's
  *  `src`, a player's (which seeks by range). Desk's `deskfile:` scheme is
@@ -196,7 +194,7 @@ export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { 
  *  Linux, `http://deskfile.localhost/` on Windows. */
 export const fileUrl = (hub: HubAccount, agent: string, artifact: string): string =>
   preview
-    ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(hub.token)}`
+    ? `${new URL(`/api/agents/${encodeURIComponent(agent)}/attachments/${encodeURIComponent(artifact)}`, hub.url)}?token=${encodeURIComponent(devToken(hub.id))}`
     : `${convertFileSrc("", "deskfile")}${[hub.id, agent, artifact].map(encodeURIComponent).join("/")}`;
 
 /** Opens a file in the app this computer opens its kind with. */
@@ -233,7 +231,7 @@ export const uploadFile = async (hub: HubAccount, agent: string, channel: string
   if (preview) {
     const url = new URL(`/api/agents/${encodeURIComponent(agent)}/attachments`, hub.url);
     url.search = new URLSearchParams({ channel, filename: file.name }).toString();
-    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${hub.token}` }, body: file });
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${devToken(hub.id)}` }, body: file });
     const body = (await res.json().catch(() => ({}))) as Attachment & { error?: string };
     if (!res.ok) throw new Error(body.error || res.statusText);
     return body;

@@ -4,7 +4,8 @@ import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
 import { PairHub } from "../hubs/PairHub";
 import { keepPending } from "../hubs/pairing";
-import { hubAccounts, openUrl, saveHub } from "../platform";
+import { setDevToken } from "../hub/devTokens";
+import { hubAccounts, invoke, openUrl } from "../platform";
 import { deskState } from "../restore/boot";
 import { Hubs } from "./Hubs";
 
@@ -13,14 +14,13 @@ vi.mock("../platform", async (original) => ({
   invoke: vi.fn(() => Promise.resolve()),
   statePut: vi.fn(() => Promise.resolve()),
   stateRemove: vi.fn(() => Promise.resolve()),
-  saveHub: vi.fn(() => Promise.resolve({ id: "hub-example-com" })),
   hubAccounts: vi.fn(() => Promise.resolve([])),
   removeHub: vi.fn(() => Promise.resolve()),
   openUrl: vi.fn(),
 }));
 
-const acme: HubAccount = { id: "hub-example-com", label: "Acme", url: "https://hub.example.com", local: false, token: "wfp_old" };
-const thisComputer: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, token: "local-token" };
+const acme: HubAccount = { id: "hub-example-com", label: "Acme", url: "https://hub.example.com", local: false, revision: "wfp_old" };
+const thisComputer: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:4100", local: true, revision: "local-token" };
 const PAGE = "https://hub.example.com/pair/K7Q2";
 
 const json = (body: unknown, status = 200) =>
@@ -42,13 +42,51 @@ const codeRequests = () =>
     .mock.calls.filter(([input]) => String(input).endsWith("/api/pair/device/request"))
     .map(([, init]) => JSON.parse(init!.body as string) as Record<string, string>);
 
+/** The hubs Desk's native side kept, with their tokens, as pairings were
+ *  collected: what `hubs_save` once took from the page. */
+const kept: { label: string; url: string; token: string }[] = [];
+
+/** Desk's native side for pairing (src-tauri/src/hub_io.rs), over the
+ *  hubs `hubsAnswer` stands in for: it asks them, and keeps an approved
+ *  pairing's token itself, telling the page only that it did. */
+const nativePairing = () =>
+  vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+    const a = args ?? {};
+    if (cmd === "pair_request") {
+      const res = await fetch(`${String(a.url)}/api/pair/device/request`, {
+        method: "POST",
+        body: JSON.stringify({
+          device_name: a.deviceName,
+          device_kind: "desktop_device",
+          ...(a.identityHint ? { identity_hint: a.identityHint } : {}),
+        }),
+      });
+      return { status: res.status, body: await res.json().catch(() => null) };
+    }
+    if (cmd === "pair_collect") {
+      const res = await fetch(`${String(a.url)}/api/pair/device/status/${String(a.code)}`);
+      if (res.status === 404) return { status: "expired" };
+      const body = (await res.json()) as { status: string; token?: string; identity?: { display_name?: string; email?: string } };
+      if (body.status !== "approved") return { status: body.status };
+      if (!body.token) return { status: "used" };
+      kept.push({ label: String(a.label), url: String(a.url), token: body.token });
+      const id = new URL(String(a.url)).hostname.replace(/\./g, "-");
+      setDevToken(id, body.token);
+      return { status: "approved", hub: id, identity: { name: body.identity?.display_name ?? null, email: body.identity?.email ?? null } };
+    }
+    return undefined;
+  }) as typeof invoke);
+
 const approved = { status: "approved", token: "wfp_new", identity: { display_name: "Kings", email: "k@example.com" } };
 
 beforeEach(() => {
   deskState.remove("pairing.email");
   deskState.remove("pairing.pending");
   useChat.setState({ hubs: [thisComputer, acme], roster: [], rosterErrors: {} });
-  vi.mocked(saveHub).mockClear();
+  setDevToken(acme.id, "wfp_old");
+  setDevToken(thisComputer.id, "local-token");
+  kept.length = 0;
+  nativePairing();
   vi.mocked(openUrl).mockClear();
 });
 
@@ -98,7 +136,7 @@ describe("Workspaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(openUrl).toHaveBeenCalledWith(PAGE));
     // Same label and address: the hub keeps its id, and what names its agents.
-    await waitFor(() => expect(saveHub).toHaveBeenCalledWith("Acme", "https://hub.example.com", "wfp_new"));
+    await waitFor(() => expect(kept).toEqual([{ label: "Acme", url: "https://hub.example.com", token: "wfp_new" }]));
     expect(await screen.findByText(/Connected as Kings\./)).toBeTruthy();
     expect(hubAccounts).toHaveBeenCalled();
     expect(codeRequests()).toEqual([{ device_name: "Desk", device_kind: "desktop_device" }]);
@@ -165,7 +203,7 @@ describe("Connect a workspace", () => {
     expect(screen.getByRole("button", { name: "Open the page again" })).toBeTruthy();
     // Not opened again by itself after the reload.
     expect(openUrl).not.toHaveBeenCalled();
-    await waitFor(() => expect(saveHub).toHaveBeenCalledWith("Acme", "https://hub.example.com", "wfp_new"));
+    await waitFor(() => expect(kept).toEqual([{ label: "Acme", url: "https://hub.example.com", token: "wfp_new" }]));
     expect(await screen.findByText(/Connected as Kings\./)).toBeTruthy();
     expect(deskState.get("pairing.pending")).toBeUndefined();
   });

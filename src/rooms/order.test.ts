@@ -5,7 +5,6 @@ import { restore } from "../restore/boot";
 import { DeskStateStore, stable, type HubState, type LocalState, type StateEntry } from "../restore/store";
 import { arranged, followRooms, forgetRoom, moveRoom, nudgeRoom, ROOM_ORDER_KEY, roomOrder, ROOMS_PREFIX, useRoomOrder } from "./order";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
   onNativeState: vi.fn(() => Promise.resolve(() => {})),

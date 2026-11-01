@@ -260,11 +260,15 @@ impl Node {
     }
 }
 
+/// The memory store is on this computer, and its key goes nowhere else:
+/// never through a proxy, never after a redirect.
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(10))
         .build()
-        .unwrap_or_default()
+        .expect("an HTTP client")
 }
 
 /// Waits for the store to say it is ready, for at most `within`.

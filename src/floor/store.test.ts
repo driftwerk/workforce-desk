@@ -7,7 +7,6 @@ import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, w
 import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
 import { renderHook } from "@testing-library/react";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 let hubs: Record<string, FakeHub>;
@@ -53,7 +52,7 @@ describe("the floor's store", () => {
   it("reads a hub paired again afresh", async () => {
     useChat.setState({ hubs: [hub("b")] });
     await settle();
-    useChat.setState({ hubs: [hub("b", { token: "t-new" })] });
+    useChat.setState({ hubs: [hub("b", { revision: "t-new" })] });
     expect(floorOf("b")?.state).toBe("loading");
     await settle();
     expect(floorOf("b")?.state).toBe("ready");
