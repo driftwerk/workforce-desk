@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { brokered, BridgedSocket } from "./broker";
 import { DeskHub, HubError } from "./client";
+import { useDesk } from "./store";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -62,7 +63,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   createAgent: (h) => h.createAgent({ id: "a", name: "A", system_prompt: "" }),
   deleteAgent: (h) => h.deleteAgent("a b"),
   renameAgent: (h) => h.renameAgent("a", "B", "p"),
-  setAgentPicture: (h) => h.setAgentPicture("a", new Blob([new Uint8Array([1, 2])], { type: "image/png" })),
+  setAgentPicture: (h) => Promise.all([h.setAgentPicture("a", new Blob([new Uint8Array([1, 2])], { type: "image/png" })), h.setAgentPicture("a", null)]),
   providers: (h) => h.providers(),
   connectProvider: (h) => h.connectProvider("anthropic", { key: "k" }),
   disconnectProvider: (h) => h.disconnectProvider("anthropic"),
@@ -304,5 +305,36 @@ describe("a bridged socket", () => {
     ws.close();
     await settle();
     expect(native.calls.map((c) => c.cmd)).toEqual(["local_hub_socket_open"]);
+  });
+});
+
+describe("the desk over the broker", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("connects, loads what the hub has, and reconnects when the hub goes away", async () => {
+    vi.useFakeTimers();
+    let opened = 0;
+    native.answer = (cmd) => (cmd === "local_hub_socket_open" ? ++opened : undefined);
+    const stop = useDesk.getState().connect(brokered);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(native.calls[0]).toMatchObject({ cmd: "local_hub_socket_open", args: { path: "/api/desk/events" } });
+    const say = (m: unknown) => native.channels.at(-1)!.onmessage(m);
+    say({ type: "open" });
+    expect(useDesk.getState().connected).toBe(true);
+    const session = { id: "s1", engine: "claude", state: "running", name: "One" };
+    say({ type: "text", data: JSON.stringify({ type: "snapshot", sessions: [session], restore: [], rooms: [] }) });
+    expect(useDesk.getState().loaded).toBe(true);
+    expect(Object.keys(useDesk.getState().sessions)).toEqual(["s1"]);
+    say({ type: "close", code: 1006, reason: "", clean: false });
+    expect(useDesk.getState().connected).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(native.calls.filter((c) => c.cmd === "local_hub_socket_open")).toHaveLength(2);
+    say({ type: "open" });
+    expect(useDesk.getState().connected).toBe(true);
+    stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(native.calls.at(-1)).toMatchObject({ cmd: "local_hub_socket_close", args: { id: 2 } });
+    // Nothing the page sent or was given carried a token.
+    expect(JSON.stringify(native.calls.map((c) => [c.cmd, c.args, c.options]))).not.toMatch(/token|bearer|authorization/i);
   });
 });

@@ -345,6 +345,28 @@ mod tests {
         }
     }
 
+    /// And the other way: every route allowed is one `DeskHub` uses, so the
+    /// list is exactly what the page needs.
+    #[test]
+    fn every_route_allowed_is_one_desk_hub_uses() {
+        let recorded: Vec<Recorded> = serde_json::from_str(RECORDED).unwrap();
+        for (kind, routes) in [("http", HTTP), ("socket", SOCKETS)] {
+            for route in routes {
+                let used = recorded.iter().any(|r| {
+                    let path = r.path.split('?').next().unwrap();
+                    r.kind == kind
+                        && r.method == route.method
+                        && segments(path).is_some_and(|s| matches(route, &s))
+                });
+                assert!(
+                    used,
+                    "{} {} {} is allowed but DeskHub never asks it",
+                    kind, route.method, route.pattern
+                );
+            }
+        }
+    }
+
     #[test]
     fn nothing_else_the_admin_token_could_do_is() {
         for (method, target) in [

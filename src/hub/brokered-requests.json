@@ -131,6 +131,11 @@
   },
   {
     "kind": "http",
+    "method": "DELETE",
+    "path": "/api/agents/a/picture"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/providers"
   },
