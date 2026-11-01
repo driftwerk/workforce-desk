@@ -70,8 +70,11 @@ pub fn remote() -> reqwest::Client {
 /// read timeout, which reqwest counts from the send and so would cut a slow
 /// upload off. Each upload is bounded by [`upload_timeout`] instead.
 pub fn uploading(on_this_computer: bool) -> reqwest::Client {
-    client(on_this_computer, None)
+    client(on_this_computer, UPLOAD_READ_TIMEOUT)
 }
+
+/// None: see [`uploading`].
+const UPLOAD_READ_TIMEOUT: Option<Duration> = None;
 
 /// How long an upload of `bytes` may take, its answer included: what any
 /// request may, and the time to send it at [`UPLOAD_FLOOR`] bytes a second.
@@ -222,8 +225,9 @@ mod tests {
         assert!(asked.recv_timeout(Duration::from_millis(200)).is_err());
     }
 
-    /// A hub that takes `wait` (on the paused clock) to answer, after
-    /// reading the request.
+    /// A hub that takes `wait` to answer, after
+    /// reading the whole request (a hub that answered before reading it all
+    /// would have its connection reset under the upload, on Windows).
     async fn slow_hub(wait: Duration) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -231,51 +235,77 @@ mod tests {
         tokio::spawn(async move {
             while let Ok((mut s, _)) = l.accept().await {
                 tokio::spawn(async move {
+                    let mut got = Vec::new();
                     let mut chunk = [0u8; 64 * 1024];
-                    let _ = s.read(&mut chunk).await;
-                    tokio::time::sleep(wait).await;
-                    let _ = s
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-                        )
-                        .await;
+                    let whole = loop {
+                        let Ok(n) = s.read(&mut chunk).await else {
+                            return;
+                        };
+                        if n == 0 {
+                            return;
+                        }
+                        got.extend_from_slice(&chunk[..n]);
+                        let Some(end) = got.windows(4).position(|w| w == b"\r\n\r\n") else {
+                            continue;
+                        };
+                        let length = String::from_utf8_lossy(&got[..end])
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if got.len() >= end + 4 + length {
+                            break true;
+                        }
+                    };
+                    if whole {
+                        tokio::time::sleep(wait).await;
+                        let _ = s
+                            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                            .await;
+                    }
                 });
             }
         });
         url
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn an_upload_is_bounded_by_its_size_not_the_read_timeout() {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let hub = slow_hub(READ_TIMEOUT + Duration::from_secs(30)).await;
-        let body = vec![0u8; 4 * 1024 * 1024];
-        assert!(
-            upload_timeout(body.len()) > READ_TIMEOUT + Duration::from_secs(30),
-            "a 4 MiB upload may take longer than any other request"
-        );
-        let plain = loopback()
+        // reqwest counts a read timeout from the send: a hub slower to answer
+        // than it (an upload still arriving, say) is cut off however much is
+        // still coming.
+        let hub = slow_hub(Duration::from_millis(800)).await;
+        let body = vec![0u8; 1024 * 1024];
+        let cut = client(true, Some(Duration::from_millis(300)))
             .post(format!("{hub}/up"))
             .body(body.clone())
             .send()
             .await;
-        assert!(
-            plain.unwrap_err().is_timeout(),
-            "the read timeout counts from the send"
-        );
-        let up = uploading(true)
+        assert!(cut.unwrap_err().is_timeout());
+        // So an upload has none, and is bounded by its size instead.
+        assert_eq!(UPLOAD_READ_TIMEOUT, None);
+        let up = client(true, UPLOAD_READ_TIMEOUT)
             .post(format!("{hub}/up"))
-            .timeout(upload_timeout(body.len()))
+            .timeout(Duration::from_secs(5))
             .body(body)
             .send()
             .await
             .unwrap();
         assert_eq!(up.status().as_u16(), 200);
+        assert!(upload_timeout(0) >= READ_TIMEOUT);
+        assert!(
+            upload_timeout(100 * 1024 * 1024) > READ_TIMEOUT + Duration::from_secs(3000),
+            "100 MB at the slowest uplink allowed"
+        );
         // Still bounded: a hub that never answers is given up on.
-        let never = slow_hub(Duration::from_secs(24 * 3600)).await;
+        let never = slow_hub(Duration::from_secs(3600)).await;
         let late = uploading(true)
             .post(format!("{never}/up"))
-            .timeout(upload_timeout(3))
+            .timeout(Duration::from_millis(300))
             .body("abc")
             .send()
             .await;

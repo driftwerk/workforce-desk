@@ -28,4 +28,4 @@ libc = { workspace = true }
 # gives reqwest rustls without a provider.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true }
