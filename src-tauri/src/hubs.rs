@@ -168,14 +168,34 @@ fn save_with(
     if record.id == LOCAL_HUB_ID {
         eyre::bail!("that name is reserved for the local hub");
     }
-    secrets.set_account(&device_token_account(&record.id), token)?;
     let mut records = read_records(paths)?;
+    // Ids come from the host, and two hosts can make the same one
+    // (`a.b-c.example`, `a-b.c.example`): a workspace elsewhere never takes
+    // over another's id, and with it the conversations Desk keeps for it.
+    if let Some(kept) = records
+        .iter()
+        .find(|r| r.id == record.id && !same_place(&r.url, &record.url))
+    {
+        eyre::bail!(
+            "Desk is already connected to {} under that name. Remove it from Settings first.",
+            kept.url
+        );
+    }
+    secrets.set_account(&device_token_account(&record.id), token)?;
     match records.iter_mut().find(|r| r.id == record.id) {
         Some(kept) => *kept = record.clone(),
         None => records.push(record.clone()),
     }
     write_records(paths, &records)?;
     Ok(record)
+}
+
+/// Whether two hub addresses are the same place, as Desk keeps them.
+fn same_place(a: &str, b: &str) -> bool {
+    match (desk_core::net::hub_url(a), desk_core::net::hub_url(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a.trim_end_matches('/') == b.trim_end_matches('/'),
+    }
 }
 
 pub fn remove(paths: &Paths, id: &str) -> Result<()> {
@@ -421,6 +441,29 @@ mod tests {
         );
         assert_eq!(token("a-example-com").as_deref(), Some("second"));
         assert_eq!(token("b-example-com").as_deref(), Some("other"));
+    }
+
+    #[test]
+    fn a_hub_elsewhere_never_takes_over_another_hubs_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let secrets = Secrets::of(&paths, desk_core::KeyStore::File);
+        let token = |id: &str| secrets.get_account(&device_token_account(id)).unwrap();
+        save_with(&secrets, &paths, "Ours", "https://a.b-c.example", "ours").unwrap();
+        for elsewhere in ["https://a-b.c.example", "https://a.b-c.example:8443"] {
+            assert_eq!(id_for(elsewhere).unwrap(), "a-b-c-example");
+            assert!(
+                save_with(&secrets, &paths, "Theirs", elsewhere, "theirs").is_err(),
+                "{elsewhere}"
+            );
+        }
+        let kept = read_records(&paths).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].url, "https://a.b-c.example");
+        assert_eq!(token("a-b-c-example").as_deref(), Some("ours"));
+        // The same place, however it is written, is paired again in place.
+        save_with(&secrets, &paths, "Ours", "https://A.b-c.example/", "again").unwrap();
+        assert_eq!(token("a-b-c-example").as_deref(), Some("again"));
     }
 
     #[test]

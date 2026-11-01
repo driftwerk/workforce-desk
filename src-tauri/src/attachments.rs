@@ -406,8 +406,9 @@ pub async fn attachment_upload(
             let url = upload_url(account.base.as_str(), &agent, &channel, &filename)?;
             Some(
                 account
-                    .client
+                    .uploads
                     .post(url)
+                    .timeout(desk_core::net::upload_timeout(body.len()))
                     .header(header::CONTENT_TYPE, "application/octet-stream")
                     .body(body.clone()),
             )

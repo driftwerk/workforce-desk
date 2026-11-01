@@ -51,7 +51,8 @@ const reachable = (entries: string[]): Set<string> => {
 /** What a grid's window loads: `main.tsx`'s imports, but not the shell. */
 const gridRoots = (): string[] => importsOf("./main.tsx").filter((f) => f !== "./shell/App.tsx");
 
-const INVOKE = /\b(?:tauriInvoke|invoke)(?:<[^>]*>)?\(\s*"([a-z_]+)"/g;
+// A type argument may itself have one (`invoke<Array<X>>("cmd")`).
+const INVOKE = /\b(?:tauriInvoke|invoke)(?:<(?:[^<>]|<[^<>]*>)*>)?\(\s*"([a-z_]+)"/g;
 const EXPORT = /export\s+(?:const|async\s+function|function|class)\s+([A-Za-z0-9_]+)/g;
 
 /** The commands `file` invokes, each with the export it is inside (none for

@@ -147,6 +147,20 @@ impl HubIo {
                     .map_err(|e| e.to_string())
             })
         });
+        let (paired, id) = (Arc::clone(&self.paired), hub.to_string());
+        let probe: socket::Probe = Arc::new(move || {
+            let (paired, id) = (Arc::clone(&paired), id.clone());
+            Box::pin(async move {
+                let me = |reach: &crate::paired::Reach| {
+                    let url = desk_core::net::at(&reach.base, "/api/me", None).ok()?;
+                    Some(reach.client.get(url))
+                };
+                paired
+                    .send(&id, me)
+                    .await
+                    .is_ok_and(|r| r.status().is_success())
+            })
+        });
         let dial = Dial {
             url,
             bearer,
@@ -154,14 +168,17 @@ impl HubIo {
             legacy: Some(Legacy {
                 hub: hub.to_string(),
                 hubs: Arc::clone(&self.legacy),
+                probe,
             }),
         };
         self.sockets.dial(owner, page, dial, events)
     }
 
-    /// Forgets the hubs read, after one is paired or removed.
+    /// Forgets the hubs read, and which were found old, after one is
+    /// paired or removed.
     pub fn forget(&self) {
         self.paired.forget();
+        self.legacy.clear();
     }
 }
 
@@ -662,9 +679,15 @@ mod tests {
         }
     }
 
+    /// A hub whose sockets take the token in the header when
+    /// `accept_header` (else only in the URL, as before header auth), and
+    /// whose `GET /api/me` takes it in the header when `rest_takes_token`
+    /// (as every hub's REST does, for a token it hasn't revoked). It tells
+    /// each request's path and `Authorization`.
     #[allow(clippy::result_large_err)]
     async fn ws_hub(
         accept_header: bool,
+        rest_takes_token: bool,
     ) -> (
         String,
         tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
@@ -679,6 +702,37 @@ mod tests {
                 };
                 let tx = tx.clone();
                 tokio::spawn(async move {
+                    let mut head = vec![0u8; 4096];
+                    let n = loop {
+                        let n = stream.peek(&mut head).await.unwrap();
+                        if n == 0 || head[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                            break n;
+                        }
+                    };
+                    let text = String::from_utf8_lossy(&head[..n]).to_string();
+                    if text.starts_with("GET /api/me ") {
+                        let mut stream = stream;
+                        let mut sink = vec![0u8; n];
+                        stream.read_exact(&mut sink).await.unwrap();
+                        let auth = text
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .starts_with("authorization:")
+                                    .then(|| l["authorization:".len()..].trim().to_string())
+                            })
+                            .unwrap_or_default();
+                        let _ = tx.send(("/api/me".into(), auth.clone()));
+                        let ok = rest_takes_token && auth == "Bearer SENTINEL-DEVICE";
+                        let status = if ok { "200 OK" } else { "401 Unauthorized" };
+                        let _ = stream
+                            .write_all(
+                                format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                                    .as_bytes(),
+                            )
+                            .await;
+                        return;
+                    }
                     let ws = tokio_tungstenite::accept_hdr_async(
                         stream,
                         move |req: &Request, res: Response| {
@@ -735,7 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_socket_carries_the_token_in_its_header_and_never_its_url() {
-        let (url, mut seen) = ws_hub(true).await;
+        let (url, mut seen) = ws_hub(true, true).await;
         let io = io_for(vec![account("dev", &url, false, "SENTINEL-DEVICE")]);
         let (events, mut rx) = opened();
         io.open_socket(
@@ -755,26 +809,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_older_hub_is_sent_the_token_in_the_url_only_after_it_refuses_the_header() {
-        let (url, mut seen) = ws_hub(false).await;
+    async fn an_older_hub_is_sent_the_token_in_the_url_only_after_it_takes_it_in_a_header() {
+        let (url, mut seen) = ws_hub(false, true).await;
         let io = io_for(vec![account("old", &url, false, "SENTINEL-DEVICE")]);
         let (events, mut rx) = opened();
         io.open_socket("main", "old", "/ws/desk", events)
             .await
             .unwrap();
         assert_eq!(said(&mut rx).await["type"], "open");
-        // The header, the header with the token read again, then the URL.
-        let tried: Vec<_> = (0..3).map(|_| seen.try_recv().unwrap()).collect();
-        assert_eq!(
-            tried[0],
-            ("/ws/desk".into(), "Bearer SENTINEL-DEVICE".into())
-        );
-        assert_eq!(
-            tried[1],
-            ("/ws/desk".into(), "Bearer SENTINEL-DEVICE".into())
-        );
+        // The header, the header with the token read again, the hub asked
+        // whether it takes the token at all (in a header), then the URL.
+        let tried: Vec<_> = (0..4).map(|_| seen.try_recv().unwrap()).collect();
+        let header = ("/ws/desk".to_string(), "Bearer SENTINEL-DEVICE".to_string());
+        assert_eq!(tried[0], header);
+        assert_eq!(tried[1], header);
         assert_eq!(
             tried[2],
+            ("/api/me".into(), "Bearer SENTINEL-DEVICE".into())
+        );
+        assert_eq!(
+            tried[3],
             ("/ws/desk?token=SENTINEL-DEVICE".into(), String::new())
         );
         // Remembered: the next socket to that hub goes the old way at once.
@@ -788,11 +842,49 @@ mod tests {
             "/ws/desk?token=SENTINEL-DEVICE"
         );
         assert!(seen.try_recv().is_err());
+        // Until a hub is paired or removed: then the header is tried first.
+        io.forget();
+        let (events, mut rx) = opened();
+        io.open_socket("main", "old", "/ws/desk", events)
+            .await
+            .unwrap();
+        assert_eq!(said(&mut rx).await["type"], "open");
+        assert_eq!(seen.recv().await.unwrap(), header);
+    }
+
+    #[tokio::test]
+    async fn a_token_the_hub_turns_away_everywhere_never_goes_in_a_url() {
+        // A hub that refuses the token in the header on its sockets and its
+        // REST alike (revoked, say; or a 401 for any other reason).
+        let (url, mut seen) = ws_hub(false, false).await;
+        let io = io_for(vec![account("hub", &url, false, "SENTINEL-DEVICE")]);
+        for _ in 0..2 {
+            let (events, mut rx) = opened();
+            io.open_socket("main", "hub", "/ws/desk", events)
+                .await
+                .unwrap();
+            assert_eq!(said(&mut rx).await["type"], "error");
+            let closed = said(&mut rx).await;
+            assert_eq!(closed["type"], "close");
+            assert!(
+                closed.to_string().contains("401"),
+                "the page is told the hub refused: {closed}"
+            );
+        }
+        let mut tried = Vec::new();
+        while let Ok(t) = seen.try_recv() {
+            tried.push(t);
+        }
+        assert!(tried.len() >= 6, "{tried:?}");
+        assert!(
+            tried.iter().all(|(uri, _)| !uri.contains("token")),
+            "{tried:?}"
+        );
     }
 
     #[tokio::test]
     async fn a_socket_to_a_hub_desk_isnt_paired_with_is_never_opened() {
-        let (url, mut seen) = ws_hub(true).await;
+        let (url, mut seen) = ws_hub(true, true).await;
         let io = io_for(vec![account("dev", &url, false, "SENTINEL-DEVICE")]);
         let (events, _rx) = opened();
         assert!(

@@ -54,6 +54,17 @@ pub enum Refused {
     Garbled,
 }
 
+/// `host:port` as `CONNECT` names it: an IPv6 address in brackets, once
+/// (a URL's host already has them).
+fn authority(host: &str, port: u16) -> String {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
 /// A TCP stream to `host:port` through HTTP proxy `proxy`.
 pub async fn connect(proxy: &Intercept, host: &str, port: u16) -> Result<TcpStream, Refused> {
     let uri = proxy.uri();
@@ -67,11 +78,7 @@ pub async fn connect(proxy: &Intercept, host: &str, port: u16) -> Result<TcpStre
     let mut stream = TcpStream::connect((proxy_host.trim_matches(['[', ']']), proxy_port))
         .await
         .map_err(|_| Refused::Unreachable)?;
-    let authority = if host.contains(':') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    };
+    let authority = authority(host, port);
     let mut head = format!("CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n");
     if let Some(auth) = proxy
         .basic_auth()
@@ -133,6 +140,18 @@ mod tests {
         assert!(proxy_for(&url("ws://127.0.0.1:4100/ws"), &m).is_none());
         let none = Matcher::builder().build();
         assert!(proxy_for(&url("wss://hub.example.com/ws"), &none).is_none());
+    }
+
+    #[test]
+    fn a_tunnel_names_its_hub_as_connect_wants() {
+        assert_eq!(authority("hub.example.com", 443), "hub.example.com:443");
+        assert_eq!(authority("[2001:db8::1]", 443), "[2001:db8::1]:443");
+        assert_eq!(authority("2001:db8::1", 8443), "[2001:db8::1]:8443");
+        assert_eq!(
+            url("wss://[2001:db8::1]/ws").host_str(),
+            Some("[2001:db8::1]"),
+            "what the socket passes"
+        );
     }
 
     /// An HTTP proxy that takes one `CONNECT`, answers `status`, and on 200

@@ -15,18 +15,38 @@ use reqwest::Url;
 
 /// How long a hub has to take a connection.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a hub may go without sending anything while it answers.
-pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a hub may take to start answering, or go without sending
+/// anything while it answers. reqwest counts it from the send, so it bounds
+/// the whole request too: generous, so no route a hub is slow to answer
+/// (making a session, posting to a room) is cut off. An upload, which may
+/// take longer than this to send, goes by [`uploading`] instead.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(300);
+/// The slowest an upload is let go: well under any uplink people use.
+const UPLOAD_FLOOR: u64 = 32 * 1024;
+
+/// What every client here is: no redirects, and a connection taken in time.
+fn client(on_this_computer: bool, read_timeout: Option<Duration>) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT);
+    // No proxy for this computer's hub; for others the system's, if any
+    // (a corporate network may need it), and https only.
+    let builder = if on_this_computer {
+        builder.no_proxy()
+    } else {
+        builder.https_only(true)
+    };
+    match read_timeout {
+        Some(t) => builder.read_timeout(t),
+        None => builder,
+    }
+    .build()
+    .expect("an HTTP client")
+}
 
 /// A client for the hub on this computer: no proxy, no redirects.
 pub fn loopback() -> reqwest::Client {
-    reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
-        .build()
-        .expect("an HTTP client")
+    client(true, Some(READ_TIMEOUT))
 }
 
 /// [`loopback`], blocking.
@@ -43,13 +63,20 @@ pub fn loopback_blocking() -> reqwest::blocking::Client {
 /// A client for hubs elsewhere: through the system's proxy when it has one
 /// (a corporate network may need it), over https only, no redirects.
 pub fn remote() -> reqwest::Client {
-    reqwest::Client::builder()
-        .https_only(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT)
-        .build()
-        .expect("an HTTP client")
+    client(false, Some(READ_TIMEOUT))
+}
+
+/// [`loopback`] or [`remote`], as `on_this_computer` says, for uploads: no
+/// read timeout, which reqwest counts from the send and so would cut a slow
+/// upload off. Each upload is bounded by [`upload_timeout`] instead.
+pub fn uploading(on_this_computer: bool) -> reqwest::Client {
+    client(on_this_computer, None)
+}
+
+/// How long an upload of `bytes` may take, its answer included: what any
+/// request may, and the time to send it at [`UPLOAD_FLOOR`] bytes a second.
+pub fn upload_timeout(bytes: usize) -> Duration {
+    READ_TIMEOUT + Duration::from_secs(bytes as u64 / UPLOAD_FLOOR)
 }
 
 /// Whether `url` names this computer by address. An address, not a name:
@@ -193,6 +220,66 @@ mod tests {
         let (hub, asked) = listener("HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n".into());
         assert!(remote().get(format!("{hub}/api/me")).send().await.is_err());
         assert!(asked.recv_timeout(Duration::from_millis(200)).is_err());
+    }
+
+    /// A hub that takes `wait` (on the paused clock) to answer, after
+    /// reading the request.
+    async fn slow_hub(wait: Duration) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                tokio::spawn(async move {
+                    let mut chunk = [0u8; 64 * 1024];
+                    let _ = s.read(&mut chunk).await;
+                    tokio::time::sleep(wait).await;
+                    let _ = s
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        )
+                        .await;
+                });
+            }
+        });
+        url
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_upload_is_bounded_by_its_size_not_the_read_timeout() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let hub = slow_hub(READ_TIMEOUT + Duration::from_secs(30)).await;
+        let body = vec![0u8; 4 * 1024 * 1024];
+        assert!(
+            upload_timeout(body.len()) > READ_TIMEOUT + Duration::from_secs(30),
+            "a 4 MiB upload may take longer than any other request"
+        );
+        let plain = loopback()
+            .post(format!("{hub}/up"))
+            .body(body.clone())
+            .send()
+            .await;
+        assert!(
+            plain.unwrap_err().is_timeout(),
+            "the read timeout counts from the send"
+        );
+        let up = uploading(true)
+            .post(format!("{hub}/up"))
+            .timeout(upload_timeout(body.len()))
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(up.status().as_u16(), 200);
+        // Still bounded: a hub that never answers is given up on.
+        let never = slow_hub(Duration::from_secs(24 * 3600)).await;
+        let late = uploading(true)
+            .post(format!("{never}/up"))
+            .timeout(upload_timeout(3))
+            .body("abc")
+            .send()
+            .await;
+        assert!(late.unwrap_err().is_timeout());
     }
 
     #[test]

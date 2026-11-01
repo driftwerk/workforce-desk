@@ -101,14 +101,26 @@ impl LegacyHubs {
     fn forget(&self, hub: &str) {
         self.0.lock().expect("legacy").remove(hub);
     }
+
+    /// Forgets every hub found old, after one is paired or removed: each is
+    /// asked with the header first again.
+    pub fn clear(&self) {
+        self.0.lock().expect("legacy").clear();
+    }
 }
 
+/// Whether a hub takes its token in a request's `Authorization` header,
+/// which every hub reads there (older ones only on REST, not on sockets).
+pub type Probe = Arc<dyn Fn() -> BoxFuture<'static, bool> + Send + Sync>;
+
 /// A hub that may be older than reading a socket's token from the header:
-/// which one, and where that is remembered.
+/// which one, where that is remembered, and how to ask it whether it takes
+/// the token at all.
 #[derive(Clone)]
 pub struct Legacy {
     pub hub: String,
     pub hubs: Arc<LegacyHubs>,
+    pub probe: Probe,
 }
 
 /// A socket to open: where, with which token, counted in which pool.
@@ -485,8 +497,11 @@ async fn attempt(url: &Url, token: &str, carry: Carry) -> Result<Ws, Failed> {
 /// header: read again once if the hub turns it away (Desk Helper renews
 /// the local hub's; a hub paired again has a new one). A paired hub that
 /// still turns it away is asked once more with it in the URL, as hubs
-/// before header auth read it; if that opens, the hub is remembered as one
-/// of those, and asked that way from then on.
+/// before header auth read it, but only once the hub has taken the token in
+/// a request's header ([`Probe`]): then the token is good and the hub is
+/// one of those. A token the hub turns away everywhere (revoked, expired)
+/// is never put in a URL. If the URL opens, the hub is remembered as old,
+/// and asked that way from then on.
 async fn handshake(dial: &Dial) -> Result<Ws, Failed> {
     let legacy = dial.legacy.as_ref();
     if let Some(l) = legacy.filter(|l| l.hubs.known(&l.hub)) {
@@ -504,10 +519,12 @@ async fn handshake(dial: &Dial) -> Result<Ws, Failed> {
         match attempt(&dial.url, &token, Carry::Header).await {
             Err(Failed::Refused(StatusCode::UNAUTHORIZED)) if !fresh => fresh = true,
             Err(Failed::Refused(StatusCode::UNAUTHORIZED)) if legacy.is_some() => {
-                let ws = attempt(&dial.url, &token, Carry::Query).await?;
-                if let Some(l) = legacy {
-                    l.hubs.remember(&l.hub);
+                let l = legacy.expect("a legacy hub");
+                if !(l.probe)().await {
+                    return Err(Failed::Refused(StatusCode::UNAUTHORIZED));
                 }
+                let ws = attempt(&dial.url, &token, Carry::Query).await?;
+                l.hubs.remember(&l.hub);
                 return Ok(ws);
             }
             other => return other,

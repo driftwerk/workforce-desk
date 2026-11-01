@@ -39,19 +39,40 @@ impl std::fmt::Display for Failure {
 }
 
 /// A hub, ready to be sent to: its checked address, its token, and the
-/// client for where it is.
+/// clients for where it is.
 #[derive(Clone)]
 pub struct Reach {
     pub base: Url,
     pub token: Arc<str>,
     pub client: reqwest::Client,
+    /// For an upload, each bounded by `desk_core::net::upload_timeout`.
+    pub uploads: reqwest::Client,
+}
+
+/// The clients for one kind of place: requests, and uploads.
+struct Clients {
+    requests: reqwest::Client,
+    uploads: reqwest::Client,
+}
+
+impl Clients {
+    fn new(on_this_computer: bool) -> Self {
+        Self {
+            requests: if on_this_computer {
+                desk_core::net::loopback()
+            } else {
+                desk_core::net::remote()
+            },
+            uploads: desk_core::net::uploading(on_this_computer),
+        }
+    }
 }
 
 pub struct Paired {
     source: Source,
     hubs: Mutex<Option<Arc<Vec<HubAccount>>>>,
-    loopback: reqwest::Client,
-    remote: reqwest::Client,
+    loopback: Clients,
+    remote: Clients,
 }
 
 impl Paired {
@@ -63,8 +84,8 @@ impl Paired {
         Self {
             source,
             hubs: Mutex::new(None),
-            loopback: desk_core::net::loopback(),
-            remote: desk_core::net::remote(),
+            loopback: Clients::new(true),
+            remote: Clients::new(false),
         }
     }
 
@@ -106,15 +127,16 @@ impl Paired {
         }
         .map_err(Failure::Refused)?;
         // No proxy for this computer's hub; the system's, if any, for others.
-        let client = if desk_core::net::is_loopback(&base) {
-            self.loopback.clone()
+        let clients = if desk_core::net::is_loopback(&base) {
+            &self.loopback
         } else {
-            self.remote.clone()
+            &self.remote
         };
         Ok(Reach {
             base,
             token: hub.token.into(),
-            client,
+            client: clients.requests.clone(),
+            uploads: clients.uploads.clone(),
         })
     }
 
