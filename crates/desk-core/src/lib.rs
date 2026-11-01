@@ -495,10 +495,25 @@ impl Secrets {
 
     /// Deletes the local hub's secrets and Desk's token for it.
     pub fn forget_backend(&self) -> Result<()> {
-        for s in Secret::ALL {
-            self.delete_account(s.account())?;
+        let accounts: Vec<String> = Secret::ALL
+            .iter()
+            .map(|s| s.account().to_string())
+            .chain([device_token_account(LOCAL_HUB_ID)])
+            .collect();
+        self.forget(vault::KeyOwner::Helper, &accounts)
+    }
+
+    /// Deletes the app's own secrets: `accounts` (remote hubs' device
+    /// tokens), and in the system store all the rest it holds too.
+    pub fn forget_app(&self, accounts: &[String]) -> Result<()> {
+        self.forget(vault::KeyOwner::App, accounts)
+    }
+
+    fn forget(&self, owner: vault::KeyOwner, accounts: &[String]) -> Result<()> {
+        match self {
+            Secrets::Keyring(k) => k.vault.forget(owner, accounts),
+            Secrets::File(f) => accounts.iter().try_for_each(|a| f.delete_account(a)),
         }
-        self.delete_account(&device_token_account(LOCAL_HUB_ID))
     }
 }
 

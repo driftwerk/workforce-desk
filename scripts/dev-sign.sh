@@ -13,5 +13,5 @@ bin=$1
 id=$2
 [ "$(uname -s)" = Darwin ] || exit 0
 [ -n "${DESK_DEV_SIGNING_IDENTITY:-}" ] || exit 0
-codesign --force --timestamp=none --sign "$DESK_DEV_SIGNING_IDENTITY" --identifier "$id" "$bin" 2>/dev/null ||
+codesign --force --timestamp=none --sign "$DESK_DEV_SIGNING_IDENTITY" --identifier "$id" "$bin" ||
   { echo "dev-sign.sh: couldn't sign $bin with \"$DESK_DEV_SIGNING_IDENTITY\"" >&2; exit 1; }

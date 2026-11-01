@@ -41,12 +41,15 @@ DESK_HOME=/tmp/desk ./target/debug/desk-hubd --workforce ../workforce-public-des
 
 ### The keychain in development
 
-Desk keeps its secrets in the keychain as two items under `xyz.driftwerk.desk`.
+On macOS Desk keeps its secrets in the keychain as two items under `xyz.driftwerk.desk`.
 `desk-helper-secrets` holds the local hub's secrets and is written only by desk-hubd.
 `desk-app-secrets` holds remote workspaces' device tokens and is written only by the app.
-Each process reads each item once, so reloading the page reads nothing. Secrets
-an older Desk kept one item each are moved into these items the first time
-they're read, and the old items are left for older versions.
+Secrets an older Desk kept one item each are moved into these items the first
+time they're read, and the old items are kept in step for older versions.
+Credential Manager and the Secret Service keep one item per secret, as before.
+Everywhere, each process reads each secret once, so reloading the page reads
+nothing, and the app reads desk-hubd's again only after desk-hubd changes them
+(it writes a new random value to `secrets.rev` beside them, no secret in it).
 
 The keychain remembers "Always Allow" by a binary's signature. A development
 build only has the linker's ad-hoc signature, which changes with every
