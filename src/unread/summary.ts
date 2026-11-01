@@ -200,6 +200,8 @@ function watchNeedsSeen(): () => void {
     if (key === NEEDS_SEEN_KEY) useNeedsSeen.setState({ seen: seenFrom(value) });
   });
   const note = () => {
+    // Nothing seen and nothing on screen: nothing to note, or to let go.
+    if (!useNeedsSeen.getState().seen.size && !Object.keys(useWatching.getState().on).length) return;
     const hubs = useFloor.getState().hubs;
     if (noteSeen(merged(hubs, useChat.getState().hubs).needs, (hub) => hubs[hub]?.state === "ready"))
       deskState.set(NEEDS_SEEN_KEY, [...useNeedsSeen.getState().seen]);

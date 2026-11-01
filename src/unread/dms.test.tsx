@@ -61,7 +61,7 @@ const { agentItem } = await import("../groups/model");
 const { useFloor, useMerged } = await import("../floor/store");
 const { itemBadge } = await import("./badges");
 const { useBadgeData } = await import("./Marks");
-const { useReads, restoreKeptDms } = await import("./reads");
+const { useReads, markUnread, restoreKeptDms, KEPT_DM_MS, LANDED_GRACE_MS } = await import("./reads");
 const { SEEN_MS } = await import("./seen");
 const { dmsFrom, useUnread } = await import("./summary");
 const { noteSeen, useNeedsSeen } = await import("./needsSeen");
@@ -255,6 +255,36 @@ describe("Allan's DM while you talk to him", () => {
     act(() => restoreKeptDms());
     act(() => listed(1, { id: "a2", at: T2 }, { id: "a1", at: T1 }));
     expect(badge).toEqual({ count: 0, dot: false });
+  });
+
+  it("lets go of a Mark unread its hub took once another Desk has moved on, but not before the write could land", async () => {
+    talking();
+    const place = { kind: "dm" as const, hub: "dw", agent: "allan" };
+    act(() => listed(0, { id: "a2", at: T2 }, { id: "a2", at: T2 }));
+    await act(() => markUnread(place, { at: T1, message: "a1" }));
+    expect(surface.puts.at(-1)).toMatchObject({ at: T1, mark: "set" });
+    // A listing sent before the hub took it still says T2.
+    act(() => listed(1, { id: "a2", at: T2 }, { id: "a2", at: T2 }));
+    expect(useReads.getState().dms[KEY]?.at).toBe(T1);
+    // Later it says T3: read further on another Desk.
+    wait(LANDED_GRACE_MS + 1);
+    act(() => listed(0, { id: "a3", at: T3 }, { id: "a3", at: T3 }));
+    expect(useReads.getState().dms[KEY]?.at).toBe(T3);
+    expect(state.get("unread.dms.kept")).toEqual({});
+  });
+
+  it("ignores kept points that aren't whole or are long past", () => {
+    const old = Date.now() - KEPT_DM_MS - 1;
+    state.set("unread.dms.kept", {
+      "dw/allan": { point: { at: "not a time", message: null }, mark: "advance", since: Date.now() },
+      "dw/bob": { point: { at: T3, message: null }, mark: "set", since: old },
+      "dw/cy": "garbage",
+    });
+    act(() => useReads.setState({ dms: {} }));
+    act(() => restoreKeptDms());
+    expect(useReads.getState().dms).toEqual({});
+    act(() => listed(1, { id: "a2", at: T2 }, { id: "a1", at: T1 }));
+    expect(useReads.getState().dms[KEY]?.at).toBe(T1);
   });
 
   it("while you're elsewhere a reply badges, and opening the DM clears it at once", () => {
