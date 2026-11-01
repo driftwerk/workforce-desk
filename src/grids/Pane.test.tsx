@@ -289,7 +289,7 @@ describe("a session's pane", () => {
   });
 
   it("resumes one Desk started that has stopped, from its header or its options", () => {
-    const pane = shown({ state: "interrupted" });
+    const pane = shown({ state: "interrupted", cliSessionId: "s0" });
     fireEvent.click(within(pane).getByRole("button", { name: "Resume" }));
     fromMenu(pane, "Resume");
     expect(resume).toHaveBeenCalledTimes(2);
@@ -335,6 +335,24 @@ describe("a session's pane", () => {
     expect(pane.className).toContain("gpane-asking");
     expect(within(pane).getByText("Stopped: Bash was not allowed")).toBeTruthy();
     expect(within(pane).getByText(/needs you · asked/)).toBeTruthy();
+  });
+
+  it("offers ending and removing it from its options", () => {
+    const pane = shown({ state: "stopped", cliSessionId: "s0" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    expect(screen.getByRole("menuitem", { name: "End session…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Remove…" })).toBeTruthy();
+  });
+
+  it("offers Resume where a closed session it showed was", async () => {
+    useDesk.setState({ hub: { closeTerminal, stop, resume } as never });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, sess("closed-1"));
+    canvas();
+    const pane = screen.getByRole("region", { name: "Session" });
+    expect(within(pane).getByText(/This session is closed/)).toBeTruthy();
+    fireEvent.click(within(pane).getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(resume).toHaveBeenCalledWith("closed-1"));
   });
 
   it("offers neither for one running in another terminal", () => {

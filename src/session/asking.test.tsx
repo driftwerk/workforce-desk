@@ -82,7 +82,13 @@ describe("a session's actions", () => {
     expect(labels({ state: "working", terminalId: "t1" })).toEqual(["Interrupt"]);
     expect(labels({ state: "done" })).toEqual(["Stop"]);
     expect(labels({ state: "asking", terminalId: "t1" })).toEqual([]);
-    expect(labels({ live: false, state: "stopped" })).toEqual(["Resume"]);
+    expect(labels({ live: false, state: "stopped", cliSessionId: "c1" })).toEqual(["Resume"]);
+    // Nothing to resume without a conversation, nor while it runs elsewhere.
+    expect(labels({ live: false, state: "stopped", cliSessionId: null })).toEqual([]);
+    expect(labels({ live: false, state: "working", cliSessionId: "c1" })).toEqual([]);
+    // One closed in another terminal resumes in Desk.
+    expect(labels({ live: false, state: "closed", origin: "external", cliSessionId: "c1" })).toEqual(["Resume in Desk"]);
+    expect(labels({ live: false, state: "closed", origin: "external", cliSessionId: "c1", caps: { resume: "none" } as never })).toEqual([]);
   });
 
   it("interrupt a tracked session through the hub, leaving its terminal be", () => {

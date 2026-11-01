@@ -9,7 +9,9 @@ import { sortedSessions, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
-import { approvalsSwitchable, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
+import { approvalsSwitchable, lifecycleActions, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
+import { HubError } from "../hub/client";
+import { plainError } from "../ui/plainError";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { Terminal } from "../session/Terminal";
@@ -479,10 +481,26 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
 
 function SessionPane({ id }: { id: string }) {
   const session = useDesk((s) => s.sessions[id]);
+  const [problem, setProblem] = useState<string | null>(null);
   if (!session) {
+    // Closed (the hub lists only what's open) or removed: Resume finds out.
+    const resume = () => {
+      setProblem(null);
+      useDesk
+        .getState()
+        .hub?.resume(id)
+        .catch((e) => setProblem(e instanceof HubError && e.status === 404 ? "It was removed from Desk, so there's nothing to resume." : plainError(e)));
+    };
     return (
       <div className="gpane-empty">
-        <p className="muted small">This session is no longer on the hub.</p>
+        <p className="muted small">
+          {problem ?? "This session is closed."}{" "}
+          {!problem && (
+            <button type="button" className="link small" onClick={resume}>
+              Resume
+            </button>
+          )}
+        </p>
       </div>
     );
   }
@@ -595,6 +613,7 @@ function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], s
         ]
       : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
+    ...(session ? [{ kind: "separator" as const }, ...lifecycleActions(session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run }))] : []),
     { kind: "separator" },
     { kind: "item", label: removeLabel(pane, hosted), onSelect: onClose },
   ];

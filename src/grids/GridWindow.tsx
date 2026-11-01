@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
@@ -178,6 +179,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
       <ErrorBoundary name="grid">
         <GridCanvas grid={grid} />
       </ErrorBoundary>
+      <LifecycleDialogs />
       {layoutMenu && (
         <Menu
           label="Layout"
