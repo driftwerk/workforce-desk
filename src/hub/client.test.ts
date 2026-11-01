@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeskHub, HubError } from "./client";
+import { direct } from "./transport";
 
-const hub = new DeskHub({ url: "http://127.0.0.1:1", token: "t" });
+const hub = new DeskHub(direct({ url: "http://127.0.0.1:1", token: "t" }));
 const answer = (body: string, type: string) =>
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": type } }));
 

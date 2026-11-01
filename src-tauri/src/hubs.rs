@@ -247,6 +247,54 @@ mod tests {
         );
     }
 
+    /// What `hubs_list` hands the page, serialized as the IPC sends it: each
+    /// hub's device token, never the local hub's gateway (admin) token.
+    #[test]
+    fn the_page_is_never_given_the_admin_token() {
+        const SENTINEL: &str = "SENTINEL-ADMIN-7c41";
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        desk_core::write_ports(
+            &paths.hub_state(),
+            &desk_core::HubPorts {
+                postgres: 1,
+                admin: 2,
+                gateway: 3,
+                memory: 4,
+            },
+        )
+        .unwrap();
+        let secrets = Secrets::of(&paths, desk_core::KeyStore::File);
+        secrets
+            .set_account(desk_core::Secret::GatewayToken.account(), SENTINEL)
+            .unwrap();
+        save_with(&secrets, &paths, "Acme", "https://a.example.com", "remote").unwrap();
+        let ipc = |local: Option<Connection>| {
+            serde_json::to_string(&accounts_with(&paths, local, &secrets).unwrap()).unwrap()
+        };
+        // Not yet paired with the local hub: it isn't listed, rather than
+        // listed with the admin token.
+        let unpaired = desk_core::backend::read_connection(&paths, &secrets)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unpaired.admin_token, SENTINEL);
+        let json = ipc(Some(unpaired));
+        assert!(!json.contains(SENTINEL), "{json}");
+        assert!(!json.contains("\"local\":true"));
+        // Paired: the local hub is listed with its device token.
+        secrets
+            .set_account(&device_token_account(LOCAL_HUB_ID), "local-device")
+            .unwrap();
+        let paired = desk_core::backend::read_connection(&paths, &secrets)
+            .unwrap()
+            .unwrap();
+        let json = ipc(Some(paired));
+        assert!(!json.contains(SENTINEL), "{json}");
+        let listed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(listed[0]["token"], "local-device");
+        assert_eq!(listed[1]["token"], "remote");
+    }
+
     #[test]
     fn hub_ids_come_from_the_host() {
         assert_eq!(

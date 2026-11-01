@@ -1,5 +1,6 @@
 mod attachments;
 mod badge;
+mod broker;
 mod files;
 mod fonts;
 mod frame;
@@ -59,10 +60,17 @@ fn backend_of(paths: &Paths) -> eyre::Result<Option<Backend>> {
     })
 }
 
-#[derive(Serialize)]
+/// Where the local hub is, as the page learns it. Never its token: the page
+/// reaches the hub's admin surface only through [`broker`], which holds it.
+#[derive(Debug, Serialize)]
 struct HubConnection {
     url: String,
-    token: String,
+}
+
+impl From<desk_core::backend::Connection> for HubConnection {
+    fn from(c: desk_core::backend::Connection) -> Self {
+        Self { url: c.gateway_url }
+    }
 }
 
 type CommandResult<T> = Result<T, String>;
@@ -71,8 +79,8 @@ fn text<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-/// The local hub's address and token. On first launch `desk-hubd` is still
-/// creating them, so this waits for both.
+/// The local hub's address, once it has one and its token. On first launch
+/// `desk-hubd` is still creating them, so this waits for both.
 #[tauri::command]
 async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
     let backend = app.backend()?;
@@ -80,10 +88,7 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             if let Some(c) = backend.connection().map_err(text)? {
-                return Ok(HubConnection {
-                    url: c.gateway_url,
-                    token: c.admin_token,
-                });
+                return Ok(HubConnection::from(c));
             }
             // Say at once when Desk Helper can't start, rather than wait.
             if let Some(why) = helper::login(&backend).status().blocked() {
@@ -685,6 +690,7 @@ pub fn run() {
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths, backend.clone()));
             app.manage(attachments::Files::new(paths.clone(), backend.clone()));
+            app.manage(broker::Broker::new(backend.clone()));
             app.manage(App {
                 paths,
                 backend,
@@ -707,8 +713,29 @@ pub fn run() {
             });
             Ok(())
         })
+        // A page loading again, or a window gone, holds none of the local
+        // hub's sockets any more.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started
+                && let Some(broker) = webview.try_state::<broker::Broker>()
+            {
+                broker.sockets.close_owned(webview.label());
+            }
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(broker) = window.try_state::<broker::Broker>()
+            {
+                broker.sockets.close_owned(window.label());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             hub_connection,
+            broker::local_hub_fetch,
+            broker::local_hub_socket_open,
+            broker::local_hub_socket_send,
+            broker::local_hub_socket_ack,
+            broker::local_hub_socket_close,
             fonts::fonts_list,
             host_info,
             badge::set_unread_badge,
@@ -790,4 +817,23 @@ pub fn run() {
                 tracing::warn!(error = %e, "couldn't save desk state");
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What `hub_connection` hands the page, serialized as the IPC sends it.
+    #[test]
+    fn hub_connection_never_carries_the_admin_token() {
+        const SENTINEL: &str = "SENTINEL-ADMIN-93ab";
+        let c = desk_core::backend::Connection {
+            gateway_url: "http://127.0.0.1:3".into(),
+            admin_token: SENTINEL.into(),
+            device_token: Some("device".into()),
+        };
+        let json = serde_json::to_value(HubConnection::from(c)).unwrap();
+        assert_eq!(json, serde_json::json!({ "url": "http://127.0.0.1:3" }));
+        assert!(!json.to_string().contains(SENTINEL));
+    }
 }
