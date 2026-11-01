@@ -24,8 +24,8 @@ use desk_voice::realtime::gpt_live::GptLive;
 use desk_voice::speech::Speaker;
 use desk_voice::voices::{Provider, VoiceInfo, engine_voices, kokoro_voices};
 use desk_voice::{
-    Audio, Cascade, EngineKind, ListenMode, Member, Models, Realtime, SharedAudioOut, Utterance,
-    VoiceEngine, VoiceEvents, VoiceSpec, VoiceState,
+    Audio, Cascade, EngineKind, ListenMode, Member, Models, Realtime, SharedAudioOut, StopReason,
+    Utterance, VoiceEngine, VoiceEvents, VoiceSpec, VoiceState,
 };
 use eyre::eyre;
 use tauri::{AppHandle, Emitter, State};
@@ -183,6 +183,10 @@ impl VoiceEvents for Events {
     fn error(&self, message: &str) {
         let _ = self.app.emit("voice-error", message);
     }
+
+    fn stopped(&self, reason: StopReason) {
+        let _ = self.app.emit("voice-stopped", reason);
+    }
 }
 
 /// Download progress, at most every half percent.
@@ -333,6 +337,13 @@ async fn reconcile(app: AppHandle, voice: &Voice) -> CommandResult<()> {
                 _ => running.take(),
             }
         };
+        if let Some(engine) = &replaced {
+            tracing::info!(
+                engine = ?engine.kind(),
+                wanted = ?want,
+                "voice: engine stopping"
+            );
+        }
         let trial = lock(&voice.trial).take();
         tauri::async_runtime::spawn_blocking(move || drop((replaced, trial)))
             .await
@@ -441,10 +452,18 @@ pub fn voice_push_to_talk(app: AppHandle, voice: State<'_, Voice>, pressed: bool
 }
 
 /// Speaks `text` in `voice` (the agent's; the engine's default when
-/// absent).
+/// absent). With no engine to say it, says so, rather than saying nothing.
 #[tauri::command]
-pub fn voice_speak(desk: State<'_, Voice>, text: String, voice: Option<VoiceSpec>) {
-    desk.with_engine(|e| e.speak(text, voice));
+pub fn voice_speak(
+    desk: State<'_, Voice>,
+    text: String,
+    voice: Option<VoiceSpec>,
+) -> CommandResult<()> {
+    if desk.with_engine(|e| e.speak(text, voice)) {
+        Ok(())
+    } else {
+        Err("Voice isn't running, so that wasn't read out.".into())
+    }
 }
 
 #[tauri::command]

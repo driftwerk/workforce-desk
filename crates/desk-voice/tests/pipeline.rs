@@ -75,7 +75,7 @@ fn listen(listener: &mut Listener, audio: &[f32]) -> Vec<Utterance> {
             }
         });
         if said.len() > before {
-            listener.speaking();
+            listener.speaking("", at(fed));
             listener.spoken(at(fed));
         }
         listener.tick(at(fed));
@@ -305,6 +305,58 @@ fn the_engine_stops_talking_when_talked_over_and_takes_push_to_talk() {
         agent: "Atlas".into()
     }));
     assert!(events.errors.lock().unwrap().is_empty());
+    drop(engine);
+}
+
+/// A reply coming back into the microphone, far louder than an echo canceller
+/// leaves it: the voice model fires and the recogniser hears the words, and it's
+/// still the reply. It isn't stopped, and isn't sent to the agent as the person.
+#[test]
+#[ignore = "needs the speech models"]
+fn its_own_voice_coming_back_doesnt_stop_it() {
+    const REPLY: &str = "The nightly build failed in the integration suite, in the payments tests.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let reply = speaker().synthesize(REPLY, None).unwrap();
+    for gain in [0.3f32, 0.1] {
+        let echo: Vec<f32> = reply.samples.iter().map(|s| s * gain).collect();
+        {
+            let mic = mic.lock().unwrap();
+            let feed = mic.as_ref().unwrap();
+            for chunk in echo.chunks(4_096) {
+                feed(chunk, reply.rate);
+            }
+            for chunk in silence(1.5).chunks(1_600) {
+                feed(chunk, SPEECH_RATE);
+            }
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert_eq!(*out.stops.lock().unwrap(), 0);
+    assert_eq!(engine.state(), VoiceState::Speaking);
+    assert!(events.said.lock().unwrap().is_empty());
     drop(engine);
 }
 

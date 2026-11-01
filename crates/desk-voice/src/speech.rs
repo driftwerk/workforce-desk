@@ -3,7 +3,7 @@
 //! transcribes the segments worth hearing, and Kokoro speaks.
 
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eyre::{Context, Result, eyre};
 use sherpa_onnx::{
@@ -13,8 +13,10 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
+use crate::barge::{Barge, Verdict, judge};
 use crate::conversation::{Conversation, ListenMode, Phase, Timing};
 use crate::decode::Audio;
+use crate::directions::without_directions;
 use crate::keywords::{Keywords, SentencePiece, vocabulary};
 use crate::models::{ASR, KWS, Models, TTS, VAD};
 use crate::resample::SPEECH_RATE;
@@ -27,11 +29,15 @@ const MAX_SPEECH_SECONDS: f32 = 20.0;
 /// of what came before the segment to be transcribed whole.
 const PRE_ROLL: u64 = SPEECH_RATE as u64 * 2 / 5;
 const RATE: i32 = SPEECH_RATE as i32;
+/// As much of what's being said over playback as is transcribed to judge it.
+const JUDGED: usize = SPEECH_RATE as usize * 2;
+/// How long after a reply what's heard might still be the reply.
+const ECHO_MEMORY: Duration = Duration::from_secs(4);
 
 /// What the listener noticed while being fed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Heard {
-    /// Speech started over playback: stop speaking.
+    /// Someone talked over playback: stop speaking.
     BargeIn,
     /// A segment is being transcribed.
     Transcribing,
@@ -243,6 +249,69 @@ impl Wake {
     }
 }
 
+/// The listener's models: voice activity, the name spotter, and speech
+/// recognition. A trait so a whole pipeline can be tested without them.
+pub trait Ears: Send {
+    /// 16 kHz mono audio, in any chunk size.
+    fn feed(&mut self, samples: &[f32], out: &mut dyn FnMut(Sound));
+    /// Ends the input: whatever speech is pending is treated as finished.
+    fn flush(&mut self, out: &mut dyn FnMut(Sound));
+    fn set_names(&mut self, names: &[String]) -> Result<()>;
+    fn names(&self) -> &[String];
+    /// The audio since the current speech began, but no more than `max` samples.
+    fn since_onset(&self, max: usize) -> Vec<f32>;
+    /// Starts afresh.
+    fn reset(&mut self);
+    fn reset_spotter(&self);
+    fn transcribe(&mut self, samples: &[f32]) -> String;
+}
+
+/// [`Ears`] on the real models.
+struct OnDevice {
+    wake: Wake,
+    asr: OfflineRecognizer,
+}
+
+impl Ears for OnDevice {
+    fn feed(&mut self, samples: &[f32], out: &mut dyn FnMut(Sound)) {
+        self.wake.feed(samples, out);
+    }
+
+    fn flush(&mut self, out: &mut dyn FnMut(Sound)) {
+        self.wake.flush(out);
+    }
+
+    fn set_names(&mut self, names: &[String]) -> Result<()> {
+        self.wake.set_names(names)
+    }
+
+    fn names(&self) -> &[String] {
+        self.wake.names()
+    }
+
+    fn since_onset(&self, max: usize) -> Vec<f32> {
+        self.wake.since_onset(max)
+    }
+
+    fn reset(&mut self) {
+        self.wake.reset();
+    }
+
+    fn reset_spotter(&self) {
+        self.wake.reset_spotter();
+    }
+
+    fn transcribe(&mut self, samples: &[f32]) -> String {
+        let stream = self.asr.create_stream();
+        stream.accept_waveform(RATE, samples);
+        self.asr.decode(&stream);
+        stream
+            .get_result()
+            .map(|r| r.text.trim().to_string())
+            .unwrap_or_default()
+    }
+}
+
 fn recognizer(models: &Models) -> Result<OfflineRecognizer> {
     let mut config = OfflineRecognizerConfig::default();
     config.model_config.transducer = OfflineTransducerModelConfig {
@@ -256,42 +325,86 @@ fn recognizer(models: &Models) -> Result<OfflineRecognizer> {
         .ok_or_else(|| eyre!("couldn't load the speech recognition model"))
 }
 
+/// What Desk has been saying, so its own voice coming back isn't taken for
+/// the person.
+#[derive(Default)]
+struct Said {
+    text: String,
+    /// Until when it might still come back; `None` while it's being said.
+    until: Option<Instant>,
+}
+
+impl Said {
+    fn speaking(&mut self, text: &str, now: Instant) {
+        if self.until.is_some_and(|t| now >= t) {
+            self.text.clear();
+        }
+        self.until = None;
+        self.text.push(' ');
+        self.text.push_str(&without_directions(text));
+    }
+
+    fn over(&mut self, now: Instant) {
+        self.until = Some(now + ECHO_MEMORY);
+    }
+
+    /// Whether `heard`, now, is our own voice.
+    fn echoes(&self, heard: &str, now: Instant) -> bool {
+        self.until.is_none_or(|t| now < t) && judge(heard, &self.text) == Verdict::Echo
+    }
+}
+
 /// The cascade's listener: the wake path, the conversation, and Parakeet for
 /// the segments worth hearing.
 pub struct Listener {
-    wake: Wake,
-    asr: OfflineRecognizer,
+    ears: Box<dyn Ears>,
     conversation: Conversation,
     push_to_talk: Option<Vec<f32>>,
     transcribing: bool,
+    barge: Barge,
+    said: Said,
+    /// A name heard in what's being judged over playback: it counts if that
+    /// turns out to be someone talking.
+    named: Option<String>,
 }
 
 impl Listener {
     pub fn new(models: &Models, timing: Timing, now: Instant) -> Result<Self> {
-        Ok(Self {
+        let ears = OnDevice {
             wake: Wake::new(models)?,
             asr: recognizer(models)?,
+        };
+        Ok(Self::with_ears(Box::new(ears), timing, now))
+    }
+
+    /// A listener on `ears`.
+    pub fn with_ears(ears: Box<dyn Ears>, timing: Timing, now: Instant) -> Self {
+        Self {
+            ears,
             conversation: Conversation::new(timing, now),
             push_to_talk: None,
             transcribing: false,
-        })
+            barge: Barge::default(),
+            said: Said::default(),
+            named: None,
+        }
     }
 
     /// Listens for these names from now on. With none, only push-to-talk works.
     pub fn set_names(&mut self, names: &[String]) -> Result<()> {
         tracing::info!(?names, "voice: listening for names");
-        self.wake.set_names(names)
+        self.ears.set_names(names)
     }
 
     pub fn names(&self) -> &[String] {
-        self.wake.names()
+        self.ears.names()
     }
 
     /// Listens this way from now on (see [`ListenMode`]).
     pub fn set_mode(&mut self, mode: ListenMode, now: Instant) {
         tracing::info!(?mode, "voice: listening");
         self.conversation.set_mode(mode, now);
-        self.wake.reset_spotter();
+        self.ears.reset_spotter();
     }
 
     pub fn state(&self) -> VoiceState {
@@ -319,14 +432,16 @@ impl Listener {
             return;
         }
         let mut sounds = Vec::new();
-        self.wake.feed(samples, &mut |s| sounds.push(s));
+        self.ears.feed(samples, &mut |s| sounds.push(s));
+        self.barge.hear(samples);
         self.hear(sounds, now, out);
+        self.weigh(now, out);
     }
 
     /// Ends the input: whatever speech is pending is treated as finished.
     pub fn flush(&mut self, now: Instant, out: &mut dyn FnMut(Heard)) {
         let mut sounds = Vec::new();
-        self.wake.flush(&mut |s| sounds.push(s));
+        self.ears.flush(&mut |s| sounds.push(s));
         self.hear(sounds, now, out);
     }
 
@@ -334,29 +449,93 @@ impl Listener {
         for sound in sounds {
             match sound {
                 Sound::Name(name) => {
+                    if self.conversation.is_speaking() {
+                        self.named = Some(name);
+                        continue;
+                    }
                     let accepted = self.conversation.keyword(&name, now);
                     tracing::info!(name, accepted, "voice: heard a name");
                 }
                 Sound::SpeechStarted => {
                     tracing::info!("voice: speech started");
-                    if self.conversation.speech_started(now) {
-                        out(Heard::BargeIn);
+                    self.conversation.speech_started(now);
+                    if self.conversation.is_speaking() {
+                        self.barge.begin();
                     }
                 }
                 Sound::Segment(samples) => {
                     self.conversation.speech_ended(now);
+                    self.barge.end();
                     tracing::info!(
                         seconds = samples.len() as f32 / RATE as f32,
                         transcribe = self.conversation.wants_transcript(),
                         "voice: speech ended"
                     );
-                    if self.conversation.wants_transcript() {
-                        let text = self.transcribe(&samples, out);
-                        if let Some(u) = self.conversation.transcript(&text, now) {
-                            out(Heard::Utterance(u));
-                        }
-                    }
+                    self.segment(&samples, now, out);
                 }
+            }
+        }
+    }
+
+    /// A finished stretch of speech. Over playback it's judged first, whether
+    /// or not anything would be done with its words: until now, it hasn't
+    /// been shown to be anyone.
+    fn segment(&mut self, samples: &[f32], now: Instant, out: &mut dyn FnMut(Heard)) {
+        if self.conversation.is_speaking() {
+            let text = self.ears.transcribe(samples);
+            tracing::info!(text, "voice: transcribed over playback");
+            let verdict = judge(&text, &self.said.text);
+            if verdict != Verdict::Person {
+                tracing::info!(why = verdict.name(), "voice: not a barge-in");
+                self.named = None;
+                return;
+            }
+            self.barged(now, out);
+            if let Some(u) = self.conversation.transcript(&text, now) {
+                out(Heard::Utterance(u));
+            }
+            return;
+        }
+        if !self.conversation.wants_transcript() {
+            return;
+        }
+        let text = self.transcribe(samples, out);
+        if self.said.echoes(&text, now) {
+            tracing::info!("voice: heard our own reply; not sent");
+            return;
+        }
+        if let Some(u) = self.conversation.transcript(&text, now) {
+            out(Heard::Utterance(u));
+        }
+    }
+
+    /// Whether the speech going on over playback is someone talking, once
+    /// there's enough of it to tell. Stops playback without waiting for them
+    /// to finish. A fraction of a second of its own voice can transcribe as
+    /// anything ("the nightly build" came out "the night we did"), so it takes
+    /// two looks at it in a row.
+    fn weigh(&mut self, now: Instant, out: &mut dyn FnMut(Heard)) {
+        if !self.conversation.is_speaking() || !self.barge.due() {
+            return;
+        }
+        let audio = self.ears.since_onset(JUDGED);
+        let text = self.ears.transcribe(&audio);
+        let verdict = judge(&text, &self.said.text);
+        if verdict != Verdict::Person {
+            tracing::debug!(why = verdict.name(), "voice: not a barge-in yet");
+            self.barge.rejected(verdict);
+        } else if self.barge.convinced() {
+            self.barged(now, out);
+        }
+    }
+
+    fn barged(&mut self, now: Instant, out: &mut dyn FnMut(Heard)) {
+        if self.conversation.interrupted() {
+            self.said.over(now);
+            out(Heard::BargeIn);
+            if let Some(name) = self.named.take() {
+                let accepted = self.conversation.keyword(&name, now);
+                tracing::info!(name, accepted, "voice: heard a name");
             }
         }
     }
@@ -364,14 +543,8 @@ impl Listener {
     fn transcribe(&mut self, samples: &[f32], out: &mut dyn FnMut(Heard)) -> String {
         self.transcribing = true;
         out(Heard::Transcribing);
-        let stream = self.asr.create_stream();
-        stream.accept_waveform(RATE, samples);
-        self.asr.decode(&stream);
+        let text = self.ears.transcribe(samples);
         self.transcribing = false;
-        let text = stream
-            .get_result()
-            .map(|r| r.text.trim().to_string())
-            .unwrap_or_default();
         tracing::info!(text, "voice: transcribed");
         text
     }
@@ -383,7 +556,12 @@ impl Listener {
             return false;
         }
         self.push_to_talk = Some(Vec::new());
-        self.conversation.speech_started(now)
+        self.conversation.speech_started(now);
+        let interrupted = self.conversation.interrupted();
+        if interrupted {
+            self.said.over(now);
+        }
+        interrupted
     }
 
     /// Released: transcribe what was held and send it.
@@ -392,7 +570,7 @@ impl Listener {
             return;
         };
         self.conversation.speech_ended(now);
-        self.wake.reset();
+        self.ears.reset();
         if held.len() < SPEECH_RATE as usize / 4 {
             out(Heard::Nothing);
             return;
@@ -405,7 +583,13 @@ impl Listener {
         }
     }
 
-    pub fn speaking(&mut self) {
+    /// `text` is about to be said (empty for audio already made).
+    pub fn speaking(&mut self, text: &str, now: Instant) {
+        if !self.conversation.is_speaking() {
+            self.barge.reset();
+            self.named = None;
+        }
+        self.said.speaking(text, now);
         self.conversation.speaking();
     }
 
@@ -413,7 +597,8 @@ impl Listener {
     /// it starts afresh.
     pub fn spoken(&mut self, now: Instant) {
         self.conversation.spoken(now);
-        self.wake.reset_spotter();
+        self.said.over(now);
+        self.ears.reset_spotter();
     }
 
     /// True when the conversation just ended for silence.
@@ -460,6 +645,19 @@ impl Recent {
     fn clear(&mut self) {
         self.samples.clear();
         self.end = 0;
+    }
+}
+
+/// Speech made on this computer.
+pub trait LocalSpeech: Send + Sync {
+    /// `text` in the voice `voice` (an id; the default for none or an unknown
+    /// one), or `None` when it can't be said.
+    fn synthesize(&self, text: &str, voice: Option<&str>) -> Option<Audio>;
+}
+
+impl LocalSpeech for Speaker {
+    fn synthesize(&self, text: &str, voice: Option<&str>) -> Option<Audio> {
+        Speaker::synthesize(self, text, voice)
     }
 }
 

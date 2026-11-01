@@ -5,6 +5,7 @@
 
 pub mod address;
 pub mod audio;
+pub mod barge;
 pub mod cascade;
 pub mod conversation;
 pub mod decode;
@@ -104,6 +105,28 @@ impl Utterance {
     }
 }
 
+/// Why speech stopped before its end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StopReason {
+    /// Someone talked over it.
+    BargeIn,
+    /// Push-to-talk was pressed.
+    PushToTalk,
+    /// The app asked: Stop, or End.
+    Asked,
+}
+
+impl StopReason {
+    pub fn name(self) -> &'static str {
+        match self {
+            StopReason::BargeIn => "barge-in",
+            StopReason::PushToTalk => "push-to-talk",
+            StopReason::Asked => "asked",
+        }
+    }
+}
+
 /// Where an engine reports what it hears and does.
 pub trait VoiceEvents: Send + Sync + 'static {
     fn state(&self, state: &VoiceState);
@@ -112,6 +135,8 @@ pub trait VoiceEvents: Send + Sync + 'static {
     fn unheard(&self);
     /// Something went wrong that the person should hear about.
     fn error(&self, message: &str);
+    /// What was being said was stopped: nothing more of that reply is wanted.
+    fn stopped(&self, _reason: StopReason) {}
 }
 
 /// A way of listening and speaking. Dropping it stops it.

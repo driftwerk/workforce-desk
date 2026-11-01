@@ -128,7 +128,12 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
         }
         let engine = Arc::new(Mutex::new(Engine { engine, player }));
         let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        keep_running(engine.clone(), alive.clone(), cancels_echo);
+        keep_running(
+            engine.clone(),
+            alive.clone(),
+            cancels_echo,
+            speaking.clone(),
+        );
         Ok(MacAudio {
             engine,
             alive,
@@ -272,6 +277,7 @@ fn keep_running(
     engine: Arc<Mutex<Engine>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
     cancel_echo: bool,
+    speaking: Arc<Speaking>,
 ) {
     std::thread::spawn(move || {
         let mut failures = 0u32;
@@ -292,6 +298,18 @@ fn keep_running(
             } {
                 Ok(()) => {
                     tracing::info!("voice: the audio device changed; audio restarted");
+                    let lost = speaking.pending();
+                    if lost > 0 {
+                        // The player went down with the engine. Stopping it
+                        // answers the buffers it had, so whoever waits on
+                        // them hears they're over and isn't left "speaking".
+                        tracing::warn!(
+                            lost,
+                            "voice: speech stopped: the audio device changed mid-reply"
+                        );
+                        unsafe { e.player.stop() };
+                        speaking.stopped();
+                    }
                     failures = 0;
                 }
                 Err(err) => {

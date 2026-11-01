@@ -16,9 +16,9 @@ use crate::conversation::{ListenMode, Timing};
 use crate::decode::Audio;
 use crate::hub::CloudSpeech;
 use crate::resample::{Resampler, SPEECH_RATE};
-use crate::speech::{Heard, Listener, Speaker, sentences};
+use crate::speech::{Heard, Listener, LocalSpeech, sentences};
 use crate::voices::{Member, VoiceSpec};
-use crate::{AudioIn, Models, SharedAudioOut, VoiceEngine, VoiceEvents, VoiceState};
+use crate::{AudioIn, Models, SharedAudioOut, StopReason, VoiceEngine, VoiceEvents, VoiceState};
 
 enum Input {
     Audio(Vec<f32>, u32),
@@ -37,6 +37,15 @@ enum Speech {
     Audio(Audio),
 }
 
+impl Speech {
+    fn words(&self) -> &str {
+        match self {
+            Speech::Text(text, _) => text,
+            Speech::Audio(_) => "",
+        }
+    }
+}
+
 struct Job {
     speech: Speech,
     generation: u64,
@@ -44,7 +53,7 @@ struct Job {
 
 /// How the cascade speaks: Kokoro here, cloud voices through the hub.
 pub struct Voices {
-    pub kokoro: Arc<Speaker>,
+    pub kokoro: Arc<dyn LocalSpeech>,
     pub cloud: Option<Arc<dyn CloudSpeech>>,
 }
 
@@ -66,6 +75,16 @@ impl Cascade {
         open: impl FnOnce(AudioIn) -> Result<SharedAudioOut>,
     ) -> Result<Self> {
         let listener = Listener::new(models, Timing::default(), Instant::now())?;
+        Self::with_listener(listener, voices, events, open)
+    }
+
+    /// [`start`](Self::start), on a listener already made.
+    pub fn with_listener(
+        listener: Listener,
+        voices: Voices,
+        events: Arc<dyn VoiceEvents>,
+        open: impl FnOnce(AudioIn) -> Result<SharedAudioOut>,
+    ) -> Result<Self> {
         let (tx, rx) = channel();
         let audio_tx = tx.clone();
         let out = open(Box::new(move |samples, rate| {
@@ -187,6 +206,9 @@ impl Worker {
             self.listener.tick(Instant::now());
             self.publish(self.listener.state());
         }
+        if self.pending > 0 {
+            tracing::info!(reason = "engine stopped", "voice: speech stopped");
+        }
         self.out.stop();
     }
 
@@ -210,24 +232,28 @@ impl Worker {
             Input::Mode(mode) => self.listener.set_mode(mode, now),
             Input::PushToTalk(true) => {
                 if self.listener.start_push_to_talk(now) {
-                    self.silence();
+                    self.silence(StopReason::PushToTalk);
                 }
             }
             Input::PushToTalk(false) => self.listen(|l, out| l.finish_push_to_talk(now, out)),
             Input::Speak(speech) => {
                 self.pending += 1;
-                self.listener.speaking();
+                tracing::info!(chars = speech.words().len(), "voice: speaking");
+                self.listener.speaking(speech.words(), now);
                 let generation = self.generation.load(Ordering::SeqCst);
                 let _ = self.jobs.send(Job { speech, generation });
             }
             Input::StopSpeaking => {
-                self.silence();
+                if self.pending > 0 {
+                    self.silence(StopReason::Asked);
+                }
                 self.listener.spoken(now);
             }
             Input::Spoken { generation } => {
                 if generation == self.generation.load(Ordering::SeqCst) && self.pending > 0 {
                     self.pending -= 1;
                     if self.pending == 0 {
+                        tracing::info!("voice: speech finished");
                         self.listener.spoken(now);
                     }
                 }
@@ -244,7 +270,7 @@ impl Worker {
             (&self.state, &*self.events, &self.out, &*self.generation);
         f(&mut self.listener, &mut |h| match h {
             Heard::BargeIn => {
-                stop(out, generation);
+                stop(out, generation, events, StopReason::BargeIn);
                 barged = true;
             }
             Heard::Transcribing => set_state(state, events, VoiceState::Transcribing),
@@ -256,8 +282,8 @@ impl Worker {
         }
     }
 
-    fn silence(&mut self) {
-        stop(&self.out, &self.generation);
+    fn silence(&mut self, reason: StopReason) {
+        stop(&self.out, &self.generation, &*self.events, reason);
         self.pending = 0;
     }
 
@@ -266,7 +292,6 @@ impl Worker {
     }
 }
 
-/// Stops playback and drops whatever was still to be said.
 /// Every thirty seconds of microphone audio, how loud it was: proof the
 /// microphone is live (zero means muted or gated).
 fn level(samples: &[f32], rate: u32) {
@@ -289,9 +314,17 @@ fn level(samples: &[f32], rate: u32) {
     }
 }
 
-fn stop(out: &SharedAudioOut, generation: &AtomicU64) {
+/// Stops playback and drops whatever was still to be said, saying why.
+fn stop(
+    out: &SharedAudioOut,
+    generation: &AtomicU64,
+    events: &dyn VoiceEvents,
+    reason: StopReason,
+) {
+    tracing::info!(reason = reason.name(), "voice: speech stopped");
     generation.fetch_add(1, Ordering::SeqCst);
     out.stop();
+    events.stopped(reason);
 }
 
 fn set_state(current: &Mutex<VoiceState>, events: &dyn VoiceEvents, state: VoiceState) {
@@ -329,8 +362,16 @@ impl Mouth {
 
     fn say(&self, parts: Vec<Part>, generation: u64) {
         let current = || self.generation.load(Ordering::SeqCst) == generation;
+        let spoken = || {
+            let tx = self.tx.clone();
+            let done: Box<dyn FnOnce() + Send> = Box::new(move || {
+                let _ = tx.send(Input::Spoken { generation });
+            });
+            done
+        };
         let mut cloud_failed = false;
-        let mut scheduled = false;
+        let mut last_rate = None;
+        let mut finished_by_last = false;
         let count = parts.len();
         for (i, part) in parts.into_iter().enumerate() {
             if !current() {
@@ -343,19 +384,19 @@ impl Mouth {
                 break;
             }
             let last = i + 1 == count;
-            let done: Box<dyn FnOnce() + Send> = if last {
-                let tx = self.tx.clone();
-                Box::new(move || {
-                    let _ = tx.send(Input::Spoken { generation });
-                })
-            } else {
-                Box::new(|| {})
-            };
+            let done = if last { spoken() } else { Box::new(|| {}) as _ };
             self.out.play(&audio.samples, audio.rate, done);
-            scheduled = last;
+            last_rate = Some(audio.rate);
+            finished_by_last = last;
         }
-        if !scheduled {
-            let _ = self.tx.send(Input::Spoken { generation });
+        if finished_by_last {
+            return;
+        }
+        // The end of what was said is when it's finished playing, even if the
+        // last part had no audio of its own. A stopped reply has nothing to wait for.
+        match last_rate.filter(|_| current()) {
+            Some(rate) => self.out.play(&[0.0; 16], rate, spoken()),
+            None => spoken()(),
         }
     }
 
@@ -374,6 +415,7 @@ impl Mouth {
                 Ok(audio) => return Some(audio),
                 Err(e) => {
                     *cloud_failed = true;
+                    tracing::warn!(error = %e, "voice: the cloud voice failed; Kokoro says the rest");
                     self.events.error(&e.to_string());
                 }
             }
@@ -386,7 +428,12 @@ impl Mouth {
         if text.trim().is_empty() {
             return None;
         }
-        self.voices.kokoro.synthesize(&text, kokoro)
+        let audio = self.voices.kokoro.synthesize(&text, kokoro);
+        if audio.is_none() {
+            tracing::warn!("voice: Kokoro couldn't say a sentence; going on to the next");
+            self.events.error("Kokoro couldn't say part of that.");
+        }
+        audio
     }
 }
 
@@ -394,3 +441,6 @@ enum Part {
     Text(String, Option<VoiceSpec>),
     Audio(Audio),
 }
+
+#[cfg(test)]
+mod tests;
