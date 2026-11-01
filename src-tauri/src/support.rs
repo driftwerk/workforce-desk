@@ -195,10 +195,7 @@ pub fn remove(paths: &Paths, backend: Option<&Backend>, everything: bool) -> Res
         wait_stopped(&backend.paths, Duration::from_secs(40))?;
         remove_backend(backend)?;
     }
-    let secrets = app_secrets(paths)?;
-    for a in remote {
-        secrets.delete_account(&a)?;
-    }
+    app_secrets(paths)?.forget_app(&remote)?;
     match std::fs::remove_dir_all(&paths.root) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

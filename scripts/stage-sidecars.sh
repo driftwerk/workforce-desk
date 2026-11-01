@@ -29,5 +29,6 @@ cargo build $flag -p workforce-cli --bin workforce --manifest-path "$repo/Cargo.
 target=${CARGO_TARGET_DIR:-$root/target}
 mkdir -p "$root/src-tauri/binaries"
 cp "$target/$profile/desk-hubd" "$root/src-tauri/binaries/$helper-$triple"
+"$root/scripts/dev-sign.sh" "$root/src-tauri/binaries/$helper-$triple" xyz.driftwerk.desk.helper.dev
 cp "$repo/target/$profile/workforce" "$root/src-tauri/binaries/$agents-$triple"
 cp "${VELLEV_TARGET_DIR:-$vellev/target}/$profile/vellev" "$root/src-tauri/binaries/$memory-$triple"

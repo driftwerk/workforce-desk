@@ -10,6 +10,7 @@ pub mod install;
 #[cfg(unix)]
 pub mod process;
 pub mod redact;
+pub mod vault;
 // A Unix login shell's environment: on Windows the CLIs run inside WSL.
 #[cfg(unix)]
 pub mod shell;
@@ -283,33 +284,39 @@ pub trait SecretStore {
 }
 
 /// The system's own store: the keychain on macOS, Credential Manager on
-/// Windows, the Secret Service on a Linux desktop.
-pub struct Keyring;
+/// Windows, the Secret Service on a Linux desktop. Desk's secrets are kept
+/// there as two bundles and read once per process ([`vault`]).
+#[derive(Clone)]
+pub struct Keyring {
+    vault: std::sync::Arc<vault::Vault>,
+}
 
 impl Keyring {
+    /// The store for the secrets kept beside `paths`, shared by the whole
+    /// process.
+    pub fn at(paths: &Paths) -> Self {
+        Self {
+            vault: vault::shared(&paths.root),
+        }
+    }
+
+    /// Over a vault of its own: a stand-in store for tests.
+    pub fn with(vault: std::sync::Arc<vault::Vault>) -> Self {
+        Self { vault }
+    }
+
     /// An item by account name, for secrets beyond [`Secret`] (one device
     /// token per paired hub).
     pub fn get_account(&self, account: &str) -> Result<Option<String>> {
-        match keyring::Entry::new(KEYRING_SERVICE, account)?.get_password() {
-            Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e)
-                .with_context(|| format!("reading {account} from {}", KeyStore::System.name())),
-        }
+        self.vault.get(account)
     }
 
     pub fn set_account(&self, account: &str, value: &str) -> Result<()> {
-        keyring::Entry::new(KEYRING_SERVICE, account)?
-            .set_password(value)
-            .with_context(|| format!("saving {account} to {}", KeyStore::System.name()))
+        self.vault.set(account, value)
     }
 
     pub fn delete_account(&self, account: &str) -> Result<()> {
-        match keyring::Entry::new(KEYRING_SERVICE, account)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e)
-                .with_context(|| format!("removing {account} from {}", KeyStore::System.name())),
-        }
+        self.vault.delete(account)
     }
 
     /// Whether the store answers within `within`: a Linux session may have
@@ -453,7 +460,7 @@ impl Secrets {
 
     pub fn of(paths: &Paths, store: KeyStore) -> Self {
         match store {
-            KeyStore::System => Secrets::Keyring(Keyring),
+            KeyStore::System => Secrets::Keyring(Keyring::at(paths)),
             KeyStore::File => Secrets::File(FileSecrets::new(paths)),
         }
     }
@@ -488,10 +495,25 @@ impl Secrets {
 
     /// Deletes the local hub's secrets and Desk's token for it.
     pub fn forget_backend(&self) -> Result<()> {
-        for s in Secret::ALL {
-            self.delete_account(s.account())?;
+        let accounts: Vec<String> = Secret::ALL
+            .iter()
+            .map(|s| s.account().to_string())
+            .chain([device_token_account(LOCAL_HUB_ID)])
+            .collect();
+        self.forget(vault::KeyOwner::Helper, &accounts)
+    }
+
+    /// Deletes the app's own secrets: `accounts` (remote hubs' device
+    /// tokens), and in the system store all the rest it holds too.
+    pub fn forget_app(&self, accounts: &[String]) -> Result<()> {
+        self.forget(vault::KeyOwner::App, accounts)
+    }
+
+    fn forget(&self, owner: vault::KeyOwner, accounts: &[String]) -> Result<()> {
+        match self {
+            Secrets::Keyring(k) => k.vault.forget(owner, accounts),
+            Secrets::File(f) => accounts.iter().try_for_each(|a| f.delete_account(a)),
         }
-        self.delete_account(&device_token_account(LOCAL_HUB_ID))
     }
 }
 

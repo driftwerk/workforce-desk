@@ -8,3 +8,10 @@ POSTGRESQL_VERSION = "=18.6.1"
 # static C runtime; the rest of Desk links it the same way.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# `cargo run` (and so `npm run tauri dev`) on macOS goes through
+# scripts/dev-run.sh, which signs Desk's binaries with
+# DESK_DEV_SIGNING_IDENTITY when it's set (README → Develop → Keychain), so
+# the keychain's "Always Allow" outlives a rebuild. Unset, it only runs them.
+[target.'cfg(target_os = "macos")']
+runner = "scripts/dev-run.sh"
