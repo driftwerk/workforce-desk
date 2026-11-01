@@ -853,6 +853,12 @@ mod tests {
     /// The capabilities as the build resolved them: a grid's window is
     /// refused what only the main window may do, which the main window
     /// gets past the ACL for.
+    ///
+    /// Not on Windows: building an app links in its menus, which need the
+    /// Common Controls v6 that only the app's manifest asks for, and a test
+    /// binary has none (it fails to load, `STATUS_ENTRYPOINT_NOT_FOUND`).
+    /// The capabilities are the same files on every system.
+    #[cfg(not(windows))]
     #[test]
     fn a_grid_window_is_refused_what_only_the_main_window_may_do() {
         use tauri::ipc::{CallbackFn, InvokeBody};
