@@ -264,16 +264,27 @@ describe("a bridged socket", () => {
     expect(acks()).toEqual([{ id: 7, bytes: 10 }]);
   });
 
-  it("acknowledges a frame whose handler threw", async () => {
+  it("goes on after a handler throws, as a WebSocket does", async () => {
     const { ws, say } = await opened();
-    say({ type: "open" });
-    ws.onmessage = () => {
-      throw new Error("a bad frame");
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    ws.onopen = () => {
+      throw new Error("a bad open");
     };
-    expect(() => say(new Uint8Array(4).buffer)).toThrow("a bad frame");
+    say({ type: "open" });
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    const heard: unknown[] = [];
+    ws.onmessage = (m) => {
+      heard.push(m.data);
+      if (heard.length === 1) throw new Error("a bad frame");
+    };
+    // The Channel the frames come through stops at a callback that throws.
+    expect(() => say(new Uint8Array(4).buffer)).not.toThrow();
+    say({ type: "text", data: "next", n: 4 });
+    expect(heard).toEqual([new Uint8Array(4).buffer, "next"]);
     await settle();
     await settle();
-    expect(acks()).toEqual([{ id: 7, bytes: 4 }]);
+    expect(acks()).toEqual([{ id: 7, bytes: 8 }]);
+    expect(reported).toHaveBeenCalledTimes(2);
   });
 
   it("holds an acknowledgement until its handler is done with the frame", async () => {

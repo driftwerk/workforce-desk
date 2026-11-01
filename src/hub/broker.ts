@@ -33,6 +33,17 @@ const fetchVia = async (method: string, path: string, body?: Body): Promise<Resp
   });
 };
 
+/** Runs a socket's handler. A handler that throws is reported, as a
+ *  WebSocket's would be, and the socket goes on: the frames arrive through
+ *  a Channel that would hold every later one back if its callback threw. */
+const safely = (handler: () => void): void => {
+  try {
+    handler();
+  } catch (e) {
+    console.error("A handler of the local hub's connection failed:", e);
+  }
+};
+
 /** What the native side says of a socket; `n` is a text frame's size as
  *  the native side counts it. */
 type Said =
@@ -75,7 +86,7 @@ export class BridgedSocket implements DeskSocket {
     const events = new Channel<Said | ArrayBuffer>();
     events.onmessage = (m) => this.heard(m);
     this.id = invoke<number>("local_hub_socket_open", { path, events }).catch((e: unknown) => {
-      this.onerror?.(new Event("error"));
+      safely(() => this.onerror?.(new Event("error")));
       this.ended(1006, String(e), false);
       return null;
     });
@@ -134,12 +145,9 @@ export class BridgedSocket implements DeskSocket {
   private deliver(data: string | ArrayBuffer, n: number): void {
     const frame = { n, held: false };
     this.hearing = frame;
-    try {
-      this.onmessage?.(new MessageEvent("message", { data }));
-    } finally {
-      this.hearing = null;
-      if (!frame.held) this.took(n);
-    }
+    safely(() => this.onmessage?.(new MessageEvent("message", { data })));
+    this.hearing = null;
+    if (!frame.held) this.took(n);
   }
 
   private then(f: (id: number) => Promise<unknown>): void {
@@ -159,13 +167,13 @@ export class BridgedSocket implements DeskSocket {
       case "open":
         if (this.readyState !== BridgedSocket.CONNECTING) return;
         this.readyState = BridgedSocket.OPEN;
-        this.onopen?.(new Event("open"));
+        safely(() => this.onopen?.(new Event("open")));
         return;
       case "text":
         this.deliver(m.data, m.n);
         return;
       case "error":
-        this.onerror?.(new Event("error"));
+        safely(() => this.onerror?.(new Event("error")));
         return;
       case "close":
         this.ended(m.code, m.reason, m.clean);
@@ -175,7 +183,7 @@ export class BridgedSocket implements DeskSocket {
   private ended(code: number, reason: string, wasClean: boolean): void {
     if (this.readyState === BridgedSocket.CLOSED) return;
     this.readyState = BridgedSocket.CLOSED;
-    this.onclose?.(new CloseEvent("close", { code, reason, wasClean }));
+    safely(() => this.onclose?.(new CloseEvent("close", { code, reason, wasClean })));
   }
 }
 
