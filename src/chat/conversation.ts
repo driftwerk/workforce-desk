@@ -661,6 +661,18 @@ export class Conversation {
     this.set({ ...this.state, messages: this.state.messages.filter((m) => !ids.has(m.id)) });
   }
 
+  /** Says which kept message each of these live messages goes before. */
+  place(anchors: ReadonlyMap<string, string>) {
+    if (anchors.size === 0) return;
+    this.set({
+      ...this.state,
+      messages: this.state.messages.map((m) => {
+        const placedBefore = anchors.get(m.id);
+        return placedBefore ? { ...m, placedBefore } : m;
+      }),
+    });
+  }
+
   /** Forgets a turn Desk has settled. */
   forget(turnRef: string) {
     if (!(turnRef in this.state.turns)) return;

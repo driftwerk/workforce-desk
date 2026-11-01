@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyConversation, type ConversationState } from "./conversation";
-import { covered, cursorIn, fetchHistory, prepend, readConversation, withHistory } from "./history";
+import { covered, cursorIn, fetchHistory, prepend, readConversation, settle, withHistory } from "./history";
 import { useChat } from "./store";
-import type { ChatMessage, HubAccount } from "./types";
+import type { Attachment, ChatMessage, HubAccount } from "./types";
 import { setDevToken } from "../hub/devTokens";
 
 /** The DMs opened, to tell what they hear and see what they're told. */
@@ -29,6 +29,7 @@ vi.mock("./conversation", async (original) => ({
     drop(ids: Set<string>) {
       this.dropped.push(ids);
     }
+    place() {}
     cancel() {}
     close() {}
   },
@@ -239,6 +240,154 @@ describe("the live messages the hub's copy now shows", () => {
     expect(covered(kept, [{ ...msg("m-1", "assistant", "Green.", at), status: "streaming" }], before).size).toBe(0);
     expect(covered(kept, [msg("m-1", "assistant", "Green.", "2026-10-28T10:00:01.000Z")], before).size).toBe(0);
     expect(covered([msg("h1", "system", "x", at)], [msg("m-1", "system", "x", at)], before).size).toBe(0);
+  });
+});
+
+describe("a person's files, against the hub's copy", () => {
+  const before = "2026-10-28T10:30:00.000Z";
+  const at = (minute: number) => `2026-10-28T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  const file = (id: string): Attachment => ({ artifact_id: id, media_type: "image/png", filename: `${id}.png`, size: 1 });
+  const withFiles = (m: ChatMessage, ...ids: string[]): ChatMessage => ({ ...m, attachments: ids.map(file) });
+  const shape = (list: ChatMessage[]) => list.map((m) => [m.content, (m.attachments ?? []).map((f) => f.artifact_id)]);
+
+  /** What Desk holds live: 2 images with text, reply, 1 image alone, reply,
+   *  more chat, reply. */
+  const live = [
+    withFiles(msg("m-1", "user", "two of these", at(0)), "a", "b"),
+    msg("m-2", "assistant", "Seen two.", at(1)),
+    withFiles(msg("m-3", "user", "", at(2)), "c"),
+    msg("m-4", "assistant", "Seen one.", at(3)),
+    msg("m-5", "user", "more chat", at(4)),
+    msg("m-6", "assistant", "Sure.", at(5)),
+  ];
+
+  /** The live messages after each `refreshHistory`, as the store folds them. */
+  const refresh = (page: ChatMessage[], held: ChatMessage[], seen = before) => {
+    const { ids, anchors } = settle(page, held, seen);
+    return held.filter((m) => !ids.has(m.id)).map((m) => (anchors.has(m.id) ? { ...m, placedBefore: anchors.get(m.id)! } : m));
+  };
+
+  describe("a hub that returns them", () => {
+    const kept = [
+      withFiles(msg("h1", "user", "two of these", at(0)), "a", "b"),
+      msg("h2", "assistant", "Seen two.", at(1)),
+      withFiles(msg("h3", "user", "", at(2)), "c"),
+      msg("h4", "assistant", "Seen one.", at(3)),
+      msg("h5", "user", "more chat", at(4)),
+      msg("h6", "assistant", "Sure.", at(5)),
+    ];
+
+    it("shows the kept ones, each once, at every step of the conversation", () => {
+      for (const n of [2, 4, 6]) {
+        const page = kept.slice(0, n);
+        const held = refresh(page, live.slice(0, n));
+        expect(held).toEqual([]);
+        expect(shape(withHistory(page, [...held, ...live.slice(n)], before))).toEqual(shape(kept));
+      }
+    });
+
+    it("knows a file by its id, whatever the words came back as", () => {
+      const redacted = [withFiles(msg("h1", "user", "my key is [redacted]", at(0)), "a")];
+      expect([...covered(redacted, [withFiles(msg("m-1", "user", "my key is hunter2", at(0)), "a")], before)]).toEqual(["m-1"]);
+    });
+
+    it("shows an image the page has before the read that would cover it", () => {
+      const held = [withFiles(msg("m-1", "user", "", at(0)), "c")];
+      expect(withHistory([withFiles(msg("h1", "user", "", at(0)), "c")], held, at(1)).map((m) => m.id)).toEqual(["h1"]);
+    });
+  });
+
+  describe("an older hub that never does", () => {
+    // It keeps the words of the first without its files, and no message at
+    // all for the image alone.
+    const kept = [
+      msg("h1", "user", "two of these", at(0)),
+      msg("h2", "assistant", "Seen two.", at(1)),
+      msg("h4", "assistant", "Seen one.", at(3)),
+      msg("h5", "user", "more chat", at(4)),
+      msg("h6", "assistant", "Sure.", at(5)),
+    ];
+    const expected = [
+      ["two of these", ["a", "b"]],
+      ["Seen two.", []],
+      ["", ["c"]],
+      ["Seen one.", []],
+      ["more chat", []],
+      ["Sure.", []],
+    ];
+
+    it("never drops a live message for a copy without its files", () => {
+      expect([...covered(kept, live, before)].sort()).toEqual(["m-2", "m-4", "m-5", "m-6"]);
+    });
+
+    it("keeps every image visible, in its place, through the reported sequence", () => {
+      // Refreshed after each reply, as the store does at each turn's end.
+      let held = refresh(kept.slice(0, 2), live.slice(0, 2));
+      expect(shape(withHistory(kept.slice(0, 2), held, before))).toEqual(expected.slice(0, 2));
+
+      held = [...held, ...live.slice(2, 4)];
+      held = refresh(kept.slice(0, 3), held);
+      expect(held.map((m) => m.id)).toEqual(["m-1", "m-3"]);
+      expect(held[1]!.placedBefore).toBe("h4");
+      expect(shape(withHistory(kept.slice(0, 3), held, before))).toEqual(expected.slice(0, 4));
+
+      held = [...held, ...live.slice(4, 6)];
+      held = refresh(kept, held);
+      expect(held.map((m) => m.id)).toEqual(["m-1", "m-3"]);
+      expect(held[1]!.placedBefore).toBe("h4");
+      expect(shape(withHistory(kept, held, before))).toEqual(expected);
+    });
+
+    it("places it right when the clocks disagree by more than a reply takes", () => {
+      // This computer runs 90 seconds ahead of the hub; its replies took 60.
+      const late = (m: ChatMessage): ChatMessage => ({ ...m, at: new Date(Date.parse(m.at) + 90_000).toISOString() });
+      const held = refresh(kept, live.map(late));
+      expect(shape(withHistory(kept, held, before))).toEqual(expected);
+    });
+
+    it("keeps an image the hub hasn't passed yet last", () => {
+      const sent = withFiles(msg("m-9", "user", "", at(6)), "z");
+      expect(withHistory(kept, [sent], at(6)).at(-1)!.id).toBe("m-9");
+      expect(settle(kept, [sent], before).anchors.size).toBe(0);
+    });
+
+    it("goes by time when nothing of yours came after it, past what clocks can differ by", () => {
+      const lone = withFiles(msg("m-9", "user", "", at(2)), "z");
+      const elsewhere = [msg("h1", "user", "a", at(0)), msg("h2", "assistant", "b", at(1)), msg("h3", "user", "from my phone", at(10))];
+      expect(withHistory(elsewhere, [lone], before).map((m) => m.id)).toEqual(["h1", "h2", "m-9", "h3"]);
+      const close = [msg("h1", "user", "a", at(0)), msg("h3", "assistant", "b", at(3))];
+      expect(withHistory(close, [lone], before).map((m) => m.id)).toEqual(["h1", "h3", "m-9"]);
+    });
+
+    it("doesn't take an earlier message that said the same for its copy", () => {
+      const old = [msg("h1", "user", "look", at(0))];
+      const sent = withFiles(msg("m-1", "user", "look", at(20)), "a");
+      expect(shape(withHistory(old, [sent], before))).toEqual([["look", []], ["look", ["a"]]]);
+    });
+
+    it("keeps its place across later refreshes", () => {
+      const anchored = { ...withFiles(msg("m-3", "user", "", at(2)), "c"), placedBefore: "h4" };
+      const later = settle(kept, [anchored, msg("m-7", "user", "more chat", at(4))], before);
+      expect(later.anchors.has("m-3")).toBe(false);
+    });
+  });
+
+  it("doesn't take a message with no files for one that has them", () => {
+    const kept = [withFiles(msg("h1", "user", "look", at(0)), "a")];
+    expect(covered(kept, [msg("m-1", "user", "look", at(0))], before).size).toBe(0);
+  });
+
+  it("reads a person's files off the page the hub gives", async () => {
+    answer(() =>
+      json({
+        messages: [
+          { id: "h1", from: "user", text: "", at: at(0), attachments: [file("c")] },
+          { id: "h2", from: "user", text: "", at: at(1) },
+        ],
+      }),
+    );
+    const page = await fetchHistory(hub, "scout");
+    expect(shape(page!.messages)).toEqual([["", ["c"]]]);
   });
 });
 

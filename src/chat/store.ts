@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
-import { covered, cursorIn, fetchHistory, prepend } from "./history";
+import { cursorIn, fetchHistory, prepend, settle } from "./history";
 import {
   agentKey,
   FEATURES,
@@ -361,7 +361,11 @@ export const useChat = create<ChatStore>((set, get) => ({
       },
     }));
     const convo = get().conversations[key];
-    if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream)));
+    if (convo) {
+      const { ids, anchors } = settle(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream));
+      live.get(key)?.place(anchors);
+      live.get(key)?.drop(ids);
+    }
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,

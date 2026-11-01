@@ -94,6 +94,9 @@ export interface ChatMessage {
   requestId?: string;
   /** Its files. */
   attachments?: Attachment[];
+  /** The kept message it goes before: a live message the hub has passed
+   *  without keeping it as it is (an older hub keeps no image of its own). */
+  placedBefore?: string;
 }
 
 // ── Desk as a surface of the hub (mirrors the hub's `workforce_core::desk`) ──
