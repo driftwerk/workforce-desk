@@ -897,6 +897,7 @@ mod tests {
         };
         for cmd in [
             "data_remove",
+            "pair_request",
             "pair_collect",
             "hubs_remove",
             "wsl_install",
