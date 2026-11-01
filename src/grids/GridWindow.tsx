@@ -7,9 +7,9 @@ import {
   closeGridWindow,
   gridWindowMonitor,
   hubAccounts,
-  hubConnection,
   inApp,
   listen,
+  localHub,
   monitorsNow,
   onThemesChanged,
   setGridWindowMode,
@@ -68,8 +68,8 @@ export function GridWindow({ gridId }: { gridId: string }) {
     const refresh = () => loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
     refresh();
     const unlisten = subscribe(onThemesChanged(refresh));
-    hubConnection()
-      .then((c) => (stop = useDesk.getState().connect(c, { notify: false })))
+    localHub()
+      .then((t) => (stop = useDesk.getState().connect(t, { notify: false })))
       .then(() => hubAccounts())
       .then(useChat.getState().setHubs)
       .catch(fail);

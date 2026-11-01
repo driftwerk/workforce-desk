@@ -7,7 +7,7 @@ import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
-import { hubAccounts, hubConnection, inApp, onThemesChanged, subscribe } from "../platform";
+import { hubAccounts, inApp, localHub, onThemesChanged, subscribe } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -164,8 +164,8 @@ export function App() {
     const unlisten = subscribe(onThemesChanged(refresh));
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).
-    hubConnection()
-      .then((c) => (stop = connect(c)))
+    localHub()
+      .then((t) => (stop = connect(t)))
       .then(() => (inApp ? resumeAfterUpdate() : undefined))
       .catch(fail)
       .then(() => hubAccounts())

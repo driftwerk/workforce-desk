@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { shownState } from "../floor/background";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
-import { DeskHub, HubError, ROOM_PAGE, type HubConnection } from "./client";
+import { DeskHub, HubError, ROOM_PAGE } from "./client";
+import type { DeskTransport } from "./transport";
 import { byTime, later } from "../rooms/time";
 import { afterPage, inWindow, isLive, ofPlace, placeKey, shown, type PageDir, type PlaceKey, type Window } from "../rooms/window";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
@@ -51,7 +52,8 @@ interface DeskState {
    *  changes, and handing Desk's groups to the hub, to the main window. */
   detached: boolean;
   /** With `notify: false`, this is a detached grid's window. */
-  connect: (conn: HubConnection, opts?: { notify?: boolean }) => () => void;
+  /** Talks to the local hub through `transport` (`brokered` in the app). */
+  connect: (transport: DeskTransport, opts?: { notify?: boolean }) => () => void;
   open: (id: string | null) => void;
   setView: (view: View) => void;
   openRoom: (id: string | null) => Promise<void>;
@@ -247,8 +249,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   loaded: false,
   error: null,
   detached: false,
-  connect: (conn, opts) => {
-    const hub = new DeskHub(conn);
+  connect: (transport, opts) => {
+    const hub = new DeskHub(transport);
     set({ hub, detached: opts?.notify === false });
     return hub.events(
       (e) => {

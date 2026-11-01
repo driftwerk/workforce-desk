@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { deskListeners, useDesk } from "../hub/store";
+import { direct } from "../hub/transport";
 import type { DeskEvent, Room } from "../hub/types";
 import { useGrids } from "../grids/store";
 import { useUi } from "../shell/ui";
@@ -242,7 +243,7 @@ describe("through a hub restart", () => {
 
   it("keeps the view and selection, and reads the open room again when it's back", async () => {
     mainUi.write(saved);
-    stop = useDesk.getState().connect({ url: "http://127.0.0.1:1", token: "t" });
+    stop = useDesk.getState().connect(direct({ url: "http://127.0.0.1:1", token: "t" }));
     latest().open();
     latest().event({ type: "snapshot", sessions: [], restore: [], rooms: [room("r1"), room("r2")] });
     expect(useDesk.getState()).toMatchObject({ view: "rooms", activeRoom: "r1", openId: "s1", loaded: true });
@@ -265,7 +266,7 @@ describe("through a hub restart", () => {
 
   it("a room deleted while Desk was closed is no longer open", () => {
     mainUi.write(saved);
-    stop = useDesk.getState().connect({ url: "http://127.0.0.1:1", token: "t" });
+    stop = useDesk.getState().connect(direct({ url: "http://127.0.0.1:1", token: "t" }));
     latest().open();
     latest().event({ type: "snapshot", sessions: [], restore: [], rooms: [room("r2")] });
     expect(useDesk.getState().activeRoom).toBeNull();

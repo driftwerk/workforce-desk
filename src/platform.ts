@@ -6,6 +6,8 @@ import type { Attachment, HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
 import type { DeskGroup, Ungrouped } from "./groups/model";
 import type { HubConnection } from "./hub/client";
+import { brokered } from "./hub/broker";
+import { direct, type DeskTransport } from "./hub/transport";
 import { preview } from "./preview";
 
 /** False only in that browser preview: app-only features (global shortcuts,
@@ -96,7 +98,15 @@ export interface ThemeFile {
   source: string;
 }
 
-export const hubConnection = (): Promise<HubConnection> => invoke("hub_connection");
+/** The local hub's admin surface, once the hub is up (on first launch
+ *  `desk-hubd` is still starting it). In the app it is reached only through
+ *  Desk's native side, which holds the hub's token: the page never has it.
+ *  The browser preview has no native side, and the dev bridge gives it a
+ *  development hub's token. */
+export const localHub = async (): Promise<DeskTransport> => {
+  const c = await invoke<{ url: string } & Partial<HubConnection>>("hub_connection");
+  return preview && c.token ? direct({ url: c.url, token: c.token }) : brokered;
+};
 
 export const loadSettings = (): Promise<Settings> => invoke("settings_load");
 

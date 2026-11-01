@@ -1,0 +1,377 @@
+[
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/spend?period=week&by=engine&limit=10"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/engines"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/sessions/s1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/stop"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/interrupt"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/asked/allow"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/asked/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/resume"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/remove"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/end"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/closed"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/hidden"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/sessions/hidden/claude/a%2Fb%20c"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/clear"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/approvals/ap1"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/sessions/s%201/name"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/restore"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/restore/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/vault"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/vault/speech/openai/api_key"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/agents"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/agents/a%20b"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/agents/a"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/agents/a/picture"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/providers"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/providers/anthropic/connect"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/providers/anthropic"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/identity/SOUL.md"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/agents/a/identity/SOUL.md"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/identity/SOUL.md/revisions"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/identity/SOUL.md/revisions/3"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/agents/a/identity/SOUL.md/revisions/3/restore"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/memory/summary"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/heartbeat"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a/config"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/agents/a/config"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/overview"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/activity?limit=5&filter=needs_you&before=e1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/manager"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/suggestions"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/suggestions/g1/accept"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/suggestions/g1/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/rooms"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/rooms"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/rooms/r1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/rooms/r1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/rooms/r1/messages?limit=5&thread=t&before=m1&after=m0&around=m2"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/rooms/r1/messages/m%201"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/rooms/r1/messages"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/rooms/r1/messages/m1/copy"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/unread"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/reads"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/reads"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/reads/all"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/rooms/search?q=hello+there%21&limit=20&room=r1&from=me&has=link%2Cfile&inThread=true&after=2026-01-01&before=2026-02-01"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/state?prefix=grid%2F&values=true"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/state/grid%2Fa%20b"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/state/grid%2Fa"
+  },
+  {
+    "kind": "socket",
+    "method": "GET",
+    "path": "/api/desk/events"
+  },
+  {
+    "kind": "socket",
+    "method": "GET",
+    "path": "/api/desk/sessions/s1/pty"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/layout"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/layout/import"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/groups"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/groups/g"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/groups/g"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/groups/g/move"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/groups/g/items/agent%3Alocal/desk"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/groups/ungrouped/order"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/terminals"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/terminals"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/terminals/t%201/reopen"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/terminals/t1"
+  },
+  {
+    "kind": "socket",
+    "method": "GET",
+    "path": "/api/desk/terminals/t%201/pty"
+  }
+]

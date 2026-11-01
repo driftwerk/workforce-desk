@@ -29,9 +29,12 @@ import type {
   TerminalInfo,
   UnreadSummary,
 } from "./types";
-import { hubFetch } from "./net";
+import { direct, type Body, type DeskSocket, type DeskTransport } from "./transport";
 import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
 
+/** A hub and the token to reach it with: a paired hub's device token, or
+ *  in the browser preview the local hub's own. In the app the local hub's
+ *  admin surface is reached through `brokered` instead, with no token here. */
 export interface HubConnection {
   url: string;
   token: string;
@@ -142,22 +145,40 @@ export const refusal = async (res: Response): Promise<HubError> => {
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
  *  so its Slack picture, if any, shows again); the picture shown after. */
-export const sendPicture = async (conn: HubConnection, path: string, image: Blob | null): Promise<Picture | null> => {
-  const res = await hubFetch(new URL(path, conn.url), {
-    method: image ? "PUT" : "DELETE",
-    headers: { authorization: `Bearer ${conn.token}`, ...(image ? { "content-type": image.type || "application/octet-stream" } : {}) },
-    body: image ?? undefined,
-  });
+export const sendPicture = (conn: HubConnection, path: string, image: Blob | null): Promise<Picture | null> =>
+  pictureVia(direct(conn), path, image);
+
+const pictureVia = async (t: DeskTransport, path: string, image: Blob | null): Promise<Picture | null> => {
+  const res = await t.fetch(image ? "PUT" : "DELETE", path, image ? { type: image.type || "application/octet-stream", data: image } : undefined);
   if (!res.ok) throw await refusal(res);
   if (!(res.headers.get("content-type") ?? "").includes("json")) throw new HubError(404, NO_ROUTE);
   return pictureOf(((await res.json()) as { picture?: unknown }).picture);
 };
 
-const wsUrl = (base: string, path: string, token: string): string => {
-  const u = new URL(path, base);
-  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  u.searchParams.set("token", token);
-  return u.toString();
+const json = (body: unknown): Body | undefined => (body === undefined ? undefined : { type: "application/json", data: JSON.stringify(body) });
+
+/** A hub's answer: its status and JSON (none for a 204), and a `HubError`
+ *  for a refusal or a route the hub doesn't have. */
+const answer = async <T>(res: Response): Promise<{ status: number; body: T }> => {
+  if (!res.ok) throw await refusal(res);
+  if (res.status === 204) return { status: res.status, body: undefined as T };
+  // A hub without this route answers with its web page, not a 404.
+  if (!(res.headers.get("content-type") ?? "").includes("json")) {
+    throw new HubError(404, NO_ROUTE);
+  }
+  return { status: res.status, body: (await res.json()) as T };
+};
+
+/** A Desk route; in the browser preview, the dev bridge answers the ones
+ *  the running hub doesn't have yet. */
+const withDevBridge = async <T>(method: string, path: string, body: unknown, call: () => Promise<T>): Promise<T> => {
+  try {
+    return await call();
+  } catch (e) {
+    if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
+    const { devHub } = await import("../devBridge");
+    return devHub<T>(method, path, body);
+  }
 };
 
 /** One call to a hub's API, as `conn`: its status and JSON answer (none
@@ -168,23 +189,7 @@ export const hubRequest = async <T>(
   method: string,
   path: string,
   body?: unknown,
-): Promise<{ status: number; body: T }> => {
-  const res = await hubFetch(new URL(path, conn.url), {
-    method,
-    headers: {
-      authorization: `Bearer ${conn.token}`,
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) throw await refusal(res);
-  if (res.status === 204) return { status: res.status, body: undefined as T };
-  // A hub without this route answers with its web page, not a 404.
-  if (!(res.headers.get("content-type") ?? "").includes("json")) {
-    throw new HubError(404, NO_ROUTE);
-  }
-  return { status: res.status, body: (await res.json()) as T };
-};
+): Promise<{ status: number; body: T }> => answer<T>(await direct(conn).fetch(method, path, json(body)));
 
 /** One call to a hub's API, as `conn`: its JSON answer, nothing for a 204. */
 export const hubCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
@@ -192,41 +197,33 @@ export const hubCall = async <T>(conn: HubConnection, method: string, path: stri
 
 /** A Desk route; in the browser preview, the dev bridge answers the ones
  *  the running hub doesn't have yet. */
-export const deskCall = async <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> => {
-  try {
-    return await hubCall<T>(conn, method, path, body);
-  } catch (e) {
-    if (!preview || !(e instanceof HubError) || e.status !== 404) throw e;
-    const { devHub } = await import("../devBridge");
-    return devHub<T>(method, path, body);
-  }
-};
+export const deskCall = <T>(conn: HubConnection, method: string, path: string, body?: unknown): Promise<T> =>
+  withDevBridge(method, path, body, () => hubCall<T>(conn, method, path, body));
 
 /** The most messages one read of a room or thread returns. */
 export const ROOM_PAGE = 100;
 
+/** The local hub's admin surface: sessions, terminals, rooms, the crew and
+ *  its agents. In the app `t` is `brokered`, which holds no token. */
 export class DeskHub {
-  constructor(private readonly conn: HubConnection) {}
+  constructor(private readonly t: DeskTransport) {}
 
-  private request = <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
-    hubRequest<T>(this.conn, method, path, body);
+  private request = async <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
+    answer<T>(await this.t.fetch(method, path, json(body)));
 
-  private call = <T>(method: string, path: string, body?: unknown): Promise<T> => hubCall<T>(this.conn, method, path, body);
+  private call = async <T>(method: string, path: string, body?: unknown): Promise<T> => (await this.request<T>(method, path, body)).body;
 
-  private desk = <T>(method: string, path: string, body?: unknown): Promise<T> => deskCall<T>(this.conn, method, path, body);
+  private desk = <T>(method: string, path: string, body?: unknown): Promise<T> =>
+    withDevBridge(method, path, body, () => this.call<T>(method, path, body));
 
   private async text(path: string): Promise<string> {
-    const res = await hubFetch(new URL(path, this.conn.url), { headers: { authorization: `Bearer ${this.conn.token}` } });
+    const res = await this.t.fetch("GET", path);
     if (!res.ok) throw await refusal(res);
     return res.text();
   }
 
   private async putText(path: string, text: string): Promise<void> {
-    const res = await hubFetch(new URL(path, this.conn.url), {
-      method: "PUT",
-      headers: { authorization: `Bearer ${this.conn.token}`, "content-type": "text/plain" },
-      body: text,
-    });
+    const res = await this.t.fetch("PUT", path, { type: "text/plain", data: text });
     if (!res.ok) throw await refusal(res);
   }
 
@@ -303,7 +300,7 @@ export class DeskHub {
   renameAgent = (id: string, name: string, systemPrompt?: string): Promise<unknown> =>
     this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, systemPrompt === undefined ? { name } : { name, system_prompt: systemPrompt });
   /** Chooses a picture for an agent here (null: none); the one it shows after. */
-  setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => sendPicture(this.conn, agentPicturePath(id), image);
+  setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => pictureVia(this.t, agentPicturePath(id), image);
   /** What agents on this computer can think with, connected or not. */
   providers = async (): Promise<Provider[]> =>
     (await this.desk<{ providers: Provider[] }>("GET", "/api/desk/providers")).providers;
@@ -437,12 +434,12 @@ export class DeskHub {
   };
 
   events(onEvent: (e: DeskEvent) => void, onState: (open: boolean) => void): () => void {
-    let ws: WebSocket | null = null;
+    let ws: DeskSocket | null = null;
     let closed = false;
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const open = () => {
-      ws = new WebSocket(wsUrl(this.conn.url, "/api/desk/events", this.conn.token));
+      ws = this.t.socket("/api/desk/events");
       ws.onopen = () => {
         retry = 0;
         onState(true);
@@ -462,10 +459,8 @@ export class DeskHub {
     };
   }
 
-  ptySocket(id: string): WebSocket {
-    const ws = new WebSocket(wsUrl(this.conn.url, `/api/desk/sessions/${id}/pty`, this.conn.token));
-    ws.binaryType = "arraybuffer";
-    return ws;
+  ptySocket(id: string): DeskSocket {
+    return this.t.socket(`/api/desk/sessions/${id}/pty`);
   }
 
   // ── The sidebar's groups, kept by the hub ───────────────────────────────
@@ -510,9 +505,7 @@ export class DeskHub {
 
   /** The same protocol as a session's: binary frames both ways, text
    *  frames for control (see session/Terminal.tsx). */
-  terminalSocket(id: string): WebSocket {
-    const ws = new WebSocket(wsUrl(this.conn.url, `/api/desk/terminals/${encodeURIComponent(id)}/pty`, this.conn.token));
-    ws.binaryType = "arraybuffer";
-    return ws;
+  terminalSocket(id: string): DeskSocket {
+    return this.t.socket(`/api/desk/terminals/${encodeURIComponent(id)}/pty`);
   }
 }
