@@ -147,7 +147,7 @@ pub fn save(paths: &Paths, label: &str, url: &str, token: &str) -> Result<HubRec
     save_with(&app_secrets(paths)?, paths, label, url, token)
 }
 
-fn save_with(
+pub(crate) fn save_with(
     secrets: &Secrets,
     paths: &Paths,
     label: &str,
@@ -191,7 +191,7 @@ fn save_with(
 }
 
 /// Whether two hub addresses are the same place, as Desk keeps them.
-fn same_place(a: &str, b: &str) -> bool {
+pub(crate) fn same_place(a: &str, b: &str) -> bool {
     match (desk_core::net::hub_url(a), desk_core::net::hub_url(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => a.trim_end_matches('/') == b.trim_end_matches('/'),
