@@ -6,6 +6,7 @@ import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, us
 import { lookOf, statusOf, waitsOnYou } from "../floor/background";
 import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
+import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
 import { addToGrid as placeInGrid } from "../grids/windows";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
@@ -690,6 +691,9 @@ function ItemRow({
   onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
+  const inGrids = useGridNames(item.key);
+  const says = inGrids.length ? inGridSays(inGrids) : null;
+  const markId = `${useId()}-grid`;
   return (
     <SortRow
       id={item.key}
@@ -704,7 +708,7 @@ function ItemRow({
       nameClass={session ? "mono" : "display"}
       meta={<span className={`gi-meta small ${session && waitsOnYou(session) ? "state-blocked" : "faint"}`}>{meta}</span>}
       title={title}
-      describedBy={hint}
+      describedBy={says ? `${hint} ${markId}` : hint}
       data={{ "data-item": item.key }}
       register={(el) => register(item.key, el)}
       onOpen={onOpen}
@@ -714,6 +718,7 @@ function ItemRow({
       onRemove={onRemove}
       onHover={onHover}
     >
+      {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />
     </SortRow>
   );
