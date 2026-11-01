@@ -1674,6 +1674,18 @@ button.thread-bar:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* In a grid: a quiet glyph before the unread mark. */
+.gi-grid {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: -1px;
+  color: var(--faint);
+}
+.gi:hover .gi-grid,
+.gi.on .gi-grid {
+  color: var(--muted);
+}
 .rename-field {
   flex: 1;
   min-width: 0;
@@ -2200,7 +2212,6 @@ button.thread-bar:hover {
 }
 .urow-read:hover,
 .urow-read:focus-within {
-  opacity: 0.85;
 }
 .urow-open {
   flex: 1;
