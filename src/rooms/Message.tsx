@@ -4,6 +4,7 @@ import { Attachments, type FileHome } from "../attachments/Attachments";
 import { RoutedApproval } from "../chat/Approvals";
 import { saveMadeFile } from "../attachments/save";
 import { linkParts, openLink } from "../shell/links";
+import { DESK_RICH_HOST } from "../shell/richHost";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
@@ -25,9 +26,6 @@ const time = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
-
-/** Link schemes agent markdown keeps besides the web's: links to room messages. */
-const LINK_SCHEMES = ["desk"] as const;
 
 /** Plain text with its links clickable: the web's, and Desk's own. */
 function Linked({ text }: { text: string }) {
@@ -99,8 +97,7 @@ export const Message = memo(function Message({
 }) {
   const host = useMemo<RichHost>(
     () => ({
-      openUrl: openLink,
-      linkSchemes: LINK_SCHEMES,
+      ...DESK_RICH_HOST,
       answered,
       saveFile: saveMadeFile,
       submitForm: async (summary, values) => onSubmitForm(summary, values),
