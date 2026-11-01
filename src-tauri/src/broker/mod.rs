@@ -11,6 +11,7 @@
 
 pub mod routes;
 pub mod socket;
+pub mod tunnel;
 
 use std::sync::{Arc, Mutex};
 

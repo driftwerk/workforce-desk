@@ -160,7 +160,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       // The preview reaches the hub itself, with this token (in the app the
       // native side holds every hub's, and the page has none).
       setDevToken("local", need("device"));
-      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, revision: need("device").slice(-8) }]);
+      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, revision: "preview" }]);
     case "settings_load":
       return answer(settings);
     case "settings_save":

@@ -27,6 +27,8 @@
     "notification:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
+    "updater:default",
+    "process:allow-restart",
     "allow-hub-connection",
     "allow-local-hub-fetch",
     "allow-local-hub-socket-open",

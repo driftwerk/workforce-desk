@@ -384,6 +384,8 @@ enum Failed {
     Refused(StatusCode),
     Other,
     Unsendable,
+    /// The proxy this computer goes through wouldn't tunnel to the hub.
+    Proxy(super::tunnel::Refused),
 }
 
 impl Failed {
@@ -399,6 +401,19 @@ impl Failed {
             Failed::Refused(status) => format!("{hub} refused the connection ({status})."),
             Failed::Other => format!("Desk couldn't reach {}.", hub.to_lowercase()),
             Failed::Unsendable => format!("{hub} has a token Desk can't send."),
+            Failed::Proxy(super::tunnel::Refused::Status(status)) => {
+                format!(
+                    "This computer's proxy refused to reach {} ({status}).",
+                    hub.to_lowercase()
+                )
+            }
+            Failed::Proxy(super::tunnel::Refused::Unsupported(kind)) => {
+                format!(
+                    "Desk can't reach {} through a {kind} proxy.",
+                    hub.to_lowercase()
+                )
+            }
+            Failed::Proxy(_) => "Desk couldn't reach this computer's proxy.".into(),
         }
     }
 }
@@ -438,13 +453,32 @@ async fn attempt(url: &Url, token: &str, carry: Carry) -> Result<Ws, Failed> {
         "wss" => Some(Connector::Rustls(tls()?)),
         _ => None,
     };
-    let connect = tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector);
-    match tokio::time::timeout(HANDSHAKE, connect).await {
-        Err(_) => Err(Failed::Late),
-        Ok(Ok((ws, _))) => Ok(ws),
-        Ok(Err(WsError::Http(r))) => Err(Failed::Refused(r.status())),
-        Ok(Err(_)) => Err(Failed::Other),
-    }
+    let connect = async {
+        let opened = match super::tunnel::system_proxy_for(&url) {
+            // Through the proxy's tunnel, TLS to the hub inside it.
+            Some(proxy) => {
+                let host = url.host_str().ok_or(Failed::Other)?;
+                let port = url.port_or_known_default().ok_or(Failed::Other)?;
+                let stream = super::tunnel::connect(&proxy, host, port)
+                    .await
+                    .map_err(Failed::Proxy)?;
+                tokio_tungstenite::client_async_tls_with_config(request, stream, None, connector)
+                    .await
+            }
+            None => {
+                tokio_tungstenite::connect_async_tls_with_config(request, None, false, connector)
+                    .await
+            }
+        };
+        match opened {
+            Ok((ws, _)) => Ok(ws),
+            Err(WsError::Http(r)) => Err(Failed::Refused(r.status())),
+            Err(_) => Err(Failed::Other),
+        }
+    };
+    tokio::time::timeout(HANDSHAKE, connect)
+        .await
+        .unwrap_or(Err(Failed::Late))
 }
 
 /// The socket `dial` names, its handshake carrying the hub's token in the
