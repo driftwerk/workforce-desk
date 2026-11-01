@@ -44,6 +44,7 @@ describe("Keyboard shortcuts", () => {
     expect(screen.getAllByText(/In a terminal/).map((e) => e.textContent)).toEqual([
       "In a terminal: Ctrl+Shift+N (the shell keeps Ctrl+N)",
       "In a terminal: Ctrl+Shift+T (the shell keeps Ctrl+T)",
+      "In a terminal: Ctrl+Shift+R (the shell keeps Ctrl+R)",
       "In a terminal: Ctrl+Shift+S (the shell keeps Ctrl+S)",
     ]);
     useHost.setState(DEFAULT_HOST);

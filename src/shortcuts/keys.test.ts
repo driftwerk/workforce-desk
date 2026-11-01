@@ -39,6 +39,7 @@ describe("shortcut keys on macOS", () => {
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
+      reload: "Primary+R",
       saveFile: "Primary+S",
       stopAnswer: "Primary+Period",
       jumpNew: "Primary+J",
@@ -49,7 +50,7 @@ describe("shortcut keys on macOS", () => {
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -167,6 +168,16 @@ describe("shortcut keys on macOS", () => {
 describe("shortcut keys on Windows and Linux", () => {
   const WIN = defaultShortcuts("windows");
 
+  it("makes reload Ctrl+R, and Ctrl+Shift+R in a terminal", () => {
+    expect(MAC.reload).toBe("Primary+R");
+    for (const platform of ["windows", "linux"] as const) {
+      const d = defaultShortcuts(platform);
+      expect(shortcutLabel(d.reload, platform)).toBe("Ctrl+R");
+      expect(terminalKeys(d.reload, platform)).toBe("Primary+Shift+R");
+    }
+    expect(terminalKeys(MAC.reload, "macos")).toBe("Primary+R");
+  });
+
   it("default to Ctrl where macOS has ⌘, and the same keys where macOS has ⌃", () => {
     expect(WIN).toEqual({
       ask: "Primary+Shift+K",
@@ -177,6 +188,7 @@ describe("shortcut keys on Windows and Linux", () => {
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
       settings: "Primary+Comma",
+      reload: "Primary+R",
       saveFile: "Primary+S",
       stopAnswer: "Primary+Period",
       jumpNew: "Primary+J",
@@ -189,7 +201,7 @@ describe("shortcut keys on Windows and Linux", () => {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
+      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
         expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }

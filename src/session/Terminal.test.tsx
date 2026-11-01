@@ -91,4 +91,25 @@ describe("a terminal", () => {
     useHost.setState(DEFAULT_HOST);
     vi.unstubAllGlobals();
   });
+
+  it("on linux, sends Ctrl+R to the shell and doesn't reload Desk, which takes Ctrl+Shift+R", () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    useHost.setState({ ...DEFAULT_HOST, platform: "linux" });
+    useSettings.setState({ shortcuts: {}, keys: defaultShortcuts("linux") });
+    const socket = { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() };
+    useDesk.setState({ hub: { ptySocket: () => socket } as never });
+    const reload = vi.fn();
+    renderHook(() => useAppShortcut("reload", reload));
+    render(<Terminal sessionId="s1" />);
+    const field = terms.at(-1)!.field!;
+    const typed = () => socket.send.mock.calls.flatMap(([d]) => (ArrayBuffer.isView(d) ? [...(d as Uint8Array)] : []));
+    const key = (init: KeyboardEventInit) => act(() => void field.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init })));
+    key({ code: "KeyR", key: "r", ctrlKey: true });
+    expect(typed()).toEqual([0x12]);
+    expect(reload).not.toHaveBeenCalled();
+    key({ code: "KeyR", key: "R", ctrlKey: true, shiftKey: true });
+    expect(reload).toHaveBeenCalledTimes(1);
+    useHost.setState(DEFAULT_HOST);
+    vi.unstubAllGlobals();
+  });
 });
