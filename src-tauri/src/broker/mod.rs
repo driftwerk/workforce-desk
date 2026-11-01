@@ -49,11 +49,13 @@ struct Local {
     bearer: Arc<str>,
 }
 
+/// The local hub as last read: once, and again when the hub turns the token
+/// away (Desk Helper renews it).
+type Kept = Arc<Mutex<Option<Local>>>;
+
 pub struct Broker {
     source: Source,
-    /// Read once, and again when the hub turns the token away (Desk Helper
-    /// renews it).
-    local: Mutex<Option<Local>>,
+    local: Kept,
     client: reqwest::Client,
     pub sockets: socket::Sockets,
 }
@@ -87,28 +89,14 @@ impl Broker {
             .expect("an HTTP client");
         Self {
             source,
-            local: Mutex::new(None),
+            local: Kept::default(),
             client,
             sockets: socket::Sockets::default(),
         }
     }
 
     async fn local(&self) -> Result<Local, String> {
-        if let Some(l) = self.local.lock().expect("local").clone() {
-            return Ok(l);
-        }
-        let source = Arc::clone(&self.source);
-        let conn = tauri::async_runtime::spawn_blocking(move || source())
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "This computer's hub isn't running yet.".to_string())?;
-        let local = Local {
-            base: loopback(&conn.gateway_url)?,
-            bearer: conn.admin_token.into(),
-        };
-        *self.local.lock().expect("local") = Some(local.clone());
-        Ok(local)
+        read(&self.source, &self.local).await
     }
 
     fn forget(&self) {
@@ -180,26 +168,58 @@ impl Broker {
         events: socket::Events,
     ) -> Result<u32, String> {
         let allowed = routes::socket(target).map_err(|e| e.to_string())?;
+        let page = self.sockets.page(owner);
         let local = self.local().await?;
         let mut url = at(&local.base, &allowed.path, None)?;
         url.set_scheme("ws")
             .map_err(|_| "This computer's hub has no socket address.".to_string())?;
-        self.sockets.open(owner, url, &local.bearer, events)
+        let (source, kept) = (Arc::clone(&self.source), Arc::clone(&self.local));
+        let bearer: socket::Bearer = Arc::new(move |fresh| {
+            let (source, kept) = (Arc::clone(&source), Arc::clone(&kept));
+            Box::pin(async move {
+                if fresh {
+                    *kept.lock().expect("local") = None;
+                }
+                read(&source, &kept).await.map(|l| l.bearer)
+            })
+        });
+        self.sockets.open(owner, page, url, bearer, events)
     }
 }
 
+/// The local hub as kept, or read now (and kept) if it isn't.
+async fn read(source: &Source, kept: &Kept) -> Result<Local, String> {
+    if let Some(l) = kept.lock().expect("local").clone() {
+        return Ok(l);
+    }
+    let source = Arc::clone(source);
+    let conn = tauri::async_runtime::spawn_blocking(move || source())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "This computer's hub isn't running yet.".to_string())?;
+    let local = Local {
+        base: loopback(&conn.gateway_url)?,
+        bearer: conn.admin_token.into(),
+    };
+    *kept.lock().expect("local") = Some(local.clone());
+    Ok(local)
+}
+
 /// The hub's address when it is on this computer: plain `http` to a
-/// loopback host, with nothing else in it. The admin token goes nowhere else.
+/// loopback address, with nothing else in it. The admin token goes nowhere
+/// else. An address, not a name: nothing a resolver answers decides where
+/// the token goes (Desk writes the hub's as `127.0.0.1`).
 fn loopback(gateway_url: &str) -> Result<Url, String> {
     let refuse = || "This computer's hub isn't at an address on this computer.".to_string();
     let url = Url::parse(gateway_url).map_err(|_| refuse())?;
-    let host = url.host_str().unwrap_or_default();
-    let local_host = host.eq_ignore_ascii_case("localhost")
-        || host
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|ip| ip.is_loopback());
+    let local_host = url
+        .host_str()
+        .unwrap_or_default()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback());
     if url.scheme() != "http"
         || !local_host
         || !url.username().is_empty()
@@ -297,6 +317,18 @@ pub fn local_hub_socket_send(
         _ => return Err("The frame didn't say its kind.".into()),
     };
     broker.sockets.send(webview.label(), id, frame)
+}
+
+/// The page has taken `bytes` more of what socket `id` gave it: the hub's
+/// socket is read again while it has room.
+#[tauri::command]
+pub fn local_hub_socket_ack(
+    webview: tauri::Webview,
+    broker: tauri::State<'_, Broker>,
+    id: u32,
+    bytes: usize,
+) {
+    broker.sockets.ack(webview.label(), id, bytes);
 }
 
 #[tauri::command]
@@ -517,6 +549,8 @@ mod tests {
             "http://user:pw@127.0.0.1:3",
             "http://127.0.0.1:3/prefix",
             "http://127.0.0.1:3/?x=1",
+            "http://localhost:3",
+            "http://0.0.0.0:3",
             "not a url",
         ] {
             let e = broker_at(url, vec![])
@@ -530,7 +564,7 @@ mod tests {
         }
         for url in [
             "http://127.0.0.1:3",
-            "http://localhost:3/",
+            "http://127.0.0.1:3/",
             "http://[::1]:3",
         ] {
             assert!(loopback(url).is_ok(), "{url}");

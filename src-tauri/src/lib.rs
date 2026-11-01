@@ -734,6 +734,7 @@ pub fn run() {
             broker::local_hub_fetch,
             broker::local_hub_socket_open,
             broker::local_hub_socket_send,
+            broker::local_hub_socket_ack,
             broker::local_hub_socket_close,
             fonts::fonts_list,
             host_info,

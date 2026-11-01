@@ -69,7 +69,8 @@ export function Terminal({
     const inPane = () => !!host.current && host.current.contains(document.activeElement);
     ws.onopen = () => viewer.opened(inPane());
     ws.onmessage = (m) => {
-      if (m.data instanceof ArrayBuffer) x.write(new Uint8Array(m.data));
+      // A brokered socket is given more once xterm has written this.
+      if (m.data instanceof ArrayBuffer) x.write(new Uint8Array(m.data), ws.hold?.());
       else if (typeof m.data === "string") {
         try {
           viewer.heard(JSON.parse(m.data));

@@ -24,6 +24,9 @@ export interface DeskSocket {
   onerror: ((ev: Event) => void) | null;
   send(data: string | ArrayBuffer | ArrayBufferView<ArrayBuffer>): void;
   close(): void;
+  /** A brokered socket's: called from `onmessage`, the frame being heard
+   *  counts as taken only once the returned function is called. */
+  hold?(): () => void;
 }
 
 export interface DeskTransport {

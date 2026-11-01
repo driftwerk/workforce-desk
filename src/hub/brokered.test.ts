@@ -210,6 +210,12 @@ describe("the brokered transport", () => {
 });
 
 describe("a bridged socket", () => {
+  // What a test was given is acknowledged within it, not in the next.
+  afterEach(async () => {
+    await settle();
+    await settle();
+  });
+
   const opened = async () => {
     native.answer = (cmd) => (cmd === "local_hub_socket_open" ? 7 : undefined);
     const ws = brokered.socket("/api/desk/sessions/s1/pty") as BridgedSocket;
@@ -239,9 +245,62 @@ describe("a bridged socket", () => {
     say({ type: "open" });
     const bytes = new Uint8Array([1, 2, 3]).buffer;
     say(bytes);
-    say({ type: "text", data: '{"type":"viewer"}' });
+    say({ type: "text", data: '{"type":"viewer"}', n: 17 });
     expect(heard.messages).toEqual([bytes, '{"type":"viewer"}']);
     expect(heard.messages[0]).toBeInstanceOf(ArrayBuffer);
+  });
+
+  const acks = () => native.calls.filter((c) => c.cmd === "local_hub_socket_ack").map((c) => c.args);
+
+  it("acknowledges what its handler heard, many frames at once", async () => {
+    const { say } = await opened();
+    say({ type: "open" });
+    say(new Uint8Array(3).buffer);
+    say(new Uint8Array(5).buffer);
+    say({ type: "text", data: "é", n: 2 });
+    expect(acks()).toEqual([]);
+    await settle();
+    await settle();
+    expect(acks()).toEqual([{ id: 7, bytes: 10 }]);
+  });
+
+  it("acknowledges a frame whose handler threw", async () => {
+    const { ws, say } = await opened();
+    say({ type: "open" });
+    ws.onmessage = () => {
+      throw new Error("a bad frame");
+    };
+    expect(() => say(new Uint8Array(4).buffer)).toThrow("a bad frame");
+    await settle();
+    await settle();
+    expect(acks()).toEqual([{ id: 7, bytes: 4 }]);
+  });
+
+  it("holds an acknowledgement until its handler is done with the frame", async () => {
+    const { ws, say } = await opened();
+    say({ type: "open" });
+    const releases: (() => void)[] = [];
+    ws.onmessage = () => releases.push(ws.hold());
+    say(new Uint8Array(6).buffer);
+    say(new Uint8Array(4).buffer);
+    await settle();
+    expect(acks()).toEqual([]);
+    releases[1]!();
+    releases[1]!();
+    await settle();
+    await settle();
+    expect(acks()).toEqual([{ id: 7, bytes: 4 }]);
+    releases[0]!();
+    await settle();
+    await settle();
+    expect(acks()).toEqual([
+      { id: 7, bytes: 4 },
+      { id: 7, bytes: 6 },
+    ]);
+    // Outside a handler there is nothing to hold.
+    ws.hold()();
+    await settle();
+    expect(acks()).toHaveLength(2);
   });
 
   it("sends frames in the order they were sent, each as its own kind", async () => {
@@ -283,7 +342,7 @@ describe("a bridged socket", () => {
     expect(native.calls.map((c) => c.cmd)).toEqual(["local_hub_socket_open", "local_hub_socket_send", "local_hub_socket_close"]);
     expect(native.calls[2]!.args).toEqual({ id: 7 });
     say({ type: "close", code: 1000, reason: "", clean: true });
-    say({ type: "text", data: "late" });
+    say({ type: "text", data: "late", n: 4 });
     expect(ws.readyState).toBe(WebSocket.CLOSED);
     expect(heard.closes.map((c) => [c.code, c.wasClean])).toEqual([[1000, true]]);
     expect(heard.messages).toEqual([]);
@@ -322,7 +381,8 @@ describe("the desk over the broker", () => {
     say({ type: "open" });
     expect(useDesk.getState().connected).toBe(true);
     const session = { id: "s1", engine: "claude", state: "running", name: "One" };
-    say({ type: "text", data: JSON.stringify({ type: "snapshot", sessions: [session], restore: [], rooms: [] }) });
+    const snapshot = JSON.stringify({ type: "snapshot", sessions: [session], restore: [], rooms: [] });
+    say({ type: "text", data: snapshot, n: snapshot.length });
     expect(useDesk.getState().loaded).toBe(true);
     expect(Object.keys(useDesk.getState().sessions)).toEqual(["s1"]);
     say({ type: "close", code: 1006, reason: "", clean: false });

@@ -33,12 +33,22 @@ const fetchVia = async (method: string, path: string, body?: Body): Promise<Resp
   });
 };
 
-/** What the native side says of a socket. */
-type Said = { type: "open" } | { type: "text"; data: string } | { type: "error" } | { type: "close"; code: number; reason: string; clean: boolean };
+/** What the native side says of a socket; `n` is a text frame's size as
+ *  the native side counts it. */
+type Said =
+  | { type: "open" }
+  | { type: "text"; data: string; n: number }
+  | { type: "error" }
+  | { type: "close"; code: number; reason: string; clean: boolean };
 
 /** A socket the native side holds open to the local hub, shaped like the
  *  WebSocket the page would otherwise open: frames arrive in order, and
- *  the page's go one after another. */
+ *  the page's go one after another.
+ *
+ *  The native side gives a socket's frames only as fast as the page takes
+ *  them: each is acknowledged once its handler has run (or, if the handler
+ *  called `hold()`, once it releases it), a few at a time. A terminal
+ *  flooding output then waits on the hub rather than filling the page. */
 export class BridgedSocket implements DeskSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -55,6 +65,11 @@ export class BridgedSocket implements DeskSocket {
   private readonly id: Promise<number | null>;
   /** Sends (and the close) in the order the page made them. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Taken and not yet acknowledged; an acknowledgement is on its way. */
+  private owed = 0;
+  private acking = false;
+  /** The frame being heard, until its handler holds it. */
+  private hearing: { n: number; held: boolean } | null = null;
 
   constructor(path: string) {
     const events = new Channel<Said | ArrayBuffer>();
@@ -85,6 +100,48 @@ export class BridgedSocket implements DeskSocket {
     this.then((id) => invoke("local_hub_socket_close", { id }));
   }
 
+  /** Called from `onmessage`, holds back the acknowledgement of the frame
+   *  being heard until the returned function is called (once its data is
+   *  used: xterm's write callback). */
+  hold(): () => void {
+    const frame = this.hearing;
+    if (!frame || frame.held) return () => {};
+    frame.held = true;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.took(frame.n);
+    };
+  }
+
+  private took(n: number): void {
+    this.owed += n;
+    if (this.acking) return;
+    this.acking = true;
+    // Once the page has had a turn: many frames, one acknowledgement.
+    setTimeout(() => {
+      this.acking = false;
+      const bytes = this.owed;
+      this.owed = 0;
+      if (bytes > 0 && this.readyState !== BridgedSocket.CLOSED)
+        void this.id
+          .then((id) => (id === null ? undefined : invoke("local_hub_socket_ack", { id, bytes })))
+          .catch((e: unknown) => console.warn("the local hub's connection:", e));
+    }, 0);
+  }
+
+  private deliver(data: string | ArrayBuffer, n: number): void {
+    const frame = { n, held: false };
+    this.hearing = frame;
+    try {
+      this.onmessage?.(new MessageEvent("message", { data }));
+    } finally {
+      this.hearing = null;
+      if (!frame.held) this.took(n);
+    }
+  }
+
   private then(f: (id: number) => Promise<unknown>): void {
     this.queue = this.queue
       .then(() => this.id)
@@ -95,7 +152,7 @@ export class BridgedSocket implements DeskSocket {
   private heard(m: Said | ArrayBuffer): void {
     if (this.readyState === BridgedSocket.CLOSED) return;
     if (m instanceof ArrayBuffer) {
-      this.onmessage?.(new MessageEvent("message", { data: m }));
+      this.deliver(m, m.byteLength);
       return;
     }
     switch (m.type) {
@@ -105,7 +162,7 @@ export class BridgedSocket implements DeskSocket {
         this.onopen?.(new Event("open"));
         return;
       case "text":
-        this.onmessage?.(new MessageEvent("message", { data: m.data }));
+        this.deliver(m.data, m.n);
         return;
       case "error":
         this.onerror?.(new Event("error"));
