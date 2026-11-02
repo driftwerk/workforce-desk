@@ -23,6 +23,20 @@ export const closedByHub = (e: { code: number }): boolean => e.code === 1000 || 
  *  second, doubling, at most ten. */
 export const reattachDelay = (n: number): number => Math.min(10_000, 500 * 2 ** n);
 
+/** How long a socket must stay open before the pane counts the hub as
+ *  back, and tries again from the shortest wait should it drop. */
+export const STEADY_MS = 5_000;
+
+/** Written before the replay of a pane attached again. The hub's replay
+ *  (its history, then the screen) expects a fresh terminal: the old output
+ *  is kept, pushed up into the scrollback under a line that says so, and
+ *  the replay drawn below it from the top. Nothing is erased, so the
+ *  scrollback beyond what the hub keeps stays. */
+export const reattachPrefix = (rows: number, alternate = false): string =>
+  // Off the alternate screen first (where nothing reaches the scrollback);
+  // only when on it, as leaving it also moves the cursor back.
+  `${alternate ? "\x1b[?1049l" : ""}\x1b[m\r\n\x1b[2m— reconnected —\x1b[0m${"\n".repeat(Math.max(1, rows))}\x1b[H`;
+
 /** A session's terminal, or a grid's: the hub's pseudo-terminal, attached
  *  over its socket (which replays what it kept, then streams). Where the
  *  same terminal shows in more than one place, the one the person last
@@ -85,6 +99,8 @@ export function Terminal({
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let away = false;
+    /** Set once a socket has stayed open long enough to count as back. */
+    let steady: ReturnType<typeof setTimeout> | undefined;
     const attach = () => {
       // The hub as Desk now has it: where to reach it is read again for
       // each socket, so one that moved is found.
@@ -93,10 +109,15 @@ export function Terminal({
       const s = terminalId ? current.terminalSocket(terminalId) : current.ptySocket(sessionId!);
       ws = s;
       s.onopen = () => {
-        retry = 0;
-        away = false;
-        // The hub replays the screen with its history: drawn from clear.
-        if (again) x.reset();
+        // Only a socket that stays up is back: one that drops at once
+        // goes on waiting longer, rather than every half second.
+        steady = setTimeout(() => {
+          retry = 0;
+          away = false;
+        }, STEADY_MS);
+        // The hub replays the screen as for a fresh terminal: the old
+        // output is kept above it.
+        if (again) x.write(reattachPrefix(x.rows, x.buffer.active.type === "alternate"));
         viewer.opened(inPane());
       };
       s.onmessage = (m) => {
@@ -111,6 +132,7 @@ export function Terminal({
         }
       };
       s.onclose = (e) => {
+        clearTimeout(steady);
         if (gone || ws !== s) return;
         setViewing(false);
         if (closedByHub(e)) return ended();
@@ -166,6 +188,7 @@ export function Terminal({
     return () => {
       gone = true;
       clearTimeout(timer);
+      clearTimeout(steady);
       observer.disconnect();
       for (const t of turns) el.removeEventListener(t, turnedHere, true);
       input.dispose();

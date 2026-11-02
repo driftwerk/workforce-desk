@@ -8,7 +8,7 @@ import { useAppShortcut } from "../shortcuts/manager";
 import { NIGHT } from "../theme/builtin";
 import { useThemeStore } from "../theme/store";
 import { EMOJI_STACK } from "../theme/tokens";
-import { Terminal } from "./Terminal";
+import { Terminal, reattachPrefix } from "./Terminal";
 
 const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement; written: string[]; resets: number }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -21,6 +21,7 @@ vi.mock("@xterm/xterm", () => ({
     field?: HTMLTextAreaElement;
     written: string[] = [];
     resets = 0;
+    buffer = { active: { type: "normal" } };
     private keys?: (e: KeyboardEvent) => boolean;
     private data?: (d: string) => void;
     constructor(options: Record<string, unknown>) {
@@ -189,13 +190,43 @@ describe("a terminal whose hub goes away", () => {
     await later(4000);
     expect(sockets).toHaveLength(2);
     expect(hub.ptySocket).toHaveBeenLastCalledWith("s1");
-    // Its replay draws the screen again, from clear.
+    // The old output is kept: pushed up into the scrollback under a line
+    // that says so, and the hub's replay drawn below it from the top.
+    const before = terms.at(-1)!.written.length;
     opened(sockets[1]);
-    expect(terms.at(-1)!.resets).toBe(1);
-    // Dropped again, it starts over from the shortest wait.
+    expect(terms.at(-1)!.resets).toBe(0);
+    const prefix = terms.at(-1)!.written.slice(before).join("");
+    expect(prefix).toBe(reattachPrefix(24));
+    expect(prefix).not.toMatch(/\x1bc|\x1b\[3J|\x1b\[2J/);
+    // Once it has stayed up a while, a drop starts over from the shortest wait.
+    await later(5000);
     closed(sockets[1], 1006);
     await later(500);
     expect(sockets).toHaveLength(3);
+  });
+
+  it("waits longer each time a socket opens and drops at once, rather than every half second", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const { hub, sockets } = fakeHub(async () => [{ id: "t1", live: true }]);
+    useDesk.setState({ hub: hub as never });
+    render(<Terminal terminalId="t1" />);
+    opened(sockets[0]);
+    closed(sockets[0], 1006);
+    for (const [wait, n] of [
+      [500, 2],
+      [1000, 3],
+      [2000, 4],
+    ] as const) {
+      await later(wait - 1);
+      expect(sockets).toHaveLength(n - 1);
+      await later(1);
+      expect(sockets).toHaveLength(n);
+      opened(sockets[n - 1]);
+      closed(sockets[n - 1], 1006);
+    }
+    // Said once, however often it flaps.
+    expect(shown().match(/reconnecting/g)).toHaveLength(1);
   });
 
   it("keeps trying while the hub is away, never waiting more than ten seconds", async () => {
