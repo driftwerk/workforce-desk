@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
-import { cursorIn, fetchHistory, prepend, settle } from "./history";
+import { cursorIn, fetchHistory, prepend, settle, type Reading } from "./history";
 import {
   agentKey,
   FEATURES,
@@ -25,7 +25,8 @@ export interface History {
   more: boolean;
   /** Reading the page before the first message. */
   earlier: "idle" | "loading" | "failed";
-  /** When the latest page was read: live messages after it can't be in it. */
+  /** When the read of the latest page began: live messages sent after it may
+   *  not be in it. */
   loadedAt: string | null;
 }
 
@@ -193,6 +194,17 @@ const ensure = (key: string): boolean => {
   return true;
 };
 
+/** Gives way, in `key`'s live conversation, to what the hub's page just read
+ *  (`kept`) shows, and places what it passed. */
+const settleLive = (key: string, kept: ChatMessage[], read: Reading) => {
+  const convo = useChat.getState().conversations[key];
+  if (!convo?.messages.length) return;
+  const now = new Date().toISOString();
+  const { ids, anchors, twins } = settle(kept, convo.messages, now, !!convo.features?.has(FEATURES.stream), read);
+  live.get(key)?.place(anchors, twins);
+  live.get(key)?.drop(ids);
+};
+
 export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
@@ -313,6 +325,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: started }
           : { state: "absent", messages: [], more: false },
       );
+      if (page) settleLive(key, page.messages, { began: started, seen: new Set() });
     } catch {
       if (get().histories[key]) putHistory({ state: "failed" });
     }
@@ -348,6 +361,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     const was = get().histories[key];
     if (!page || was?.state !== "ready") return;
+    // One begun before the read shown came back after it: it has nothing newer.
+    if (was.loadedAt !== null && started < was.loadedAt) return;
     const first = cursorIn(was.messages, "first");
     // Earlier pages already read stay above it.
     const reachesBack = !first || page.messages.some((m) => m.id === first);
@@ -362,12 +377,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         },
       },
     }));
-    const convo = get().conversations[key];
-    if (convo) {
-      const { ids, anchors, twins } = settle(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream));
-      live.get(key)?.place(anchors, twins);
-      live.get(key)?.drop(ids);
-    }
+    settleLive(key, page.messages, { began: started, seen: new Set(was.messages.map((m) => m.id)) });
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,

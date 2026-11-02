@@ -169,12 +169,31 @@ const twinOf = (k: ChatMessage, m: ChatMessage): boolean =>
   notEarlier(k, m);
 
 /** Where in the hub's `kept`, from `from` back, the live `m` is: as its copy
- *  or as its twin. -1 when it isn't within {@link LOOK_BACK}. */
-const look = (kept: ChatMessage[], from: number, m: ChatMessage): number => {
+ *  or as its twin, never as one whose words are already another's (`taken`).
+ *  -1 when it isn't within {@link LOOK_BACK}. */
+const look = (kept: ChatMessage[], from: number, m: ChatMessage, taken: ReadonlySet<string>): number => {
   for (let k = from; k >= Math.max(0, from - LOOK_BACK); k--) {
-    if (copyOf(kept[k]!, m) || twinOf(kept[k]!, m)) return k;
+    if (!taken.has(kept[k]!.id) && (copyOf(kept[k]!, m) || twinOf(kept[k]!, m))) return k;
   }
   return -1;
+};
+
+/** Whether the live messages before `m` (`earlier`) that could also be the
+ *  twin of `kept[at]` are as many as the twins free for them (`free`) there
+ *  and before it: then which of them is whose isn't known, and the next read,
+ *  which may have kept `m`'s own, decides. */
+const contested = (
+  kept: ChatMessage[],
+  at: number,
+  m: ChatMessage,
+  earlier: readonly ChatMessage[],
+  free: (k: number) => boolean,
+): boolean => {
+  const rivals = earlier.filter((n) => n.role === m.role && filesOf(n).length > 0 && n.content.trim() === m.content.trim()).length;
+  if (rivals === 0) return false;
+  let twins = 0;
+  for (let k = at; k >= Math.max(0, at - LOOK_BACK); k--) if (free(k) && twinOf(kept[k]!, m)) twins++;
+  return rivals >= twins;
 };
 
 /** What the hub's latest page says of the live messages. */
@@ -190,6 +209,14 @@ export interface Settled {
   twins: Map<string, string>;
 }
 
+/** A read of the hub's page, for {@link settle}: when it `began` (what was
+ *  sent since, it may or may not have seen), and the kept messages an earlier
+ *  read already had (`seen`), which nothing sent since can be. */
+export interface Reading {
+  began: string;
+  seen: ReadonlySet<string>;
+}
+
 /** The live messages, finished by `before`, that `kept` (the hub's latest
  *  page, oldest first) now shows: matched in order from the end, so a reply
  *  the hub hasn't kept yet stays live, and an older one that says the same
@@ -197,34 +224,71 @@ export interface Settled {
  *  (`streamed`), an answer is known by its id alone; what you said, which
  *  the hub keeps under an id of its own, is still matched by its files or
  *  its text. One matched by its files or its text whose files the hub didn't
- *  return stays live, so they aren't lost. */
-export const settle = (kept: ChatMessage[], all: ChatMessage[], before: string, streamed = false): Settled => {
+ *  return stays live, so they aren't lost.
+ *
+ *  One sent while the read ran (after `read.began`) is matched only as its
+ *  copy, oldest first, after what was found for those before it and never as
+ *  what an earlier read had: the same words further back are another
+ *  message, and so are words alone without its files. */
+export const settle = (kept: ChatMessage[], all: ChatMessage[], before: string, streamed = false, read?: Reading): Settled => {
+  const began = read?.began ?? before;
   // Those the hub sent live by their id are known by it; on a hub that
   // streams its answers by id, every answer is.
   const keptIds = new Set(kept.map((m) => m.id));
+  const taken = new Set(all.flatMap((m) => (m.keptAs ? [m.keptAs] : [])));
   const ids = new Set<string>();
-  const anchors = new Map<string, string>();
   const twins = new Map<string, string>();
-  let next: string | undefined;
+  // Where in `kept` each live message is, by its place in `all`.
+  const found = new Map<number, number>();
+  const during: number[] = [];
+  const unplaced = new Set<number>();
+  // One that may be the twin of what a later one is found as.
+  const rival = (n: ChatMessage) => !keptIds.has(n.id) && !n.keptAs && n.status === "complete" && n.at <= began;
   let j = kept.length - 1;
   for (let i = all.length - 1; i >= 0; i--) {
     const m = all[i]!;
     if (keptIds.has(m.id)) {
       ids.add(m.id);
-      next = m.id;
+      found.set(i, kept.findIndex((k) => k.id === m.id));
       continue;
     }
     if ((streamed && m.role === "assistant") || m.status !== "complete" || m.at > before || m.role === "system") continue;
-    const at = m.keptAs ? kept.findIndex((k) => k.id === m.keptAs) : look(kept, j, m);
-    if (at >= 0) {
-      if (copyOf(kept[at]!, m)) ids.add(m.id);
-      else if (!m.keptAs) twins.set(m.id, kept[at]!.id);
-      next = kept[at]!.id;
-      j = Math.min(j, at - 1);
-    } else if (next && !m.placedBefore && !m.keptAs && filesOf(m).length > 0) {
-      // Later refreshes no longer know what followed it: its place stands.
-      anchors.set(m.id, next);
+    if (m.at > began) {
+      during.push(i);
+      continue;
     }
+    const at = m.keptAs ? kept.findIndex((k) => k.id === m.keptAs) : look(kept, j, m, taken);
+    if (at < 0) {
+      if (!m.placedBefore && !m.keptAs && filesOf(m).length > 0) unplaced.add(i);
+      continue;
+    }
+    if (copyOf(kept[at]!, m)) ids.add(m.id);
+    else if (!m.keptAs) {
+      if (contested(kept, at, m, all.slice(0, i).filter(rival), (k) => !taken.has(kept[k]!.id))) continue;
+      twins.set(m.id, kept[at]!.id);
+    }
+    found.set(i, at);
+    j = Math.min(j, at - 1);
+  }
+
+  let last = -1;
+  for (const i of during.reverse()) {
+    const m = all[i]!;
+    for (const [n, at] of found) if (n < i) last = Math.max(last, at);
+    const at = kept.findIndex((k, n) => n > last && !read?.seen.has(k.id) && !taken.has(k.id) && copyOf(k, m));
+    if (at < 0) continue;
+    ids.add(m.id);
+    found.set(i, at);
+    last = at;
+  }
+
+  // Later refreshes no longer know what followed one: its place stands.
+  const anchors = new Map<string, string>();
+  let next: string | undefined;
+  for (let i = all.length - 1; i >= 0; i--) {
+    const at = found.get(i);
+    if (at !== undefined) next = kept[at]!.id;
+    else if (next && unplaced.has(i)) anchors.set(all[i]!.id, next);
   }
   return { ids, anchors, twins };
 };
@@ -235,9 +299,10 @@ export const covered = (kept: ChatMessage[], all: ChatMessage[], before: string,
 
 /** The conversation as shown: what the hub kept, then what arrived live,
  *  without the live messages the hub's copy already has. Those can only be
- *  ones that existed when the history was read (`loadedAt`), or answers the
- *  socket repeats before you've said anything; they're the start of the
- *  live list and the end of the history.
+ *  ones that existed when the read of the history began (`loadedAt`), or
+ *  answers the socket repeats before you've said anything; they're the start
+ *  of the live list and the end of the history. One sent while the read ran
+ *  that it has, {@link settle} drops as soon as it is read.
  *
  *  A live message matched by its files or its words isn't given up for a copy
  *  that lacks its files. Where the hub kept its words, its files show on the
@@ -267,17 +332,20 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
     if (k >= 0) showOn(k, m);
     return false;
   });
+  // One sent since that read began may not be in it: an earlier message that
+  // says the same is another message.
+  const seen = unsettled.filter((m) => loadedAt !== null && m.at <= loadedAt);
+  const free = (k: number) => !shownFiles.has(k);
   let j = history.length - 1;
-  for (const m of unsettled.reverse()) {
-    // One sent since that read can't be in it: an earlier message that says
-    // the same is another message.
-    if (loadedAt === null || m.at > loadedAt) continue;
+  for (let u = seen.length - 1; u >= 0; u--) {
+    const m = seen[u]!;
     for (let k = j; k >= Math.max(0, j - LOOK_BACK); k--) {
-      if (!shownFiles.has(k) && twinOf(history[k]!, m)) {
+      if (!free(k) || !twinOf(history[k]!, m)) continue;
+      if (!contested(history, k, m, seen.slice(0, u), free)) {
         showOn(k, m);
         j = k - 1;
-        break;
       }
+      break;
     }
   }
 

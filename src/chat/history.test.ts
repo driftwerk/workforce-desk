@@ -235,6 +235,28 @@ describe("the live messages the hub's copy now shows", () => {
     expect(covered(kept, [msg("m-1", "assistant", "Done.", at)], before).size).toBe(0);
   });
 
+  it("cover one sent while the read ran that it has, as its copy", () => {
+    const kept = [msg("h1", "user", "hi", at), msg("h2", "user", "look", at)];
+    const sent = [msg("m-1", "user", "hi", "2026-10-28T09:59:40.000Z")];
+    expect([...settle(kept, sent, before, false, { began: "2026-10-28T09:59:30.000Z", seen: new Set() }).ids]).toEqual(["m-1"]);
+    // Its words alone, on a hub that keeps no files, aren't enough: an
+    // earlier message that said the same may be all the read saw.
+    const image = [
+      { ...msg("m-2", "user", "look", "2026-10-28T09:59:40.000Z"), attachments: [{ artifact_id: "a", media_type: "image/png", filename: "a.png", size: 1 }] },
+    ];
+    const { ids, twins, anchors } = settle(kept, image, before, false, { began: "2026-10-28T09:59:30.000Z", seen: new Set() });
+    expect([ids.size, twins.size, anchors.size]).toEqual([0, 0, 0]);
+  });
+
+  it("don't take one sent while the read ran for what an earlier read had, or for an earlier live message's copy", () => {
+    const kept = [msg("h1", "user", "ok", "2026-10-28T09:58:00.000Z"), msg("h2", "assistant", "Sure.", "2026-10-28T09:58:30.000Z")];
+    const again = msg("m-3", "user", "ok", "2026-10-28T09:59:40.000Z");
+    const read = { began: "2026-10-28T09:59:30.000Z", seen: new Set<string>() };
+    const live = [msg("m-1", "user", "ok", "2026-10-28T09:58:00.000Z"), msg("m-2", "assistant", "Sure.", "2026-10-28T09:58:30.000Z"), again];
+    expect([...settle(kept, live, before, false, read).ids].sort()).toEqual(["m-1", "m-2"]);
+    expect(settle(kept, [again], before, false, { ...read, seen: new Set(["h1", "h2"]) }).ids.size).toBe(0);
+  });
+
   it("leave errors, unfinished answers and anything after the read alone", () => {
     const kept = [msg("h1", "assistant", "Green.", at)];
     expect(covered(kept, [{ ...msg("m-1", "assistant", "Green.", at), status: "streaming" }], before).size).toBe(0);
@@ -440,6 +462,31 @@ describe("a person's files, against the hub's copy", () => {
       expect(shape(withHistory(page, held, before))).toEqual([["look", ["a"]], ["look", ["b"]], ["Seen.", []]]);
     });
 
+    it("doesn't give a later message that said the same an earlier one's copy while the hub hasn't kept it", () => {
+      const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const second = withFiles(msg("m-2", "user", "look", at(1)), "b");
+      const page = [msg("h1", "user", "look", at(0))];
+      const held = refresh(page, [first, second]);
+      expect(held.map((m) => [m.keptAs, m.placedBefore])).toEqual([
+        ["h1", undefined],
+        [undefined, undefined],
+      ]);
+      expect(shape(withHistory(page, held, before))).toEqual([["look", ["a"]], ["look", ["b"]]]);
+      // Nor once the first has its copy: that one is taken.
+      expect(settle(page, held, before).twins.size).toBe(0);
+      // The next read that has it decides.
+      const later = [...page, msg("h2", "user", "look", at(1))];
+      const again = refresh(later, held);
+      expect(again.map((m) => m.keptAs)).toEqual(["h1", "h2"]);
+      expect(shape(withHistory(later, again, before))).toEqual([["look", ["a"]], ["look", ["b"]]]);
+    });
+
+    it("shows two held messages that said the same in order before either is settled", () => {
+      const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const second = withFiles(msg("m-2", "user", "look", at(1)), "b");
+      expect(shape(withHistory([msg("h1", "user", "look", at(0))], [first, second], before))).toEqual([["look", ["a"]], ["look", ["b"]]]);
+    });
+
     it("keeps its place across later refreshes", () => {
       const anchored = { ...withFiles(msg("m-3", "user", "", at(2)), "c"), placedBefore: "h4" };
       const later = settle(kept, [anchored, msg("m-7", "user", "more chat", at(4))], before);
@@ -575,13 +622,70 @@ describe("a DM's history in the store", () => {
       expect(withHistory(stored().messages, live, stored().loadedAt).map((m) => m.id)).toEqual(["h1", "h2"]);
     });
 
-    it("may show a message it did see twice, only until the next read", async () => {
-      answerAfterAWhile([{ id: "h1", from: "user", text: "hi", at: mid }]);
+    it("covers a message sent while it ran that it has, on opening a DM and on reading it again", async () => {
+      answer(() => {
+        vi.setSystemTime(end);
+        opened.at(-1)!.change({ ...emptyConversation(), messages: [msg("m-1", "user", "hi", mid)] });
+        return json({ messages: [{ id: "h1", from: "user", text: "hi", at: mid }], more: false });
+      });
       useChat.getState().openDm(key);
       await vi.waitFor(() => expect(stored().state).toBe("ready"));
-      const sent = msg("m-1", "user", "hi", mid);
-      expect(withHistory(stored().messages, [sent], stored().loadedAt).map((m) => m.id)).toEqual(["h1", "m-1"]);
-      expect([...covered(stored().messages, [sent], end)]).toEqual(["m-1"]);
+      const dm = opened.at(-1)!;
+      expect(dm.dropped).toEqual([new Set(["m-1"])]);
+
+      vi.setSystemTime("2026-10-28T10:00:03.000Z");
+      answer(() => {
+        vi.setSystemTime("2026-10-28T10:00:05.000Z");
+        dm.change({ ...emptyConversation(), messages: [msg("m-2", "user", "and you?", "2026-10-28T10:00:04.000Z")] });
+        return json({
+          messages: [
+            { id: "h1", from: "user", text: "hi", at: mid },
+            { id: "h2", from: "user", text: "and you?", at: "2026-10-28T10:00:04.000Z" },
+          ],
+          more: false,
+        });
+      });
+      await useChat.getState().refreshHistory(key);
+      expect(dm.dropped.at(-1)).toEqual(new Set(["m-2"]));
+    });
+
+    it("doesn't take a message sent while it ran for one an earlier read had", async () => {
+      const page = [
+        { id: "h1", from: "user", text: "ok", at: start },
+        { id: "h2", from: "agent", text: "Sure.", at: start },
+      ];
+      answerAfterAWhile(page);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      const dm = opened.at(-1)!;
+      vi.setSystemTime("2026-10-28T10:00:03.000Z");
+      answer(() => {
+        vi.setSystemTime("2026-10-28T10:00:05.000Z");
+        dm.change({ ...emptyConversation(), messages: [msg("m-1", "user", "ok", "2026-10-28T10:00:04.000Z")] });
+        return json({ messages: page, more: false });
+      });
+      await useChat.getState().refreshHistory(key);
+      expect(dm.dropped.flatMap((ids) => [...ids])).toEqual([]);
+    });
+
+    it("never goes back to an earlier read's, when that one comes back last", async () => {
+      const said = (id: string) => ({ id, from: "user", text: id, at: start });
+      answerAfterAWhile([said("h1")]);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      const pending: ((r: Response) => void)[] = [];
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => pending.push(r))));
+      vi.setSystemTime("2026-10-28T10:00:03.000Z");
+      const earlier = useChat.getState().refreshHistory(key);
+      vi.setSystemTime("2026-10-28T10:00:04.000Z");
+      const later = useChat.getState().refreshHistory(key);
+      await vi.waitFor(() => expect(pending).toHaveLength(2));
+      pending[1]!(json({ messages: [said("h1"), said("h2"), said("h3")], more: false }));
+      await later;
+      pending[0]!(json({ messages: [said("h1"), said("h2")], more: false }));
+      await earlier;
+      expect(stored().loadedAt).toBe("2026-10-28T10:00:04.000Z");
+      expect(stored().messages.map((m) => m.id)).toEqual(["h1", "h2", "h3"]);
     });
   });
 
