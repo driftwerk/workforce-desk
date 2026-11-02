@@ -74,7 +74,7 @@ const CODEX_LABEL: Record<Choice, string> = {
   allow: "Allow",
   allow_for_session: "Allow for this session",
   deny: "Deny",
-  cancel: "Cancel",
+  cancel: "Deny and stop",
 };
 
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {

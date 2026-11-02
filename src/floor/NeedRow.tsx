@@ -27,7 +27,7 @@ const DECIDING: Record<Choice, { word: string; busy: string; done: string }> = {
   allow: { word: "Allow", busy: "Allowed…", done: "Allowed" },
   allow_for_session: { word: "Allow for this session", busy: "Allowed…", done: "Allowed for this session" },
   deny: { word: "Deny", busy: "Denied…", done: "Denied" },
-  cancel: { word: "Cancel", busy: "Cancelled…", done: "Cancelled" },
+  cancel: { word: "Deny and stop", busy: "Stopped…", done: "Denied and stopped" },
 };
 
 /** The answers a need offers, in the order they read: Codex says its own

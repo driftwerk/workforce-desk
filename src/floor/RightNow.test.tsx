@@ -337,11 +337,11 @@ describe("Right now's needs, answered in place", () => {
     show([codex("cx-1", "Run rm a.txt?", ["cancel", "allow"]), codex("cx-2", "Edit a.rs?", ["allow", "allow_for_session", "deny", "cancel"], 5)]);
     render(<RightNow brief={null} />);
     expect(needRows().map((r) => within(r).getAllByRole("button").filter((b) => b.tabIndex !== -1).map((b) => b.textContent))).toEqual([
-      ["Allow", "Cancel", "Open"],
-      ["Allow", "Allow for this session", "Deny", "Cancel", "Open"],
+      ["Allow", "Deny and stop", "Open"],
+      ["Allow", "Allow for this session", "Deny", "Deny and stop", "Open"],
     ]);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow for this session “Edit a.rs?” for acme-web" })));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel “Run rm a.txt?” for acme-web" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Deny and stop “Run rm a.txt?” for acme-web" })));
     expect(hubs.local!.decided).toEqual([
       { at: { kind: "codex", sessionId: "s-1", approvalId: "cx-2", choices: ["allow", "allow_for_session", "deny", "cancel"] }, choice: "allow_for_session" },
       { at: { kind: "codex", sessionId: "s-1", approvalId: "cx-1", choices: ["cancel", "allow"] }, choice: "cancel" },
