@@ -661,14 +661,16 @@ export class Conversation {
     this.set({ ...this.state, messages: this.state.messages.filter((m) => !ids.has(m.id)) });
   }
 
-  /** Says which kept message each of these live messages goes before. */
-  place(anchors: ReadonlyMap<string, string>) {
-    if (anchors.size === 0) return;
+  /** Says which kept message each of these live messages goes before, and
+   *  which kept message says the words of each of these. */
+  place(anchors: ReadonlyMap<string, string>, twins: ReadonlyMap<string, string>) {
+    if (anchors.size === 0 && twins.size === 0) return;
     this.set({
       ...this.state,
       messages: this.state.messages.map((m) => {
         const placedBefore = anchors.get(m.id);
-        return placedBefore ? { ...m, placedBefore } : m;
+        const keptAs = twins.get(m.id);
+        return placedBefore || keptAs ? { ...m, ...(placedBefore ? { placedBefore } : {}), ...(keptAs ? { keptAs } : {}) } : m;
       }),
     });
   }

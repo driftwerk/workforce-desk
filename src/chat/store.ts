@@ -303,12 +303,14 @@ export const useChat = create<ChatStore>((set, get) => ({
     const putHistory = (h: Partial<History>) =>
       set((s) => ({ histories: { ...s.histories, [key]: { ...(s.histories[key] ?? blankHistory()), ...h } } }));
     putHistory({ state: "loading" });
+    // What's sent from here on, the read may not have seen.
+    const started = new Date().toISOString();
     try {
       const page = await fetchHistory(target.hub, target.agent.id);
       if (!get().histories[key]) return; // forgotten meanwhile
       putHistory(
         page
-          ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: new Date().toISOString() }
+          ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: started }
           : { state: "absent", messages: [], more: false },
       );
     } catch {
@@ -356,14 +358,14 @@ export const useChat = create<ChatStore>((set, get) => ({
           ...was,
           messages: prepend(was.messages, page.messages),
           more: reachesBack ? page.more : was.more,
-          loadedAt: new Date().toISOString(),
+          loadedAt: started,
         },
       },
     }));
     const convo = get().conversations[key];
     if (convo) {
-      const { ids, anchors } = settle(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream));
-      live.get(key)?.place(anchors);
+      const { ids, anchors, twins } = settle(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream));
+      live.get(key)?.place(anchors, twins);
       live.get(key)?.drop(ids);
     }
   },

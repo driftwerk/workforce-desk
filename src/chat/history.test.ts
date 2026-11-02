@@ -263,8 +263,11 @@ describe("a person's files, against the hub's copy", () => {
 
   /** The live messages after each `refreshHistory`, as the store folds them. */
   const refresh = (page: ChatMessage[], held: ChatMessage[], seen = before) => {
-    const { ids, anchors } = settle(page, held, seen);
-    return held.filter((m) => !ids.has(m.id)).map((m) => (anchors.has(m.id) ? { ...m, placedBefore: anchors.get(m.id)! } : m));
+    const { ids, anchors, twins } = settle(page, held, seen);
+    return held
+      .filter((m) => !ids.has(m.id))
+      .map((m) => (anchors.has(m.id) ? { ...m, placedBefore: anchors.get(m.id)! } : m))
+      .map((m) => (twins?.has(m.id) ? { ...m, keptAs: twins.get(m.id)! } : m));
   };
 
   describe("a hub that returns them", () => {
@@ -316,7 +319,7 @@ describe("a person's files, against the hub's copy", () => {
       ["Sure.", []],
     ];
 
-    it("never drops a live message for a copy without its files", () => {
+    it("doesn't drop a person's live message for a copy without its files", () => {
       expect([...covered(kept, live, before)].sort()).toEqual(["m-2", "m-4", "m-5", "m-6"]);
     });
 
@@ -369,6 +372,72 @@ describe("a person's files, against the hub's copy", () => {
       const history = [msg("h1", "user", "look", at(0)), msg("h2", "assistant", "Yes?", at(1))];
       const sent = withFiles(msg("m-1", "user", "look", at(1)), "a");
       expect(shape(withHistory(history, [sent], at(0)))).toEqual([["look", []], ["Yes?", []], ["look", ["a"]]]);
+    });
+
+    it("keeps a reply that says what the last kept message said, after a message with files", () => {
+      const history = [msg("h1", "user", "hi", at(0)), msg("h2", "assistant", "Got it.", at(1))];
+      const reply = msg("m-2", "assistant", "Got it.", at(3));
+      for (const words of ["look", ""]) {
+        const sent = withFiles(msg("m-1", "user", words, at(2)), "a");
+        expect(shape(withHistory(history, [sent, reply], at(1)))).toEqual([
+          ["hi", []],
+          ["Got it.", []],
+          [words, ["a"]],
+          ["Got it.", []],
+        ]);
+      }
+    });
+
+    it("still drops an answer the socket repeats after an image that has its place", () => {
+      const history = [msg("h1", "user", "hi", at(0)), msg("h2", "assistant", "Got it.", at(2))];
+      const placed = { ...withFiles(msg("m-1", "user", "", at(1)), "a"), placedBefore: "h2" };
+      const repeat = msg("m-2", "assistant", "Got it.", at(3));
+      expect(shape(withHistory(history, [placed, repeat], at(2)))).toEqual([
+        ["hi", []],
+        ["", ["a"]],
+        ["Got it.", []],
+      ]);
+    });
+
+    it("keeps an image just sent last when this computer's clock is well behind the hub's", () => {
+      // This computer is 5 minutes slow: the read, then the image, by its
+      // clock, are both before what the hub said just now by its own.
+      const recent = [msg("h1", "user", "a", at(4)), msg("h2", "assistant", "b", at(5))];
+      const sent = withFiles(msg("m-1", "user", "", at(1)), "z");
+      expect(withHistory(recent, [sent], at(0)).map((m) => m.id)).toEqual(["h1", "h2", "m-1"]);
+    });
+
+    it("gives a message the hub reworded no place in the history, so it isn't said there twice", () => {
+      const history = [msg("h1", "user", "my key is [redacted]", at(0)), msg("h2", "assistant", "Noted.", at(1))];
+      const live2 = [msg("m-1", "user", "my key is hunter2", at(0)), msg("m-2", "assistant", "Noted.", at(1))];
+      const { anchors } = settle(history, live2, before);
+      expect(anchors.size).toBe(0);
+      expect(withHistory(history, refresh(history, live2), before).at(-1)!.id).toBe("m-1");
+    });
+
+    it("puts files on the copy it found, however much has followed it since", () => {
+      const sent = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const page = [msg("h1", "user", "look", at(0)), msg("h2", "assistant", "Seen.", at(1))];
+      const held = refresh(page, [sent]);
+      expect(held.map((m) => m.id)).toEqual(["m-1"]);
+      const chat = Array.from({ length: 60 }, (_, i) => msg(`c${i}`, i % 2 ? "assistant" : "user", `line ${i}`, at(2)));
+      const later = [...page, ...chat];
+      // Refreshed again, it stays where it was found and takes no other place.
+      const again = refresh(later, held);
+      expect(again.map((m) => m.id)).toEqual(["m-1"]);
+      expect(again[0]!.placedBefore).toBeUndefined();
+      const shown = shape(withHistory(later, again, before));
+      expect(shown).toHaveLength(later.length);
+      expect(shown[0]).toEqual(["look", ["a"]]);
+    });
+
+    it("gives two live messages that say the same a copy each, and takes the files back from neither", () => {
+      const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const second = withFiles(msg("m-2", "user", "look", at(1)), "b");
+      const page = [msg("h1", "user", "look", at(0)), msg("h2", "user", "look", at(1)), msg("h3", "assistant", "Seen.", at(2))];
+      const held = refresh(page, [first, second]);
+      expect(held.map((m) => m.keptAs)).toEqual(["h1", "h2"]);
+      expect(shape(withHistory(page, held, before))).toEqual([["look", ["a"]], ["look", ["b"]], ["Seen.", []]]);
     });
 
     it("keeps its place across later refreshes", () => {
@@ -451,6 +520,70 @@ describe("a DM's history in the store", () => {
     useChat.setState({ hubs: [hub], roster: [agent], conversations: {}, histories: {}, activeAgent: null });
   });
   afterEach(() => useChat.getState().forget("local/scout"));
+
+  describe("what a read is known to have seen", () => {
+    const start = "2026-10-28T10:00:00.000Z";
+    const mid = "2026-10-28T10:00:01.000Z";
+    const end = "2026-10-28T10:00:02.000Z";
+    const key = "local/scout";
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(start);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    /** Answers `messages`, as the read takes until `end` to come back. */
+    const answerAfterAWhile = (messages: unknown[]) =>
+      answer(() => {
+        vi.setSystemTime(end);
+        return json({ messages, more: false });
+      });
+    const stored = () => useChat.getState().histories[key]!;
+
+    it("is what was there when it began, on opening a DM and on reading it again", async () => {
+      answerAfterAWhile([{ id: "h1", from: "user", text: "look", at: "2026-10-28T09:00:00.000Z" }]);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      expect(stored().loadedAt).toBe(start);
+
+      const again = "2026-10-28T10:00:01.500Z";
+      vi.setSystemTime(again);
+      await useChat.getState().refreshHistory(key);
+      expect(stored().loadedAt).toBe(again);
+    });
+
+    it("doesn't take an image sent while it ran for an earlier message that said the same", async () => {
+      answerAfterAWhile([{ id: "h1", from: "user", text: "look", at: start }]);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      const sent: ChatMessage = {
+        ...msg("m-1", "user", "look", mid),
+        attachments: [{ artifact_id: "a", media_type: "image/png", filename: "a.png", size: 1 }],
+      };
+      expect(withHistory(stored().messages, [sent], stored().loadedAt).map((m) => m.id)).toEqual(["h1", "m-1"]);
+    });
+
+    it("still covers a reply begun before it that finished while it ran", async () => {
+      answerAfterAWhile([
+        { id: "h1", from: "user", text: "go", at: start },
+        { id: "h2", from: "assistant", text: "Done.", at: start },
+      ]);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      const live = [msg("m-1", "user", "go", "2026-10-28T09:59:58.000Z"), msg("m-2", "assistant", "Done.", "2026-10-28T09:59:59.000Z")];
+      expect(withHistory(stored().messages, live, stored().loadedAt).map((m) => m.id)).toEqual(["h1", "h2"]);
+    });
+
+    it("may show a message it did see twice, only until the next read", async () => {
+      answerAfterAWhile([{ id: "h1", from: "user", text: "hi", at: mid }]);
+      useChat.getState().openDm(key);
+      await vi.waitFor(() => expect(stored().state).toBe("ready"));
+      const sent = msg("m-1", "user", "hi", mid);
+      expect(withHistory(stored().messages, [sent], stored().loadedAt).map((m) => m.id)).toEqual(["h1", "m-1"]);
+      expect([...covered(stored().messages, [sent], end)]).toEqual(["m-1"]);
+    });
+  });
 
   it("reads it when the DM opens, and pages back with the earliest id", async () => {
     answer((u) =>
