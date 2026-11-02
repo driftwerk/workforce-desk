@@ -49,6 +49,8 @@ export interface Turn {
   /** The hub has sent a frame of it: it is a turn of its own, not one
    *  taken into a live turn. */
   acked: boolean;
+  /** When its last frame came. */
+  heardAt?: number;
 }
 
 /** A tool call waiting for you to allow or deny it. */
@@ -270,6 +272,7 @@ const newTurn = (ref: string, now: number): Turn => ({
   attachments: [],
   state: "live",
   acked: false,
+  heardAt: now,
 });
 
 /** One frame of turn `ref` folded into its draft. */
@@ -309,7 +312,7 @@ const foldTurn = (turns: Record<string, Turn>, ref: string, msg: ServerMessage, 
   })();
   // A turn's end says what it saved, null for nothing; every other frame
   // may name the message its answer is.
-  return { ...turns, [ref]: { ...next, replyId: msg.type === "turn_end" ? (msg.id ?? null) : (msg.id ?? t.replyId), acked: true } };
+  return { ...turns, [ref]: { ...next, replyId: msg.type === "turn_end" ? (msg.id ?? null) : (msg.id ?? t.replyId), acked: true, heardAt: now } };
 };
 
 const step = (s: ConversationState, msg: ServerMessage, now: number): Working | null => {
@@ -558,7 +561,21 @@ export interface Ask {
   turn?: DeskTurn;
   legacy?: string;
   attachments?: Attachment[];
+  /** Sent from the queue under this ticket (its turn's ref, on a hub that
+   *  takes structured turns): it waits for a running turn rather than
+   *  steering it, and what became of it is told to
+   *  [`Conversation.onQueued`]. */
+  queued?: string;
 }
+
+/** What became of a queued send: the hub took it, held it back because a
+ *  turn is still running, or it didn't get there (refused, or the
+ *  connection went before the hub said). */
+export type QueuedOutcome = "taken" | "busy" | "lost";
+
+/** Frames that say a turn is under way: on a hub that names no turns, the
+ *  first after a queued send means the hub took it. */
+const UNDER_WAY = new Set(["typing", "stream_start", "stream_delta", "message", "tool_start", USER_MESSAGE]);
 
 /** One conversation with an agent: a `/ws` connection on a Desk channel,
  *  reconnecting until closed. */
@@ -569,6 +586,13 @@ export class Conversation {
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private alive: ReturnType<typeof keepAlive> | undefined;
+  /** Queued sends the hub hasn't answered yet, by ticket: the ref their
+   *  frames carry (none on a hub that names no turns), and the id of the
+   *  message shown for each. */
+  private waiting = new Map<string, { ref: string | null; shown: string }>();
+  /** Told what became of each queued send, by its ticket. One that didn't
+   *  get there is no longer shown as said. */
+  onQueued?: (ticket: string, outcome: QueuedOutcome) => void;
 
   constructor(
     readonly hub: HubAccount,
@@ -606,13 +630,18 @@ export class Conversation {
     ws.onmessage = (e) => {
       this.alive?.heard();
       try {
-        this.set(reduce(this.state, JSON.parse(e.data as string) as ServerMessage));
+        const msg = JSON.parse(e.data as string) as ServerMessage;
+        if (this.settleQueued(msg)) return;
+        this.set(reduce(this.state, msg));
       } catch {
         /* not a message Desk renders */
       }
     };
     ws.onclose = () => {
       this.alive?.stop();
+      // Whether the hub took what was still on its way can't be known now:
+      // it goes back to the queue rather than be lost.
+      this.unsend([...this.waiting.keys()], "lost");
       this.set(disconnected(this.state));
       if (!this.closed) this.timer = setTimeout(() => this.open(), backoff(this.retry++));
     };
@@ -626,7 +655,8 @@ export class Conversation {
     const features = this.state.features;
     if (!this.ws || this.ws.readyState !== OPEN || !features || (!content.trim() && !files.length)) return false;
     const structured = !!ask.turn && features.has(FEATURES.place);
-    const turnRef = structured ? crypto.randomUUID() : null;
+    const turnRef = structured ? (ask.queued ?? crypto.randomUUID()) : null;
+    const queued = !!ask.queued && structured && features.has(FEATURES.queue);
     this.ws.send(
       JSON.stringify({
         type: "chat",
@@ -635,6 +665,7 @@ export class Conversation {
         channel: this.channel,
         agent_id: this.agentId,
         ...(structured ? { desk: ask.turn, turn_ref: turnRef, answers_approvals: true } : {}),
+        ...(queued ? { mode: "queue" } : {}),
         ...(files.length
           ? { attachments: files.map((f) => ({ filename: f.filename, mime_type: f.media_type, artifact_id: f.artifact_id })) }
           : {}),
@@ -642,6 +673,7 @@ export class Conversation {
     );
     const now = Date.now();
     const said = { ...message("user", content), ...(files.length ? { attachments: files } : {}) };
+    if (ask.queued) this.waiting.set(ask.queued, { ref: turnRef, shown: said.id });
     this.set({
       ...this.state,
       messages: [...this.state.messages, said],
@@ -649,6 +681,61 @@ export class Conversation {
       turns: turnRef ? { ...this.state.turns, [turnRef]: newTurn(turnRef, now) } : this.state.turns,
     });
     return { turnRef };
+  }
+
+  /** Settles the queued sends `msg` answers: a frame of one's turn (or, on
+   *  a hub that names no turns, the turn starting) means the hub took it;
+   *  an error means it didn't, and it's taken back, as if never said. True
+   *  when the frame is only the hub holding a send back as busy, which
+   *  shows nothing. */
+  private settleQueued(msg: ServerMessage): boolean {
+    if (!this.waiting.size) return false;
+    const error = msg.type === "error";
+    const answered = [...this.waiting].filter(([, w]) =>
+      msg.turn_ref ? w.ref === msg.turn_ref : error || (w.ref === null && UNDER_WAY.has(msg.type)),
+    );
+    if (!answered.length) return false;
+    const tickets = answered.map(([ticket]) => ticket);
+    if (!error) {
+      for (const t of tickets) {
+        this.waiting.delete(t);
+        this.onQueued?.(t, "taken");
+      }
+      return false;
+    }
+    const busy = (msg.error ?? msg.content) === BUSY;
+    this.unsend(tickets, busy ? "busy" : "lost");
+    // Held back as busy, it says nothing; any other refusal says why.
+    return busy;
+  }
+
+  /** Takes back queued sends that didn't get there: their messages aren't
+   *  shown as said, nor their turns as under way. */
+  private unsend(tickets: string[], outcome: QueuedOutcome) {
+    const gone = tickets.flatMap((t) => {
+      const w = this.waiting.get(t);
+      this.waiting.delete(t);
+      return w ? [{ ...w, ticket: t }] : [];
+    });
+    if (!gone.length) return;
+    const shown = new Set(gone.map((w) => w.shown));
+    const refs = new Set(gone.flatMap((w) => (w.ref ? [w.ref] : [])));
+    const placeholder = this.state.working?.phase === "sending";
+    this.set({
+      ...this.state,
+      messages: this.state.messages.filter((m) => !shown.has(m.id)),
+      turns: Object.fromEntries(Object.entries(this.state.turns).filter(([ref]) => !refs.has(ref))),
+      ...(placeholder ? { working: null } : {}),
+    });
+    for (const w of gone) this.onQueued?.(w.ticket, outcome);
+  }
+
+  /** Takes turn `ref` as ended: its answer finished and the hub never said
+   *  the turn did. */
+  lapse(ref: string) {
+    const t = this.state.turns[ref];
+    if (!t || t.state !== "live") return;
+    this.set({ ...this.state, turns: { ...this.state.turns, [ref]: { ...t, working: null, state: "ended" } } });
   }
 
   /** Answers a permission prompt. */

@@ -6,7 +6,7 @@ import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles }
 import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
 import { withHistory } from "../chat/history";
-import { useChat } from "../chat/store";
+import { isRunning, useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
@@ -23,6 +23,7 @@ import { WorkingRow } from "../chat/WorkingRow";
 import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
+import { QueuedMessages } from "./QueuedMessages";
 import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
@@ -236,7 +237,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const subtitle =
     overseeing && tab === "chat" ? overseeingLine(roster, agent, trackedOverview ?? trackedSessions, overseeing) : brainSubtitle;
   const Root = inPane ? "div" : "main";
-  const busy = convo.working !== null;
+  // Working, or a streamed turn not yet said to have ended (for a grace).
+  const busy = isRunning(convo);
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the
   // tools it has run), not an empty message.
@@ -429,6 +431,11 @@ function DmComposer({
   sending: [boolean, (sending: boolean) => void];
 }) {
   const send = useChat((s) => s.send);
+  const enqueue = useChat((s) => s.enqueue);
+  // A queue that's waiting to go keeps what you send behind it, and Stop
+  // beside it, whatever the agent is doing.
+  const waiting = useChat((s) => !!s.queues[to]?.items.length && !s.queues[to]!.paused);
+  const holding = busy || waiting;
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
@@ -441,15 +448,24 @@ function DmComposer({
     const picked = files.files;
     if (sending || (!draft.trim() && !picked.length)) return;
     const text = emoji.settle(draft);
+    // While the agent works, what you send waits for its next turn: Stop
+    // (or Esc) stops it, and a queued message can be sent at once.
     if (!picked.length) {
-      if (send(to, text)) setDraft("");
+      if (holding) {
+        enqueue(to, text);
+        setDraft("");
+      } else if (send(to, text)) setDraft("");
       return;
     }
     if (!hub) return;
     setSending(true);
     uploadAll(hub, agent.id, DESK_DM, picked)
       .then((attachments) => {
-        if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        // Still working once the files are up: they wait with the rest.
+        const s = useChat.getState();
+        const q = s.queues[to];
+        if (isRunning(s.conversations[to]) || (!!q?.items.length && !q.paused)) enqueue(to, text, attachments);
+        else if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         setDraft("");
         files.sent(picked);
       })
@@ -478,21 +494,35 @@ function DmComposer({
           onSelect={emoji.onSelect}
           onFocus={emoji.onFocus}
           onKeyDown={(e) => {
+            // Keys that pick or end an IME composition are the input method's.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (emoji.onKeyDown(e)) return;
             if (e.key === "Enter" && !e.shiftKey) submit(e);
+            // Esc stops the agent, as Stop does; with nothing running it's
+            // left to close what it always closed.
+            else if (e.key === "Escape" && holding && !e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              cancel(to);
+            }
           }}
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
-        {busy ? (
-          <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
+        {holding && (
+          <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop
           </button>
-        ) : (
-          <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
-            {sending ? "Sending…" : "Send"}
-          </button>
         )}
+        <button
+          type="submit"
+          className="btn btn-signal"
+          title={holding ? `Sends when ${agent.name}’s done` : undefined}
+          disabled={sending || (!draft.trim() && !files.pending.length) || (!holding && !connected)}
+        >
+          {sending ? "Sending…" : holding ? "Queue" : "Send"}
+        </button>
+        <QueuedMessages to={to} name={agent.name} busy={busy} />
       </form>
     </>
   );

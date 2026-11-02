@@ -240,6 +240,84 @@
   flex-basis: 100%;
 }
 
+/* ── Queued for the next turn ───────────────────────────────────────────── */
+
+.composer-queue {
+  flex-basis: 100%;
+  order: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.composer-queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.composer-queue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
+}
+.queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+.queued-edit {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  field-sizing: content;
+  max-height: 120px;
+}
+.queued-files {
+  flex: none;
+}
+.queued-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.queued-actions .link {
+  margin-right: 4px;
+}
+.queued-actions .link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .drop-target {
   position: relative;
 }
