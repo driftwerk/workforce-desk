@@ -95,21 +95,22 @@ pub fn finish(paths: &Paths, counts: Counts) -> Result<Moved> {
 }
 
 /// Moves the SQLite memories into the store with the hub's `workforce`
-/// binary, run on the hub's config (which must already say the store) and
-/// environment, while the hub is stopped. Checked, noted and set aside, or
+/// binary, run on the hub's config (which must already say the store),
+/// environment and secrets (on a pipe), while the hub is stopped. Checked, noted and set aside, or
 /// an error and nothing changed but what the store was given (a second run
 /// gives it the same memories again, under the same ids).
 pub async fn move_sqlite(
     workforce: &Path,
     paths: &Paths,
     env: &BTreeMap<String, String>,
+    secrets: &crate::handover::HubSecrets,
 ) -> Result<Moved> {
     let db = paths.sqlite_memories();
     if !db.exists() {
         return finish(paths, Counts::default());
     }
-    let run = Command::new(workforce)
-        .args(["memory", "move-sqlite", "--apply", "--json", "-c"])
+    let mut cmd = Command::new(workforce);
+    cmd.args(["memory", "move-sqlite", "--apply", "--json", "-c"])
         .arg(paths.hub_config())
         .arg("--from")
         .arg(&db)
@@ -117,9 +118,13 @@ pub async fn move_sqlite(
         .env_clear()
         .envs(env)
         .stdin(Stdio::null())
-        .kill_on_drop(true)
-        .output();
-    let out = tokio::time::timeout(Duration::from_secs(60 * 60), run)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let handover = secrets.hand_to(&mut cmd)?;
+    let child = cmd.spawn().context("starting the memory move");
+    drop(handover);
+    let out = tokio::time::timeout(Duration::from_secs(60 * 60), child?.wait_with_output())
         .await
         .context("moving memories took over an hour")??;
     let stdout = String::from_utf8_lossy(&out.stdout);

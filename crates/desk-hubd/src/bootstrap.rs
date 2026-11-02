@@ -24,11 +24,19 @@ pub struct Person {
     pub device_name: String,
 }
 
+/// `program`'s output, when it succeeds with some. Only starting it holds
+/// back desk-hubd's other spawns; it is waited for after.
 fn command(program: &str, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(program)
-        .args(args)
-        .output()
-        .ok()?;
+    let child = crate::handover::spawning(|| {
+        std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    })
+    .ok()?;
+    let out = child.wait_with_output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (out.status.success() && !s.is_empty()).then_some(s)
 }
@@ -235,7 +243,8 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
     if !ready {
         eyre::bail!("the local hub did not come up for pairing");
     }
-    let person = person();
+    // `git` runs to say who the person is: off the async threads.
+    let person = tokio::task::spawn_blocking(person).await?;
     let owner = ensure_owner(&hub, paths, &person).await?;
     let env = std::env::vars().collect();
     let secrets = Secrets::for_host(paths, &Host::running_here(&env))?;
@@ -258,6 +267,21 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A command's output is waited for without holding back desk-hubd's
+    /// other spawns: only starting it is.
+    #[test]
+    fn a_command_is_waited_for_outside_the_spawn_lock() {
+        let waiting = std::thread::spawn(|| command("/bin/sh", &["-c", "sleep 1; echo done"]));
+        std::thread::sleep(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        crate::handover::spawning(|| ());
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "a spawn waited for a running command"
+        );
+        assert_eq!(waiting.join().unwrap().as_deref(), Some("done"));
+    }
 
     #[test]
     fn email_matches_are_exact() {
