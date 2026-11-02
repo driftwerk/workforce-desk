@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useDesk } from "../hub/store";
-import type { Decision, Denied, Session } from "../hub/types";
+import type { Choice, Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
 
 /** "Bash(cargo test)" → "Bash". */
@@ -69,6 +69,14 @@ export function Asked({ session, compact = false }: { session: Session; compact?
   );
 }
 
+const CODEX_ORDER: Choice[] = ["allow", "allow_for_session", "deny", "cancel"];
+const CODEX_LABEL: Record<Choice, string> = {
+  allow: "Allow",
+  allow_for_session: "Allow for this session",
+  deny: "Deny",
+  cancel: "Cancel",
+};
+
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {
   const { hub, fail, open } = useDesk();
   const pending = session.pending;
@@ -92,6 +100,29 @@ export function Approval({ session, compact = false }: { session: Session; compa
     );
   }
   const decide = (d: Decision) => hub?.decide(session.id, pending.id, d).catch(fail);
+  if (pending.choices?.length) {
+    // Codex's own answers; its terminal asks too, and whichever answers first wins.
+    const offered = CODEX_ORDER.filter((c) => pending.choices!.includes(c));
+    return (
+      <div className={compact ? "approval approval-compact" : "approval"}>
+        {!compact && (
+          <span className="approval-text">
+            <b>Needs you</b>
+            <span>
+              {pending.tool}
+              {pending.detail ? ` · ${pending.detail}` : ""}
+              {pending.why ? ` · ${pending.why}` : ""}
+            </span>
+          </span>
+        )}
+        {offered.map((c) => (
+          <button key={c} type="button" className={c === "allow" ? "btn btn-blocked" : "btn btn-ghost"} onClick={() => decide(c)}>
+            {CODEX_LABEL[c]}
+          </button>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className={compact ? "approval approval-compact" : "approval"}>
       {!compact && (

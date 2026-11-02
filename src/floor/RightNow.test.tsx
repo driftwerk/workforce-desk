@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { HubError, type DeskHub } from "../hub/client";
-import type { Room, Session } from "../hub/types";
+import type { Choice, Room, Session } from "../hub/types";
 import { openTarget } from "../shell/navigate";
 import { RightNow } from "./RightNow";
 import { useFloor } from "./store";
@@ -329,6 +329,23 @@ describe("Right now's needs, answered in place", () => {
     ]);
     expect(openTarget).not.toHaveBeenCalled();
     await act(() => vi.waitFor(() => expect(hubs.local!.days).toHaveLength(1)));
+  });
+
+  it("offers a Codex request the answers Codex does, and sends the one chosen", async () => {
+    const codex = (id: string, ask: string, choices: Choice[], ago = 6) =>
+      approval(id, "s-1", { who: session("s-1", "acme-web"), ask, since: at(ago), answer: { kind: "decide", at: { kind: "codex", sessionId: "s-1", approvalId: id, choices } } });
+    show([codex("cx-1", "Run rm a.txt?", ["cancel", "allow"]), codex("cx-2", "Edit a.rs?", ["allow", "allow_for_session", "deny", "cancel"], 5)]);
+    render(<RightNow brief={null} />);
+    expect(needRows().map((r) => within(r).getAllByRole("button").filter((b) => b.tabIndex !== -1).map((b) => b.textContent))).toEqual([
+      ["Allow", "Cancel", "Open"],
+      ["Allow", "Allow for this session", "Deny", "Cancel", "Open"],
+    ]);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow for this session “Edit a.rs?” for acme-web" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel “Run rm a.txt?” for acme-web" })));
+    expect(hubs.local!.decided).toEqual([
+      { at: { kind: "codex", sessionId: "s-1", approvalId: "cx-2", choices: ["allow", "allow_for_session", "deny", "cancel"] }, choice: "allow_for_session" },
+      { at: { kind: "codex", sessionId: "s-1", approvalId: "cx-1", choices: ["cancel", "allow"] }, choice: "cancel" },
+    ]);
   });
 
   it("opens from the row's body, beside the Floor, and replies there too", () => {

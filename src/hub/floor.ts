@@ -1,8 +1,8 @@
 import { deskCall } from "./client";
 import type { HubRef } from "./net";
-import type { DecideRef, FloorView, UsageView } from "./types";
+import type { Choice, DecideRef, FloorView, UsageView } from "./types";
 
-export type Choice = "allow" | "deny";
+export type { Choice } from "./types";
 
 /** A hub's floor: what's waiting on the person, what's running, today's
  *  lanes, and the plans' usage, all as the person; and answering a need. */

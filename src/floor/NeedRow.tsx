@@ -23,9 +23,22 @@ const useFocusKept = () => {
   return ref;
 };
 
-const DECIDING: Record<Choice, { busy: string; done: string }> = {
-  allow: { busy: "Allowed…", done: "Allowed" },
-  deny: { busy: "Denied…", done: "Denied" },
+const DECIDING: Record<Choice, { word: string; busy: string; done: string }> = {
+  allow: { word: "Allow", busy: "Allowed…", done: "Allowed" },
+  allow_for_session: { word: "Allow for this session", busy: "Allowed…", done: "Allowed for this session" },
+  deny: { word: "Deny", busy: "Denied…", done: "Denied" },
+  cancel: { word: "Cancel", busy: "Cancelled…", done: "Cancelled" },
+};
+
+/** The answers a need offers, in the order they read: Codex says its own
+ *  (an escalated command offers only Allow and Cancel); the rest allow or
+ *  deny. */
+const choicesOf = (need: FloorNeed): Choice[] => {
+  if (need.answer.kind !== "decide") return [];
+  const at = need.answer.at;
+  if (at.kind !== "codex") return ["allow", "deny"];
+  const order: Choice[] = ["allow", "allow_for_session", "deny", "cancel"];
+  return order.filter((c) => at.choices.includes(c));
 };
 
 /** What still needs the person, as a row: it opens where it is (a session
@@ -75,9 +88,8 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       </FloorRow>
       {actions && (
         <span className="floor-need-buttons">
-          {need.answer.kind === "decide" &&
-            (["allow", "deny"] as const).map((choice) => {
-              const word = deciding === choice ? DECIDING[choice].busy : choice === "allow" ? "Allow" : "Deny";
+          {choicesOf(need).map((choice) => {
+              const word = deciding === choice ? DECIDING[choice].busy : DECIDING[choice].word;
               return (
                 <button
                   key={choice}

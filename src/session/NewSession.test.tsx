@@ -103,3 +103,23 @@ it("offers the engines the hub starts, and approvals in Desk only where the engi
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", approvals: undefined }));
 });
+
+it("starts Codex with Approve for me only when asked, and only where the hub offers it", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-3" }));
+  const caps = terminalCaps("terminal");
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: { terminal: { ...caps.terminal!, approveForMe: true } } }),
+  ]);
+  useDesk.setState({ hub: { start, engines } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole("radio", { name: "Approve for me" })).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  expect(screen.getByRole("radio", { name: "Ask me" }).getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: "Approve for me" }));
+  expect(screen.getByText(/Codex’s own reviewer answers what it asks/)).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", approveForMe: true }));
+});

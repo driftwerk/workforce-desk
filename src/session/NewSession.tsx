@@ -15,6 +15,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
   const [goal, setGoal] = useState("");
   const [worktree, setWorktree] = useState("");
   const [approvals, setApprovals] = useState<"desk" | "terminal">("desk");
+  const [approveForMe, setApproveForMe] = useState(false);
   const [busy, setBusy] = useState(false);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   useEffect(() => {
@@ -30,6 +31,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
   const offered = startable(engines);
   const caps = defaultCaps(engines?.find((e) => e.engine === engine));
   const inDesk = answersInDesk(engine, caps);
+  const canApproveForMe = !!caps?.approveForMe;
 
   const choose = async () => {
     const dir = await pickFolder();
@@ -49,6 +51,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
         name: name || nameFrom(cwd),
         goal,
         approvals: inDesk ? approvals : undefined,
+        approveForMe: canApproveForMe && approveForMe ? true : undefined,
         worktree: worktree.trim() || undefined,
         env: await pluginEnv(),
       });
@@ -109,6 +112,22 @@ export function NewSession({ onClose }: { onClose: () => void }) {
                 In the terminal
               </button>
             </div>
+          </div>
+        )}
+        {canApproveForMe && (
+          <div className="field">
+            <span>Approvals</span>
+            <div className="seg" role="radiogroup" aria-label="Approvals">
+              <button type="button" role="radio" aria-checked={!approveForMe} onClick={() => setApproveForMe(false)}>
+                Ask me
+              </button>
+              <button type="button" role="radio" aria-checked={approveForMe} onClick={() => setApproveForMe(true)}>
+                Approve for me
+              </button>
+            </div>
+            {approveForMe && (
+              <p className="muted small">Codex’s own reviewer answers what it asks, inside the workspace sandbox. You can still stop its turn.</p>
+            )}
           </div>
         )}
         <footer className="sheet-foot">

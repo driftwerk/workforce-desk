@@ -24,7 +24,12 @@ const ENGINE = ENGINE_TITLE;
 
 const where = (s: Session): string => {
   const background = backgroundOf(s);
-  return [ENGINE[s.engine], s.branch ? `branch ${s.branch}` : homeShort(s.cwd), background && backgroundLine(background)]
+  return [
+    ENGINE[s.engine],
+    s.approveForMe && "Approve for me",
+    s.branch ? `branch ${s.branch}` : homeShort(s.cwd),
+    background && backgroundLine(background),
+  ]
     .filter(Boolean)
     .join(" · ");
 };
