@@ -4,7 +4,8 @@
 // message. Stopping the agent pauses the queue, so nothing goes on its own
 // right after a Stop; a queue put back after a reload waits paused too, since
 // Desk can't tell whether the turn it waited for has ended. Kept with the
-// drafts, so a reload or a crash never loses it.
+// drafts, so a reload or a crash never loses it: a message stays in the queue
+// until the hub has taken it, and one sent when the window went is put back.
 
 import { draftKey } from "../restore/drafts";
 import { deskState } from "../restore/boot";
@@ -16,6 +17,10 @@ export interface Queued {
   id: string;
   text: string;
   attachments?: Attachment[];
+  /** On its way: the ticket of the send it went in, until the hub takes it
+   *  (and it leaves the queue) or it's put back. Kept, so another window
+   *  doesn't send it too. */
+  sending?: string;
 }
 
 /** A DM's queue. */
@@ -23,6 +28,8 @@ export interface Queue {
   items: Queued[];
   /** Held until you send it on: after a Stop, or put back after a reload. */
   paused: boolean;
+  /** The message being edited here: nothing goes until it's saved. */
+  editing?: string;
 }
 
 export const emptyQueue = (): Queue => ({ items: [], paused: false });
@@ -42,17 +49,39 @@ const isQueued = (v: unknown): v is Queued =>
   typeof v === "object" &&
   typeof (v as Queued).id === "string" &&
   typeof (v as Queued).text === "string" &&
-  ((v as Queued).attachments === undefined || Array.isArray((v as Queued).attachments));
+  ((v as Queued).attachments === undefined || Array.isArray((v as Queued).attachments)) &&
+  ((v as Queued).sending === undefined || typeof (v as Queued).sending === "string");
 
-/** The queue kept for agent `key`, paused, or none. */
+/** The messages a kept queue holds, as kept. */
+export const keptItems = (v: unknown): Queued[] => {
+  const items = (v as { items?: unknown } | null | undefined)?.items;
+  return Array.isArray(items) ? items.filter(isQueued) : [];
+};
+
+/** The queue kept for agent `key` as a window opening puts it back: paused,
+ *  and with what was on its way when a window went back in it, since
+ *  whether the hub took it can't be known. None if nothing's kept. */
 export const readQueue = (key: string, store: DeskStateStore = deskState): Queue | null => {
-  const kept = store.get(draftKey.queue(key)) as { items?: unknown } | undefined;
-  const items = Array.isArray(kept?.items) ? kept.items.filter(isQueued) : [];
+  const items = keptItems(store.get(draftKey.queue(key))).map(({ sending: _sent, ...i }) => i);
   return items.length ? { items, paused: true } : null;
 };
 
-/** Keeps agent `key`'s queue; none once it's empty. */
+/** What's kept in Desk's file (read late) that `q` lacks, put in front of
+ *  it, paused: nothing typed is dropped for being read after the window
+ *  opened. */
+export const withKept = (q: Queue, kept: Queued[]): Queue => {
+  const have = new Set(q.items.map((i) => i.id));
+  const missing = kept.filter((i) => !have.has(i.id)).map(({ sending: _sent, ...i }) => i);
+  return missing.length ? { ...q, items: [...missing, ...q.items], paused: true } : q;
+};
+
+/** Keeps agent `key`'s queue, at once (another window reads it to know what
+ *  this one has sent); none once it's empty. */
 export const keepQueue = (key: string, q: Queue, store: DeskStateStore = deskState): void => {
-  if (q.items.length) store.setSoon(draftKey.queue(key), { items: q.items });
+  if (q.items.length) store.set(draftKey.queue(key), { items: q.items });
   else store.remove(draftKey.queue(key));
 };
+
+/** How long a queue the hub held back as busy (a turn Desk can't see is
+ *  running) waits before it's offered again, after `times` in a row. */
+export const heldRetryMs = (times: number): number => Math.min(3000 * 2 ** Math.max(0, times - 1), 60_000);

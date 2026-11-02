@@ -6,7 +6,7 @@ import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles }
 import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
 import { withHistory } from "../chat/history";
-import { useChat } from "../chat/store";
+import { isRunning, useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
@@ -237,7 +237,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const subtitle =
     overseeing && tab === "chat" ? overseeingLine(roster, agent, trackedOverview ?? trackedSessions, overseeing) : brainSubtitle;
   const Root = inPane ? "div" : "main";
-  const busy = convo.working !== null;
+  // Working, or a streamed turn not yet said to have ended (for a grace).
+  const busy = isRunning(convo);
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the
   // tools it has run), not an empty message.
@@ -431,6 +432,10 @@ function DmComposer({
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
+  // A queue that's waiting to go keeps what you send behind it, and Stop
+  // beside it, whatever the agent is doing.
+  const waiting = useChat((s) => !!s.queues[to]?.items.length && !s.queues[to]!.paused);
+  const holding = busy || waiting;
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
@@ -446,7 +451,7 @@ function DmComposer({
     // While the agent works, what you send waits for its next turn: Stop
     // (or Esc) stops it, and a queued message can be sent at once.
     if (!picked.length) {
-      if (busy) {
+      if (holding) {
         enqueue(to, text);
         setDraft("");
       } else if (send(to, text)) setDraft("");
@@ -457,7 +462,9 @@ function DmComposer({
     uploadAll(hub, agent.id, DESK_DM, picked)
       .then((attachments) => {
         // Still working once the files are up: they wait with the rest.
-        if (useChat.getState().conversations[to]?.working) enqueue(to, text, attachments);
+        const s = useChat.getState();
+        const q = s.queues[to];
+        if (isRunning(s.conversations[to]) || (!!q?.items.length && !q.paused)) enqueue(to, text, attachments);
         else if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         setDraft("");
         files.sent(picked);
@@ -487,11 +494,13 @@ function DmComposer({
           onSelect={emoji.onSelect}
           onFocus={emoji.onFocus}
           onKeyDown={(e) => {
+            // Keys that pick or end an IME composition are the input method's.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (emoji.onKeyDown(e)) return;
             if (e.key === "Enter" && !e.shiftKey) submit(e);
             // Esc stops the agent, as Stop does; with nothing running it's
             // left to close what it always closed.
-            else if (e.key === "Escape" && busy && !e.shiftKey) {
+            else if (e.key === "Escape" && holding && !e.shiftKey) {
               e.preventDefault();
               e.stopPropagation();
               cancel(to);
@@ -500,7 +509,7 @@ function DmComposer({
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
-        {busy && (
+        {holding && (
           <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop
           </button>
@@ -508,10 +517,10 @@ function DmComposer({
         <button
           type="submit"
           className="btn btn-signal"
-          title={busy ? `Sends when ${agent.name}’s done` : undefined}
-          disabled={sending || (!draft.trim() && !files.pending.length) || (!busy && !connected)}
+          title={holding ? `Sends when ${agent.name}’s done` : undefined}
+          disabled={sending || (!draft.trim() && !files.pending.length) || (!holding && !connected)}
         >
-          {sending ? "Sending…" : busy ? "Queue" : "Send"}
+          {sending ? "Sending…" : holding ? "Queue" : "Send"}
         </button>
         <QueuedMessages to={to} name={agent.name} busy={busy} />
       </form>

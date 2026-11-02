@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Conversation, emptyConversation, type ConversationState } from "./conversation";
+import { Conversation, emptyConversation, type ConversationState, type QueuedOutcome } from "./conversation";
 import { cursorIn, fetchHistory, prepend, settle, type Reading } from "./history";
 import {
   agentKey,
@@ -14,7 +14,9 @@ import {
   type PermissionChoice,
 } from "./types";
 import { pairedHub } from "../hub/net";
-import { emptyQueue, keepQueue, merged, readQueue, type Queue } from "./queue";
+import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
+import { deskState } from "../restore/boot";
+import { draftKey } from "../restore/drafts";
 import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -97,6 +99,9 @@ interface ChatStore {
   sendQueuedNow: (key: string, id: string) => boolean;
   /** Sends a paused queue on: now if the agent is free, else when it is. */
   resumeQueue: (key: string) => void;
+  /** Marks the queued message being edited (null: none), so nothing goes
+   *  until the edit is saved. */
+  editingQueued: (key: string, id: string | null) => void;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -122,17 +127,29 @@ export const dmTurn = (voice?: DeskVoice): DeskTurn => ({
 
 const live = new Map<string, Conversation>();
 
-/** How long a queue the hub held back (a turn Desk didn't see is running)
- *  waits before it's offered again. */
-export const HELD_RETRY_MS = 3000;
+/** How long after its answer stopped streaming a turn the hub never said
+ *  ended is taken as ended, so a queue can't wait on it for ever. */
+export const STREAM_END_GRACE_MS = 10_000;
 
-/** Each queued send the hub hasn't settled, by turn ref: its agent and what
- *  it carried, put back if the hub holds it back. */
-const inFlight = new Map<string, { key: string; items: Queue["items"] }>();
 /** Turns you stopped: the hub says nothing more of them. */
 const stopped = new Set<string>();
-/** When each DM's held-back queue may be offered again. */
-const heldUntil = new Map<string, number>();
+/** How many times in a row each DM's queue was held back as busy, and when
+ *  it may be offered again. */
+const held = new Map<string, { times: number; until: number }>();
+/** Each DM's pending re-check: a held-back queue's retry, or a turn's grace. */
+const later = new Map<string, ReturnType<typeof setTimeout>>();
+/** Each DM's watch on its kept queue, for what other windows send. */
+const unwatch = new Map<string, () => void>();
+
+/** `q` with the messages of send `ticket` no longer on their way. */
+const unmark = (q: Queue, ticket: string): Queue => ({
+  ...q,
+  items: q.items.map((i) => {
+    if (i.sending !== ticket) return i;
+    const { sending: _sent, ...rest } = i;
+    return rest;
+  }),
+});
 
 const putQueue = (key: string, f: (q: Queue) => Queue) => {
   const was = useChat.getState().queues[key] ?? emptyQueue();
@@ -142,26 +159,90 @@ const putQueue = (key: string, f: (q: Queue) => Queue) => {
   keepQueue(key, next);
 };
 
+const checkAgain = (key: string, ms: number) => {
+  clearTimeout(later.get(key));
+  later.set(
+    key,
+    setTimeout(() => {
+      later.delete(key);
+      drain(key);
+    }, ms),
+  );
+};
+
+/** Whether the agent is still at its turn in conversation `c`: working, or
+ *  a turn the hub streams that hasn't said it ended, until a grace after
+ *  its last frame (a stopped one ends silently). The composer reads the
+ *  same, so a queue that waits always has Stop beside it. */
+export const isRunning = (c: ConversationState | undefined, now = Date.now()): boolean =>
+  !!c &&
+  (!!c.working ||
+    (!!c.features?.has(FEATURES.stream) &&
+      Object.values(c.turns).some(
+        (t) => t.acked && t.state === "live" && !stopped.has(t.ref) && now - (t.heardAt ?? now) < STREAM_END_GRACE_MS,
+      )));
+
 /** Sends what's queued for `key`'s agent, as one message, once nothing is
- *  running there and the queue isn't paused. */
+ *  running there, the queue isn't paused or being edited, and nothing of it
+ *  is already on its way (from here or another window). What's sent stays
+ *  in the queue until the hub takes it. */
 const drain = (key: string) => {
   const { queues, conversations } = useChat.getState();
   const q = queues[key];
   const c = conversations[key];
   const convo = live.get(key);
-  // A turn the hub streams is running until it says it ended, whatever
-  // pauses there are between its model calls; a stopped one ends silently.
-  const streamed = !!c?.features?.has(FEATURES.stream);
-  const running =
-    !!c && (!!c.working || (streamed && Object.values(c.turns).some((t) => t.acked && t.state === "live" && !stopped.has(t.ref))));
-  if (!q?.items.length || q.paused || !c?.connected || running || !convo) return;
-  if ((heldUntil.get(key) ?? 0) > Date.now()) return;
-  const { text, attachments } = merged(q.items);
-  const sent = convo.send(text, { turn: dmTurn(), attachments, queued: true });
-  if (!sent) return;
-  heldUntil.delete(key);
-  if (sent.turnRef) inFlight.set(sent.turnRef, { key, items: q.items });
-  putQueue(key, (was) => ({ ...was, items: was.items.filter((i) => !q.items.includes(i)) }));
+  if (!c || !convo) return;
+  const now = Date.now();
+  // A turn whose answer has stopped streaming: after the grace it's done,
+  // and until then it's looked at again when the grace is up.
+  const quiet = c.working ? [] : Object.values(c.turns).filter((t) => t.acked && t.state === "live" && !stopped.has(t.ref));
+  for (const t of quiet) if (now - (t.heardAt ?? now) >= STREAM_END_GRACE_MS) convo.lapse(t.ref);
+  if (isRunning(useChat.getState().conversations[key], now)) {
+    if (quiet.length) checkAgain(key, STREAM_END_GRACE_MS - Math.min(...quiet.map((t) => now - (t.heardAt ?? now))) + 5);
+    return;
+  }
+  if (!q?.items.length || q.paused || q.editing || !c.connected) return;
+  if (q.items.some((i) => i.sending)) return;
+  const wait = held.get(key);
+  if (wait && wait.until > now) return checkAgain(key, wait.until - now);
+  // Another window may have sent some of it: only what the kept queue
+  // still holds, not on its way, goes.
+  const kept = deskState.get(draftKey.queue(key));
+  const keptIds = kept === undefined ? null : new Set(keptItems(kept).filter((i) => !i.sending).map((i) => i.id));
+  const items = q.items.filter((i) => !keptIds || keptIds.has(i.id));
+  if (!items.length) return;
+  const ticket = crypto.randomUUID();
+  const { text, attachments } = merged(items);
+  // Marked first, so another window reading the kept queue holds off.
+  putQueue(key, (was) => ({ ...was, items: was.items.map((i) => (items.includes(i) ? { ...i, sending: ticket } : i)) }));
+  if (!convo.send(text, { turn: dmTurn(), attachments, queued: ticket })) putQueue(key, (was) => unmark(was, ticket));
+};
+
+/** What became of queued send `ticket`: taken, it leaves the queue; held
+ *  back as busy, it's offered again later, backing off; lost, it waits in
+ *  front, paused, for you to send it again. */
+const settleQueued = (key: string, ticket: string, outcome: QueuedOutcome) => {
+  if (outcome === "taken") {
+    held.delete(key);
+    putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.sending !== ticket) }));
+    return;
+  }
+  putQueue(key, (q) => ({ ...unmark(q, ticket), ...(outcome === "lost" ? { paused: true } : {}) }));
+  if (outcome === "busy") {
+    const times = (held.get(key)?.times ?? 0) + 1;
+    const ms = heldRetryMs(times);
+    held.set(key, { times, until: Date.now() + ms });
+    checkAgain(key, ms);
+  }
+};
+
+/** What another window or device did to `key`'s kept queue, shown here. */
+const adopt = (key: string, value: unknown) => {
+  const was = useChat.getState().queues[key] ?? emptyQueue();
+  // What this window has on its way stays marked until the hub answers.
+  const mine = new Map(was.items.filter((i) => i.sending).map((i) => [i.id, i.sending!]));
+  const items = keptItems(value).map((i) => (!i.sending && mine.has(i.id) ? { ...i, sending: mine.get(i.id)! } : i));
+  useChat.setState((s) => ({ queues: { ...s.queues, [key]: { ...was, items } } }));
 };
 
 /** The hub an agent key (`hub/agent`) is on. */
@@ -226,6 +307,13 @@ const ensure = (key: string): boolean => {
   const hub = agent && hubs.find((h) => h.id === agent.hubId);
   if (!agent || !hub) return false;
   const kept = useChat.getState().queues[key] ? null : readQueue(key);
+  // Desk's file read after the window opened: what it kept joins the queue.
+  void deskState.loaded?.then(() => {
+    if (!live.has(key)) return;
+    const late = keptItems(deskState.get(draftKey.queue(key)));
+    if (late.length) putQueue(key, (q) => withKept(q, late));
+  });
+  if (!unwatch.has(key)) unwatch.set(key, deskState.watch(draftKey.queue(key), (v) => adopt(key, v)));
   useChat.setState((s) => ({
     conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() },
     ...(kept ? { queues: { ...s.queues, [key]: kept } } : {}),
@@ -250,7 +338,6 @@ const ensure = (key: string): boolean => {
     if (!settled.length) return;
     settled.forEach((t) => {
       settling.add(t.ref);
-      inFlight.delete(t.ref);
       stopped.delete(t.ref);
     });
     void useChat
@@ -263,16 +350,7 @@ const ensure = (key: string): boolean => {
         }),
       );
   });
-  // A queued send the hub held back goes to the front of the queue again,
-  // and is offered once more in a moment.
-  convo.onHeld = (ref) => {
-    const sent = inFlight.get(ref);
-    inFlight.delete(ref);
-    if (!sent) return;
-    putQueue(key, (q) => ({ ...q, items: [...sent.items, ...q.items] }));
-    heldUntil.set(key, Date.now() + HELD_RETRY_MS);
-    setTimeout(() => drain(key), HELD_RETRY_MS);
-  };
+  convo.onQueued = (ticket, outcome) => settleQueued(key, ticket, outcome);
   live.set(key, convo);
   return true;
 };
@@ -488,6 +566,15 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.cancel();
   },
   queues: {},
+  editingQueued: (key, id) => {
+    putQueue(key, (q) => {
+      if ((q.editing ?? null) === id) return q;
+      const { editing: _was, ...rest } = q;
+      return id ? { ...rest, editing: id } : rest;
+    });
+    // The edit is in: what was held for it goes, if it may.
+    if (!id) drain(key);
+  },
   enqueue: (key, text, attachments) => {
     if (!text.trim() && !attachments?.length) return;
     const item = { id: crypto.randomUUID(), text, ...(attachments?.length ? { attachments } : {}) };
@@ -502,12 +589,15 @@ export const useChat = create<ChatStore>((set, get) => ({
   removeQueued: (key, id) => putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.id !== id) })),
   sendQueuedNow: (key, id) => {
     const item = get().queues[key]?.items.find((i) => i.id === id);
-    if (!item || item.attachments?.length) return false;
-    if (!get().send(key, item.text)) return false;
+    const files = item?.attachments ?? [];
+    // Files can't join a turn under way; with none running they go now.
+    if (!item || item.sending || (files.length && isRunning(get().conversations[key]))) return false;
+    if (!get().send(key, item.text, files.length ? { attachments: files } : {})) return false;
     get().removeQueued(key, id);
     return true;
   },
   resumeQueue: (key) => {
+    held.delete(key);
     putQueue(key, (q) => (q.paused ? { ...q, paused: false } : q));
     drain(key);
   },
@@ -515,7 +605,11 @@ export const useChat = create<ChatStore>((set, get) => ({
   forget: (key) => {
     live.get(key)?.close();
     keepQueue(key, emptyQueue());
-    heldUntil.delete(key);
+    held.delete(key);
+    clearTimeout(later.get(key));
+    later.delete(key);
+    unwatch.get(key)?.();
+    unwatch.delete(key);
     live.delete(key);
     set((s) => {
       const { [key]: _gone, ...conversations } = s.conversations;

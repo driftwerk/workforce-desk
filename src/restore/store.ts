@@ -88,12 +88,21 @@ export class DeskStateStore {
     private readonly delay = HUB_DEBOUNCE_MS,
   ) {}
 
+  private markLoaded: () => void = () => {};
+  /** Settles once Desk's file has been read (or couldn't be): what opened
+   *  before then, waiting longer than the shell did, can look again. */
+  readonly loaded = new Promise<void>((done) => (this.markLoaded = done));
+
   /** Reads Desk's file. */
   async load(): Promise<void> {
-    const all = await this.local.load();
-    for (const [key, e] of Object.entries(all)) {
-      this.entries.set(key, e);
-      if (e.dirty) this.pending.add(key);
+    try {
+      const all = await this.local.load();
+      for (const [key, e] of Object.entries(all)) {
+        this.entries.set(key, e);
+        if (e.dirty) this.pending.add(key);
+      }
+    } finally {
+      this.markLoaded();
     }
   }
 
