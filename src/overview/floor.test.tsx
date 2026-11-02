@@ -138,23 +138,49 @@ describe("the Floor", () => {
     expect(screen.queryByRole("button", { name: "New session" })).toBeNull();
   });
 
-  it("comes back as the crew's overview on the minute once a hub that said it had none has it", async () => {
+  it("comes back as the crew's overview, with its overseer, on the minute once a hub that said it had none has them", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       // A hub that is starting up answers 404 for a moment.
       let up = false;
+      const until = <T,>(v: () => T) => vi.fn(() => (up ? Promise.resolve(v()) : Promise.reject(new HubError(404, "This hub doesn’t have that yet."))));
       const hub = hubWith({
-        overview: vi.fn(() => (up ? Promise.resolve(overview()) : Promise.reject(new HubError(404, "This hub doesn’t have that yet.")))),
+        overview: until(() => overview()),
+        manager: until(() => ({ agentId: "desk", level: "suggest" as const })),
+        activity: until(() => structuredClone(page)),
       });
       useDesk.setState({ hub, sessions: { a: session("a", { name: "acme-web" }) } });
       render(<Floor onNewSession={() => {}} />);
       await act(() => vi.advanceTimersByTimeAsync(0));
       expect(useOverview.getState().overviewSupport).toBe("no");
+      expect(useOverview.getState().managerSupport).toBe("no");
       expect(screen.queryByRole("button", { name: "New session" })).toBeNull();
       up = true;
       await act(() => vi.advanceTimersByTimeAsync(60_000));
       expect(useOverview.getState().overviewSupport).toBe("yes");
       expect(screen.getByRole("button", { name: "New session" })).toBeTruthy();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(useOverview.getState().managerSupport).toBe("yes");
+      expect(useOverview.getState().activitySupport).toBe("yes");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("brings the activity back on the minute once a hub that said it had none has it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let up = false;
+      const hub = hubWith({
+        activity: vi.fn(() => (up ? Promise.resolve(structuredClone(page)) : Promise.reject(new HubError(404, "This hub doesn’t have that yet.")))),
+      });
+      useDesk.setState({ hub, sessions: { a: session("a", { name: "acme-web" }) } });
+      render(<Floor onNewSession={() => {}} />);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(useOverview.getState().activitySupport).toBe("no");
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(useOverview.getState().activitySupport).toBe("yes");
     } finally {
       vi.useRealTimers();
     }
