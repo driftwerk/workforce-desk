@@ -982,19 +982,45 @@ mod tests {
 
     /// A program named `name` that only sleeps (a link to `sleep`, which
     /// `ps` names by the link), started with its pid written to `pid_file`.
-    fn fake_running(dir: &Path, name: &str, pid_file: &Path) -> std::process::Child {
-        let bin = dir.join(name);
-        std::os::unix::fs::symlink("/bin/sleep", &bin).unwrap();
-        let child = std::process::Command::new(&bin).arg("600").spawn().unwrap();
-        std::fs::create_dir_all(pid_file.parent().unwrap()).unwrap();
-        std::fs::write(pid_file, format!("{}\n/some/data\n", child.id())).unwrap();
-        child
+    /// It is waited for as soon as it ends, as a leftover is by init: one
+    /// left a zombie would still show in `ps`.
+    struct Fake {
+        pid: u32,
+        gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
-    async fn gone_soon(child: &mut std::process::Child) -> bool {
+    impl Fake {
+        fn running(&self) -> bool {
+            !self.gone.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            let _ = desk_core::process::kill(self.pid);
+        }
+    }
+
+    fn fake_running(dir: &Path, name: &str, pid_file: &Path) -> Fake {
+        let bin = dir.join(name);
+        std::os::unix::fs::symlink("/bin/sleep", &bin).unwrap();
+        let mut child = std::process::Command::new(&bin).arg("600").spawn().unwrap();
+        std::fs::create_dir_all(pid_file.parent().unwrap()).unwrap();
+        std::fs::write(pid_file, format!("{}\n/some/data\n", child.id())).unwrap();
+        let gone = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ended = std::sync::Arc::clone(&gone);
+        let pid = child.id();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            ended.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        Fake { pid, gone }
+    }
+
+    async fn gone_soon(fake: &Fake) -> bool {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
-            if child.try_wait().unwrap().is_some() {
+            if !fake.running() {
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1025,7 +1051,7 @@ mod tests {
         let saved = ports(&paths).unwrap();
         let _held = TcpListener::bind(("127.0.0.1", saved.gateway)).unwrap();
         std::fs::write(paths.helper_pid(), "4242").unwrap();
-        let mut hub = fake_running(dir.path(), "workforce", &hub_pid(&paths));
+        let hub = fake_running(dir.path(), "workforce", &hub_pid(&paths));
         let err = claim(&paths, &dir.path().join("workforce"), None)
             .await
             .err()
@@ -1034,11 +1060,7 @@ mod tests {
         assert!(err.contains("already running"), "{err}");
         assert_eq!(std::fs::read_to_string(paths.helper_pid()).unwrap(), "4242");
         assert_eq!(read_ports(&paths.hub_state()).unwrap(), Some(saved));
-        assert!(
-            hub.try_wait().unwrap().is_none(),
-            "the running hub was stopped"
-        );
-        let _ = hub.kill();
+        assert!(hub.running(), "the running hub was stopped");
     }
 
     /// With the Desk home claimed, a hub and a Postgres an earlier helper
@@ -1048,29 +1070,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path().join("Desk"));
         let saved = ports(&paths).unwrap();
-        let mut hub = fake_running(dir.path(), "workforce", &hub_pid(&paths));
-        let mut pg = fake_running(
+        let hub = fake_running(dir.path(), "workforce", &hub_pid(&paths));
+        let pg = fake_running(
             dir.path(),
             "postgres",
             &paths.postgres_data().join("postmaster.pid"),
         );
         // A pid file naming some other program leaves it alone.
         let other_paths = Paths::at(dir.path().join("Other"));
-        let mut other = fake_running(dir.path(), "sleepy", &hub_pid(&other_paths));
+        let other = fake_running(dir.path(), "sleepy", &hub_pid(&other_paths));
         let claimed = claim(&paths, &dir.path().join("workforce"), None)
             .await
             .unwrap();
-        assert!(gone_soon(&mut hub).await, "the leftover hub kept running");
-        assert!(
-            gone_soon(&mut pg).await,
-            "the leftover Postgres kept running"
-        );
+        assert!(gone_soon(&hub).await, "the leftover hub kept running");
+        assert!(gone_soon(&pg).await, "the leftover Postgres kept running");
         assert_eq!(claimed.ports, saved);
         stop_leftovers(&other_paths, &dir.path().join("workforce"), None)
             .await
             .unwrap();
-        assert!(other.try_wait().unwrap().is_none());
-        let _ = other.kill();
+        assert!(other.running());
     }
 
     /// A Postgres found running on Desk's data is never started over, nor
@@ -1080,7 +1098,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path().join("Desk"));
         let log = fake_postgres_install(&paths);
-        let mut pg = fake_running(
+        let pg = fake_running(
             dir.path(),
             "postgres",
             &paths.postgres_data().join("postmaster.pid"),
@@ -1091,7 +1109,6 @@ mod tests {
             .to_string();
         assert!(err.contains("already running"), "{err}");
         assert!(!log.exists(), "pg_ctl was run");
-        assert!(pg.try_wait().unwrap().is_none());
-        let _ = pg.kill();
+        assert!(pg.running());
     }
 }
