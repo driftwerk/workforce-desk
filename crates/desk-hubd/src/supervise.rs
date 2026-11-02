@@ -9,14 +9,13 @@ use std::time::{Duration, Instant};
 
 use desk_core::host::Host;
 use desk_core::install::Install;
-use desk_core::{
-    HUB_EXECUTABLE, HubPorts, Paths, Secret, SecretStore, Secrets, read_ports, write_ports,
-};
+use desk_core::{HUB_EXECUTABLE, HubPorts, Paths, Secret, Secrets, read_ports, write_ports};
 use eyre::{Context, Result};
 use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
+use crate::handover::HubSecrets;
 use crate::{bootstrap, commands, config, holder, memory, model, moving};
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
@@ -50,25 +49,20 @@ fn ports(paths: &Paths) -> Result<HubPorts> {
 const PLUGIN_DIRS: &str = "CLAUDE_CODE_PLUGIN_DIRS";
 
 /// Environment for `workforce serve`: login env, minus anything a parent
-/// Claude Code session leaked (but the person's plugin folders), plus the
-/// secrets.
-fn hub_env(
-    login: &BTreeMap<String, String>,
-    secrets: &impl SecretStore,
-) -> Result<BTreeMap<String, String>> {
+/// Claude Code session leaked (but the person's plugin folders). Never the
+/// secrets: they go on a pipe ([`crate::handover`]), as anything in a
+/// process's environment is readable by the person's other processes and
+/// inherited by what the hub starts.
+fn hub_env(login: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     // `~/.local/bin` too, where Claude Code's and Codex's installers put
     // them, so one installed from Desk's settings is found without a restart.
-    let mut env = desk_core::shell::with_local_bin(
+    desk_core::shell::with_local_bin(
         login
             .iter()
             .filter(|(k, _)| !k.starts_with("CLAUDE") || k.as_str() == PLUGIN_DIRS)
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
-    );
-    for s in Secret::ALL {
-        env.insert(s.env().into(), secrets.get_or_create(s)?);
-    }
-    Ok(env)
+    )
 }
 
 /// The local Postgres's settings. `max_connections` is given on every
@@ -112,8 +106,15 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
     if !paths.postgres_data().join("postgresql.conf").exists() {
         std::fs::write(&first_run, "")?;
     }
+    let password_file = settings.password_file.clone();
+    // One an older Desk or an unfinished start left goes first; setup writes
+    // it again only when it runs initdb, and it goes again straight after,
+    // whether setup worked or not.
+    forget_postgres_password(&password_file);
     let mut pg = PostgreSQL::new(settings);
-    pg.setup().await.context("installing Postgres")?;
+    let setup = pg.setup().await;
+    forget_postgres_password(&password_file);
+    setup.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
     let _ = std::fs::remove_file(&first_run);
     for db in [config::DATABASE, memory::DATABASE] {
@@ -122,6 +123,27 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
         }
     }
     Ok(pg)
+}
+
+/// Removes Postgres's password file. Only initdb reads it, and setup writes
+/// it again whenever initdb runs; left on disk it would give the database's
+/// password to anything running as this user.
+fn forget_postgres_password(path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(error = %e, "could not remove Postgres's password file"),
+    }
+}
+
+/// Why the hub stopped, when it is because it is too old for this Desk: it
+/// refused `--secrets-fd` (clap's usage error, exit status 2), so it can't
+/// take its secrets on the pipe.
+fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static str> {
+    (status.code() == Some(2)).then_some(
+        "the hub is too old for this Desk: it doesn't take its secrets on a pipe \
+         (--secrets-fd); install the hub this Desk ships with (hub.ref)",
+    )
 }
 
 /// A log file to append to, moved aside to `<name>.1` first once it is
@@ -138,15 +160,33 @@ pub fn append_log(path: &Path, limit: u64) -> Result<std::fs::File> {
 
 pub const LOG_LIMIT: u64 = 20 * 1024 * 1024;
 
-fn spawn_hub(workforce: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result<Child> {
-    let log = append_log(&paths.logs().join("hub.log"), LOG_LIMIT)?;
-    Command::new(workforce)
-        .args(["serve", "-c"])
+/// `workforce serve` on the hub's config, with `env` and, on a pipe, the
+/// secrets. The pipe is kept open by what this returns beside the command.
+fn hub_command(
+    workforce: &Path,
+    paths: &Paths,
+    env: &BTreeMap<String, String>,
+    secrets: &HubSecrets,
+) -> Result<(Command, crate::handover::Handover)> {
+    let mut cmd = Command::new(workforce);
+    cmd.args(["serve", "-c"])
         .arg(paths.hub_config())
         .current_dir(paths.hub())
         .env_clear()
-        .envs(env)
-        .stdin(Stdio::null())
+        .envs(env);
+    let handover = secrets.hand_to(&mut cmd)?;
+    Ok((cmd, handover))
+}
+
+fn spawn_hub(
+    workforce: &Path,
+    paths: &Paths,
+    env: &BTreeMap<String, String>,
+    secrets: &HubSecrets,
+) -> Result<Child> {
+    let log = append_log(&paths.logs().join("hub.log"), LOG_LIMIT)?;
+    let (mut cmd, _handover) = hub_command(workforce, paths, env, secrets)?;
+    cmd.stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
         .kill_on_drop(true)
@@ -319,14 +359,15 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     config::ensure_rich(&desk_agent)?;
     config::ensure_oversight(&desk_agent)?;
     let login = desk_core::shell::login_env();
-    let env = hub_env(
-        &login,
-        &Secrets::for_host(&paths, &Host::running_here(&process_env))?,
-    )?;
+    let env = hub_env(&login);
+    let secrets = HubSecrets::load(&Secrets::for_host(
+        &paths,
+        &Host::running_here(&process_env),
+    )?)?;
     let pg = start_postgres(
         &paths,
         ports.postgres,
-        env[Secret::PostgresPassword.env()].clone(),
+        secrets.get(Secret::PostgresPassword).to_owned(),
     )
     .await?;
 
@@ -339,8 +380,8 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
                 memory::env(
                     &paths,
                     &ports,
-                    &env[Secret::PostgresPassword.env()],
-                    &env[Secret::MemoryKey.env()],
+                    secrets.get(Secret::PostgresPassword),
+                    secrets.get(Secret::MemoryKey),
                     &login,
                 ),
             ))
@@ -373,14 +414,14 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     let mut switch_pending = node.is_some() && memories == config::Memories::Sqlite;
     if switch_pending && *model_rx.borrow() {
         switch_pending = false;
-        memories = switch_to_store(&workforce, &paths, &ports, &env).await;
+        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets).await;
     }
 
     tracing::info!(gateway = %ports.gateway_url(), ?memories, "local hub starting");
     {
         let paths = paths.clone();
         let gateway = ports.gateway_url();
-        let admin = env[Secret::GatewayToken.env()].clone();
+        let admin = secrets.get(Secret::GatewayToken).to_owned();
         tokio::spawn(async move {
             if let Err(e) = bootstrap::run(&paths, &gateway, &admin).await {
                 tracing::error!(error = %e, "could not pair Desk with its local hub");
@@ -398,14 +439,14 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
             &paths,
             &socket,
             &env,
-            &env[Secret::GatewayToken.env()],
+            secrets.get(Secret::GatewayToken),
         )
         .await
         {
             tracing::warn!(error = %e, "no PTY holder; the hub's terminals end when it restarts");
         }
         let started = Instant::now();
-        let mut hub = match spawn_hub(&workforce, &paths, &env) {
+        let mut hub = match spawn_hub(&workforce, &paths, &env, &secrets) {
             Ok(c) => c,
             Err(e) => break Err(e),
         };
@@ -423,12 +464,15 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
                     if ready.is_ok() {
                         tracing::info!("the memory store's model is here; moving memories into the store");
                         stop(&mut hub, Duration::from_secs(20)).await;
-                        memories = switch_to_store(&workforce, &paths, &ports, &env).await;
+                        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets).await;
                         tracing::info!(?memories, "local hub starting again");
                         continue 'run;
                     }
                 }
                 status = hub.wait() => {
+                    if let Some(why) = status.as_ref().ok().and_then(|s| too_old_for_this_desk(*s)) {
+                        tracing::error!("{why}");
+                    }
                     if started.elapsed() > HEALTHY_AFTER {
                         backoff = Duration::from_secs(1);
                     }
@@ -470,14 +514,15 @@ async fn switch_to_store(
     paths: &Paths,
     ports: &HubPorts,
     env: &BTreeMap<String, String>,
+    secrets: &HubSecrets,
 ) -> config::Memories {
     let url = memory::url(ports);
-    let key = &env[Secret::MemoryKey.env()];
+    let key = secrets.get(Secret::MemoryKey);
     let moved = async {
         memory::ready(&url, Duration::from_secs(120)).await?;
         memory::ensure_tenant(&url, key).await?;
         write_config(paths, ports, config::Memories::Store)?;
-        moving::move_sqlite(workforce, paths, env).await
+        moving::move_sqlite(workforce, paths, env, secrets).await
     }
     .await;
     match moved {
@@ -518,7 +563,7 @@ mod tests {
     #[derive(Default)]
     struct Memory(RefCell<HashMap<Secret, String>>);
 
-    impl SecretStore for Memory {
+    impl desk_core::SecretStore for Memory {
         fn get(&self, s: Secret) -> Result<Option<String>> {
             Ok(self.0.borrow().get(&s).cloned())
         }
@@ -529,21 +574,86 @@ mod tests {
     }
 
     #[test]
-    fn the_hub_gets_its_secrets_and_none_of_a_parent_claude_session() {
+    fn the_hub_gets_none_of_a_parent_claude_session() {
         let login = BTreeMap::from([
             ("PATH".to_string(), "/usr/bin".to_string()),
             ("CLAUDE_CODE_CHILD_SESSION".to_string(), "1".to_string()),
             ("CLAUDECODE".to_string(), "1".to_string()),
             ("CLAUDE_CODE_PLUGIN_DIRS".to_string(), "/mine".to_string()),
         ]);
-        let env = hub_env(&login, &Memory::default()).unwrap();
+        let env = hub_env(&login);
         let claude: Vec<_> = env.keys().filter(|k| k.starts_with("CLAUDE")).collect();
         // The person's own plugin folders stay; the hub adds Desk's.
         assert_eq!(claude, ["CLAUDE_CODE_PLUGIN_DIRS"]);
         assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
+    }
+
+    /// The hub's command carries none of its secrets in its environment,
+    /// only the descriptor they arrive on.
+    #[test]
+    fn the_hubs_secrets_are_not_in_its_environment() {
+        let login = BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("HOME".to_string(), "/Users/k".to_string()),
+        ]);
+        let secrets = HubSecrets::load(&Memory::default()).unwrap();
+        let paths = Paths::at("/Users/k/Library/Application Support/Desk");
+        let (cmd, _handover) =
+            hub_command(Path::new("workforce"), &paths, &hub_env(&login), &secrets).unwrap();
+        let env: BTreeMap<String, String> = cmd
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert_eq!(
+            env.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["HOME", "PATH", crate::handover::FD_ENV]
+        );
+        let args: Vec<&str> = cmd.as_std().get_args().filter_map(|a| a.to_str()).collect();
+        assert_eq!(args[0], "serve");
+        assert!(
+            args.windows(2).any(|w| w == ["--secrets-fd", "3"]),
+            "{args:?}"
+        );
         for s in Secret::ALL {
-            assert!(!env[s.env()].is_empty());
+            assert!(!env.contains_key(s.env()), "{}", s.env());
+            assert!(
+                !env.values().any(|v| v.contains(secrets.get(s))),
+                "{}",
+                s.env()
+            );
         }
+    }
+
+    /// A Postgres password file an earlier start or an older Desk left is
+    /// removed before Postgres is set up.
+    #[test]
+    fn a_left_over_postgres_password_file_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::create_dir_all(paths.hub()).unwrap();
+        let settings = postgres_settings(&paths, 54001, "unused".into());
+        std::fs::write(&settings.password_file, "pw-fixture").unwrap();
+        forget_postgres_password(&settings.password_file);
+        assert!(!settings.password_file.exists());
+        // Nothing there is fine too.
+        forget_postgres_password(&settings.password_file);
+    }
+
+    /// A hub that refuses `--secrets-fd` (clap's usage error, exit 2) is too
+    /// old for this Desk, and is told apart from one that failed otherwise.
+    #[tokio::test]
+    async fn a_hub_too_old_for_the_pipe_is_named() {
+        let exit = |code: i32| async move {
+            Command::new("/bin/sh")
+                .args(["-c", &format!("exit {code}")])
+                .status()
+                .await
+                .unwrap()
+        };
+        assert!(too_old_for_this_desk(exit(2).await).is_some());
+        assert!(too_old_for_this_desk(exit(1).await).is_none());
+        assert!(too_old_for_this_desk(exit(0).await).is_none());
     }
 
     #[test]
@@ -552,7 +662,7 @@ mod tests {
             ("PATH".to_string(), "/usr/bin".to_string()),
             ("HOME".to_string(), "/Users/k".to_string()),
         ]);
-        let env = hub_env(&login, &Memory::default()).unwrap();
+        let env = hub_env(&login);
         assert_eq!(env["PATH"], "/usr/bin:/Users/k/.local/bin");
     }
 

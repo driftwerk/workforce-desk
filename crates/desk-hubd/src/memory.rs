@@ -147,16 +147,16 @@ fn spawn(binary: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result
         &paths.logs().join("memory.log"),
         crate::supervise::LOG_LIMIT,
     )?;
-    let child = Command::new(binary)
-        .arg("serve")
+    let mut cmd = Command::new(binary);
+    cmd.arg("serve")
         .current_dir(paths.memory())
         .env_clear()
         .envs(env)
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
-        .kill_on_drop(true)
-        .spawn()
+        .kill_on_drop(true);
+    let child = crate::handover::spawning(|| cmd.spawn())
         .with_context(|| format!("starting {}", binary.display()))?;
     if let Some(pid) = child.id() {
         std::fs::write(pidfile(paths), pid.to_string())?;
