@@ -10,7 +10,7 @@ import { useThemeStore } from "../theme/store";
 import { EMOJI_STACK } from "../theme/tokens";
 import { Terminal } from "./Terminal";
 
-const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement }[] = [];
+const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement; written: string[]; resets: number }[] = [];
 vi.mock("@xterm/xterm", () => ({
   // Like xterm: its text field takes the keys, and a key the custom handler
   // doesn't keep back is typed (Ctrl and a letter as its control character).
@@ -19,6 +19,8 @@ vi.mock("@xterm/xterm", () => ({
     cols = 80;
     rows = 24;
     field?: HTMLTextAreaElement;
+    written: string[] = [];
+    resets = 0;
     private keys?: (e: KeyboardEvent) => boolean;
     private data?: (d: string) => void;
     constructor(options: Record<string, unknown>) {
@@ -33,7 +35,12 @@ vi.mock("@xterm/xterm", () => ({
         if (e.ctrlKey && /^Key[A-Z]$/.test(e.code)) this.data?.(String.fromCharCode(e.code.charCodeAt(3) - 64));
       });
     }
-    write() {}
+    write(d: unknown) {
+      if (typeof d === "string") this.written.push(d);
+    }
+    reset() {
+      this.resets++;
+    }
     focus() {}
     resize() {}
     dispose() {}
@@ -113,3 +120,146 @@ describe("a terminal", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/** A socket as the page holds one, its handlers called by the test. */
+interface FakeSocket {
+  readyState: number;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  onopen?: (() => void) | null;
+  onclose?: ((e: { code: number }) => void) | null;
+}
+
+/** A hub whose sockets are kept in `sockets`, and whose lists answer
+ *  `listed()` (throwing: the hub can't be reached). */
+const fakeHub = (listed: () => Promise<unknown[]>) => {
+  const sockets: FakeSocket[] = [];
+  const made = (): FakeSocket => {
+    const s: FakeSocket = { readyState: 0, send: vi.fn(), close: vi.fn() };
+    sockets.push(s);
+    return s;
+  };
+  const hub = { ptySocket: vi.fn(made), terminalSocket: vi.fn(made), sessions: vi.fn(listed), terminals: vi.fn(listed) };
+  return { hub, sockets };
+};
+
+const opened = (s: FakeSocket | undefined) =>
+  act(() => {
+    if (!s) throw new Error("no socket");
+    s.readyState = WebSocket.OPEN;
+    s.onopen?.();
+  });
+const closed = (s: FakeSocket | undefined, code: number) =>
+  act(() => {
+    if (!s) throw new Error("no socket");
+    s.readyState = WebSocket.CLOSED;
+    s.onclose?.({ code });
+  });
+const later = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+const shown = () => terms.at(-1)!.written.join("");
+
+describe("a terminal whose hub goes away", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("says it is reconnecting, and attaches to the same session again once the hub is back", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    let up = false;
+    const { hub, sockets } = fakeHub(async () => {
+      if (!up) throw new Error("Desk couldn't reach this computer's hub");
+      return [{ id: "s1", live: true }];
+    });
+    useDesk.setState({ hub: hub as never });
+    render(<Terminal sessionId="s1" />);
+    opened(sockets[0]);
+    // The hub stopped: the socket dropped, no close frame (1006).
+    closed(sockets[0], 1006);
+    expect(shown()).toContain("reconnecting");
+    expect(shown()).not.toContain("detached");
+    // Unreachable: asked again later and later, with no socket meanwhile.
+    await later(500);
+    await later(1000);
+    await later(2000);
+    expect(hub.sessions).toHaveBeenCalledTimes(3);
+    expect(sockets).toHaveLength(1);
+    up = true;
+    await later(4000);
+    expect(sockets).toHaveLength(2);
+    expect(hub.ptySocket).toHaveBeenLastCalledWith("s1");
+    // Its replay draws the screen again, from clear.
+    opened(sockets[1]);
+    expect(terms.at(-1)!.resets).toBe(1);
+    // Dropped again, it starts over from the shortest wait.
+    closed(sockets[1], 1006);
+    await later(500);
+    expect(sockets).toHaveLength(3);
+  });
+
+  it("keeps trying while the hub is away, never waiting more than ten seconds", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const { hub, sockets } = fakeHub(() => Promise.reject(new Error("unreachable")));
+    useDesk.setState({ hub: hub as never });
+    render(<Terminal terminalId="t1" />);
+    closed(sockets[0], 1006);
+    await later(500 + 1000 + 2000 + 4000 + 8000);
+    expect(hub.terminals).toHaveBeenCalledTimes(5);
+    await later(10_000 * 20);
+    expect(hub.terminals).toHaveBeenCalledTimes(25);
+    expect(shown()).not.toContain("terminal closed");
+  });
+
+  it("stops trying once unmounted", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const { hub, sockets } = fakeHub(async () => [{ id: "t1", live: true }]);
+    useDesk.setState({ hub: hub as never });
+    const { unmount } = render(<Terminal terminalId="t1" />);
+    closed(sockets[0], 1006);
+    unmount();
+    await later(60_000);
+    expect(hub.terminals).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(1);
+  });
+});
+
+describe("a terminal that ended", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("says so when the hub closes it, and doesn't try again", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const { hub, sockets } = fakeHub(async () => [{ id: "t1", live: true }]);
+    useDesk.setState({ hub: hub as never });
+    render(<Terminal terminalId="t1" />);
+    opened(sockets[0]);
+    // The hub's close frame has no code (1005).
+    closed(sockets[0], 1005);
+    expect(shown()).toContain("terminal closed");
+    expect(shown()).not.toContain("reconnecting");
+    await later(60_000);
+    expect(sockets).toHaveLength(1);
+    expect(hub.terminals).not.toHaveBeenCalled();
+  });
+
+  it("says so when the hub comes back without it", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const { hub, sockets } = fakeHub(async () => [{ id: "t2", live: true }, { id: "t1", live: false }]);
+    useDesk.setState({ hub: hub as never });
+    render(<Terminal terminalId="t1" />);
+    closed(sockets[0], 1006);
+    await later(500);
+    expect(shown()).toContain("terminal closed");
+    await later(60_000);
+    expect(sockets).toHaveLength(1);
+    expect(hub.terminals).toHaveBeenCalledTimes(1);
+  });
+});
+

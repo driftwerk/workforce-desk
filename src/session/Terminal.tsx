@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { trackedIn } from "../grids/terminals";
 import { useDesk } from "../hub/store";
+import type { DeskSocket } from "../hub/transport";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
@@ -11,6 +12,16 @@ import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
 import { xtermTheme } from "../theme/xterm";
 import { Viewer } from "./viewer";
+
+/** The hub closes a terminal's socket with a close frame when the terminal
+ *  ends (no code: 1005), as the page does its own (1000). Any other close
+ *  (1006: the connection dropped) is the hub going away, perhaps to
+ *  restart, its terminals kept. */
+export const closedByHub = (e: { code: number }): boolean => e.code === 1000 || e.code === 1005;
+
+/** How long a pane waits before its `n`th try to attach again: half a
+ *  second, doubling, at most ten. */
+export const reattachDelay = (n: number): number => Math.min(10_000, 500 * 2 ** n);
 
 /** A session's terminal, or a grid's: the hub's pseudo-terminal, attached
  *  over its socket (which replays what it kept, then streams). Where the
@@ -51,7 +62,8 @@ export function Terminal({
     x.loadAddon(fit);
     x.open(host.current);
     term.current = x;
-    const ws = terminalId ? hub.terminalSocket(terminalId) : hub.ptySocket(sessionId!);
+    let ws: DeskSocket | null = null;
+    const isOpen = () => ws?.readyState === WebSocket.OPEN;
     const encoder = new TextEncoder();
     const viewer = new Viewer({
       // A pane that isn't laid out (parked) has no size: it keeps the one it had.
@@ -62,33 +74,79 @@ export function Terminal({
       resize: ({ cols, rows }) => {
         if (x.cols !== cols || x.rows !== rows) x.resize(cols, rows);
       },
-      send: (c) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(c)),
+      send: (c) => isOpen() && ws!.send(JSON.stringify(c)),
       role: (active) => setViewing(!active),
     });
     viewerRef.current = viewer;
     const inPane = () => !!host.current && host.current.contains(document.activeElement);
-    ws.onopen = () => viewer.opened(inPane());
-    ws.onmessage = (m) => {
-      // A brokered socket is given more once xterm has written this.
-      if (m.data instanceof ArrayBuffer) x.write(new Uint8Array(m.data), ws.hold?.());
-      else if (typeof m.data === "string") {
-        try {
-          viewer.heard(JSON.parse(m.data));
-        } catch {
-          // Not a control message this Desk knows.
+    const note = (text: string) => x.write(`\r\n\x1b[2m— ${text} —\x1b[0m\r\n`);
+    const ended = () => note(terminalId ? "terminal closed" : "session detached");
+    let gone = false;
+    let retry = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let away = false;
+    const attach = () => {
+      // The hub as Desk now has it: where to reach it is read again for
+      // each socket, so one that moved is found.
+      const current = useDesk.getState().hub ?? hub;
+      const again = away;
+      const s = terminalId ? current.terminalSocket(terminalId) : current.ptySocket(sessionId!);
+      ws = s;
+      s.onopen = () => {
+        retry = 0;
+        away = false;
+        // The hub replays the screen with its history: drawn from clear.
+        if (again) x.reset();
+        viewer.opened(inPane());
+      };
+      s.onmessage = (m) => {
+        // A brokered socket is given more once xterm has written this.
+        if (m.data instanceof ArrayBuffer) x.write(new Uint8Array(m.data), s.hold?.());
+        else if (typeof m.data === "string") {
+          try {
+            viewer.heard(JSON.parse(m.data));
+          } catch {
+            // Not a control message this Desk knows.
+          }
         }
+      };
+      s.onclose = (e) => {
+        if (gone || ws !== s) return;
+        setViewing(false);
+        if (closedByHub(e)) return ended();
+        if (!away) note("reconnecting…");
+        away = true;
+        later();
+      };
+    };
+    const later = () => {
+      timer = setTimeout(() => void reattach(), reattachDelay(retry++));
+    };
+    // The socket dropped (the hub stopped, or can't be reached): once the
+    // hub answers again, attach again, unless it no longer has it.
+    const reattach = async () => {
+      if (gone) return;
+      const current = useDesk.getState().hub ?? hub;
+      let there: boolean;
+      try {
+        const id = terminalId ?? sessionId;
+        const all: { id: string; live: boolean }[] = terminalId ? await current.terminals() : await current.sessions();
+        there = all.some((t) => t.id === id && t.live);
+      } catch {
+        if (!gone) later();
+        return;
       }
+      if (gone) return;
+      if (there) attach();
+      else ended();
     };
-    ws.onclose = () => {
-      setViewing(false);
-      x.write(`\r\n\x1b[2m— ${terminalId ? "terminal closed" : "session detached"} —\x1b[0m\r\n`);
-    };
+    attach();
     // Keys go to the hub as typed; it keeps only the active viewer's. The
     // claim comes from the person turning here (a click, focus, a key, a
     // paste), never from onData, which also carries xterm's answers to the
     // program's queries. The listeners capture, so the claim goes ahead of
     // what xterm sends for the same event (a focus report, a mouse report).
-    const input = x.onData((d) => ws.readyState === WebSocket.OPEN && ws.send(encoder.encode(d)));
+    const input = x.onData((d) => isOpen() && ws!.send(encoder.encode(d)));
     const turnedHere = () => viewer.claim();
     const el = host.current;
     const turns = ["mousedown", "focus", "paste"] as const;
@@ -106,10 +164,12 @@ export function Terminal({
     observer.observe(el);
     if (autoFocus) x.focus();
     return () => {
+      gone = true;
+      clearTimeout(timer);
       observer.disconnect();
       for (const t of turns) el.removeEventListener(t, turnedHere, true);
       input.dispose();
-      ws.close();
+      ws?.close();
       x.dispose();
       term.current = null;
       viewerRef.current = null;
