@@ -365,6 +365,12 @@ describe("a person's files, against the hub's copy", () => {
       expect(shape(withHistory(old, [sent], before))).toEqual([["look", []], ["look", ["a"]]]);
     });
 
+    it("doesn't put a new image on a message that said the same just before the read", () => {
+      const history = [msg("h1", "user", "look", at(0)), msg("h2", "assistant", "Yes?", at(1))];
+      const sent = withFiles(msg("m-1", "user", "look", at(1)), "a");
+      expect(shape(withHistory(history, [sent], at(0)))).toEqual([["look", []], ["Yes?", []], ["look", ["a"]]]);
+    });
+
     it("keeps its place across later refreshes", () => {
       const anchored = { ...withFiles(msg("m-3", "user", "", at(2)), "c"), placedBefore: "h4" };
       const later = settle(kept, [anchored, msg("m-7", "user", "more chat", at(4))], before);

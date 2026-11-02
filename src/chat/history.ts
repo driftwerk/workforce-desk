@@ -244,6 +244,9 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
   const shownFiles = new Map<number, Attachment[]>();
   let j = history.length - 1;
   for (const m of [...held].reverse()) {
+    // One sent since that read can't be in it: an earlier message that says
+    // the same is another message.
+    if (loadedAt === null || m.at > loadedAt) continue;
     for (let k = j; k >= Math.max(0, j - LOOK_BACK); k--) {
       if (twinOf(history[k]!, m)) {
         shownFiles.set(k, filesOf(m) as Attachment[]);
