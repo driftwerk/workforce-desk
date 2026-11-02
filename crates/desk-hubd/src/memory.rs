@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths, process};
+use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths};
 use eyre::{Context, Result, bail};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
@@ -208,40 +208,18 @@ fn spawn(
 /// it could stop it), which would otherwise hold the tenant and its port.
 /// Only a process that is the store's binary is stopped.
 pub async fn stop_leftover(paths: &Paths, binary: &Path) {
-    let Some(pid) = std::fs::read_to_string(pidfile(paths))
-        .ok()
-        .and_then(|p| p.trim().parse::<u32>().ok())
-    else {
-        return;
-    };
     let name = binary
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let running = |pid: u32| async move {
-        tokio::task::spawn_blocking(move || process::command_of(pid))
-            .await
-            .ok()
-            .flatten()
-    };
-    if !running(pid)
-        .await
-        .is_some_and(|comm| process::is_program(&comm, &name))
-    {
+    let Some(pid) = crate::supervise::left_running(&pidfile(paths), &name) else {
         return;
-    }
+    };
     tracing::warn!(
         pid,
         "stopping the memory store an earlier Desk Helper left running"
     );
-    let _ = process::terminate(pid);
-    let deadline = Instant::now() + STOP_GRACE;
-    while Instant::now() < deadline && running(pid).await.is_some() {
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    if running(pid).await.is_some() {
-        let _ = process::kill(pid);
-    }
+    crate::supervise::stop_left_running(pid, &name, STOP_GRACE, true).await;
 }
 
 /// The store, kept running: started again after it exits, sooner the
