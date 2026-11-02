@@ -119,24 +119,25 @@ fn accounts_with(
     local: Option<Connection>,
     secrets: &Secrets,
 ) -> Result<Vec<HubAccount>> {
-    let mut out = Vec::new();
-    if let Some(c) = local
-        && let Some(token) = c.device_token
-    {
-        out.push(HubAccount::new(
-            LOCAL_HUB_ID.into(),
-            desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
-            c.gateway_url,
-            true,
-            token,
-        ));
-    }
+    let mut out: Vec<HubAccount> = local.and_then(local_account).into_iter().collect();
     for r in read_records(paths)? {
         if let Some(token) = secrets.get_account(&device_token_account(&r.id))? {
             out.push(HubAccount::new(r.id, r.label, r.url, false, token));
         }
     }
     Ok(out)
+}
+
+/// The local hub's account, from its connection, once Desk is paired with it.
+pub fn local_account(c: Connection) -> Option<HubAccount> {
+    let token = c.device_token?;
+    Some(HubAccount::new(
+        LOCAL_HUB_ID.into(),
+        desk_core::computer_name().unwrap_or_else(|| "This computer".into()),
+        c.gateway_url,
+        true,
+        token,
+    ))
 }
 
 /// Keeps a remote hub Desk has just been paired with. Pairing the same

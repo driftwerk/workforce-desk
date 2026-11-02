@@ -17,6 +17,9 @@ use crate::hubs::{self, HubAccount};
 /// Reads every hub Desk can reach, with its token; blocking.
 type Source = Arc<dyn Fn() -> eyre::Result<Vec<HubAccount>> + Send + Sync>;
 
+/// Reads only the hub on this computer; blocking (on Windows it asks WSL).
+type LocalSource = Arc<dyn Fn() -> eyre::Result<Option<HubAccount>> + Send + Sync>;
+
 /// Why a hub couldn't be asked.
 #[derive(Debug)]
 pub enum Failure {
@@ -72,20 +75,42 @@ impl Clients {
 
 pub struct Paired {
     source: Source,
+    local_source: LocalSource,
     hubs: Mutex<Option<Arc<Vec<HubAccount>>>>,
+    /// Reading the local hub again when it can't be reached where it was.
+    pub(crate) reread: crate::reread::Reread,
     loopback: Clients,
     remote: Clients,
 }
 
 impl Paired {
     pub fn new(paths: Paths, backend: Option<Backend>) -> Self {
-        Self::with_source(Arc::new(move || hubs::accounts(&paths, backend.as_ref())))
+        let local = backend.clone();
+        Self::with_sources(
+            Arc::new(move || hubs::accounts(&paths, backend.as_ref())),
+            Arc::new(move || match &local {
+                Some(b) => Ok(b.connection()?.and_then(hubs::local_account)),
+                None => Ok(None),
+            }),
+        )
     }
 
+    /// With `source` for every hub, the local one read from it too.
+    #[cfg(test)]
     pub(crate) fn with_source(source: Source) -> Self {
+        let all = Arc::clone(&source);
+        Self::with_sources(
+            source,
+            Arc::new(move || Ok(all()?.into_iter().find(|h| h.local))),
+        )
+    }
+
+    pub(crate) fn with_sources(source: Source, local_source: LocalSource) -> Self {
         Self {
             source,
+            local_source,
             hubs: Mutex::new(None),
+            reread: crate::reread::Reread::default(),
             loopback: Clients::new(true),
             remote: Clients::new(false),
         }
@@ -94,6 +119,39 @@ impl Paired {
     /// Forgets the hubs read, after one is paired or removed.
     pub fn forget(&self) {
         *self.hubs.lock().expect("hubs") = None;
+    }
+
+    /// Reads the hub on this computer again (and no other) after nothing
+    /// answered where it was: once however many failed together, at most
+    /// once every [`crate::reread::GAP`].
+    pub async fn reread_local(self: &Arc<Self>) {
+        let this = Arc::clone(self);
+        self.reread
+            .run(|| async move {
+                let read = Arc::clone(&this.local_source);
+                let Ok(Ok(local)) = tauri::async_runtime::spawn_blocking(move || read()).await
+                else {
+                    return;
+                };
+                let mut kept = this.hubs.lock().expect("hubs");
+                if let Some(hubs) = kept.as_ref() {
+                    let others = hubs.iter().filter(|h| !h.local).cloned();
+                    *kept = Some(Arc::new(local.into_iter().chain(others).collect()));
+                }
+            })
+            .await;
+    }
+
+    /// Said by a socket to this computer's hub that couldn't connect.
+    pub fn local_unreachable(&self) {
+        self.reread.mark_stale();
+    }
+
+    /// Reads the local hub again first if a socket to it couldn't connect.
+    pub async fn reread_local_if_stale(self: &Arc<Self>) {
+        if self.reread.is_stale() {
+            self.reread_local().await;
+        }
     }
 
     fn all(&self) -> eyre::Result<Arc<Vec<HubAccount>>> {
@@ -174,7 +232,7 @@ impl Paired {
             // It never reached the old address: sent again only where the
             // hub is now, if it moved.
             Err(e) if reach.local && e.is_connect() => {
-                self.forget();
+                self.reread_local().await;
                 let now = self.reach_async(id).await?;
                 if now.base == reach.base {
                     return Err(unreachable(e));
@@ -265,16 +323,27 @@ pub(crate) mod tests {
             format!("http://{}", l.local_addr().unwrap())
         };
         let at = Arc::new(Mutex::new(gone.clone()));
-        let reads = Arc::new(AtomicUsize::new(0));
+        // Every hub's read (each workspace's token), and the local one's.
+        let (reads, local_reads) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
         let (following, counted) = (Arc::clone(&at), Arc::clone(&reads));
-        let p = Arc::new(Paired::with_source(Arc::new(move || {
-            counted.fetch_add(1, Ordering::SeqCst);
-            let local = following.lock().unwrap().clone();
-            Ok(vec![
-                account("local", &local, true, "l"),
-                account("dev", &gone, false, "d"),
-            ])
-        })));
+        let (following_local, counted_local) = (Arc::clone(&at), Arc::clone(&local_reads));
+        let mut p = Paired::with_sources(
+            Arc::new(move || {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let local = following.lock().unwrap().clone();
+                Ok(vec![
+                    account("local", &local, true, "l"),
+                    account("dev", &gone, false, "d"),
+                ])
+            }),
+            Arc::new(move || {
+                counted_local.fetch_add(1, Ordering::SeqCst);
+                let local = following_local.lock().unwrap().clone();
+                Ok(Some(account("local", &local, true, "l")))
+            }),
+        );
+        p.reread = crate::reread::Reread::every(std::time::Duration::ZERO);
+        let p = Arc::new(p);
         let get = |path: &'static str| {
             move |r: &Reach| Some(r.client.get(desk_core::net::at(&r.base, path, None).ok()?))
         };
@@ -285,11 +354,15 @@ pub(crate) mod tests {
         *at.lock().unwrap() = url;
         let answer = p.send("local", get("/api/me")).await.unwrap();
         assert_eq!(answer.status(), StatusCode::NO_CONTENT);
+        // Only the local hub was read again; the workspaces once, at first.
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert_eq!(local_reads.load(Ordering::SeqCst), 2);
         let before = reads.load(Ordering::SeqCst);
         assert!(matches!(
             p.send("dev", get("/api/me")).await,
             Err(Failure::Unreachable(_))
         ));
         assert_eq!(reads.load(Ordering::SeqCst), before);
+        assert_eq!(local_reads.load(Ordering::SeqCst), 2);
     }
 }

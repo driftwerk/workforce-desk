@@ -125,6 +125,7 @@ impl HubIo {
     ) -> Result<u32, String> {
         let (path, query) = socket_target(target)?;
         let page = self.sockets.page(owner);
+        self.paired.reread_local_if_stale().await;
         let reach = self
             .paired
             .reach_async(hub)
@@ -167,7 +168,7 @@ impl HubIo {
         // isn't, which would only read every hub's token again.
         let unreachable = reach.local.then(|| {
             let paired = Arc::clone(&self.paired);
-            Arc::new(move || paired.forget()) as socket::Unreachable
+            Arc::new(move || paired.local_unreachable()) as socket::Unreachable
         });
         let dial = Dial {
             url,

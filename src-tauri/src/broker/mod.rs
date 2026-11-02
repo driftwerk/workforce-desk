@@ -57,6 +57,8 @@ type Kept = Arc<Mutex<Option<Local>>>;
 pub struct Broker {
     source: Source,
     local: Kept,
+    /// Reading it again when it can't be reached where it was.
+    reread: Arc<crate::reread::Reread>,
     client: reqwest::Client,
     sockets: Arc<socket::Sockets>,
 }
@@ -87,6 +89,7 @@ impl Broker {
         Self {
             source,
             local: Kept::default(),
+            reread: Arc::default(),
             // The token goes to the hub on this computer and nowhere else:
             // never through a proxy, never after a redirect.
             client: desk_core::net::loopback(),
@@ -100,6 +103,18 @@ impl Broker {
 
     fn forget(&self) {
         *self.local.lock().expect("local") = None;
+    }
+
+    /// Reads where the hub is again after nothing answered where it was:
+    /// once however many failed together, at most once every
+    /// [`crate::reread::GAP`].
+    async fn reread(&self) {
+        self.reread
+            .run(|| async {
+                self.forget();
+                let _ = self.local().await;
+            })
+            .await;
     }
 
     /// One of `DeskHub`'s requests, sent as the hub's admin.
@@ -145,7 +160,7 @@ impl Broker {
             // is read again, and the request sent there if it moved (it
             // never reached the old address).
             Err(e) if e.is_connect() => {
-                self.forget();
+                self.reread().await;
                 let now = self.local().await?;
                 if now.base == local.base {
                     return Err(unreachable(e));
@@ -183,6 +198,9 @@ impl Broker {
     ) -> Result<u32, String> {
         let allowed = routes::socket(target).map_err(|e| e.to_string())?;
         let page = self.sockets.page(owner);
+        if self.reread.is_stale() {
+            self.reread().await;
+        }
         let local = self.local().await?;
         let mut url = at(&local.base, &allowed.path, None)?;
         url.set_scheme("ws")
@@ -198,9 +216,8 @@ impl Broker {
             })
         });
         // Desk Helper may have moved the hub: read again for the next one.
-        let kept = Arc::clone(&self.local);
-        let unreachable: socket::Unreachable =
-            Arc::new(move || *kept.lock().expect("local") = None);
+        let reread = Arc::clone(&self.reread);
+        let unreachable: socket::Unreachable = Arc::new(move || reread.mark_stale());
         self.sockets
             .open(owner, page, url, bearer, Some(unreachable), events)
     }
@@ -589,11 +606,14 @@ mod tests {
     }
 
     /// A broker whose hub is wherever `at` says, and how often it read it.
-    fn broker_following(at: Arc<Mutex<String>>) -> (Broker, Arc<std::sync::atomic::AtomicUsize>) {
+    fn broker_following(
+        at: Arc<Mutex<String>>,
+        gap: Duration,
+    ) -> (Broker, Arc<std::sync::atomic::AtomicUsize>) {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = Arc::clone(&reads);
-        let broker = Broker::with_source(
+        let mut broker = Broker::with_source(
             Arc::new(move || {
                 counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(Some(Connection {
@@ -604,6 +624,7 @@ mod tests {
             }),
             Arc::default(),
         );
+        broker.reread = Arc::new(crate::reread::Reread::every(gap));
         (broker, reads)
     }
 
@@ -613,7 +634,7 @@ mod tests {
     async fn a_hub_that_moved_is_asked_where_it_is_now() {
         let (url, mut seen) = hub(vec![OK_JSON]).await;
         let at = Arc::new(Mutex::new(url.clone()));
-        let (broker, reads) = broker_following(Arc::clone(&at));
+        let (broker, reads) = broker_following(Arc::clone(&at), Duration::ZERO);
         // Read once, kept.
         *at.lock().unwrap() = gone_address();
         let first = broker.fetch("GET", "/api/desk/sessions", None).await;
@@ -649,7 +670,7 @@ mod tests {
             }
         });
         let at = Arc::new(Mutex::new(gone_address()));
-        let (broker, _) = broker_following(Arc::clone(&at));
+        let (broker, _) = broker_following(Arc::clone(&at), Duration::ZERO);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let events: socket::Events = Arc::new(move |body| {
             if let InvokeResponseBody::Json(s) = body {
@@ -675,5 +696,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(said(&mut rx).await, "open");
+    }
+
+    /// A hub that is down isn't read again for every request that fails:
+    /// once for those failing together, then not within the gap.
+    #[tokio::test]
+    async fn a_hub_that_is_down_is_read_again_at_most_once_a_gap() {
+        let at = Arc::new(Mutex::new(gone_address()));
+        let (broker, reads) = broker_following(at, Duration::from_secs(60));
+        let broker = Arc::new(broker);
+        assert!(
+            broker
+                .fetch("GET", "/api/desk/sessions", None)
+                .await
+                .is_err()
+        );
+        let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(read(), 2, "read, then once again");
+        let all: Vec<_> = (0..6)
+            .map(|_| {
+                let b = Arc::clone(&broker);
+                tokio::spawn(async move { b.fetch("GET", "/api/desk/sessions", None).await })
+            })
+            .collect();
+        for t in all {
+            assert!(t.await.unwrap().is_err());
+        }
+        assert_eq!(read(), 2);
     }
 }
