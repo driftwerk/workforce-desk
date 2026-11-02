@@ -57,6 +57,10 @@ export const onUtterance = (f: (u: Utterance) => void): Promise<() => void> =>
 /** Push-to-talk was let go and nothing was said. */
 export const onUnheard = (f: () => void): Promise<() => void> => listen("voice-unheard", () => f());
 
+/** What was being read out was stopped (barge-in, push-to-talk, Stop): no more
+ *  of that answer is wanted. */
+export const onSpeechStopped = (f: () => void): Promise<() => void> => listen("voice-stopped", () => f());
+
 export const onVoiceError = (f: (message: string) => void): Promise<() => void> =>
   listen<string>("voice-error", (e) => f(e.payload));
 

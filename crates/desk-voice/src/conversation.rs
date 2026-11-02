@@ -131,10 +131,15 @@ impl Conversation {
         true
     }
 
-    /// Speech began. True means barge in: stop what's playing.
-    pub fn speech_started(&mut self, now: Instant) -> bool {
+    /// Speech began. Over playback it may or may not be someone talking: see
+    /// [`interrupted`](Self::interrupted).
+    pub fn speech_started(&mut self, now: Instant) {
         self.in_speech = true;
         self.last = now;
+    }
+
+    /// Someone talked over playback. True when something was playing: stop it.
+    pub fn interrupted(&mut self) -> bool {
         let barge = self.speaking;
         if barge {
             self.speaking = false;
@@ -484,14 +489,20 @@ mod tests {
     }
 
     #[test]
-    fn speaking_over_playback_barges_in() {
+    fn speech_over_playback_stops_it_only_when_it_interrupts() {
         let (mut c, clock) = start();
         c.speaking();
-        assert!(c.speech_started(clock.at(200)));
+        c.speech_started(clock.at(200));
+        assert!(
+            c.is_speaking(),
+            "the start of a sound isn't an interruption"
+        );
+        assert!(!c.keyword("Atlas", clock.at(300)));
+        assert!(c.interrupted());
         assert!(!c.is_speaking());
         assert!(c.keyword("Atlas", clock.at(400)));
         c.speech_ended(clock.at(900));
-        assert!(!c.speech_started(clock.at(1_500)));
+        assert!(!c.interrupted());
     }
 
     #[test]

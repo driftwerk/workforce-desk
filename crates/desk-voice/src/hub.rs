@@ -177,13 +177,23 @@ struct SpeakRequest<'a> {
 }
 
 const MAX_AUDIO_BYTES: u64 = 64 << 20;
+/// How long a sentence may take to come back. Far longer than one takes, short
+/// enough that a stalled voice hands over to another, not to a minute's silence.
+const SPEAK_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl CloudSpeech for Hub {
     fn speak(&self, voice: &VoiceSpec, text: &str) -> std::result::Result<Audio, SpeechError> {
         let body = serde_json::to_string(&SpeakRequest { voice, text })
             .map_err(|e| SpeechError::Hub(e.to_string()))?;
         let mut response = self
-            .post("/api/desk/voice/speak", body)
+            .agent
+            .post(&format!("{}/api/desk/voice/speak", self.base))
+            .config()
+            .timeout_global(Some(SPEAK_TIMEOUT))
+            .build()
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .content_type("application/json")
+            .send(body)
             .map_err(|e| SpeechError::Hub(format!("couldn't reach Desk's hub: {e}")))?;
         let status = response.status();
         let content_type = response

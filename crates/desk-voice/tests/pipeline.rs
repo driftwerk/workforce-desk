@@ -308,6 +308,169 @@ fn the_engine_stops_talking_when_talked_over_and_takes_push_to_talk() {
     drop(engine);
 }
 
+/// A reply coming back into the microphone, far louder than an echo canceller
+/// leaves it: the voice model fires and the recogniser hears the words, and it's
+/// still the reply. It isn't stopped, and isn't sent to the agent as the person.
+#[test]
+#[ignore = "needs the speech models"]
+fn its_own_voice_coming_back_doesnt_stop_it() {
+    const REPLY: &str = "The nightly build failed in the integration suite, in the payments tests.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let reply = speaker().synthesize(REPLY, None).unwrap();
+    for gain in [0.3f32, 0.1] {
+        let echo: Vec<f32> = reply.samples.iter().map(|s| s * gain).collect();
+        {
+            let mic = mic.lock().unwrap();
+            let feed = mic.as_ref().unwrap();
+            for chunk in echo.chunks(4_096) {
+                feed(chunk, reply.rate);
+            }
+            for chunk in silence(1.5).chunks(1_600) {
+                feed(chunk, SPEECH_RATE);
+            }
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert_eq!(*out.stops.lock().unwrap(), 0);
+    assert_eq!(engine.state(), VoiceState::Speaking);
+    assert!(events.said.lock().unwrap().is_empty());
+    drop(engine);
+}
+
+/// Its own voice saying numbers, written as digits and heard as words, and cut
+/// off part-way through a word, as playback is when a new look is taken: still
+/// the reply. It isn't stopped, and isn't sent.
+#[test]
+#[ignore = "needs the speech models"]
+fn its_own_numbers_cut_off_dont_stop_it() {
+    const REPLY: &str = "The build failed at 3:30 today, after 2 of the 14 tests took 2.5 minutes, \
+        and the runner costs $4.20 an hour.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let reply = speaker().synthesize(REPLY, None).unwrap();
+    // Cut at an odd place, mid-word as likely as not.
+    let cut = reply.samples.len() * 7 / 11;
+    for gain in [0.3f32, 0.1] {
+        let echo: Vec<f32> = reply.samples[..cut].iter().map(|s| s * gain).collect();
+        {
+            let mic = mic.lock().unwrap();
+            let feed = mic.as_ref().unwrap();
+            for chunk in echo.chunks(4_096) {
+                feed(chunk, reply.rate);
+            }
+            for chunk in silence(1.5).chunks(1_600) {
+                feed(chunk, SPEECH_RATE);
+            }
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert_eq!(*out.stops.lock().unwrap(), 0);
+    assert_eq!(engine.state(), VoiceState::Speaking);
+    assert!(events.said.lock().unwrap().is_empty());
+    drop(engine);
+}
+
+/// Over a long reply, a short real phrase whose words are all further on in it:
+/// it stops the reply, and what was said gets to the agent.
+#[test]
+#[ignore = "needs the speech models"]
+fn a_short_real_phrase_stops_a_long_reply() {
+    const REPLY: &str = "I looked at the failing job this morning and read the logs. \
+        The cache key changed when the lockfile was updated last week. \
+        Do you want me to open the pull request now? \
+        I can tell you what I find about the timeout once that has finished.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let phrase = speaker()
+        .synthesize("What about the timeout?", None)
+        .unwrap();
+    {
+        let mic = mic.lock().unwrap();
+        let feed = mic.as_ref().unwrap();
+        for chunk in silence(0.5).chunks(1_600) {
+            feed(chunk, SPEECH_RATE);
+        }
+        for chunk in phrase.samples.chunks(4_096) {
+            feed(chunk, phrase.rate);
+        }
+        for chunk in silence(2.0).chunks(1_600) {
+            feed(chunk, SPEECH_RATE);
+        }
+    }
+    wait_for("barge-in", || *out.stops.lock().unwrap() > 0);
+    wait_for("what they said", || !events.said.lock().unwrap().is_empty());
+    let said = events.said.lock().unwrap()[0].clone();
+    assert!(words(&said.text).contains("timeout"), "{}", said.text);
+    drop(engine);
+}
+
 fn roster() -> Vec<Member> {
     names()
         .into_iter()

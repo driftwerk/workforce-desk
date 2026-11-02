@@ -377,7 +377,11 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     case "stream_delta": {
       const last = s.messages.at(-1);
       if (!last || last.status !== "streaming") return s;
-      return { ...s, messages: [...s.messages.slice(0, -1), { ...last, content: last.content + (msg.content ?? "") }] };
+      const speech =
+        msg.speech === undefined && last.speech === undefined
+          ? {}
+          : { speech: (last.speech ?? last.content) + (msg.speech ?? msg.content ?? "") };
+      return { ...s, messages: [...s.messages.slice(0, -1), { ...last, content: last.content + (msg.content ?? ""), ...speech }] };
     }
     case "stream_discard":
       return { ...s, streaming: false, typing: true, messages: s.messages.filter((m) => m.status !== "streaming") };
@@ -422,12 +426,12 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     }
     case "message": {
       const content = msg.content ?? "";
-      const desk = msg.desk ? { desk: msg.desk } : {};
+      const desk = { ...(msg.desk ? { desk: msg.desk } : {}), ...(msg.speech ? { speech: msg.speech } : {}) };
       if (msg.id && s.messages.some((m) => m.id === msg.id)) {
         const merged = update(s.messages, msg.id, (m) => ({ ...m, content: content || m.content, status: "complete", ...desk }));
         return outOfBand ? { ...s, messages: merged } : { ...s, typing: false, streaming: false, working: null, messages: merged };
       }
-      if (outOfBand) return { ...s, messages: [...s.messages, { ...message("assistant", content), ...(msg.id ? { id: msg.id } : {}) }] };
+      if (outOfBand) return { ...s, messages: [...s.messages, { ...message("assistant", content), ...(msg.id ? { id: msg.id } : {}), ...(msg.speech ? { speech: msg.speech } : {}) }] };
       const last = s.messages.at(-1);
       // On a hub without ids: a non-streamed answer that repeats what just
       // streamed is the same answer (what it mentions to act on may come
@@ -438,7 +442,7 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
           typing: false,
           streaming: false,
           working: null,
-          messages: msg.desk ? [...s.messages.slice(0, -1), { ...last, ...desk }] : s.messages,
+          messages: msg.desk || msg.speech ? [...s.messages.slice(0, -1), { ...last, ...desk }] : s.messages,
         };
       // Tools ran ahead of the answer: the answer belongs to that message.
       if (last?.role === "assistant" && last.status === "streaming" && last.content === "")
@@ -527,12 +531,25 @@ export const wsPath = (agentId: string, channel = "desk"): string =>
 
 /** Answers that finished in this step: assistant messages that became
  *  complete with something to say, by id. */
-export const finishedAnswers = (before: ConversationState, after: ConversationState): ChatMessage[] => {
+export const finishedAnswers = (before: ConversationState, after: ConversationState): ChatMessage[] =>
+  finished(before, after).filter((m) => m.content.trim() !== "");
+
+/** Answers that finished in this step with something to say out loud, which may
+ *  be nothing to read: a reply that was only `(laughing)`. */
+export const finishedSpeech = (before: ConversationState, after: ConversationState): ChatMessage[] =>
+  finished(before, after).filter((m) => (m.speech ?? m.content).trim() !== "");
+
+const finished = (before: ConversationState, after: ConversationState): ChatMessage[] => {
   const was = new Map(before.messages.map((m) => [m.id, m.status]));
-  return after.messages.filter(
-    (m) => m.role === "assistant" && m.status === "complete" && m.content.trim() !== "" && was.get(m.id) !== "complete",
-  );
+  return after.messages.filter((m) => m.role === "assistant" && m.status === "complete" && was.get(m.id) !== "complete");
 };
+
+/** `messages` as a conversation shows them: an answer with nothing to read, only
+ *  to hear or nothing at all, leaves no empty bubble. */
+export const toShow = (messages: ChatMessage[]): ChatMessage[] =>
+  messages.filter(
+    (m) => !(m.role === "assistant" && m.status === "complete" && !m.content.trim() && !m.tools.length && !m.attachments?.length && !m.desk),
+  );
 
 /** What Desk sends with a message: where it was asked (on a hub that takes
  *  structured turns), what to say instead to a hub that doesn't, and its

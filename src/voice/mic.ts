@@ -18,11 +18,14 @@ export interface MicState {
   hold: string | null;
   /** The hold's key or button is still down. */
   pressed: boolean;
+  /** Answers to a DM being read out: the engine that says them stays up, whoever
+   *  has the microphone by then, hearing nothing but someone talking over it. */
+  replying: number;
   /** Why the microphone couldn't be had, for the DM that asked. */
   problem: { agent: string; message: string } | null;
 }
 
-export const useMic = create<MicState>(() => ({ talk: null, hold: null, pressed: false, problem: null }));
+export const useMic = create<MicState>(() => ({ talk: null, hold: null, pressed: false, replying: 0, problem: null }));
 
 export type Owner = { agent: string; mode: "talk" | "hold" };
 
@@ -32,9 +35,16 @@ export const owner = (s: Pick<MicState, "talk" | "hold"> = useMic.getState()): O
 
 /** How the engine listens for the owner (`voice_claim`'s mode): every word
  *  for a talking DM; only what's held while a hold is in hand, unless it's
- *  the talking DM's own hold. */
-export const claimMode = (s: Pick<MicState, "talk" | "hold"> = useMic.getState()): "open" | "held" | null =>
-  s.hold ? (s.hold === s.talk ? "open" : "held") : s.talk ? "open" : null;
+ *  the talking DM's own hold; and while a DM's answer is read out once nobody
+ *  has the microphone, only to tell when someone talks over it. */
+export const claimMode = (s: Pick<MicState, "talk" | "hold" | "replying"> = useMic.getState()): "open" | "held" | null =>
+  s.hold ? (s.hold === s.talk ? "open" : "held") : s.talk ? "open" : s.replying > 0 ? "held" : null;
+
+/** A DM's answer is about to be read out. */
+export const replyStarted = (): void => useMic.setState((s) => ({ replying: s.replying + 1 }));
+
+/** What was being read out is over. */
+export const repliesOver = (): void => useMic.setState({ replying: 0 });
 
 /** Turns `agent`'s spoken conversation on, taking the microphone from any
  *  other DM's, or off. */
@@ -55,7 +65,7 @@ export const holdDone = (): void => useMic.setState((s) => (s.pressed ? {} : { h
 /** The microphone couldn't be had for `agent`: it goes back to voice by
  *  name, saying why in that DM. */
 export const micFailed = (agent: string, message: string): void =>
-  useMic.setState({ talk: null, hold: null, pressed: false, problem: { agent, message } });
+  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: { agent, message } });
 
 /** `agent`'s DM isn't shown anywhere now: whatever it held is let go. */
 export const forget = (agent: string): void =>

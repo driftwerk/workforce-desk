@@ -71,7 +71,7 @@ describe("the pill while a DM has the mic", () => {
 });
 
 describe("a DM's voice bar", () => {
-  const mic = (patch: Partial<MicState> = {}): MicState => ({ talk: null, hold: null, pressed: false, problem: null, ...patch });
+  const mic = (patch: Partial<MicState> = {}): MicState => ({ talk: null, hold: null, pressed: false, replying: 0, problem: null, ...patch });
   const key = "local/atlas";
   const listening = { state: "listening", conversation: null } as const;
 

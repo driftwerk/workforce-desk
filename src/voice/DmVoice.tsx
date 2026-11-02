@@ -3,9 +3,9 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu } from "../ui/Menu";
 import { stopSpeaking } from "./api";
-import { toggleTalk, useMic } from "./mic";
+import { useMic } from "./mic";
 import { useVoiceStore } from "./store";
-import { endHold, setReply, startHold } from "./useVoice";
+import { endConversation, endHold, setReply, startHold, talkOrEnd } from "./useVoice";
 import { dmVoiceView } from "./view";
 import "../styles/voice.css";
 
@@ -79,7 +79,7 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
         aria-label={talking ? `End the conversation with ${name}` : `Talk with ${name}`}
         aria-pressed={talking}
         title={`${talking ? `End the conversation with ${name}` : `Talk with ${name} until you end it`} (${shortcutLabel(talkKeys)}) · ${answers}`}
-        onClick={() => toggleTalk(agent)}
+        onClick={() => talkOrEnd(agent)}
       >
         <TalkIcon />
       </button>
@@ -142,7 +142,7 @@ export function DmVoiceBar({ agent, name }: { agent: string; name: string }) {
         </button>
       )}
       {mic.talk === agent && (
-        <button type="button" className="link small" onClick={() => toggleTalk(agent)}>
+        <button type="button" className="link small" onClick={() => endConversation(agent)}>
           End
         </button>
       )}

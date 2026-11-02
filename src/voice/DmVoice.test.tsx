@@ -17,7 +17,7 @@ const calls = (command: string) => vi.mocked(invoke).mock.calls.filter(([c]) => 
 beforeEach(() => {
   vi.mocked(invoke).mockClear();
   vi.mocked(invoke).mockImplementation(() => Promise.resolve());
-  useMic.setState({ talk: null, hold: null, pressed: false, problem: null });
+  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null });
   useSettings.setState({ writtenReplies: [], loaded: true });
   useVoiceStore.setState({ here: true, status: { state: "listening", conversation: null }, waiting: {}, speakingFor: null });
 });
