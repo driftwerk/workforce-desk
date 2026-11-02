@@ -138,6 +138,28 @@ describe("the Floor", () => {
     expect(screen.queryByRole("button", { name: "New session" })).toBeNull();
   });
 
+  it("comes back as the crew's overview on the minute once a hub that said it had none has it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      // A hub that is starting up answers 404 for a moment.
+      let up = false;
+      const hub = hubWith({
+        overview: vi.fn(() => (up ? Promise.resolve(overview()) : Promise.reject(new HubError(404, "This hub doesn’t have that yet.")))),
+      });
+      useDesk.setState({ hub, sessions: { a: session("a", { name: "acme-web" }) } });
+      render(<Floor onNewSession={() => {}} />);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(useOverview.getState().overviewSupport).toBe("no");
+      expect(screen.queryByRole("button", { name: "New session" })).toBeNull();
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(useOverview.getState().overviewSupport).toBe("yes");
+      expect(screen.getByRole("button", { name: "New session" })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the brief, who needs you, who's working and what's done today, beside the activity", async () => {
     useDesk.setState({
       hub: hubWith({}),

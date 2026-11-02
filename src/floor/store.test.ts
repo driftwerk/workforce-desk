@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { localIso } from "../hub/floor";
 import { deskListeners } from "../hub/store";
 import { merged } from "./merge";
-import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, watchFloor } from "./store";
+import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, useLocalFloor, watchFloor } from "./store";
 import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
 import { renderHook } from "@testing-library/react";
 
@@ -58,17 +58,51 @@ describe("the floor's store", () => {
     expect(floorOf("b")?.state).toBe("ready");
   });
 
-  it("marks a hub without the route unsupported, and asks it again only when Desk comes forward", async () => {
+  it("marks a hub without the route unsupported, and asks it again on the minute and when Desk comes forward", async () => {
     hubs.b!.floor = null;
     useChat.setState({ hubs: [hub("b")] });
     await settle();
     expect(floorOf("b")?.state).toBe("unsupported");
     const { unmount } = renderHook(() => useFloorTick(true));
     await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
-    expect(hubs.b!.days).toHaveLength(1);
+    expect(hubs.b!.days).toHaveLength(2);
     window.dispatchEvent(new Event("focus"));
     await settle();
-    expect(hubs.b!.days).toHaveLength(2);
+    expect(hubs.b!.days).toHaveLength(3);
+    unmount();
+  });
+
+  it("brings this computer's floor back once its hub, answering 404 while it restarted, has it again", async () => {
+    // A hub starting up answers 404 for a moment, before its routes are in.
+    const route = hubs.local!.floor;
+    hubs.local!.floor = null;
+    useChat.setState({ hubs: [hub("local", { local: true })] });
+    const shown = renderHook(() => useLocalFloor());
+    await settle();
+    expect(floorOf("local")?.state).toBe("unsupported");
+    expect(shown.result.current).toBe(false);
+    hubs.local!.floor = route;
+    const { unmount } = renderHook(() => useFloorTick(true));
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(floorOf("local")?.state).toBe("ready");
+    expect(shown.result.current).toBe(true);
+    unmount();
+    shown.unmount();
+  });
+
+  it("reads a hub that failed before it ever answered on the minute, even while its link is up", async () => {
+    hubs.b!.down = true;
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    floorHeard("b", new Set(["desk.floor"]));
+    await settle();
+    expect(floorOf("b")?.state).toBe("failed");
+    const { unmount } = renderHook(() => useFloorTick(true));
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(floorOf("b")?.state).toBe("failed");
+    hubs.b!.down = false;
+    await vi.advanceTimersByTimeAsync(TICK_MS + SETTLE_MS);
+    expect(floorOf("b")?.state).toBe("ready");
     unmount();
   });
 
