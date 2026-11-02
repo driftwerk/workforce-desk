@@ -481,6 +481,25 @@ describe("a person's files, against the hub's copy", () => {
       expect(shape(withHistory(later, again, before))).toEqual([["look", ["a"]], ["look", ["b"]]]);
     });
 
+    it("gives each its own copy when the hub has both, however far apart they were said", () => {
+      const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const second = withFiles(msg("m-2", "user", "look", at(5)), "b");
+      const page = [msg("h1", "user", "look", at(0)), msg("h2", "user", "look", at(5))];
+      expect([...settle(page, [first, second], before).twins]).toEqual([
+        ["m-2", "h2"],
+        ["m-1", "h1"],
+      ]);
+      expect(shape(withHistory(page, [first, second], before))).toEqual([["look", ["a"]], ["look", ["b"]]]);
+    });
+
+    it("doesn't count a message that said the same long before as the later one's copy", () => {
+      const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
+      const second = withFiles(msg("m-2", "user", "look", at(1)), "b");
+      const page = [msg("h0", "user", "look", "2026-10-28T06:00:00.000Z"), msg("h1", "user", "look", at(0))];
+      const { twins, anchors } = settle(page, [first, second], before);
+      expect([[...twins], anchors.size]).toEqual([[["m-1", "h1"]], 0]);
+    });
+
     it("shows two held messages that said the same in order before either is settled", () => {
       const first = withFiles(msg("m-1", "user", "look", at(0)), "a");
       const second = withFiles(msg("m-2", "user", "look", at(1)), "b");

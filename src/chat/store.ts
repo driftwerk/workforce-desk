@@ -144,6 +144,11 @@ const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
   }
 };
 
+/** Each DM's count of reads of its history begun, and the count of the one
+ *  shown, so a read that began before the one shown changes nothing. */
+const readsBegun = new Map<string, number>();
+const readShown = new Map<string, number>();
+
 /** Each hub's count of pictures you've set there, so a read of you that
  *  began before one doesn't put the old picture back. */
 const mySets = new Map<string, number>();
@@ -353,6 +358,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     const target = whereIs(get(), key);
     if (!target || get().histories[key]?.state !== "ready") return;
     const started = new Date().toISOString();
+    const read = (readsBegun.get(key) ?? 0) + 1;
+    readsBegun.set(key, read);
     let page;
     try {
       page = await fetchHistory(target.hub, target.agent.id);
@@ -362,7 +369,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     const was = get().histories[key];
     if (!page || was?.state !== "ready") return;
     // One begun before the read shown came back after it: it has nothing newer.
-    if (was.loadedAt !== null && started < was.loadedAt) return;
+    if (read < (readShown.get(key) ?? 0)) return;
+    readShown.set(key, read);
     const first = cursorIn(was.messages, "first");
     // Earlier pages already read stay above it.
     const reachesBack = !first || page.messages.some((m) => m.id === first);

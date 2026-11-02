@@ -178,10 +178,10 @@ const look = (kept: ChatMessage[], from: number, m: ChatMessage, taken: Readonly
   return -1;
 };
 
-/** Whether the live messages before `m` (`earlier`) that could also be the
- *  twin of `kept[at]` are as many as the twins free for them (`free`) there
- *  and before it: then which of them is whose isn't known, and the next read,
- *  which may have kept `m`'s own, decides. */
+/** Whether the live messages before `m` (`earlier`) that say what it says
+ *  are as many as the twins free (`free`) at `kept[at]` and before it for
+ *  them and `m`, each by its own time: then which of them is whose isn't
+ *  known, and the next read, which may have kept `m`'s own, decides. */
 const contested = (
   kept: ChatMessage[],
   at: number,
@@ -189,11 +189,13 @@ const contested = (
   earlier: readonly ChatMessage[],
   free: (k: number) => boolean,
 ): boolean => {
-  const rivals = earlier.filter((n) => n.role === m.role && filesOf(n).length > 0 && n.content.trim() === m.content.trim()).length;
-  if (rivals === 0) return false;
+  const rivals = earlier.filter((n) => n.role === m.role && filesOf(n).length > 0 && n.content.trim() === m.content.trim());
+  if (rivals.length === 0) return false;
   let twins = 0;
-  for (let k = at; k >= Math.max(0, at - LOOK_BACK); k--) if (free(k) && twinOf(kept[k]!, m)) twins++;
-  return rivals >= twins;
+  for (let k = at; k >= Math.max(0, at - LOOK_BACK); k--) {
+    if (free(k) && (twinOf(kept[k]!, m) || rivals.some((n) => twinOf(kept[k]!, n)))) twins++;
+  }
+  return rivals.length >= twins;
 };
 
 /** What the hub's latest page says of the live messages. */
