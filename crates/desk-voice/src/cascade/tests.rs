@@ -141,6 +141,8 @@ struct Room {
     /// How much the person had said when playback stopped, in samples.
     person_said: AtomicU64,
     person_fed: AtomicU64,
+    /// Frames the microphone has been given.
+    frames: AtomicU64,
     closed: AtomicBool,
 }
 
@@ -158,6 +160,7 @@ impl Room {
             stops: AtomicU64::new(0),
             person_said: AtomicU64::new(0),
             person_fed: AtomicU64::new(0),
+            frames: AtomicU64::new(0),
             closed: AtomicBool::new(false),
         }
     }
@@ -247,6 +250,7 @@ impl Room {
             in_flight.pop_front().unwrap()
         };
         self.heard_over.lock().unwrap().push_back(sentence);
+        self.frames.fetch_add(1, Ordering::SeqCst);
         let mut person = self.person.lock().unwrap();
         for slot in &mut frame {
             if let Some(s) = person.pop_front() {
@@ -470,6 +474,17 @@ impl Sim {
         }
     }
 
+    /// Lets `seconds` of the room's audio reach the microphone. Counted in
+    /// frames, not waited for on the clock: a slow runner feeds fewer frames
+    /// a millisecond, and the listener only knows the time from the audio.
+    fn hears_for(&self, seconds: f32) {
+        let from = self.room.frames.load(Ordering::SeqCst);
+        let frames = (16_000.0 * seconds) as u64 / FRAME as u64;
+        self.wait_for("the room's audio to reach the microphone", |s| {
+            s.room.frames.load(Ordering::SeqCst) >= from + frames
+        });
+    }
+
     fn spoke_to_the_end(&self) {
         self.wait_for("the reply to finish", |s| {
             s.played() >= 3 && s.engine.state() != VoiceState::Speaking
@@ -611,7 +626,11 @@ fn being_asked_to_stop_stops_and_says_why() {
         s.engine.state() == VoiceState::Speaking
     });
     sim.engine.stop_speaking();
-    sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped, so wait for it.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
+    assert!(sim.room.stops.load(Ordering::SeqCst) > 0);
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::Asked]);
 }
 
@@ -689,7 +708,7 @@ fn what_is_said_just_after_a_long_reply_is_sent() {
         s.played() >= 22 && s.engine.state() != VoiceState::Speaking
     });
     // Long enough for what the echo left going to end: under the 4 s of memory.
-    std::thread::sleep(Duration::from_millis(150));
+    sim.hears_for(1.0);
     sim.room.says(1.0);
     sim.wait_for("what they said", |s| {
         !s.events.utterances.lock().unwrap().is_empty()
@@ -727,7 +746,7 @@ fn the_replys_own_words_after_it_went_quiet_are_the_person() {
     sim.wait_for("the reply to finish", |s| {
         s.played() >= 1 && s.engine.state() != VoiceState::Speaking
     });
-    std::thread::sleep(Duration::from_millis(150));
+    sim.hears_for(1.0);
     sim.room.says(1.0);
     sim.wait_for("what they said", |s| {
         !s.events.utterances.lock().unwrap().is_empty()
