@@ -176,7 +176,19 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id();
-        let args = args_of(pid).unwrap();
+        // Its command line is the shell's once the shell has started.
+        let start = Instant::now();
+        let args = loop {
+            if let Some(a) = args_of(pid).filter(|a| a.contains("fake")) {
+                break a;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "{:?}",
+                args_of(pid)
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert!(args.contains("serve -c /a b/config.toml"), "{args}");
         assert_eq!(cwd_of(pid).unwrap().canonicalize().unwrap(), dir);
         child.kill().unwrap();
