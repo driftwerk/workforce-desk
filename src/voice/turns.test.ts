@@ -320,6 +320,15 @@ describe("the engine that says a DM's answer", () => {
     expect(useVoiceStore.getState().error).toBe("Voice isn't running.");
   });
 
+  it("says a reply that was only a direction, with nothing to read", () => {
+    useMic.setState({ talk: key });
+    fresh().heard({ agent: null, text: "tell me a joke" });
+    const said = { ...answer(""), messages: [{ ...answer("").messages[0]!, speech: "(laughing)" }] };
+    useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: said } }));
+    expect(calls("voice_speak")).toHaveLength(1);
+    expect(vi.mocked(invoke).mock.calls.find(([c]) => c === "voice_speak")?.[1]).toMatchObject({ text: "(laughing)" });
+  });
+
   describe("when the engine doesn't say it's speaking", () => {
     /** An answer handed to the engine for a DM whose microphone was then given back. */
     const answered = async () => {

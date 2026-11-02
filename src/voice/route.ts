@@ -1,5 +1,5 @@
 import type { ConversationState } from "../chat/conversation";
-import { finishedAnswers } from "../chat/conversation";
+import { finishedSpeech } from "../chat/conversation";
 import { agentKey, FEATURES, type Agent, type ChatMessage } from "../chat/types";
 import type { VoiceSpec } from "../platform";
 import type { RosterMember } from "./api";
@@ -28,7 +28,7 @@ export const resolveAgent = (
  *  wait began counts; history brought in meanwhile isn't anything finishing. */
 export const newAnswers = (before: ConversationState, after: ConversationState, since: number): ChatMessage[] => {
   const known = new Set(before.messages.map((m) => m.id));
-  return finishedAnswers(before, after).filter((m) => known.has(m.id) || !m.at || Date.parse(m.at) >= since);
+  return finishedSpeech(before, after).filter((m) => known.has(m.id) || !m.at || Date.parse(m.at) >= since);
 };
 
 /** What a failed turn said, if this update brought one. */

@@ -6,6 +6,7 @@ import {
   emptyConversation,
   finishedAnswers,
   reduce,
+  toShow,
   statusOf,
   wsPath,
   type ConversationState,
@@ -42,6 +43,14 @@ describe("conversation", () => {
     expect(s.messages[0]).toMatchObject({ content: "Found it. Well, yes.", speech: "(excited) Found it. Well, (sighing) yes." });
     const whole = run([{ type: "message", content: "Done.", speech: "(calm) Done." }]);
     expect(whole.messages[0]).toMatchObject({ content: "Done.", speech: "(calm) Done." });
+  });
+
+  it("leaves no bubble for an answer that was only said", () => {
+    const s = run([{ type: "stream_start" }, { type: "stream_delta", content: "", speech: "(laughing)" }, { type: "stream_end" }]);
+    expect(s.messages[0]).toMatchObject({ content: "", speech: "(laughing)", status: "complete" });
+    expect(toShow(s.messages)).toEqual([]);
+    const written = run([{ type: "stream_start" }, { type: "stream_delta", content: "Ha.", speech: "(laughing) Ha." }, { type: "stream_end" }]);
+    expect(toShow(written.messages)).toEqual(written.messages);
   });
 
   it("has no speech for an answer that says what it shows", () => {
