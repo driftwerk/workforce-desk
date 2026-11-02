@@ -181,6 +181,23 @@ describe("typing while an agent works", () => {
     expect(queued()).toEqual(["and staging"]);
   });
 
+  it("holds what's queued after a Stop, and what you queue behind it, until you send it on", async () => {
+    const { s } = await working();
+    act(() => type("and staging"));
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    // You ask something else; while it's answered you queue one more.
+    act(() => type("what failed?"));
+    const ref = s.chats[1]!.turn_ref as string;
+    expect(s.chats[1]).toMatchObject({ content: "what failed?" });
+    act(() => s.receive({ type: "typing", session_id: "s-allan", turn_ref: ref }));
+    act(() => type("and prod"));
+    await ends(s, ref);
+    expect(s.chats).toHaveLength(2);
+    expect(queued()).toEqual(["and staging", "and prod"]);
+    fireEvent.click(screen.getByRole("button", { name: "Send them" }));
+    expect(s.chats[2]).toMatchObject({ content: "and staging\n\nand prod", mode: "queue" });
+  });
+
   it("leaves Esc alone when nothing is running", async () => {
     render(<Rooms />);
     act(() => useChat.getState().openDm(KEY));

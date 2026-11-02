@@ -85,8 +85,8 @@ interface ChatStore {
   cancel: (key: string) => void;
   /** What's queued in each DM for its agent's next turn, by agent key. */
   queues: Record<string, Queue>;
-  /** Queues a message for the agent's next turn, and sends the queue on if
-   *  it was paused. */
+  /** Queues a message for the agent's next turn; behind a paused queue it
+   *  waits with the rest until you send them on. */
   enqueue: (key: string, text: string, attachments?: Attachment[]) => void;
   /** Changes a queued message's text; with none left (and no files), takes
    *  it out. */
@@ -491,7 +491,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   enqueue: (key, text, attachments) => {
     if (!text.trim() && !attachments?.length) return;
     const item = { id: crypto.randomUUID(), text, ...(attachments?.length ? { attachments } : {}) };
-    putQueue(key, (q) => ({ items: [...q.items, item], paused: false }));
+    putQueue(key, (q) => ({ ...q, items: [...q.items, item] }));
     drain(key);
   },
   editQueued: (key, id, text) =>
