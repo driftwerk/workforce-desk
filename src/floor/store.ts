@@ -258,12 +258,14 @@ export const floorUnheard = (hubId: string): void => {
 
 /** The hubs the minute's read is for: those whose link isn't saying when
  *  their floor changes, those with work running, whose progress is never
- *  signalled, and those whose last read failed. */
+ *  signalled, those whose last read failed, and those that said they have
+ *  no floor: a hub that is starting up answers 404 for a moment, and one
+ *  updated since has one. */
 const unheard = (): string[] => {
   const { heard, hubs } = useFloor.getState();
-  return supported().filter((id) => {
+  return everyHub().filter((id) => {
     const f = hubs[id];
-    return !heard[id] || f?.stale || f?.state === "failed" || (f?.floor?.working.length ?? 0) > 0;
+    return !heard[id] || f?.stale || f?.state === "failed" || f?.state === "unsupported" || (f?.floor?.working.length ?? 0) > 0;
   });
 };
 

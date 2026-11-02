@@ -20,7 +20,9 @@ const summary = (sessions: Session[]): string => {
 };
 
 /** How often the overview is read again while it's shown, so "quiet for
- *  40 min" and "6 min" stay true between events. */
+ *  40 min" and "6 min" stay true between events; and the overview, the
+ *  overseer and the activity asked again of a hub that had none, as a hub
+ *  starting up answers 404 for a moment. */
 const REFRESH_MS = 60_000;
 
 /** The crew's overview where the hub has one; the sessions as they were
@@ -35,7 +37,10 @@ export function Floor({ onNewSession }: { onNewSession: () => void }) {
     void loadOverview();
     void loadManager();
     const t = setInterval(() => {
-      if (useOverview.getState().overviewSupport !== "no") void useOverview.getState().loadOverview();
+      const s = useOverview.getState();
+      void s.loadOverview();
+      if (s.managerSupport === "no") void s.loadManager();
+      if (s.activitySupport === "no") void s.loadActivity("all");
     }, REFRESH_MS);
     return () => clearInterval(t);
   }, [hub]);
