@@ -26,17 +26,33 @@ fn free_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
-/// Ports from the last run, or new ones on first run. A saved port that is
-/// now taken by something else is replaced.
+/// Ports from the last run, or new ones on first run. Asked once this
+/// helper holds the Desk home and has stopped what an earlier one left
+/// running ([`claim`]), so a saved port still busy is some other program's:
+/// that port alone moves, said loudly, rather than leaving the hub unable
+/// to start. Desk reads the new one from the hub's state.
 fn ports(paths: &Paths) -> Result<HubPorts> {
-    let usable = |p: u16| TcpListener::bind(("127.0.0.1", p)).is_ok();
     let saved = read_ports(&paths.hub_state())?;
-    let pick = |p: Option<u16>| p.filter(|&p| usable(p)).map_or_else(free_port, Ok);
+    let keep = |what: &str, p: Option<u16>| -> Result<u16> {
+        match p.filter(|&p| p != 0) {
+            Some(p) if TcpListener::bind(("127.0.0.1", p)).is_ok() => Ok(p),
+            Some(p) => {
+                let moved = free_port()?;
+                tracing::warn!(
+                    port = p,
+                    moved_to = moved,
+                    "the local hub's {what} port is in use by another program; moving it"
+                );
+                Ok(moved)
+            }
+            None => free_port(),
+        }
+    };
     let ports = HubPorts {
-        postgres: pick(saved.map(|s| s.postgres))?,
-        admin: pick(saved.map(|s| s.admin))?,
-        gateway: pick(saved.map(|s| s.gateway))?,
-        memory: pick(saved.map(|s| s.memory).filter(|&p| p != 0))?,
+        postgres: keep("Postgres", saved.map(|s| s.postgres))?,
+        admin: keep("admin", saved.map(|s| s.admin))?,
+        gateway: keep("gateway", saved.map(|s| s.gateway))?,
+        memory: keep("memory store", saved.map(|s| s.memory))?,
     };
     if saved != Some(ports) {
         write_ports(&paths.hub_state(), &ports)?;
@@ -91,6 +107,13 @@ fn postgres_settings(paths: &Paths, port: u16, password: String) -> Settings {
 }
 
 async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<PostgreSQL> {
+    // Never one found running: it isn't this helper's to start over or stop.
+    if let Some(pg) = postgres_running(paths) {
+        eyre::bail!(
+            "a Postgres (process {}) is already running on Desk's data; leaving it alone",
+            pg.pid
+        );
+    }
     let settings = postgres_settings(paths, port, password);
     // A first initdb that didn't finish leaves a data directory that looks
     // made but isn't; the marker says to start it over.
@@ -111,11 +134,17 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
     // it again only when it runs initdb, and it goes again straight after,
     // whether setup worked or not.
     forget_postgres_password(&password_file);
-    let mut pg = PostgreSQL::new(settings);
+    // Dropped, a `PostgreSQL` stops whatever server has a `postmaster.pid`
+    // in the data directory, which before a start that worked may be
+    // another's: so it is only let drop once this process started it. A
+    // server a failed start left half up is stopped by the next helper, as
+    // a leftover.
+    let mut pg = std::mem::ManuallyDrop::new(PostgreSQL::new(settings));
     let setup = pg.setup().await;
     forget_postgres_password(&password_file);
     setup.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
+    let pg = std::mem::ManuallyDrop::into_inner(pg);
     let _ = std::fs::remove_file(&first_run);
     for db in [config::DATABASE, memory::DATABASE] {
         if !pg.database_exists(db).await? {
@@ -186,12 +215,21 @@ fn spawn_hub(
 ) -> Result<Child> {
     let log = append_log(&paths.logs().join("hub.log"), LOG_LIMIT)?;
     let (mut cmd, _handover) = hub_command(workforce, paths, env, secrets)?;
-    cmd.stdin(Stdio::null())
+    let child = cmd
+        .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("starting {}", workforce.display()))
+        .with_context(|| format!("starting {}", workforce.display()))?;
+    // Without it, a hub left running were this helper killed would have
+    // to be stopped by hand: worth a warning, never the hub.
+    if let Some(pid) = child.id()
+        && let Err(e) = std::fs::write(hub_pid(paths), pid.to_string())
+    {
+        tracing::warn!(error = %e, "could not write the hub's pid file");
+    }
+    Ok(child)
 }
 
 /// SIGTERM, then SIGKILL if it hasn't gone after `grace`.
@@ -296,6 +334,212 @@ fn init_logging(paths: &Paths) {
     }
 }
 
+/// The Desk home, held by one helper for its life: a second one for the
+/// same home is refused before it touches anything of the first's (its
+/// ports, config, pid file, Postgres). The lock goes with the process,
+/// however it ends; the file is left in place.
+#[derive(Debug)]
+struct RunLock {
+    _file: std::fs::File,
+}
+
+impl RunLock {
+    fn take(paths: &Paths) -> Result<Self> {
+        let path = paths.hub().join("run").join("desk-hubd.lock");
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        // Opened close-on-exec (as std opens every file), so the hub and the
+        // PTY holder it outlives don't keep the lock.
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("opening {}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                let pid = std::fs::read_to_string(paths.helper_pid())
+                    .map(|p| format!(" (process {})", p.trim()))
+                    .unwrap_or_default();
+                eyre::bail!(
+                    "Desk Helper is already running for {}{pid}; leaving it alone. \
+                     Stop it first (desk-hubd --stop) to start another.",
+                    paths.root.display()
+                )
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(e).with_context(|| format!("locking {}", path.display()))
+            }
+        }
+    }
+}
+
+/// Where the helper writes the hub's process id, so the next one can stop
+/// a hub left running when this one was killed.
+fn hub_pid(paths: &Paths) -> PathBuf {
+    paths.hub().join("run").join("hub.pid")
+}
+
+/// The process id on a pid file's first line (as Postgres's
+/// `postmaster.pid` and Desk's own have it).
+fn pid_in(pid_file: &Path) -> Option<u32> {
+    std::fs::read_to_string(pid_file)
+        .ok()?
+        .lines()
+        .next()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Whether `want` is among a command line's arguments, whole.
+fn has_args(args: &str, want: &str) -> bool {
+    args.match_indices(want).any(|(i, _)| {
+        let before = args[..i].chars().next_back();
+        let after = args[i + want.len()..].chars().next();
+        before.is_none_or(|c| c == ' ') && after.is_none_or(|c| c == ' ')
+    })
+}
+
+/// What a process must be to be taken for this Desk home's own.
+pub(crate) type Ours = std::sync::Arc<dyn Fn(u32) -> bool + Send + Sync>;
+
+/// A process an earlier helper for this Desk home left running: found by
+/// its pid file, and only while it is what `ours` says this home's is, a
+/// check made again before every signal. A pid file names a process by
+/// number only: one left by a helper that crashed may name another by now,
+/// and one copied with a Desk home names the original home's processes.
+pub(crate) struct Leftover {
+    pub pid: u32,
+    ours: Ours,
+}
+
+impl Leftover {
+    pub(crate) fn find(pid_file: &Path, ours: Ours) -> Option<Self> {
+        let pid = pid_in(pid_file)?;
+        ours(pid).then_some(Self { pid, ours })
+    }
+
+    async fn still_ours(&self) -> bool {
+        let (ours, pid) = (std::sync::Arc::clone(&self.ours), self.pid);
+        tokio::task::spawn_blocking(move || ours(pid))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Stops it with `first` (SIGTERM, or SIGINT for Postgres's fast
+    /// shutdown), then, when `kill`, SIGKILL after `grace`; nothing is sent
+    /// once it is no longer this home's. Whether it has gone.
+    pub(crate) async fn stop(
+        &self,
+        first: fn(u32) -> std::io::Result<()>,
+        grace: Duration,
+        kill: bool,
+    ) -> bool {
+        if !self.still_ours().await {
+            return true;
+        }
+        let _ = first(self.pid);
+        let deadline = Instant::now() + grace;
+        while Instant::now() < deadline && self.still_ours().await {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if kill && self.still_ours().await {
+            let _ = desk_core::process::kill(self.pid);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        !self.still_ours().await
+    }
+}
+
+/// A hub this home's helper started: `serve -c <this home's hub config>`,
+/// which the PTY holder (the same program, run as `pty-holder`) isn't.
+fn hub_leftover(paths: &Paths) -> Option<Leftover> {
+    let want = format!("serve -c {}", paths.hub_config().display());
+    let ours: Ours = std::sync::Arc::new(move |pid| {
+        desk_core::process::args_of(pid).is_some_and(|args| has_args(&args, &want))
+    });
+    Leftover::find(&hub_pid(paths), ours)
+}
+
+/// The Postgres running on this home's data: its `postmaster.pid` names
+/// this home's data directory (one copied from another home names that
+/// one's), and the process was started on it (`-D <data>`).
+fn postgres_running(paths: &Paths) -> Option<Leftover> {
+    let data = paths.postgres_data();
+    let pid_file = data.join("postmaster.pid");
+    let names_ours = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|f| f.lines().nth(1).map(|l| Path::new(l.trim()) == data))
+        .unwrap_or(false);
+    if !names_ours {
+        return None;
+    }
+    let want = format!("-D {}", data.display());
+    let ours: Ours = std::sync::Arc::new(move |pid| {
+        desk_core::process::args_of(pid).is_some_and(|args| has_args(&args, &want))
+    });
+    Leftover::find(&pid_file, ours)
+}
+
+/// Stops what an earlier helper for this Desk home left running when it
+/// was killed before it could stop them: the hub, the memory store, then
+/// Postgres. Only called with the [`RunLock`] held, so none of them belongs
+/// to a helper still running; and only what is this home's is stopped.
+async fn stop_leftovers(paths: &Paths, store: Option<&Path>) -> Result<()> {
+    if let Some(hub) = hub_leftover(paths) {
+        tracing::warn!(
+            pid = hub.pid,
+            "stopping the hub an earlier Desk Helper left running"
+        );
+        hub.stop(desk_core::process::terminate, Duration::from_secs(20), true)
+            .await;
+    }
+    if let Some(store) = store {
+        memory::stop_leftover(paths, store).await;
+    }
+    if let Some(pg) = postgres_running(paths) {
+        let pid = pg.pid;
+        tracing::warn!(
+            pid,
+            "stopping the Postgres an earlier Desk Helper left running"
+        );
+        // Fast shutdown: its clients (the hub, the store) are gone.
+        if !pg
+            .stop(desk_core::process::interrupt, POSTGRES_TIMEOUT, false)
+            .await
+        {
+            eyre::bail!(
+                "the Postgres an earlier Desk Helper left running (process {pid}) did not stop"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// What this helper holds while it runs.
+struct Claim {
+    _lock: RunLock,
+    _pid: PidFile,
+    ports: HubPorts,
+}
+
+/// Takes the Desk home: refused at once while another helper runs for it;
+/// then stops what an earlier, killed one left running, and takes the
+/// saved ports, which must then be free.
+async fn claim(paths: &Paths, store: Option<&Path>) -> Result<Claim> {
+    let lock = RunLock::take(paths)?;
+    let pid = PidFile::write(paths.helper_pid())?;
+    stop_leftovers(paths, store).await?;
+    Ok(Claim {
+        _lock: lock,
+        _pid: pid,
+        ports: ports(paths)?,
+    })
+}
+
 /// Writes this process's id where `--stop` finds it, and removes it when
 /// dropped.
 struct PidFile(PathBuf);
@@ -332,9 +576,10 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     for dir in [paths.hub(), paths.hub_data(), paths.logs()] {
         std::fs::create_dir_all(&dir)?;
     }
-    let _pid = PidFile::write(paths.helper_pid())?;
     let workforce = workforce_binary();
     let store = memory::binary();
+    let claimed = claim(&paths, store.as_deref()).await?;
+    let ports = claimed.ports;
     // The installed helper hands over to an update: it stops when what the
     // update replaces changes under it, and launchd, systemd or Desk Helper
     // on Windows starts the new one.
@@ -346,7 +591,6 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
         Duration::from_secs(10),
     );
     tokio::pin!(updated);
-    let ports = ports(&paths)?;
     // Once memories have moved into the store the hub always opens them
     // there: SQLite no longer holds them.
     let mut memories = if moving::moved(&paths).is_some() {
@@ -372,19 +616,16 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     .await?;
 
     let node = match &store {
-        Some(binary) => {
-            memory::stop_leftover(&paths, binary).await;
-            Some(memory::Node::supervise(
-                binary.clone(),
-                paths.clone(),
-                memory::env(&paths, &ports, &login),
-                memory::secrets(
-                    &ports,
-                    secrets.get(Secret::PostgresPassword),
-                    secrets.get(Secret::MemoryKey),
-                ),
-            ))
-        }
+        Some(binary) => Some(memory::Node::supervise(
+            binary.clone(),
+            paths.clone(),
+            memory::env(&paths, &ports, &login),
+            memory::secrets(
+                &ports,
+                secrets.get(Secret::PostgresPassword),
+                secrets.get(Secret::MemoryKey),
+            ),
+        )),
         None => {
             tracing::warn!("no memory store beside Desk Helper; memories stay in SQLite");
             None
@@ -488,6 +729,7 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
             }
         }
     };
+    let _ = std::fs::remove_file(hub_pid(&paths));
     // A download under way stops at its next read and keeps what it has.
     model::stop();
     // The hub first, then the store it writes to, then the database both use.
@@ -728,8 +970,10 @@ mod tests {
         assert!(dir.path().join("hub.log.1").is_file());
     }
 
+    /// A saved port still busy once the helper holds the home is another
+    /// program's: that port alone moves, and the move is saved.
     #[test]
-    fn saved_ports_are_kept_and_taken_ones_replaced() {
+    fn a_busy_saved_port_moves_and_no_other() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         let first = ports(&paths).unwrap();
@@ -737,6 +981,311 @@ mod tests {
         let _held = TcpListener::bind(("127.0.0.1", first.gateway)).unwrap();
         let next = ports(&paths).unwrap();
         assert_ne!(next.gateway, first.gateway);
-        assert_eq!(next.postgres, first.postgres);
+        assert_eq!(
+            HubPorts { gateway: 0, ..next },
+            HubPorts {
+                gateway: 0,
+                ..first
+            }
+        );
+        assert_eq!(read_ports(&paths.hub_state()).unwrap(), Some(next));
+    }
+
+    /// A saved state without a memory store port (an older Desk) gets one.
+    #[test]
+    fn a_missing_memory_port_is_given_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let first = ports(&paths).unwrap();
+        write_ports(&paths.hub_state(), &HubPorts { memory: 0, ..first }).unwrap();
+        let next = ports(&paths).unwrap();
+        assert_ne!(next.memory, 0);
+        assert_eq!(
+            HubPorts { memory: 0, ..next },
+            HubPorts { memory: 0, ..first }
+        );
+    }
+
+    /// A Postgres install whose `pg_ctl` only records what it is asked and
+    /// fails to start, and a data directory that looks made.
+    fn fake_postgres_install(paths: &Paths) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let version = Settings::default().version.to_string();
+        let bin = paths
+            .postgres_install()
+            .join(version.trim_start_matches('='))
+            .join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(paths.postgres_data()).unwrap();
+        std::fs::write(paths.postgres_data().join("postgresql.conf"), "").unwrap();
+        let log = paths.hub().join("pg_ctl.log");
+        let script = format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\ncase \"$*\" in *start*) exit 1;; esac\nexit 0\n",
+            log.display()
+        );
+        std::fs::write(bin.join("pg_ctl"), script).unwrap();
+        std::fs::set_permissions(bin.join("pg_ctl"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        log
+    }
+
+    /// A start that fails stops nothing: a `postmaster.pid` in the data
+    /// directory may be another server's, and this one never started.
+    #[tokio::test]
+    async fn a_failed_start_stops_no_postgres() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let log = fake_postgres_install(&paths);
+        // One a crashed server left, naming a process that is gone.
+        let mut gone = std::process::Command::new("true").spawn().unwrap();
+        gone.wait().unwrap();
+        std::fs::write(
+            paths.postgres_data().join("postmaster.pid"),
+            format!("{}\n", gone.id()),
+        )
+        .unwrap();
+        assert!(
+            start_postgres(&paths, 54001, "pw-fixture".into())
+                .await
+                .is_err()
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert!(calls.contains("start"), "{calls}");
+        assert!(!calls.contains("stop"), "{calls}");
+    }
+
+    /// A stand-in for one of a home's processes: a shell that waits,
+    /// whose command line reads `<name> <args>` after the script, started
+    /// in `cwd`, with its pid (and `pid_line2`, as Postgres writes its data
+    /// directory there) written to `pid_file`. It ends on SIGTERM or
+    /// SIGINT, and is waited for as soon as it ends, as a leftover is by
+    /// init: one left a zombie would still show in `ps`.
+    struct Fake {
+        pid: u32,
+        gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Fake {
+        fn start(name: &str, args: &[&str], pid_file: &Path, pid_line2: &Path) -> Self {
+            let mut child = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "trap 'exit 0' INT TERM; while :; do sleep 0.1; done",
+                    name,
+                ])
+                .args(args)
+                .spawn()
+                .unwrap();
+            std::fs::create_dir_all(pid_file.parent().unwrap()).unwrap();
+            std::fs::write(
+                pid_file,
+                format!("{}\n{}\n", child.id(), pid_line2.display()),
+            )
+            .unwrap();
+            let gone = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let ended = std::sync::Arc::clone(&gone);
+            let pid = child.id();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                ended.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            // Its command line is in place once the shell runs.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !desk_core::process::args_of(pid).is_some_and(|a| a.contains(name)) {
+                assert!(Instant::now() < deadline, "the stand-in didn't start");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Fake { pid, gone }
+        }
+
+        /// A hub of `of`, its pid in `paths`' hub pid file.
+        fn hub(of: &Paths, paths: &Paths) -> Self {
+            let config = of.hub_config().display().to_string();
+            Self::start(
+                "workforce",
+                &["serve", "-c", &config],
+                &hub_pid(paths),
+                Path::new(""),
+            )
+        }
+
+        /// `of`'s PTY holder, its pid in `paths`' hub pid file.
+        fn holder(of: &Paths, paths: &Paths) -> Self {
+            let socket = of.hub().join("run/pty.sock").display().to_string();
+            Self::start(
+                "workforce",
+                &["pty-holder", "--socket", &socket],
+                &hub_pid(paths),
+                Path::new(""),
+            )
+        }
+
+        /// A Postgres on `of`'s data, its pid in `paths`' `postmaster.pid`.
+        fn postgres(of: &Paths, paths: &Paths) -> Self {
+            let data = of.postgres_data().display().to_string();
+            Self::start(
+                "postgres",
+                &["-D", &data, "-F", "-p", "54001"],
+                &paths.postgres_data().join("postmaster.pid"),
+                &of.postgres_data(),
+            )
+        }
+
+        fn running(&self) -> bool {
+            !self.gone.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            let _ = desk_core::process::kill(self.pid);
+        }
+    }
+
+    async fn gone_soon(fake: &Fake) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if !fake.running() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[test]
+    fn a_second_helper_for_the_same_desk_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let first = RunLock::take(&paths).unwrap();
+        let err = RunLock::take(&paths).unwrap_err().to_string();
+        assert!(err.contains("already running"), "{err}");
+        // Another Desk home is its own.
+        assert!(RunLock::take(&Paths::at(dir.path().join("Other"))).is_ok());
+        drop(first);
+        // Free again once the first lets go. A child another test is
+        // starting holds a copy of every open file until it runs its
+        // program (close-on-exec), the lock's for that moment too.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while RunLock::take(&paths).is_err() {
+            assert!(Instant::now() < deadline, "the lock stayed taken");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Refused, a second helper leaves the running one's pid file, ports
+    /// and processes as they were.
+    #[tokio::test]
+    async fn a_refused_helper_touches_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path().join("Desk"));
+        let _running = RunLock::take(&paths).unwrap();
+        let saved = ports(&paths).unwrap();
+        let _held = TcpListener::bind(("127.0.0.1", saved.gateway)).unwrap();
+        std::fs::write(paths.helper_pid(), "4242").unwrap();
+        let hub = Fake::hub(&paths, &paths);
+        let err = claim(&paths, None)
+            .await
+            .err()
+            .expect("refused")
+            .to_string();
+        assert!(err.contains("already running"), "{err}");
+        assert_eq!(std::fs::read_to_string(paths.helper_pid()).unwrap(), "4242");
+        assert_eq!(read_ports(&paths.hub_state()).unwrap(), Some(saved));
+        assert!(hub.running(), "the running hub was stopped");
+    }
+
+    /// With the Desk home claimed, a hub and a Postgres an earlier helper
+    /// left running (it was killed) are stopped, and their ports kept.
+    #[tokio::test]
+    async fn what_a_killed_helper_left_running_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path().join("Desk"));
+        let saved = ports(&paths).unwrap();
+        let hub = Fake::hub(&paths, &paths);
+        let pg = Fake::postgres(&paths, &paths);
+        let claimed = claim(&paths, None).await.unwrap();
+        assert!(gone_soon(&hub).await, "the leftover hub kept running");
+        assert!(gone_soon(&pg).await, "the leftover Postgres kept running");
+        assert_eq!(claimed.ports, saved);
+    }
+
+    /// A copied Desk home (a rescue copy, say) carries pid files naming the
+    /// original home's live processes: a helper on the copy stops none of
+    /// them, whatever its pid files say of them.
+    #[tokio::test]
+    async fn a_copied_home_stops_nothing_of_the_home_it_was_copied_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = Paths::at(dir.path().join("Desk"));
+        let copy = Paths::at(dir.path().join("Desk-rescue"));
+        let hub = Fake::hub(&live, &live);
+        let pg = Fake::postgres(&live, &live);
+        for (from, to) in [
+            (hub_pid(&live), hub_pid(&copy)),
+            (
+                live.postgres_data().join("postmaster.pid"),
+                copy.postgres_data().join("postmaster.pid"),
+            ),
+        ] {
+            std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+            std::fs::copy(from, to).unwrap();
+        }
+        stop_leftovers(&copy, None).await.unwrap();
+        // Nor one whose postmaster.pid was made to name the copy's data.
+        let pid_file = copy.postgres_data().join("postmaster.pid");
+        std::fs::write(
+            &pid_file,
+            format!("{}\n{}\n", pg.pid, copy.postgres_data().display()),
+        )
+        .unwrap();
+        stop_leftovers(&copy, None).await.unwrap();
+        assert!(postgres_running(&copy).is_none());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(hub.running(), "the live hub was stopped");
+        assert!(pg.running(), "the live Postgres was stopped");
+    }
+
+    /// The PTY holder is the hub's program run as `pty-holder`: a hub pid
+    /// file naming it never stops it, which would end every terminal.
+    #[tokio::test]
+    async fn the_pty_holder_is_never_taken_for_a_leftover_hub() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path().join("Desk"));
+        let holder = Fake::holder(&paths, &paths);
+        assert!(hub_leftover(&paths).is_none());
+        stop_leftovers(&paths, None).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(holder.running(), "the PTY holder was stopped");
+    }
+
+    #[test]
+    fn an_argument_is_matched_whole() {
+        assert!(has_args(
+            "x serve -c /a b/c.toml --secrets-fd 3",
+            "serve -c /a b/c.toml"
+        ));
+        assert!(has_args("x serve -c /a b/c.toml", "serve -c /a b/c.toml"));
+        assert!(!has_args(
+            "x serve -c /a b/c.toml.bak",
+            "serve -c /a b/c.toml"
+        ));
+        assert!(!has_args("x -D /data2", "-D /data"));
+    }
+
+    /// A Postgres found running on Desk's data is never started over, nor
+    /// stopped.
+    #[tokio::test]
+    async fn a_postgres_found_running_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path().join("Desk"));
+        let log = fake_postgres_install(&paths);
+        let pg = Fake::postgres(&paths, &paths);
+        let err = start_postgres(&paths, 54001, "pw-fixture".into())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("already running"), "{err}");
+        assert!(!log.exists(), "pg_ctl was run");
+        assert!(pg.running());
     }
 }

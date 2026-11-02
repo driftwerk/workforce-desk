@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths, process};
+use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths};
 use eyre::{Context, Result, bail};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
@@ -208,40 +208,32 @@ fn spawn(
 /// it could stop it), which would otherwise hold the tenant and its port.
 /// Only a process that is the store's binary is stopped.
 pub async fn stop_leftover(paths: &Paths, binary: &Path) {
-    let Some(pid) = std::fs::read_to_string(pidfile(paths))
-        .ok()
-        .and_then(|p| p.trim().parse::<u32>().ok())
-    else {
-        return;
-    };
     let name = binary
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let running = |pid: u32| async move {
-        tokio::task::spawn_blocking(move || process::command_of(pid))
-            .await
-            .ok()
-            .flatten()
-    };
-    if !running(pid)
-        .await
-        .is_some_and(|comm| process::is_program(&comm, &name))
-    {
+    // This home's store runs in this home's memory folder: one named by a
+    // pid file copied from another home runs in that one's.
+    let home = paths
+        .memory()
+        .canonicalize()
+        .unwrap_or_else(|_| paths.memory());
+    let ours: crate::supervise::Ours = std::sync::Arc::new(move |pid| {
+        desk_core::process::command_of(pid)
+            .is_some_and(|comm| desk_core::process::is_program(&comm, &name))
+            && desk_core::process::cwd_of(pid)
+                .is_some_and(|cwd| cwd.canonicalize().unwrap_or(cwd) == home)
+    });
+    let Some(store) = crate::supervise::Leftover::find(&pidfile(paths), ours) else {
         return;
-    }
+    };
     tracing::warn!(
-        pid,
+        pid = store.pid,
         "stopping the memory store an earlier Desk Helper left running"
     );
-    let _ = process::terminate(pid);
-    let deadline = Instant::now() + STOP_GRACE;
-    while Instant::now() < deadline && running(pid).await.is_some() {
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    if running(pid).await.is_some() {
-        let _ = process::kill(pid);
-    }
+    store
+        .stop(desk_core::process::terminate, STOP_GRACE, true)
+        .await;
 }
 
 /// The store, kept running: started again after it exits, sooner the
@@ -525,7 +517,10 @@ mod tests {
         let paths = Paths::at(dir.path().join("Desk"));
         std::fs::create_dir_all(paths.memory()).unwrap();
         let bin = fake_store(dir.path(), false);
-        let mut orphan = std::process::Command::new(&bin).spawn().unwrap();
+        let mut orphan = std::process::Command::new(&bin)
+            .current_dir(paths.memory())
+            .spawn()
+            .unwrap();
         std::fs::write(pidfile(&paths), orphan.id().to_string()).unwrap();
         let starts = dir.path().join("starts");
         wait_for(|| starts.is_file()).await;
@@ -539,6 +534,11 @@ mod tests {
         std::fs::write(pidfile(&other_paths), other.id().to_string()).unwrap();
         stop_leftover(&other_paths, &bin).await;
         assert!(other.try_wait().unwrap().is_none());
+        // Nor this home's pid file copied into another home: the store runs
+        // in this home's folder.
+        std::fs::copy(pidfile(&paths), pidfile(&other_paths)).unwrap();
+        stop_leftover(&other_paths, Path::new("/bin/sleep")).await;
+        assert!(orphan.try_wait().unwrap().is_none());
         // `sh` runs the script, so `ps` names the interpreter: name the
         // script's own process by what it execs.
         stop_leftover(&paths, Path::new("/bin/sleep")).await;
