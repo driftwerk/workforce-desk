@@ -2,8 +2,8 @@
 //! segments, the keyword spotter listens for roster names, Parakeet
 //! transcribes the segments worth hearing, and Kokoro speaks.
 
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::collections::{HashSet, VecDeque};
+use std::time::Instant;
 
 use eyre::{Context, Result, eyre};
 use sherpa_onnx::{
@@ -31,8 +31,11 @@ const PRE_ROLL: u64 = SPEECH_RATE as u64 * 2 / 5;
 const RATE: i32 = SPEECH_RATE as i32;
 /// As much of what's being said over playback as is transcribed to judge it.
 const JUDGED: usize = SPEECH_RATE as usize * 2;
-/// How long after a reply what's heard might still be the reply.
-const ECHO_MEMORY: Duration = Duration::from_secs(4);
+/// How long after a sentence what's heard might still be it, in samples.
+const ECHO_MEMORY: u64 = SPEECH_RATE as u64 * 4;
+/// How long sound lingers after the speaker reports it finished, in samples:
+/// what's left in the device and the room.
+const LINGER: u64 = SPEECH_RATE as u64 * 3 / 10;
 
 /// What the listener noticed while being fed.
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +80,8 @@ pub struct Wake {
 }
 
 const MIN_SPEECH_SECONDS: f32 = 0.25;
+/// How far into speech the voice model reports it, at best, in samples.
+const ONSET_LATE: u64 = (MIN_SPEECH_SECONDS * SPEECH_RATE as f32) as u64 + VAD_WINDOW as u64;
 
 impl Wake {
     pub fn new(models: &Models) -> Result<Self> {
@@ -201,8 +206,7 @@ impl Wake {
     fn after_window(&mut self, out: &mut dyn FnMut(Sound)) {
         let detected = self.vad.detected();
         if detected && !self.in_speech {
-            let lead = (MIN_SPEECH_SECONDS * SPEECH_RATE as f32) as u64 + VAD_WINDOW as u64;
-            self.onset = Some(self.recent.end.saturating_sub(lead + PRE_ROLL));
+            self.onset = Some(self.recent.end.saturating_sub(ONSET_LATE + PRE_ROLL));
             out(Sound::SpeechStarted);
         }
         while let Some(segment) = self.vad.front() {
@@ -325,33 +329,82 @@ fn recognizer(models: &Models) -> Result<OfflineRecognizer> {
         .ok_or_else(|| eyre!("couldn't load the speech recognition model"))
 }
 
-/// What Desk has been saying, so its own voice coming back isn't taken for
-/// the person.
+/// What Desk has been saying, sentence by sentence, so its own voice coming back
+/// isn't taken for the person: what's playing and what just played, never what
+/// is still to come. Times are in samples of microphone audio, which reach here
+/// in order with the speaker's reports, however far behind transcribing has put
+/// the listener; a wall clock would run together what was hours of backlog apart.
 #[derive(Default)]
 struct Said {
-    text: String,
-    /// Until when it might still come back; `None` while it's being said.
-    until: Option<Instant>,
+    /// Handed to the speaker and not finished. The first is playing.
+    queued: VecDeque<String>,
+    /// Finished, oldest first, and when.
+    played: VecDeque<(String, u64)>,
+    /// When the last of it finished, while nothing is queued.
+    quiet_since: Option<u64>,
 }
 
 impl Said {
-    fn speaking(&mut self, text: &str, now: Instant) {
-        if self.until.is_some_and(|t| now >= t) {
-            self.text.clear();
+    fn playing(&mut self, text: &str) {
+        self.queued.push_back(without_directions(text));
+    }
+
+    /// The sentence playing has finished.
+    fn finished(&mut self, now: u64) {
+        if let Some(sentence) = self.queued.pop_front() {
+            self.played.push_back((sentence, now));
         }
-        self.until = None;
-        self.text.push(' ');
-        self.text.push_str(&without_directions(text));
+        if self.queued.is_empty() {
+            self.quiet_since = Some(now);
+        }
+        let kept = (MAX_SPEECH_SECONDS as u64 * SPEECH_RATE as u64) + ECHO_MEMORY;
+        while self.played.front().is_some_and(|(_, at)| *at + kept < now) {
+            self.played.pop_front();
+        }
     }
 
-    fn over(&mut self, now: Instant) {
-        self.until = Some(now + ECHO_MEMORY);
+    /// All of it has stopped, played out or cut off.
+    fn over(&mut self, now: u64) {
+        while !self.queued.is_empty() {
+            self.finished(now);
+        }
+        self.quiet_since.get_or_insert(now);
     }
 
-    /// Whether `heard`, now, is our own voice.
-    fn echoes(&self, heard: &str, now: Instant) -> bool {
-        self.until.is_none_or(|t| now < t) && judge(heard, &self.text) == Verdict::Echo
+    /// Whether speech begun at `start` began once the audio had gone quiet.
+    fn quiet_at(&self, start: u64) -> bool {
+        self.queued.is_empty() && self.quiet_since.is_none_or(|at| start >= at + LINGER)
     }
+
+    /// Whether anything heard at `now` might still be the reply.
+    fn may_come_back(&self, now: u64) -> bool {
+        !self.queued.is_empty() || self.quiet_since.is_some_and(|at| now < at + ECHO_MEMORY)
+    }
+
+    /// What might have come back in speech heard since `since`, in the order it
+    /// was said.
+    fn around(&self, since: u64) -> String {
+        let played = self
+            .played
+            .iter()
+            .filter(|(_, at)| *at + ECHO_MEMORY >= since)
+            .map(|(sentence, _)| sentence.as_str());
+        played
+            .chain(self.queued.front().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// The stretch of speech going on.
+#[derive(Debug, Clone, Copy, Default)]
+struct Stretch {
+    /// When it began, as best the voice model's late report can say.
+    start: u64,
+    /// It began after the audio went quiet, so there's nothing it could be.
+    after_quiet: bool,
+    /// It's stopped a reply as someone talking: it isn't judged again.
+    a_person: bool,
 }
 
 /// The cascade's listener: the wake path, the conversation, and Parakeet for
@@ -363,6 +416,9 @@ pub struct Listener {
     transcribing: bool,
     barge: Barge,
     said: Said,
+    /// Samples of microphone audio so far.
+    clock: u64,
+    stretch: Stretch,
     /// A name heard in what's being judged over playback: it counts if that
     /// turns out to be someone talking.
     named: Option<String>,
@@ -386,6 +442,8 @@ impl Listener {
             transcribing: false,
             barge: Barge::default(),
             said: Said::default(),
+            clock: 0,
+            stretch: Stretch::default(),
             named: None,
         }
     }
@@ -427,6 +485,7 @@ impl Listener {
 
     /// 16 kHz mono microphone audio, in any chunk size.
     pub fn feed(&mut self, samples: &[f32], now: Instant, out: &mut dyn FnMut(Heard)) {
+        self.clock += samples.len() as u64;
         if let Some(held) = &mut self.push_to_talk {
             held.extend_from_slice(samples);
             return;
@@ -459,9 +518,13 @@ impl Listener {
                 Sound::SpeechStarted => {
                     tracing::info!("voice: speech started");
                     self.conversation.speech_started(now);
-                    if self.conversation.is_speaking() {
-                        self.barge.begin();
-                    }
+                    self.barge.begin();
+                    let start = self.clock.saturating_sub(ONSET_LATE);
+                    self.stretch = Stretch {
+                        start,
+                        after_quiet: self.said.quiet_at(start),
+                        a_person: false,
+                    };
                 }
                 Sound::Segment(samples) => {
                     self.conversation.speech_ended(now);
@@ -472,6 +535,11 @@ impl Listener {
                         "voice: speech ended"
                     );
                     self.segment(&samples, now, out);
+                    // The voice model may go straight on, with no new report.
+                    self.stretch = Stretch {
+                        start: self.clock,
+                        ..Stretch::default()
+                    };
                 }
             }
         }
@@ -484,7 +552,7 @@ impl Listener {
         if self.conversation.is_speaking() {
             let text = self.ears.transcribe(samples);
             tracing::info!(text, "voice: transcribed over playback");
-            let verdict = judge(&text, &self.said.text);
+            let verdict = self.verdict(&text, self.stretch.start);
             if verdict != Verdict::Person {
                 tracing::info!(why = verdict.name(), "voice: not a barge-in");
                 self.named = None;
@@ -500,12 +568,29 @@ impl Listener {
             return;
         }
         let text = self.transcribe(samples, out);
-        if self.said.echoes(&text, now) {
+        if self.said.may_come_back(self.clock)
+            && self.verdict(&text, self.stretch.start) == Verdict::Echo
+        {
             tracing::info!("voice: heard our own reply; not sent");
             return;
         }
         if let Some(u) = self.conversation.transcript(&text, now) {
             out(Heard::Utterance(u));
+        }
+    }
+
+    /// What `text`, heard since `since` in the stretch going on, is: by when it
+    /// began, then by its words, then for a word or two by how loud it was.
+    fn verdict(&self, text: &str, since: u64) -> Verdict {
+        let playing = if self.stretch.after_quiet || self.stretch.a_person {
+            String::new()
+        } else {
+            self.said.around(since)
+        };
+        match judge(text, &playing) {
+            Verdict::Fragment if self.barge.above_playback() => Verdict::Person,
+            Verdict::Fragment => Verdict::Echo,
+            verdict => verdict,
         }
     }
 
@@ -520,7 +605,11 @@ impl Listener {
         }
         let audio = self.ears.since_onset(JUDGED);
         let text = self.ears.transcribe(&audio);
-        let verdict = judge(&text, &self.said.text);
+        let since = self
+            .stretch
+            .start
+            .max(self.clock.saturating_sub(JUDGED as u64));
+        let verdict = self.verdict(&text, since);
         if verdict != Verdict::Person {
             tracing::debug!(why = verdict.name(), "voice: not a barge-in yet");
             self.barge.rejected(verdict);
@@ -531,7 +620,8 @@ impl Listener {
 
     fn barged(&mut self, now: Instant, out: &mut dyn FnMut(Heard)) {
         if self.conversation.interrupted() {
-            self.said.over(now);
+            self.said.over(self.clock);
+            self.stretch.a_person = true;
             out(Heard::BargeIn);
             if let Some(name) = self.named.take() {
                 let accepted = self.conversation.keyword(&name, now);
@@ -559,7 +649,7 @@ impl Listener {
         self.conversation.speech_started(now);
         let interrupted = self.conversation.interrupted();
         if interrupted {
-            self.said.over(now);
+            self.said.over(self.clock);
         }
         interrupted
     }
@@ -583,21 +673,31 @@ impl Listener {
         }
     }
 
-    /// `text` is about to be said (empty for audio already made).
-    pub fn speaking(&mut self, text: &str, now: Instant) {
+    /// Something is about to be said.
+    pub fn speaking(&mut self) {
         if !self.conversation.is_speaking() {
             self.barge.reset();
             self.named = None;
         }
-        self.said.speaking(text, now);
         self.conversation.speaking();
+    }
+
+    /// `sentence` has gone to the speaker, after whatever it already has (empty
+    /// for audio already made).
+    pub fn playing(&mut self, sentence: &str) {
+        self.said.playing(sentence);
+    }
+
+    /// The speaker has finished the sentence it was on.
+    pub fn played(&mut self) {
+        self.said.finished(self.clock);
     }
 
     /// Playback ended; our own voice is still in the spotter's context, so
     /// it starts afresh.
     pub fn spoken(&mut self, now: Instant) {
         self.conversation.spoken(now);
-        self.said.over(now);
+        self.said.over(self.clock);
         self.ears.reset_spotter();
     }
 
@@ -609,7 +709,7 @@ impl Listener {
 
 /// The last stretch of microphone audio, by absolute sample index.
 struct Recent {
-    samples: std::collections::VecDeque<f32>,
+    samples: VecDeque<f32>,
     end: u64,
     capacity: usize,
 }
@@ -617,7 +717,7 @@ struct Recent {
 impl Recent {
     fn new(capacity: usize) -> Self {
         Self {
-            samples: std::collections::VecDeque::with_capacity(capacity),
+            samples: VecDeque::with_capacity(capacity),
             end: 0,
             capacity,
         }
@@ -744,6 +844,156 @@ pub fn sentences(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SECOND: u64 = SPEECH_RATE as u64;
+
+    /// Ears that hear what they're told to, when they're told to.
+    #[derive(Default)]
+    struct Told {
+        sounds: Vec<Sound>,
+        says: String,
+    }
+
+    struct ToldEars(std::sync::Arc<std::sync::Mutex<Told>>);
+
+    impl Ears for ToldEars {
+        fn feed(&mut self, _samples: &[f32], out: &mut dyn FnMut(Sound)) {
+            self.0.lock().unwrap().sounds.drain(..).for_each(out);
+        }
+        fn flush(&mut self, _out: &mut dyn FnMut(Sound)) {}
+        fn set_names(&mut self, _names: &[String]) -> Result<()> {
+            Ok(())
+        }
+        fn names(&self) -> &[String] {
+            &[]
+        }
+        fn since_onset(&self, _max: usize) -> Vec<f32> {
+            Vec::new()
+        }
+        fn reset(&mut self) {}
+        fn reset_spotter(&self) {}
+        fn transcribe(&mut self, _samples: &[f32]) -> String {
+            self.0.lock().unwrap().says.clone()
+        }
+    }
+
+    /// A stretch of `frames` frames at `level`, transcribing as `says`, over a
+    /// sentence playing whose echo has been measured at 0.05.
+    fn over_playback(level: f32, frames: usize, says: &str) -> Vec<Heard> {
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Told::default()));
+        let now = Instant::now();
+        let mut listener =
+            Listener::with_ears(Box::new(ToldEars(told.clone())), Timing::default(), now);
+        listener.set_mode(ListenMode::Open, now);
+        listener.speaking();
+        listener.playing("Two tests timed out again.");
+        let mut heard = Vec::new();
+        let frame = |at: f32| vec![at; VAD_WINDOW];
+        for _ in 0..60 {
+            listener.feed(&frame(0.05), now, &mut |h| heard.push(h));
+        }
+        told.lock().unwrap().says = says.to_string();
+        told.lock().unwrap().sounds.push(Sound::SpeechStarted);
+        for _ in 0..frames {
+            listener.feed(&frame(level), now, &mut |h| heard.push(h));
+        }
+        told.lock()
+            .unwrap()
+            .sounds
+            .push(Sound::Segment(frame(level)));
+        listener.feed(&frame(0.05), now, &mut |h| heard.push(h));
+        heard
+    }
+
+    /// A word or two of the sentence playing: at the playback's level they're
+    /// the reply, and above it someone said them.
+    #[test]
+    fn how_loud_a_fragment_was_decides_it() {
+        assert_eq!(over_playback(0.05, 6, "two tests"), []);
+        let heard = over_playback(0.3, 6, "two tests");
+        assert!(heard.contains(&Heard::BargeIn), "{heard:?}");
+        assert!(
+            heard
+                .iter()
+                .any(|h| matches!(h, Heard::Utterance(u) if u.text == "two tests")),
+            "{heard:?}"
+        );
+    }
+
+    /// However quiet, what isn't in what's playing is someone.
+    #[test]
+    fn words_that_are_not_playing_need_no_loudness() {
+        let heard = over_playback(0.05, 6, "open the pull request");
+        assert!(heard.contains(&Heard::BargeIn), "{heard:?}");
+    }
+
+    #[test]
+    fn only_what_is_playing_or_just_played_can_come_back() {
+        let mut said = Said::default();
+        said.playing("First sentence here.");
+        said.playing("Second sentence here.");
+        said.playing("Third sentence here.");
+        assert_eq!(said.around(0), "First sentence here.");
+        said.finished(SECOND);
+        assert_eq!(
+            said.around(SECOND),
+            "First sentence here. Second sentence here."
+        );
+        said.finished(10 * SECOND);
+        assert_eq!(
+            said.around(10 * SECOND),
+            "Second sentence here. Third sentence here."
+        );
+        assert_eq!(
+            said.around(2 * SECOND),
+            "First sentence here. Second sentence here. Third sentence here.",
+            "a long stretch may have run across all of them"
+        );
+    }
+
+    #[test]
+    fn directions_are_not_what_comes_back() {
+        let mut said = Said::default();
+        said.playing("(excited) Found it.");
+        assert_eq!(said.around(0), "Found it.");
+    }
+
+    #[test]
+    fn speech_after_the_audio_went_quiet_began_after_it() {
+        let mut said = Said::default();
+        assert!(said.quiet_at(0), "nothing has played");
+        said.playing("A sentence.");
+        assert!(!said.quiet_at(SECOND));
+        said.finished(SECOND);
+        assert!(
+            !said.quiet_at(SECOND + LINGER - 1),
+            "it's still in the room"
+        );
+        assert!(said.quiet_at(SECOND + LINGER));
+        said.playing("Another.");
+        assert!(!said.quiet_at(2 * SECOND), "and now it isn't quiet");
+    }
+
+    #[test]
+    fn the_reply_is_forgotten_after_a_while() {
+        let mut said = Said::default();
+        assert!(!said.may_come_back(0));
+        said.playing("A sentence.");
+        assert!(said.may_come_back(100 * SECOND));
+        said.over(100 * SECOND);
+        assert!(said.may_come_back(100 * SECOND + ECHO_MEMORY - 1));
+        assert!(!said.may_come_back(100 * SECOND + ECHO_MEMORY));
+    }
+
+    #[test]
+    fn being_cut_off_ends_all_of_it_at_once() {
+        let mut said = Said::default();
+        said.playing("One.");
+        said.playing("Two.");
+        said.over(SECOND);
+        assert!(said.queued.is_empty());
+        assert_eq!(said.around(SECOND), "One. Two.");
+    }
 
     #[test]
     fn recent_audio_is_cut_by_absolute_index() {

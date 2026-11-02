@@ -12,9 +12,11 @@
 //!    that matters: a digital reference can't know the speaker's volume, the
 //!    room, or what the canceller already removed.
 //! 2. **Words.** That audio has to transcribe to words ([`judge`]) that aren't
-//!    filler, and aren't what's being said, twice running.
+//!    filler, and aren't a run of what's playing, twice running.
 //!
 //! A stretch that ends before 1 is met (a short "wait") goes straight to 2.
+//! Losing what someone said is the worst this can do, and cutting a reply short
+//! the next: where the evidence runs out, it's a person.
 //! Pure: fed levels and transcripts, so every rule is tested without audio.
 
 use std::collections::VecDeque;
@@ -35,6 +37,8 @@ const DECAY: f32 = 0.995;
 /// starts at best, plus its own latency and however the audio was chunked, and
 /// the speech mustn't count as the level to beat. About 640 ms.
 const LAG: usize = 20;
+/// Frames of a stretch above the playback that make a word or two a person's.
+const AUDIBLE: usize = 3;
 /// Frames of a rejected stretch after which its level counts as echo, if what
 /// it held wasn't words: too little audio may merely be too short to transcribe.
 const LONG_ENOUGH: usize = 31;
@@ -47,6 +51,9 @@ pub enum Verdict {
     Echo,
     /// No words, or only "um".
     Noise,
+    /// A word or two, all of them in what's playing. Too few to tell by the words,
+    /// so how loud they were decides: [`Barge::above_playback`].
+    Fragment,
 }
 
 impl Verdict {
@@ -55,6 +62,7 @@ impl Verdict {
             Verdict::Person => "person",
             Verdict::Echo => "echo",
             Verdict::Noise => "noise",
+            Verdict::Fragment => "fragment",
         }
     }
 }
@@ -64,8 +72,15 @@ const FILLER: &[&str] = &[
 ];
 /// Short things that mean stop, even when the reply has the same word in it.
 const STOPS: &[&str] = &["stop", "wait"];
-/// Of what was heard, this much in the reply's own word order is the reply.
-const ECHO_SHARE: f32 = 0.7;
+/// The fewest words that can be called the reply on words alone.
+const MIN_ECHO_WORDS: usize = 3;
+/// A recogniser hearing a reply through a room gets words wrong: one for every
+/// this many it gets right.
+const MATCHED_PER_MISHEARD: usize = 4;
+/// And cuts words off at the ends of what it was given. A word at the edge that
+/// isn't in the reply could as well be a person, "yes open the pull request",
+/// so it's only let go when this many words either side of it say otherwise.
+const MATCHED_PER_STRAY: usize = 5;
 
 fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
@@ -74,8 +89,9 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// What transcribing it gave, against what's being said.
-pub fn judge(heard: &str, said: &str) -> Verdict {
+/// What transcribing it gave, against what was playing while it was heard: not
+/// the whole reply, since a long one has any short phrase somewhere in it.
+pub fn judge(heard: &str, playing: &str) -> Verdict {
     let heard = words(heard);
     if heard.iter().all(|w| FILLER.contains(&w.as_str())) {
         return Verdict::Noise;
@@ -83,8 +99,19 @@ pub fn judge(heard: &str, said: &str) -> Verdict {
     if heard.len() <= 3 && heard.iter().any(|w| STOPS.contains(&w.as_str())) {
         return Verdict::Person;
     }
-    let said = words(said);
-    if in_order(&heard, &said) as f32 / heard.len() as f32 >= ECHO_SHARE {
+    let run = best_run(&heard, &words(playing));
+    if heard.len() < MIN_ECHO_WORDS {
+        return if run.matched == heard.len() {
+            Verdict::Fragment
+        } else {
+            Verdict::Person
+        };
+    }
+    let stray = heard.len() - run.span;
+    if run.matched >= MIN_ECHO_WORDS
+        && run.misheard <= run.matched / MATCHED_PER_MISHEARD
+        && stray <= run.matched / MATCHED_PER_STRAY
+    {
         Verdict::Echo
     } else {
         Verdict::Person
@@ -98,22 +125,69 @@ fn same_word(a: &str, b: &str) -> bool {
     short == long || (short.len() >= 4 && long.starts_with(short))
 }
 
-/// How many of `heard` appear in `said`, in the same order.
-fn in_order(heard: &[String], said: &[String]) -> usize {
-    let mut best = vec![0; said.len() + 1];
-    for word in heard {
-        let mut diagonal = 0;
-        for (i, other) in said.iter().enumerate() {
-            let above = best[i + 1];
-            best[i + 1] = if same_word(word, other) {
-                diagonal + 1
-            } else {
-                above.max(best[i])
-            };
-            diagonal = above;
+/// The part of `heard` that runs along `said`, word after word.
+#[derive(Debug, Clone, Copy, Default)]
+struct Run {
+    /// Worth: its matches less its misheard words. Nothing starts a run but a
+    /// match, so a run only goes on while it's worth more than starting over.
+    score: i32,
+    matched: usize,
+    /// Words wrong, extra or missed along the way.
+    misheard: usize,
+    /// How many of `heard` it covers.
+    span: usize,
+}
+
+impl Run {
+    fn matched(self) -> Self {
+        Self {
+            score: self.score + 1,
+            matched: self.matched + 1,
+            span: self.span + 1,
+            ..self
         }
     }
-    best[said.len()]
+
+    /// A word gone wrong along the way, which `covers` a word of `heard` or not.
+    /// `None` where there's no run to go on with.
+    fn misheard(self, covers: usize) -> Option<Self> {
+        (self.score > 1).then_some(Self {
+            score: self.score - 1,
+            misheard: self.misheard + 1,
+            span: self.span + covers,
+            ..self
+        })
+    }
+}
+
+/// The best run of `heard` along `said`: a contiguous stretch of each, allowing
+/// for what a recogniser gets wrong.
+fn best_run(heard: &[String], said: &[String]) -> Run {
+    let mut best = Run::default();
+    let mut above = vec![Run::default(); said.len() + 1];
+    for word in heard {
+        let mut row = vec![Run::default(); said.len() + 1];
+        for (i, other) in said.iter().enumerate() {
+            let diagonal = above[i];
+            let found = if same_word(word, other) {
+                Some(diagonal.matched())
+            } else {
+                diagonal.misheard(1)
+            };
+            let options = [found, above[i + 1].misheard(1), row[i].misheard(0)];
+            let cell = options
+                .into_iter()
+                .flatten()
+                .max_by_key(|r| r.score)
+                .unwrap_or_default();
+            if cell.score > best.score {
+                best = cell;
+            }
+            row[i + 1] = cell;
+        }
+        above = row;
+    }
+    best
 }
 
 /// One reply's worth of listening over playback.
@@ -203,6 +277,11 @@ impl Barge {
         self.in_stretch = false;
     }
 
+    /// Whether this stretch stood out from the playback, as its echo wouldn't.
+    pub fn above_playback(&self) -> bool {
+        self.loud >= AUDIBLE
+    }
+
     /// Whether what's been heard is due to be transcribed: sustained and above
     /// the playback, and more of it than last time.
     pub fn due(&mut self) -> bool {
@@ -239,6 +318,8 @@ fn rms(samples: &[f32]) -> f32 {
 mod tests {
     use super::*;
 
+    use crate::cascade::tests::LONG_REPLY;
+
     const REPLY: &str =
         "The build failed at three today. Two tests timed out, want me to rerun them?";
 
@@ -253,7 +334,9 @@ mod tests {
         assert_eq!(judge("Um. Hmm.", REPLY), Verdict::Noise);
         assert_eq!(judge("the build failed at three", REPLY), Verdict::Echo);
         assert_eq!(judge("tests timed out, want me", REPLY), Verdict::Echo);
-        assert_eq!(judge("today", REPLY), Verdict::Echo);
+        assert_eq!(judge("today", REPLY), Verdict::Fragment);
+        assert_eq!(judge("two tests", REPLY), Verdict::Fragment);
+        assert_eq!(judge("two tasks", REPLY), Verdict::Person);
         assert_eq!(judge("hold on a second", REPLY), Verdict::Person);
         assert_eq!(judge("no", REPLY), Verdict::Person);
         assert_eq!(judge("what about the tests though", REPLY), Verdict::Person);
@@ -268,6 +351,47 @@ mod tests {
             ),
             Verdict::Echo
         );
+    }
+
+    /// With a long reply, nearly any short phrase can be found scattered through
+    /// it, word by word. That isn't the reply coming back.
+    #[test]
+    fn a_short_phrase_is_not_an_echo_of_a_long_reply() {
+        for phrase in [
+            "yes please do that",
+            "no let me look at it first",
+            "what about the timeout",
+            "can you open it now",
+            "yes open the pull request",
+        ] {
+            assert_eq!(judge(phrase, LONG_REPLY), Verdict::Person, "{phrase}");
+        }
+    }
+
+    /// Echo is a run of what's playing with nothing else in it. These all have
+    /// words of it, in order, as someone answering it would.
+    #[test]
+    fn a_run_of_what_is_playing_is_echo_and_little_else_is() {
+        let playing = "Do you want me to open the pull request with that change now?";
+        for echo in [
+            "open the pull request",
+            "you want me to open the",
+            "want me to open a pull request with",
+            "the pull request with that change now",
+            "uh want me to open the pull",
+        ] {
+            assert_eq!(judge(echo, playing), Verdict::Echo, "{echo}");
+        }
+        for person in [
+            "yes open the pull request",
+            "no the pull request",
+            "open the request",
+            "me open that",
+            "do you want that",
+            "change the pull request now",
+        ] {
+            assert_eq!(judge(person, playing), Verdict::Person, "{person}");
+        }
     }
 
     #[test]
@@ -382,6 +506,19 @@ mod tests {
         barge.rejected(Verdict::Noise);
         frames(&mut barge, 0.2, SUSTAINED * 3);
         assert!(!barge.due(), "a second of it with no words wasn't anyone");
+    }
+
+    /// A word or two come back at the level of the playback isn't someone; the
+    /// same word above it is.
+    #[test]
+    fn standing_out_from_the_playback_settles_a_fragment() {
+        let mut barge = Barge::default();
+        frames(&mut barge, 0.05, 40);
+        barge.begin();
+        frames(&mut barge, 0.06, SUSTAINED);
+        assert!(!barge.above_playback());
+        frames(&mut barge, 0.3, AUDIBLE);
+        assert!(barge.above_playback());
     }
 
     #[test]

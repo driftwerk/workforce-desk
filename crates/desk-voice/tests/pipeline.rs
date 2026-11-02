@@ -75,7 +75,7 @@ fn listen(listener: &mut Listener, audio: &[f32]) -> Vec<Utterance> {
             }
         });
         if said.len() > before {
-            listener.speaking("", at(fed));
+            listener.speaking();
             listener.spoken(at(fed));
         }
         listener.tick(at(fed));
@@ -357,6 +357,62 @@ fn its_own_voice_coming_back_doesnt_stop_it() {
     assert_eq!(*out.stops.lock().unwrap(), 0);
     assert_eq!(engine.state(), VoiceState::Speaking);
     assert!(events.said.lock().unwrap().is_empty());
+    drop(engine);
+}
+
+/// Over a long reply, a short real phrase whose words are all further on in it:
+/// it stops the reply, and what was said gets to the agent.
+#[test]
+#[ignore = "needs the speech models"]
+fn a_short_real_phrase_stops_a_long_reply() {
+    const REPLY: &str = "I looked at the failing job this morning and read the logs. \
+        The cache key changed when the lockfile was updated last week. \
+        Do you want me to open the pull request now? \
+        I can tell you what I find about the timeout once that has finished.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let phrase = speaker()
+        .synthesize("What about the timeout?", None)
+        .unwrap();
+    {
+        let mic = mic.lock().unwrap();
+        let feed = mic.as_ref().unwrap();
+        for chunk in silence(0.5).chunks(1_600) {
+            feed(chunk, SPEECH_RATE);
+        }
+        for chunk in phrase.samples.chunks(4_096) {
+            feed(chunk, phrase.rate);
+        }
+        for chunk in silence(2.0).chunks(1_600) {
+            feed(chunk, SPEECH_RATE);
+        }
+    }
+    wait_for("barge-in", || *out.stops.lock().unwrap() > 0);
+    wait_for("what they said", || !events.said.lock().unwrap().is_empty());
+    let said = events.said.lock().unwrap()[0].clone();
+    assert!(words(&said.text).contains("timeout"), "{}", said.text);
     drop(engine);
 }
 

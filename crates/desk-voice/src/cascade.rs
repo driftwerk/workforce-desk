@@ -27,7 +27,18 @@ enum Input {
     PushToTalk(bool),
     Speak(Speech),
     StopSpeaking,
-    Spoken { generation: u64 },
+    /// A sentence of it has gone to the speaker.
+    Playing {
+        generation: u64,
+        text: String,
+    },
+    /// The speaker has finished one.
+    Played {
+        generation: u64,
+    },
+    Spoken {
+        generation: u64,
+    },
     Shutdown,
 }
 
@@ -239,7 +250,7 @@ impl Worker {
             Input::Speak(speech) => {
                 self.pending += 1;
                 tracing::info!(chars = speech.words().len(), "voice: speaking");
-                self.listener.speaking(speech.words(), now);
+                self.listener.speaking();
                 let generation = self.generation.load(Ordering::SeqCst);
                 let _ = self.jobs.send(Job { speech, generation });
             }
@@ -248,6 +259,16 @@ impl Worker {
                     self.silence(StopReason::Asked);
                 }
                 self.listener.spoken(now);
+            }
+            Input::Playing { generation, text } => {
+                if generation == self.generation.load(Ordering::SeqCst) {
+                    self.listener.playing(&text);
+                }
+            }
+            Input::Played { generation } => {
+                if generation == self.generation.load(Ordering::SeqCst) {
+                    self.listener.played();
+                }
             }
             Input::Spoken { generation } => {
                 if generation == self.generation.load(Ordering::SeqCst) && self.pending > 0 {
@@ -377,6 +398,7 @@ impl Mouth {
             if !current() {
                 break;
             }
+            let text = part.words().to_string();
             let Some(audio) = self.render(part, &mut cloud_failed) else {
                 continue;
             };
@@ -384,7 +406,15 @@ impl Mouth {
                 break;
             }
             let last = i + 1 == count;
-            let done = if last { spoken() } else { Box::new(|| {}) as _ };
+            let tx = self.tx.clone();
+            let also = last.then(spoken);
+            let done: Box<dyn FnOnce() + Send> = Box::new(move || {
+                let _ = tx.send(Input::Played { generation });
+                if let Some(also) = also {
+                    also();
+                }
+            });
+            let _ = self.tx.send(Input::Playing { generation, text });
             self.out.play(&audio.samples, audio.rate, done);
             last_rate = Some(audio.rate);
             finished_by_last = last;
@@ -442,5 +472,15 @@ enum Part {
     Audio(Audio),
 }
 
+impl Part {
+    /// What's said in it, as far as anyone knows.
+    fn words(&self) -> &str {
+        match self {
+            Part::Text(text, _) => text,
+            Part::Audio(_) => "",
+        }
+    }
+}
+
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

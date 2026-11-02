@@ -23,6 +23,7 @@ const SILENCE_FRAMES: usize = 22;
 #[derive(Clone, Copy)]
 enum EchoHeardAs {
     Nothing,
+    /// The sentence that was playing when it was heard.
     Reply,
 }
 
@@ -31,7 +32,9 @@ enum EchoHeardAs {
 struct FakeEars {
     heard_as: EchoHeardAs,
     person_says: String,
-    echo_text: String,
+    room: Arc<Room>,
+    /// The sentence playing in the last frame heard.
+    sentence: usize,
     onset: VecDeque<f32>,
     audio: Vec<f32>,
     loud_run: usize,
@@ -47,6 +50,9 @@ impl Ears for FakeEars {
             self.window.push(s);
             if self.window.len() < FRAME {
                 continue;
+            }
+            if let Some(sentence) = self.room.heard_over.lock().unwrap().pop_front() {
+                self.sentence = sentence;
             }
             let level = (self.window.iter().map(|x| x * x).sum::<f32>() / FRAME as f32).sqrt();
             if self.in_speech {
@@ -102,7 +108,10 @@ impl Ears for FakeEars {
         }
         match self.heard_as {
             EchoHeardAs::Nothing => String::new(),
-            EchoHeardAs::Reply => self.echo_text.clone(),
+            EchoHeardAs::Reply => {
+                let rendered = self.room.rendered.lock().unwrap();
+                rendered.get(self.sentence).cloned().unwrap_or_default()
+            }
         }
     }
 }
@@ -116,6 +125,10 @@ struct Room {
     /// How loud the agent's voice comes back.
     echo: f32,
     playing: Mutex<VecDeque<Playing>>,
+    /// Every sentence the voices have made, in order.
+    rendered: Mutex<Vec<String>>,
+    /// Which of them was playing in each frame the microphone heard.
+    heard_over: Mutex<VecDeque<usize>>,
     person: Mutex<VecDeque<f32>>,
     played: AtomicU64,
     stops: AtomicU64,
@@ -130,6 +143,8 @@ impl Room {
         Self {
             echo,
             playing: Mutex::default(),
+            rendered: Mutex::default(),
+            heard_over: Mutex::default(),
             person: Mutex::default(),
             played: AtomicU64::new(0),
             stops: AtomicU64::new(0),
@@ -173,6 +188,8 @@ impl Room {
     fn frame(&self) -> Vec<f32> {
         let mut frame = vec![0.0; FRAME];
         let mut finished = None;
+        let sentence = self.played.load(Ordering::SeqCst) as usize;
+        self.heard_over.lock().unwrap().push_back(sentence);
         {
             let mut playing = self.playing.lock().unwrap();
             if let Some((samples, done)) = playing.front_mut() {
@@ -222,11 +239,15 @@ fn second() -> Audio {
     }
 }
 
-struct Local(Mutex<Vec<String>>);
+struct Local {
+    said: Mutex<Vec<String>>,
+    room: Arc<Room>,
+}
 
 impl LocalSpeech for Local {
     fn synthesize(&self, text: &str, _voice: Option<&str>) -> Option<Audio> {
-        self.0.lock().unwrap().push(text.to_string());
+        self.said.lock().unwrap().push(text.to_string());
+        self.room.rendered.lock().unwrap().push(text.to_string());
         Some(second())
     }
 }
@@ -235,6 +256,7 @@ impl LocalSpeech for Local {
 struct Cloud {
     works: usize,
     said: Mutex<Vec<String>>,
+    room: Arc<Room>,
 }
 
 impl CloudSpeech for Cloud {
@@ -244,6 +266,7 @@ impl CloudSpeech for Cloud {
             return Err(SpeechError::Provider("the voice is down".into()));
         }
         said.push(text.to_string());
+        self.room.rendered.lock().unwrap().push(text.to_string());
         Ok(second())
     }
 }
@@ -286,6 +309,31 @@ struct Sim {
 const REPLY: &str =
     "The build failed at three today. Two tests timed out again. Want me to rerun them now?";
 
+/// A reply of about 300 words, which has most short phrases somewhere in it.
+pub(crate) const LONG_REPLY: &str = "\
+I looked at the failing job this morning and went through the logs from the last three runs. \
+The build fails because the cache key changed when the lockfile was updated last week. \
+So the runner restored an old dependency set and carried on as if nothing had happened. \
+Two tests then timed out waiting for a service that never started on that runner. \
+Nothing in the application code caused it, and the same commit passes on a clean machine. \
+I can fix it by pinning the key to the lockfile hash and adding a health check. \
+The health check runs before the tests and fails quickly if the service isn't up. \
+That should also make the nightly run faster, since it will reuse the cache properly. \
+The nightly run has been taking about forty minutes, and most of that is installing packages. \
+With the cache working I would expect it to come down to around fifteen minutes. \
+There is one more thing I noticed while reading through the workflow file yesterday. \
+The retry step wraps the whole suite, which hides flaky tests instead of reporting them. \
+I would rather retry only the tests that failed and print a summary at the end. \
+That is a separate change, so I would keep it out of this one and do it next. \
+The other open question is the deploy job, which still depends on the old cache. \
+It won't break today, but it will once the old key expires at the end of the month. \
+I can update it in the same change, or leave it for whoever owns the deploy job. \
+Do you want me to open a pull request with that change now? \
+Or would you rather look at the workflow file first and tell me what you think? \
+If you do want the pull request, I will ask for a review from the platform team. \
+Then I can run the whole suite twice on a clean runner to be sure it holds. \
+And I can tell you what I find about the timeout once that has finished running.";
+
 impl Sim {
     fn new(heard_as: EchoHeardAs, person_says: &str, cloud_works: usize) -> Self {
         Self::in_room(
@@ -299,16 +347,21 @@ impl Sim {
     fn in_room(room: Room, heard_as: EchoHeardAs, person_says: &str, cloud_works: usize) -> Self {
         let room = Arc::new(room);
         let events = Arc::new(Recorded::default());
-        let local = Arc::new(Local(Mutex::new(Vec::new())));
+        let local = Arc::new(Local {
+            said: Mutex::new(Vec::new()),
+            room: room.clone(),
+        });
         let cloud = Arc::new(Cloud {
             works: cloud_works,
             said: Mutex::new(Vec::new()),
+            room: room.clone(),
         });
         let transcriptions = Arc::new(AtomicU64::new(0));
         let ears = FakeEars {
             heard_as,
             person_says: person_says.to_string(),
-            echo_text: "two tests timed out again".to_string(),
+            room: room.clone(),
+            sentence: 0,
             onset: VecDeque::new(),
             audio: Vec::new(),
             loud_run: 0,
@@ -491,7 +544,7 @@ fn a_failing_voice_falls_back_without_silence() {
         ["The build failed at three today."]
     );
     assert_eq!(
-        *sim.local.0.lock().unwrap(),
+        *sim.local.said.lock().unwrap(),
         ["Two tests timed out again.", "Want me to rerun them now?"]
     );
     assert_eq!(*sim.events.errors.lock().unwrap(), ["the voice is down"]);
@@ -505,8 +558,8 @@ fn the_fallback_voice_never_reads_a_direction() {
     let sim = Sim::new(EchoHeardAs::Nothing, "", 0);
     sim.engine
         .speak("(excited) Found it today.".into(), sim.fish());
-    sim.wait_for("the fallback", |s| !s.local.0.lock().unwrap().is_empty());
-    assert_eq!(*sim.local.0.lock().unwrap(), ["Found it today."]);
+    sim.wait_for("the fallback", |s| !s.local.said.lock().unwrap().is_empty());
+    assert_eq!(*sim.local.said.lock().unwrap(), ["Found it today."]);
 }
 
 /// Stop asks to stop, and says so.
@@ -533,4 +586,97 @@ fn the_tail_of_the_reply_is_not_sent_to_the_agent() {
     });
     std::thread::sleep(Duration::from_millis(100));
     assert!(sim.events.utterances.lock().unwrap().is_empty());
+}
+
+/// A real phrase over a long reply, whose words are all further on in it.
+#[test]
+fn a_short_phrase_stops_a_long_reply_and_is_sent() {
+    let sim = Sim::new(EchoHeardAs::Nothing, "open the pull request", 99);
+    sim.engine.speak(LONG_REPLY.into(), sim.fish());
+    sim.wait_for("the reply to start", |s| s.played() >= 1);
+    sim.room.says(2.0);
+    sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
+    sim.wait_for("what they said", |s| {
+        !s.events.utterances.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        sim.events.utterances.lock().unwrap()[0].text,
+        "open the pull request"
+    );
+}
+
+/// Said in the moments after a long reply: it's the person answering it.
+#[test]
+fn what_is_said_just_after_a_long_reply_is_sent() {
+    let sim = Sim::new(EchoHeardAs::Nothing, "what about the timeout", 99);
+    sim.engine.speak(LONG_REPLY.into(), sim.fish());
+    sim.wait_for("the reply to finish", |s| {
+        s.played() >= 22 && s.engine.state() != VoiceState::Speaking
+    });
+    // Long enough for what the echo left going to end: under the 4 s of memory.
+    std::thread::sleep(Duration::from_millis(150));
+    sim.room.says(1.0);
+    sim.wait_for("what they said", |s| {
+        !s.events.utterances.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        sim.events.utterances.lock().unwrap()[0].text,
+        "what about the timeout"
+    );
+}
+
+/// The same words, said out loud over the sentence they're in: louder than the
+/// playback, so someone said them.
+#[test]
+fn a_fragment_of_what_is_playing_said_out_loud_stops_it() {
+    let sim = Sim::in_room(Room::with_echo(0.0), EchoHeardAs::Nothing, "two tests", 9);
+    sim.engine.speak(
+        "Two tests timed out again. Want me to rerun them?".into(),
+        sim.fish(),
+    );
+    sim.wait_for("the reply to start", |s| {
+        s.engine.state() == VoiceState::Speaking && !s.room.rendered.lock().unwrap().is_empty()
+    });
+    sim.room.says(0.3);
+    sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
+}
+
+/// Words of the sentence playing, whole, said after the audio went quiet: it can't
+/// be coming back, so it's the person, whatever the words.
+#[test]
+fn the_replys_own_words_after_it_went_quiet_are_the_person() {
+    let sim = Sim::new(EchoHeardAs::Nothing, "two tests timed out again", 9);
+    sim.engine
+        .speak("Two tests timed out again.".into(), sim.fish());
+    sim.wait_for("the reply to finish", |s| {
+        s.played() >= 1 && s.engine.state() != VoiceState::Speaking
+    });
+    std::thread::sleep(Duration::from_millis(150));
+    sim.room.says(1.0);
+    sim.wait_for("what they said", |s| {
+        !s.events.utterances.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        sim.events.utterances.lock().unwrap()[0].text,
+        "two tests timed out again"
+    );
+}
+
+/// Once what was said has stopped a reply as someone talking, it isn't then held
+/// to be the reply when it ends, whatever words it came to.
+#[test]
+fn what_stopped_a_reply_is_sent_whatever_it_says() {
+    let sim = Sim::new(EchoHeardAs::Nothing, "no not the build failed at three", 9);
+    sim.engine.speak(REPLY.into(), sim.fish());
+    sim.wait_for("the reply to start", |s| s.played() >= 1);
+    sim.room.says(2.0);
+    sim.wait_for("what they said", |s| {
+        !s.events.utterances.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        sim.events.utterances.lock().unwrap()[0].text,
+        "no not the build failed at three"
+    );
 }
