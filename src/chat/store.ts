@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState } from "./conversation";
-import { covered, cursorIn, fetchHistory, prepend } from "./history";
+import { cursorIn, fetchHistory, prepend, settle, type Reading } from "./history";
 import {
   agentKey,
   FEATURES,
@@ -25,7 +25,8 @@ export interface History {
   more: boolean;
   /** Reading the page before the first message. */
   earlier: "idle" | "loading" | "failed";
-  /** When the latest page was read: live messages after it can't be in it. */
+  /** When the read of the latest page began: live messages sent after it may
+   *  not be in it. */
   loadedAt: string | null;
 }
 
@@ -143,6 +144,11 @@ const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
   }
 };
 
+/** Each DM's count of reads of its history begun, and the count of the one
+ *  shown, so a read that began before the one shown changes nothing. */
+const readsBegun = new Map<string, number>();
+const readShown = new Map<string, number>();
+
 /** Each hub's count of pictures you've set there, so a read of you that
  *  began before one doesn't put the old picture back. */
 const mySets = new Map<string, number>();
@@ -191,6 +197,17 @@ const ensure = (key: string): boolean => {
   });
   live.set(key, convo);
   return true;
+};
+
+/** Gives way, in `key`'s live conversation, to what the hub's page just read
+ *  (`kept`) shows, and places what it passed. */
+const settleLive = (key: string, kept: ChatMessage[], read: Reading) => {
+  const convo = useChat.getState().conversations[key];
+  if (!convo?.messages.length) return;
+  const now = new Date().toISOString();
+  const { ids, anchors, twins } = settle(kept, convo.messages, now, !!convo.features?.has(FEATURES.stream), read);
+  live.get(key)?.place(anchors, twins);
+  live.get(key)?.drop(ids);
 };
 
 export const useChat = create<ChatStore>((set, get) => ({
@@ -303,14 +320,17 @@ export const useChat = create<ChatStore>((set, get) => ({
     const putHistory = (h: Partial<History>) =>
       set((s) => ({ histories: { ...s.histories, [key]: { ...(s.histories[key] ?? blankHistory()), ...h } } }));
     putHistory({ state: "loading" });
+    // What's sent from here on, the read may not have seen.
+    const started = new Date().toISOString();
     try {
       const page = await fetchHistory(target.hub, target.agent.id);
       if (!get().histories[key]) return; // forgotten meanwhile
       putHistory(
         page
-          ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: new Date().toISOString() }
+          ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: started }
           : { state: "absent", messages: [], more: false },
       );
+      if (page) settleLive(key, page.messages, { began: started, seen: new Set() });
     } catch {
       if (get().histories[key]) putHistory({ state: "failed" });
     }
@@ -338,6 +358,8 @@ export const useChat = create<ChatStore>((set, get) => ({
     const target = whereIs(get(), key);
     if (!target || get().histories[key]?.state !== "ready") return;
     const started = new Date().toISOString();
+    const read = (readsBegun.get(key) ?? 0) + 1;
+    readsBegun.set(key, read);
     let page;
     try {
       page = await fetchHistory(target.hub, target.agent.id);
@@ -346,6 +368,9 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     const was = get().histories[key];
     if (!page || was?.state !== "ready") return;
+    // One begun before the read shown came back after it: it has nothing newer.
+    if (read < (readShown.get(key) ?? 0)) return;
+    readShown.set(key, read);
     const first = cursorIn(was.messages, "first");
     // Earlier pages already read stay above it.
     const reachesBack = !first || page.messages.some((m) => m.id === first);
@@ -356,12 +381,11 @@ export const useChat = create<ChatStore>((set, get) => ({
           ...was,
           messages: prepend(was.messages, page.messages),
           more: reachesBack ? page.more : was.more,
-          loadedAt: new Date().toISOString(),
+          loadedAt: started,
         },
       },
     }));
-    const convo = get().conversations[key];
-    if (convo) live.get(key)?.drop(covered(page.messages, convo.messages, started, !!convo.features?.has(FEATURES.stream)));
+    settleLive(key, page.messages, { began: started, seen: new Set(was.messages.map((m) => m.id)) });
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,
