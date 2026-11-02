@@ -18,6 +18,8 @@ mod commands;
 #[cfg(unix)]
 mod config;
 #[cfg(unix)]
+mod handover;
+#[cfg(unix)]
 mod holder;
 #[cfg(unix)]
 mod memory;
