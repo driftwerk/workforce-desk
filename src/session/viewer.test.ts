@@ -101,4 +101,19 @@ describe("a terminal's viewer", () => {
     expect(sent).toEqual([]);
     expect(v.active).toBe(false);
   });
+
+  it("hears its role afresh on a new connection, and sizes the terminal again", () => {
+    const { v, sent, roles } = setup();
+    v.opened(false);
+    v.heard({ type: "role", active: true, free: false });
+    expect(sent).toEqual([{ type: "resize", cols: 100, rows: 30 }]);
+    // The hub came back: the same role on the new connection is still news.
+    v.opened(false);
+    v.heard({ type: "role", active: true, free: false });
+    expect(roles).toEqual([true, true]);
+    expect(sent).toEqual([
+      { type: "resize", cols: 100, rows: 30 },
+      { type: "resize", cols: 100, rows: 30 },
+    ]);
+  });
 });

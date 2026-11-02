@@ -43,7 +43,11 @@ export class Viewer {
 
   /** The socket opened; `focused` when the person is already in this pane. */
   opened(focused: boolean): void {
+    // A new connection (the first, or one after the hub came back) is told
+    // its role afresh.
     this.asked = null;
+    this.known = false;
+    this.isActive = false;
     if (focused) this.claim();
   }
 
