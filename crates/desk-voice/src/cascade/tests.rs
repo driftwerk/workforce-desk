@@ -626,7 +626,11 @@ fn being_asked_to_stop_stops_and_says_why() {
         s.engine.state() == VoiceState::Speaking
     });
     sim.engine.stop_speaking();
-    sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped, so wait for it.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
+    assert!(sim.room.stops.load(Ordering::SeqCst) > 0);
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::Asked]);
 }
 
