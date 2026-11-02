@@ -28,13 +28,15 @@ export interface Restorable {
   subscribe: (onChange: () => void) => () => void;
 }
 
+// Reached for when used, not when this loads: what imports the store (a
+// conversation's queue does) needn't bring Desk's file with it.
 const local: LocalState = {
-  load: stateLoad,
-  put: statePut,
-  remove: stateRemove,
-  synced: stateSynced,
-  adopt: stateAdopt,
-  flush: stateFlush,
+  load: () => stateLoad(),
+  put: (key, value) => statePut(key, value),
+  remove: (key) => stateRemove(key),
+  synced: (key, value, updatedAt) => stateSynced(key, value, updatedAt),
+  adopt: (key, value, updatedAt) => stateAdopt(key, value, updatedAt),
+  flush: () => stateFlush(),
 };
 
 export const hubState = (hub: DeskHub): HubState => ({ list: hub.stateList, put: hub.statePut, remove: hub.stateRemove });
