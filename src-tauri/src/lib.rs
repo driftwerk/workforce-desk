@@ -14,6 +14,7 @@ mod logins;
 mod navigation;
 mod pair_gate;
 mod paired;
+mod reread;
 mod state;
 mod support;
 mod terminals;

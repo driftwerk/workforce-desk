@@ -125,6 +125,7 @@ impl HubIo {
     ) -> Result<u32, String> {
         let (path, query) = socket_target(target)?;
         let page = self.sockets.page(owner);
+        self.paired.reread_local_if_stale().await;
         let reach = self
             .paired
             .reach_async(hub)
@@ -162,10 +163,18 @@ impl HubIo {
                     .is_ok_and(|r| r.status().is_success())
             })
         });
+        // This computer's hub may have moved to new ports: read again for
+        // the next socket when it can't be reached. A workspace elsewhere
+        // isn't, which would only read every hub's token again.
+        let unreachable = reach.local.then(|| {
+            let paired = Arc::clone(&self.paired);
+            Arc::new(move || paired.local_unreachable()) as socket::Unreachable
+        });
         let dial = Dial {
             url,
             bearer,
             pool: Pool::Hubs,
+            unreachable,
             legacy: Some(Legacy {
                 hub: hub.to_string(),
                 hubs: Arc::clone(&self.legacy),
@@ -841,6 +850,37 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
+    }
+
+    /// Desk Helper moved this computer's hub: a socket to its old address
+    /// fails, and the next one the page opens goes to where it is now.
+    #[tokio::test]
+    async fn a_socket_after_the_local_hub_moved_opens_where_it_is_now() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (url, _seen) = ws_hub(true, true).await;
+        let gone = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", l.local_addr().unwrap())
+        };
+        let at = Arc::new(std::sync::Mutex::new(gone));
+        let following = Arc::clone(&at);
+        let paired = Arc::new(Paired::with_source(Arc::new(move || {
+            let local = following.lock().unwrap().clone();
+            Ok(vec![account("local", &local, true, "SENTINEL-DEVICE")])
+        })));
+        let io = HubIo::new(paired, Arc::default());
+        let (events, mut rx) = opened();
+        io.open_socket("main", "local", "/ws/desk", events)
+            .await
+            .unwrap();
+        assert_eq!(said(&mut rx).await["type"], "error");
+        assert_eq!(said(&mut rx).await["type"], "close");
+        *at.lock().unwrap() = url;
+        let (events, mut rx) = opened();
+        io.open_socket("main", "local", "/ws/desk", events)
+            .await
+            .unwrap();
+        assert_eq!(said(&mut rx).await["type"], "open");
     }
 
     #[tokio::test]

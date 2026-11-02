@@ -50,12 +50,15 @@ struct Local {
 }
 
 /// The local hub as last read: once, and again when the hub turns the token
-/// away (Desk Helper renews it).
+/// away (Desk Helper renews it) or can't be reached where it was (Desk
+/// Helper gave it new ports).
 type Kept = Arc<Mutex<Option<Local>>>;
 
 pub struct Broker {
     source: Source,
     local: Kept,
+    /// Reading it again when it can't be reached where it was.
+    reread: Arc<crate::reread::Reread>,
     client: reqwest::Client,
     sockets: Arc<socket::Sockets>,
 }
@@ -86,6 +89,7 @@ impl Broker {
         Self {
             source,
             local: Kept::default(),
+            reread: Arc::default(),
             // The token goes to the hub on this computer and nowhere else:
             // never through a proxy, never after a redirect.
             client: desk_core::net::loopback(),
@@ -99,6 +103,18 @@ impl Broker {
 
     fn forget(&self) {
         *self.local.lock().expect("local") = None;
+    }
+
+    /// Reads where the hub is again after nothing answered where it was:
+    /// once however many failed together, at most once every
+    /// [`crate::reread::GAP`].
+    async fn reread(&self) {
+        self.reread
+            .run(|| async {
+                self.forget();
+                let _ = self.local().await;
+            })
+            .await;
     }
 
     /// One of `DeskHub`'s requests, sent as the hub's admin.
@@ -137,7 +153,22 @@ impl Broker {
                 e.without_url()
             )
         };
-        let mut response = send(self.local().await?)?.await.map_err(unreachable)?;
+        let local = self.local().await?;
+        let mut response = match send(local.clone())?.await {
+            Ok(r) => r,
+            // Desk Helper may have moved the hub to new ports: where it is
+            // is read again, and the request sent there if it moved (it
+            // never reached the old address).
+            Err(e) if e.is_connect() => {
+                self.reread().await;
+                let now = self.local().await?;
+                if now.base == local.base {
+                    return Err(unreachable(e));
+                }
+                send(now)?.await.map_err(unreachable)?
+            }
+            Err(e) => return Err(unreachable(e)),
+        };
         // A refused token is read again once: the hub may have a new one.
         // The hub refused before doing anything, so sending again is safe.
         if response.status() == StatusCode::UNAUTHORIZED {
@@ -167,6 +198,9 @@ impl Broker {
     ) -> Result<u32, String> {
         let allowed = routes::socket(target).map_err(|e| e.to_string())?;
         let page = self.sockets.page(owner);
+        if self.reread.is_stale() {
+            self.reread().await;
+        }
         let local = self.local().await?;
         let mut url = at(&local.base, &allowed.path, None)?;
         url.set_scheme("ws")
@@ -181,7 +215,11 @@ impl Broker {
                 read(&source, &kept).await.map(|l| l.bearer)
             })
         });
-        self.sockets.open(owner, page, url, bearer, events)
+        // Desk Helper may have moved the hub: read again for the next one.
+        let reread = Arc::clone(&self.reread);
+        let unreachable: socket::Unreachable = Arc::new(move || reread.mark_stale());
+        self.sockets
+            .open(owner, page, url, bearer, Some(unreachable), events)
     }
 }
 
@@ -559,5 +597,131 @@ mod tests {
             );
         }
         assert_eq!(broker.sockets.count(), 0);
+    }
+
+    /// An address nothing listens on any more.
+    fn gone_address() -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", l.local_addr().unwrap())
+    }
+
+    /// A broker whose hub is wherever `at` says, and how often it read it.
+    fn broker_following(
+        at: Arc<Mutex<String>>,
+        gap: Duration,
+    ) -> (Broker, Arc<std::sync::atomic::AtomicUsize>) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let mut broker = Broker::with_source(
+            Arc::new(move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Some(Connection {
+                    gateway_url: at.lock().unwrap().clone(),
+                    admin_token: SENTINEL.into(),
+                    device_token: Some("device".into()),
+                }))
+            }),
+            Arc::default(),
+        );
+        broker.reread = Arc::new(crate::reread::Reread::every(gap));
+        (broker, reads)
+    }
+
+    /// Desk Helper moved the hub to a new port: a request its old address
+    /// can't take reads where it is now and goes there.
+    #[tokio::test]
+    async fn a_hub_that_moved_is_asked_where_it_is_now() {
+        let (url, mut seen) = hub(vec![OK_JSON]).await;
+        let at = Arc::new(Mutex::new(url.clone()));
+        let (broker, reads) = broker_following(Arc::clone(&at), Duration::ZERO);
+        // Read once, kept.
+        *at.lock().unwrap() = gone_address();
+        let first = broker.fetch("GET", "/api/desk/sessions", None).await;
+        assert!(first.unwrap_err().contains("couldn't reach"));
+        *at.lock().unwrap() = url;
+        let answer = broker
+            .fetch("GET", "/api/desk/sessions", None)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        assert_eq!(
+            seen.recv().await.unwrap().line,
+            "GET /api/desk/sessions HTTP/1.1"
+        );
+        // Read again only when its address failed: once for each failure.
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    /// A socket to the hub's old address fails; the next one the page opens
+    /// goes to where the hub is now.
+    #[tokio::test]
+    async fn a_socket_after_the_hub_moved_opens_where_it_is_now() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                        use futures_util::StreamExt;
+                        while ws.next().await.is_some() {}
+                    }
+                });
+            }
+        });
+        let at = Arc::new(Mutex::new(gone_address()));
+        let (broker, _) = broker_following(Arc::clone(&at), Duration::ZERO);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let events: socket::Events = Arc::new(move |body| {
+            if let InvokeResponseBody::Json(s) = body {
+                let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+                let _ = tx.send(v["type"].as_str().unwrap_or_default().to_string());
+            }
+        });
+        async fn said(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> String {
+            tokio::time::timeout(Duration::from_secs(10), rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        }
+        broker
+            .open_socket("main", "/api/desk/events", events.clone())
+            .await
+            .unwrap();
+        assert_eq!(said(&mut rx).await, "error");
+        assert_eq!(said(&mut rx).await, "close");
+        *at.lock().unwrap() = url;
+        broker
+            .open_socket("main", "/api/desk/events", events)
+            .await
+            .unwrap();
+        assert_eq!(said(&mut rx).await, "open");
+    }
+
+    /// A hub that is down isn't read again for every request that fails:
+    /// once for those failing together, then not within the gap.
+    #[tokio::test]
+    async fn a_hub_that_is_down_is_read_again_at_most_once_a_gap() {
+        let at = Arc::new(Mutex::new(gone_address()));
+        let (broker, reads) = broker_following(at, Duration::from_secs(60));
+        let broker = Arc::new(broker);
+        assert!(
+            broker
+                .fetch("GET", "/api/desk/sessions", None)
+                .await
+                .is_err()
+        );
+        let read = || reads.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(read(), 2, "read, then once again");
+        let all: Vec<_> = (0..6)
+            .map(|_| {
+                let b = Arc::clone(&broker);
+                tokio::spawn(async move { b.fetch("GET", "/api/desk/sessions", None).await })
+            })
+            .collect();
+        for t in all {
+            assert!(t.await.unwrap().is_err());
+        }
+        assert_eq!(read(), 2);
     }
 }
