@@ -28,6 +28,56 @@ pub fn kill(pid: u32) -> io::Result<()> {
     signal(pid, libc::SIGKILL)
 }
 
+/// Asks process `pid` to stop at once, as it would on Ctrl-C (SIGINT):
+/// Postgres's fast shutdown. One already gone is no error.
+pub fn interrupt(pid: u32) -> io::Result<()> {
+    signal(pid, libc::SIGINT)
+}
+
+/// Process `pid`'s whole command line, its arguments joined by spaces;
+/// none when nothing runs as `pid`.
+pub fn args_of(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        let args: Vec<_> = raw
+            .split(|&b| b == 0)
+            .filter(|a| !a.is_empty())
+            .map(String::from_utf8_lossy)
+            .collect();
+        (!args.is_empty()).then(|| args.join(" "))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("ps")
+            .args(["-ww", "-p", &pid.to_string(), "-o", "args="])
+            .output()
+            .ok()?;
+        let args = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !args.is_empty()).then_some(args)
+    }
+}
+
+/// The folder process `pid` runs in; none when nothing runs as `pid` (or
+/// it isn't this user's).
+pub fn cwd_of(pid: u32) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("lsof")
+            .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|l| l.strip_prefix('n'))
+            .map(std::path::PathBuf::from)
+    }
+}
+
 /// The command process `pid` runs (`ps`'s `comm`: the full path on macOS,
 /// the name cut to 15 bytes on Linux); none when nothing runs as `pid`.
 pub fn command_of(pid: u32) -> Option<String> {
@@ -110,8 +160,34 @@ mod tests {
     }
 
     #[test]
+    fn a_process_is_known_by_its_command_line_and_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().canonicalize().unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "sleep 60; :",
+                "fake",
+                "serve",
+                "-c",
+                "/a b/config.toml",
+            ])
+            .current_dir(&dir)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let args = args_of(pid).unwrap();
+        assert!(args.contains("serve -c /a b/config.toml"), "{args}");
+        assert_eq!(cwd_of(pid).unwrap().canonicalize().unwrap(), dir);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(args_of(pid), None);
+    }
+
+    #[test]
     fn process_one_and_none_are_never_signalled() {
         assert!(terminate(1).is_err());
+        assert!(interrupt(1).is_err());
         assert!(kill(0).is_err());
     }
 
