@@ -21,6 +21,8 @@
 
 use std::collections::VecDeque;
 
+mod spoken;
+
 const FRAME: usize = 512;
 /// Frames in `SUSTAINED`, about 320 ms at 16 kHz. Silero has already taken
 /// 250 ms to report speech, so a real interruption stops playback about a
@@ -79,19 +81,44 @@ const MIN_ECHO_WORDS: usize = 3;
 const MATCHED_PER_MISHEARD: usize = 4;
 /// And cuts words off at the ends of what it was given. A word at the edge that
 /// isn't in the reply could as well be a person, "yes open the pull request",
-/// so it's only let go when this many words either side of it say otherwise.
+/// so it's only let go when this many words either side of it say otherwise...
 const MATCHED_PER_STRAY: usize = 5;
+/// ...or when it's at an edge the audio was cut at, where the recogniser makes a
+/// word of whatever it heard of the one cut ("it" for "-ild"), from this many
+/// words of the run.
+const MATCHED_FOR_A_CUT_STRAY: usize = 3;
+/// Words someone answering what they heard puts beside it: "yes open the pull
+/// request", "the second one why". Never let go as the recogniser's.
+const ANSWERS: &[&str] = &[
+    "yes", "yeah", "yep", "no", "nope", "not", "don't", "okay", "ok", "please", "but", "sure",
+    "right", "actually", "instead", "thanks", "what", "why", "how", "which", "who", "when",
+    "where",
+];
+
+/// How what's judged was cut from the audio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cut {
+    /// A look at speech still going on: its last word may be cut off too.
+    Look,
+    /// A whole stretch, which ended where the speech paused. Its start may
+    /// still be cut: the voice model reports speech late, and some of what came
+    /// before is taken with it.
+    Whole,
+}
 
 fn words(text: &str) -> Vec<String> {
-    text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+    let words = spoken::said(text)
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
         .filter(|w| !w.is_empty())
         .map(str::to_lowercase)
-        .collect()
+        .collect();
+    spoken::without_joining_and(words)
 }
 
 /// What transcribing it gave, against what was playing while it was heard: not
 /// the whole reply, since a long one has any short phrase somewhere in it.
-pub fn judge(heard: &str, playing: &str) -> Verdict {
+/// Numbers and symbols are compared as they're said, "3" as "three".
+pub fn judge(heard: &str, playing: &str, cut: Cut) -> Verdict {
     let heard = words(heard);
     if heard.iter().all(|w| FILLER.contains(&w.as_str())) {
         return Verdict::Noise;
@@ -99,22 +126,68 @@ pub fn judge(heard: &str, playing: &str) -> Verdict {
     if heard.len() <= 3 && heard.iter().any(|w| STOPS.contains(&w.as_str())) {
         return Verdict::Person;
     }
-    let run = best_run(&heard, &words(playing));
+    let said = words(playing);
+    let run = best_run(&heard, &said);
+    let edges = Edges::of(&heard, &said, run, cut);
+    let matched = run.matched + edges.cut_words;
     if heard.len() < MIN_ECHO_WORDS {
-        return if run.matched == heard.len() {
+        return if matched == heard.len() {
             Verdict::Fragment
         } else {
             Verdict::Person
         };
     }
-    let stray = heard.len() - run.span;
-    if run.matched >= MIN_ECHO_WORDS
-        && run.misheard <= run.matched / MATCHED_PER_MISHEARD
-        && stray <= run.matched / MATCHED_PER_STRAY
-    {
+    let let_go = edges.strays == 0
+        || (!edges.answers
+            && (edges.strays <= matched / MATCHED_PER_STRAY
+                || (edges.strays == 1 && edges.at_a_cut && matched >= MATCHED_FOR_A_CUT_STRAY)));
+    if matched >= MIN_ECHO_WORDS && run.misheard <= matched / MATCHED_PER_MISHEARD && let_go {
         Verdict::Echo
     } else {
         Verdict::Person
+    }
+}
+
+/// The words of `heard` either side of its run along what's playing.
+#[derive(Debug, Default)]
+struct Edges {
+    /// What's left of a word of the reply where the audio was cut: "thr" just
+    /// after "at" for "three", "he" just before "build" for "the".
+    cut_words: usize,
+    /// The rest.
+    strays: usize,
+    /// Every stray is at an edge the audio may have been cut at.
+    at_a_cut: bool,
+    /// A stray is a word someone answers with.
+    answers: bool,
+}
+
+impl Edges {
+    fn of(heard: &[String], said: &[String], run: Run, cut: Cut) -> Self {
+        if run.matched == 0 {
+            return Self {
+                strays: heard.len(),
+                ..Self::default()
+            };
+        }
+        let before = &heard[..run.heard_from];
+        let after = &heard[run.heard_to..];
+        // Only the word beside the run can be a piece of the one playing beside it.
+        let start_cut = matches!(before, [word] if run.said_from > 0
+            && said[run.said_from - 1].ends_with(word.as_str()));
+        let end_cut = matches!(after, [word] if cut == Cut::Look
+            && said.get(run.said_to).is_some_and(|next| next.starts_with(word.as_str())));
+        let strays: Vec<&String> = before
+            .iter()
+            .filter(|_| !start_cut)
+            .chain(after.iter().filter(|_| !end_cut))
+            .collect();
+        Self {
+            cut_words: usize::from(start_cut) + usize::from(end_cut),
+            strays: strays.len(),
+            at_a_cut: end_cut || after.is_empty() || cut == Cut::Look,
+            answers: strays.iter().any(|w| ANSWERS.contains(&w.as_str())),
+        }
     }
 }
 
@@ -134,27 +207,38 @@ struct Run {
     matched: usize,
     /// Words wrong, extra or missed along the way.
     misheard: usize,
-    /// How many of `heard` it covers.
-    span: usize,
+    /// The words of `heard` from its first match to its last, `heard_from..heard_to`.
+    heard_from: usize,
+    heard_to: usize,
+    /// And of what was said.
+    said_from: usize,
+    said_to: usize,
 }
 
 impl Run {
-    fn matched(self) -> Self {
+    /// `heard[h]` is `said[s]`.
+    fn matched(self, h: usize, s: usize) -> Self {
+        let (heard_from, said_from) = if self.matched == 0 {
+            (h, s)
+        } else {
+            (self.heard_from, self.said_from)
+        };
         Self {
             score: self.score + 1,
             matched: self.matched + 1,
-            span: self.span + 1,
+            heard_from,
+            heard_to: h + 1,
+            said_from,
+            said_to: s + 1,
             ..self
         }
     }
 
-    /// A word gone wrong along the way, which `covers` a word of `heard` or not.
-    /// `None` where there's no run to go on with.
-    fn misheard(self, covers: usize) -> Option<Self> {
+    /// A word gone wrong along the way. `None` where there's no run to go on with.
+    fn misheard(self) -> Option<Self> {
         (self.score > 1).then_some(Self {
             score: self.score - 1,
             misheard: self.misheard + 1,
-            span: self.span + covers,
             ..self
         })
     }
@@ -165,16 +249,23 @@ impl Run {
 fn best_run(heard: &[String], said: &[String]) -> Run {
     let mut best = Run::default();
     let mut above = vec![Run::default(); said.len() + 1];
-    for word in heard {
+    for (h, word) in heard.iter().enumerate() {
         let mut row = vec![Run::default(); said.len() + 1];
         for (i, other) in said.iter().enumerate() {
             let diagonal = above[i];
             let found = if same_word(word, other) {
-                Some(diagonal.matched())
+                Some(diagonal.matched(h, i))
             } else {
-                diagonal.misheard(1)
+                diagonal.misheard()
             };
-            let options = [found, above[i + 1].misheard(1), row[i].misheard(0)];
+            // The recogniser here leaves numbers out of what it writes, as often
+            // as not: one it didn't write isn't a word it got wrong.
+            let skipped = if row[i].matched > 0 && spoken::of_a_number(other) {
+                Some(row[i])
+            } else {
+                row[i].misheard()
+            };
+            let options = [found, above[i + 1].misheard(), skipped];
             let cell = options
                 .into_iter()
                 .flatten()
@@ -329,28 +420,119 @@ mod tests {
 
     #[test]
     fn nothing_but_words_that_arent_the_reply_is_a_person() {
-        assert_eq!(judge("", REPLY), Verdict::Noise);
-        assert_eq!(judge(" . ", REPLY), Verdict::Noise);
-        assert_eq!(judge("Um. Hmm.", REPLY), Verdict::Noise);
-        assert_eq!(judge("the build failed at three", REPLY), Verdict::Echo);
-        assert_eq!(judge("tests timed out, want me", REPLY), Verdict::Echo);
-        assert_eq!(judge("today", REPLY), Verdict::Fragment);
-        assert_eq!(judge("two tests", REPLY), Verdict::Fragment);
-        assert_eq!(judge("two tasks", REPLY), Verdict::Person);
-        assert_eq!(judge("hold on a second", REPLY), Verdict::Person);
-        assert_eq!(judge("no", REPLY), Verdict::Person);
-        assert_eq!(judge("what about the tests though", REPLY), Verdict::Person);
-        assert_eq!(judge("no the tests", REPLY), Verdict::Person);
+        assert_eq!(judge("", REPLY, Cut::Whole), Verdict::Noise);
+        assert_eq!(judge(" . ", REPLY, Cut::Whole), Verdict::Noise);
+        assert_eq!(judge("Um. Hmm.", REPLY, Cut::Whole), Verdict::Noise);
+        assert_eq!(
+            judge("the build failed at three", REPLY, Cut::Whole),
+            Verdict::Echo
+        );
+        assert_eq!(
+            judge("tests timed out, want me", REPLY, Cut::Whole),
+            Verdict::Echo
+        );
+        assert_eq!(judge("today", REPLY, Cut::Whole), Verdict::Fragment);
+        assert_eq!(judge("two tests", REPLY, Cut::Whole), Verdict::Fragment);
+        assert_eq!(judge("two tasks", REPLY, Cut::Whole), Verdict::Person);
+        assert_eq!(
+            judge("hold on a second", REPLY, Cut::Whole),
+            Verdict::Person
+        );
+        assert_eq!(judge("no", REPLY, Cut::Whole), Verdict::Person);
+        assert_eq!(
+            judge("what about the tests though", REPLY, Cut::Whole),
+            Verdict::Person
+        );
+        assert_eq!(judge("no the tests", REPLY, Cut::Whole), Verdict::Person);
         // As the recogniser really hears a reply come back: words cut off, or
         // run together, part of the way through it.
-        assert_eq!(judge("the build failing at three", REPLY), Verdict::Echo);
+        assert_eq!(
+            judge("the build failing at three", REPLY, Cut::Whole),
+            Verdict::Echo
+        );
         assert_eq!(
             judge(
                 "The nightly builds",
-                "The nightly build failed in the suite."
+                "The nightly build failed in the suite.",
+                Cut::Whole
             ),
             Verdict::Echo
         );
+    }
+
+    /// At the first looks a reply comes back as two to four of its words, cut at
+    /// either end, and as it's said: "three" for "3".
+    #[test]
+    fn its_own_voice_cut_short_is_still_echo() {
+        let playing = "The build failed at 3 today. Two tests timed out.";
+        for (echo, cut) in [
+            ("build failed at thr", Cut::Look),
+            ("he build failed at three", Cut::Look),
+            ("he build failed at three", Cut::Whole),
+            ("build failed at three to", Cut::Look),
+            ("it failed at three today", Cut::Look),
+            ("it failed at three today", Cut::Whole),
+            ("failed at 3 today", Cut::Whole),
+            ("ild failed at", Cut::Look),
+        ] {
+            assert_eq!(judge(echo, playing, cut), Verdict::Echo, "{echo} {cut:?}");
+        }
+        assert_eq!(judge("at thr", playing, Cut::Look), Verdict::Fragment);
+    }
+
+    /// Numbers and amounts, written in the reply and said back as words, or
+    /// heard as digits: the same either way, and nothing else.
+    #[test]
+    fn numbers_match_as_they_are_said() {
+        let playing = "It costs $2.50 a run, about 10% more, since version 2.1 on the 3rd.";
+        for echo in [
+            "it costs two dollars fifty cents a run",
+            "two dollars and fifty cents a run about",
+            "about ten percent more since",
+            "since version two point one on the third",
+            "version 2.1 on the 3rd",
+            // As the recogniser here often has it: the numbers left out.
+            "about more since version on the",
+        ] {
+            assert_eq!(judge(echo, playing, Cut::Whole), Verdict::Echo, "{echo}");
+        }
+        for person in [
+            "it costs five dollars a run",
+            "about twenty percent more though",
+            "since version three point four",
+        ] {
+            assert_eq!(
+                judge(person, playing, Cut::Whole),
+                Verdict::Person,
+                "{person}"
+            );
+        }
+    }
+
+    /// A stray word at an edge is let go only where the audio was cut, and never
+    /// one someone answering would say.
+    #[test]
+    fn a_stray_word_is_let_go_only_where_the_audio_was_cut() {
+        let playing = "Do you want me to open the pull request with that change now?";
+        assert_eq!(judge("do you want that", playing, Cut::Look), Verdict::Echo);
+        assert_eq!(
+            judge("do you want that", playing, Cut::Whole),
+            Verdict::Person
+        );
+        for person in [
+            "yes open the pull request",
+            "no the pull request",
+            "open the pull request please",
+            "the pull request with that why",
+        ] {
+            for cut in [Cut::Look, Cut::Whole] {
+                assert_eq!(
+                    judge(person, playing, cut),
+                    Verdict::Person,
+                    "{person} {cut:?}"
+                );
+            }
+        }
     }
 
     /// With a long reply, nearly any short phrase can be found scattered through
@@ -364,7 +546,11 @@ mod tests {
             "can you open it now",
             "yes open the pull request",
         ] {
-            assert_eq!(judge(phrase, LONG_REPLY), Verdict::Person, "{phrase}");
+            assert_eq!(
+                judge(phrase, LONG_REPLY, Cut::Whole),
+                Verdict::Person,
+                "{phrase}"
+            );
         }
     }
 
@@ -380,7 +566,7 @@ mod tests {
             "the pull request with that change now",
             "uh want me to open the pull",
         ] {
-            assert_eq!(judge(echo, playing), Verdict::Echo, "{echo}");
+            assert_eq!(judge(echo, playing, Cut::Whole), Verdict::Echo, "{echo}");
         }
         for person in [
             "yes open the pull request",
@@ -390,24 +576,34 @@ mod tests {
             "do you want that",
             "change the pull request now",
         ] {
-            assert_eq!(judge(person, playing), Verdict::Person, "{person}");
+            assert_eq!(
+                judge(person, playing, Cut::Whole),
+                Verdict::Person,
+                "{person}"
+            );
         }
     }
 
     #[test]
     fn stop_means_stop_even_if_the_reply_says_it() {
-        assert_eq!(judge("Stop.", "They stop and wait."), Verdict::Person);
-        assert_eq!(judge("wait wait", "They stop and wait."), Verdict::Person);
         assert_eq!(
-            judge("they stop and wait", "They stop and wait."),
+            judge("Stop.", "They stop and wait.", Cut::Whole),
+            Verdict::Person
+        );
+        assert_eq!(
+            judge("wait wait", "They stop and wait.", Cut::Whole),
+            Verdict::Person
+        );
+        assert_eq!(
+            judge("they stop and wait", "They stop and wait.", Cut::Whole),
             Verdict::Echo
         );
     }
 
     #[test]
     fn with_nothing_being_said_nothing_is_an_echo() {
-        assert_eq!(judge("hello there", ""), Verdict::Person);
-        assert_eq!(judge("hello", ""), Verdict::Person);
+        assert_eq!(judge("hello there", "", Cut::Whole), Verdict::Person);
+        assert_eq!(judge("hello", "", Cut::Whole), Verdict::Person);
     }
 
     #[test]

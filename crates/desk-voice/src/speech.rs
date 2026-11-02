@@ -13,7 +13,7 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
-use crate::barge::{Barge, Verdict, judge};
+use crate::barge::{Barge, Cut, Verdict, judge};
 use crate::conversation::{Conversation, ListenMode, Phase, Timing};
 use crate::decode::Audio;
 use crate::directions::without_directions;
@@ -33,8 +33,8 @@ const RATE: i32 = SPEECH_RATE as i32;
 const JUDGED: usize = SPEECH_RATE as usize * 2;
 /// How long after a sentence what's heard might still be it, in samples.
 const ECHO_MEMORY: u64 = SPEECH_RATE as u64 * 4;
-/// How long sound lingers after the speaker reports it finished, in samples:
-/// what's left in the device and the room.
+/// How long sound lingers once the microphone has heard the end of it, in
+/// samples: the room's tail, and how late a speaker reports a sentence finished.
 const LINGER: u64 = SPEECH_RATE as u64 * 3 / 10;
 
 /// What the listener noticed while being fed.
@@ -418,6 +418,9 @@ pub struct Listener {
     said: Said,
     /// Samples of microphone audio so far.
     clock: u64,
+    /// Samples of microphone audio that what has played may still be in once
+    /// the speaker says it's done: [`crate::AudioOut::lag`].
+    lag: u64,
     stretch: Stretch,
     /// A name heard in what's being judged over playback: it counts if that
     /// turns out to be someone talking.
@@ -443,6 +446,7 @@ impl Listener {
             barge: Barge::default(),
             said: Said::default(),
             clock: 0,
+            lag: 0,
             stretch: Stretch::default(),
             named: None,
         }
@@ -552,7 +556,7 @@ impl Listener {
         if self.conversation.is_speaking() {
             let text = self.ears.transcribe(samples);
             tracing::info!(text, "voice: transcribed over playback");
-            let verdict = self.verdict(&text, self.stretch.start);
+            let verdict = self.verdict(&text, self.stretch.start, Cut::Whole);
             if verdict != Verdict::Person {
                 tracing::info!(why = verdict.name(), "voice: not a barge-in");
                 self.named = None;
@@ -569,7 +573,7 @@ impl Listener {
         }
         let text = self.transcribe(samples, out);
         if self.said.may_come_back(self.clock)
-            && self.verdict(&text, self.stretch.start) == Verdict::Echo
+            && self.verdict(&text, self.stretch.start, Cut::Whole) == Verdict::Echo
         {
             tracing::info!("voice: heard our own reply; not sent");
             return;
@@ -579,15 +583,16 @@ impl Listener {
         }
     }
 
-    /// What `text`, heard since `since` in the stretch going on, is: by when it
-    /// began, then by its words, then for a word or two by how loud it was.
-    fn verdict(&self, text: &str, since: u64) -> Verdict {
+    /// What `text`, heard since `since` in the stretch going on and `cut` from
+    /// it so, is: by when it began, then by its words, then for a word or two by
+    /// how loud it was.
+    fn verdict(&self, text: &str, since: u64, cut: Cut) -> Verdict {
         let playing = if self.stretch.after_quiet || self.stretch.a_person {
             String::new()
         } else {
             self.said.around(since)
         };
-        match judge(text, &playing) {
+        match judge(text, &playing, cut) {
             Verdict::Fragment if self.barge.above_playback() => Verdict::Person,
             Verdict::Fragment => Verdict::Echo,
             verdict => verdict,
@@ -609,7 +614,7 @@ impl Listener {
             .stretch
             .start
             .max(self.clock.saturating_sub(JUDGED as u64));
-        let verdict = self.verdict(&text, since);
+        let verdict = self.verdict(&text, since, Cut::Look);
         if verdict != Verdict::Person {
             tracing::debug!(why = verdict.name(), "voice: not a barge-in yet");
             self.barge.rejected(verdict);
@@ -620,7 +625,7 @@ impl Listener {
 
     fn barged(&mut self, now: Instant, out: &mut dyn FnMut(Heard)) {
         if self.conversation.interrupted() {
-            self.said.over(self.clock);
+            self.said.over(self.heard_until());
             self.stretch.a_person = true;
             out(Heard::BargeIn);
             if let Some(name) = self.named.take() {
@@ -649,7 +654,7 @@ impl Listener {
         self.conversation.speech_started(now);
         let interrupted = self.conversation.interrupted();
         if interrupted {
-            self.said.over(self.clock);
+            self.said.over(self.heard_until());
         }
         interrupted
     }
@@ -688,16 +693,28 @@ impl Listener {
         self.said.playing(sentence);
     }
 
+    /// How long what's played may still be reaching the microphone once the
+    /// speaker says it's done.
+    pub fn set_lag(&mut self, lag: std::time::Duration) {
+        self.lag = (lag.as_secs_f64() * f64::from(SPEECH_RATE)) as u64;
+    }
+
+    /// Where in the microphone's audio what has played so far will have
+    /// stopped coming in.
+    fn heard_until(&self) -> u64 {
+        self.clock + self.lag
+    }
+
     /// The speaker has finished the sentence it was on.
     pub fn played(&mut self) {
-        self.said.finished(self.clock);
+        self.said.finished(self.heard_until());
     }
 
     /// Playback ended; our own voice is still in the spotter's context, so
     /// it starts afresh.
     pub fn spoken(&mut self, now: Instant) {
         self.conversation.spoken(now);
-        self.said.over(self.clock);
+        self.said.over(self.heard_until());
         self.ears.reset_spotter();
     }
 

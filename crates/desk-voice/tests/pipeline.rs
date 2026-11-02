@@ -360,6 +360,61 @@ fn its_own_voice_coming_back_doesnt_stop_it() {
     drop(engine);
 }
 
+/// Its own voice saying numbers, written as digits and heard as words, and cut
+/// off part-way through a word, as playback is when a new look is taken: still
+/// the reply. It isn't stopped, and isn't sent.
+#[test]
+#[ignore = "needs the speech models"]
+fn its_own_numbers_cut_off_dont_stop_it() {
+    const REPLY: &str = "The build failed at 3:30 today, after 2 of the 14 tests took 2.5 minutes, \
+        and the runner costs $4.20 an hour.";
+    let events = Arc::new(Recorded::default());
+    let out = Arc::new(HeldPlayback::default());
+    let mic: Arc<Mutex<Option<AudioIn>>> = Arc::new(Mutex::new(None));
+    let engine = {
+        let (out, mic) = (out.clone(), mic.clone());
+        Cascade::start(
+            models(),
+            Voices {
+                kokoro: speaker(),
+                cloud: None,
+            },
+            events.clone(),
+            move |input| {
+                *mic.lock().unwrap() = Some(input);
+                Ok(out)
+            },
+        )
+        .unwrap()
+    };
+    engine.set_mode(desk_voice::ListenMode::Open);
+    engine.speak(REPLY.into(), None);
+    wait_for("playback", || !out.played.lock().unwrap().is_empty());
+    wait_for("speaking", || engine.state() == VoiceState::Speaking);
+
+    let reply = speaker().synthesize(REPLY, None).unwrap();
+    // Cut at an odd place, mid-word as likely as not.
+    let cut = reply.samples.len() * 7 / 11;
+    for gain in [0.3f32, 0.1] {
+        let echo: Vec<f32> = reply.samples[..cut].iter().map(|s| s * gain).collect();
+        {
+            let mic = mic.lock().unwrap();
+            let feed = mic.as_ref().unwrap();
+            for chunk in echo.chunks(4_096) {
+                feed(chunk, reply.rate);
+            }
+            for chunk in silence(1.5).chunks(1_600) {
+                feed(chunk, SPEECH_RATE);
+            }
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert_eq!(*out.stops.lock().unwrap(), 0);
+    assert_eq!(engine.state(), VoiceState::Speaking);
+    assert!(events.said.lock().unwrap().is_empty());
+    drop(engine);
+}
+
 /// Over a long reply, a short real phrase whose words are all further on in it:
 /// it stops the reply, and what was said gets to the agent.
 #[test]

@@ -17,7 +17,8 @@ use eyre::{Result, eyre};
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
 use objc2_avf_audio::{
-    AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode, AVAudioTime,
+    AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode,
+    AVAudioPlayerNodeCompletionCallbackType, AVAudioTime,
 };
 
 use super::SharedIn;
@@ -46,7 +47,7 @@ pub struct MacAudio {
     format: Retained<AVAudioFormat>,
     resampler: Mutex<Option<Resampler>>,
     speaking: Arc<Speaking>,
-    _tap: Option<Tap>,
+    tap: Option<Tap>,
 }
 
 // SAFETY: the engine is behind a `Mutex`; the format is an immutable object.
@@ -140,7 +141,7 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
             format,
             resampler: Mutex::new(None),
             speaking,
-            _tap: tap,
+            tap,
         })
     }
 }
@@ -220,7 +221,7 @@ impl AudioOut for MacAudio {
         let done = Mutex::new(Some(done));
         let speaking = self.speaking.clone();
         speaking.started();
-        let finished = RcBlock::new(move || {
+        let finished = RcBlock::new(move |_: AVAudioPlayerNodeCompletionCallbackType| {
             speaking.finished();
             if let Some(done) = done.lock().ok().and_then(|mut d| d.take()) {
                 done();
@@ -229,14 +230,47 @@ impl AudioOut for MacAudio {
         let Ok(engine) = self.engine.lock() else {
             return;
         };
+        // Called once the buffer has been heard, the output device's latency
+        // included, not once the player has taken it: a reply that has "ended"
+        // while its last words are still to come out of the speaker would have
+        // them taken for the person (AVAudioPlayerNodeCompletionDataPlayedBack;
+        // a stopped player calls it too).
         unsafe {
             engine
                 .player
-                .scheduleBuffer_completionHandler(&buffer, RcBlock::as_ptr(&finished));
+                .scheduleBuffer_completionCallbackType_completionHandler(
+                    &buffer,
+                    AVAudioPlayerNodeCompletionCallbackType::DataPlayedBack,
+                    RcBlock::as_ptr(&finished),
+                );
             if !engine.player.isPlaying() {
                 engine.player.play();
             }
         }
+    }
+
+    /// What's played reaches the tap after the microphone's own latency, and
+    /// up to a tap's buffer later still. The output's latency is in `done`.
+    fn lag(&self) -> std::time::Duration {
+        if self.tap.is_none() {
+            return std::time::Duration::ZERO;
+        }
+        let Ok(engine) = self.engine.lock() else {
+            return std::time::Duration::ZERO;
+        };
+        let (latency, rate) = unsafe {
+            let mic = engine.engine.inputNode();
+            (
+                mic.presentationLatency(),
+                mic.outputFormatForBus(0).sampleRate(),
+            )
+        };
+        let buffered = if rate > 0.0 {
+            f64::from(TAP_FRAMES) / rate
+        } else {
+            0.0
+        };
+        std::time::Duration::from_secs_f64((latency.max(0.0) + buffered).min(1.0))
     }
 
     fn stop(&self) {
@@ -332,7 +366,7 @@ impl Drop for MacAudio {
         if let Ok(engine) = self.engine.lock() {
             unsafe {
                 engine.player.stop();
-                if self._tap.is_some() {
+                if self.tap.is_some() {
                     engine.engine.inputNode().removeTapOnBus(0);
                 }
                 engine.engine.stop();

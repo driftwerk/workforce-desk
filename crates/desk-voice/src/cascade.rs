@@ -250,6 +250,7 @@ impl Worker {
             Input::Speak(speech) => {
                 self.pending += 1;
                 tracing::info!(chars = speech.words().len(), "voice: speaking");
+                self.listener.set_lag(self.out.lag());
                 self.listener.speaking();
                 let generation = self.generation.load(Ordering::SeqCst);
                 let _ = self.jobs.send(Job { speech, generation });

@@ -4,14 +4,93 @@
 //! cloud voice fails part-way and Kokoro says the rest, the text it's handed
 //! was written for the cloud voice, so the directions come out first.
 //!
-//! A direction is a group in parentheses or square brackets of up to four
-//! lower-case words (letters, spaces, hyphens, apostrophes) that isn't
-//! attached to a word: `(soft tone)`, `[laughing]`. Spoken, a short aside in
-//! brackets goes with them, which costs little; `(API)`, `f(x)`, `(page 4)`
-//! and `[1, 2]` stay.
+//! A direction is a group in parentheses or square brackets that names one of
+//! the tags the hub writes ([`TAGS`]) and isn't attached to a word: `(soft
+//! tone)`, `[laughing]`. Everything else in brackets is said, as Desk says every
+//! word of a reply: `(yes)`, `(re)start`, `(API)`, `f(x)` and `[1, 2]` stay.
 
-const MAX_WORDS: usize = 4;
-const MAX_CHARS: usize = 40;
+/// The tags the hub writes into speech, as its `llm::speech::markup` tables
+/// name them (Fish Audio's emotions, tones, sounds and pauses), and the moods
+/// it names but no voice performs, which an S2 voice is still given.
+const TAGS: &[&str] = &[
+    "happy",
+    "sad",
+    "angry",
+    "excited",
+    "calm",
+    "nervous",
+    "confident",
+    "surprised",
+    "satisfied",
+    "delighted",
+    "scared",
+    "worried",
+    "upset",
+    "frustrated",
+    "depressed",
+    "empathetic",
+    "embarrassed",
+    "disgusted",
+    "moved",
+    "proud",
+    "relaxed",
+    "grateful",
+    "curious",
+    "sarcastic",
+    "disdainful",
+    "unhappy",
+    "anxious",
+    "hysterical",
+    "indifferent",
+    "uncertain",
+    "doubtful",
+    "confused",
+    "disappointed",
+    "regretful",
+    "guilty",
+    "ashamed",
+    "jealous",
+    "envious",
+    "hopeful",
+    "optimistic",
+    "pessimistic",
+    "nostalgic",
+    "lonely",
+    "bored",
+    "contemptuous",
+    "sympathetic",
+    "compassionate",
+    "determined",
+    "resigned",
+    "in a hurry tone",
+    "shouting",
+    "screaming",
+    "whispering",
+    "soft tone",
+    "emphasis",
+    "laughing",
+    "chuckling",
+    "sobbing",
+    "crying loudly",
+    "sighing",
+    "groaning",
+    "panting",
+    "gasping",
+    "yawning",
+    "snoring",
+    "clear throat",
+    "audience laughing",
+    "background laughter",
+    "crowd laughing",
+    "break",
+    "long-break",
+    "pensive",
+    "thoughtful",
+    "serious",
+];
+
+/// The longest a tag is, brackets included.
+const MAX_CHARS: usize = 24;
 
 fn closer(open: char) -> Option<char> {
     match open {
@@ -25,20 +104,13 @@ fn closer(open: char) -> Option<char> {
 fn direction(text: &str) -> Option<usize> {
     let mut chars = text.char_indices();
     let close = closer(chars.next()?.1)?;
-    for (i, c) in chars {
-        if i > MAX_CHARS {
-            return None;
-        }
-        if c == close {
-            let words = text[1..i].split_whitespace().count();
-            return (1..=MAX_WORDS).contains(&words).then_some(i + 1);
-        }
-        let allowed = c.is_alphabetic() && !c.is_uppercase() || matches!(c, ' ' | '-' | '\'' | '’');
-        if !allowed {
-            return None;
-        }
-    }
-    None
+    let (end, _) = chars.take(MAX_CHARS).find(|(_, c)| *c == close)?;
+    let name = text[1..end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    TAGS.contains(&name.to_lowercase().as_str())
+        .then_some(end + close.len_utf8())
 }
 
 /// `text` without voice directions, spaced as if they'd never been there.
@@ -78,6 +150,20 @@ mod tests {
         assert_eq!(without_directions("Done (laughing)."), "Done.");
         assert_eq!(without_directions("(sad)(soft tone) Oh."), "Oh.");
         assert_eq!(without_directions("Hi. (calm) Next."), "Hi. Next.");
+    }
+
+    /// Desk says every word of a reply: only what names a tag goes.
+    #[test]
+    fn words_in_brackets_are_said() {
+        for said in [
+            "Choose (yes) or (no).",
+            "The mode is (strict) by default",
+            "(re)start it",
+            "Menu (file) > [edit]",
+            "Pass the flag (optional) too.",
+        ] {
+            assert_eq!(without_directions(said), said);
+        }
     }
 
     #[test]

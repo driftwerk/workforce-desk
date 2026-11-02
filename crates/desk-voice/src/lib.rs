@@ -165,6 +165,12 @@ pub trait AudioOut: Send + Sync {
     fn play(&self, samples: &[f32], rate: u32, done: Box<dyn FnOnce() + Send>);
     /// Stop now, dropping everything queued.
     fn stop(&self);
+    /// How long after `done` runs what was played can still be on its way into
+    /// the microphone's audio: what lies between the speaker and the samples
+    /// [`AudioIn`] is given, and whatever of the output `done` doesn't wait for.
+    fn lag(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 pub type SharedAudioOut = Arc<dyn AudioOut>;

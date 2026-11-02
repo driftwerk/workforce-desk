@@ -124,6 +124,12 @@ type Playing = (Vec<f32>, Option<Box<dyn FnOnce() + Send>>);
 struct Room {
     /// How loud the agent's voice comes back.
     echo: f32,
+    /// What every sentence sounds like.
+    voice: Audio,
+    /// Played audio on its way to the microphone, with the sentence it's of:
+    /// a speaker may say a sentence is done this long before the room has
+    /// heard the end of it.
+    in_flight: Mutex<VecDeque<(Vec<f32>, usize)>>,
     playing: Mutex<VecDeque<Playing>>,
     /// Every sentence the voices have made, in order.
     rendered: Mutex<Vec<String>>,
@@ -142,6 +148,8 @@ impl Room {
     fn with_echo(echo: f32) -> Self {
         Self {
             echo,
+            voice: second(),
+            in_flight: Mutex::default(),
             playing: Mutex::default(),
             rendered: Mutex::default(),
             heard_over: Mutex::default(),
@@ -151,6 +159,21 @@ impl Room {
             person_said: AtomicU64::new(0),
             person_fed: AtomicU64::new(0),
             closed: AtomicBool::new(false),
+        }
+    }
+
+    /// Every sentence sounds like `voice`.
+    fn saying(self, voice: Audio) -> Self {
+        Self { voice, ..self }
+    }
+
+    /// What's played reaches the microphone `lag` after the speaker says it's done.
+    fn lagging(self, lag: Duration) -> Self {
+        let frames = (lag.as_secs_f32() * 16_000.0) as usize / FRAME;
+        let in_flight = (0..frames).map(|_| (vec![0.0; FRAME], 0)).collect();
+        Self {
+            in_flight: Mutex::new(in_flight),
+            ..self
         }
     }
 }
@@ -165,6 +188,11 @@ impl AudioOut for RoomOut {
         );
         let mut playing = self.0.playing.lock().unwrap();
         playing.push_back((samples.to_vec(), Some(done)));
+    }
+
+    fn lag(&self) -> Duration {
+        let frames = self.0.in_flight.lock().unwrap().len();
+        Duration::from_secs_f32((frames * FRAME) as f32 / 16_000.0)
     }
 
     fn stop(&self) {
@@ -188,10 +216,16 @@ impl Room {
     fn frame(&self) -> Vec<f32> {
         let mut frame = vec![0.0; FRAME];
         let mut finished = None;
-        let sentence = self.played.load(Ordering::SeqCst) as usize;
-        self.heard_over.lock().unwrap().push_back(sentence);
+        let played = self.played.load(Ordering::SeqCst) as usize;
+        let sentence;
         {
             let mut playing = self.playing.lock().unwrap();
+            // With nothing playing, what's heard is what played last.
+            sentence = if playing.is_empty() {
+                played.saturating_sub(1)
+            } else {
+                played
+            };
             if let Some((samples, done)) = playing.front_mut() {
                 let n = FRAME.min(samples.len());
                 for (slot, s) in frame.iter_mut().zip(samples.drain(..n)) {
@@ -207,6 +241,12 @@ impl Room {
         if let Some(done) = finished {
             done();
         }
+        let (mut frame, sentence) = {
+            let mut in_flight = self.in_flight.lock().unwrap();
+            in_flight.push_back((frame, sentence));
+            in_flight.pop_front().unwrap()
+        };
+        self.heard_over.lock().unwrap().push_back(sentence);
         let mut person = self.person.lock().unwrap();
         for slot in &mut frame {
             if let Some(s) = person.pop_front() {
@@ -248,7 +288,7 @@ impl LocalSpeech for Local {
     fn synthesize(&self, text: &str, _voice: Option<&str>) -> Option<Audio> {
         self.said.lock().unwrap().push(text.to_string());
         self.room.rendered.lock().unwrap().push(text.to_string());
-        Some(second())
+        Some(self.room.voice.clone())
     }
 }
 
@@ -267,7 +307,7 @@ impl CloudSpeech for Cloud {
         }
         said.push(text.to_string());
         self.room.rendered.lock().unwrap().push(text.to_string());
-        Ok(second())
+        Ok(self.room.voice.clone())
     }
 }
 
@@ -585,6 +625,40 @@ fn the_tail_of_the_reply_is_not_sent_to_the_agent() {
         s.played() >= 1 && s.engine.state() != VoiceState::Speaking
     });
     std::thread::sleep(Duration::from_millis(100));
+    assert!(sim.events.utterances.lock().unwrap().is_empty());
+}
+
+/// A sentence of tone with a pause in it, long enough for the voice model to
+/// end a stretch, and a short last word after it.
+fn paused() -> Audio {
+    let tone = |seconds: f32| {
+        (0..(16_000.0 * seconds) as usize).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+    };
+    Audio {
+        samples: tone(0.4)
+            .chain(std::iter::repeat_n(0.0, 16_000 * 4 / 5))
+            .chain(tone(0.3))
+            .collect(),
+        rate: 16_000,
+    }
+}
+
+/// A speaker that says a sentence is done when it has taken it, before the
+/// room has heard the end of it: the last word after a pause starts a stretch
+/// of its own once the reply looks over. It's still the reply, not the person.
+#[test]
+fn the_tail_is_not_sent_however_late_the_room_hears_it() {
+    let room = Room::with_echo(ECHO_LEVEL)
+        .saying(paused())
+        .lagging(Duration::from_millis(700));
+    let sim = Sim::in_room(room, EchoHeardAs::Reply, "", 9);
+    sim.engine
+        .speak("Two tests timed out again.".into(), sim.fish());
+    sim.wait_for("the reply to finish", |s| {
+        s.played() >= 1 && s.engine.state() != VoiceState::Speaking
+    });
+    // What was in flight, and the stretch it starts, have ended.
+    std::thread::sleep(Duration::from_millis(700));
     assert!(sim.events.utterances.lock().unwrap().is_empty());
 }
 

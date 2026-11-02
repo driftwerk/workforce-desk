@@ -56,6 +56,12 @@ describe("speakable", () => {
     expect(speakable("(excited) **Found** it. [whispering] Over here (laughing).")).toBe("(excited) Found it. [whispering] Over here (laughing).");
   });
 
+  it("takes the hub's speech as written, with its directions and every word in brackets", () => {
+    expect(speakable("(calm) Set my_var, then choose (yes) or (no):\n\n```sh\nexport my_var=1\n```")).toBe(
+      "(calm) Set my_var, then choose (yes) or (no): The code is in the chat.",
+    );
+  });
+
   it("drops html, images, rules and emoji", () => {
     expect(speakable("Done ✅\n\n---\n\n![chart](a.png)<br>All green.")).toBe("Done. All green.");
   });
