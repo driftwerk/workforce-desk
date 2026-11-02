@@ -87,12 +87,14 @@ const MATCHED_PER_STRAY: usize = 5;
 /// word of whatever it heard of the one cut ("it" for "-ild"), from this many
 /// words of the run.
 const MATCHED_FOR_A_CUT_STRAY: usize = 3;
-/// Words someone answering what they heard puts beside it: "yes open the pull
-/// request", "the second one why". Never let go as the recogniser's.
+/// Words someone answering what they heard puts beside it, "yes open the pull
+/// request", "so open the pull request", "the second one why": never let go as
+/// the recogniser's.
 const ANSWERS: &[&str] = &[
     "yes", "yeah", "yep", "no", "nope", "not", "don't", "okay", "ok", "please", "but", "sure",
     "right", "actually", "instead", "thanks", "what", "why", "how", "which", "who", "when",
-    "where",
+    "where", "so", "just", "then", "and", "also", "maybe", "hey", "can", "could", "would", "let's",
+    "i", "we",
 ];
 
 /// How what's judged was cut from the audio.
@@ -524,6 +526,9 @@ mod tests {
             "no the pull request",
             "open the pull request please",
             "the pull request with that why",
+            "so open the pull request",
+            "just open the pull request",
+            "and then open the pull request",
         ] {
             for cut in [Cut::Look, Cut::Whole] {
                 assert_eq!(
