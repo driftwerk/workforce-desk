@@ -25,9 +25,7 @@ pub struct Person {
 }
 
 fn command(program: &str, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(program)
-        .args(args)
-        .output()
+    let out = crate::handover::spawning(|| std::process::Command::new(program).args(args).output())
         .ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (out.status.success() && !s.is_empty()).then_some(s)

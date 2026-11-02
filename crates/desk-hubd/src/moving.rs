@@ -118,10 +118,13 @@ pub async fn move_sqlite(
         .env_clear()
         .envs(env)
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    // Held until the run has ended, so past its spawn.
-    let _handover = secrets.hand_to(&mut cmd)?;
-    let out = tokio::time::timeout(Duration::from_secs(60 * 60), cmd.output())
+    let handover = secrets.hand_to(&mut cmd)?;
+    let child = cmd.spawn().context("starting the memory move");
+    drop(handover);
+    let out = tokio::time::timeout(Duration::from_secs(60 * 60), child?.wait_with_output())
         .await
         .context("moving memories took over an hour")??;
     let stdout = String::from_utf8_lossy(&out.stdout);

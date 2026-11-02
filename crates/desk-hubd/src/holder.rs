@@ -77,16 +77,36 @@ pub async fn probe(socket: &Path, token: &str) -> Result<Probe> {
         .map_err(|_| eyre::eyre!("the PTY holder didn't answer"))?
 }
 
-/// The holder's environment: only what a process needs to run, and its
-/// token. Its terminals get theirs from the hub.
-pub fn holder_env(env: &BTreeMap<String, String>, token: &str) -> BTreeMap<String, String> {
+/// The holder's environment: only what a process needs to run. Never its
+/// token, the hub's admin token, which goes on a pipe
+/// ([`crate::handover`]). Its terminals get theirs from the hub.
+pub fn holder_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut out: BTreeMap<String, String> = ["PATH", "HOME", "USER", "LANG", "TMPDIR"]
         .into_iter()
         .filter_map(|k| Some((k.to_string(), env.get(k)?.clone())))
         .collect();
     out.insert("RUST_LOG".into(), "info".into());
-    out.insert(TOKEN_ENV.into(), token.into());
     out
+}
+
+/// `<workforce> pty-holder --socket <socket>`, with `env` and, on a pipe,
+/// its token. The pipe is kept open by what this returns beside the command.
+fn holder_command(
+    workforce: &Path,
+    paths: &Paths,
+    socket: &Path,
+    env: &BTreeMap<String, String>,
+    token: &str,
+) -> Result<(Command, crate::handover::Handover)> {
+    let mut cmd = Command::new(workforce);
+    cmd.arg("pty-holder")
+        .arg("--socket")
+        .arg(socket)
+        .current_dir(paths.hub())
+        .env_clear()
+        .envs(holder_env(env));
+    let handover = crate::handover::hand_over(&mut cmd, &BTreeMap::from([(TOKEN_ENV, token)]))?;
+    Ok((cmd, handover))
 }
 
 /// Makes sure a holder that takes `token` serves `socket`: one already
@@ -120,18 +140,15 @@ pub async fn ensure(
     )?;
     // No kill_on_drop: the holder outlives this process (it starts its own
     // session) and is never stopped with the hub.
-    let mut child = Command::new(workforce)
-        .arg("pty-holder")
-        .arg("--socket")
-        .arg(socket)
-        .current_dir(paths.hub())
-        .env_clear()
-        .envs(holder_env(env, token))
+    let (mut cmd, handover) = holder_command(workforce, paths, socket, env, token)?;
+    let child = cmd
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
-        .spawn()
-        .with_context(|| format!("starting the PTY holder ({})", workforce.display()))?;
+        .spawn();
+    drop(handover);
+    let mut child =
+        child.with_context(|| format!("starting the PTY holder ({})", workforce.display()))?;
     let pid = child.id();
     // Reaped when it ends, so it never lingers as a zombie.
     tokio::spawn(async move {
@@ -161,20 +178,41 @@ pub async fn ensure(
 mod tests {
     use super::*;
 
+    /// The holder's environment holds what a process needs and never its
+    /// token, which is the hub's admin token: that goes on a pipe.
     #[test]
-    fn the_holder_gets_only_what_it_needs_and_its_token() {
+    fn the_holder_gets_only_what_it_needs_and_its_token_on_a_pipe() {
         let env = BTreeMap::from([
             ("PATH".to_string(), "/usr/bin".to_string()),
             ("HOME".to_string(), "/Users/k".to_string()),
             ("WORKFORCE_GATEWAY_TOKEN".to_string(), "gw".to_string()),
             ("ANTHROPIC_API_KEY".to_string(), "k".to_string()),
         ]);
-        let out = holder_env(&env, "tok");
+        let paths = Paths::at("/Users/k/Library/Application Support/Desk");
+        let (cmd, _handover) = holder_command(
+            Path::new("workforce"),
+            &paths,
+            Path::new("/tmp/pty.sock"),
+            &env,
+            "tok-fixture",
+        )
+        .unwrap();
+        let std = cmd.as_std();
+        let envs: BTreeMap<String, String> = std
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
         assert_eq!(
-            out.keys().map(String::as_str).collect::<Vec<_>>(),
-            ["HOME", "PATH", "RUST_LOG", TOKEN_ENV]
+            envs.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["HOME", "PATH", "RUST_LOG", crate::handover::FD_ENV]
         );
-        assert_eq!(out[TOKEN_ENV], "tok");
+        assert!(!envs.values().any(|v| v.contains("tok-fixture")));
+        let args: Vec<_> = std.get_args().filter_map(|a| a.to_str()).collect();
+        assert!(!args.iter().any(|a| a.contains("tok-fixture")));
+        assert!(
+            args.windows(2).any(|w| w == ["--secrets-fd", "3"]),
+            "{args:?}"
+        );
     }
 
     /// A stand-in holder that answers one hello with `answer`.

@@ -107,24 +107,43 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
         std::fs::write(&first_run, "")?;
     }
     let password_file = settings.password_file.clone();
+    // One an older Desk or an unfinished start left goes first; setup writes
+    // it again only when it runs initdb, and it goes again straight after,
+    // whether setup worked or not.
+    forget_postgres_password(&password_file);
     let mut pg = PostgreSQL::new(settings);
-    pg.setup().await.context("installing Postgres")?;
+    let setup = pg.setup().await;
+    forget_postgres_password(&password_file);
+    setup.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
     let _ = std::fs::remove_file(&first_run);
-    // Only initdb reads the password from this file, and it writes it again
-    // whenever it runs. Left on disk it would give the database's password to
-    // anything running as this user.
-    match std::fs::remove_file(&password_file) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!(error = %e, "could not remove Postgres's password file"),
-    }
     for db in [config::DATABASE, memory::DATABASE] {
         if !pg.database_exists(db).await? {
             pg.create_database(db).await?;
         }
     }
     Ok(pg)
+}
+
+/// Removes Postgres's password file. Only initdb reads it, and setup writes
+/// it again whenever initdb runs; left on disk it would give the database's
+/// password to anything running as this user.
+fn forget_postgres_password(path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(error = %e, "could not remove Postgres's password file"),
+    }
+}
+
+/// Why the hub stopped, when it is because it is too old for this Desk: it
+/// refused `--secrets-fd` (clap's usage error, exit status 2), so it can't
+/// take its secrets on the pipe.
+fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static str> {
+    (status.code() == Some(2)).then_some(
+        "the hub is too old for this Desk: it doesn't take its secrets on a pipe \
+         (--secrets-fd); install the hub this Desk ships with (hub.ref)",
+    )
 }
 
 /// A log file to append to, moved aside to `<name>.1` first once it is
@@ -451,6 +470,9 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
                     }
                 }
                 status = hub.wait() => {
+                    if let Some(why) = status.as_ref().ok().and_then(|s| too_old_for_this_desk(*s)) {
+                        tracing::error!("{why}");
+                    }
                     if started.elapsed() > HEALTHY_AFTER {
                         backoff = Duration::from_secs(1);
                     }
@@ -587,6 +609,12 @@ mod tests {
             env.keys().map(String::as_str).collect::<Vec<_>>(),
             ["HOME", "PATH", crate::handover::FD_ENV]
         );
+        let args: Vec<&str> = cmd.as_std().get_args().filter_map(|a| a.to_str()).collect();
+        assert_eq!(args[0], "serve");
+        assert!(
+            args.windows(2).any(|w| w == ["--secrets-fd", "3"]),
+            "{args:?}"
+        );
         for s in Secret::ALL {
             assert!(!env.contains_key(s.env()), "{}", s.env());
             assert!(
@@ -595,6 +623,37 @@ mod tests {
                 s.env()
             );
         }
+    }
+
+    /// A Postgres password file an earlier start or an older Desk left is
+    /// removed before Postgres is set up.
+    #[test]
+    fn a_left_over_postgres_password_file_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::create_dir_all(paths.hub()).unwrap();
+        let settings = postgres_settings(&paths, 54001, "unused".into());
+        std::fs::write(&settings.password_file, "pw-fixture").unwrap();
+        forget_postgres_password(&settings.password_file);
+        assert!(!settings.password_file.exists());
+        // Nothing there is fine too.
+        forget_postgres_password(&settings.password_file);
+    }
+
+    /// A hub that refuses `--secrets-fd` (clap's usage error, exit 2) is too
+    /// old for this Desk, and is told apart from one that failed otherwise.
+    #[tokio::test]
+    async fn a_hub_too_old_for_the_pipe_is_named() {
+        let exit = |code: i32| async move {
+            Command::new("/bin/sh")
+                .args(["-c", &format!("exit {code}")])
+                .status()
+                .await
+                .unwrap()
+        };
+        assert!(too_old_for_this_desk(exit(2).await).is_some());
+        assert!(too_old_for_this_desk(exit(1).await).is_none());
+        assert!(too_old_for_this_desk(exit(0).await).is_none());
     }
 
     #[test]
