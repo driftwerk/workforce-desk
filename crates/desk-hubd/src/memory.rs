@@ -76,15 +76,15 @@ fn file_url(path: &Path) -> String {
     out
 }
 
-/// The store's environment, and nothing else: its settings, its secrets
-/// (never on the command line, where `ps` shows them), and a Hugging Face
-/// address that leads nowhere, so that it only ever reads the model Desk
-/// Helper fetched and never downloads one of its own.
+/// The store's environment, and nothing else: its settings and a Hugging
+/// Face address that leads nowhere, so that it only ever reads the model
+/// Desk Helper fetched and never downloads one of its own. Never its
+/// secrets ([`secrets`]): those go on a pipe, as `ps -E` shows a process's
+/// environment to anything running as this user, and its command line to
+/// anyone.
 pub fn env(
     paths: &Paths,
     ports: &HubPorts,
-    postgres_password: &str,
-    key: &str,
     login: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
@@ -99,15 +99,6 @@ pub fn env(
     };
     set(&mut env, "VELLEV_LISTEN", listen.clone());
     set(&mut env, "VELLEV_ADVERTISE_URL", format!("http://{listen}"));
-    set(
-        &mut env,
-        "VELLEV_DATABASE_URL",
-        format!(
-            "postgres://{}:{postgres_password}@127.0.0.1:{}/{DATABASE}",
-            crate::config::DATABASE_USER,
-            ports.postgres
-        ),
-    );
     set(&mut env, "VELLEV_DATABASE_CONNECTIONS", "4".into());
     set(&mut env, "VELLEV_STORE", file_url(&paths.memory_store()));
     set(
@@ -121,7 +112,6 @@ pub fn env(
         paths.memory_models().to_string_lossy().into_owned(),
     );
     set(&mut env, "VELLEV_LOCAL_MODEL", crate::model::MODEL.into());
-    set(&mut env, "VELLEV_API_KEYS", key.into());
     set(&mut env, "VELLEV_TENANTS", MEMORY_TENANT.into());
     // A day to restore to is plenty on one computer, and keeps what a restore
     // needs from piling up on its disk.
@@ -131,11 +121,63 @@ pub fn env(
     env
 }
 
+/// The store's secrets, handed over on a pipe by the names it reads them
+/// under: its database (with Postgres's password) and its admin key.
+pub fn secrets(
+    ports: &HubPorts,
+    postgres_password: &str,
+    key: &str,
+) -> BTreeMap<&'static str, String> {
+    BTreeMap::from([
+        (
+            "VELLEV_DATABASE_URL",
+            format!(
+                "postgres://{}:{postgres_password}@127.0.0.1:{}/{DATABASE}",
+                crate::config::DATABASE_USER,
+                ports.postgres
+            ),
+        ),
+        ("VELLEV_API_KEYS", key.to_string()),
+    ])
+}
+
+/// Why the store stopped, when it is because it is too old for this Desk:
+/// it refused `--secrets-fd`.
+fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static str> {
+    crate::handover::refused_the_pipe(status).then_some(
+        "the memory store is too old for this Desk: it doesn't take its secrets on a pipe \
+         (--secrets-fd); install the store this Desk ships with (vellev.ref)",
+    )
+}
+
 fn pidfile(paths: &Paths) -> PathBuf {
     paths.memory().join("store.pid")
 }
 
-fn spawn(binary: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result<Child> {
+/// `<store> serve`, with `env` and, on a pipe, `secrets`. The pipe is kept
+/// open by what this returns beside the command.
+fn store_command(
+    binary: &Path,
+    paths: &Paths,
+    env: &BTreeMap<String, String>,
+    secrets: &BTreeMap<&'static str, String>,
+) -> Result<(Command, crate::handover::Handover)> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("serve")
+        .current_dir(paths.memory())
+        .env_clear()
+        .envs(env);
+    let entries = secrets.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let handover = crate::handover::hand_over(&mut cmd, &entries)?;
+    Ok((cmd, handover))
+}
+
+fn spawn(
+    binary: &Path,
+    paths: &Paths,
+    env: &BTreeMap<String, String>,
+    secrets: &BTreeMap<&'static str, String>,
+) -> Result<Child> {
     for dir in [
         paths.memory_store(),
         paths.memory_cache(),
@@ -147,17 +189,15 @@ fn spawn(binary: &Path, paths: &Paths, env: &BTreeMap<String, String>) -> Result
         &paths.logs().join("memory.log"),
         crate::supervise::LOG_LIMIT,
     )?;
-    let mut cmd = Command::new(binary);
-    cmd.arg("serve")
-        .current_dir(paths.memory())
-        .env_clear()
-        .envs(env)
+    let (mut cmd, handover) = store_command(binary, paths, env, secrets)?;
+    let child = cmd
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
-        .kill_on_drop(true);
-    let child = crate::handover::spawning(|| cmd.spawn())
-        .with_context(|| format!("starting {}", binary.display()))?;
+        .kill_on_drop(true)
+        .spawn();
+    drop(handover);
+    let child = child.with_context(|| format!("starting {}", binary.display()))?;
     if let Some(pid) = child.id() {
         std::fs::write(pidfile(paths), pid.to_string())?;
     }
@@ -212,13 +252,18 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn supervise(binary: PathBuf, paths: Paths, env: BTreeMap<String, String>) -> Self {
+    pub fn supervise(
+        binary: PathBuf,
+        paths: Paths,
+        env: BTreeMap<String, String>,
+        secrets: BTreeMap<&'static str, String>,
+    ) -> Self {
         let (stop, mut stopping) = watch::channel(false);
         let task = tokio::spawn(async move {
             let mut backoff = Duration::from_secs(1);
             loop {
                 let started = Instant::now();
-                let mut child = match spawn(&binary, &paths, &env) {
+                let mut child = match spawn(&binary, &paths, &env, &secrets) {
                     Ok(c) => c,
                     Err(e) => {
                         tracing::error!(error = %format!("{e:#}"), "could not start the memory store");
@@ -237,6 +282,9 @@ impl Node {
                         return;
                     }
                     status = child.wait() => {
+                        if let Some(why) = status.as_ref().ok().and_then(|s| too_old_for_this_desk(*s)) {
+                            tracing::error!("{why}");
+                        }
                         if started.elapsed() > HEALTHY_AFTER {
                             backoff = Duration::from_secs(1);
                         }
@@ -329,14 +377,13 @@ mod tests {
             ("HF_HOME".to_string(), "/elsewhere".to_string()),
             ("AWS_SECRET_ACCESS_KEY".to_string(), "nope".to_string()),
         ]);
-        let env = env(&paths, &ports(), "pw", "key", &login);
+        let env = env(&paths, &ports(), &login);
         assert_eq!(env["VELLEV_LISTEN"], "127.0.0.1:54004");
         assert_eq!(env["VELLEV_ADVERTISE_URL"], "http://127.0.0.1:54004");
         assert_eq!(
             env["VELLEV_STORE"],
             "file:///Users/k/Library/Application%20Support/Desk/hub/memory/store"
         );
-        assert!(env["VELLEV_DATABASE_URL"].ends_with("@127.0.0.1:54001/memory"));
         assert_eq!(env["VELLEV_LOCAL_MODEL"], "BAAI/bge-base-en-v1.5");
         assert_eq!(env["VELLEV_TENANTS"], "desk");
         assert_eq!(env["HOME"], "/Users/k");
@@ -344,6 +391,57 @@ mod tests {
         assert!(!env.contains_key("HF_HOME"));
         assert!(env["HF_ENDPOINT"].starts_with("http://127.0.0.1:"));
         assert!(!env.contains_key("AWS_SECRET_ACCESS_KEY"));
+    }
+
+    /// The store's database URL (with Postgres's password) and its key go on
+    /// a pipe, never in its environment, where `ps -E` shows them.
+    #[test]
+    fn the_stores_secrets_go_on_a_pipe_not_in_its_environment() {
+        let paths = Paths::at("/Users/k/Library/Application Support/Desk");
+        let login = BTreeMap::from([("HOME".to_string(), "/Users/k".to_string())]);
+        let secrets = secrets(&ports(), "pw-fixture", "key-fixture");
+        assert!(secrets["VELLEV_DATABASE_URL"].ends_with("@127.0.0.1:54001/memory"));
+        assert_eq!(secrets["VELLEV_API_KEYS"], "key-fixture");
+        let (cmd, _handover) = store_command(
+            Path::new("vellev"),
+            &paths,
+            &env(&paths, &ports(), &login),
+            &secrets,
+        )
+        .unwrap();
+        let std = cmd.as_std();
+        let envs: Vec<(String, String)> = std
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        for (k, v) in &envs {
+            assert!(k != "VELLEV_DATABASE_URL" && k != "VELLEV_API_KEYS", "{k}");
+            assert!(
+                !v.contains("pw-fixture") && !v.contains("key-fixture"),
+                "{k}"
+            );
+        }
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == crate::handover::FD_ENV && v == "3")
+        );
+        let args: Vec<&str> = std.get_args().filter_map(|a| a.to_str()).collect();
+        assert_eq!(args, ["serve", "--secrets-fd", "3"]);
+    }
+
+    /// A store that refuses `--secrets-fd` is named as too old for this
+    /// Desk.
+    #[tokio::test]
+    async fn a_store_too_old_for_the_pipe_is_named() {
+        let status = |code: i32| async move {
+            tokio::process::Command::new("/bin/sh")
+                .args(["-c", &format!("exit {code}")])
+                .status()
+                .await
+                .unwrap()
+        };
+        assert!(too_old_for_this_desk(status(2).await).is_some());
+        assert!(too_old_for_this_desk(status(3).await).is_none());
     }
 
     /// A stand-in for the store: a script that runs until killed, and
@@ -390,7 +488,7 @@ mod tests {
         let paths = Paths::at(dir.path().join("Desk"));
         std::fs::create_dir_all(paths.logs()).unwrap();
         let bin = fake_store(dir.path(), true);
-        let node = Node::supervise(bin, paths.clone(), BTreeMap::new());
+        let node = Node::supervise(bin, paths.clone(), BTreeMap::new(), BTreeMap::new());
         // The first run exits at once; the second is started a second later.
         let starts = dir.path().join("starts");
         wait_for(|| std::fs::read_to_string(&starts).is_ok_and(|s| s.lines().count() == 1)).await;

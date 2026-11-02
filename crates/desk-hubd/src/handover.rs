@@ -33,9 +33,17 @@ pub const FD_FLAG: &str = "--secrets-fd";
 pub const FD: RawFd = 3;
 
 /// Held while a handover pipe exists in this process, and by every other
-/// spawn ([`spawning`]). On macOS a pipe is made close-on-exec only after
-/// it is made (there is no `pipe2`), so a child spawned in between would
-/// inherit it; with this held, none is.
+/// spawn desk-hubd makes while one might: the hub, the PTY holder, the
+/// memory move and the memory store take it through [`hand_over`], and the
+/// pairing's `git` through [`spawning`]. On macOS a pipe is made
+/// close-on-exec only after it is made (there is no `pipe2`), so a child
+/// spawned in between would inherit it; with this held, none is. Only
+/// starting a child holds it, never waiting for one.
+///
+/// The spawns that don't take it rely on running in sequence instead: the
+/// login shell read for the environment, and Postgres's own (`initdb`,
+/// `pg_ctl`, creating the databases), run before the first handover, and
+/// stopping Postgres after the hub and the store have stopped.
 static SPAWNS: Mutex<()> = Mutex::new(());
 
 fn spawns() -> MutexGuard<'static, ()> {
@@ -44,11 +52,17 @@ fn spawns() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Runs `spawn`, which starts a child, while no handover pipe exists. Every
-/// child desk-hubd starts without a handover is started through this.
+/// Runs `spawn`, which starts a child and returns at once, while no
+/// handover pipe exists. Wait for the child after it returns, never in it.
 pub fn spawning<T>(spawn: impl FnOnce() -> T) -> T {
     let _spawns = spawns();
     spawn()
+}
+
+/// Whether a child exited refusing `--secrets-fd`: clap's usage error,
+/// exit status 2, from a program too old to take its secrets on a pipe.
+pub fn refused_the_pipe(status: std::process::ExitStatus) -> bool {
+    status.code() == Some(2)
 }
 
 /// The hub's secrets, read once from the secret store, by the variable

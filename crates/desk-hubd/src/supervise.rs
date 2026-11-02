@@ -140,7 +140,7 @@ fn forget_postgres_password(path: &Path) {
 /// refused `--secrets-fd` (clap's usage error, exit status 2), so it can't
 /// take its secrets on the pipe.
 fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static str> {
-    (status.code() == Some(2)).then_some(
+    crate::handover::refused_the_pipe(status).then_some(
         "the hub is too old for this Desk: it doesn't take its secrets on a pipe \
          (--secrets-fd); install the hub this Desk ships with (hub.ref)",
     )
@@ -377,12 +377,11 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
             Some(memory::Node::supervise(
                 binary.clone(),
                 paths.clone(),
-                memory::env(
-                    &paths,
+                memory::env(&paths, &ports, &login),
+                memory::secrets(
                     &ports,
                     secrets.get(Secret::PostgresPassword),
                     secrets.get(Secret::MemoryKey),
-                    &login,
                 ),
             ))
         }
