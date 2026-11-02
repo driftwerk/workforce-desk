@@ -123,6 +123,9 @@ export const FEATURES = {
   floor: "desk.floor",
   /** The hub link says when the person's plan usage changes. */
   usage: "desk.usage",
+  /** A message may be sent to wait for the running turn: refused as busy
+   *  while it works, rather than steering it. */
+  queue: "desk.queue",
 } as const;
 
 export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "other";

@@ -14,6 +14,7 @@ import {
   type PermissionChoice,
 } from "./types";
 import { pairedHub } from "../hub/net";
+import { emptyQueue, keepQueue, merged, readQueue, type Queue } from "./queue";
 import { pictureOf, type Picture } from "../pictures/pictures";
 
 /** What the hub kept of a DM, read when it opens. */
@@ -80,7 +81,22 @@ interface ChatStore {
   sendTo: (key: string, content: string) => Promise<boolean>;
   /** Answers a permission prompt in a DM. */
   answerPrompt: (key: string, requestId: string, choice: PermissionChoice) => boolean;
+  /** Stops the agent's turn; what's queued for it then waits, paused. */
   cancel: (key: string) => void;
+  /** What's queued in each DM for its agent's next turn, by agent key. */
+  queues: Record<string, Queue>;
+  /** Queues a message for the agent's next turn, and sends the queue on if
+   *  it was paused. */
+  enqueue: (key: string, text: string, attachments?: Attachment[]) => void;
+  /** Changes a queued message's text; with none left (and no files), takes
+   *  it out. */
+  editQueued: (key: string, id: string, text: string) => void;
+  removeQueued: (key: string, id: string) => void;
+  /** Sends a queued message at once, into the running turn (a message with
+   *  files can't join one, so it waits); false if it couldn't be sent. */
+  sendQueuedNow: (key: string, id: string) => boolean;
+  /** Sends a paused queue on: now if the agent is free, else when it is. */
+  resumeQueue: (key: string) => void;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -105,6 +121,48 @@ export const dmTurn = (voice?: DeskVoice): DeskTurn => ({
 });
 
 const live = new Map<string, Conversation>();
+
+/** How long a queue the hub held back (a turn Desk didn't see is running)
+ *  waits before it's offered again. */
+export const HELD_RETRY_MS = 3000;
+
+/** Each queued send the hub hasn't settled, by turn ref: its agent and what
+ *  it carried, put back if the hub holds it back. */
+const inFlight = new Map<string, { key: string; items: Queue["items"] }>();
+/** Turns you stopped: the hub says nothing more of them. */
+const stopped = new Set<string>();
+/** When each DM's held-back queue may be offered again. */
+const heldUntil = new Map<string, number>();
+
+const putQueue = (key: string, f: (q: Queue) => Queue) => {
+  const was = useChat.getState().queues[key] ?? emptyQueue();
+  const next = f(was);
+  if (next === was) return;
+  useChat.setState((s) => ({ queues: { ...s.queues, [key]: next } }));
+  keepQueue(key, next);
+};
+
+/** Sends what's queued for `key`'s agent, as one message, once nothing is
+ *  running there and the queue isn't paused. */
+const drain = (key: string) => {
+  const { queues, conversations } = useChat.getState();
+  const q = queues[key];
+  const c = conversations[key];
+  const convo = live.get(key);
+  // A turn the hub streams is running until it says it ended, whatever
+  // pauses there are between its model calls; a stopped one ends silently.
+  const streamed = !!c?.features?.has(FEATURES.stream);
+  const running =
+    !!c && (!!c.working || (streamed && Object.values(c.turns).some((t) => t.acked && t.state === "live" && !stopped.has(t.ref))));
+  if (!q?.items.length || q.paused || !c?.connected || running || !convo) return;
+  if ((heldUntil.get(key) ?? 0) > Date.now()) return;
+  const { text, attachments } = merged(q.items);
+  const sent = convo.send(text, { turn: dmTurn(), attachments, queued: true });
+  if (!sent) return;
+  heldUntil.delete(key);
+  if (sent.turnRef) inFlight.set(sent.turnRef, { key, items: q.items });
+  putQueue(key, (was) => ({ ...was, items: was.items.filter((i) => !q.items.includes(i)) }));
+};
 
 /** The hub an agent key (`hub/agent`) is on. */
 const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
@@ -167,7 +225,11 @@ const ensure = (key: string): boolean => {
   const agent = roster.find((a) => agentKey(a) === key);
   const hub = agent && hubs.find((h) => h.id === agent.hubId);
   if (!agent || !hub) return false;
-  useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() } }));
+  const kept = useChat.getState().queues[key] ? null : readQueue(key);
+  useChat.setState((s) => ({
+    conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() },
+    ...(kept ? { queues: { ...s.queues, [key]: kept } } : {}),
+  }));
   let everConnected = false;
   const settling = new Set<string>();
   const convo = new Conversation(hub, agent.id, (c) => {
@@ -179,12 +241,18 @@ const ensure = (key: string): boolean => {
       if (everConnected) void useChat.getState().refreshHistory(key);
       everConnected = true;
     }
+    // Free again: what's queued goes next.
+    queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
     if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
     // A turn that ended is in the hub's copy, by the id it was saved under.
     const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
     if (!settled.length) return;
-    settled.forEach((t) => settling.add(t.ref));
+    settled.forEach((t) => {
+      settling.add(t.ref);
+      inFlight.delete(t.ref);
+      stopped.delete(t.ref);
+    });
     void useChat
       .getState()
       .refreshHistory(key)
@@ -195,6 +263,16 @@ const ensure = (key: string): boolean => {
         }),
       );
   });
+  // A queued send the hub held back goes to the front of the queue again,
+  // and is offered once more in a moment.
+  convo.onHeld = (ref) => {
+    const sent = inFlight.get(ref);
+    inFlight.delete(ref);
+    if (!sent) return;
+    putQueue(key, (q) => ({ ...q, items: [...sent.items, ...q.items] }));
+    heldUntil.set(key, Date.now() + HELD_RETRY_MS);
+    setTimeout(() => drain(key), HELD_RETRY_MS);
+  };
   live.set(key, convo);
   return true;
 };
@@ -402,17 +480,51 @@ export const useChat = create<ChatStore>((set, get) => ({
       };
       attempt();
     }),
-  cancel: (key) => live.get(key)?.cancel(),
+  cancel: (key) => {
+    // Paused first, so the turn ending doesn't send the queue on.
+    putQueue(key, (q) => (q.items.length && !q.paused ? { ...q, paused: true } : q));
+    const c = get().conversations[key];
+    for (const t of Object.values(c?.turns ?? {})) if (t.state === "live") stopped.add(t.ref);
+    live.get(key)?.cancel();
+  },
+  queues: {},
+  enqueue: (key, text, attachments) => {
+    if (!text.trim() && !attachments?.length) return;
+    const item = { id: crypto.randomUUID(), text, ...(attachments?.length ? { attachments } : {}) };
+    putQueue(key, (q) => ({ items: [...q.items, item], paused: false }));
+    drain(key);
+  },
+  editQueued: (key, id, text) =>
+    putQueue(key, (q) => ({
+      ...q,
+      items: q.items.flatMap((i) => (i.id !== id ? [i] : text.trim() || i.attachments?.length ? [{ ...i, text }] : [])),
+    })),
+  removeQueued: (key, id) => putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.id !== id) })),
+  sendQueuedNow: (key, id) => {
+    const item = get().queues[key]?.items.find((i) => i.id === id);
+    if (!item || item.attachments?.length) return false;
+    if (!get().send(key, item.text)) return false;
+    get().removeQueued(key, id);
+    return true;
+  },
+  resumeQueue: (key) => {
+    putQueue(key, (q) => (q.paused ? { ...q, paused: false } : q));
+    drain(key);
+  },
   rename: (key, name) => set((s) => ({ roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)) })),
   forget: (key) => {
     live.get(key)?.close();
+    keepQueue(key, emptyQueue());
+    heldUntil.delete(key);
     live.delete(key);
     set((s) => {
       const { [key]: _gone, ...conversations } = s.conversations;
       const { [key]: _kept, ...histories } = s.histories;
+      const { [key]: _queued, ...queues } = s.queues;
       return {
         conversations,
         histories,
+        queues,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,
       };

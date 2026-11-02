@@ -558,6 +558,10 @@ export interface Ask {
   turn?: DeskTurn;
   legacy?: string;
   attachments?: Attachment[];
+  /** Sent from the queue: it waits for a running turn rather than steering
+   *  it, and if the hub says one is still running it's taken back
+   *  ([`Conversation.onHeld`]) instead of shown as failed. */
+  queued?: boolean;
 }
 
 /** One conversation with an agent: a `/ws` connection on a Desk channel,
@@ -569,6 +573,12 @@ export class Conversation {
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private alive: ReturnType<typeof keepAlive> | undefined;
+  /** Queued sends the hub hasn't taken yet: each turn's ref, and the id of
+   *  the message shown for it. */
+  private waiting = new Map<string, string>();
+  /** Told the ref of a queued send the hub refused because a turn is still
+   *  running; the message is no longer shown. */
+  onHeld?: (turnRef: string) => void;
 
   constructor(
     readonly hub: HubAccount,
@@ -606,7 +616,9 @@ export class Conversation {
     ws.onmessage = (e) => {
       this.alive?.heard();
       try {
-        this.set(reduce(this.state, JSON.parse(e.data as string) as ServerMessage));
+        const msg = JSON.parse(e.data as string) as ServerMessage;
+        if (this.held(msg)) return;
+        this.set(reduce(this.state, msg));
       } catch {
         /* not a message Desk renders */
       }
@@ -627,6 +639,7 @@ export class Conversation {
     if (!this.ws || this.ws.readyState !== OPEN || !features || (!content.trim() && !files.length)) return false;
     const structured = !!ask.turn && features.has(FEATURES.place);
     const turnRef = structured ? crypto.randomUUID() : null;
+    const queued = !!ask.queued && structured && features.has(FEATURES.queue);
     this.ws.send(
       JSON.stringify({
         type: "chat",
@@ -635,6 +648,7 @@ export class Conversation {
         channel: this.channel,
         agent_id: this.agentId,
         ...(structured ? { desk: ask.turn, turn_ref: turnRef, answers_approvals: true } : {}),
+        ...(queued ? { mode: "queue" } : {}),
         ...(files.length
           ? { attachments: files.map((f) => ({ filename: f.filename, mime_type: f.media_type, artifact_id: f.artifact_id })) }
           : {}),
@@ -642,6 +656,7 @@ export class Conversation {
     );
     const now = Date.now();
     const said = { ...message("user", content), ...(files.length ? { attachments: files } : {}) };
+    if (queued && turnRef) this.waiting.set(turnRef, said.id);
     this.set({
       ...this.state,
       messages: [...this.state.messages, said],
@@ -649,6 +664,27 @@ export class Conversation {
       turns: turnRef ? { ...this.state.turns, [turnRef]: newTurn(turnRef, now) } : this.state.turns,
     });
     return { turnRef };
+  }
+
+  /** Whether `msg` is the hub holding back a queued send because a turn is
+   *  still running: the send is taken back, as if never made, and
+   *  [`onHeld`] told. Any other frame of it means the hub took it. */
+  private held(msg: ServerMessage): boolean {
+    const ref = msg.turn_ref;
+    const shown = ref ? this.waiting.get(ref) : undefined;
+    if (!ref || shown === undefined) return false;
+    this.waiting.delete(ref);
+    if (msg.type !== "error" || (msg.error ?? msg.content) !== BUSY) return false;
+    const { [ref]: _gone, ...turns } = this.state.turns;
+    const placeholder = this.state.working?.phase === "sending";
+    this.set({
+      ...this.state,
+      messages: this.state.messages.filter((m) => m.id !== shown),
+      turns,
+      ...(placeholder ? { working: null } : {}),
+    });
+    this.onHeld?.(ref);
+    return true;
   }
 
   /** Answers a permission prompt. */

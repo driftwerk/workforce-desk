@@ -23,6 +23,7 @@ import { WorkingRow } from "../chat/WorkingRow";
 import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
+import { QueuedMessages } from "./QueuedMessages";
 import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
@@ -429,6 +430,7 @@ function DmComposer({
   sending: [boolean, (sending: boolean) => void];
 }) {
   const send = useChat((s) => s.send);
+  const enqueue = useChat((s) => s.enqueue);
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
@@ -441,15 +443,22 @@ function DmComposer({
     const picked = files.files;
     if (sending || (!draft.trim() && !picked.length)) return;
     const text = emoji.settle(draft);
+    // While the agent works, what you send waits for its next turn: Stop
+    // (or Esc) stops it, and a queued message can be sent at once.
     if (!picked.length) {
-      if (send(to, text)) setDraft("");
+      if (busy) {
+        enqueue(to, text);
+        setDraft("");
+      } else if (send(to, text)) setDraft("");
       return;
     }
     if (!hub) return;
     setSending(true);
     uploadAll(hub, agent.id, DESK_DM, picked)
       .then((attachments) => {
-        if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        // Still working once the files are up: they wait with the rest.
+        if (useChat.getState().conversations[to]?.working) enqueue(to, text, attachments);
+        else if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         setDraft("");
         files.sent(picked);
       })
@@ -480,19 +489,31 @@ function DmComposer({
           onKeyDown={(e) => {
             if (emoji.onKeyDown(e)) return;
             if (e.key === "Enter" && !e.shiftKey) submit(e);
+            // Esc stops the agent, as Stop does; with nothing running it's
+            // left to close what it always closed.
+            else if (e.key === "Escape" && busy && !e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              cancel(to);
+            }
           }}
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
-        {busy ? (
-          <button type="button" className="btn btn-ghost" onClick={() => cancel(to)}>
+        {busy && (
+          <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop
           </button>
-        ) : (
-          <button type="submit" className="btn btn-signal" disabled={sending || (!draft.trim() && !files.pending.length) || !connected}>
-            {sending ? "Sending…" : "Send"}
-          </button>
         )}
+        <button
+          type="submit"
+          className="btn btn-signal"
+          title={busy ? `Sends when ${agent.name}’s done` : undefined}
+          disabled={sending || (!draft.trim() && !files.pending.length) || (!busy && !connected)}
+        >
+          {sending ? "Sending…" : busy ? "Queue" : "Send"}
+        </button>
+        <QueuedMessages to={to} name={agent.name} busy={busy} />
       </form>
     </>
   );

@@ -12,6 +12,8 @@ export const draftKey = {
   dm: (agent: string) => `draft.dm.${agent}`,
   /** A room's message, or a reply in one of its threads. */
   room: (room: string, thread: string | null = null) => (thread ? `draft.thread.${room}.${thread}` : `draft.room.${room}`),
+  /** What's queued for an agent's next turn in their DM. */
+  queue: (agent: string) => `draft.queue.${agent}`,
   /** An agent's file (`hub/agent`, `SOUL.md`). */
   file: (agent: string, file: string) => `draft.file.${agent}/${file}`,
 };
