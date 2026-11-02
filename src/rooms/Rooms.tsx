@@ -1,3 +1,4 @@
+import { toShow } from "../chat/conversation";
 import { formAnswer } from "../chat/forms";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -241,7 +242,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // tools it has run), not an empty message.
   const pending = last?.role === "assistant" && last.status === "streaming" && !last.content ? last : undefined;
   const answering = last?.role === "assistant" && last.status === "streaming" && !!last.content;
-  const liveShown = pending ? convo.messages.slice(0, -1) : convo.messages;
+  const liveShown = toShow(pending ? convo.messages.slice(0, -1) : convo.messages);
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
 

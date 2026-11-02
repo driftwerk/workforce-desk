@@ -243,7 +243,7 @@ impl Worker {
                     }
                 }
             }
-            Input::StopSpeaking => self.out.stop(),
+            Input::StopSpeaking => self.stop_playing("asked"),
             Input::Played => {
                 self.playing = self.playing.saturating_sub(1);
                 if self.playing == 0 {
@@ -294,7 +294,7 @@ impl Worker {
 
     fn push_to_talk(&mut self, pressed: bool, now: Instant) {
         if pressed {
-            self.out.stop();
+            self.stop_playing("push-to-talk");
         }
         match (&mut self.session, pressed) {
             (None, true) => self.open(None, Mode::Held, Vec::new(), now),
@@ -370,11 +370,13 @@ impl Worker {
             }
             Live::Interrupted => {
                 if self.playing > 0 {
+                    tracing::info!(reason = "the model heard speech", "voice: speech stopped");
                     self.out.stop();
                 }
             }
             Live::Heard(text) => {
                 if self.playing > 0 && s.lifetime.in_speech() {
+                    tracing::info!(reason = "barge-in", "voice: speech stopped");
                     self.out.stop();
                 }
                 s.lifetime.heard(&text, now);
@@ -431,9 +433,17 @@ impl Worker {
         self.ended();
     }
 
+    /// Stops what's playing, saying why, if anything is.
+    fn stop_playing(&self, reason: &str) {
+        if self.playing > 0 {
+            tracing::info!(reason, "voice: speech stopped");
+        }
+        self.out.stop();
+    }
+
     fn ended(&mut self) {
         self.session = None;
-        self.out.stop();
+        self.stop_playing("the live session ended");
         self.decoder = pcm::Decoder::default();
         self.wake.reset_spotter();
     }

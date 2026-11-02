@@ -8,12 +8,14 @@ import {
   disableVoice,
   enableVoice,
   onUnheard,
+  onSpeechStopped,
   onUtterance,
   onVoiceError,
   onVoiceState,
   pushToTalk,
   setVoiceRoster,
   speak,
+  stopSpeaking,
   toolResult,
   voiceStatus,
   type Utterance,
@@ -21,15 +23,17 @@ import {
 } from "./api";
 import { targetDm } from "./dms";
 import { voiceEngine } from "./engines";
-import { claimMode, holdDone, micFailed, owner, pressHold, releaseHold, toggleTalk, useMic } from "./mic";
+import { claimMode, holdDone, micFailed, owner, pressHold, releaseHold, repliesOver, replyStarted, toggleTalk, useMic } from "./mic";
 import type { VoiceSpec } from "../platform";
-import { forModel, missingAgent, outcome, resolveAgent, speechOf, voiceFor, voiceRoster, wakeNames } from "./route";
-import { DETAILS_IN_DESK, speakable } from "./speakable";
+import { asked, failureIn, forModel, missingAgent, newAnswers, resolveAgent, saysWhenTurnsEnd, speechOf, turnsOver, voiceFor, voiceRoster, wakeNames } from "./route";
+import { ERROR_IN_CHAT, speakable } from "./speakable";
 import { useVoiceStore } from "./store";
 
 const ANSWER_WAIT_MS = 10 * 60_000;
 const SEND_TRIES = 60;
 const SEND_RETRY_MS = 150;
+/** How long an engine given something to say may go without saying it's speaking. */
+export const REPLY_SILENCE_MS = 10_000;
 
 const failed = (e: unknown) => useVoiceStore.setState({ error: e instanceof Error ? e.message : String(e) });
 
@@ -40,11 +44,52 @@ interface Reply {
   answer: (text: string) => void;
 }
 
-/** Read aloud in `voice`, `agent`'s own. */
-const aloud = (agent: string | null, voice?: VoiceSpec): Reply => ({
+/** An answer on its way to the engine, which is told before it's over. */
+let saying = 0;
+/** The claim on the way to the engine, if any: what's said next waits for it. */
+let claiming: Promise<unknown> | null = null;
+
+let replyWatch: ReturnType<typeof setTimeout> | null = null;
+
+const unwatchReply = (): void => {
+  if (replyWatch) clearTimeout(replyWatch);
+  replyWatch = null;
+};
+
+/** Holding the engine for an answer ends when it reports it has finished
+ *  speaking, which an engine that never reports speaking won't. So a while after
+ *  it was given something, it must be speaking, or still being given it. */
+const watchReply = (): void => {
+  unwatchReply();
+  replyWatch = setTimeout(() => {
+    replyWatch = null;
+    if (useMic.getState().replying === 0) return;
+    if (saying > 0 || claiming) watchReply();
+    else if (useVoiceStore.getState().status.state !== "speaking") repliesOver();
+  }, REPLY_SILENCE_MS);
+};
+
+/** Read aloud in `voice`, `agent`'s own. An answer to a DM (`held`) keeps the
+ *  engine up to say it, starting it again if nobody has the microphone now. */
+const aloud = (agent: string | null, voice?: VoiceSpec, held = false): Reply => ({
   answer: (text) => {
+    if (!text.trim()) return;
     useVoiceStore.setState({ speakingFor: agent });
-    void speak(text, voice).catch(failed);
+    if (held) replyStarted();
+    const say = () => {
+      saying++;
+      void speak(text, voice)
+        .then(() => {
+          if (held) watchReply();
+        })
+        .catch((e: unknown) => {
+          failed(e);
+          if (held) repliesOver();
+        })
+        .finally(() => saying--);
+    };
+    if (claiming) void claiming.then(say);
+    else say();
   },
 });
 
@@ -79,6 +124,24 @@ export const readAloud = (agent: Agent, text: string): void => {
   aloud(agentKey(agent), voiceOf(agent)).answer(speakable(text));
 };
 
+/** Agents whose answers aren't wanted aloud any more: stopped, or the
+ *  conversation ended. Saying something to them again wants them back. */
+const hushed = new Set<string>();
+
+/** Ends `agent`'s spoken conversation: its answers stop being read out,
+ *  whatever is left of them. */
+export const endConversation = (agent: string): void => {
+  hushed.add(agent);
+  if (useMic.getState().talk === agent) toggleTalk(agent);
+  void stopSpeaking().catch(failed);
+};
+
+/** Starts `agent`'s spoken conversation, or ends it. */
+export const talkOrEnd = (agent: string): void => {
+  if (useMic.getState().talk === agent) endConversation(agent);
+  else toggleTalk(agent);
+};
+
 /** Hold to talk in `agent`'s DM: the microphone is its until what's said
  *  has gone. */
 export const startHold = (agent: string): void => {
@@ -98,10 +161,25 @@ export const endHold = (): void => {
 export class Turns {
   private current: Agent | null = null;
   private waiting = new Map<string, () => void>();
+  private speaking = false;
 
   status(s: VoiceStatus) {
     if (s.state === "off" || (s.state === "listening" && s.conversation === null)) this.current = null;
     if (s.state !== "speaking" && useVoiceStore.getState().speakingFor) useVoiceStore.setState({ speakingFor: null });
+    if (s.state === "speaking") this.speaking = true;
+    else if (this.speaking && saying === 0) {
+      this.speaking = false;
+      repliesOver();
+    }
+  }
+
+  /** What was being read out was stopped: the rest of those answers aren't
+   *  wanted, unless something more is said to the agent, and the engine needn't
+   *  stay up to say them. */
+  stopped() {
+    for (const key of this.waiting.keys()) hushed.add(key);
+    unwatchReply();
+    repliesOver();
   }
 
   heard(u: Utterance) {
@@ -110,13 +188,14 @@ export class Turns {
     if (mic?.mode === "hold") holdDone();
     const agent = mic ? (chat.roster.find((a) => agentKey(a) === mic.agent) ?? null) : resolveAgent(u.agent, chat.roster, this.current, chat.activeAgent);
     const written = !!mic && !u.callId && replyOf(mic.agent) === "written";
-    const reply = u.callId ? toModel(u.callId) : written ? inWriting : aloud(agent ? agentKey(agent) : null, agent ? voiceOf(agent) : undefined);
+    const reply = u.callId ? toModel(u.callId) : written ? inWriting : aloud(agent ? agentKey(agent) : null, agent ? voiceOf(agent) : undefined, !!mic);
     useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null });
     if (!agent) {
       reply.answer(missingAgent(u.agent, wakeNames(chat.roster)));
       return;
     }
     const key = agentKey(agent);
+    hushed.delete(key);
     if (!mic) {
       this.current = agent;
       chat.openDm(key);
@@ -137,23 +216,42 @@ export class Turns {
     attempt(0);
   }
 
+  /** Waits for the agent to answer, until its turn ends: each part of the
+   *  answer is read out as it finishes, or for a voice model, which can take
+   *  one result, all of it at the end. */
   private awaitAnswer(key: string, name: string, reply: Reply, cloud: boolean): () => void {
     this.waiting.get(key)?.();
+    const since = Date.now();
+    const baseline = asked(useChat.getState().conversations[key]);
+    const whole: string[] = [];
     const giveUp = setTimeout(() => done(), ANSWER_WAIT_MS);
     const unsubscribe = useChat.subscribe((s, prev) => {
       const before = prev.conversations[key];
       const after = s.conversations[key];
       if (!before || !after || before === after) return;
-      const o = outcome(before, after);
-      if (!o) return;
+      const answers = newAnswers(before, after, since);
+      for (const answer of answers) {
+        if (cloud) whole.push(forModel(answer.content));
+        else if (!hushed.has(key)) reply.answer(speakable(answer.speech ?? answer.content));
+      }
+      const failure = failureIn(before, after);
+      if (failure !== null) {
+        done();
+        if (cloud && whole.length) reply.answer(whole.join(" "));
+        else if (!hushed.has(key)) reply.answer(`${name} couldn't answer. ${ERROR_IN_CHAT}`);
+        return;
+      }
+      const over = saysWhenTurnsEnd(after) ? turnsOver(before, after, baseline) : answers.length > 0;
+      if (!over) return;
       done();
-      if (o.kind === "error") reply.answer(`${name} couldn't answer. ${DETAILS_IN_DESK}`);
-      else reply.answer(cloud ? forModel(o.text) : speakable(o.text));
+      if (cloud) reply.answer(whole.length ? whole.join(" ") : `${name} had nothing to say.`);
     });
     const done = () => {
       clearTimeout(giveUp);
       unsubscribe();
       if (this.waiting.get(key) === done) this.waiting.delete(key);
+      // The turn is over, but its last part may only now be starting to be said.
+      if (useMic.getState().replying > 0) watchReply();
       useVoiceStore.setState((s) => {
         const { [key]: _gone, ...waiting } = s.waiting;
         return { thinking: this.waiting.size > 0, waiting };
@@ -175,11 +273,18 @@ export class Turns {
  *  why in the DM that asked. */
 const followMic = (): (() => void) => {
   let mode = claimMode();
-  const claim = (next: typeof mode) =>
-    claimVoice(next).catch((e: unknown) => {
-      const who = owner();
-      if (who) micFailed(who.agent, e instanceof Error ? e.message : String(e));
-    });
+  const claim = (next: typeof mode) => {
+    const claimed: Promise<unknown> = claimVoice(next)
+      .catch((e: unknown) => {
+        const who = owner();
+        if (who) micFailed(who.agent, e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (claiming === claimed) claiming = null;
+      });
+    claiming = claimed;
+    return claimed;
+  };
   if (mode) void claim(mode);
   return useMic.subscribe((s) => {
     const next = claimMode(s);
@@ -224,6 +329,7 @@ export function useVoice(enabled: boolean) {
       }),
       onUtterance((u) => turns.heard(u)),
       onUnheard(holdDone),
+      onSpeechStopped(() => turns.stopped()),
       onVoiceError((message) => useVoiceStore.setState({ error: message })),
     ];
     const unfollow = followMic();
@@ -245,7 +351,7 @@ export function useVoice(enabled: boolean) {
     "talkHere",
     () => {
       const dm = targetDm();
-      if (dm) toggleTalk(dm);
+      if (dm) talkOrEnd(dm);
     },
     true,
     { fromFields: false },

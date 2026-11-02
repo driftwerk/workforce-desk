@@ -43,6 +43,11 @@ impl Speaking {
             .store(now_ms() + ECHO_TAIL_MS, Ordering::SeqCst);
     }
 
+    /// Whether anything queued is still to play.
+    pub fn pending(&self) -> usize {
+        self.queued.load(Ordering::SeqCst)
+    }
+
     /// Whether the microphone should be quiet now.
     pub fn now(&self) -> bool {
         self.queued.load(Ordering::SeqCst) > 0 || now_ms() < self.quiet_after.load(Ordering::SeqCst)

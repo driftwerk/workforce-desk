@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { claimMode, endTalk, forget, holdDone, micFailed, owner, pressHold, releaseHold, toggleTalk, useMic } from "./mic";
+import { claimMode, endTalk, forget, holdDone, micFailed, owner, pressHold, releaseHold, toggleTalk, useMic, repliesOver, replyStarted } from "./mic";
 
-beforeEach(() => useMic.setState({ talk: null, hold: null, pressed: false, problem: null }));
+beforeEach(() => useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null }));
 
 describe("the microphone's owner", () => {
   it("is voice by name until a DM takes it", () => {
@@ -36,6 +36,18 @@ describe("the microphone's owner", () => {
     expect(claimMode()).toBe("held");
     holdDone();
     expect(owner()).toEqual({ agent: "local/atlas", mode: "talk" });
+  });
+
+  it("stays up to say an answer once nobody has it, hearing only what talks over it", () => {
+    expect(claimMode()).toBeNull();
+    replyStarted();
+    expect(claimMode()).toBe("held");
+    toggleTalk("local/atlas");
+    expect(claimMode()).toBe("open");
+    toggleTalk("local/atlas");
+    expect(claimMode()).toBe("held");
+    repliesOver();
+    expect(claimMode()).toBeNull();
   });
 
   it("stays open for a hold in the DM that's talking", () => {
