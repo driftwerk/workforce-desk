@@ -86,6 +86,9 @@ describe("a session's actions", () => {
     // Nothing to resume without a conversation, nor while it runs elsewhere.
     expect(labels({ live: false, state: "stopped", cliSessionId: null })).toEqual([]);
     expect(labels({ live: false, state: "working", cliSessionId: "c1" })).toEqual([]);
+    // A Codex typed in a Desk terminal is a session like any, and resumes by its id.
+    expect(labels({ engine: "codex", live: false, state: "stopped", cliSessionId: "th-1", terminalId: "t1" })).toEqual(["Resume"]);
+    expect(labels({ engine: "codex", live: true, state: "working", cliSessionId: "th-1", terminalId: "t1" })).toEqual(["Interrupt"]);
     // One closed in another terminal resumes in Desk.
     expect(labels({ live: false, state: "closed", origin: "external", cliSessionId: "c1" })).toEqual(["Resume in Desk"]);
     expect(labels({ live: false, state: "closed", origin: "external", cliSessionId: "c1", caps: { resume: "none" } as never })).toEqual([]);
