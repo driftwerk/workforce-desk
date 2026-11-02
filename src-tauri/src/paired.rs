@@ -44,6 +44,8 @@ impl std::fmt::Display for Failure {
 pub struct Reach {
     pub base: Url,
     pub token: Arc<str>,
+    /// The hub on this computer, whose address Desk Helper may change.
+    pub local: bool,
     pub client: reqwest::Client,
     /// For an upload, each bounded by `desk_core::net::upload_timeout`.
     pub uploads: reqwest::Client,
@@ -135,6 +137,7 @@ impl Paired {
         Ok(Reach {
             base,
             token: hub.token.into(),
+            local: hub.local,
             client: clients.requests.clone(),
             uploads: clients.uploads.clone(),
         })
@@ -152,27 +155,41 @@ impl Paired {
 
     /// Sends `build`'s request to hub `id` with its token; a token the hub
     /// turns away is read again once (the local hub's is renewed by Desk
-    /// Helper; a hub paired again has a new one).
+    /// Helper; a hub paired again has a new one), and so is the local hub's
+    /// address when nothing answers at it (Desk Helper gave it new ports).
     pub async fn send(
         self: &Arc<Self>,
         id: &str,
         build: impl Fn(&Reach) -> Option<reqwest::RequestBuilder>,
     ) -> Result<reqwest::Response, Failure> {
         let build = &build;
+        let unreachable = |e: reqwest::Error| Failure::Unreachable(e.without_url().to_string());
         let attempt = |reach: Reach| async move {
             let request = build(&reach).ok_or(Failure::Unknown)?;
-            request
-                .bearer_auth(&*reach.token)
-                .send()
-                .await
-                .map_err(|e| Failure::Unreachable(e.without_url().to_string()))
+            Ok::<_, Failure>(request.bearer_auth(&*reach.token).send().await)
         };
-        let response = attempt(self.reach_async(id).await?).await?;
+        let reach = self.reach_async(id).await?;
+        let response = match attempt(reach.clone()).await? {
+            Ok(r) => r,
+            // It never reached the old address: sent again only where the
+            // hub is now, if it moved.
+            Err(e) if reach.local && e.is_connect() => {
+                self.forget();
+                let now = self.reach_async(id).await?;
+                if now.base == reach.base {
+                    return Err(unreachable(e));
+                }
+                attempt(now).await?.map_err(unreachable)?
+            }
+            Err(e) => return Err(unreachable(e)),
+        };
         if response.status() != StatusCode::UNAUTHORIZED {
             return Ok(response);
         }
         self.forget();
-        attempt(self.reach_async(id).await?).await
+        attempt(self.reach_async(id).await?)
+            .await?
+            .map_err(unreachable)
     }
 }
 
@@ -222,5 +239,57 @@ pub(crate) mod tests {
             );
         }
         assert!(matches!(p.reach("nobody"), Err(Failure::Unknown)));
+    }
+
+    /// Desk Helper moved this computer's hub to a new port: a request its
+    /// old address can't take reads where it is now and goes there. A
+    /// workspace that can't be reached isn't read again.
+    #[tokio::test]
+    async fn the_local_hub_is_asked_where_it_is_now() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            while let Ok((mut s, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf).await;
+                let _ = s
+                    .write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n")
+                    .await;
+            }
+        });
+        let gone = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", l.local_addr().unwrap())
+        };
+        let at = Arc::new(Mutex::new(gone.clone()));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (following, counted) = (Arc::clone(&at), Arc::clone(&reads));
+        let p = Arc::new(Paired::with_source(Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let local = following.lock().unwrap().clone();
+            Ok(vec![
+                account("local", &local, true, "l"),
+                account("dev", &gone, false, "d"),
+            ])
+        })));
+        let get = |path: &'static str| {
+            move |r: &Reach| Some(r.client.get(desk_core::net::at(&r.base, path, None).ok()?))
+        };
+        assert!(matches!(
+            p.send("local", get("/api/me")).await,
+            Err(Failure::Unreachable(_))
+        ));
+        *at.lock().unwrap() = url;
+        let answer = p.send("local", get("/api/me")).await.unwrap();
+        assert_eq!(answer.status(), StatusCode::NO_CONTENT);
+        let before = reads.load(Ordering::SeqCst);
+        assert!(matches!(
+            p.send("dev", get("/api/me")).await,
+            Err(Failure::Unreachable(_))
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), before);
     }
 }

@@ -123,6 +123,11 @@ pub struct Legacy {
     pub probe: Probe,
 }
 
+/// Called when a socket's hub can't be reached at its address: the hub on
+/// this computer may have moved (Desk Helper gave it new ports), so where
+/// it is gets read again for the next socket.
+pub type Unreachable = Arc<dyn Fn() + Send + Sync>;
+
 /// A socket to open: where, with which token, counted in which pool.
 pub struct Dial {
     pub url: Url,
@@ -132,6 +137,8 @@ pub struct Dial {
     /// turned the header away (none for the local hub's admin sockets,
     /// whose hub is always new enough).
     pub legacy: Option<Legacy>,
+    /// For a hub on this computer: told when its address can't be reached.
+    pub unreachable: Option<Unreachable>,
 }
 
 /// What the page sends down a socket.
@@ -222,6 +229,7 @@ impl Sockets {
         page: u64,
         url: Url,
         bearer: Bearer,
+        unreachable: Option<Unreachable>,
         events: Events,
     ) -> Result<u32, String> {
         let dial = Dial {
@@ -229,6 +237,7 @@ impl Sockets {
             bearer,
             pool: Pool::Local,
             legacy: None,
+            unreachable,
         };
         self.dial(owner, page, dial, events)
     }
@@ -550,6 +559,11 @@ async fn relay(dial: Dial, mut said: mpsc::Receiver<Said>, events: Events, credi
     let mut ws = match handshake(&dial).await {
         Ok(ws) => ws,
         Err(why) => {
+            if !matches!(why, Failed::Refused(_) | Failed::Unsendable)
+                && let Some(unreachable) = &dial.unreachable
+            {
+                unreachable();
+            }
             events(event(serde_json::json!({ "type": "error" })));
             events(closed(1006, &why.said(dial.pool)));
             return;
@@ -710,7 +724,7 @@ mod tests {
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
         let id = sockets
-            .open("main", 0, url, token("SENTINEL-ADMIN"), events)
+            .open("main", 0, url, token("SENTINEL-ADMIN"), None, events)
             .unwrap();
         assert_eq!(said(&mut rx).await, serde_json::json!({ "type": "open" }));
         let hello = said(&mut rx).await;
@@ -766,7 +780,7 @@ mod tests {
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
         sockets
-            .open("main", 0, url, token("SENTINEL-ADMIN"), events)
+            .open("main", 0, url, token("SENTINEL-ADMIN"), None, events)
             .unwrap();
         assert_eq!(said(&mut rx).await, serde_json::json!({ "type": "error" }));
         let close = said(&mut rx).await;
@@ -815,7 +829,7 @@ mod tests {
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
         sockets
-            .open("main", 0, url.clone(), bearer, events)
+            .open("main", 0, url.clone(), bearer, None, events)
             .unwrap();
         assert_eq!(said(&mut rx).await["type"], "open");
         assert_eq!(*reads.lock().unwrap(), [false, true]);
@@ -823,7 +837,9 @@ mod tests {
         assert_eq!(seen.recv().await.unwrap(), "Bearer new");
         // And only once: a hub that keeps refusing is said to.
         let (events, mut rx) = recorder();
-        sockets.open("main", 0, url, token("old"), events).unwrap();
+        sockets
+            .open("main", 0, url, token("old"), None, events)
+            .unwrap();
         assert_eq!(said(&mut rx).await["type"], "error");
         assert!(
             said(&mut rx).await["reason"]
@@ -842,7 +858,9 @@ mod tests {
         let (_silent, url) = listener().await;
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
-        sockets.open("main", 0, url, token("t"), events).unwrap();
+        sockets
+            .open("main", 0, url, token("t"), None, events)
+            .unwrap();
         assert_eq!(said(&mut rx).await["type"], "error");
         let close = said(&mut rx).await;
         assert_eq!(close["code"], 1006);
@@ -858,7 +876,11 @@ mod tests {
         for owner in ["main", "main", "grid-1"] {
             let url = echo_hub().await;
             let (events, _rx) = recorder();
-            ids.push(sockets.open(owner, 0, url, token("t"), events).unwrap());
+            ids.push(
+                sockets
+                    .open(owner, 0, url, token("t"), None, events)
+                    .unwrap(),
+            );
         }
         sockets.close_owned("main");
         assert_eq!(sockets.count(), 1);
@@ -872,14 +894,21 @@ mod tests {
         let (events, _rx) = recorder();
         assert!(
             sockets
-                .open("main", 0, echo_hub().await, token("t"), events.clone())
+                .open(
+                    "main",
+                    0,
+                    echo_hub().await,
+                    token("t"),
+                    None,
+                    events.clone()
+                )
                 .is_err()
         );
         let page = sockets.page("main");
         assert_eq!(page, 1);
         assert!(
             sockets
-                .open("main", page, echo_hub().await, token("t"), events)
+                .open("main", page, echo_hub().await, token("t"), None, events)
                 .is_ok()
         );
         assert_eq!(sockets.page("grid-1"), 0);
@@ -892,7 +921,14 @@ mod tests {
         let (_silent, url) = listener().await;
         let open = |owner: &str| {
             let (events, _rx) = recorder();
-            sockets.open(owner, sockets.page(owner), url.clone(), token("t"), events)
+            sockets.open(
+                owner,
+                sockets.page(owner),
+                url.clone(),
+                token("t"),
+                None,
+                events,
+            )
         };
         for _ in 0..MAX_PER_WINDOW {
             open("main").unwrap();
@@ -916,7 +952,9 @@ mod tests {
         let (_silent, url) = listener().await;
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
-        let id = sockets.open("main", 0, url, token("t"), events).unwrap();
+        let id = sockets
+            .open("main", 0, url, token("t"), None, events)
+            .unwrap();
         while sockets.send("main", id, Out::Text("x".into())).is_ok() {}
         sockets.close("main", id);
         assert_eq!(sockets.count(), 0, "it is forgotten");
@@ -962,7 +1000,9 @@ mod tests {
         let (url, mut hub_heard) = flooding_hub(TOTAL).await;
         let sockets = Sockets::default();
         let (events, mut rx) = recorder();
-        let id = sockets.open("main", 0, url, token("t"), events).unwrap();
+        let id = sockets
+            .open("main", 0, url, token("t"), None, events)
+            .unwrap();
         assert_eq!(said(&mut rx).await["type"], "open");
         // A page that takes nothing is given no more than its window.
         let mut given = 0;
