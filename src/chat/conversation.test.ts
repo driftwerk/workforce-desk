@@ -6,8 +6,8 @@ import {
   emptyConversation,
   finishedAnswers,
   reduce,
-  toShow,
   statusOf,
+  toShow,
   wsPath,
   type ConversationState,
 } from "./conversation";
@@ -51,6 +51,9 @@ describe("conversation", () => {
     expect(toShow(s.messages)).toEqual([]);
     const written = run([{ type: "stream_start" }, { type: "stream_delta", content: "Ha.", speech: "(laughing) Ha." }, { type: "stream_end" }]);
     expect(toShow(written.messages)).toEqual(written.messages);
+    // A voice that takes no directions: nothing to say or read at all.
+    const silent = run([{ type: "stream_start" }, { type: "stream_end" }]);
+    expect(toShow(silent.messages)).toEqual([]);
   });
 
   it("has no speech for an answer that says what it shows", () => {

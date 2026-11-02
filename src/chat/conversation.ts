@@ -544,11 +544,11 @@ const finished = (before: ConversationState, after: ConversationState): ChatMess
   return after.messages.filter((m) => m.role === "assistant" && m.status === "complete" && was.get(m.id) !== "complete");
 };
 
-/** `messages` as a conversation shows them: an answer that was only said has
- *  nothing to read, so it leaves no empty bubble. */
+/** `messages` as a conversation shows them: an answer with nothing to read, only
+ *  to hear or nothing at all, leaves no empty bubble. */
 export const toShow = (messages: ChatMessage[]): ChatMessage[] =>
   messages.filter(
-    (m) => !(m.status === "complete" && m.speech?.trim() && !m.content.trim() && !m.tools.length && !m.attachments?.length && !m.desk),
+    (m) => !(m.role === "assistant" && m.status === "complete" && !m.content.trim() && !m.tools.length && !m.attachments?.length && !m.desk),
   );
 
 /** What Desk sends with a message: where it was asked (on a hub that takes
