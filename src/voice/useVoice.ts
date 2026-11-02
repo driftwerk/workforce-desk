@@ -32,6 +32,8 @@ import { useVoiceStore } from "./store";
 const ANSWER_WAIT_MS = 10 * 60_000;
 const SEND_TRIES = 60;
 const SEND_RETRY_MS = 150;
+/** How long an engine given something to say may go without saying it's speaking. */
+export const REPLY_SILENCE_MS = 10_000;
 
 const failed = (e: unknown) => useVoiceStore.setState({ error: e instanceof Error ? e.message : String(e) });
 
@@ -47,6 +49,26 @@ let saying = 0;
 /** The claim on the way to the engine, if any: what's said next waits for it. */
 let claiming: Promise<unknown> | null = null;
 
+let replyWatch: ReturnType<typeof setTimeout> | null = null;
+
+const unwatchReply = (): void => {
+  if (replyWatch) clearTimeout(replyWatch);
+  replyWatch = null;
+};
+
+/** Holding the engine for an answer ends when it reports it has finished
+ *  speaking, which an engine that never reports speaking won't. So a while after
+ *  it was given something, it must be speaking, or still being given it. */
+const watchReply = (): void => {
+  unwatchReply();
+  replyWatch = setTimeout(() => {
+    replyWatch = null;
+    if (useMic.getState().replying === 0) return;
+    if (saying > 0 || claiming) watchReply();
+    else if (useVoiceStore.getState().status.state !== "speaking") repliesOver();
+  }, REPLY_SILENCE_MS);
+};
+
 /** Read aloud in `voice`, `agent`'s own. An answer to a DM (`held`) keeps the
  *  engine up to say it, starting it again if nobody has the microphone now. */
 const aloud = (agent: string | null, voice?: VoiceSpec, held = false): Reply => ({
@@ -57,6 +79,9 @@ const aloud = (agent: string | null, voice?: VoiceSpec, held = false): Reply => 
     const say = () => {
       saying++;
       void speak(text, voice)
+        .then(() => {
+          if (held) watchReply();
+        })
         .catch((e: unknown) => {
           failed(e);
           if (held) repliesOver();
@@ -149,9 +174,12 @@ export class Turns {
   }
 
   /** What was being read out was stopped: the rest of those answers aren't
-   *  wanted, unless something more is said to the agent. */
+   *  wanted, unless something more is said to the agent, and the engine needn't
+   *  stay up to say them. */
   stopped() {
     for (const key of this.waiting.keys()) hushed.add(key);
+    unwatchReply();
+    repliesOver();
   }
 
   heard(u: Utterance) {
@@ -222,6 +250,8 @@ export class Turns {
       clearTimeout(giveUp);
       unsubscribe();
       if (this.waiting.get(key) === done) this.waiting.delete(key);
+      // The turn is over, but its last part may only now be starting to be said.
+      if (useMic.getState().replying > 0) watchReply();
       useVoiceStore.setState((s) => {
         const { [key]: _gone, ...waiting } = s.waiting;
         return { thinking: this.waiting.size > 0, waiting };

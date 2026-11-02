@@ -6,7 +6,7 @@ import { useSettings } from "../settings/store";
 import { FEATURES, type Agent, type ChatMessage, type ServerMessage } from "../chat/types";
 import { claimMode, useMic } from "./mic";
 import { useVoiceStore } from "./store";
-import { endConversation, talkOrEnd, Turns } from "./useVoice";
+import { endConversation, REPLY_SILENCE_MS, talkOrEnd, Turns } from "./useVoice";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
@@ -318,6 +318,56 @@ describe("the engine that says a DM's answer", () => {
     vi.mocked(invoke).mockImplementation(() => Promise.resolve());
     expect(useMic.getState().replying).toBe(0);
     expect(useVoiceStore.getState().error).toBe("Voice isn't running.");
+  });
+
+  describe("when the engine doesn't say it's speaking", () => {
+    /** An answer handed to the engine for a DM whose microphone was then given back. */
+    const answered = async () => {
+      const turns = fresh();
+      useMic.setState({ talk: key });
+      turns.heard({ agent: null, text: "what failed?" });
+      useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("Two tests.") } }));
+      useMic.setState({ talk: null });
+      await flush();
+      expect(useMic.getState().replying).toBe(1);
+      return turns;
+    };
+
+    beforeEach(() => useVoiceStore.setState({ status: { state: "listening", conversation: null } }));
+
+    it("lets go of the microphone after a while", async () => {
+      await answered();
+      expect(claimMode()).toBe("held");
+      await vi.advanceTimersByTimeAsync(REPLY_SILENCE_MS);
+      expect(useMic.getState().replying).toBe(0);
+      expect(claimMode()).toBeNull();
+    });
+
+    it("lets go as soon as speech is reported stopped", async () => {
+      const turns = await answered();
+      turns.stopped();
+      expect(useMic.getState().replying).toBe(0);
+    });
+
+    it("lets go a while after the turn ends, too", async () => {
+      await answered();
+      await vi.advanceTimersByTimeAsync(REPLY_SILENCE_MS - 1);
+      useMic.setState({ replying: 1 });
+      made.splice(0).forEach((turns) => turns.stop());
+      await vi.advanceTimersByTimeAsync(REPLY_SILENCE_MS);
+      expect(useMic.getState().replying).toBe(0);
+    });
+
+    it("doesn't cut off a long reply that is being spoken", async () => {
+      const turns = await answered();
+      const speaking = { state: "speaking" } as const;
+      turns.status(speaking);
+      useVoiceStore.setState({ status: speaking });
+      await vi.advanceTimersByTimeAsync(10 * REPLY_SILENCE_MS);
+      expect(useMic.getState().replying).toBe(1);
+      turns.status({ state: "listening", conversation: null });
+      expect(useMic.getState().replying).toBe(0);
+    });
   });
 
   it("ending the conversation stops it, and what's left isn't said", () => {
