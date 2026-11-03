@@ -397,22 +397,28 @@
   align-items: baseline;
   gap: 4px 12px;
 }
-.rimg-always {
+.rimg-always,
+.rimg-open {
   font-size: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .rimg-shown {
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
   max-width: min(100%, 520px);
   margin: 6px 0;
+  vertical-align: top;
+}
+.rimg-frame {
+  display: block;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
   overflow: hidden;
-  vertical-align: top;
 }
-.rimg-shown img {
+.rimg-frame img {
   display: block;
   max-width: 100%;
   max-height: 360px;

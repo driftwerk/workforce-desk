@@ -18,7 +18,7 @@ export function Chat() {
         <b>Pictures from the web</b>
         <span className="muted small">
           A picture an agent links to waits for you to click Show image, and Desk fetches it then. Showing one tells its
-          site your IP address. Pictures from these sites show straight away:
+          site your IP address. Pictures from these sites show straight away (up to ten a message):
         </span>
         {imageSites.length ? (
           <ul className="image-sites" aria-label="Sites whose pictures always show">
@@ -39,6 +39,10 @@ export function Chat() {
         ) : (
           <span className="small faint">None yet. Choose “Always show from this site” under a picture to add one.</span>
         )}
+        <span className="small faint">
+          Best left off: sites where anyone can post a picture (image hosts, forums, chat apps), since then anyone can
+          choose what Desk fetches.
+        </span>
       </div>
     </section>
   );

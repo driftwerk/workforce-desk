@@ -7,6 +7,7 @@ import { AgentMark } from "../ui/Mark";
 import { answerPrompt, cancelAsk, dismiss, retry, stop } from "./engine";
 import { Progress } from "./ProgressCard";
 import { memberOf } from "./routing";
+import { ImageBudget } from "../shell/RemoteImage";
 
 /** What a draft says when it isn't going: why, and what can be done. */
 const NOTE: Partial<Record<RoomDraft["state"], string>> = {
@@ -43,7 +44,9 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
         <Progress draft={draft} asked={asked} onStop={() => stop(roomId, draft.id)} />
         {draft.text && (
           <div className="msg-text rich">
-            <RichMarkdown text={draft.text} streaming={!stopped} />
+            <ImageBudget>
+              <RichMarkdown text={draft.text} streaming={!stopped} />
+            </ImageBudget>
           </div>
         )}
         <Attachments files={draft.attachments} home={home} />

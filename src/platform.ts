@@ -118,8 +118,10 @@ export const saveSettings = (settings: Settings): Promise<void> => invoke("setti
 
 /** A remote picture, fetched by Desk (never the page): the length of its
  *  meta's JSON (four bytes), that JSON (`{"mime"}`), then its bytes. Rejects
- *  with `{kind: "refused" | "failed", reason}`. */
-export const remoteImageFetch = (url: string): Promise<ArrayBuffer> => invoke("remote_image_fetch", { url });
+ *  with `{kind: "refused" | "failed", reason}`, or, `sameSite` (shown without
+ *  a click), `{kind: "moved"}` when it redirects off its site. */
+export const remoteImageFetch = (url: string, sameSite: boolean): Promise<ArrayBuffer> =>
+  invoke("remote_image_fetch", { url, sameSite });
 
 export const themeFiles = (): Promise<ThemeFile[]> => invoke("themes_list");
 
