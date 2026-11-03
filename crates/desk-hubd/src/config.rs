@@ -345,6 +345,11 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
         "weaviate".into(),
         table(&[("enabled", Value::Boolean(false))]),
     );
+    // One hub on one computer: turn control, follow-ups and leadership stay
+    // in the hub's own process. Port 4222 here may be another project's NATS,
+    // whose restarts would stall every turn and which would share this hub's
+    // streams and leader lease.
+    doc.insert("nats".into(), table(&[("enabled", Value::Boolean(false))]));
     learning(&mut doc, ports, memories);
     // Desk pairs itself as a device to chat (`/ws` takes no admin token).
     // Loopback-only and Desk holds the admin token, so its token never lapses.
@@ -507,6 +512,8 @@ mod tests {
         }
         assert_eq!(doc["weaviate"]["enabled"].as_bool(), Some(false));
         assert_eq!(doc["desk"]["enabled"].as_bool(), Some(true));
+        assert_eq!(doc["nats"]["enabled"].as_bool(), Some(false));
+        assert!(doc["nats"].get("url").is_none(), "no NATS server is named");
         let origins: Vec<_> = doc["gateway"]["cors_allowed_origins"]
             .as_array()
             .unwrap()
