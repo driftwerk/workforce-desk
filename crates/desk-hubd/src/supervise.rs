@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 
 use desk_core::host::Host;
 use desk_core::install::Install;
-use desk_core::{HUB_EXECUTABLE, HubPorts, Paths, Secret, Secrets, read_ports, write_ports};
+use desk_core::{
+    HUB_EXECUTABLE, HubPorts, KeyStore, Paths, Secret, Secrets, read_ports, write_ports,
+};
 use eyre::{Context, Result};
 use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
@@ -709,16 +711,15 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     } else {
         config::Memories::Sqlite
     };
-    write_config(&paths, &ports, memories)?;
+    let keys = Secrets::for_host(&paths, &Host::running_here(&process_env))?;
+    let key_store = keys.store();
+    write_config(&paths, &ports, memories, key_store)?;
     let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
     config::ensure_rich(&desk_agent)?;
     config::ensure_oversight(&desk_agent)?;
     let login = desk_core::shell::login_env();
     let env = hub_env(&login);
-    let secrets = HubSecrets::load(&Secrets::for_host(
-        &paths,
-        &Host::running_here(&process_env),
-    )?)?;
+    let secrets = HubSecrets::load(&keys)?;
     let pg = start_postgres(
         &paths,
         ports.postgres,
@@ -765,7 +766,7 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     let mut switch_pending = node.is_some() && memories == config::Memories::Sqlite;
     if switch_pending && *model_rx.borrow() {
         switch_pending = false;
-        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets).await;
+        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store).await;
     }
 
     tracing::info!(gateway = %ports.gateway_url(), ?memories, "local hub starting");
@@ -815,7 +816,7 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
                     if ready.is_ok() {
                         tracing::info!("the memory store's model is here; moving memories into the store");
                         stop(&mut hub, Duration::from_secs(20)).await;
-                        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets).await;
+                        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store).await;
                         tracing::info!(?memories, "local hub starting again");
                         continue 'run;
                     }
@@ -853,8 +854,16 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     outcome
 }
 
-fn write_config(paths: &Paths, ports: &HubPorts, memories: config::Memories) -> Result<()> {
-    desk_core::write_private(&paths.hub_config(), &config::render(paths, ports, memories))
+fn write_config(
+    paths: &Paths,
+    ports: &HubPorts,
+    memories: config::Memories,
+    keys: KeyStore,
+) -> Result<()> {
+    desk_core::write_private(
+        &paths.hub_config(),
+        &config::render(paths, ports, memories, keys),
+    )
 }
 
 /// Puts the hub's memories in the store, with the hub stopped: waits for
@@ -867,13 +876,14 @@ async fn switch_to_store(
     ports: &HubPorts,
     env: &BTreeMap<String, String>,
     secrets: &HubSecrets,
+    keys: KeyStore,
 ) -> config::Memories {
     let url = memory::url(ports);
     let key = secrets.get(Secret::MemoryKey);
     let moved = async {
         memory::ready(&url, Duration::from_secs(120)).await?;
         memory::ensure_tenant(&url, key).await?;
-        write_config(paths, ports, config::Memories::Store)?;
+        write_config(paths, ports, config::Memories::Store, keys)?;
         moving::move_sqlite(workforce, paths, env, secrets).await
     }
     .await;
@@ -884,7 +894,7 @@ async fn switch_to_store(
         }
         Err(e) => {
             tracing::error!(error = %format!("{e:#}"), "could not move memories into the memory store; staying on SQLite");
-            if let Err(e) = write_config(paths, ports, config::Memories::Sqlite) {
+            if let Err(e) = write_config(paths, ports, config::Memories::Sqlite, keys) {
                 tracing::error!(error = %e, "could not write the hub's config");
             }
             config::Memories::Sqlite

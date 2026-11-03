@@ -29,6 +29,7 @@ import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalP
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
 import { baseName, homeShort } from "../ui/paths";
+import { OWN_SIGN_IN_LABEL, accountsOf, hasAccounts, useAccounts, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 
 const ENGINE = ENGINE_TITLE;
@@ -104,7 +105,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
   if (session) {
     return {
       name,
-      meta: `${ENGINE[session.engine]} · ${statusOf(session, STATE_LABEL)}`,
+      meta: `${withAccount(ENGINE[session.engine], session)} · ${statusOf(session, STATE_LABEL)}`,
       state: lookOf(session),
       tracked,
       asking: session.pending || session.state === "asking" ? session : null,
@@ -592,6 +593,24 @@ function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], s
     (s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], { kind: "terminal", terminalId: ranIn })),
   );
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
+  const allAccounts = useAccounts((s) => s.accounts);
+  const hub = useDesk((s) => s.hub);
+  const fail = useDesk((s) => s.fail);
+  // Another account for a session Desk started (one in a terminal of its
+  // own is moved there).
+  const accounts = session && hasAccounts(session.caps) && !session.terminalId && session.origin === "desk" ? accountsOf(allAccounts, session.engine) : [];
+  const onAccount = (to: string | null) => {
+    if (session) hub?.switchAccount(session.id, to).catch(fail);
+  };
+  const account: MenuEntry[] = session
+    ? [
+        // Only an account whose sign-in the hub can read is one to move to.
+        ...accounts
+          .filter((a) => a.signedIn || session.account?.id === a.id)
+          .map((a): MenuEntry => ({ kind: "item", label: a.name, checked: session.account?.id === a.id, onSelect: () => onAccount(a.id) })),
+        { kind: "item", label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) },
+      ]
+    : [];
   const swap: MenuEntry[] = tracked
     ? [{ kind: "item", label: "Show as session", onSelect: () => put({ kind: "session", sessionId: tracked.id }) }]
     : terminal && !terminalElsewhere
@@ -602,6 +621,7 @@ function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], s
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
     ...swap,
     ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+    ...(accounts.length ? [{ kind: "item" as const, label: "Account", submenu: account }] : []),
     ...(session && approvalsSwitchable(session)
       ? [
           {
