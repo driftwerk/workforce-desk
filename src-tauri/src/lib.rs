@@ -14,6 +14,7 @@ mod logins;
 mod navigation;
 mod pair_gate;
 mod paired;
+mod remote_images;
 mod reread;
 mod state;
 mod support;
@@ -792,6 +793,7 @@ pub fn run() {
             attachments::attachment_open,
             attachments::attachment_save,
             attachments::attachment_upload,
+            remote_images::remote_image_fetch,
             voice::voice_enable,
             voice::voice_disable,
             voice::voice_claim,

@@ -67,6 +67,7 @@
     "allow-grid-window-monitor",
     "allow-grid-monitors",
     "allow-attachment-open",
+    "allow-remote-image-fetch",
     "allow-attachment-save",
     "allow-attachment-upload",
     "allow-voice-enable",

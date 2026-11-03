@@ -18,6 +18,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+url = "2.5.8"
 whoami = "2.1.3"
 
 [target.'cfg(unix)'.dependencies]
@@ -28,4 +30,3 @@ libc = { workspace = true }
 # gives reqwest rustls without a provider.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 tempfile = { workspace = true }
-tokio = { workspace = true }
