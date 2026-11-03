@@ -6,6 +6,7 @@ import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
   emoticons: boolean;
+  imageSites: string[];
   writtenReplies: string[];
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
@@ -35,6 +36,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   sessionNames: {},
   layoutOnHub: false,
   emoticons: true,
+  imageSites: [],
   keys: defaultShortcuts(),
   loaded: false,
   load: async () => {
@@ -58,6 +60,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       sessionNames: s.sessionNames ?? {},
       layoutOnHub: s.layoutOnHub ?? false,
       emoticons: s.emoticons ?? true,
+      imageSites: s.imageSites ?? [],
       writtenReplies: s.writtenReplies ?? [],
       loaded: true,
     });
@@ -86,6 +89,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       sessionNames: s.sessionNames,
       layoutOnHub: s.layoutOnHub,
       emoticons: s.emoticons,
+      imageSites: s.imageSites,
     });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),
@@ -110,6 +114,19 @@ export const removeCustomVoice = (provider: string, id: string): void => {
   const left = (customVoices[provider] ?? []).filter((v) => v.id !== id);
   const { [provider]: _was, ...others } = customVoices;
   set({ customVoices: left.length ? { ...others, [provider]: left } : others });
+};
+
+/** Pictures from `site` show in agent markdown without a click. */
+export const alwaysShowImagesFrom = (site: string): void => {
+  const { imageSites, set } = useSettings.getState();
+  const host = site.toLowerCase();
+  if (!imageSites.includes(host)) set({ imageSites: [...imageSites, host] });
+};
+
+/** Pictures from `site` wait for a click again. */
+export const stopShowingImagesFrom = (site: string): void => {
+  const { imageSites, set } = useSettings.getState();
+  set({ imageSites: imageSites.filter((s) => s !== site.toLowerCase()) });
 };
 
 /** Kokoro's own voices are named like af_heart or bm_george. */

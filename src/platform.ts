@@ -92,6 +92,9 @@ export interface Settings {
   /** Emoticons typed in a message (`<3`, `:)`) become emoji; older files
    *  have none (on). */
   emoticons?: boolean;
+  /** Sites (host names, lowercased) whose pictures in agent markdown show
+   *  without a click; older files have none. */
+  imageSites?: string[];
 }
 
 export interface ThemeFile {
@@ -112,6 +115,11 @@ export const localHub = async (): Promise<DeskTransport> => {
 export const loadSettings = (): Promise<Settings> => invoke("settings_load");
 
 export const saveSettings = (settings: Settings): Promise<void> => invoke("settings_save", { settings });
+
+/** A remote picture, fetched by Desk (never the page): the length of its
+ *  meta's JSON (four bytes), that JSON (`{"mime"}`), then its bytes. Rejects
+ *  with `{kind: "refused" | "failed", reason}`. */
+export const remoteImageFetch = (url: string): Promise<ArrayBuffer> => invoke("remote_image_fetch", { url });
 
 export const themeFiles = (): Promise<ThemeFile[]> => invoke("themes_list");
 

@@ -345,3 +345,77 @@
   gap: 8px;
   text-align: center;
 }
+
+/* ── A remote picture in agent markdown ─────────────────────────────────── */
+/* Where an inline image would be, inside a paragraph: spans laid out as a
+   card, nothing fetched until "Show image". */
+.rimg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 520px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.rimg-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.rimg-badge {
+  font: inherit;
+}
+.rimg-title {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rimg-caption {
+  font-weight: 600;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.rimg-site {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rimg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rimg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.rimg-always {
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rimg-shown {
+  display: inline-block;
+  max-width: min(100%, 520px);
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+  vertical-align: top;
+}
+.rimg-shown img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+

@@ -1,7 +1,7 @@
-import { useSettings } from "./store";
+import { stopShowingImagesFrom, useSettings } from "./store";
 
 export function Chat() {
-  const { emoticons, set } = useSettings();
+  const { emoticons, imageSites, set } = useSettings();
   return (
     <section className="settings-pane" aria-label="Chat">
       <h1 className="display-lg">Chat</h1>
@@ -14,6 +14,32 @@ export function Chat() {
           </span>
         </span>
       </label>
+      <div className="set-group">
+        <b>Pictures from the web</b>
+        <span className="muted small">
+          A picture an agent links to waits for you to click Show image, and Desk fetches it then. Showing one tells its
+          site your IP address. Pictures from these sites show straight away:
+        </span>
+        {imageSites.length ? (
+          <ul className="image-sites" aria-label="Sites whose pictures always show">
+            {imageSites.map((site) => (
+              <li key={site} className="image-site">
+                <span>{site}</span>
+                <button
+                  type="button"
+                  className="btn att-btn"
+                  aria-label={`Stop always showing pictures from ${site}`}
+                  onClick={() => stopShowingImagesFrom(site)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="small faint">None yet. Choose “Always show from this site” under a picture to add one.</span>
+        )}
+      </div>
     </section>
   );
 }

@@ -131,6 +131,10 @@ pub struct Settings {
     /// turned off, older files included.
     #[serde(default = "default_true")]
     pub emoticons: bool,
+    /// Sites (host names, lowercased) whose pictures in agent markdown are
+    /// shown without a click; the rest wait for "Show image".
+    #[serde(default)]
+    pub image_sites: Vec<String>,
     /// Older Desks' hold-to-talk and Ask anyone keys, read once into
     /// `shortcuts` and never written again.
     #[serde(default, skip_serializing)]
@@ -178,6 +182,7 @@ impl Default for Settings {
             session_names: Default::default(),
             layout_on_hub: false,
             emoticons: true,
+            image_sites: Vec::new(),
             push_to_talk_shortcut: None,
             ask_shortcut: None,
         }
@@ -400,6 +405,25 @@ mod tests {
         let sparse = load_settings(&paths).unwrap();
         assert_eq!(sparse.groups[0].name, "Beta");
         assert!(!sparse.groups[0].collapsed && sparse.groups[0].items.is_empty());
+    }
+
+    #[test]
+    fn sites_whose_pictures_show_round_trip_and_older_files_have_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"system"}"#).unwrap();
+        assert!(load_settings(&paths).unwrap().image_sites.is_empty());
+        let chosen = Settings {
+            image_sites: vec!["images.example".into()],
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        assert!(
+            std::fs::read_to_string(paths.settings())
+                .unwrap()
+                .contains(r#""imageSites": ["#)
+        );
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 
     #[test]
