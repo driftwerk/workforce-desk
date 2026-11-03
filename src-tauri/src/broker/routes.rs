@@ -59,6 +59,12 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/sessions/{}/remove"),
     route("POST", "/api/desk/sessions/{}/end"),
     route("POST", "/api/desk/sessions/{}/approvals/{}"),
+    // Desk's line: a session's thread, your messages and answers.
+    with_query("GET", "/api/desk/sessions/{}/line", &["before"]),
+    route("POST", "/api/desk/sessions/{}/line"),
+    route("PATCH", "/api/desk/line/{}"),
+    route("DELETE", "/api/desk/line/{}"),
+    route("POST", "/api/desk/line/{}/answer"),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),
     route("GET", "/api/desk/sessions/hidden"),

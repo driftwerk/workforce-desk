@@ -8,7 +8,15 @@ export interface Oversight {
   level: OversightLevel;
   track: { crew: boolean; deskSessions: boolean; externalSessions: boolean; workspaces: boolean };
   /** Minutes of 0 mean it doesn't speak up for that. */
-  wake: { waitingMinutes: number; quietMinutes: number; onFinish: boolean; onFailure: boolean };
+  wake: {
+    waitingMinutes: number;
+    quietMinutes: number;
+    onFinish: boolean;
+    onFailure: boolean;
+    /** A session's message to it on Desk's line gets a turn of its own;
+     *  off, sessions' questions go to you. */
+    onMessage: boolean;
+  };
   /** Local times like "09:00"; "" is off. */
   summaries: { morning: string; evening: string };
   /** Check-ins in any hour; what happens past them waits for the next. */
@@ -27,6 +35,9 @@ export interface Oversight {
     /** Nudge sessions started in another terminal, which may not ask before
      *  they act. */
     messageTerminalSessions: boolean;
+    /** Answer what sessions ask it on Desk's line; anything that pushes,
+     *  deletes or sends still comes to you, with its draft. */
+    answerSessions: boolean;
   };
 }
 
@@ -34,7 +45,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
   enabled: false,
   level: "watch",
   track: { crew: true, deskSessions: true, externalSessions: true, workspaces: false },
-  wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true },
+  wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true, onMessage: true },
   summaries: { morning: "09:00", evening: "" },
   maxCheckinsPerHour: 6,
   maxCheckinsPerDay: 100,
@@ -46,6 +57,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     interrupt: false,
     messageAgents: false,
     messageTerminalSessions: false,
+    answerSessions: true,
   },
 };
 
@@ -100,6 +112,7 @@ export const oversightOf = (source: string): Oversight => {
       quietMinutes: count(wake.quiet_minutes, d.wake.quietMinutes),
       onFinish: bool(wake.on_finish, d.wake.onFinish),
       onFailure: bool(wake.on_failure, d.wake.onFailure),
+      onMessage: bool(wake.on_message, d.wake.onMessage),
     },
     summaries: { morning: time(summaries.morning, d.summaries.morning), evening: time(summaries.evening, d.summaries.evening) },
     maxCheckinsPerHour: count(o.max_checkins_per_hour, d.maxCheckinsPerHour) || d.maxCheckinsPerHour,
@@ -112,6 +125,7 @@ export const oversightOf = (source: string): Oversight => {
       interrupt: bool(act.interrupt, d.act.interrupt),
       messageAgents: bool(act.message_agents, d.act.messageAgents),
       messageTerminalSessions: bool(act.message_terminal_sessions, d.act.messageTerminalSessions),
+      answerSessions: bool(act.answer_sessions, d.act.answerSessions),
     },
   };
 };
@@ -138,6 +152,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       quiet_minutes: o.wake.quietMinutes,
       on_finish: o.wake.onFinish,
       on_failure: o.wake.onFailure,
+      on_message: o.wake.onMessage,
     },
     summaries: { ...table(was.summaries), morning: o.summaries.morning, evening: o.summaries.evening },
     max_checkins_per_hour: o.maxCheckinsPerHour,
@@ -151,6 +166,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       interrupt: o.act.interrupt,
       message_agents: o.act.messageAgents,
       message_terminal_sessions: o.act.messageTerminalSessions,
+      answer_sessions: o.act.answerSessions,
     },
   };
   return stringify(doc) + "\n";

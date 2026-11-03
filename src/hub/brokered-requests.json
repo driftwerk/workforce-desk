@@ -352,6 +352,36 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/sessions/s1/line"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/s1/line?before=2026-11-03T10%3A00%3A00Z"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/line"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/line/m1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/line/m1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/line/m1/answer"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/manager"
   },
   {

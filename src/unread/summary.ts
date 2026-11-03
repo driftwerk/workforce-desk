@@ -151,7 +151,7 @@ export function forgetHubs(hubs: readonly HubAccount[]): void {
 }
 
 /** Events after which the summary may say something else. */
-const CHANGES: ReadonlySet<DeskEvent["type"]> = new Set(["roomMessage", "read", "session", "removed", "activity", "room", "roomRemoved"]);
+const CHANGES: ReadonlySet<DeskEvent["type"]> = new Set(["roomMessage", "read", "session", "removed", "activity", "room", "roomRemoved", "line"]);
 
 const onEvent = (e: DeskEvent) => {
   noticesFrom(e);

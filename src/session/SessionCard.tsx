@@ -22,6 +22,7 @@ import { ENGINE_TITLE } from "../engines/engines";
 import { BreakerBanner } from "../spend/BreakerBanner";
 import { SpendStrip } from "../spend/SpendStrip";
 import { ImageBudget } from "../shell/RemoteImage";
+import { Thread } from "../line/Thread";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -115,6 +116,7 @@ export function SessionCard({ session }: { session: Session }) {
       )}
       <SessionBody session={session} />
       <Approval session={session} />
+      <Thread session={session} />
     </SidePanel>
   );
 }

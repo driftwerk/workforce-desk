@@ -27,6 +27,7 @@ import type {
   Manager,
   NewRoomMessage,
   HiddenSession,
+  LineMessage,
   NewSession,
   NewTerminal,
   Overview,
@@ -476,6 +477,18 @@ export class DeskHub {
     if (q.before) params.set("before", q.before);
     return this.desk("GET", `/api/desk/activity?${params}`);
   };
+  /** A session's line, oldest first: the page before `before`. */
+  lineThread = (id: string, before?: string): Promise<LineMessage[]> =>
+    this.call("GET", `/api/desk/sessions/${encodeURIComponent(id)}/line${before ? `?before=${encodeURIComponent(before)}` : ""}`);
+  /** Your message to a session: at its turn's end, or `now` into it. */
+  postLine = (id: string, text: string, when: "queue" | "now"): Promise<LineMessage> =>
+    this.call("POST", `/api/desk/sessions/${encodeURIComponent(id)}/line`, { text, when });
+  /** Changes a message of yours that hasn't gone out. */
+  editLine = (id: string, text: string): Promise<void> => this.call("PATCH", `/api/desk/line/${encodeURIComponent(id)}`, { text });
+  /** Takes back a message of yours that hasn't gone out. */
+  takeBackLine = (id: string): Promise<void> => this.call("DELETE", `/api/desk/line/${encodeURIComponent(id)}`);
+  /** Your answer to a question on a session's line. */
+  answerLine = (id: string, text: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/answer`, { text });
   /** Which agent oversees the crew, and how much it does on its own. */
   manager = (): Promise<Manager> => this.desk("GET", "/api/desk/manager");
   suggestions = async (): Promise<Suggestion[]> =>

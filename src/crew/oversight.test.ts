@@ -22,17 +22,17 @@ describe("[oversight] in an agent's config", () => {
 enabled = true
 level = "act"
 track = { crew = true, desk_sessions = false, external_sessions = true, workspaces = true }
-wake = { waiting_minutes = 10, quiet_minutes = 0, on_finish = false, on_failure = true }
+wake = { waiting_minutes = 10, quiet_minutes = 0, on_finish = false, on_failure = true, on_message = false }
 summaries = { morning = "08:30", evening = "" }
 max_checkins_per_hour = 3
 max_checkins_per_day = 12
-act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_out_work = false, interrupt = true }
+act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_out_work = false, interrupt = true, answer_sessions = false }
 `);
     expect(o).toEqual({
       enabled: true,
       level: "act",
       track: { crew: true, deskSessions: false, externalSessions: true, workspaces: true },
-      wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true },
+      wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true, onMessage: false },
       summaries: { morning: "08:30", evening: "" },
       maxCheckinsPerHour: 3,
       maxCheckinsPerDay: 12,
@@ -44,8 +44,19 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         interrupt: true,
         messageAgents: false,
         messageTerminalSessions: false,
+        answerSessions: false,
       },
     });
+  });
+
+  it("answers sessions' questions and wakes on them unless switched off, as the hub reads it", () => {
+    expect(DEFAULT_OVERSIGHT.act.answerSessions).toBe(true);
+    expect(DEFAULT_OVERSIGHT.wake.onMessage).toBe(true);
+    expect(oversightOf("[oversight]\nenabled = true\n").act.answerSessions).toBe(true);
+    const off = withOversight(CONFIG, { ...DEFAULT_OVERSIGHT, act: { ...DEFAULT_OVERSIGHT.act, answerSessions: false }, wake: { ...DEFAULT_OVERSIGHT.wake, onMessage: false } });
+    const doc = parse(off) as { oversight: { act: Record<string, unknown>; wake: Record<string, unknown> } };
+    expect(doc.oversight.act.answer_sessions).toBe(false);
+    expect(doc.oversight.wake.on_message).toBe(false);
   });
 
   it("uses the default for anything it can't use", () => {
@@ -78,7 +89,7 @@ wake = { waiting_minutes = 2.5 }
       enabled: true,
       level: "suggest",
       track: { crew: true, desk_sessions: true, external_sessions: true, workspaces: false },
-      wake: { coalesce_seconds: 60, waiting_minutes: 5, quiet_minutes: 30, on_finish: true, on_failure: true },
+      wake: { coalesce_seconds: 60, waiting_minutes: 5, quiet_minutes: 30, on_finish: true, on_failure: true, on_message: true },
       summaries: { morning: "09:00", evening: "18:00" },
       max_checkins_per_hour: 6,
       max_checkins_per_day: 100,
@@ -90,6 +101,7 @@ wake = { waiting_minutes = 2.5 }
         interrupt: false,
         message_agents: false,
         message_terminal_sessions: false,
+        answer_sessions: true,
       },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });

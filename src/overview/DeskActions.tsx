@@ -7,11 +7,14 @@ import { openLocalDm, openSession, useKnownSession, useLocalAgent } from "./peop
 import { useOverview } from "./store";
 import { homeShort } from "../ui/paths";
 import { ENGINE_TITLE } from "../engines/engines";
+import { LineAnswer } from "../line/LineAnswer";
+import { messageIn, useLine } from "../line/store";
 
 const ENGINE = ENGINE_TITLE;
 
 type Approval = NonNullable<DeskExtras["approvals"]>[number];
 type Mentioned = NonNullable<DeskExtras["suggestions"]>[number];
+type Question = NonNullable<DeskExtras["questions"]>[number];
 
 /** What an overseer's message mentions, to act on where it's said: a
  *  session's request to allow or deny, and its suggestions. */
@@ -23,6 +26,9 @@ export function DeskActions({ extras }: { extras: DeskExtras }) {
       ))}
       {(extras.suggestions ?? []).map((s) => (
         <SuggestionCard key={s.id} mentioned={s} />
+      ))}
+      {(extras.questions ?? []).map((q) => (
+        <QuestionCard key={q.messageId} question={q} />
       ))}
     </>
   );
@@ -144,6 +150,51 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
         </span>
       )}
       {problem && <span className="small state-blocked">{problem}</span>}
+    </div>
+  );
+}
+
+/** A question a session asked on its line that the overseer gave you:
+ *  answered here, or already answered (here, on the Floor, in the
+ *  session's thread, or by the overseer). */
+function QuestionCard({ question }: { question: Question }) {
+  const live = useLine((s) => messageIn(s.threads, question.messageId));
+  const loaded = useLine((s) => question.sessionId in s.threads);
+  const connected = useDesk((s) => !!s.hub);
+  const known = useKnownSession(question.sessionId);
+  useEffect(() => {
+    if (connected && !loaded && known) void useLine.getState().load(question.sessionId);
+  }, [connected, loaded, known, question.sessionId]);
+  const open = live ? live.asked === "open" || live.asked === "escalated" : !loaded || !known;
+  return (
+    <div className="dm-action dm-question" role="group" aria-label={`${question.session}'s question`}>
+      <span className="dm-action-text">
+        <span className="small muted">{question.session} asks</span>
+        <span>{question.ask}</span>
+      </span>
+      {open ? (
+        <LineAnswer
+          compact
+          asking={{
+            id: question.messageId,
+            sessionId: question.sessionId,
+            session: question.session,
+            ask: question.ask,
+            why: question.why,
+            options: question.options,
+            draft: question.draft,
+          }}
+        />
+      ) : (
+        <span className="small faint" role="status">
+          {live?.asked === "withdrawn" ? "Withdrawn: the session has ended." : "Already answered."}
+        </span>
+      )}
+      {known && (
+        <button type="button" className="link small" onClick={() => openSession(question.sessionId)}>
+          Open {question.session}
+        </button>
+      )}
     </div>
   );
 }
