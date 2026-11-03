@@ -332,7 +332,7 @@ export type DeskEvent =
   /** A session's spend changed: what its engine recorded was read. */
   | { type: "spend"; session: string }
   /** The person's engine accounts changed: all of them as they now are. */
-  | { type: "accounts"; accounts: EngineAccount[] }
+  | { type: "accounts"; accounts: EngineAccount[]; needs?: AccountNeed[]; autoSwitch?: boolean }
   /** Signing in to a new account moved on. */
   | { type: "accountSignIn"; signIn: AccountSignIn };
 
@@ -355,7 +355,29 @@ export interface EngineAccount {
   signedIn: boolean;
   /** The sessions running on it now. */
   sessions: string[];
+  /** The key its plan readings have (a plan card's `claude:<key>`). */
+  planKey?: string | null;
   createdAt: string;
+}
+
+/** One side of a switch: an account, or (`id` null) the CLI's own sign-in. */
+export interface AccountSide {
+  id: string | null;
+  name: string;
+}
+
+/** A Floor need about the person's accounts. */
+export type AccountNeed =
+  | { kind: "limit"; id: string; engine: Engine; from: AccountSide; to: AccountSide; sessions: string[]; resetsAt: string | null }
+  | { kind: "allFull"; id: string; engine: Engine; resets: [AccountSide, string | null][] }
+  | { kind: "reset"; id: string; engine: Engine; account: AccountSide; from: AccountSide; sessions: string[] };
+
+/** What moving every session off an account did. */
+export interface SwitchedAll {
+  now: string[];
+  afterTurn: string[];
+  nextStart: string[];
+  inTerminals: string[];
 }
 
 /** Where signing in through the engine's own command is. */
@@ -374,6 +396,8 @@ export interface AccountsInfo {
   /** Where the sign-ins are kept ("the keychain"); null: this Desk keeps none. */
   store: string | null;
   signIns: AccountSignIn[];
+  needs?: AccountNeed[];
+  autoSwitch?: boolean;
 }
 
 /** What adding an account did. */

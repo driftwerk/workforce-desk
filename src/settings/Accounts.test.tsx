@@ -160,3 +160,15 @@ it("says when this Desk keeps no accounts, and shows nothing for a hub without t
   await act(async () => {});
   expect(screen.queryByText("Accounts")).toBeNull();
 });
+
+it("switches automatically only once the person turns it on", async () => {
+  const setAutoSwitch = vi.fn(async () => undefined);
+  withHub({ setAutoSwitch }, [account("a-w", "Work", { isDefault: true })]);
+  render(<Accounts engine={claude} />);
+  await act(async () => {});
+  const toggle = screen.getByRole("checkbox", { name: /Switch automatically when an account hits its limit/ }) as HTMLInputElement;
+  expect(toggle.checked).toBe(false);
+  await act(async () => fireEvent.click(toggle));
+  expect(setAutoSwitch).toHaveBeenCalledWith(true);
+  expect(toggle.checked).toBe(true);
+});

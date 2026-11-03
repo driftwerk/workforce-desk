@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
+import { AccountNeeds } from "../floor/AccountNeeds";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
 import { isAgentTurn } from "../floor/needs";
@@ -133,6 +134,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
       <div className="crew-floor-body">
         <div ref={scroller} className="crew-floor-main">
           <RestoreBanner />
+          <AccountNeeds />
           {onFloor ? (
             <>
               <RightNow brief={brief || null} />
