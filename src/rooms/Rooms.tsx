@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
+import { AgentAccess } from "../computer/AgentAccess";
 import { withHistory } from "../chat/history";
 import { isRunning, useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
@@ -74,6 +75,7 @@ type Tab = AgentTab;
 const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "settings", label: "Settings" },
+  { id: "access", label: "This computer" },
   { id: "files", label: "Files" },
 ];
 
@@ -227,7 +229,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const unsaved = dirtyFiles(drafts, activeAgent);
   const go = (next: Tab) => setAgentTab(activeAgent, next);
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
-  const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files");
+  const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files" && t.id !== "access");
   // What the hub reports stands in until the providers list says more.
   const brainSubtitle =
     local && brain && provider && !fallback
@@ -248,7 +250,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
 
-  const chat = tab !== "settings" && !(tab === "files" && local);
+  const chat = tab !== "settings" && !((tab === "files" || tab === "access") && local);
   return (
     <Root
       ref={(el: HTMLElement | null) => {
@@ -288,6 +290,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       {tab === "settings" ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-settings">
           <AgentSettings agent={agent} hub={hub} onOpenFiles={() => go("files")} />
+        </div>
+      ) : tab === "access" && local ? (
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-access">
+          <AgentAccess agent={agent} />
         </div>
       ) : tab === "files" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-files">

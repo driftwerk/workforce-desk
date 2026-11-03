@@ -109,6 +109,7 @@ describe("an agent's brain in its config", () => {
     expect(out.llm).toEqual({ provider: "claude-code", default_model: "standard" });
     expect(out.rich!.charts).toBe(false);
     expect(out.rich!.tables).toBe(true);
+    expect(out.computer).toEqual({ access: "full", asks: "irreversible" });
   });
 });
 
