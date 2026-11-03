@@ -129,6 +129,26 @@ impl Login for Helper {
         })
     }
 
+    /// Registered and allowed but not running (it exited, or was killed):
+    /// asks launchd to start the job (`kickstart` without `-k` leaves a
+    /// running one alone). Not registered yet: registers it, which starts it.
+    fn start(&self) -> Status {
+        let status = self.ensure();
+        if status != Status::Running {
+            return status;
+        }
+        let target = format!("gui/{}/{LAUNCH_AGENT_LABEL}", uid());
+        match launchctl(&["kickstart", &target]) {
+            Ok(out) if out.status.success() => Status::Running,
+            Ok(out) => Status::Failed {
+                message: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            },
+            Err(e) => Status::Failed {
+                message: e.to_string(),
+            },
+        }
+    }
+
     fn status(&self) -> Status {
         let Ok(exe) = std::env::current_exe() else {
             return Status::Development;

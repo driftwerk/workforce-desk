@@ -105,6 +105,12 @@ pub trait Login {
     /// Registers it when it isn't, registers it again when an update changed
     /// how, and says where it stands.
     fn ensure(&self) -> Status;
+    /// Starts it now if it isn't running, the way the system starts it at
+    /// login, and says where it stands. Never restarts one that runs. In a
+    /// development run, nothing to do: `Development`.
+    fn start(&self) -> Status {
+        self.ensure()
+    }
     /// Stops it (and with it the hub and Postgres) and takes it out of what
     /// starts at login. In a development run, nothing to do.
     fn unregister(&self) -> Result<()>;
@@ -115,6 +121,40 @@ pub trait Login {
 /// Desk Helper as this system starts it, for `backend`.
 pub fn login(backend: &Backend) -> impl Login {
     Helper::new(backend.clone())
+}
+
+/// Why Desk Helper last stopped, from the tail of `desk-hubd.log`: what its
+/// last `exiting:` line (or, failing that, last error) says. None when it
+/// started again since, or says nothing.
+pub fn last_reason(log: &str) -> Option<String> {
+    for line in log.lines().rev() {
+        if line.contains("desk-hubd starting") {
+            return None;
+        }
+        let Some(at) = line.find("exiting: ").or_else(|| {
+            line.contains(" ERROR ")
+                .then(|| line.find(": ").map(|i| i + 2))
+                .flatten()
+        }) else {
+            continue;
+        };
+        let line = &line[at..];
+        let line = line.strip_prefix("exiting: ").unwrap_or(line);
+        return Some(line.trim().chars().take(400).collect());
+    }
+    None
+}
+
+/// The reason from the log file at `path`, reading only its end.
+pub fn last_reason_in(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(64 * 1024)))
+        .ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    last_reason(&String::from_utf8_lossy(&bytes))
 }
 
 /// A development run, which manages nothing: `DESK_HOME` set, unless
@@ -128,6 +168,25 @@ fn development() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_exit_line_is_the_reason() {
+        let log = "2026-11-01T10:00:00Z  INFO desk_hubd::supervise: desk-hubd starting version=\"0.1.0\"\n\
+                   2026-11-01T10:05:00Z  WARN desk_hubd::supervise: hub exited; restarting\n\
+                   2026-11-01T10:06:00Z ERROR desk_hubd::supervise: exiting: Postgres failed: port busy\n";
+        assert_eq!(last_reason(log).unwrap(), "Postgres failed: port busy");
+        // Started again since: nothing to blame.
+        let again =
+            format!("{log}2026-11-01T10:07:00Z  INFO desk_hubd::supervise: desk-hubd starting\n");
+        assert_eq!(last_reason(&again), None);
+        // No exit line: the last error stands.
+        let err = "t ERROR desk_hubd::supervise: could not pair Desk with its local hub\n";
+        assert_eq!(
+            last_reason(err).unwrap(),
+            "could not pair Desk with its local hub"
+        );
+        assert_eq!(last_reason(""), None);
+    }
 
     #[test]
     fn only_a_helper_that_cannot_run_stops_the_wait_for_the_hub() {

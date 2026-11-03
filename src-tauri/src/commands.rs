@@ -32,6 +32,8 @@ pub const COMMANDS: &[&str] = &[
     "login_cancel",
     "helper_status",
     "helper_open_login_items",
+    "helper_start",
+    "helper_last_reason",
     "cli_installed",
     "cli_install",
     "report_save",

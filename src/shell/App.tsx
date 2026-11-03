@@ -7,6 +7,7 @@ import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
+import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
 import { hubAccounts, inApp, localHub, onThemesChanged, subscribe } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
@@ -86,6 +87,9 @@ const jumpNearest = () => {
 /** How often the agents every workspace lists are read again. */
 const ROSTER_EVERY_MS = 60_000;
 
+/** How often the local hub is asked for again while it can't be reached. */
+const LOCAL_HUB_RETRY_MS = 5_000;
+
 export function App() {
   const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
   const theme = useTheme();
@@ -99,6 +103,7 @@ export function App() {
   useEffect(() => {
     prune(rooms, hubs);
   }, [rooms, hubs]);
+  const hubDown = useHubDown();
   useHubLinks();
   useEffect(() => startUnread(), []);
   useAppBadge();
@@ -164,15 +169,34 @@ export function App() {
     const unlisten = subscribe(onThemesChanged(refresh));
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).
-    localHub()
-      .then((t) => (stop = connect(t)))
-      .then(() => (inApp ? resumeAfterUpdate() : undefined))
+    // The hub may not be up yet, or may have stopped before Desk opened:
+    // asked again until it answers (the banner says meanwhile).
+    let gone = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let said = false;
+    const reach = (): Promise<void> =>
+      localHub().then(
+        (t) => {
+          if (gone) return;
+          stop = connect(t);
+          return inApp ? resumeAfterUpdate() : undefined;
+        },
+        (e: unknown) => {
+          if (!said) fail(e);
+          said = true;
+          // Not awaited: workspaces connected from here load meanwhile.
+          if (!gone) retry = setTimeout(() => void reach().catch(fail), LOCAL_HUB_RETRY_MS);
+        },
+      );
+    reach()
       .catch(fail)
       .then(() => hubAccounts())
       .then(setHubs)
       .then(resumePairing)
       .catch(fail);
     return () => {
+      gone = true;
+      clearTimeout(retry);
       stop?.();
       unlisten();
     };
@@ -276,7 +300,7 @@ export function App() {
     });
   }
   return (
-    <div className="app">
+    <div className="app" data-hub-down={hubDown || undefined}>
       {/* On macOS the window has no title bar (traffic lights overlay the
           content), so this strip is what moves it; elsewhere the system's
           title bar does. */}
@@ -320,6 +344,7 @@ export function App() {
       <LifecycleDialogs />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <UpdateNotice />
+      <HubDownBanner down={hubDown} />
       {error && (
         <div className="toast" role="alert">
           <span>{error}</span>
