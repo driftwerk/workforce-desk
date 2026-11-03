@@ -13,6 +13,7 @@ import type {
   EngineAccount,
   EngineInfo,
   SpendBy,
+  SwitchedAll,
   SpendPeriod,
   SpendView,
   DeskEvent,
@@ -308,6 +309,12 @@ export class DeskHub {
   /** "OK" on a sign-in problem the person has dealt with. */
   dismissSignInProblem = (account: string): Promise<void> => this.call("POST", `/api/desk/accounts/problems/${account}/dismiss`);
   cancelSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/sign-ins/${id}`);
+  /** Moves every session on one account to another: "Switch all". */
+  switchAll = (from: string | null, to: string | null): Promise<SwitchedAll> =>
+    this.call("POST", "/api/desk/accounts/switch-all", { engine: "claude", from, to });
+  /** "Not now" on an account need. */
+  putOffNeed = (id: string): Promise<void> => this.call("POST", `/api/desk/accounts/needs/${encodeURIComponent(id)}/put-off`);
+  setAutoSwitch = (on: boolean): Promise<void> => this.call("PUT", "/api/desk/accounts/auto-switch", { on });
   /** Moves a session to another account (null: the CLI's own sign-in). */
   switchAccount = (id: string, account: string | null): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/account`, { account });

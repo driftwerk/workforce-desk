@@ -76,6 +76,9 @@ const HTTP: &[Route] = &[
     route("DELETE", "/api/desk/accounts/{}"),
     route("POST", "/api/desk/accounts/sign-ins/{}/code"),
     route("DELETE", "/api/desk/accounts/sign-ins/{}"),
+    route("POST", "/api/desk/accounts/switch-all"),
+    route("POST", "/api/desk/accounts/needs/{}/put-off"),
+    route("PUT", "/api/desk/accounts/auto-switch"),
     route("POST", "/api/desk/accounts/problems/{}/dismiss"),
     route("POST", "/api/desk/sessions/{}/account"),
     // The vault: which keys there are, and setting one. Never a key's value.

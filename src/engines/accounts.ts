@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
-import type { AccountSignIn, Caps, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
+import type { AccountNeed, AccountSignIn, Caps, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -53,6 +53,39 @@ export const signInStep = (s: AccountSignIn): string => {
   }
 };
 
+/** "7 sessions", "1 session". */
+const sessionsCount = (n: number): string => (n === 1 ? "1 session" : `${n} sessions`);
+
+/** What an account need says, its reset times in `at` (a clock). */
+export const needText = (n: AccountNeed, at: (iso: string) => string): { title: string; detail: string | null } => {
+  switch (n.kind) {
+    case "limit":
+      return {
+        title: `${n.from.name} hit its limit — switch ${sessionsCount(n.sessions.length)} to ${n.to.name}?`,
+        detail: n.resetsAt ? `${n.from.name} resets ${at(n.resetsAt)}.` : null,
+      };
+    case "allFull":
+      return {
+        title: "Every Claude account is at its limit",
+        detail: n.resets.map(([side, when]) => (when ? `${side.name} resets ${at(when)}` : `${side.name}: no reset time yet`)).join(" · "),
+      };
+    case "reset":
+      return {
+        title: `${n.account.name} has reset — switch ${sessionsCount(n.sessions.length)} back from ${n.from.name}?`,
+        detail: null,
+      };
+    case "signIn":
+      return {
+        title: n.problem === "notRemoved" ? `${n.account.name}’s sign-in was left behind` : `${n.account.name}’s sign-in can’t be used`,
+        detail: problemText({ account: n.account.id ?? "", name: n.account.name, problem: n.problem }, useAccounts.getState().store),
+      };
+  }
+};
+
+/** The plan card's account, by the key its readings have. */
+export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: string): EngineAccount | null =>
+  accounts.find((a) => a.planKey && cardKey === `${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`) ?? null;
+
 /** What a sign-in problem says. */
 export const problemText = (p: SignInProblem, store: string | null): string => {
   const where = store ?? "the hub's store";
@@ -69,6 +102,11 @@ export const problemText = (p: SignInProblem, store: string | null): string => {
 interface AccountsState {
   accounts: EngineAccount[];
   problems: SignInProblem[];
+  needs: AccountNeed[];
+  /** Desk moves sessions off an account at its limit by itself. */
+  autoSwitch: boolean;
+  /** Sessions a switch-all left: they run in terminals of their own. */
+  leftInTerminals: string[];
   /** Where the hub keeps their sign-ins; null: this Desk keeps none. */
   store: string | null;
   signIns: Record<string, AccountSignIn>;
@@ -79,6 +117,9 @@ interface AccountsState {
 
 export const useAccounts = create<AccountsState>((set) => ({
   accounts: [],
+  needs: [],
+  autoSwitch: false,
+  leftInTerminals: [],
   problems: [],
   store: null,
   signIns: {},
@@ -95,6 +136,8 @@ export const useAccounts = create<AccountsState>((set) => ({
       set({
         supported: true,
         accounts: info.accounts,
+        needs: info.needs ?? [],
+        autoSwitch: info.autoSwitch ?? false,
         problems: info.problems ?? [],
         store: info.store,
         signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
@@ -111,7 +154,7 @@ deskListeners.add((e) => {
       void useAccounts.getState().load();
       return;
     case "accounts":
-      useAccounts.setState({ accounts: e.accounts, problems: e.problems ?? [], supported: true });
+      useAccounts.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
       return;
     case "accountSignIn":
       useAccounts.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));

@@ -61,6 +61,21 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/switch-all"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/needs/limit%3Aa1%3Aa2/put-off"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/accounts/auto-switch"
+  },
+  {
+    "kind": "http",
     "method": "PATCH",
     "path": "/api/desk/sessions/s1"
   },

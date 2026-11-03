@@ -45,6 +45,7 @@ export function Accounts({ engine }: { engine: EngineInfo }) {
           ))}
         </ul>
       )}
+      {accounts.length > 0 && <AutoSwitch />}
       {store === null && supported ? (
         <span className="faint small">This Desk keeps no accounts yet: update Desk to add them.</span>
       ) : adding ? (
@@ -57,6 +58,31 @@ export function Accounts({ engine }: { engine: EngineInfo }) {
         </span>
       )}
     </div>
+  );
+}
+
+/** "Switch automatically when an account hits its limit": off unless the
+ *  person turns it on. Desk never switches back by itself. */
+function AutoSwitch() {
+  const { hub, fail } = useDesk();
+  const on = useAccounts((s) => s.autoSwitch);
+  const set = async (next: boolean) => {
+    useAccounts.setState({ autoSwitch: next });
+    try {
+      await hub?.setAutoSwitch(next);
+    } catch (e) {
+      useAccounts.setState({ autoSwitch: !next });
+      fail(e);
+    }
+  };
+  return (
+    <label className="toggle-row">
+      <input type="checkbox" checked={on} onChange={(e) => void set(e.target.checked)} />
+      <span>
+        <b className="small">Switch automatically when an account hits its limit</b>
+        <span className="muted small">Desk moves its sessions to an account with room and says so on the Floor. It asks before switching back.</span>
+      </span>
+    </label>
   );
 }
 

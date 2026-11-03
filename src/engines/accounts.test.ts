@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EngineAccount } from "../hub/types";
-import { OWN_SIGN_IN, accountOfChoice, problemText, accountsOf, defaultChoice, hasAccounts, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
+import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
 
 const account = (id: string, isDefault = false, engine: EngineAccount["engine"] = "claude", sessions: string[] = []): EngineAccount => ({
   id,
@@ -38,6 +38,13 @@ it("says where a sign-in is in plain words, and why it failed as the hub says", 
   expect(signInStep({ ...base, state: "open", url: null })).toBe("Finish signing in in your browser.");
   expect(signInStep({ ...base, state: "done", account: "a" })).toBe("Work is added.");
   expect(signInStep({ ...base, state: "failed", why: "the sign-in took too long: start it again" })).toBe("the sign-in took too long: start it again");
+});
+
+it("finds a plan card's account by the key its readings have", () => {
+  const work = { ...account("Work"), planKey: "ab12" };
+  expect(accountOfCard([work], "claude:ab12")?.name).toBe("Work");
+  expect(accountOfCard([work], "claude:zz")).toBeNull();
+  expect(accountOfCard([account("x")], "claude:ab12")).toBeNull();
 });
 
 it("says each sign-in problem with where the sign-ins are kept", () => {
