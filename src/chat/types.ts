@@ -211,15 +211,36 @@ export interface FrameAttachment {
   duration?: number;
 }
 
-/** The buttons a permission prompt offers. */
+/** What a call on this computer would do, as the hub resolved it: the card
+ *  shows these, never the agent's own summary. */
+export interface ComputerFacts {
+  /** read | write | delete | exec | session | connector | unknown */
+  effect: string;
+  /** Real paths, as you read them (`~/…`). */
+  paths?: string[];
+  command?: string;
+  cwd?: string;
+  connector?: string;
+  /** Why it asks: "Outside its folder", "Can't be undone", … */
+  why: string;
+}
+
+/** The buttons a permission prompt offers. A hub before Desk's grants sends
+ *  only the first four, and its card offers Allow once and Deny. */
 export interface PromptOptions {
   allow_once: boolean;
   deny_once: boolean;
   allow_always: boolean;
   deny_always: boolean;
+  /** "Allow for this session" (a call on this computer). */
+  allow_session?: boolean;
+  /** "Always allow in …": the folder as you read it, or the connector. */
+  allow_in_folder?: string | null;
+  /** On a call on this computer: what it would do. */
+  facts?: ComputerFacts | null;
 }
 
-export type PermissionChoice = "allow_once" | "deny_once" | "allow_always" | "deny_always";
+export type PermissionChoice = "allow_once" | "deny_once" | "allow_always" | "deny_always" | "allow_session" | "allow_in_folder";
 
 /** What the hub's `/ws` and hub link send (the subset Desk renders). */
 export interface ServerMessage {
