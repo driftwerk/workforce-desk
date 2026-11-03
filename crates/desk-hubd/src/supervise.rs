@@ -312,25 +312,46 @@ async fn replaced(files: Vec<PathBuf>, every: Duration) {
     }
 }
 
-/// Logs to `logs/desk-hubd.log` when launchd, systemd or WSL's launcher
-/// started this (no terminal to print to), to the terminal otherwise.
+/// Logs to `logs/desk-hubd.log` always: stderr is /dev/null when launchd,
+/// systemd or the app starts this detached. Run from a terminal it also
+/// prints there. Only when the file can't be opened is stderr all it has.
 fn init_logging(paths: &Paths) {
     use std::io::IsTerminal;
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    let file = (!std::io::stderr().is_terminal())
-        .then(|| {
-            std::fs::create_dir_all(paths.logs()).ok()?;
-            append_log(&paths.logs().join("desk-hubd.log"), LOG_LIMIT).ok()
-        })
-        .flatten();
+    let file = std::fs::create_dir_all(paths.logs())
+        .ok()
+        .and_then(|()| append_log(&paths.logs().join("desk-hubd.log"), LOG_LIMIT).ok());
+    let on_terminal = std::io::stderr().is_terminal();
     match file {
         Some(f) => tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_ansi(false)
-            .with_writer(std::sync::Mutex::new(f))
+            .with_writer(std::sync::Mutex::new(Tee {
+                file: f,
+                terminal: on_terminal,
+            }))
             .init(),
         None => tracing_subscriber::fmt().with_env_filter(filter).init(),
+    }
+}
+
+/// The log file, and the terminal too when there is one.
+struct Tee {
+    file: std::fs::File,
+    terminal: bool,
+}
+
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.terminal {
+            let _ = std::io::stderr().write_all(buf);
+        }
+        self.file.write_all(buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
     }
 }
 
@@ -561,9 +582,98 @@ impl Drop for PidFile {
     }
 }
 
+/// Why `run` returned without an error.
+#[derive(Debug, PartialEq, Eq)]
+enum Exit {
+    Terminated,
+    Interrupted,
+    Updated,
+}
+
+/// The one plain line `desk-hubd.log` gets as the helper exits, saying why.
+fn exit_line(outcome: &Result<Exit>) -> String {
+    match outcome {
+        Ok(Exit::Terminated) => "exiting: SIGTERM received (stopped on request)".into(),
+        Ok(Exit::Interrupted) => "exiting: SIGINT received (stopped on request)".into(),
+        Ok(Exit::Updated) => {
+            "exiting: Desk was updated; the login item starts the new Desk Helper".into()
+        }
+        Err(e) => {
+            let text = format!("{e:#}");
+            let kind = if text.contains("already running") {
+                "the lock was refused"
+            } else if text.contains("too old for this Desk") {
+                "the hub is too old for this Desk"
+            } else if text.to_lowercase().contains("postgres") {
+                "Postgres failed"
+            } else {
+                "error"
+            };
+            format!("exiting: {kind}: {}", text.replace('\n', " "))
+        }
+    }
+}
+
+/// `<binary> --version`, first line, or why it could not be had. Bounded,
+/// so a hub that hangs cannot hold the helper back.
+async fn version_of(binary: &Path) -> String {
+    let run = Command::new(binary)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(Duration::from_secs(5), run).await {
+        Ok(Ok(out)) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_owned(),
+        Ok(Ok(out)) => format!("--version failed ({})", out.status),
+        Ok(Err(e)) => format!("could not run it ({e})"),
+        Err(_) => "--version timed out".into(),
+    }
+}
+
+/// Logged at startup: which programs this helper runs.
+async fn log_startup(workforce: &Path, store: Option<&Path>) {
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        pid = std::process::id(),
+        %exe,
+        "desk-hubd starting"
+    );
+    tracing::info!(
+        hub = %workforce.display(),
+        hub_version = %version_of(workforce).await,
+        store = %store.map(|p| p.display().to_string()).unwrap_or_else(|| "none".into()),
+        "hub binary"
+    );
+}
+
+/// Runs the helper, and says why it ended in `desk-hubd.log` whichever way
+/// that is: a signal, an error, a panic.
 #[tokio::main]
 pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<()> {
     init_logging(&paths);
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("exiting: panic: {info}");
+        default_hook(info);
+    }));
+    let outcome = run_helper(&paths, process_env).await;
+    match &outcome {
+        Ok(_) => tracing::info!("{}", exit_line(&outcome)),
+        Err(_) => tracing::error!("{}", exit_line(&outcome)),
+    }
+    outcome.map(|_| ())
+}
+
+async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Result<Exit> {
+    let paths = paths.clone();
     if commands::root_on_windows_drive(&paths.root) {
         eyre::bail!(
             "Desk keeps its data in your Linux home, not on a Windows drive ({} is on one)",
@@ -578,6 +688,7 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     }
     let workforce = workforce_binary();
     let store = memory::binary();
+    log_startup(&workforce, store.as_deref()).await;
     let claimed = claim(&paths, store.as_deref()).await?;
     let ports = claimed.ports;
     // The installed helper hands over to an update: it stops when what the
@@ -692,12 +803,12 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
         };
         loop {
             tokio::select! {
-                _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(()) }
-                _ = int.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(()) }
+                _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(Exit::Terminated) }
+                _ = int.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(Exit::Interrupted) }
                 _ = &mut updated => {
                     tracing::info!("Desk was updated; handing over to the new helper");
                     stop(&mut hub, Duration::from_secs(20)).await;
-                    break 'run Ok(())
+                    break 'run Ok(Exit::Updated)
                 }
                 ready = model_rx.wait_for(|&r| r), if switch_pending => {
                     switch_pending = false;
@@ -718,9 +829,9 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
                     }
                     tracing::warn!(?status, retry_in = ?backoff, "hub exited; restarting");
                     tokio::select! {
-                        _ = term.recv() => break 'run Ok(()),
-                        _ = int.recv() => break 'run Ok(()),
-                        _ = &mut updated => break 'run Ok(()),
+                        _ = term.recv() => break 'run Ok(Exit::Terminated),
+                        _ = int.recv() => break 'run Ok(Exit::Interrupted),
+                        _ = &mut updated => break 'run Ok(Exit::Updated),
                         _ = tokio::time::sleep(backoff) => {}
                     }
                     backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -783,6 +894,34 @@ async fn switch_to_store(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_way_out_says_why() {
+        assert!(exit_line(&Ok(Exit::Terminated)).contains("SIGTERM"));
+        assert!(exit_line(&Ok(Exit::Interrupted)).contains("SIGINT"));
+        assert!(exit_line(&Ok(Exit::Updated)).contains("updated"));
+        let line = |msg: &str| exit_line(&Err(eyre::eyre!("{msg}")));
+        assert!(line("Desk Helper is already running for /x").contains("lock was refused"));
+        assert!(
+            line("the hub is too old for this Desk: x").contains("hub is too old for this Desk")
+        );
+        assert!(line("starting Postgres: boom").contains("Postgres failed"));
+        let other = line("nope\nsecond line");
+        assert!(other.starts_with("exiting: error: nope second line"));
+        assert!(!other.contains('\n'));
+    }
+
+    #[tokio::test]
+    async fn the_hubs_version_is_read_or_its_failure_said() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("hub");
+        std::fs::write(&fake, "#!/bin/sh\necho 'workforce 1.2.3'\necho more\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(version_of(&fake).await, "workforce 1.2.3");
+        let missing = version_of(&dir.path().join("nope")).await;
+        assert!(missing.starts_with("could not run it"), "{missing}");
+    }
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
