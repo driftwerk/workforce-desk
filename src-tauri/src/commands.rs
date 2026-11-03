@@ -61,6 +61,7 @@ pub const COMMANDS: &[&str] = &[
     "attachment_open",
     "attachment_save",
     "attachment_upload",
+    "remote_image_fetch",
     "voice_enable",
     "voice_disable",
     "voice_claim",

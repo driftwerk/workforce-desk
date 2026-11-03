@@ -6,11 +6,13 @@ pub mod backend;
 #[cfg(unix)]
 pub mod holder;
 pub mod host;
+pub mod image_size;
 pub mod install;
 pub mod net;
 #[cfg(unix)]
 pub mod process;
 pub mod redact;
+pub mod remote_image;
 pub mod vault;
 // A Unix login shell's environment: on Windows the CLIs run inside WSL.
 #[cfg(unix)]
