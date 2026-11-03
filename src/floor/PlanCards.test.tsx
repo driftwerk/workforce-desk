@@ -6,7 +6,7 @@ import { startLogin } from "../platform";
 import { PlanCards } from "./PlanCards";
 import { useFloor } from "./store";
 import { NOW, at, hub, ready, view } from "./testing";
-import { clock } from "./time";
+import { clock, dayClock } from "./time";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
@@ -105,6 +105,16 @@ describe("the plan cards", () => {
     ).toBeTruthy();
     expect(within(claude).getAllByRole("img")[0]!.getAttribute("aria-label")).toContain(`at this pace it runs out about ${clock(hits)}`);
     expect(within(claude).getByText(/^At the limit\. It resets at .+\.$/)).toBeTruthy();
+  });
+
+  it("name the day the weekly limit is reached when it isn't today", () => {
+    show(usage({ readings: [reading([{ usedPercent: 58, resetsAt: later(3 * 1440), minutes: 10_080 }])] }));
+    render(<PlanCards />);
+    const claude = card("Claude plan usage");
+    const hits = NOW + 42 / (58 / (4 * 1440 * MIN));
+    const line = within(claude).getByText(/^At this pace you reach the limit about /).textContent!;
+    expect(line).toContain(`about ${dayClock(hits, NOW)},`);
+    expect(dayClock(hits, NOW)).not.toBe(clock(hits));
   });
 
   it("colour a window by the percent they show", () => {
