@@ -66,7 +66,7 @@ export const DEFAULT_UI: MainUi = {
   inbox: false,
 };
 
-const TABS: readonly string[] = ["chat", "settings", "files"];
+const TABS: readonly string[] = ["chat", "settings", "access", "files"];
 const text = (x: unknown): string | null => (typeof x === "string" && x ? x : null);
 
 const focusOf = (x: unknown): PanelFocus | null => {

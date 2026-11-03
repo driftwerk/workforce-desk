@@ -74,6 +74,41 @@ export interface AgentHeartbeat {
   last_error: string | null;
 }
 
+/** Something always allowed on this computer, or for one session. */
+export interface ComputerGrant {
+  id: string;
+  agent: string;
+  ability: "write" | "delete" | "run" | "session" | "connector_write";
+  /** As you read it (`~/dev/acme-web`). */
+  folder: string | null;
+  connector: string | null;
+  session_id: string | null;
+  run_name: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+/** One call an agent made here, as Desk recorded it. */
+export interface ComputerActivityRow {
+  id: string;
+  at: string;
+  agent: string;
+  kind: "read" | "write" | "delete" | "exec" | "session" | "connector";
+  doing: string;
+  folder: string | null;
+  tool: string;
+  decided_by: "rule" | "grant" | "session" | "person" | "classifier";
+  outcome: { outcome: "ran" | "refused" | "allowed" | "declined" | "not_answered" | "unattended" };
+  reason: string | null;
+}
+
+export interface ComputerActivityPage {
+  rows: ComputerActivityRow[];
+  next: string | null;
+}
+
+export type DiskAccess = "granted" | "missing" | "unknown";
+
 /** What a hub without a route is taken to have said. */
 const NO_ROUTE = "This hub doesn’t have that yet.";
 
@@ -284,6 +319,27 @@ export class DeskHub {
     this.call("PUT", `/api/desk/sessions/${encodeURIComponent(id)}/name`, { name });
   restore = (ids: string[]): Promise<Session[]> => this.call("POST", "/api/desk/restore", { ids });
   dismissRestore = (): Promise<void> => this.call("POST", "/api/desk/restore/dismiss");
+
+  /** Whether agents may use this computer at all (the kill switch). */
+  computerAccess = async (): Promise<{ stopped: boolean }> => this.call("GET", "/api/desk/computer/access");
+  setComputerStopped = (stopped: boolean): Promise<{ stopped: boolean }> => this.call("PUT", "/api/desk/computer/access", { stopped });
+  /** What is always allowed (and for which session), one agent's or all. */
+  computerGrants = (agent?: string): Promise<ComputerGrant[]> =>
+    this.call("GET", `/api/desk/computer/grants${agent ? `?agent=${encodeURIComponent(agent)}` : ""}`);
+  revokeGrant = (id: string): Promise<void> => this.call("DELETE", `/api/desk/computer/grants/${encodeURIComponent(id)}`);
+  forgetSession = (sessionId: string): Promise<void> =>
+    this.call("POST", `/api/desk/computer/sessions/${encodeURIComponent(sessionId)}/forget`);
+  /** What agents did here, newest first; `next` goes on from the page. */
+  computerActivity = (f: { agent?: string; kind?: string; before?: string } = {}): Promise<ComputerActivityPage> => {
+    const q = new URLSearchParams();
+    if (f.agent) q.set("agent", f.agent);
+    if (f.kind) q.set("kind", f.kind);
+    if (f.before) q.set("before", f.before);
+    const qs = q.toString();
+    return this.call("GET", `/api/desk/computer/activity${qs ? `?${qs}` : ""}`);
+  };
+  /** Whether macOS lets agents read other apps' files here. */
+  diskAccess = async (): Promise<DiskAccess> => (await this.call<{ state: DiskAccess }>("GET", "/api/desk/computer/disk-access")).state;
 
   /** Vault paths (never values) on this hub. */
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;

@@ -91,6 +91,18 @@ const HTTP: &[Route] = &[
     route("GET", "/api/agents/{}/heartbeat"),
     route("GET", "/api/agents/{}/config"),
     route("PUT", "/api/agents/{}/config"),
+    // What agents may touch on this computer.
+    route("GET", "/api/desk/computer/access"),
+    route("PUT", "/api/desk/computer/access"),
+    with_query("GET", "/api/desk/computer/grants", &["agent"]),
+    route("DELETE", "/api/desk/computer/grants/{}"),
+    route("POST", "/api/desk/computer/sessions/{}/forget"),
+    with_query(
+        "GET",
+        "/api/desk/computer/activity",
+        &["agent", "kind", "before"],
+    ),
+    route("GET", "/api/desk/computer/disk-access"),
     // The providers agents think with.
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),

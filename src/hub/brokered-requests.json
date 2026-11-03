@@ -102,6 +102,51 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/computer/access"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/computer/access"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/grants"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/grants?agent=allan"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/computer/grants/g%201"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/computer/sessions/desk%3Aallan/forget"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/activity"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/activity?agent=allan&kind=exec&before=1%7Ea"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/disk-access"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/vault"
   },
   {

@@ -4,6 +4,7 @@ import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Calls } from "./Calls";
 import { Chat } from "./Chat";
+import { Computer } from "./Computer";
 import { Engines } from "./Engines";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
@@ -51,6 +52,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "appearance" && <Appearance />}
       {section === "chat" && <Chat />}
       {section === "hubs" && <Hubs />}
+      {section === "computer" && <Computer />}
       {section === "providers" && <Providers />}
       {section === "engines" && <Engines />}
       {section === "sessions" && <Sessions />}
