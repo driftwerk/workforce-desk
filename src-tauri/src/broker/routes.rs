@@ -67,6 +67,15 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/restore"),
     route("POST", "/api/desk/restore/dismiss"),
     with_query("GET", "/api/desk/spend", &["period", "by", "limit"]),
+    with_query("GET", "/api/desk/ledger", &["period", "session", "before"]),
+    // Budgets, and what Desk's breaker holds.
+    route("GET", "/api/desk/budgets"),
+    route("POST", "/api/desk/budgets"),
+    route("PATCH", "/api/desk/budgets/{}"),
+    route("DELETE", "/api/desk/budgets/{}"),
+    route("PUT", "/api/desk/breaker/rules"),
+    route("POST", "/api/desk/breakers/continue"),
+    route("POST", "/api/desk/breakers/keep"),
     route("GET", "/api/desk/engines"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.

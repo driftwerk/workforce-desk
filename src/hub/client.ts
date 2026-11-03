@@ -16,6 +16,13 @@ import type {
   SwitchedAll,
   SpendPeriod,
   SpendView,
+  Budget,
+  BudgetsView,
+  BreakerRules,
+  BreakerView,
+  LedgerPage,
+  NewBudget,
+  OnExceed,
   DeskEvent,
   Manager,
   NewRoomMessage,
@@ -276,6 +283,33 @@ export class DeskHub {
       if (e instanceof HubError && e.status === 404) return null;
       throw e;
     }
+  };
+  /** The budgets, where each stands, Desk's breakers and their rules; null
+   *  from a hub without budgets (an older one). */
+  budgets = async (): Promise<BudgetsView | null> => {
+    try {
+      return await this.call<BudgetsView>("GET", "/api/desk/budgets");
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** Sets a budget: one for the same group, scope, period and unit is replaced. */
+  putBudget = (b: NewBudget): Promise<Budget> => this.call("POST", "/api/desk/budgets", b);
+  patchBudget = (id: string, patch: { amount?: number; warnAt?: number; onExceed?: OnExceed }): Promise<Budget> =>
+    this.call("PATCH", `/api/desk/budgets/${encodeURIComponent(id)}`, patch);
+  deleteBudget = (id: string): Promise<void> => this.call("DELETE", `/api/desk/budgets/${encodeURIComponent(id)}`);
+  setBreakerRules = (rules: BreakerRules): Promise<BreakerRules> => this.call("PUT", "/api/desk/breaker/rules", rules);
+  /** Lets what a breaker holds go on. */
+  breakerContinue = (subject: string): Promise<BreakerView> => this.call("POST", "/api/desk/breakers/continue", { subject });
+  /** Leaves what a breaker holds paused; its Floor need goes. */
+  breakerKeep = (subject: string): Promise<BreakerView> => this.call("POST", "/api/desk/breakers/keep", { subject });
+  /** The ledger's calls in `period`, newest first, a page from `before`. */
+  ledger = (q: { period: SpendPeriod; session?: string; before?: string }): Promise<LedgerPage> => {
+    const params = new URLSearchParams({ period: q.period });
+    if (q.session) params.set("session", q.session);
+    if (q.before) params.set("before", q.before);
+    return this.call("GET", `/api/desk/ledger?${params.toString()}`);
   };
   /** Every engine the hub knows: installed, its version and sign-in, and
    *  where it starts it; null from a hub that doesn't say (an older one). */

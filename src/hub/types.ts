@@ -337,7 +337,11 @@ export type DeskEvent =
   /** The person's engine accounts changed: all of them as they now are. */
   | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[]; needs?: AccountNeed[]; autoSwitch?: boolean }
   /** Signing in to a new account moved on. */
-  | { type: "accountSignIn"; signIn: AccountSignIn };
+  | { type: "accountSignIn"; signIn: AccountSignIn }
+  /** The budgets changed: all of them as they now are. */
+  | { type: "budgets"; budgets: Budget[] }
+  /** Where one of Desk's breakers stands changed. */
+  | { type: "breaker"; breaker: BreakerView };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 
@@ -464,6 +468,113 @@ export interface SpendView {
   more: number;
 }
 
+// ── Budgets and Desk's breaker ───────────────────────────────────────────
+
+/** What a budget applies to: everything together (`desk`), the default for
+ *  each session or agent without its own, or one session's or agent's own. */
+export type BudgetScope =
+  | { kind: "desk" }
+  | { kind: "each_session" }
+  | { kind: "each_agent" }
+  | { kind: "session"; id: string }
+  | { kind: "agent"; id: string };
+
+export type BudgetUnit = "usd" | "tokens";
+/** Over a budget: `pause` the turn after (agents' new turns; a total's new
+ *  starts) until you say Continue, or only `warn`. */
+export type OnExceed = "pause" | "warn";
+
+export interface Budget {
+  id: string;
+  scope: BudgetScope;
+  /** The sidebar group it is the budget of; null is ungrouped. */
+  group: string | null;
+  period: SpendPeriod;
+  unit: BudgetUnit;
+  amount: number;
+  /** The share it warns at, between 0 and 1. */
+  warnAt: number;
+  onExceed: OnExceed;
+  updatedAt: string;
+}
+
+export type BudgetStatus = "under" | "warn" | "over";
+
+/** Where what a budget counts stands now. */
+export interface Standing {
+  budget: string;
+  period: SpendPeriod;
+  unit: BudgetUnit;
+  used: number;
+  of: number;
+  status: BudgetStatus;
+  onExceed: OnExceed;
+  from: string;
+  to: string;
+}
+
+export interface BudgetView extends Budget {
+  standing: Standing | null;
+}
+
+export type BreakerReason = { kind: "loop" } | { kind: "errors" } | { kind: "budget"; budget: string };
+
+export type BreakerLevel =
+  | { level: "clear" }
+  | { level: "steered"; reason: BreakerReason; at: string }
+  | { level: "held"; reason: BreakerReason; since: string; until: string; kept: boolean };
+
+/** One of Desk's breakers: what it holds, and what the Floor asks of it. */
+export interface BreakerView {
+  /** `session:<id>`, `agent:<id>`, `pool:desk`, `pool:group:<id>`. */
+  subject: string;
+  name: string;
+  level: BreakerLevel;
+  ask: string | null;
+  why: string | null;
+}
+
+export interface BreakerRules {
+  /** Watch sessions for loops and repeated failures. */
+  loops: boolean;
+}
+
+export interface BudgetsView {
+  budgets: BudgetView[];
+  breakers: BreakerView[];
+  rules: BreakerRules;
+}
+
+export interface NewBudget {
+  scope: BudgetScope;
+  group: string | null;
+  period: SpendPeriod;
+  unit: BudgetUnit;
+  amount: number;
+  warnAt?: number;
+  onExceed?: OnExceed;
+}
+
+/** One kept call, as the Ledger lists it. */
+export interface LedgerRow {
+  session: string;
+  key: string;
+  at: string;
+  engine: Engine;
+  model: string | null;
+  tokens: Tokens;
+  usd: number | null;
+  priced: "priced" | "reported" | "none";
+  billing: Billing;
+  account: string | null;
+}
+
+export interface LedgerPage {
+  rows: LedgerRow[];
+  /** The next page's start, when there is one. */
+  next: string | null;
+}
+
 // ── Unread: read points and what's after them ────────────────────────────
 
 /** Read through `at`: the message, event or version seen last, when there is one. */
@@ -539,7 +650,8 @@ export type Decision = "allow" | "deny" | "terminal" | "allow_for_session" | "ca
 
 /** Who or what an activity event is by or about. */
 export interface ActivityParty {
-  kind: "agent" | "session" | "manager" | "you";
+  /** `desk`: Desk itself, its breaker. */
+  kind: "agent" | "session" | "manager" | "you" | "desk";
   id: string;
   name: string;
   engine?: Engine | null;
@@ -570,7 +682,15 @@ export type ActivityKind =
   /** An agent on another hub answered in one of your rooms. */
   | "replied"
   /** A delivery reached one of your rooms. */
-  | "delivered";
+  | "delivered"
+  /** Desk's breaker told a session in its turn to stop or wrap up. */
+  | "steered"
+  /** Desk's breaker paused a session or agent, or held new sessions. */
+  | "paused"
+  /** You let what the breaker paused go on. */
+  | "continued"
+  /** A budget was set, changed or removed. */
+  | "budgeted";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -679,7 +799,10 @@ export type DecideRef =
   | { kind: "prompt"; agentId: string; sessionId: string; requestId: string }
   | { kind: "routed"; requestId: string }
   /** A Codex session's request, with the answers Codex offers for it. */
-  | { kind: "codex"; sessionId: string; approvalId: string; choices: Choice[] };
+  | { kind: "codex"; sessionId: string; approvalId: string; choices: Choice[] }
+  /** What Desk's breaker holds (`session:<id>`, `agent:<id>`, `pool:desk`,
+   *  `pool:group:<id>`): allow is Continue, deny is Keep paused. */
+  | { kind: "breaker"; subject: string };
 
 /** An answer to a need: Codex's requests take the last two as well. */
 export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
@@ -688,9 +811,10 @@ export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
  *  session's terminal, or by replying where it was asked. */
 export type Answer = { kind: "decide"; at: DecideRef } | { kind: "terminal" } | { kind: "reply" };
 
-/** An agent (its id) or a Desk session (its id) on a hub. */
+/** An agent (its id), a Desk session (its id) on a hub, or Desk itself
+ *  (what its breaker holds new sessions for: `pool:…`). */
 export interface Who {
-  kind: "agent" | "session";
+  kind: "agent" | "session" | "desk";
   id: string;
   name: string;
   engine: Engine | null;
@@ -704,6 +828,8 @@ export interface Need {
   kind: NeedKind;
   who: Who;
   ask: string;
+  /** What the answers do, when the ask needs it said. */
+  why?: string | null;
   options: string[] | null;
   since: string;
   place: Place;

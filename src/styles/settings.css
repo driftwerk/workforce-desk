@@ -888,3 +888,56 @@ legend.set-label {
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
+
+/* ── Budgets ────────────────────────────────────────────────────────────── */
+
+.budget-row .hub-name {
+  gap: 4px;
+}
+.budget-row .spend-bar {
+  display: block;
+  max-width: 320px;
+}
+.budget-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  margin-top: 4px;
+}
+.budget-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.budget-field input,
+.budget-field select {
+  min-width: 0;
+  max-width: 100%;
+}
+.budget-field input {
+  width: 120px;
+}
+.budget-narrow input {
+  width: 72px;
+}
+.budget-actions {
+  display: flex;
+  gap: 8px;
+}
+.budget-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.budget-check input {
+  margin-top: 3px;
+}
+.budget-hint {
+  display: block;
+  margin-top: 2px;
+}
+.budget-refused {
+  flex-basis: 100%;
+}

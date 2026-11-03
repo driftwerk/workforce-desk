@@ -14,6 +14,7 @@ import { HubError } from "../hub/client";
 import { plainError } from "../ui/plainError";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
+import { BreakerBanner } from "../spend/BreakerBanner";
 import { Terminal } from "../session/Terminal";
 import { useSettings } from "../settings/store";
 import { shortcutLabel, terminalKeys } from "../shortcuts/keys";
@@ -505,7 +506,12 @@ function SessionPane({ id }: { id: string }) {
       </div>
     );
   }
-  return <SessionBody session={session} autoFocus={false} />;
+  return (
+    <>
+      <BreakerBanner sessionId={session.id} compact />
+      <SessionBody session={session} autoFocus={false} />
+    </>
+  );
 }
 
 function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string; content: Extract<PaneContent, { kind: "terminal" }> }) {
