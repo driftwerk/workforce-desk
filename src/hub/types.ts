@@ -14,6 +14,9 @@ export interface Caps {
   interrupt: "keys" | "none";
   /** Whose plan windows its sessions report. */
   plan: "claude" | "codex" | null;
+  /** It can start with its own reviewer answering its approvals
+   *  ("Approve for me"); absent from older hubs. */
+  approveForMe?: boolean;
   /** What the person reads beside it. */
   notes: string[];
 }
@@ -68,6 +71,10 @@ export interface PendingApproval {
   since: string;
   /** False when the terminal is the one asking. */
   answerable: boolean;
+  /** What Codex offers to answer it with; absent: allow or deny. */
+  choices?: Choice[];
+  /** What Codex said of it: where it runs, and why. */
+  why?: string;
 }
 
 /** A tool auto mode refused in the turn a session stopped on. */
@@ -111,6 +118,8 @@ export interface Session {
   currentTool: string | null;
   pending: PendingApproval | null;
   approvals: "desk" | "terminal";
+  /** Codex's own reviewer answers its approvals; absent from older hubs. */
+  approveForMe?: boolean;
   /** The Desk terminal it runs in, when it was started there by hand and
    *  Desk's hooks registered it (a tracked terminal). */
   terminalId?: string | null;
@@ -153,6 +162,8 @@ export interface NewSession {
   worktree?: string;
   prompt?: string;
   approvals?: "desk" | "terminal";
+  /** Codex's own reviewer answers its approvals ("Approve for me"). */
+  approveForMe?: boolean;
   /** Added to the session's environment, as for a terminal: Desk's Claude
    *  Code plugin folder, joined by the hub to the person's own. */
   env?: Record<string, string>;
@@ -427,7 +438,7 @@ export interface UnreadSummary {
   update: ReadPoint | null;
 }
 
-export type Decision = "allow" | "deny" | "terminal";
+export type Decision = "allow" | "deny" | "terminal" | "allow_for_session" | "cancel";
 
 // ── The crew overview: activity, the overview, the manager ────────────────
 
@@ -571,7 +582,12 @@ export type Place =
 export type DecideRef =
   | { kind: "session"; sessionId: string; approvalId: string }
   | { kind: "prompt"; agentId: string; sessionId: string; requestId: string }
-  | { kind: "routed"; requestId: string };
+  | { kind: "routed"; requestId: string }
+  /** A Codex session's request, with the answers Codex offers for it. */
+  | { kind: "codex"; sessionId: string; approvalId: string; choices: Choice[] };
+
+/** An answer to a need: Codex's requests take the last two as well. */
+export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
 
 /** How a need can be answered in place: allowed or denied, only in the
  *  session's terminal, or by replying where it was asked. */
