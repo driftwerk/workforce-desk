@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
-import type { AccountSignIn, Caps, Engine, EngineAccount, Session } from "../hub/types";
+import type { AccountSignIn, Caps, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -53,8 +53,22 @@ export const signInStep = (s: AccountSignIn): string => {
   }
 };
 
+/** What a sign-in problem says. */
+export const problemText = (p: SignInProblem, store: string | null): string => {
+  const where = store ?? "the hub's store";
+  switch (p.problem) {
+    case "gone":
+      return `${p.name}’s sign-in is no longer in ${where}: add the account again. Nothing is switched to it.`;
+    case "unreadable":
+      return `Desk couldn’t read ${p.name}’s sign-in from ${where} just now, so nothing was switched. Unlock the keychain, then try again.`;
+    case "notRemoved":
+      return `${p.name} is removed, but Desk couldn’t delete its sign-in from ${where}. Delete it there yourself.`;
+  }
+};
+
 interface AccountsState {
   accounts: EngineAccount[];
+  problems: SignInProblem[];
   /** Where the hub keeps their sign-ins; null: this Desk keeps none. */
   store: string | null;
   signIns: Record<string, AccountSignIn>;
@@ -65,6 +79,7 @@ interface AccountsState {
 
 export const useAccounts = create<AccountsState>((set) => ({
   accounts: [],
+  problems: [],
   store: null,
   signIns: {},
   supported: null,
@@ -80,6 +95,7 @@ export const useAccounts = create<AccountsState>((set) => ({
       set({
         supported: true,
         accounts: info.accounts,
+        problems: info.problems ?? [],
         store: info.store,
         signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
       });
@@ -95,7 +111,7 @@ deskListeners.add((e) => {
       void useAccounts.getState().load();
       return;
     case "accounts":
-      useAccounts.setState({ accounts: e.accounts, supported: true });
+      useAccounts.setState({ accounts: e.accounts, problems: e.problems ?? [], supported: true });
       return;
     case "accountSignIn":
       useAccounts.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));

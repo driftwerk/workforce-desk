@@ -52,6 +52,11 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/accounts/problems/a1/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/sessions/s1/account"
   },
   {

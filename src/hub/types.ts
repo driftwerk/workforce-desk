@@ -332,7 +332,7 @@ export type DeskEvent =
   /** A session's spend changed: what its engine recorded was read. */
   | { type: "spend"; session: string }
   /** The person's engine accounts changed: all of them as they now are. */
-  | { type: "accounts"; accounts: EngineAccount[] }
+  | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[] }
   /** Signing in to a new account moved on. */
   | { type: "accountSignIn"; signIn: AccountSignIn };
 
@@ -358,6 +358,14 @@ export interface EngineAccount {
   createdAt: string;
 }
 
+/** What is wrong with an account's sign-in on the hub's computer: gone,
+ *  unreadable just now, or left behind when the account was removed. */
+export interface SignInProblem {
+  account: string;
+  name: string;
+  problem: "gone" | "unreadable" | "notRemoved";
+}
+
 /** Where signing in through the engine's own command is. */
 export type AccountSignInState =
   | { state: "starting" }
@@ -374,6 +382,7 @@ export interface AccountsInfo {
   /** Where the sign-ins are kept ("the keychain"); null: this Desk keeps none. */
   store: string | null;
   signIns: AccountSignIn[];
+  problems?: SignInProblem[];
 }
 
 /** What adding an account did. */

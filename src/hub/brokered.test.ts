@@ -48,6 +48,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   removeAccount: (h) => h.removeAccount("a1"),
   signInCode: (h) => h.signInCode("i1", "code"),
   cancelSignIn: (h) => h.cancelSignIn("i1"),
+  dismissSignInProblem: (h) => h.dismissSignInProblem("a1"),
   switchAccount: (h) => h.switchAccount("s1", "a1"),
   update: (h) => h.update("s1", { name: "x" }),
   stop: (h) => h.stop("s1"),
