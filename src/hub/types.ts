@@ -20,6 +20,12 @@ export interface Caps {
   /** Whether its sessions can each run on one of the person's accounts
    *  (`token`: a `setup-token` sign-in per account); absent from older hubs. */
   accounts?: "token" | "none";
+  /** How Desk's line reaches its sessions: Desk's plugin submits, or it is
+   *  typed in at the prompt; `none`, it has no line. Absent from older hubs. */
+  line?: "submit" | "paste" | "none";
+  /** How the person's Send now reaches a working turn; `none`: queue only.
+   *  Absent from older hubs. */
+  steer?: "paste" | "turnSteer" | "none";
   /** What the person reads beside it. */
   notes: string[];
 }
@@ -337,7 +343,10 @@ export type DeskEvent =
   /** The person's engine accounts changed: all of them as they now are. */
   | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[]; needs?: AccountNeed[]; autoSwitch?: boolean }
   /** Signing in to a new account moved on. */
-  | { type: "accountSignIn"; signIn: AccountSignIn };
+  | { type: "accountSignIn"; signIn: AccountSignIn }
+  /** A message on a session's line was sent or moved on; `removed` once
+   *  you took it back. */
+  | { type: "line"; message: LineMessage; removed?: boolean };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 
@@ -570,7 +579,11 @@ export type ActivityKind =
   /** An agent on another hub answered in one of your rooms. */
   | "replied"
   /** A delivery reached one of your rooms. */
-  | "delivered";
+  | "delivered"
+  /** A question on a session's line. */
+  | "asked"
+  /** A message on a session's line. */
+  | "told";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -660,6 +673,46 @@ export interface Suggestion {
 export interface DeskExtras {
   approvals?: { sessionId: string; approvalId: string; summary: string }[];
   suggestions?: { id: string; text: string; state: Suggestion["state"] }[];
+  /** Questions sessions asked on their line that the overseer gave you. */
+  questions?: MentionedQuestion[];
+}
+
+/** A session's question on its line, as the overseer's DM shows it. */
+export interface MentionedQuestion {
+  messageId: string;
+  sessionId: string;
+  session: string;
+  ask: string;
+  why: string;
+  options?: string[];
+  draft?: string | null;
+}
+
+// ── Desk's line: sessions, the overseer and you, to each other ──────────
+
+export type LineKind = "ask" | "tell" | "answer";
+export type LineDelivery = "queued" | "handed" | "delivered" | "held" | "refused";
+export type LineAsked = "open" | "escalated" | "answered" | "withdrawn";
+/** Why a queued message hasn't gone in yet. */
+export type LineWait = "stopped" | "working" | "typing";
+
+/** One message on a session's line. */
+export interface LineMessage {
+  id: string;
+  at: string;
+  from: ActivityParty;
+  to: ActivityParty;
+  kind: LineKind;
+  text: string;
+  inReplyTo: string | null;
+  hop: number;
+  delivery: LineDelivery;
+  asked: LineAsked | null;
+  /** Why the overseer gave it to you, what it offered, and its draft. */
+  escalation: { why: string; options: string[]; draft: string | null } | null;
+  deliveredAt: string | null;
+  updatedAt: string;
+  waiting?: LineWait;
 }
 
 // ── The floor: open needs, work, today's lanes, plan usage ───────────────

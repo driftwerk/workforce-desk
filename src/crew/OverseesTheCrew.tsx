@@ -296,6 +296,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 onChange={(v) => update((x) => ({ ...x, wake: { ...x.wake, onFailure: v } }))}
               />
               <Check
+                label="A session asks it something"
+                sub="Off, sessions’ questions come straight to you"
+                checked={o.wake.onMessage}
+                onChange={(v) => update((x) => ({ ...x, wake: { ...x.wake, onMessage: v } }))}
+              />
+              <Check
                 label="Morning summary at"
                 checked={o.summaries.morning !== ""}
                 onChange={turnOn("morning", setMorning, (x) => ({ ...x, summaries: { ...x.summaries, morning: "" } }))}
@@ -392,6 +398,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   sub="Nudge agents and hand them tasks without asking. Agents still need you to post or send anything outside Desk, delete anything or change what they remember; their other tools run under their own permissions"
                   checked={o.act.messageAgents}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageAgents: v } }))}
+                />
+                <Check
+                  label="Answer sessions’ questions"
+                  sub="Answer what sessions ask it on their line. Questions about pushing, deleting, deploying or sending come to you, with its draft"
+                  checked={o.act.answerSessions}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, answerSessions: v } }))}
                 />
                 <Check
                   label="Message sessions from other terminals"

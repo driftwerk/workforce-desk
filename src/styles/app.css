@@ -2578,3 +2578,140 @@ button.urow-open {
   opacity: 0.55;
   transition: opacity 0.2s;
 }
+
+/* ── A session's line: messages with Desk, other sessions and you ──────── */
+
+.btn-sm {
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  max-height: 40%;
+  min-height: 0;
+}
+.line-thread {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.line-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
+}
+.line-row-out {
+  background: var(--sunken);
+}
+/* Not gone in yet: dashed, as queued messages are. */
+.line-row-waiting {
+  border-style: dashed;
+}
+.line-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+}
+.line-row-text {
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.line-queued {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.line-note {
+  margin: 0;
+}
+.line-composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.line-composer textarea,
+.line-answer-reply textarea {
+  flex: 1 1 200px;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  field-sizing: content;
+  max-height: 140px;
+  padding: 6px 0;
+}
+.line-composer-buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.line-composer-problem {
+  flex-basis: 100%;
+}
+.line-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  min-width: 0;
+}
+.line-answer-compact {
+  margin-top: 6px;
+}
+.line-answer-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+.line-answer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.line-answer-draft {
+  overflow-wrap: anywhere;
+}
+.line-answer-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 2px 4px 2px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.line-answer-done {
+  background: transparent;
+  padding: 0;
+}

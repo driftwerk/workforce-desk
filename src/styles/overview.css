@@ -583,3 +583,10 @@
 .oversee-cap .oversee-num {
   vertical-align: middle;
 }
+.dm-question {
+  flex-direction: column;
+  align-items: stretch;
+}
+.dm-question > .link {
+  align-self: flex-start;
+}

@@ -5,6 +5,7 @@ import type { Session } from "../hub/types";
 import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import { OptionChips } from "../ui/OptionChips";
+import { requestFocus } from "../shell/focus";
 import { plainError } from "../ui/plainError";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote, useWhoName } from "./Row";
@@ -126,7 +127,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               aria-label={`Reply to ${name}…`}
               disabled={need.stale || !!deciding}
               title={stale}
-              onClick={() => openTarget(target, { beside: true, reply: true })}
+              onClick={() => {
+                openTarget(target, { beside: true, reply: true });
+                // A question on a session's line is answered in its thread.
+                if (need.id.startsWith("line:")) requestFocus(`line:${need.who.id}`);
+              }}
             >
               Reply…
             </button>
