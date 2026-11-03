@@ -92,6 +92,9 @@ export interface Settings {
   /** Emoticons typed in a message (`<3`, `:)`) become emoji; older files
    *  have none (on). */
   emoticons?: boolean;
+  /** Sites (host names, lowercased) whose pictures in agent markdown show
+   *  without a click; older files have none. */
+  imageSites?: string[];
 }
 
 export interface ThemeFile {
@@ -112,6 +115,13 @@ export const localHub = async (): Promise<DeskTransport> => {
 export const loadSettings = (): Promise<Settings> => invoke("settings_load");
 
 export const saveSettings = (settings: Settings): Promise<void> => invoke("settings_save", { settings });
+
+/** A remote picture, fetched by Desk (never the page): the length of its
+ *  meta's JSON (four bytes), that JSON (`{"mime"}`), then its bytes. Rejects
+ *  with `{kind: "refused" | "failed", reason}`, or, `sameSite` (shown without
+ *  a click), `{kind: "moved"}` when it redirects off its site. */
+export const remoteImageFetch = (url: string, sameSite: boolean): Promise<ArrayBuffer> =>
+  invoke("remote_image_fetch", { url, sameSite });
 
 export const themeFiles = (): Promise<ThemeFile[]> => invoke("themes_list");
 
@@ -300,6 +310,13 @@ export type HelperStatus =
 
 export const helperStatus = (): Promise<HelperStatus> => invoke("helper_status");
 export const openLoginItems = (): Promise<void> => invoke("helper_open_login_items");
+/** Starts Desk Helper now, the way the system starts it at login (the
+ *  installed app: its login item; a development run starts nothing), and
+ *  says where it stands. */
+export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
+/** What `desk-hubd.log` last said about the helper stopping; null if it says
+ *  nothing or can't be read. */
+export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
 
 export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
 

@@ -446,7 +446,12 @@ export const useChat = create<ChatStore>((set, get) => ({
       if (r.status === "fulfilled") {
         roster.push(...r.value);
         read.add(hub.id);
-      } else rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      } else {
+        // This computer's hub being down doesn't make its agents vanish: the
+        // last list stays (Desk marks it stale) until the hub answers.
+        if (hub.local) roster.push(...get().roster.filter((a) => a.hubId === hub.id));
+        rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      }
     });
     // The side panel's agent goes once its hub has been read without it.
     const panel = get().panelAgent;

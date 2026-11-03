@@ -22,6 +22,7 @@ import { useMerged } from "./store";
 import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
 import { besideOf } from "./target";
 import { clock } from "./time";
+import { ImageBudget } from "../shell/RemoteImage";
 
 /** The clock the floor's times are said against, moving every minute. */
 export const useMinute = (): number => {
@@ -181,7 +182,9 @@ export function BriefCard({
           {unread && <span className="chip msg-delivery brief-new">New</span>}
         </span>
         <div className="brief-text rich">
-          <RichMarkdown text={brief.text} />
+          <ImageBudget>
+            <RichMarkdown text={brief.text} />
+          </ImageBudget>
         </div>
         <div className="brief-actions">
           <button type="button" className="btn" onClick={() => openLocalDm(managerId)}>
