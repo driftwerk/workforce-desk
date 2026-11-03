@@ -19,6 +19,7 @@ import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
 import { switchingText, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
+import { BreakerBanner } from "../spend/BreakerBanner";
 import { SpendStrip } from "../spend/SpendStrip";
 import { ImageBudget } from "../shell/RemoteImage";
 import { Thread } from "../line/Thread";
@@ -105,6 +106,7 @@ export function SessionCard({ session }: { session: Session }) {
         )}
       </div>
       <SpendStrip sessionId={session.id} />
+      <BreakerBanner sessionId={session.id} />
       {approvalsSwitchable(session) && (
         <label className="session-approvals small">
           <input type="checkbox" checked={session.approvals === "desk"} onChange={(e) => setApprovalsInDesk(session, e.target.checked)} />

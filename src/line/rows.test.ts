@@ -17,6 +17,8 @@ describe("a line's rows", () => {
     const to = (m: Parameters<typeof msg>[0]) => deliveryText(msg({ from: YOU, to: S1, kind: "tell", ...m }), NOW);
     expect(to({ delivery: "queued", waiting: "working" })).toBe("Waiting for it to finish its turn");
     expect(to({ delivery: "queued", waiting: "typing" })).toBe("Waiting: you're typing in its terminal");
+    expect(to({ delivery: "queued", waiting: "paused" })).toBe("Waiting: Desk's breaker paused it");
+    expect(to({ delivery: "queued", waiting: "asking" })).toBe("Waiting: it's asking you something");
     expect(to({ delivery: "held" })).toBe("Held: it gets this when it runs again");
     expect(to({ delivery: "handed" })).toBe("On its way");
     expect(to({ delivery: "delivered" })).toMatch(/^Delivered /);
@@ -48,6 +50,7 @@ describe("a line's rows", () => {
     expect(lineOf(old)).toEqual({ on: false, why: "Update Claude Code to 2.1.287 or later to message this session." });
     expect(steerOf(lined())).toBeNull();
     expect(steerOf(lined({ state: "working" }))).toEqual({ label: "Send now" });
+    expect(steerOf(lined({ state: "blocked" }))).toBeNull();
     expect(steerOf(lined({ state: "working", caps: { ...lined().caps!, steer: "none" } }))).toBeNull();
   });
 

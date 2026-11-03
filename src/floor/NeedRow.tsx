@@ -32,6 +32,19 @@ const DECIDING: Record<Choice, { word: string; busy: string; done: string }> = {
   cancel: { word: "Deny and stop", busy: "Stopped…", done: "Denied and stopped" },
 };
 
+/** What Desk's breaker holds is answered Continue or Keep paused (the
+ *  hub's allow and deny). */
+const BREAKER: Record<"allow" | "deny", { word: string; busy: string; done: string }> = {
+  allow: { word: "Continue", busy: "Going on…", done: "Going on" },
+  deny: { word: "Keep paused", busy: "Keeping it paused…", done: "Kept paused" },
+};
+
+const isBreaker = (need: FloorNeed): boolean => need.answer.kind === "decide" && need.answer.at.kind === "breaker";
+
+/** How a choice reads on `need`. */
+const wordsOf = (need: FloorNeed, choice: Choice) =>
+  isBreaker(need) && (choice === "allow" || choice === "deny") ? BREAKER[choice] : DECIDING[choice];
+
 /** The answers a need offers, in the order they read: Codex says its own
  *  (an escalated command offers only Allow and Cancel); the rest allow or
  *  deny. */
@@ -87,17 +100,19 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         {need.ask}
         {where && <span className="faint"> · {where}</span>}
         {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
+        {need.why && <span className="floor-need-why faint small">{need.why}</span>}
       </FloorRow>
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
           {choicesOf(need).map((choice) => {
-              const word = deciding === choice ? DECIDING[choice].busy : DECIDING[choice].word;
+              const words = wordsOf(need, choice);
+              const word = deciding === choice ? words.busy : words.word;
               return (
                 <button
                   key={choice}
                   type="button"
-                  className={choice === "allow" ? "btn btn-signal" : "btn"}
+                  className={choice === "allow" ? (isBreaker(need) ? "btn btn-blocked" : "btn btn-signal") : "btn"}
                   aria-label={`${word} “${need.ask}” for ${name}`}
                   disabled={need.stale}
                   aria-disabled={!!deciding}
@@ -154,7 +169,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             </button>
           )}
           <span className="sr-only" role="status">
-            {deciding ? DECIDING[deciding].done : ""}
+            {deciding ? wordsOf(need, deciding).done : ""}
           </span>
           {problem && (
             <span className="small state-blocked" role="alert">

@@ -6,6 +6,7 @@ import { Composer } from "./Composer";
 import { LineAnswer } from "./LineAnswer";
 import { askedText, deliveryText, editable, headOf, lineOf, outgoing, waitsOnYou } from "./rows";
 import { useLine } from "./store";
+import { useNow } from "../chat/WorkingRow";
 
 const NONE: LineMessage[] = [];
 
@@ -14,20 +15,26 @@ const NONE: LineMessage[] = [];
  *  question waiting on you is answered in place. The composer under it
  *  writes to the session. */
 export function Thread({ session }: { session: Session }) {
+  const loaded = useLine((s) => session.id in s.threads);
   const thread = useLine((s) => s.threads[session.id] ?? NONE);
   const problem = useLine((s) => s.problems[session.id]);
   const connected = useDesk((s) => !!s.hub);
+  // Why a message waits is read with the thread: again as the session
+  // moves on.
   useEffect(() => {
     if (connected) void useLine.getState().load(session.id);
-  }, [connected, session.id]);
+  }, [connected, session.id, session.state, session.live]);
   const line = lineOf(session);
-  const now = Date.now();
+  const now = useNow();
+  // Reply… on the Floor focuses the first question waiting on you.
+  const first = thread.find(waitsOnYou)?.id;
   return (
     <section className="line" aria-label={`${session.displayName ?? session.name}'s line`}>
+      {!loaded && !problem && connected && <p className="small faint line-note">Reading its line…</p>}
       {thread.length > 0 && (
         <ol className="line-thread">
           {thread.map((m) => (
-            <Row key={m.id} m={m} session={session} now={now} />
+            <Row key={m.id} m={m} session={session} now={now} focusKey={m.id === first ? `line:${session.id}` : `line:${session.id}:${m.id}`} />
           ))}
         </ol>
       )}
@@ -37,7 +44,7 @@ export function Thread({ session }: { session: Session }) {
   );
 }
 
-function Row({ m, session, now }: { m: LineMessage; session: Session; now: number }) {
+function Row({ m, session, now, focusKey }: { m: LineMessage; session: Session; now: number; focusKey: string }) {
   const out = outgoing(m, session.id);
   const status = [askedText(m), deliveryText(m, now)].filter(Boolean).join(" · ");
   const hop = m.from.kind === "session" && m.to.kind === "session" ? ` · hop ${m.hop}` : "";
@@ -55,7 +62,7 @@ function Row({ m, session, now }: { m: LineMessage; session: Session; now: numbe
       {waitsOnYou(m) && (
         <LineAnswer
           compact
-          focusKey={`line:${session.id}`}
+          focusKey={focusKey}
           asking={{
             id: m.id,
             sessionId: session.id,

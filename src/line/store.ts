@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, LineMessage } from "../hub/types";
+import { plainError } from "../ui/plainError";
 import { merged, onThread } from "./rows";
 
 interface LineState {
@@ -24,7 +25,7 @@ export const useLine = create<LineState>((set) => ({
       const thread = await hub.lineThread(sessionId);
       set((s) => ({ threads: { ...s.threads, [sessionId]: thread }, problems: withoutKey(s.problems, sessionId) }));
     } catch (e) {
-      set((s) => ({ problems: { ...s.problems, [sessionId]: e instanceof Error ? e.message : String(e) } }));
+      set((s) => ({ problems: { ...s.problems, [sessionId]: plainError(e) } }));
     }
   },
   heard: (m, removed = false) =>

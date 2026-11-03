@@ -8,6 +8,8 @@ export const fromLabel = (m: LineMessage, sessionId: string): string => {
       return "You";
     case "manager":
       return m.from.name || "Desk";
+    case "desk":
+      return m.from.name || "Desk";
     case "session":
       return m.from.id === sessionId ? "It" : m.from.name;
     case "agent":
@@ -22,6 +24,7 @@ export const toLabel = (m: LineMessage, sessionId: string): string | null => {
     case "you":
       return "you";
     case "manager":
+    case "desk":
       return m.to.name || "Desk";
     case "session":
     case "agent":
@@ -55,6 +58,10 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Held: it gets this when it runs again";
         case "working":
           return "Waiting for it to finish its turn";
+        case "paused":
+          return "Waiting: Desk's breaker paused it";
+        case "asking":
+          return "Waiting: it's asking you something";
         default:
           return "Waiting to go in";
       }
@@ -105,8 +112,8 @@ export const lineOf = (s: Session): { on: true } | { on: false; why: string } =>
 
 /** Whether Send now goes into its running turn, and what the button says. */
 export const steerOf = (s: Session): { label: string } | null => {
-  const working = s.state === "working" || s.state === "blocked";
-  if (!working || !s.caps?.steer || s.caps.steer === "none") return null;
+  // Waiting on a dialog (a permission, a question), nothing is typed in.
+  if (s.state !== "working" || !s.caps?.steer || s.caps.steer === "none") return null;
   return { label: "Send now" };
 };
 

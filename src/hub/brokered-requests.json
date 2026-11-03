@@ -22,6 +22,51 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/budgets"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/budgets"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/budgets/b1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/budgets/b1"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/breaker/rules"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/breakers/continue"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/breakers/keep"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/ledger?period=day"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/ledger?period=week&session=s1&before=1%7Eclaude%7Ek"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/accounts"
   },
   {

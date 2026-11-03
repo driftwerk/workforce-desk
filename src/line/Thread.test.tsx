@@ -119,6 +119,22 @@ describe("a session's line", () => {
     expect(screen.getByText("then the docs")).toBeTruthy();
   });
 
+  it("never offers Send now while it waits on a dialog", async () => {
+    await show({ state: "blocked" });
+    expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send when done" })).toBeTruthy();
+  });
+
+  it("says a peer's message waits while the breaker holds it or it asks you", async () => {
+    thread = [
+      msg({ id: "p", from: S2, to: S1, kind: "tell", text: "try --release", asked: null, delivery: "queued", waiting: "paused", deliveredAt: null }),
+      msg({ id: "q", from: S2, to: S1, kind: "tell", text: "say main", asked: null, delivery: "queued", waiting: "asking", deliveredAt: null }),
+    ];
+    await show();
+    expect(within(rowOf("try --release")).getByText(/Desk's breaker paused it/)).toBeTruthy();
+    expect(within(rowOf("say main")).getByText(/it's asking you something/)).toBeTruthy();
+  });
+
   it("offers only Send where the engine can't take a message mid-turn", async () => {
     await show({ state: "working", engine: "codex", terminalId: "t1", caps: { ...lined().caps!, line: "paste", steer: "none" } });
     expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
