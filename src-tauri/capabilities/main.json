@@ -62,6 +62,8 @@
     "allow-login-cancel",
     "allow-helper-status",
     "allow-helper-open-login-items",
+    "allow-helper-start",
+    "allow-helper-last-reason",
     "allow-cli-installed",
     "allow-cli-install",
     "allow-report-save",
