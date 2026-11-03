@@ -104,6 +104,18 @@ export const withBinding = (source: string, b: Binding): string => {
   return stringify(doc).trim() + "\n";
 };
 
+/** How an agent's connector writes go, as its `[computer]` says: below
+ *  Full access they ask first; at Full access only what sends to people
+ *  asks (the default), or nothing ("do anything"). */
+export type Writes = "ask" | "sends_ask" | "own";
+
+export const writesOf = (source: string): Writes => {
+  const computer = table(parseDoc(source).computer);
+  const access = typeof computer.access === "string" ? computer.access : "full";
+  if (access !== "full") return "ask";
+  return computer.asks === "never" ? "own" : "sends_ask";
+};
+
 /** What an agent at Full access asks about first, as its `[computer]`
  *  says: what can't be undone and sends to people (the default), or
  *  nothing. */

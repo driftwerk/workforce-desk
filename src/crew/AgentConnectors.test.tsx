@@ -145,6 +145,13 @@ it("connects its own connection first, just for this agent, then uses it", async
   expect(skills()).toEqual({ enabled: ["jira"], own_credential: ["jira"] });
 });
 
+it("says its changes ask first below Full access", async () => {
+  config = '[computer]\naccess = "own_folder"\n\n[skills]\nenabled = ["linear"]\n';
+  await show(api(LIST));
+  expect(within(row("Linear")).getByText(/asks before changes/)).toBeTruthy();
+  expect(screen.getByText(/asks you before it changes anything/)).toBeTruthy();
+});
+
 it("says the agent works on its own when it asks before nothing", async () => {
   config = '[computer]\nasks = "never"\n\n[skills]\nenabled = ["linear"]\n';
   await show(api(LIST));

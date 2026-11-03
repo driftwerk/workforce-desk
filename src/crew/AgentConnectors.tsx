@@ -19,7 +19,8 @@ import { ago } from "./files";
 import "../styles/connections.css";
 import {
   allowWrites,
-  asksOf,
+  writesOf,
+  type Writes,
   bindingOf,
   choose,
   setAgentConnectors,
@@ -28,6 +29,19 @@ import {
   type Through,
   type Today,
 } from "./connectors";
+
+/** How the agent's changes in its connectors go, as its access says. */
+const WRITES_SAY: Record<Writes, (name: string) => string> = {
+  ask: (name) => `${name} asks you before it changes anything in them.`,
+  sends_ask: () => "Changes run on their own; anything that sends to people asks you first.",
+  own: (name) => `${name} makes changes in them on its own, sends included.`,
+};
+
+const WRITES_ROW: Record<Writes, string> = {
+  ask: "asks before changes",
+  sends_ask: "sends to people ask first",
+  own: "works on its own",
+};
 
 /** The calls shown below the rows. */
 const SHOWN_CALLS = 20;
@@ -111,7 +125,7 @@ export function AgentConnectors({
   const list = listing?.connectors ?? null;
   const binding: Binding | null =
     config === undefined ? null : bindingOf(config);
-  const asks = config === undefined ? "irreversible" : asksOf(config);
+  const writeMode: Writes = config === undefined ? "sends_ask" : writesOf(config);
 
   /** Every connector reaching the agent today, as a first choice must keep
    *  them: the catalog's, and every other adapter the hub has. */
@@ -159,9 +173,7 @@ export function AgentConnectors({
           <p className="small muted">
             The services {agent.name} works in. It only gets the ones you turn
             on here.{" "}
-            {asks === "never"
-              ? `${agent.name} makes changes in them on its own.`
-              : `Changes run on their own; anything that sends to people asks you first.`}
+            {WRITES_SAY[writeMode](agent.name)}
           </p>
 
           {problem && (
@@ -215,7 +227,7 @@ export function AgentConnectors({
                   agent={agent}
                   connector={c}
                   binding={binding}
-                  asks={asks}
+                  writes={writeMode}
                   hasOwn={!!ownFor(c)}
                   onThrough={(through) => {
                     if (through === "own" && !ownFor(c)) {
@@ -290,7 +302,7 @@ function ConnectorChoice({
   agent,
   connector: c,
   binding,
-  asks,
+  writes,
   hasOwn,
   onThrough,
   onWrites,
@@ -299,7 +311,7 @@ function ConnectorChoice({
   agent: Agent;
   connector: Connector;
   binding: Binding;
-  asks: "irreversible" | "never";
+  writes: Writes;
   hasOwn: boolean;
   onThrough: (t: Through) => void;
   onWrites: (writes: boolean) => void;
@@ -333,7 +345,7 @@ function ConnectorChoice({
         <span className="ability-sub">
           {status}
           {through !== "off" &&
-            ` · ${readOnly ? "reads only" : asks === "never" ? "works on its own" : "sends to people ask first"}`}
+            ` · ${readOnly ? "reads only" : WRITES_ROW[writes]}`}
         </span>
         {!all && through !== "own" && (
           <button

@@ -1,6 +1,6 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { allowWrites, asksOf, bindingOf, choose, throughOf, withBinding } from "./connectors";
+import { allowWrites, asksOf, bindingOf, choose, throughOf, withBinding, writesOf } from "./connectors";
 
 const TODAY = { reaching: ["github", "jira", "linear", "xero"], own: [] as string[] };
 
@@ -38,6 +38,13 @@ describe("an agent's connectors", () => {
     // Off again drops it from all three.
     const off = choose(choose(b, "github", "off", TODAY), "linear", "mine", TODAY);
     expect(parse(withBinding(source, off)).skills).toEqual({ enabled: ["linear"] });
+  });
+
+  it("says how connector writes go at each level and mode", () => {
+    expect(writesOf("")).toBe("sends_ask");
+    expect(writesOf('[computer]\naccess = "full"\nasks = "never"\n')).toBe("own");
+    expect(writesOf('[computer]\naccess = "own_folder"\nasks = "never"\n')).toBe("ask");
+    expect(writesOf('[computer]\naccess = "read_anywhere"\n')).toBe("ask");
   });
 
   it("reads whether the agent asks before what can't be undone", () => {
