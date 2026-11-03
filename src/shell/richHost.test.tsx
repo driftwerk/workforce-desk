@@ -1,31 +1,32 @@
 import { RichMarkdown } from "@workforce/rich";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../chat/types";
 import { Message } from "../rooms/Message";
 import { DeskRichHost } from "./richHost";
+import { forgetRemoteImages } from "./RemoteImage";
 
-const openLink = vi.hoisted(() => vi.fn());
-vi.mock("./links", async (real) => ({ ...(await real<typeof import("./links")>()), openLink }));
+const invoke = vi.hoisted(() => vi.fn((_cmd: string, _args?: unknown) => Promise.resolve()));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 const IMAGE = "![the chart](https://images.example/chart.png)";
 
 afterEach(() => {
   cleanup();
-  openLink.mockClear();
+  invoke.mockClear();
+  forgetRemoteImages();
 });
 
-// The real renderer: a remote image must reach the page as a link, never as an
-// <img> the CSP then blocks.
+// The real renderer: a remote image must reach the page as Desk's placeholder,
+// never as an <img> the page would fetch.
 describe("remote images in agent markdown", () => {
-  it("a message shows one as a link, and fetches nothing", () => {
+  it("a message shows one as a placeholder, and fetches nothing", () => {
     const message: ChatMessage = { id: "m1", role: "assistant", content: IMAGE, at: "", status: "complete", tools: [] };
     const { container } = render(<Message message={message} author="Atlas" onSubmitForm={() => true} />);
     expect(container.querySelector("img")).toBeNull();
-    const link = container.querySelector("a.wf-remote-image");
-    expect(link?.textContent).toContain("the chart");
-    fireEvent.click(link!);
-    expect(openLink).toHaveBeenCalledWith("https://images.example/chart.png");
+    expect(screen.getByRole("group", { name: "Picture from images.example: the chart" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Show image" })).not.toBeNull();
+    expect(invoke).not.toHaveBeenCalledWith("remote_image_fetch", expect.anything());
   });
 
   it("markdown with no host of its own follows the same rule under the root's", () => {
@@ -35,7 +36,7 @@ describe("remote images in agent markdown", () => {
       </DeskRichHost>,
     );
     expect(container.querySelector("img")).toBeNull();
-    expect(container.querySelector("a.wf-remote-image")).not.toBeNull();
+    expect(container.querySelector(".rimg")).not.toBeNull();
   });
 
   it("an image of Desk's own is still drawn", () => {

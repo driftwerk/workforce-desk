@@ -19,6 +19,7 @@ import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
 import { ENGINE_TITLE } from "../engines/engines";
 import { SpendStrip } from "../spend/SpendStrip";
+import { ImageBudget } from "../shell/RemoteImage";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -147,7 +148,9 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
         </p>
         {session.lastReply && (
           <div className="transcript-tail rich">
-            <RichMarkdown text={session.lastReply} />
+            <ImageBudget>
+              <RichMarkdown text={session.lastReply} />
+            </ImageBudget>
           </div>
         )}
       </div>

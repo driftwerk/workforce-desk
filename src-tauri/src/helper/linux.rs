@@ -299,6 +299,21 @@ impl Login for Helper {
         }
     }
 
+    /// The service stopped (failed, or was stopped): `systemctl --user
+    /// start` is a no-op on a running one. Under autostart, `ensure` starts it.
+    fn start(&self) -> Status {
+        let status = self.ensure();
+        if status == Status::Running
+            && matches!(Starter::here(), Ok(Starter::Systemd { .. }))
+            && let Err(e) = checked(&["start", UNIT])
+        {
+            return Status::Failed {
+                message: e.to_string(),
+            };
+        }
+        status
+    }
+
     fn ensure(&self) -> Status {
         let Some(launch) = self.launch() else {
             return Status::Development;
