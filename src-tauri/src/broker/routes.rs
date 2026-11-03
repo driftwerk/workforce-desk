@@ -67,11 +67,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/restore"),
     route("POST", "/api/desk/restore/dismiss"),
     with_query("GET", "/api/desk/spend", &["period", "by", "limit"]),
-    with_query(
-        "GET",
-        "/api/desk/ledger",
-        &["period", "session", "engine", "before"],
-    ),
+    with_query("GET", "/api/desk/ledger", &["period", "session", "before"]),
     // Budgets, and what Desk's breaker holds.
     route("GET", "/api/desk/budgets"),
     route("POST", "/api/desk/budgets"),

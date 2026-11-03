@@ -92,10 +92,14 @@ export const heldFor = (b: BreakerView): string => {
   }
 };
 
-/** A budget amount typed in: a number above nothing, else null. Tokens
- *  are whole. */
+/** A budget amount typed in ("11", "$11.50", "500k", "1.2M"): a number
+ *  above nothing, else null. Tokens are whole. */
 export const parseAmount = (text: string, unit: BudgetUnit): number | null => {
-  const n = Number(text.replace(/[$,\s]/g, ""));
+  const m = /^([0-9]*\.?[0-9]+)\s*([kmb])?$/i.exec(text.replace(/[$,\s]/g, ""));
+  if (!m) return null;
+  const scale = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] ?? "").toLowerCase() as "k" | "m" | "b"] ?? 1;
+  const n = Number(m[1]) * scale;
   if (!Number.isFinite(n) || n <= 0) return null;
-  return unit === "tokens" ? (Number.isInteger(n) ? n : null) : Math.round(n * 100) / 100;
+  if (unit === "tokens") return Number.isInteger(Math.round(n * 1e6) / 1e6) ? Math.round(n) : null;
+  return Math.round(n * 100) / 100;
 };

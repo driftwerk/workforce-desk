@@ -61,9 +61,16 @@ export function Budgets() {
   useEffect(() => {
     if (hub) void load();
   }, [hub, load]);
-  const run = (call: Promise<unknown>) => {
+  /** Whether it was done; else why not is said. */
+  const run = (call: Promise<unknown>): Promise<boolean> => {
     setProblem(null);
-    return call.then(() => load()).catch((e: unknown) => setProblem(plainError(e)));
+    return call
+      .then(() => load())
+      .then(() => true)
+      .catch((e: unknown) => {
+        setProblem(plainError(e));
+        return false;
+      });
   };
 
   return (
@@ -123,8 +130,8 @@ export function Budgets() {
               <span>
                 Watch sessions for loops
                 <span className="faint small budget-hint">
-                  When a session runs the same tool call 6 times in 10 minutes, or keeps failing, Desk tells it to stop and ask you. If it carries
-                  on, it finishes that turn and waits for you.
+                  When a session keeps running the same tool call, or its tool calls keep failing, Desk tells it to stop and ask you. If it
+                  carries on, it finishes that turn and waits for you.
                 </span>
               </span>
             </label>
@@ -157,10 +164,11 @@ function BudgetRow({
 }: {
   budget: BudgetView;
   names: Names;
-  onSave: (patch: { amount?: number; warnAt?: number; onExceed?: OnExceed }) => Promise<unknown>;
+  onSave: (patch: { amount?: number; warnAt?: number; onExceed?: OnExceed }) => Promise<boolean>;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [refused, setRefused] = useState(false);
   const label = scopeLabel(budget.scope, budget.group, names);
   const s = budget.standing;
   const pct = s ? Math.round(fillOf(s) * 100) : 0;
@@ -181,7 +189,14 @@ function BudgetRow({
           <EditBudget
             budget={budget}
             onCancel={() => setEditing(false)}
-            onSave={(patch) => onSave(patch).then(() => setEditing(false))}
+            refused={refused}
+            onSave={(patch) =>
+              onSave(patch).then((done) => {
+                // Refused: the editor stays, with what was typed.
+                setRefused(!done);
+                if (done) setEditing(false);
+              })
+            }
           />
         )}
       </span>
@@ -199,10 +214,12 @@ function BudgetRow({
 
 function EditBudget({
   budget,
+  refused,
   onCancel,
   onSave,
 }: {
   budget: BudgetView;
+  refused: boolean;
   onCancel: () => void;
   onSave: (patch: { amount: number; warnAt: number; onExceed: OnExceed }) => void;
 }) {
@@ -223,6 +240,11 @@ function EditBudget({
       <Amount unit={budget.unit} value={amount} onChange={setAmount} />
       <WarnAt value={warn} onChange={setWarn} />
       <WhenOver value={over} onChange={setOver} />
+      {refused && (
+        <span className="small state-blocked budget-refused" role="alert">
+          Not saved: see why above.
+        </span>
+      )}
       <span className="budget-actions">
         <button type="submit" className="btn btn-signal" disabled={!ok}>
           Save
@@ -235,7 +257,7 @@ function EditBudget({
   );
 }
 
-function AddBudget({ names, onAdd }: { names: Names; onAdd: (b: NewBudget) => Promise<unknown> }) {
+function AddBudget({ names, onAdd }: { names: Names; onAdd: (b: NewBudget) => Promise<boolean> }) {
   const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
@@ -269,7 +291,7 @@ function AddBudget({ names, onAdd }: { names: Names; onAdd: (b: NewBudget) => Pr
           warnAt,
           onExceed: over,
         })
-          .then(() => setAmount(""))
+          .then((done) => done && setAmount(""))
           .finally(() => setBusy(false));
       }}
     >
@@ -345,7 +367,7 @@ function Amount({ unit, value, onChange }: { unit: BudgetUnit; value: string; on
   return (
     <label className="budget-field">
       <span className="small">{unit === "usd" ? "Up to ($)" : "Up to (tokens)"}</span>
-      <input inputMode="decimal" value={value} placeholder={unit === "usd" ? "11" : "500000"} onChange={(e) => onChange(e.target.value)} />
+      <input inputMode="decimal" value={value} placeholder={unit === "usd" ? "11" : "500k"} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
 }

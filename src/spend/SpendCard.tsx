@@ -24,6 +24,7 @@ export function SpendCard() {
   const [period, setPeriod] = useState<FloorPeriod>("day");
   const view = useSpend((s) => s.views[period]);
   const budgets = useBudgets((s) => s.view);
+  const budgetsKept = useBudgets((s) => s.supported);
   const loadBudgets = useBudgets((s) => s.load);
   useEffect(() => {
     if (hub) {
@@ -65,7 +66,7 @@ export function SpendCard() {
         </>
       )}
       {limit && <Limit budget={limit} />}
-      <SpendLinks budgeted={!!budgets && budgets.budgets.length > 0} />
+      <SpendLinks budgeted={!!budgets && budgets.budgets.length > 0} kept={budgetsKept !== false} />
     </section>
   );
 }
@@ -116,7 +117,7 @@ function Limit({ budget }: { budget: BudgetView }) {
 }
 
 /** Where the numbers go further: the ledger's calls, and the budgets. */
-function SpendLinks({ budgeted }: { budgeted: boolean }) {
+function SpendLinks({ budgeted, kept }: { budgeted: boolean; kept: boolean }) {
   const openSettings = useUi((u) => u.openSettings);
   const setLedger = useUi((u) => u.setLedger);
   return (
@@ -124,9 +125,11 @@ function SpendLinks({ budgeted }: { budgeted: boolean }) {
       <button type="button" className="link" onClick={() => setLedger(true)}>
         Ledger
       </button>
-      <button type="button" className="link" onClick={() => openSettings("budgets")}>
-        {budgeted ? "Budgets" : "Set a budget"}
-      </button>
+      {kept && (
+        <button type="button" className="link" onClick={() => openSettings("budgets")}>
+          {budgeted ? "Budgets" : "Set a budget"}
+        </button>
+      )}
     </p>
   );
 }

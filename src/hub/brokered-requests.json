@@ -62,7 +62,7 @@
   {
     "kind": "http",
     "method": "GET",
-    "path": "/api/desk/ledger?period=week&session=s1&engine=codex&before=1%7Eclaude%7Ek"
+    "path": "/api/desk/ledger?period=week&session=s1&before=1%7Eclaude%7Ek"
   },
   {
     "kind": "http",

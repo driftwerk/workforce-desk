@@ -49,7 +49,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   setBreakerRules: (h) => h.setBreakerRules({ loops: true }),
   breakerContinue: (h) => h.breakerContinue("session:s1"),
   breakerKeep: (h) => h.breakerKeep("pool:desk"),
-  ledger: (h) => Promise.all([h.ledger({ period: "day" }), h.ledger({ period: "week", session: "s1", engine: "codex", before: "1~claude~k" })]),
+  ledger: (h) => Promise.all([h.ledger({ period: "day" }), h.ledger({ period: "week", session: "s1", before: "1~claude~k" })]),
   accounts: (h) => h.accounts(),
   addAccount: (h) => h.addAccount({ engine: "claude", name: "Work" }),
   updateAccount: (h) => h.updateAccount("a1", { isDefault: true }),

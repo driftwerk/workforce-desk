@@ -938,3 +938,6 @@ legend.set-label {
   display: block;
   margin-top: 2px;
 }
+.budget-refused {
+  flex-basis: 100%;
+}

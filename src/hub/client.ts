@@ -305,10 +305,9 @@ export class DeskHub {
   /** Leaves what a breaker holds paused; its Floor need goes. */
   breakerKeep = (subject: string): Promise<BreakerView> => this.call("POST", "/api/desk/breakers/keep", { subject });
   /** The ledger's calls in `period`, newest first, a page from `before`. */
-  ledger = (q: { period: SpendPeriod; session?: string; engine?: string; before?: string }): Promise<LedgerPage> => {
+  ledger = (q: { period: SpendPeriod; session?: string; before?: string }): Promise<LedgerPage> => {
     const params = new URLSearchParams({ period: q.period });
     if (q.session) params.set("session", q.session);
-    if (q.engine) params.set("engine", q.engine);
     if (q.before) params.set("before", q.before);
     return this.call("GET", `/api/desk/ledger?${params.toString()}`);
   };

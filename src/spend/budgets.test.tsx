@@ -100,6 +100,10 @@ describe("budget words", () => {
     expect(parseAmount("0", "usd")).toBeNull();
     expect(parseAmount("1.5", "tokens")).toBeNull();
     expect(parseAmount("500,000", "tokens")).toBe(500_000);
+    expect(parseAmount("500k", "tokens")).toBe(500_000);
+    expect(parseAmount("1.2M", "tokens")).toBe(1_200_000);
+    expect(parseAmount("2.5k", "usd")).toBe(2500);
+    expect(parseAmount("lots", "usd")).toBeNull();
     expect(heldSession([held("session:s-1")], "s-1")?.subject).toBe("session:s-1");
     expect(heldSession([held("session:s-1")], "s-2")).toBeNull();
     const cleared = withBreaker(budgetsView({ breakers: [held("session:s-1")] }), { ...held("session:s-1"), level: { level: "clear" } });
@@ -160,6 +164,15 @@ describe("the spend card", () => {
     expect(useUi.getState().ledger).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Budgets" }));
     expect(useUi.getState().settings).toBe("budgets");
+  });
+
+  it("offers no budgets from a hub that keeps none", async () => {
+    const hub = { spend: vi.fn(async () => spendView), budgets: vi.fn(async () => null) };
+    useDesk.setState({ hub: hub as unknown as DeskHub });
+    render(<SpendCard />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /budget/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ledger" })).toBeTruthy();
   });
 
   it("offers to set a budget when there is none", async () => {
@@ -238,6 +251,16 @@ describe("Settings → Budgets", () => {
     expect(hub.breakerContinue).toHaveBeenCalledWith("session:s-1");
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Watch sessions for loops/ })));
     expect(hub.setBreakerRules).toHaveBeenCalledWith({ loops: true });
+  });
+
+  it("keeps the editor open, with what was typed, when a change is refused", async () => {
+    await show(budgetsView({ budgets: [budget()] }), { patchBudget: vi.fn(async () => Promise.reject(new Error("a budget's amount is more than nothing"))) });
+    const list = within(screen.getByRole("region", { name: "Your budgets" }));
+    fireEvent.click(list.getByRole("button", { name: "Change Everything on Desk's budget" }));
+    fireEvent.change(list.getByDisplayValue("11"), { target: { value: "15" } });
+    await act(async () => fireEvent.click(list.getByRole("button", { name: "Save" })));
+    expect(list.getByDisplayValue("15")).toBeTruthy();
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["a budget's amount is more than nothing", "Not saved: see why above."]);
   });
 
   it("says what went wrong when the hub refuses", async () => {
