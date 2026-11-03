@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { accountsOf, sessionsText, signInStep, useAccounts } from "../engines/accounts";
+import { accountsOf, problemText, sessionsText, signInStep, useAccounts } from "../engines/accounts";
 import { useDesk } from "../hub/store";
 import type { AccountSignIn, EngineAccount, EngineInfo } from "../hub/types";
 import { openUrl } from "../platform";
@@ -13,6 +13,8 @@ export function Accounts({ engine }: { engine: EngineInfo }) {
   const all = useAccounts((s) => s.accounts);
   const store = useAccounts((s) => s.store);
   const supported = useAccounts((s) => s.supported);
+  const problems = useAccounts((s) => s.problems);
+  const { hub, fail } = useDesk();
   const [adding, setAdding] = useState(false);
   useEffect(() => {
     void useAccounts.getState().load();
@@ -25,6 +27,14 @@ export function Accounts({ engine }: { engine: EngineInfo }) {
         <b className="small">Accounts</b>
         {store && <span className="faint small">Signed in once each, kept in {store}.</span>}
       </span>
+      {problems.map((p) => (
+        <p key={p.account} className="state-blocked small account-problem" role="status">
+          {problemText(p, store)}{" "}
+          <button type="button" className="link" onClick={() => hub?.dismissSignInProblem(p.account).catch(fail)}>
+            OK
+          </button>
+        </p>
+      ))}
       {accounts.length === 0 && !adding && (
         <span className="faint small">Sessions run on this computer’s sign-in. Add an account to run some on another subscription.</span>
       )}

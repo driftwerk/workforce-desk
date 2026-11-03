@@ -172,3 +172,19 @@ it("switches automatically only once the person turns it on", async () => {
   expect(setAutoSwitch).toHaveBeenCalledWith(true);
   expect(toggle.checked).toBe(true);
 });
+
+it("says when a sign-in can't be used, in plain words, until the person says OK", async () => {
+  const dismissSignInProblem = vi.fn(async () => undefined);
+  const full = withHub({ dismissSignInProblem }, [account("a-p", "Personal", { signedIn: false })]);
+  full.accounts = vi.fn(async () => ({
+    accounts: [account("a-p", "Personal", { signedIn: false })],
+    store: "the keychain",
+    signIns: [],
+    problems: [{ account: "a-p", name: "Personal", problem: "unreadable" as const }],
+  }));
+  render(<Accounts engine={claude} />);
+  await act(async () => {});
+  expect(screen.getByText(/Desk couldn’t read Personal’s sign-in from the keychain just now, so nothing was switched/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "OK" }));
+  expect(dismissSignInProblem).toHaveBeenCalledWith("a-p");
+});

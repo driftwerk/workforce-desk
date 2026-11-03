@@ -332,7 +332,7 @@ export type DeskEvent =
   /** A session's spend changed: what its engine recorded was read. */
   | { type: "spend"; session: string }
   /** The person's engine accounts changed: all of them as they now are. */
-  | { type: "accounts"; accounts: EngineAccount[]; needs?: AccountNeed[]; autoSwitch?: boolean }
+  | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[]; needs?: AccountNeed[]; autoSwitch?: boolean }
   /** Signing in to a new account moved on. */
   | { type: "accountSignIn"; signIn: AccountSignIn };
 
@@ -370,7 +370,9 @@ export interface AccountSide {
 export type AccountNeed =
   | { kind: "limit"; id: string; engine: Engine; from: AccountSide; to: AccountSide; sessions: string[]; resetsAt: string | null }
   | { kind: "allFull"; id: string; engine: Engine; resets: [AccountSide, string | null][] }
-  | { kind: "reset"; id: string; engine: Engine; account: AccountSide; from: AccountSide; sessions: string[] };
+  | { kind: "reset"; id: string; engine: Engine; account: AccountSide; from: AccountSide; sessions: string[] }
+  /** An account's sign-in can't be used: nothing switches to it. */
+  | { kind: "signIn"; id: string; engine: Engine; account: AccountSide; problem: SignInProblem["problem"] };
 
 /** What moving every session off an account did. */
 export interface SwitchedAll {
@@ -378,6 +380,14 @@ export interface SwitchedAll {
   afterTurn: string[];
   nextStart: string[];
   inTerminals: string[];
+}
+
+/** What is wrong with an account's sign-in on the hub's computer: gone,
+ *  unreadable just now, or left behind when the account was removed. */
+export interface SignInProblem {
+  account: string;
+  name: string;
+  problem: "gone" | "unreadable" | "notRemoved";
 }
 
 /** Where signing in through the engine's own command is. */
@@ -398,6 +408,7 @@ export interface AccountsInfo {
   signIns: AccountSignIn[];
   needs?: AccountNeed[];
   autoSwitch?: boolean;
+  problems?: SignInProblem[];
 }
 
 /** What adding an account did. */

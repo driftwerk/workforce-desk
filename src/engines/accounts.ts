@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
-import type { AccountNeed, AccountSignIn, Caps, Engine, EngineAccount, Session } from "../hub/types";
+import type { AccountNeed, AccountSignIn, Caps, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -74,6 +74,11 @@ export const needText = (n: AccountNeed, at: (iso: string) => string): { title: 
         title: `${n.account.name} has reset — switch ${sessionsCount(n.sessions.length)} back from ${n.from.name}?`,
         detail: null,
       };
+    case "signIn":
+      return {
+        title: n.problem === "notRemoved" ? `${n.account.name}’s sign-in was left behind` : `${n.account.name}’s sign-in can’t be used`,
+        detail: problemText({ account: n.account.id ?? "", name: n.account.name, problem: n.problem }, useAccounts.getState().store),
+      };
   }
 };
 
@@ -81,8 +86,22 @@ export const needText = (n: AccountNeed, at: (iso: string) => string): { title: 
 export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: string): EngineAccount | null =>
   accounts.find((a) => a.planKey && cardKey === `${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`) ?? null;
 
+/** What a sign-in problem says. */
+export const problemText = (p: SignInProblem, store: string | null): string => {
+  const where = store ?? "the hub's store";
+  switch (p.problem) {
+    case "gone":
+      return `${p.name}’s sign-in is no longer in ${where}: add the account again. Nothing is switched to it.`;
+    case "unreadable":
+      return `Desk couldn’t read ${p.name}’s sign-in from ${where} just now, so nothing was switched. Unlock the keychain, then try again.`;
+    case "notRemoved":
+      return `${p.name} is removed, but Desk couldn’t delete its sign-in from ${where}. Delete it there yourself.`;
+  }
+};
+
 interface AccountsState {
   accounts: EngineAccount[];
+  problems: SignInProblem[];
   needs: AccountNeed[];
   /** Desk moves sessions off an account at its limit by itself. */
   autoSwitch: boolean;
@@ -101,6 +120,7 @@ export const useAccounts = create<AccountsState>((set) => ({
   needs: [],
   autoSwitch: false,
   leftInTerminals: [],
+  problems: [],
   store: null,
   signIns: {},
   supported: null,
@@ -118,6 +138,7 @@ export const useAccounts = create<AccountsState>((set) => ({
         accounts: info.accounts,
         needs: info.needs ?? [],
         autoSwitch: info.autoSwitch ?? false,
+        problems: info.problems ?? [],
         store: info.store,
         signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
       });
@@ -133,7 +154,7 @@ deskListeners.add((e) => {
       void useAccounts.getState().load();
       return;
     case "accounts":
-      useAccounts.setState((s) => ({ accounts: e.accounts, needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
+      useAccounts.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
       return;
     case "accountSignIn":
       useAccounts.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));

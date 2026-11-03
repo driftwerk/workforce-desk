@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EngineAccount } from "../hub/types";
-import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
+import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
 
 const account = (id: string, isDefault = false, engine: EngineAccount["engine"] = "claude", sessions: string[] = []): EngineAccount => ({
   id,
@@ -45,4 +45,10 @@ it("finds a plan card's account by the key its readings have", () => {
   expect(accountOfCard([work], "claude:ab12")?.name).toBe("Work");
   expect(accountOfCard([work], "claude:zz")).toBeNull();
   expect(accountOfCard([account("x")], "claude:ab12")).toBeNull();
+});
+
+it("says each sign-in problem with where the sign-ins are kept", () => {
+  const p = (problem: "gone" | "unreadable" | "notRemoved") => problemText({ account: "a", name: "Work", problem }, "the keychain");
+  expect(p("gone")).toBe("Work’s sign-in is no longer in the keychain: add the account again. Nothing is switched to it.");
+  expect(p("notRemoved")).toContain("couldn’t delete its sign-in from the keychain");
 });

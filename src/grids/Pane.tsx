@@ -604,7 +604,10 @@ function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], s
   };
   const account: MenuEntry[] = session
     ? [
-        ...accounts.map((a): MenuEntry => ({ kind: "item", label: a.name, checked: session.account?.id === a.id, onSelect: () => onAccount(a.id) })),
+        // Only an account whose sign-in the hub can read is one to move to.
+        ...accounts
+          .filter((a) => a.signedIn || session.account?.id === a.id)
+          .map((a): MenuEntry => ({ kind: "item", label: a.name, checked: session.account?.id === a.id, onSelect: () => onAccount(a.id) })),
         { kind: "item", label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) },
       ]
     : [];

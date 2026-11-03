@@ -55,13 +55,19 @@ function Need({ need }: { need: AccountNeed }) {
         <span className="restore-text">
           <b>{title}</b>
           {detail && <span className="muted small">{detail}</span>}
-          {need.kind !== "allFull" && (
+          {(need.kind === "limit" || need.kind === "reset") && (
             <span className="muted small">Idle sessions move now; working ones once their turn ends. Desk never switches back by itself.</span>
           )}
         </span>
-        <button type="button" className="btn btn-ghost" onClick={() => hub?.putOffNeed(need.id).catch(fail)}>
-          Not now
-        </button>
+        {need.kind === "signIn" ? (
+          <button type="button" className="btn btn-ghost" onClick={() => need.account.id && hub?.dismissSignInProblem(need.account.id).catch(fail)}>
+            OK
+          </button>
+        ) : (
+          <button type="button" className="btn btn-ghost" onClick={() => hub?.putOffNeed(need.id).catch(fail)}>
+            Not now
+          </button>
+        )}
         {need.kind === "limit" && (
           <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void move(need.from.id, need.to.id)}>
             Switch all

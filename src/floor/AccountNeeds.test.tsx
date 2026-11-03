@@ -73,3 +73,15 @@ it("shows nothing when no account needs the person", () => {
   const { container } = render(<AccountNeeds />);
   expect(container.textContent).toBe("");
 });
+
+it("says why an account's sign-in can't be used, and OK clears it", async () => {
+  const dismissSignInProblem = vi.fn(async () => undefined);
+  withHub({ dismissSignInProblem });
+  useAccounts.setState({ store: "the keychain", needs: [{ kind: "signIn", id: "sign-in:p", engine: "claude", account: personal, problem: "unreadable" }] });
+  render(<AccountNeeds />);
+  expect(screen.getByText("Personal’s sign-in can’t be used")).toBeTruthy();
+  expect(screen.getByText(/so nothing was switched/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Switch all" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "OK" }));
+  expect(dismissSignInProblem).toHaveBeenCalledWith("a-p");
+});
