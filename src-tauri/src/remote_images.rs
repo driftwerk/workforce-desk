@@ -13,10 +13,19 @@ static FETCHER: LazyLock<Fetcher> = LazyLock::new(Fetcher::default);
 
 /// The picture at `url` as the page reads it: the length of its meta's JSON
 /// (four bytes, big-endian), that JSON (`{"mime": …}`, what its bytes say it
-/// is), then the bytes. Refused or failed as `{kind, reason}`.
+/// is), then the bytes. Refused or failed as `{kind, reason}`. `same_site`
+/// when it's shown without a click, because its site is one the person
+/// always shows: a redirect off that site is then `{kind: "moved"}`.
 #[tauri::command]
-pub async fn remote_image_fetch(url: String) -> Result<tauri::ipc::Response, FetchError> {
-    let image = FETCHER.fetch(&url).await?;
+pub async fn remote_image_fetch(
+    url: String,
+    same_site: Option<bool>,
+) -> Result<tauri::ipc::Response, FetchError> {
+    let image = if same_site.unwrap_or(false) {
+        FETCHER.fetch_same_site(&url).await?
+    } else {
+        FETCHER.fetch(&url).await?
+    };
     Ok(tauri::ipc::Response::new(framed(image.mime, &image.bytes)))
 }
 

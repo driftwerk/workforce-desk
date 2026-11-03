@@ -6,6 +6,7 @@ pub mod backend;
 #[cfg(unix)]
 pub mod holder;
 pub mod host;
+pub mod image_size;
 pub mod install;
 pub mod net;
 #[cfg(unix)]

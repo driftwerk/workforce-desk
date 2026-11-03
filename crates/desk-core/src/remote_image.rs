@@ -16,7 +16,11 @@
 //!   would never see where the request went);
 //! - up to [`MAX_BYTES`], within [`TOTAL_TIMEOUT`];
 //! - for a PNG, JPEG, GIF, WebP or AVIF picture, told by its bytes, whatever
-//!   the site says it is. Never SVG, which can carry script.
+//!   the site says it is. Never SVG, which can carry script;
+//! - of a size the page can decode: at most [`MAX_SIDE`] pixels a side and
+//!   [`MAX_PIXELS`] a frame, and [`MAX_ALL_FRAMES`] over an animation's
+//!   frames, read from its headers (a small file can declare a huge picture);
+//! - at most [`MAX_AT_ONCE`] at a time.
 
 use std::fmt;
 use std::future::Future;
@@ -39,6 +43,14 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 /// The most redirects followed.
 pub const MAX_REDIRECTS: usize = 5;
+/// The longest side of a picture shown.
+pub const MAX_SIDE: u32 = 8192;
+/// The most pixels in one frame.
+pub const MAX_PIXELS: u64 = 40_000_000;
+/// The most pixels over all of an animation's frames.
+pub const MAX_ALL_FRAMES: u64 = 100_000_000;
+/// The most fetches at once; the rest wait their turn.
+pub const MAX_AT_ONCE: usize = 4;
 
 /// Why a picture isn't shown, in words the placeholder can say as they are.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -48,12 +60,16 @@ pub enum FetchError {
     Refused(String),
     /// Desk tried and it didn't come.
     Failed(String),
+    /// Fetched as one of a site's "always show" pictures, it redirected to
+    /// another site (or port), which that choice doesn't cover: the page
+    /// shows its placeholder instead.
+    Moved(String),
 }
 
 impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FetchError::Refused(r) | FetchError::Failed(r) => f.write_str(r),
+            FetchError::Refused(r) | FetchError::Failed(r) | FetchError::Moved(r) => f.write_str(r),
         }
     }
 }
@@ -87,10 +103,7 @@ pub fn sniff(bytes: &[u8]) -> Option<&'static str> {
         Some("image/gif")
     } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
         Some("image/webp")
-    } else if bytes.len() >= 12
-        && &bytes[4..8] == b"ftyp"
-        && matches!(&bytes[8..12], b"avif" | b"avis")
-    {
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" && &bytes[8..12] == b"avif" {
         Some("image/avif")
     } else {
         None
@@ -136,9 +149,13 @@ fn public_v6(ip: Ipv6Addr) -> bool {
         // `::` and `::1` land in 0.0.0.0/8, so they're refused too.
         return public_v4(inner(s[6], s[7]));
     }
-    // NAT64, the well-known prefix and the local-use one (64:ff9b:1::/48).
-    if s[..2] == [0x64, 0xff9b] && (s[2..6] == [0; 4] || s[2] == 1) {
+    // NAT64's well-known prefix reaches the IPv4 address inside it.
+    if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
         return public_v4(inner(s[6], s[7]));
+    }
+    // Local-use NAT64 (64:ff9b:1::/48) is some network's own translator.
+    if s[..3] == [0x64, 0xff9b, 1] {
+        return false;
     }
     if s[0] == 0x2002 {
         return public_v4(inner(s[1], s[2]));
@@ -231,6 +248,7 @@ impl Policy {
 pub struct Fetcher {
     client: reqwest::Client,
     policy: Policy,
+    turns: tokio::sync::Semaphore,
 }
 
 impl Default for Fetcher {
@@ -254,7 +272,11 @@ impl Fetcher {
             }))
             .build()
             .expect("an HTTP client");
-        Fetcher { client, policy }
+        Fetcher {
+            client,
+            policy,
+            turns: tokio::sync::Semaphore::new(MAX_AT_ONCE),
+        }
     }
 
     /// Whether `url` may be asked for at all: before the first request and
@@ -285,10 +307,36 @@ impl Fetcher {
 
     /// The picture at `raw`, following up to [`MAX_REDIRECTS`] redirects.
     pub async fn fetch(&self, raw: &str) -> Result<Image, FetchError> {
+        self.fetch_from(raw, false).await
+    }
+
+    /// [`Fetcher::fetch`] for a picture shown because its site is one the
+    /// person always shows: a redirect may not leave that site (its host and
+    /// port), or the answer is [`FetchError::Moved`].
+    pub async fn fetch_same_site(&self, raw: &str) -> Result<Image, FetchError> {
+        self.fetch_from(raw, true).await
+    }
+
+    async fn fetch_from(&self, raw: &str, same_site: bool) -> Result<Image, FetchError> {
+        let _turn = self.turns.acquire().await.expect("never closed");
         let deadline = Instant::now() + TOTAL_TIMEOUT;
         let mut url = Url::parse(raw.trim()).map_err(|_| refused("That isn't a web address."))?;
+        let site = (
+            url.host_str().map(str::to_ascii_lowercase),
+            url.port_or_known_default(),
+        );
         for _ in 0..=MAX_REDIRECTS {
             self.check(&url)?;
+            if same_site
+                && (
+                    url.host_str().map(str::to_ascii_lowercase),
+                    url.port_or_known_default(),
+                ) != site
+            {
+                return Err(FetchError::Moved(
+                    "It moved to another site, so it waits for you to show it.".into(),
+                ));
+            }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return Err(failed("The site took too long to answer."));
@@ -306,10 +354,12 @@ impl Fetcher {
                 .map_err(why)?;
             let status = answer.status();
             if status.is_redirection() {
-                let next = answer
-                    .headers()
-                    .get(LOCATION)
-                    .and_then(|l| l.to_str().ok())
+                let Some(location) = answer.headers().get(LOCATION) else {
+                    return Err(failed("The site said the picture moved, but not where to."));
+                };
+                let next = location
+                    .to_str()
+                    .ok()
                     .and_then(|l| url.join(l).ok())
                     .ok_or_else(|| failed("The site sent Desk somewhere it couldn't follow."))?;
                 url = next;
@@ -338,10 +388,34 @@ impl Fetcher {
                 bytes.extend_from_slice(&chunk);
             }
             let mime = sniff(&bytes).ok_or_else(|| refused(NOT_AN_IMAGE))?;
+            check_size(mime, &bytes)?;
             return Ok(Image { mime, bytes });
         }
         Err(failed("The site redirected Desk too many times."))
     }
+}
+
+/// Whether a picture's declared size is one the page can decode.
+fn check_size(mime: &str, bytes: &[u8]) -> Result<(), FetchError> {
+    let size = crate::image_size::read(mime, bytes)
+        .ok_or_else(|| refused("Desk couldn't read how big the picture is."))?;
+    let frame = size.width as u64 * size.height as u64;
+    if size.width == 0 || size.height == 0 {
+        return Err(refused("Desk couldn't read how big the picture is."));
+    }
+    if size.width > MAX_SIDE || size.height > MAX_SIDE || frame > MAX_PIXELS {
+        return Err(refused(&format!(
+            "It's {} × {} pixels, too big to show.",
+            size.width, size.height
+        )));
+    }
+    if frame * size.frames as u64 > MAX_ALL_FRAMES {
+        return Err(refused(&format!(
+            "It's an animation of {} frames of {} × {} pixels, too big to show.",
+            size.frames, size.width, size.height
+        )));
+    }
+    Ok(())
 }
 
 /// A failed request in plain words: a refused name says so.
@@ -368,7 +442,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+    /// A 64 × 64 PNG's signature and header: all that's read of it.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x40\0\0\0\x40\x08\x06\0\0\0\0\0\0\0";
 
     /// A policy that lets the test's own server on this computer answer over
     /// plain http, and nothing else that isn't public.
@@ -459,6 +534,8 @@ mod tests {
             "::ffff:169.254.169.254",
             "::127.0.0.1",
             "64:ff9b::a00:1",
+            "64:ff9b:1::808:808",
+            "64:ff9b:1:abcd::1",
             "2002:7f00:1::",
             "fc00::1",
             "fd12:3456::1",
@@ -715,6 +792,7 @@ mod tests {
         assert_eq!(sniff(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
         assert_eq!(sniff(b"\0\0\0\x1cftypavif\0\0"), Some("image/avif"));
         for not in [
+            &b"\0\0\0\x1cftypavis\0\0"[..],
             &b"<svg"[..],
             b"\xEF\xBB\xBF<svg",
             b"BM....",
@@ -724,6 +802,125 @@ mod tests {
         ] {
             assert_eq!(sniff(not), None);
         }
+    }
+
+    #[tokio::test]
+    async fn a_picture_too_big_to_decode_is_refused_whatever_its_file_size() {
+        use crate::image_size::tests::{gif_of, png_of, webp_of};
+        for (bomb, why) in [
+            (png_of(10_000, 10), "10000 × 10"),
+            (png_of(7_000, 7_000), "7000 × 7000"),
+            (gif_of(1_000, 1_000, 101), "101 frames"),
+            (webp_of(2_000, 2_000, 30), "30 frames"),
+        ] {
+            let (url, _) = server(ok_head("image/png", Some(bomb.len())), bomb).await;
+            match here().fetch(&format!("{url}/a")).await {
+                Err(FetchError::Refused(r)) => assert!(r.contains(why), "{r}"),
+                other => panic!("{why}: {other:?}"),
+            }
+        }
+        for fine in [
+            png_of(8_192, 4_000),
+            gif_of(400, 300, 200),
+            webp_of(800, 600, 50),
+        ] {
+            let (url, _) = server(ok_head("image/png", Some(fine.len())), fine).await;
+            assert!(here().fetch(&format!("{url}/a")).await.is_ok());
+        }
+        // A size that can't be read is refused too.
+        let blank = b"\x89PNG\r\n\x1a\n\0\0\0\0JUNK".to_vec();
+        let (url, _) = server(ok_head("image/png", Some(blank.len())), blank).await;
+        assert!(matches!(
+            here().fetch(&format!("{url}/a")).await,
+            Err(FetchError::Refused(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn at_most_four_fetches_run_at_once() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let (now, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (n, m) = (now.clone(), most.clone());
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let (n, m) = (n.clone(), m.clone());
+                tokio::spawn(async move {
+                    let at = n.fetch_add(1, Ordering::SeqCst) + 1;
+                    m.fetch_max(at, Ordering::SeqCst);
+                    let mut buf = [0u8; 4096];
+                    let _ = s.read(&mut buf).await;
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    let _ = s
+                        .write_all(ok_head("image/png", Some(PNG.len())).as_bytes())
+                        .await;
+                    let _ = s.write_all(PNG).await;
+                    n.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        let desk = Arc::new(here());
+        let all: Vec<_> = (0..10)
+            .map(|i| {
+                let (desk, url) = (desk.clone(), format!("{url}/{i}"));
+                tokio::spawn(async move { desk.fetch(&url).await })
+            })
+            .collect();
+        for one in all {
+            assert!(one.await.unwrap().is_ok());
+        }
+        assert_eq!(most.load(Ordering::SeqCst), MAX_AT_ONCE);
+    }
+
+    #[tokio::test]
+    async fn an_always_shown_picture_stays_on_its_site() {
+        let (elsewhere, elsewhere_hits) =
+            server(ok_head("image/png", Some(PNG.len())), PNG.to_vec()).await;
+        // Another port on the same host is another site.
+        let (start, _) = server(
+            format!("HTTP/1.1 302 Found\r\nlocation: {elsewhere}/b.png\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"),
+            vec![],
+        )
+        .await;
+        assert!(matches!(
+            here().fetch_same_site(&format!("{start}/a")).await,
+            Err(FetchError::Moved(_))
+        ));
+        assert_eq!(elsewhere_hits.load(Ordering::SeqCst), 0);
+        // Asked for by a click, the same redirect is followed.
+        assert!(here().fetch(&format!("{start}/a")).await.is_ok());
+        // A redirect on the same site is fine either way.
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let same = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let first = String::from_utf8_lossy(&buf[..n]).starts_with("GET /a ");
+                if first {
+                    let _ = s.write_all(b"HTTP/1.1 301 Moved\r\nlocation: /b.png\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+                } else {
+                    let _ = s
+                        .write_all(ok_head("image/png", Some(PNG.len())).as_bytes())
+                        .await;
+                    let _ = s.write_all(PNG).await;
+                }
+            }
+        });
+        assert!(here().fetch_same_site(&format!("{same}/a")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_redirect_that_says_nowhere_is_said_plainly() {
+        let (url, _) = server(
+            "HTTP/1.1 302 Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".into(),
+            vec![],
+        )
+        .await;
+        assert_eq!(
+            here().fetch(&format!("{url}/a")).await,
+            Err(failed("The site said the picture moved, but not where to."))
+        );
     }
 
     #[test]
