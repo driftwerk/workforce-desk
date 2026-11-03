@@ -99,13 +99,13 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
     : ahead && "atLimit" in ahead
       ? `At the limit. It resets at ${resets}.`
       : ahead && resetAt !== null
-        ? `At this pace you reach the limit about ${clock(ahead.hitsAt)}, ${howLong(resetAt - ahead.hitsAt)} before it resets.`
+        ? `At this pace you reach the limit about ${dayClock(ahead.hitsAt, now)}, ${howLong(resetAt - ahead.hitsAt)} before it resets.`
         : null;
   const when = resetAt === null || reset ? null : w.minutes >= DAY_MINUTES ? `resets ${resets}` : `resets ${resets} · in ${durationOf(now, resetAt)}`;
   const spoken = [
     `${percent} percent of the ${label === "Weekly" ? "weekly limit" : label} used`,
     reset ? `reset at ${resets}` : resets && `resets ${resets}`,
-    ahead && "hitsAt" in ahead && `at this pace it runs out about ${clock(ahead.hitsAt)}`,
+    ahead && "hitsAt" in ahead && `at this pace it runs out about ${dayClock(ahead.hitsAt, now)}`,
   ]
     .filter(Boolean)
     .join("; ");
