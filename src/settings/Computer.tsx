@@ -5,7 +5,7 @@ import { agentKey, type Agent } from "../chat/types";
 import { askingOf, levelLabel, levelOf, KINDS } from "../computer/access";
 import { ActivityList, EMPTY_ACTIVITY, GrantList } from "../computer/Lists";
 import { useAgentConfigs } from "../crew/agentBrain";
-import type { ComputerActivityPage, ComputerGrant, DiskAccess } from "../hub/client";
+import { HubError, type ComputerActivityPage, type ComputerGrant, type DiskAccess } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { openUrl } from "../platform";
 import { openAgent } from "../rooms/AgentPanel";
@@ -27,7 +27,7 @@ export function Computer() {
   const agents: Agent[] = roster.filter((a) => a.hubId === localHub?.id);
   const names = Object.fromEntries(agents.map((a) => [a.id, a.name]));
 
-  const [stopped, setStopped] = useState<boolean | null | "failed">(null);
+  const [stopped, setStopped] = useState<boolean | null | "failed" | "old">(null);
   const [disk, setDisk] = useState<DiskAccess | null>(null);
   const [grants, setGrants] = useState<ComputerGrant[] | null | "failed">(null);
   const [page, setPage] = useState<ComputerActivityPage | null | "failed">(null);
@@ -46,7 +46,7 @@ export function Computer() {
     hub
       .computerAccess()
       .then((a) => setStopped(a.stopped))
-      .catch(() => setStopped("failed"));
+      .catch((e: unknown) => setStopped(e instanceof HubError && e.status === 404 ? "old" : "failed"));
     hub
       .diskAccess()
       .then(setDisk)
@@ -108,6 +108,8 @@ export function Computer() {
       </p>
       {!hub ? (
         <p className="faint small">Not connected to a hub.</p>
+      ) : stopped === "old" ? (
+        <p className="faint small">This hub doesn’t have that yet.</p>
       ) : (
         <>
           {stopped === "failed" ? (

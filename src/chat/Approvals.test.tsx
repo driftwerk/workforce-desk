@@ -98,6 +98,20 @@ describe("Desk's own card for a call on this computer", () => {
     expect(onAnswer).not.toHaveBeenCalled();
   });
 
+  it("makes no answer primary for what can't be undone, and offers deleting in its folder", () => {
+    render(
+      <PromptCard
+        prompt={ask({ allow_in_folder: "~/dev/acme-web", facts: { effect: "exec", command: "rm -rf node_modules", cwd: "~/dev/acme-web", why: "Can't be undone" } })}
+        onAnswer={() => true}
+      />,
+    );
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Allow once", "Always allow deleting in acme-web", "Deny"]);
+    expect(screen.getByRole("button", { name: "Allow once" }).className).not.toContain("btn-signal");
+    cleanup();
+    render(<PromptCard prompt={ask({ facts })} onAnswer={() => true} />);
+    expect(screen.getByRole("button", { name: "Allow once" }).className).toContain("btn-signal");
+  });
+
   it("names the connector a write would always be allowed to", () => {
     render(
       <PromptCard

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { agentKey, type Agent } from "../chat/types";
-import type { ComputerActivityRow, ComputerGrant } from "../hub/client";
+import { HubError, type ComputerActivityRow, type ComputerGrant } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { useUi } from "../shell/ui";
@@ -20,7 +20,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
   const config = useAgentConfigs((s) => s.configs[key]);
   const [saving, setSaving] = useState<Level | Asking | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [grants, setGrants] = useState<ComputerGrant[] | null | "failed">(null);
+  const [grants, setGrants] = useState<ComputerGrant[] | null | "failed" | "old">(null);
   const [rows, setRows] = useState<ComputerActivityRow[] | null | "failed">(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
     hub
       .computerGrants(agent.id)
       .then(setGrants)
-      .catch(() => setGrants("failed"));
+      .catch((e: unknown) => setGrants(e instanceof HubError && e.status === 404 ? "old" : "failed"));
     hub
       .computerActivity({ agent: agent.id })
       .then((p) => setRows(p.rows.slice(0, RECENT)))
@@ -139,7 +139,9 @@ export function AgentAccess({ agent }: { agent: Agent }) {
           <div className="ability-head">
             <h2 id="computer-grants-head">Allowed for {agent.name}</h2>
           </div>
-          {grants === "failed" ? (
+          {grants === "old" ? (
+            <p className="small faint">This hub doesn’t have that yet.</p>
+          ) : grants === "failed" ? (
             <p className="small state-blocked">Couldn’t read what’s allowed just now.</p>
           ) : grants === null ? (
             <p className="small faint">Reading…</p>

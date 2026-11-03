@@ -152,6 +152,20 @@ describe("Settings → This computer", () => {
   });
 });
 
+describe("a hub without these routes", () => {
+  it("says it doesn't have that yet, in Settings and on the tab", async () => {
+    const { HubError } = await import("../hub/client");
+    const old = () => Promise.reject(new HubError(404, "This hub doesn’t have that yet."));
+    setUp(fakeHub({ computerAccess: vi.fn(old), computerGrants: vi.fn(old), computerActivity: vi.fn(old), diskAccess: vi.fn(old) }));
+    render(<Computer />);
+    expect(await screen.findByText("This hub doesn’t have that yet.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop all access now" })).toBeNull();
+    cleanup();
+    render(<AgentAccess agent={allan} />);
+    expect(await screen.findByText("This hub doesn’t have that yet.")).toBeTruthy();
+  });
+});
+
 describe("an agent's This computer tab", () => {
   it("offers two ways of Full access, asking only before irreversible things first", async () => {
     const hub = fakeHub();

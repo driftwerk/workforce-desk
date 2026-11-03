@@ -13,9 +13,13 @@ export const ASKING: { id: Asking; title: string; line: string }[] = [
   {
     id: "irreversible",
     title: "Ask only before irreversible things",
-    line: "Deleting outside its folder, force-pushing, rewriting history and sending to people ask you first. Everything else runs.",
+    line: "Deleting outside its folder, force pushes and hard resets, and sending to people ask you first. Everything else runs.",
   },
-  { id: "never", title: "Do anything", line: "Never asks. It can delete, push and send without you." },
+  {
+    id: "never",
+    title: "Do anything",
+    line: "Never asks before what it does on this computer, deleting and force pushes included. Sending to people still asks you in your Desk chats.",
+  },
 ];
 
 export const LEVELS: { id: Level; title: string; line: string }[] = [

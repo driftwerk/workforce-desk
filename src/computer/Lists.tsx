@@ -53,7 +53,7 @@ export function ActivityList({ rows, names }: { rows: ComputerActivityRow[]; nam
                 {r.doing}
               </span>
             </span>
-            <span className={`computer-chip ${o.tone}`}>{o.text}</span>
+            <span className={`computer-chip small ${o.tone}`}>{o.text}</span>
           </li>
         );
       })}

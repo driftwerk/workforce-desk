@@ -56,6 +56,8 @@ export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (ch
   const facts = options.facts ?? null;
   const folder = options.allow_in_folder ?? null;
   const connector = facts?.effect === "connector";
+  // What can't be undone isn't the easy answer: no answer is primary.
+  const irreversible = facts?.why === "Can't be undone" || facts?.why === "Can't tell what this command runs";
   return (
     <div
       className={`dm-action dm-approval${facts ? " computer-ask" : ""}`}
@@ -92,7 +94,7 @@ export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (ch
       </span>
       <span className="dm-action-buttons">
         {options.allow_once && (
-          <button type="button" className="btn btn-signal" onClick={() => answer("allow_once")}>
+          <button type="button" className={irreversible ? "btn" : "btn btn-signal"} onClick={() => answer("allow_once")}>
             Allow once
           </button>
         )}
@@ -103,7 +105,11 @@ export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (ch
         )}
         {folder && (
           <button type="button" className="btn" onClick={() => answer("allow_in_folder")}>
-            {connector ? `Always allow writes to ${folder}` : `Always allow in ${folderName(folder)}`}
+            {connector
+              ? `Always allow writes to ${folder}`
+              : irreversible
+                ? `Always allow deleting in ${folderName(folder)}`
+                : `Always allow in ${folderName(folder)}`}
           </button>
         )}
         {options.allow_always && (
