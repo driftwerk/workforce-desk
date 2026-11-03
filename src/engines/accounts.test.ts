@@ -1,0 +1,41 @@
+import { expect, it } from "vitest";
+import type { EngineAccount } from "../hub/types";
+import { OWN_SIGN_IN, accountOfChoice, accountsOf, defaultChoice, hasAccounts, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
+
+const account = (id: string, isDefault = false, engine: EngineAccount["engine"] = "claude", sessions: string[] = []): EngineAccount => ({
+  id,
+  engine,
+  name: id,
+  isDefault,
+  signedIn: true,
+  sessions,
+  createdAt: "2026-11-03T09:00:00Z",
+});
+
+it("lists an engine's accounts default first, and starts on the default or the CLI's own sign-in", () => {
+  const all = [account("Personal"), account("Work", true), account("Team", true, "codex")];
+  expect(accountsOf(all, "claude").map((a) => a.id)).toEqual(["Work", "Personal"]);
+  expect(defaultChoice(all, "claude")).toBe("Work");
+  expect(defaultChoice([account("Personal")], "claude")).toBe(OWN_SIGN_IN);
+  expect(accountOfChoice(OWN_SIGN_IN)).toBeNull();
+  expect(accountOfChoice("Work")).toBe("Work");
+  expect(hasAccounts({ accounts: "token" } as never)).toBe(true);
+  expect(hasAccounts({ accounts: "none" } as never)).toBe(false);
+  expect(hasAccounts(undefined)).toBe(false);
+});
+
+it("names a session's account beside its engine, and a switch that waits", () => {
+  expect(withAccount("Claude Code", { account: { id: "a", name: "Work" } })).toBe("Claude Code · Work");
+  expect(withAccount("Claude Code", { account: null })).toBe("Claude Code");
+  expect(switchingText({ switchingTo: { id: "b", name: "Personal" } })).toBe("Moves to Personal when this turn ends");
+  expect(switchingText({ switchingTo: null })).toBeNull();
+  expect(sessionsText(account("x", false, "claude", ["s1", "s2", "s3"]))).toBe("3 sessions on it");
+  expect(sessionsText(account("x"))).toBe("No sessions on it now");
+});
+
+it("says where a sign-in is in plain words, and why it failed as the hub says", () => {
+  const base = { id: "i", engine: "claude" as const, name: "Work" };
+  expect(signInStep({ ...base, state: "open", url: null })).toBe("Finish signing in in your browser.");
+  expect(signInStep({ ...base, state: "done", account: "a" })).toBe("Work is added.");
+  expect(signInStep({ ...base, state: "failed", why: "the sign-in took too long: start it again" })).toBe("the sign-in took too long: start it again");
+});

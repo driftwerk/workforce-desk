@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, defaultChoice, hasAccounts, useAccounts } from "../engines/accounts";
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useDesk } from "../hub/store";
@@ -18,6 +19,9 @@ export function NewSession({ onClose }: { onClose: () => void }) {
   const [approveForMe, setApproveForMe] = useState(false);
   const [busy, setBusy] = useState(false);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
+  const allAccounts = useAccounts((s) => s.accounts);
+  // The person's pick, by engine; until they pick, the engine's default.
+  const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
   useEffect(() => {
     let live = true;
     hub
@@ -32,6 +36,11 @@ export function NewSession({ onClose }: { onClose: () => void }) {
   const caps = defaultCaps(engines?.find((e) => e.engine === engine));
   const inDesk = answersInDesk(engine, caps);
   const canApproveForMe = !!caps?.approveForMe;
+  const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
+  const account = picked[engine] ?? defaultChoice(allAccounts, engine);
+  useEffect(() => {
+    void useAccounts.getState().load();
+  }, [hub]);
 
   const choose = async () => {
     const dir = await pickFolder();
@@ -52,6 +61,7 @@ export function NewSession({ onClose }: { onClose: () => void }) {
         goal,
         approvals: inDesk ? approvals : undefined,
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
+        account: accounts.length > 0 ? accountOfChoice(account) : undefined,
         worktree: worktree.trim() || undefined,
         env: await pluginEnv(),
       });
@@ -96,6 +106,21 @@ export function NewSession({ onClose }: { onClose: () => void }) {
           <span>New worktree (optional branch name)</span>
           <input className="mono" value={worktree} onChange={(e) => setWorktree(e.target.value)} placeholder="desk/auth-fix" />
         </label>
+        {accounts.length > 0 && (
+          <div className="field">
+            <span>Account</span>
+            <div className="seg" role="radiogroup" aria-label="Account">
+              {accounts.map((a) => (
+                <button key={a.id} type="button" role="radio" aria-checked={account === a.id} onClick={() => setPicked((p) => ({ ...p, [engine]: a.id }))}>
+                  {a.name}
+                </button>
+              ))}
+              <button type="button" role="radio" aria-checked={account === OWN_SIGN_IN} onClick={() => setPicked((p) => ({ ...p, [engine]: OWN_SIGN_IN }))}>
+                {OWN_SIGN_IN_LABEL}
+              </button>
+            </div>
+          </div>
+        )}
         {caps?.notes.map((n) => (
           <p key={n} className="muted small">
             {n}

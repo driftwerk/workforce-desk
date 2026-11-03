@@ -17,6 +17,9 @@ export interface Caps {
   /** It can start with its own reviewer answering its approvals
    *  ("Approve for me"); absent from older hubs. */
   approveForMe?: boolean;
+  /** Whether its sessions can each run on one of the person's accounts
+   *  (`token`: a `setup-token` sign-in per account); absent from older hubs. */
+  accounts?: "token" | "none";
   /** What the person reads beside it. */
   notes: string[];
 }
@@ -120,6 +123,10 @@ export interface Session {
   approvals: "desk" | "terminal";
   /** Codex's own reviewer answers its approvals; absent from older hubs. */
   approveForMe?: boolean;
+  /** The person's account it runs on; null: the CLI's own sign-in. */
+  account?: AccountRef | null;
+  /** The account it moves to once its turn ends, while a switch waits. */
+  switchingTo?: AccountRef | null;
   /** The Desk terminal it runs in, when it was started there by hand and
    *  Desk's hooks registered it (a tracked terminal). */
   terminalId?: string | null;
@@ -164,6 +171,9 @@ export interface NewSession {
   approvals?: "desk" | "terminal";
   /** Codex's own reviewer answers its approvals ("Approve for me"). */
   approveForMe?: boolean;
+  /** The person's account it runs on: absent, the engine's default;
+   *  null, the CLI's own sign-in on the hub's computer. */
+  account?: string | null;
   /** Added to the session's environment, as for a terminal: Desk's Claude
    *  Code plugin folder, joined by the hub to the person's own. */
   env?: Record<string, string>;
@@ -320,7 +330,54 @@ export type DeskEvent =
   /** A place's read point moved, in this window or another. */
   | { type: "read"; place: string; point: ReadPoint }
   /** A session's spend changed: what its engine recorded was read. */
-  | { type: "spend"; session: string };
+  | { type: "spend"; session: string }
+  /** The person's engine accounts changed: all of them as they now are. */
+  | { type: "accounts"; accounts: EngineAccount[] }
+  /** Signing in to a new account moved on. */
+  | { type: "accountSignIn"; signIn: AccountSignIn };
+
+// ── Engine accounts: several subscription logins per engine ──────────────
+
+/** A session's account, as it names it. */
+export interface AccountRef {
+  id: string;
+  name: string;
+}
+
+/** One of the person's accounts. Its sign-in stays on the hub's computer:
+ *  Desk is never sent it. */
+export interface EngineAccount {
+  id: string;
+  engine: Engine;
+  name: string;
+  isDefault: boolean;
+  /** Its sign-in is still where the hub keeps it. */
+  signedIn: boolean;
+  /** The sessions running on it now. */
+  sessions: string[];
+  createdAt: string;
+}
+
+/** Where signing in through the engine's own command is. */
+export type AccountSignInState =
+  | { state: "starting" }
+  | { state: "open"; url: string | null }
+  | { state: "code"; url: string | null }
+  | { state: "checking" }
+  | { state: "done"; account: string }
+  | { state: "failed"; why: string };
+
+export type AccountSignIn = { id: string; engine: Engine; name: string } & AccountSignInState;
+
+export interface AccountsInfo {
+  accounts: EngineAccount[];
+  /** Where the sign-ins are kept ("the keychain"); null: this Desk keeps none. */
+  store: string | null;
+  signIns: AccountSignIn[];
+}
+
+/** What adding an account did. */
+export type AccountAdded = { kind: "account"; account: EngineAccount } | { kind: "signIn"; signIn: AccountSignIn };
 
 // ── Spend: what sessions cost, from the hub's ledger ─────────────────────
 

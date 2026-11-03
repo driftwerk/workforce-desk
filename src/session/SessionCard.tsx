@@ -17,6 +17,7 @@ import { approvalsSwitchable, lifecycleActions, runs, sessionActions, setApprova
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { homeShort } from "../ui/paths";
+import { switchingText, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 import { SpendStrip } from "../spend/SpendStrip";
 
@@ -25,7 +26,8 @@ const ENGINE = ENGINE_TITLE;
 const where = (s: Session): string => {
   const background = backgroundOf(s);
   return [
-    ENGINE[s.engine],
+    withAccount(ENGINE[s.engine], s),
+    switchingText(s),
     s.approveForMe && "Approve for me",
     s.branch ? `branch ${s.branch}` : homeShort(s.cwd),
     background && backgroundLine(background),
