@@ -143,14 +143,13 @@ fn public_v6(ip: Ipv6Addr) -> bool {
     if s[0] == 0x2002 {
         return public_v4(inner(s[1], s[2]));
     }
-    !((s[0] & 0xfe00) == 0xfc00 // unique local
-        || (s[0] & 0xffc0) == 0xfe80 // link-local
-        || (s[0] & 0xffc0) == 0xfec0 // site-local (deprecated)
-        || (s[0] & 0xff00) == 0xff00 // multicast
-        || (s[0] == 0x2001 && s[1] == 0) // Teredo
-        || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation
-        || (s[0] == 0x3fff && s[1] < 0x1000) // documentation
-        || (s[..4] == [0x100, 0, 0, 0])) // discard
+    // Only global unicast (2000::/3) is public: that leaves out ULA,
+    // link-local, site-local, multicast, discard, IPv4-translated
+    // (::ffff:0:a.b.c.d) and anything not yet assigned, by construction.
+    (s[0] & 0xe000) == 0x2000
+        && !((s[0] == 0x2001 && s[1] == 0) // Teredo
+            || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation
+            || (s[0] == 0x3fff && s[1] < 0x1000)) // documentation
 }
 
 /// How a name is turned into addresses.
@@ -468,6 +467,10 @@ mod tests {
             "ff02::1",
             "2001:db8::1",
             "2001:0:4136:e378::1",
+            "::ffff:0:127.0.0.1",
+            "::1:0:0:1",
+            "100::1",
+            "3fff::1",
         ] {
             assert!(!is_public(private.parse().unwrap()), "{private}");
         }
@@ -501,6 +504,8 @@ mod tests {
             "https://[::ffff:127.0.0.1]/a.png",
             "https://[fd00::1]/a.png",
             "https://[fe80::1]/a.png",
+            "https://[::ffff:0:127.0.0.1]/a.png",
+            "https://[::1:0:0:1]/a.png",
             "https://169.254.169.254/latest/meta-data",
             "https://100.64.0.1/a.png",
             "https://10.0.0.1/a.png",
