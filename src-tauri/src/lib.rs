@@ -265,6 +265,29 @@ async fn helper_status(app: State<'_, App>) -> CommandResult<helper::Status> {
     Ok(status)
 }
 
+/// Starts Desk Helper now, the way the system starts it at login (the
+/// installed app: its login item; a development run starts nothing — the
+/// supervisor is started by hand), and says where it stands.
+#[tauri::command]
+async fn helper_start(app: State<'_, App>) -> CommandResult<helper::Status> {
+    let backend = app.backend.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || match backend {
+        Some(backend) => helper::login(&backend).start(),
+        None => helper::Status::NotRegistered,
+    })
+    .await
+    .map_err(text)?;
+    *app.helper.lock().expect("helper") = status.clone();
+    Ok(status)
+}
+
+/// What `desk-hubd.log` last said about Desk Helper stopping, if readable.
+#[tauri::command]
+fn helper_last_reason(app: State<'_, App>) -> Option<String> {
+    let paths = app.backend.as_ref().map_or(&app.paths, |b| &b.paths);
+    helper::last_reason_in(&paths.logs().join("desk-hubd.log"))
+}
+
 #[tauri::command]
 fn helper_open_login_items(app: State<'_, App>) {
     if let Some(backend) = &app.backend {
@@ -765,6 +788,8 @@ pub fn run() {
             login_cancel,
             helper_status,
             helper_open_login_items,
+            helper_start,
+            helper_last_reason,
             cli_installed,
             cli_install,
             report_save,

@@ -300,6 +300,13 @@ export type HelperStatus =
 
 export const helperStatus = (): Promise<HelperStatus> => invoke("helper_status");
 export const openLoginItems = (): Promise<void> => invoke("helper_open_login_items");
+/** Starts Desk Helper now, the way the system starts it at login (the
+ *  installed app: its login item; a development run starts nothing), and
+ *  says where it stands. */
+export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
+/** What `desk-hubd.log` last said about the helper stopping; null if it says
+ *  nothing or can't be read. */
+export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
 
 export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
 
