@@ -177,3 +177,48 @@ describe("answering a tracked session's approvals in Desk", () => {
     expect(screen.queryByRole("checkbox", { name: /Answer approvals in Desk/ })).toBeNull();
   });
 });
+
+describe("a question asked in the terminal", () => {
+  const pending = {
+    id: "p1",
+    tool: "Question",
+    detail: "Send the three messages at once or one after another?",
+    why: "(1 of 2 questions)",
+    since: "2026-11-03T12:08:16Z",
+    answerable: false,
+    options: ["At once (Recommended)", "One after another", "Leave it"],
+  };
+
+  it("shows its words and its options, to answer in the terminal", () => {
+    const s = shown(session({ state: "blocked", pending }));
+    render(<SessionCard session={s} />);
+    expect(screen.getByText("Needs you in the terminal")).toBeTruthy();
+    expect(screen.getByText("Send the three messages at once or one after another? (1 of 2 questions)")).toBeTruthy();
+    expect(screen.getByLabelText("Options: At once (Recommended), One after another, Leave it")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+  });
+
+  it("shows its options on the Floor", () => {
+    useChat.setState({ hubs: [account("local")] });
+    useFloor.setState({ deciding: {}, problems: {} });
+    shown(session({ state: "blocked", pending }));
+    const n = {
+      ...need("wait:t1:p1", who("s1", "keychain-check"), { ask: `${pending.detail} ${pending.why}`, options: pending.options, answer: { kind: "terminal" } }),
+      hubId: "local",
+      local: true,
+      key: "local/wait:t1:p1",
+      stale: false,
+    };
+    render(<NeedRow need={n} now={Date.now()} actions />);
+    expect(screen.getByLabelText("Options: At once (Recommended), One after another, Leave it")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open keychain-check to answer in the terminal" })).toBeTruthy();
+  });
+
+  it("notifies with its words, and a plan as one to approve", () => {
+    expect(notificationFor("working", session({ state: "blocked", pending }))?.body).toBe(
+      "Send the three messages at once or one after another? (1 of 2 questions)",
+    );
+    const plan = { ...pending, tool: "Plan", detail: "Shadow the reads", why: undefined, options: undefined };
+    expect(notificationFor("working", session({ state: "blocked", pending: plan }))?.body).toBe("Approve the plan · Shadow the reads");
+  });
+});

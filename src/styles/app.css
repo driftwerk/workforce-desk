@@ -679,6 +679,19 @@ button {
   font-size: 12px;
   font-family: var(--font-mono);
 }
+/* A question's answers, to read: they wrap rather than run out of a row. */
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.option-chips .chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chip-live {
   border-style: dashed;
   border-color: var(--working);

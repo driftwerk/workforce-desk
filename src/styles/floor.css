@@ -127,6 +127,9 @@
   background: var(--blocked-soft);
   padding-bottom: 8px;
 }
+.floor-need-options {
+  padding: 0 10px;
+}
 .floor-need-buttons {
   display: flex;
   align-items: center;

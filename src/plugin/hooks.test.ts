@@ -15,6 +15,7 @@ describe("Desk's Claude Code plugin hooks", () => {
         "PreToolUse",
         "PermissionRequest",
         "PostToolUse",
+        "PostToolUseFailure",
         "PermissionDenied",
         "UserPromptSubmit",
         "Notification",

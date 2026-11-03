@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useDesk } from "../hub/store";
 import type { Choice, Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
+import { OptionChips } from "../ui/OptionChips";
+import { terminalAsk } from "./pending";
 
 /** "Bash(cargo test)" → "Bash". */
 export const toolName = (tool: string): string => tool.split("(")[0]?.trim() || tool;
@@ -86,10 +88,8 @@ export function Approval({ session, compact = false }: { session: Session; compa
       <div className={compact ? "approval approval-compact" : "approval"}>
         <span className="approval-text">
           <b>Needs you in the terminal</b>
-          <span>
-            {pending.tool}
-            {pending.detail ? ` · ${pending.detail}` : ""}
-          </span>
+          <span>{terminalAsk(pending)}</span>
+          {!compact && <OptionChips options={pending.options} />}
         </span>
         {compact && (
           <button type="button" className="btn btn-blocked" onClick={() => open(session.id)}>
