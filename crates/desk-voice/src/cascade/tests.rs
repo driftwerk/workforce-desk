@@ -567,6 +567,10 @@ fn a_short_word_stops_it_too() {
     });
     sim.room.says(0.3);
     sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
     sim.wait_for("what they said", |s| {
         !s.events.utterances.lock().unwrap().is_empty()
@@ -584,6 +588,10 @@ fn someone_talking_over_a_steady_echo_still_stops_it() {
     });
     sim.room.says(2.0);
     sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
 }
 
@@ -689,6 +697,10 @@ fn a_short_phrase_stops_a_long_reply_and_is_sent() {
     sim.wait_for("the reply to start", |s| s.played() >= 1);
     sim.room.says(2.0);
     sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
     sim.wait_for("what they said", |s| {
         !s.events.utterances.lock().unwrap().is_empty()
@@ -733,6 +745,10 @@ fn a_fragment_of_what_is_playing_said_out_loud_stops_it() {
     });
     sim.room.says(0.3);
     sim.wait_for("it to stop", |s| s.room.stops.load(Ordering::SeqCst) > 0);
+    // Why it stopped is said just after the speaker is stopped.
+    sim.wait_for("it to say why it stopped", |s| {
+        !s.events.stopped.lock().unwrap().is_empty()
+    });
     assert_eq!(*sim.events.stopped.lock().unwrap(), [StopReason::BargeIn]);
 }
 
