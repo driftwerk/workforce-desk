@@ -111,3 +111,41 @@
 .connections-pane .state-blocked {
   color: var(--blocked);
 }
+
+/* An agent's Connectors tab: a row per connector, whose connection it
+   uses and whether it may change things, then its recent calls. */
+.agent-connectors .conn-choice {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.conn-segs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.conn-first {
+  align-self: flex-start;
+}
+.agent-connectors > .conn-card,
+.agent-connectors > .conn-sub {
+  margin-top: 12px;
+}
+.conn-calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.conn-calls li {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+.conn-calls li > span {
+  overflow-wrap: anywhere;
+}

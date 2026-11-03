@@ -118,6 +118,9 @@ export const withDeskSettings = (source: string, brain: Brain): string => {
   // A new local agent starts at Full access, asking only before what can't
   // be undone, said in its file.
   doc.computer = { access: "full", asks: "irreversible", ...((doc.computer as object | undefined) ?? {}) };
+  // A new agent gets no connector until the person turns one on for it.
+  const skills = (doc.skills as Record<string, unknown> | undefined) ?? {};
+  doc.skills = { ...skills, enabled: Array.isArray(skills.enabled) ? skills.enabled : [] };
   return stringify(doc) + "\n";
 };
 
