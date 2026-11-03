@@ -110,6 +110,7 @@ describe("an agent's brain in its config", () => {
     expect(out.rich!.charts).toBe(false);
     expect(out.rich!.tables).toBe(true);
     expect(out.computer).toEqual({ access: "full", asks: "irreversible" });
+    expect((out as { skills?: unknown }).skills).toEqual({ enabled: [] });
   });
 });
 

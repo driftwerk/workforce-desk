@@ -13,6 +13,7 @@ import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
 import { agentKey, describeAgent, DESK_DM } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
+import { AgentConnectors } from "../crew/AgentConnectors";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
 import { AgentSettings } from "../crew/AgentSettings";
 import { brainLine } from "../crew/brain";
@@ -76,6 +77,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "settings", label: "Settings" },
   { id: "access", label: "This computer" },
+  { id: "connectors", label: "Connectors" },
   { id: "files", label: "Files" },
 ];
 
@@ -229,7 +231,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const unsaved = dirtyFiles(drafts, activeAgent);
   const go = (next: Tab) => setAgentTab(activeAgent, next);
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
-  const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files" && t.id !== "access");
+  const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files" && t.id !== "access" && t.id !== "connectors");
   // What the hub reports stands in until the providers list says more.
   const brainSubtitle =
     local && brain && provider && !fallback
@@ -250,7 +252,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
   const settled = !history || history.state === "ready" || history.state === "absent";
 
-  const chat = tab !== "settings" && !((tab === "files" || tab === "access") && local);
+  const chat = tab !== "settings" && !((tab === "files" || tab === "access" || tab === "connectors") && local);
   return (
     <Root
       ref={(el: HTMLElement | null) => {
@@ -294,6 +296,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       ) : tab === "access" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-access">
           <AgentAccess agent={agent} />
+        </div>
+      ) : tab === "connectors" && local ? (
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-connectors">
+          <AgentConnectors agent={agent} />
         </div>
       ) : tab === "files" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-files">
