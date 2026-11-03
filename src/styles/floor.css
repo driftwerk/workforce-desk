@@ -127,6 +127,10 @@
   background: var(--blocked-soft);
   padding-bottom: 8px;
 }
+.floor-need-why {
+  display: block;
+  margin-top: 2px;
+}
 .floor-need-buttons {
   display: flex;
   align-items: center;
@@ -284,6 +288,62 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Desk's breaker and budgets ─────────────────────────────────────────── */
+
+.breaker-banner {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--blocked-soft);
+  border: 1px solid color-mix(in srgb, var(--blocked) 30%, var(--border));
+  color: var(--text);
+}
+.breaker-banner .dot {
+  margin-top: 6px;
+}
+.breaker-banner-compact {
+  margin: 4px 6px;
+  padding: 6px 10px;
+  align-items: center;
+}
+.breaker-banner-compact .dot {
+  margin-top: 0;
+}
+.breaker-text {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.breaker-why {
+  display: block;
+  margin-top: 2px;
+}
+.breaker-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.spend-limit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.spend-limit .spend-bar {
+  grid-column: auto;
+}
+.spend-fill-warn {
+  background: var(--blocked);
+}
+.spend-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* ── Today ──────────────────────────────────────────────────────────────── */
 
 .today-legend {
@@ -355,4 +415,56 @@
   right: 0;
   transform: none;
   color: var(--text);
+}
+
+/* ── Ledger ─────────────────────────────────────────────────────────────── */
+
+.ledger-panel .rpanel-body,
+.ledger-panel > div {
+  min-width: 0;
+}
+.ledger-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.ledger-session select {
+  max-width: 220px;
+}
+.ledger-days {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ledger-rows {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ledger-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: baseline;
+}
+.ledger-at,
+.ledger-usd {
+  font-variant-numeric: tabular-nums;
+}
+.ledger-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.ledger-what {
+  grid-column: 2 / -1;
+  overflow-wrap: anywhere;
 }

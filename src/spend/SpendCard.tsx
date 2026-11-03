@@ -4,6 +4,10 @@ import { useDesk } from "../hub/store";
 import type { SpendRow } from "../hub/types";
 import { breakdownText, tokensText, totalTokens, totalsText, unpricedText, usdText } from "./spend";
 import { useSpend, type FloorPeriod } from "./store";
+import { useBudgets } from "./budgetStore";
+import { fillOf, standingText } from "./budgets";
+import { useUi } from "../shell/ui";
+import type { BudgetView } from "../hub/types";
 
 /** Sessions the card lists at most. */
 const TOP = 5;
@@ -19,12 +23,18 @@ export function SpendCard() {
   const failed = useSpend((s) => s.failed);
   const [period, setPeriod] = useState<FloorPeriod>("day");
   const view = useSpend((s) => s.views[period]);
+  const budgets = useBudgets((s) => s.view);
+  const loadBudgets = useBudgets((s) => s.load);
   useEffect(() => {
-    if (hub) void load();
-  }, [hub, load]);
+    if (hub) {
+      void load();
+      void loadBudgets();
+    }
+  }, [hub, load, loadBudgets]);
   if (supported === false || (!view && !failed)) return null;
   const rows = view?.rows.slice(0, TOP) ?? [];
   const unpriced = view && unpricedText(view.total);
+  const limit = deskLimit(budgets?.budgets ?? [], period);
   return (
     <section className="floor-card spend-card" aria-label="Spend">
       <div className="floor-card-head">
@@ -54,6 +64,8 @@ export function SpendCard() {
           <p className="faint small">What the tokens would cost at API prices; a session on a plan pays its plan.</p>
         </>
       )}
+      {limit && <Limit budget={limit} />}
+      <SpendLinks budgeted={!!budgets && budgets.budgets.length > 0} />
     </section>
   );
 }
@@ -79,5 +91,42 @@ function Row({ row, total }: { row: SpendRow; total: number }) {
         <span className="spend-fill" style={{ width: `${share}%` }} />
       </span>
     </li>
+  );
+}
+
+/** Desk's own total for `period`, when the person set one. */
+const deskLimit = (budgets: readonly BudgetView[], period: FloorPeriod): BudgetView | null =>
+  budgets.find((b) => b.scope.kind === "desk" && b.group === null && b.period === period && b.standing) ?? null;
+
+/** Desk's total against its budget: the bar, and the words. */
+function Limit({ budget }: { budget: BudgetView }) {
+  const s = budget.standing!;
+  const pct = Math.round(fillOf(s) * 100);
+  return (
+    <div className="spend-limit">
+      <p className={`small ${s.status === "under" ? "" : "state-blocked"}`}>
+        <span className="faint">Desk's budget </span>
+        {standingText(s)}
+      </p>
+      <span className="spend-bar" role="img" aria-label={`${pct}% of Desk's budget`}>
+        <span className={`spend-fill ${s.status === "under" ? "" : "spend-fill-warn"}`} style={{ width: `${pct}%` }} />
+      </span>
+    </div>
+  );
+}
+
+/** Where the numbers go further: the ledger's calls, and the budgets. */
+function SpendLinks({ budgeted }: { budgeted: boolean }) {
+  const openSettings = useUi((u) => u.openSettings);
+  const setLedger = useUi((u) => u.setLedger);
+  return (
+    <p className="spend-links small">
+      <button type="button" className="link" onClick={() => setLedger(true)}>
+        Ledger
+      </button>
+      <button type="button" className="link" onClick={() => openSettings("budgets")}>
+        {budgeted ? "Budgets" : "Set a budget"}
+      </button>
+    </p>
   );
 }

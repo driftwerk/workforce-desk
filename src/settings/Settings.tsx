@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Sessions } from "./Sessions";
 import "../styles/settings.css";
 import { Appearance } from "./Appearance";
+import { Budgets } from "./Budgets";
 import { Calls } from "./Calls";
 import { Chat } from "./Chat";
 import { Computer } from "./Computer";
@@ -56,6 +57,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "providers" && <Providers />}
       {section === "engines" && <Engines />}
       {section === "sessions" && <Sessions />}
+      {section === "budgets" && <Budgets />}
       {section === "voices" && <Voices />}
       {section === "calls" && <Calls />}
       {section === "shortcuts" && <Shortcuts />}

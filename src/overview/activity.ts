@@ -25,6 +25,10 @@ export const toneOf = (e: ActivityEvent): Tone => {
   if (e.actor.kind === "manager") return "manager";
   if (e.actor.kind === "you") return "you";
   switch (e.kind) {
+    case "paused":
+      return "blocked";
+    case "continued":
+      return "working";
     case "needs_you":
     case "question":
       return "blocked";
@@ -61,7 +65,7 @@ export interface Line {
  *  id) go by that name; the hub's text is still split at the name it used. */
 export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>> = {}, agentName: (id: string) => string | undefined = () => undefined): Line => {
   const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : p.kind === "agent" ? (agentName(p.id) ?? p.name) : p.name);
-  const acting = e.actor.kind === "manager" || e.actor.kind === "you" || !e.subject;
+  const acting = e.actor.kind === "manager" || e.actor.kind === "you" || e.actor.kind === "desk" || !e.subject;
   const who = acting ? e.actor : e.subject!;
   const lead = who.kind === "you" ? { name: "You", session: false } : { name: shown(who), session: who.kind === "session" };
   const other = acting && e.subject && e.subject.id !== who.id ? e.subject : null;

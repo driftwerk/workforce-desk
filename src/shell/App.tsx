@@ -34,6 +34,7 @@ import { useSessionName } from "../groups/names";
 import { useMainKey, useMainName } from "./mainName";
 import { NewSession } from "../session/NewSession";
 import { SessionCard } from "../session/SessionCard";
+import { LedgerPanel } from "../spend/Ledger";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
@@ -255,6 +256,7 @@ export function App() {
   const mainKey = useMainKey();
   const panels: OpenPanel[] = [];
   const searching = useUi((u) => u.search !== null);
+  const ledger = useUi((u) => u.ledger);
   if (thread) {
     panels.push({
       kind: "thread",
@@ -284,6 +286,17 @@ export function App() {
       element: (
         <ErrorBoundary name="search">
           <SearchPanel />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (ledger) {
+    panels.push({
+      kind: "ledger",
+      label: "Ledger",
+      element: (
+        <ErrorBoundary name="ledger">
+          <LedgerPanel />
         </ErrorBoundary>
       ),
     });

@@ -8,8 +8,17 @@ const slackUrl = (place: Extract<Place, { kind: "slack" }>): string =>
 /** What opens beside the Floor for an agent or session: one of this
  *  computer's sessions' card (another hub's opens nowhere here), else the
  *  agent's DM. */
-export const besideOf = (item: OnHub): Target | null =>
-  item.who.kind === "session" ? (item.local ? { kind: "session", sessionId: item.who.id } : null) : { kind: "agent", key: `${item.hubId}/${item.who.id}` };
+export const besideOf = (item: OnHub): Target | null => {
+  switch (item.who.kind) {
+    case "session":
+      return item.local ? { kind: "session", sessionId: item.who.id } : null;
+    case "agent":
+      return { kind: "agent", key: `${item.hubId}/${item.who.id}` };
+    // Desk itself (its breaker holding new sessions) opens nowhere.
+    case "desk":
+      return null;
+  }
+};
 
 /** Where an item opens: one of this computer's sessions in its pane or card
  *  (another hub's opens nowhere here); a room (or its thread) this computer

@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = {
   providers: "Providers",
   engines: "Engines",
   sessions: "Sessions",
+  budgets: "Budgets",
   voices: "Voices",
   calls: "Calls and voice",
   shortcuts: "Shortcuts",
@@ -62,6 +63,9 @@ interface UiState {
   setRoomDetails: (open: { room: string; rename: boolean } | null) => void;
   /** Search, while it's open: what's typed in it. */
   search: { text: string } | null;
+  /** The ledger's column is open. */
+  ledger: boolean;
+  setLedger: (open: boolean) => void;
   /** Opens search with `text` (null closes it). */
   setSearch: (text: string | null) => void;
   /** A message just jumped to, shown flashing for a moment. */
@@ -101,6 +105,8 @@ export const useUi = create<UiState>((set) => ({
   setRoomDetails: (roomDetails) => set({ roomDetails }),
   search: null,
   setSearch: (text) => set({ search: text === null ? null : { text } }),
+  ledger: false,
+  setLedger: (ledger) => set({ ledger }),
   flash: null,
   setFlash: (id) => set({ flash: id ? { id, at: Date.now() } : null }),
   setActivityOpen: (activityOpen) => set((s) => (s.activityOpen === activityOpen ? s : { activityOpen })),

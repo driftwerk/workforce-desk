@@ -318,6 +318,42 @@ describe("Right now's needs, answered in place", () => {
     for (const row of needRows()) expect(row.querySelector("button button")).toBeNull();
   });
 
+  it("answers what Desk's breaker holds with Continue or Keep paused, and says what each does", async () => {
+    const atlas = need("breaker:pool:desk", { kind: "desk", id: "pool:desk", name: "Atlas", engine: null }, {
+      kind: "approval",
+      ask: "Atlas is at 83% of its day budget ($9.13 of $11). Agents can't start new sessions for it.",
+      why: "Running sessions carry on under their own limits. Continue lets new starts go on for the rest of the day; Keep paused leaves them held.",
+      place: { kind: "elsewhere" },
+      answer: { kind: "decide", at: { kind: "breaker", subject: "pool:desk" } },
+    });
+    const paused = need("breaker:session:s-1", session("s-1", "acme-web"), {
+      kind: "approval",
+      ask: "acme-web is at 115% of its day budget ($1.15 of $1). Desk paused it after its turn.",
+      answer: { kind: "decide", at: { kind: "breaker", subject: "session:s-1" } },
+      since: at(4),
+    });
+    show([atlas, paused]);
+    render(<RightNow brief={null} />);
+    const [pool, held] = needRows();
+    expect(actions(pool!)).toEqual([
+      `Continue “${atlas.ask}” for Atlas`,
+      `Keep paused “${atlas.ask}” for Atlas`,
+    ]);
+    expect(pool!.textContent).toContain("Running sessions carry on under their own limits.");
+    expect(within(pool!).getByRole("button", { name: /^Continue/ }).className).toContain("btn-blocked");
+    expect(actions(held!)).toEqual([
+      `Continue “${paused.ask}” for acme-web`,
+      `Keep paused “${paused.ask}” for acme-web`,
+      "Open acme-web",
+    ]);
+    await act(async () => fireEvent.click(within(pool!).getByRole("button", { name: /^Continue/ })));
+    await act(async () => fireEvent.click(within(held!).getByRole("button", { name: /^Keep paused/ })));
+    expect(hubs.local!.decided).toEqual([
+      { at: { kind: "breaker", subject: "pool:desk" }, choice: "allow" },
+      { at: { kind: "breaker", subject: "session:s-1" }, choice: "deny" },
+    ]);
+  });
+
   it("allows and denies through the floor's own answer, without opening the row", async () => {
     show([npmTest, approval("ap-2", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm install?", since: at(5) })]);
     render(<RightNow brief={null} />);
