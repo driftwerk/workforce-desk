@@ -1,7 +1,6 @@
 {
   "modules": [
-    "./usage.ts",
-    "./line.ts"
+    "./desk.ts"
   ],
   "hooks": {
     "SessionStart": [

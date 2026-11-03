@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 let thread: LineMessage[] = [];
 const hub = {
   lineThread: vi.fn(() => Promise.resolve(thread)),
-  postLine: vi.fn((id: string, text: string, when: "queue" | "now") =>
+  postLine: vi.fn((_id: string, text: string, when: "queue" | "now") =>
     Promise.resolve(msg({ id: `posted-${when}`, from: YOU, to: S1, kind: "tell", text, asked: null, delivery: when === "now" ? "delivered" : "queued" })),
   ),
   editLine: vi.fn(() => Promise.resolve()),

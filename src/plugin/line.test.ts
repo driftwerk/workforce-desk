@@ -152,3 +152,14 @@ describe("Desk's line in a Claude Code session", () => {
     expect(await h.check!({ tool: `${PREFIX}ask` })).toEqual({ passed: { tool: `${PREFIX}ask` } });
   });
 });
+
+describe("Desk's hooks module", () => {
+  it("is the one module the plugin names, and registers the usage hook and the line", async () => {
+    const hooks = (await import("../../src-tauri/resources/claude-plugin/hooks/hooks.json")).default as { modules: string[] };
+    expect(hooks.modules).toEqual(["./desk.ts"]);
+    const { register: desk } = await import("../../src-tauri/resources/claude-plugin/hooks/desk");
+    const events: string[] = [];
+    desk(((event: string) => void events.push(event)) as never);
+    expect(events.sort()).toEqual(["session.measure", "session.start", "tool.call", "tool.check"]);
+  });
+});

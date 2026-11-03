@@ -82,74 +82,88 @@ const json = (r: HttpResponse): unknown => {
 
 const UNREACHABLE = "Desk can't be reached right now; carry on without it.";
 
-export const register = (on: On): void => {
-  let line: string | undefined;
-  const names = new Set<string>();
-  let polling = false;
+/** What the module knows of the session it runs in. */
+interface Line {
+  /** The session's line on the hub, once it is known. */
+  url?: string;
+  /** Desk's tools, by the names Claude Code calls them. */
+  names: Set<string>;
+  /** A poll is under way. */
+  polling: boolean;
+}
 
-  const post = ($: Engine, path: string, body: unknown) =>
-    $.http.fetch(`${line}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = ($: Engine, line: Line, path: string, body: unknown): Promise<HttpResponse> =>
+  $.http.fetch(`${line.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-  /** One message for the session, if one comes: submitted, then acked. */
-  const poll = async ($: Engine): Promise<void> => {
-    if (!line || polling) return;
-    polling = true;
-    try {
-      const r = await $.http.fetch(`${line}/next?wait=20`);
-      if (r.status !== 200) return;
-      const next = json(r) as { id?: string; text?: string } | undefined;
-      if (!next?.id || !next.text) return;
-      const id = next.id;
-      // Not awaited here: it resolves once the prompt is in (or queued
-      // behind the turn running), and the poll goes on meanwhile.
-      void $.prompt
-        .submit({ text: next.text })
-        .then((done) => post($, "/ack", { id, ok: !("drop" in done) }))
-        .catch(() => post($, "/ack", { id, ok: false }).catch(() => undefined));
-    } catch {
-      // The hub restarted or is gone: the next tick asks again.
-    } finally {
-      polling = false;
+/** One message for the session, if one comes: submitted, then acked. */
+const poll = async ($: Engine, line: Line): Promise<void> => {
+  if (!line.url || line.polling) return;
+  line.polling = true;
+  try {
+    const r = await $.http.fetch(`${line.url}/next?wait=20`);
+    if (r.status !== 200) return;
+    const next = json(r) as { id?: string; text?: string } | undefined;
+    if (!next?.id || !next.text) return;
+    const id = next.id;
+    // Not awaited here: it resolves once the prompt is in (or queued
+    // behind the turn running), and the poll goes on meanwhile.
+    void $.prompt
+      .submit({ text: next.text })
+      .then((done) => post($, line, "/ack", { id, ok: !("drop" in done) }))
+      .catch(() => post($, line, "/ack", { id, ok: false }).catch(() => undefined));
+  } catch {
+    // The hub restarted or is gone: the next tick asks again.
+  } finally {
+    line.polling = false;
+  }
+};
+
+/** Registers the hub's line tools and starts polling for messages. */
+const start = async ($: Engine, line: Line): Promise<void> => {
+  const hook = await hookUrl($).catch(() => undefined);
+  if (!hook) return;
+  line.url = lineOf(hook);
+  try {
+    const listed = json(await $.http.fetch(`${line.url}/tools`)) as { tools?: ToolSpec[] } | undefined;
+    for (const t of listed?.tools ?? []) {
+      // Seen on every turn: Desk's tools are never behind a search.
+      await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema, isDeferred: false });
+      line.names.add(`${PREFIX}${t.name}`);
     }
-  };
+    $.clock.every(POLL_MS, () => poll($, line));
+  } catch {
+    line.url = undefined;
+  }
+};
+
+/** Runs one of Desk's tools on the hub; a long wait for an answer is asked
+ *  again, a request at a time. */
+const call = async ($: Engine, line: Line, e: ToolEvent): Promise<CallResult> => {
+  const input = Object.fromEntries(Object.entries(e).filter(([k]) => !RESERVED.has(k)));
+  try {
+    let answer = json(await post($, line, "/call", { name: e.tool.slice(PREFIX.length), input })) as { result?: Record<string, unknown>; error?: string } | undefined;
+    while (answer?.result?.more === true && typeof answer.result.id === "string") {
+      answer = json(await $.http.fetch(`${line.url}/await/${answer.result.id}?wait=25`)) as typeof answer;
+    }
+    if (answer?.error) return { deny: answer.error };
+    if (!answer || !("result" in answer)) return { deny: UNREACHABLE };
+    return { result: answer.result };
+  } catch {
+    return { deny: UNREACHABLE };
+  }
+};
+
+export const register = (on: On): void => {
+  const line: Line = { names: new Set(), polling: false };
 
   on("session.start", async ($, e, next) => {
-    const hook = await hookUrl($).catch(() => undefined);
-    if (hook) {
-      line = lineOf(hook);
-      try {
-        const listed = json(await $.http.fetch(`${line}/tools`)) as { tools?: ToolSpec[] } | undefined;
-        for (const t of listed?.tools ?? []) {
-          // Seen on every turn: Desk's tools are never behind a search.
-          await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema, isDeferred: false });
-          names.add(`${PREFIX}${t.name}`);
-        }
-        $.clock.every(POLL_MS, () => poll($));
-      } catch {
-        line = undefined;
-      }
-    }
+    await start($, line);
     return next(e);
   });
 
   // Desk's own tools run without the session's permission dialog: exactly
   // those, never another server's tool that shares the prefix.
-  on("tool.check", async (_$, e, next) => (names.has(e.tool) ? { decision: "allow", reason: "Desk's line" } : next(e)));
+  on("tool.check", async (_$, e, next) => (line.names.has(e.tool) ? { decision: "allow", reason: "Desk's line" } : next(e)));
 
-  on("tool.call", async ($, e, next) => {
-    if (!names.has(e.tool) || !line) return next(e);
-    const input = Object.fromEntries(Object.entries(e).filter(([k]) => !RESERVED.has(k)));
-    try {
-      let answer = json(await post($, "/call", { name: e.tool.slice(PREFIX.length), input })) as { result?: Record<string, unknown>; error?: string } | undefined;
-      // A long wait for an answer is asked again, a request at a time.
-      while (answer?.result?.more === true && typeof answer.result.id === "string") {
-        answer = json(await $.http.fetch(`${line}/await/${answer.result.id}?wait=25`)) as typeof answer;
-      }
-      if (answer?.error) return { deny: answer.error };
-      if (!answer || !("result" in answer)) return { deny: UNREACHABLE };
-      return { result: answer.result };
-    } catch {
-      return { deny: UNREACHABLE };
-    }
-  });
+  on("tool.call", async ($, e, next) => (line.names.has(e.tool) && line.url ? call($, line, e) : next(e)));
 };
