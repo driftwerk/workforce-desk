@@ -12,6 +12,7 @@ import { AgentMark, Mark, YouMark } from "../ui/Mark";
 import type { Step } from "../hub/types";
 import { stepsOf } from "./progress";
 import { Steps } from "./ProgressCard";
+import { ImageBudget } from "../shell/RemoteImage";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -144,7 +145,9 @@ export const Message = memo(function Message({
         ) : (
           <RichHostProvider host={host}>
             <div className="msg-text rich">
-              <RichMarkdown text={message.content} streaming={message.status === "streaming"} />
+              <ImageBudget>
+                <RichMarkdown text={message.content} streaming={message.status === "streaming"} />
+              </ImageBudget>
             </div>
           </RichHostProvider>
         )}
