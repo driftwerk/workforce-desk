@@ -8,6 +8,7 @@ export const SETTINGS_SECTIONS = {
   hubs: "Workspaces",
   computer: "This computer",
   providers: "Providers",
+  connections: "Connections",
   engines: "Engines",
   sessions: "Sessions",
   voices: "Voices",
