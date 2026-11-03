@@ -78,6 +78,9 @@ export interface PendingApproval {
   choices?: Choice[];
   /** What Codex said of it: where it runs, and why. */
   why?: string;
+  /** The answers a question it asks in its terminal offers (Claude Code's
+   *  AskUserQuestion, Codex's request for input); absent from older hubs. */
+  options?: string[];
 }
 
 /** A tool auto mode refused in the turn a session stopped on. */

@@ -2,6 +2,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { shownState, waitsOnYou } from "../floor/background";
 import { sessionName } from "../groups/names";
 import type { Session, SessionState } from "../hub/types";
+import { isQuestion, terminalAsk } from "../session/pending";
 
 /** The notification a state change deserves, if any: a session that starts
  *  needing you, or finishes (its background work too), while you're looking
@@ -14,7 +15,10 @@ export const notificationFor = (
   if (before === undefined || before === state) return null;
   const name = sessionName(s.id, s.name, s);
   if (state === "blocked")
-    return { title: `${name} needs you`, body: s.pending ? `${s.pending.tool} ${s.pending.detail}`.trim() : "Waiting for an answer" };
+    return {
+      title: `${name} needs you`,
+      body: !s.pending ? "Waiting for an answer" : isQuestion(s.pending) ? terminalAsk(s.pending) : `${s.pending.tool} ${s.pending.detail}`.trim(),
+    };
   if (state === "asking" && before !== "blocked") return { title: `${name} needs you`, body: s.asked?.ask ?? "Asked you something" };
   if (state === "done" && (before === "working" || waitsOnYou({ state: before })))
     return { title: `${name} is done`, body: s.lastReply?.split("\n")[0] ?? s.goal };

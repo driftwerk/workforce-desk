@@ -4,6 +4,7 @@ import type { Choice } from "../hub/floor";
 import type { Session } from "../hub/types";
 import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
+import { OptionChips } from "../ui/OptionChips";
 import { plainError } from "../ui/plainError";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote, useWhoName } from "./Row";
@@ -100,6 +101,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
         {need.why && <span className="floor-need-why faint small">{need.why}</span>}
       </FloorRow>
+      <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
           {choicesOf(need).map((choice) => {

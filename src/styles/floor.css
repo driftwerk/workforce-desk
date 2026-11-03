@@ -131,6 +131,9 @@
   display: block;
   margin-top: 2px;
 }
+.floor-need-options {
+  padding: 0 10px;
+}
 .floor-need-buttons {
   display: flex;
   align-items: center;

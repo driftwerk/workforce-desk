@@ -8,6 +8,7 @@ export const SETTINGS_SECTIONS = {
   hubs: "Workspaces",
   computer: "This computer",
   providers: "Providers",
+  connections: "Connections",
   engines: "Engines",
   sessions: "Sessions",
   budgets: "Budgets",
@@ -18,7 +19,7 @@ export const SETTINGS_SECTIONS = {
 } as const;
 export type SettingsSection = keyof typeof SETTINGS_SECTIONS;
 
-export type AgentTab = "chat" | "settings" | "access" | "files";
+export type AgentTab = "chat" | "settings" | "access" | "connectors" | "files";
 
 /** Where a conversation was scrolled to, when not at its newest message:
  *  the first message showing, and how far its top was from the pane's. */

@@ -1,0 +1,151 @@
+/* Settings → Connections: one row per connector in the providers' list;
+   opened, what it's connected as, who uses it and its agent-only ones. */
+.connections-pane .prov-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.conn-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.conn-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+.conn-dot-on {
+  background: var(--done);
+}
+.conn-dot-blocked {
+  background: var(--blocked);
+}
+.conn-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 20px;
+}
+.conn-detail > p {
+  margin: 0;
+}
+.conn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.conn-card > p {
+  margin: 0;
+}
+.conn-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.conn-facts dt {
+  font-size: 12px;
+  color: var(--faint);
+}
+.conn-facts dd {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.conn-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.conn-sub h3 {
+  margin: 0;
+}
+.conn-used {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.conn-used li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.conn-tag {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.conn-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.conn-flow p {
+  margin: 0;
+}
+.conn-code {
+  font-size: 22px;
+  letter-spacing: 0.12em;
+  color: var(--text);
+}
+.conn-where {
+  margin-right: auto;
+}
+.connections-pane .state-on {
+  color: var(--done);
+}
+.connections-pane .state-blocked {
+  color: var(--blocked);
+}
+
+/* An agent's Connectors tab: a row per connector, whose connection it
+   uses and whether it may change things, then its recent calls. */
+.agent-connectors .conn-choice {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.conn-segs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.conn-first {
+  align-self: flex-start;
+}
+.agent-connectors > .conn-card,
+.agent-connectors > .conn-sub {
+  margin-top: 12px;
+}
+.conn-calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.conn-calls li {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+.conn-calls li > span {
+  overflow-wrap: anywhere;
+}
