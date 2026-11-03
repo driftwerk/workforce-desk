@@ -115,6 +115,9 @@ export const withBrain = (source: string, brain: Brain): string => {
 export const withDeskSettings = (source: string, brain: Brain): string => {
   const doc = parseDoc(withBrain(source, brain));
   doc.rich = { ...RICH, ...((doc.rich as object | undefined) ?? {}) };
+  // A new local agent starts at Full access, asking only before what can't
+  // be undone, said in its file.
+  doc.computer = { access: "full", asks: "irreversible", ...((doc.computer as object | undefined) ?? {}) };
   return stringify(doc) + "\n";
 };
 

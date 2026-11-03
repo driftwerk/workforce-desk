@@ -1,0 +1,96 @@
+/* What agents may touch on this computer: Desk's own approval card, the
+   agent's Access tab, and Settings → This computer. Tokens only. */
+
+.computer-ask {
+  border-color: color-mix(in srgb, var(--blocked) 40%, var(--border));
+}
+.computer-asks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--blocked);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.computer-command {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.computer-paths {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.computer-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  color: var(--text);
+}
+.computer-banner > span {
+  flex: 1 1 240px;
+}
+.computer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.computer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.computer-row:first-child {
+  border-top: 0;
+}
+.computer-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.computer-row-text .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.computer-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.computer-chip.done {
+  color: var(--done);
+}
+.computer-chip.blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+.computer-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
