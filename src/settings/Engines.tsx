@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
 import { useDesk } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
+import { Accounts } from "./Accounts";
 
 /** The engines on the computer Desk's sessions run on: whether each is
  *  installed, its version, who it is signed in as, and what Desk does with
@@ -44,6 +46,7 @@ export function Engines() {
                   {n}
                 </span>
               ))}
+              {e.installed && hasAccounts(defaultCaps(e)) && <Accounts engine={e} />}
             </li>
           ))}
         </ul>

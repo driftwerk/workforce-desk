@@ -4,7 +4,7 @@
 //! take them; and every agent learning and checking its work as Driftwerk's
 //! do, each of which an agent's own `config.toml` can turn off.
 
-use desk_core::{HubPorts, Paths, Secret};
+use desk_core::{HubPorts, KeyStore, Paths, Secret};
 use toml::{Table, Value};
 
 /// Sections whose `backend` can be Postgres.
@@ -283,6 +283,26 @@ fn learning(doc: &mut Table, ports: &HubPorts, memories: Memories) {
     );
 }
 
+/// Where the hub keeps the sign-ins of the person's engine accounts (a
+/// second Claude subscription): the keychain where Desk's own secrets are
+/// in it on macOS, else a private file beside the hub's data. The hub
+/// writes and reads only its own items there.
+fn accounts(paths: &Paths, keys: KeyStore) -> Value {
+    match keys {
+        KeyStore::System if cfg!(target_os = "macos") => table(&[
+            ("store", s("system")),
+            ("service", s(desk_core::KEYRING_SERVICE)),
+        ]),
+        KeyStore::System | KeyStore::File => table(&[
+            ("store", s("file")),
+            (
+                "file",
+                s(&paths.hub().join("accounts.json").to_string_lossy()),
+            ),
+        ]),
+    }
+}
+
 fn table(entries: &[(&str, Value)]) -> Value {
     Value::Table(
         entries
@@ -296,7 +316,7 @@ fn s(v: &str) -> Value {
     Value::String(v.to_string())
 }
 
-pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
+pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories, keys: KeyStore) -> String {
     let mut doc = Table::new();
     doc.insert(
         "hub".into(),
@@ -381,6 +401,7 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories) -> String {
                 "pty_holder_token",
                 s(&format!("${{{}}}", Secret::GatewayToken.env())),
             ),
+            ("accounts", accounts(paths, keys)),
         ]),
     );
     // A job or workflow made in Desk that needs the person's approval asks
@@ -494,7 +515,7 @@ mod tests {
 
     fn rendered(memories: Memories) -> Table {
         let paths = Paths::at("/Users/k/Library/Application Support/Desk");
-        toml::from_str(&render(&paths, &ports(), memories)).unwrap()
+        toml::from_str(&render(&paths, &ports(), memories, KeyStore::File)).unwrap()
     }
 
     #[test]
@@ -555,6 +576,29 @@ mod tests {
     /// `pool_size`, the seldom-asked ones at 4, the few fixed small ones
     /// and the local memory store's own, under `max_connections` less
     /// Postgres's 3 reserved slots.
+    #[test]
+    fn engine_accounts_are_kept_where_desks_own_secrets_are() {
+        let paths = Paths::at("/Users/k/Library/Application Support/Desk");
+        let at = |keys| {
+            let doc: Table =
+                toml::from_str(&render(&paths, &ports(), Memories::Store, keys)).unwrap();
+            doc["desk"]["accounts"].clone()
+        };
+        let file = at(KeyStore::File);
+        assert_eq!(file["store"].as_str(), Some("file"));
+        assert_eq!(
+            file["file"].as_str(),
+            Some("/Users/k/Library/Application Support/Desk/hub/accounts.json")
+        );
+        let system = at(KeyStore::System);
+        if cfg!(target_os = "macos") {
+            assert_eq!(system["store"].as_str(), Some("system"));
+            assert_eq!(system["service"].as_str(), Some(desk_core::KEYRING_SERVICE));
+        } else {
+            assert_eq!(system["store"].as_str(), Some("file"));
+        }
+    }
+
     #[test]
     fn the_hubs_pools_fit_the_local_postgres() {
         let doc = rendered(Memories::Sqlite);
@@ -673,7 +717,7 @@ mod tests {
         let mine = "# mine\n[memory]\npassive = false\nconsolidation = false\n\n[advisor]\nenabled = false\n\n[know_how]\nenabled = false\n\n[tools.programs]\nenabled = false\n";
         std::fs::write(dir.path().join("config.toml"), mine).unwrap();
         let paths = Paths::at(dir.path());
-        let _ = render(&paths, &ports(), Memories::Store);
+        let _ = render(&paths, &ports(), Memories::Store, KeyStore::File);
         ensure_rich(dir.path()).unwrap();
         ensure_oversight(dir.path()).unwrap();
         let kept = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();

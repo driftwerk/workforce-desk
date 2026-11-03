@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
+import { accountOfCard, sessionsText, useAccounts } from "../engines/accounts";
 import type { PlanKind, PlanWindow } from "../hub/types";
 import { CLI_NAME, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
 import { ask, usePlans } from "./store";
@@ -63,11 +64,14 @@ export function PlanCards() {
 }
 
 function Card({ card, now }: { card: PlanCard; now: number }) {
-  const sub = [card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
+  // One of the person's accounts: its name, and the sessions on it.
+  const account = useAccounts((s) => accountOfCard(s.accounts, card.key));
+  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
+  const title = account ? `${TITLE[card.kind]} · ${account.name}` : TITLE[card.kind];
   return (
-    <section className="floor-card plan-card" aria-label={`${TITLE[card.kind]} usage`}>
+    <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">
-        <h2 className="display floor-card-title">{TITLE[card.kind]}</h2>
+        <h2 className="display floor-card-title">{title}</h2>
         <span className="muted small">{sub}</span>
         {card.reading && <span className="floor-time">as of {clock(card.reading.observedAt)}</span>}
       </div>

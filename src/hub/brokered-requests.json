@@ -21,6 +21,61 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/accounts"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/accounts/a1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/accounts/a1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/sign-ins/i1/code"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/accounts/sign-ins/i1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/problems/a1/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/account"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/switch-all"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/needs/limit%3Aa1%3Aa2/put-off"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/accounts/auto-switch"
+  },
+  {
+    "kind": "http",
     "method": "PATCH",
     "path": "/api/desk/sessions/s1"
   },

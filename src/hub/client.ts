@@ -6,8 +6,14 @@ import type {
   ActivityFilter,
   ActivityPage,
   Decision,
+  AccountAdded,
+  AccountSignIn,
+  AccountsInfo,
+  Engine,
+  EngineAccount,
   EngineInfo,
   SpendBy,
+  SwitchedAll,
   SpendPeriod,
   SpendView,
   DeskEvent,
@@ -281,6 +287,37 @@ export class DeskHub {
       throw e;
     }
   };
+  /** The person's engine accounts; null from a hub without them. */
+  accounts = async (): Promise<AccountsInfo | null> => {
+    try {
+      return await this.call<AccountsInfo>("GET", "/api/desk/accounts");
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return null;
+      throw e;
+    }
+  };
+  /** Adds an account: with a pasted token, checked and kept; without, the
+   *  engine's own sign-in begins. */
+  addAccount = (a: { engine: Engine; name: string; token?: string; makeDefault?: boolean }): Promise<AccountAdded> =>
+    this.call("POST", "/api/desk/accounts", a);
+  updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
+    this.call("PATCH", `/api/desk/accounts/${id}`, patch);
+  removeAccount = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/${id}`);
+  /** The code the sign-in page showed, for the sign-in waiting on it. */
+  signInCode = (id: string, code: string): Promise<AccountSignIn> =>
+    this.call("POST", `/api/desk/accounts/sign-ins/${id}/code`, { code });
+  /** "OK" on a sign-in problem the person has dealt with. */
+  dismissSignInProblem = (account: string): Promise<void> => this.call("POST", `/api/desk/accounts/problems/${account}/dismiss`);
+  cancelSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/sign-ins/${id}`);
+  /** Moves every session on one account to another: "Switch all". */
+  switchAll = (from: string | null, to: string | null): Promise<SwitchedAll> =>
+    this.call("POST", "/api/desk/accounts/switch-all", { engine: "claude", from, to });
+  /** "Not now" on an account need. */
+  putOffNeed = (id: string): Promise<void> => this.call("POST", `/api/desk/accounts/needs/${encodeURIComponent(id)}/put-off`);
+  setAutoSwitch = (on: boolean): Promise<void> => this.call("PUT", "/api/desk/accounts/auto-switch", { on });
+  /** Moves a session to another account (null: the CLI's own sign-in). */
+  switchAccount = (id: string, account: string | null): Promise<Session> =>
+    this.call("POST", `/api/desk/sessions/${id}/account`, { account });
   update = (id: string, patch: { name?: string; goal?: string; approvals?: "desk" | "terminal" }): Promise<Session> =>
     this.call("PATCH", `/api/desk/sessions/${id}`, patch);
   stop = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/stop`);
