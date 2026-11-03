@@ -44,7 +44,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   list: vi.fn(async () => ({ connectors: list, adapters: [] })),
   connect: vi.fn(async () => connection()),
   test: vi.fn(async () => connection()),
-  disconnect: vi.fn(async () => {}),
+  disconnect: vi.fn(async () => ({ stillKept: null, note: null })),
   saveGoogleClient: vi.fn(async () => {}),
   start: vi.fn(),
   flow: vi.fn(),
@@ -152,6 +152,21 @@ it("lists who uses a connection, and asks before Disconnect takes it from them",
     fireEvent.click(within(asking).getByRole("button", { name: "Disconnect" }));
   });
   expect(a.disconnect).toHaveBeenCalledWith("linear", { level: "all" });
+});
+
+it("says when a key saved for the whole hub still connects it after Disconnect", async () => {
+  const note = "A Linear key saved for everyone on this hub is still kept, so agents still reach Linear.";
+  const a = api([connector({ id: "linear", name: "Linear", connections: [connection()] })], {
+    disconnect: vi.fn(async () => ({ stillKept: "global", note })),
+  });
+  await show(a);
+  fireEvent.click(within(row("Linear")).getByRole("button", { name: "Manage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+  const asking = screen.getByText("Disconnect Linear?").parentElement!;
+  await act(async () => {
+    fireEvent.click(within(asking).getByRole("button", { name: "Disconnect" }));
+  });
+  expect(screen.getByRole("status").textContent).toBe(note);
 });
 
 it("tests a connection again and shows what it found", async () => {

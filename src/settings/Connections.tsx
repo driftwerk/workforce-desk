@@ -43,6 +43,7 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
   const [list, setList] = useState<Connector[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -92,6 +93,19 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
         </div>
       )}
 
+      {notice && (
+        <div className="setting-card">
+          <span className="card-text">
+            <span className="state-blocked" role="status">
+              {notice}
+            </span>
+          </span>
+          <button type="button" className="btn btn-ghost" onClick={() => setNotice(null)}>
+            OK
+          </button>
+        </div>
+      )}
+
       {nothing && (
         <div className="setting-card connections-empty">
           <span className="card-text">
@@ -104,7 +118,7 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
       {api && list && list.length > 0 && (
         <div className="prov-list" role="list" aria-label="Connectors">
           {list.map((c) => (
-            <ConnectorRow key={c.id} api={api} connector={c} reload={load} />
+            <ConnectorRow key={c.id} api={api} connector={c} reload={load} onNotice={setNotice} />
           ))}
         </div>
       )}
@@ -115,7 +129,17 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
 }
 
 /** One connector's row, and its detail when open. */
-function ConnectorRow({ api, connector: c, reload }: { api: ConnectionsApi; connector: Connector; reload: () => Promise<void> }) {
+function ConnectorRow({
+  api,
+  connector: c,
+  reload,
+  onNotice,
+}: {
+  api: ConnectionsApi;
+  connector: Connector;
+  reload: () => Promise<void>;
+  onNotice: (n: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const all = mine(c);
   const only = agentOnly(c);
@@ -145,18 +169,28 @@ function ConnectorRow({ api, connector: c, reload }: { api: ConnectionsApi; conn
           {open ? "Close" : all || only.length ? "Manage" : "Connect"}
         </button>
       </div>
-      {open && <ConnectorDetail api={api} connector={c} reload={reload} />}
+      {open && <ConnectorDetail api={api} connector={c} reload={reload} onNotice={onNotice} />}
     </div>
   );
 }
 
-function ConnectorDetail({ api, connector: c, reload }: { api: ConnectionsApi; connector: Connector; reload: () => Promise<void> }) {
+function ConnectorDetail({
+  api,
+  connector: c,
+  reload,
+  onNotice,
+}: {
+  api: ConnectionsApi;
+  connector: Connector;
+  reload: () => Promise<void>;
+  onNotice: (n: string | null) => void;
+}) {
   const all = mine(c);
   const only = agentOnly(c);
   return (
     <div className="conn-detail">
       {all ? (
-        <ConnectedCard api={api} connector={c} connection={all} at={ALL} reload={reload} />
+        <ConnectedCard api={api} connector={c} connection={all} at={ALL} reload={reload} onNotice={onNotice} />
       ) : (
         <>
           <p className="small muted">{c.about}</p>
@@ -189,6 +223,7 @@ function ConnectorDetail({ api, connector: c, reload }: { api: ConnectionsApi; c
               connection={x}
               at={{ level: "agent", agent: x.agent ?? "" }}
               reload={reload}
+              onNotice={onNotice}
               title={`${c.name} for ${x.agentName ?? x.agent} only`}
             />
           ))}
@@ -205,6 +240,7 @@ function ConnectedCard({
   connection: x,
   at,
   reload,
+  onNotice,
   title,
 }: {
   api: ConnectionsApi;
@@ -212,6 +248,7 @@ function ConnectedCard({
   connection: Connection;
   at: At;
   reload: () => Promise<void>;
+  onNotice: (n: string | null) => void;
   title?: string;
 }) {
   const [busy, setBusy] = useState<null | "test" | "disconnect">(null);
@@ -298,7 +335,12 @@ function ConnectedCard({
             type="button"
             className="btn btn-danger"
             disabled={busy !== null}
-            onClick={() => void run("disconnect", () => api.disconnect(c.id, at)).then(() => setConfirming(false))}
+            onClick={() =>
+              void run("disconnect", async () => {
+                const left = await api.disconnect(c.id, at);
+                onNotice(left.note);
+              }).then(() => setConfirming(false))
+            }
           >
             {busy === "disconnect" ? "Disconnecting…" : "Disconnect"}
           </button>

@@ -64,6 +64,13 @@ export interface Connector {
 /** Which connection a request is about. */
 export type At = { level: "all" } | { level: "agent"; agent: string };
 
+/** What a disconnect left: a key still kept at another tier (an older one
+ *  saved for the whole hub), and what to tell the person. */
+export interface Disconnected {
+  stillKept: string | null;
+  note: string | null;
+}
+
 export interface Started {
   flow: string;
   /** Google: the page to open. */
@@ -92,7 +99,7 @@ export interface ConnectionsApi {
   list(): Promise<Listing>;
   connect(id: string, at: At, fields: Record<string, string>): Promise<Connection>;
   test(id: string, at: At): Promise<Connection>;
-  disconnect(id: string, at: At): Promise<void>;
+  disconnect(id: string, at: At): Promise<Disconnected>;
   saveGoogleClient(clientId: string, clientSecret: string): Promise<void>;
   start(id: string, at: At): Promise<Started>;
   flow(flow: string): Promise<FlowState>;
@@ -113,7 +120,11 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
       .connection,
   test: async (id, at) =>
     (await hubCall<{ connection: Connection }>(hub, "POST", `/api/desk/connections/${encodeURIComponent(id)}/test`, at)).connection,
-  disconnect: (id, at) => hubCall<void>(hub, "DELETE", `/api/desk/connections/${encodeURIComponent(id)}?${query(at)}`),
+  disconnect: async (id, at) =>
+    (await hubCall<Disconnected | undefined>(hub, "DELETE", `/api/desk/connections/${encodeURIComponent(id)}?${query(at)}`)) ?? {
+      stillKept: null,
+      note: null,
+    },
   saveGoogleClient: (clientId, clientSecret) =>
     hubCall<void>(hub, "POST", "/api/desk/connections/google/client", { client_id: clientId, client_secret: clientSecret }),
   start: (id, at) => hubCall<Started>(hub, "POST", `/api/desk/connections/${encodeURIComponent(id)}/oauth/start`, at),
