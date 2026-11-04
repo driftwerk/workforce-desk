@@ -1,5 +1,5 @@
 import type { HubAccount } from "../chat/types";
-import type { Counts, FloorSummary, Lane, Need, Span, Work } from "../hub/types";
+import type { Counts, FloorSummary, Lane, Need, Span, WentAhead, Work } from "../hub/types";
 import type { HubFloor } from "./store";
 
 /** Which hub an item came from (and whether it's this computer's), its key
@@ -13,6 +13,7 @@ export interface Tagged {
 }
 
 export type FloorNeed = Need & Tagged;
+export type FloorWentAhead = WentAhead & Tagged;
 export type FloorWork = Work & Tagged;
 export type FloorLane = Lane & Tagged;
 export type FloorParagraph = FloorSummary & Pick<Tagged, "hubId" | "local">;
@@ -20,6 +21,8 @@ export type FloorParagraph = FloorSummary & Pick<Tagged, "hubId" | "local">;
 export interface Merged {
   /** Oldest first. */
   needs: FloorNeed[];
+  /** Questions their sessions went ahead without, oldest first. */
+  wentAhead: FloorWentAhead[];
   /** Latest started first. */
   working: FloorWork[];
   /** Latest ended first. */
@@ -52,6 +55,7 @@ const whoKey = (hubId: string, w: Work | Lane): string => `${hubId}/${w.who.kind
 
 const ZERO: Merged = {
   needs: [],
+  wentAhead: [],
   working: [],
   done: [],
   lanes: [],
@@ -71,6 +75,16 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     const tag = { hubId: hub.id, local: hub.local, stale: f.stale };
     return {
       needs: [...m.needs, ...view.needs.map((n) => ({ ...n, since: shift(n.since, f.offset), ...tag, key: `${hub.id}/${n.id}` }))],
+      wentAhead: [
+        ...m.wentAhead,
+        ...(view.wentAhead ?? []).map((w) => ({
+          ...w,
+          askedAt: shift(w.askedAt, f.offset),
+          wentAheadAt: shift(w.wentAheadAt, f.offset),
+          ...tag,
+          key: `${hub.id}/${w.id}`,
+        })),
+      ],
       working: [...m.working, ...view.working.map((w) => ({ ...work(w, f.offset), ...tag, key: `${whoKey(hub.id, w)}@${w.since}` }))],
       done: [...m.done, ...view.done.map((w) => ({ ...work(w, f.offset), ...tag, key: `${whoKey(hub.id, w)}@${w.since}` }))],
       lanes: [...m.lanes, ...view.lanes.map((l) => ({ ...l, spans: l.spans.map((s) => span(s, f.offset)), ...tag, key: whoKey(hub.id, l) }))],
@@ -85,6 +99,7 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     ...all,
     counts: { ...all.counts, needsYou: all.needs.length },
     needs: all.needs.sort((a, b) => a.since.localeCompare(b.since)),
+    wentAhead: all.wentAhead.sort((a, b) => a.askedAt.localeCompare(b.askedAt)),
     working: all.working.sort((a, b) => b.since.localeCompare(a.since)),
     done: all.done.sort((a, b) => (b.endedAt ?? "").localeCompare(a.endedAt ?? "")),
     summaries: all.summaries.sort((a, b) => Number(b.local) - Number(a.local)),

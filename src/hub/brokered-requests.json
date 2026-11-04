@@ -381,6 +381,16 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/line/m1/dismiss"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/draft"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/charges"
   },

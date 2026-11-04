@@ -14,6 +14,8 @@ import { HubError } from "../hub/client";
 import { plainError } from "../ui/plainError";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
+import { LinePanel } from "../line/LinePanel";
+import { useLinePanel } from "../line/panel";
 import { BreakerBanner } from "../spend/BreakerBanner";
 import { ChargeBadge, useChargeActions } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
@@ -522,6 +524,7 @@ function SessionPane({ id }: { id: string }) {
     <>
       <BreakerBanner sessionId={session.id} compact />
       <SessionBody session={session} autoFocus={false} />
+      <LinePanel session={session} />
     </>
   );
 }
@@ -657,6 +660,9 @@ function usePaneMenu(
             onSelect: () => setApprovalsInDesk(session, session.approvals !== "desk"),
           },
         ]
+      : []),
+    ...(session && session.view !== "desk"
+      ? [{ kind: "item" as const, label: "Messages with Desk…", onSelect: () => useLinePanel.getState().show(session.id, "history") }]
       : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     ...(session ? [{ kind: "separator" as const }, ...lifecycleActions(session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run }))] : []),

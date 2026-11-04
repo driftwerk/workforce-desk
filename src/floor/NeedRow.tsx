@@ -5,7 +5,8 @@ import type { Session } from "../hub/types";
 import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import { OptionChips } from "../ui/OptionChips";
-import { requestFocus } from "../shell/focus";
+import { dismissQuestions } from "../line/LinePanel";
+import { useLinePanel } from "../line/panel";
 import { plainError } from "../ui/plainError";
 import type { FloorNeed } from "./merge";
 import { FloorRow, useStaleNote, useWhoName } from "./Row";
@@ -56,6 +57,17 @@ const choicesOf = (need: FloorNeed): Choice[] => {
   return order.filter((c) => at.choices.includes(c));
 };
 
+/** Opens a session as the side panel beside the Floor (never in a grid,
+ *  even when one shows it), with its questions shown under its terminal. */
+export const goToQuestions = (sessionId: string): void => {
+  useLinePanel.getState().show(sessionId);
+  openTarget({ kind: "session", sessionId }, { beside: true });
+};
+
+/** A question a session asked on its line: Go to session and Dismiss, on
+ *  the Floor; it's taken up in the session's terminal. */
+export const isLineNeed = (need: { id: string }): boolean => need.id.startsWith("line:");
+
 /** What still needs the person, as a row: it opens where it is (a session
  *  or a DM beside the Floor); with `actions` (Right now and Activity) it is
  *  answered there too, each button naming whose need it answers. */
@@ -69,6 +81,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   });
   const [acting, setActing] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const line = isLineNeed(need) && need.local && need.who.kind === "session";
   const act = (what: "allowAsked" | "dismissAsked") => () => {
     const hub = useDesk.getState().hub;
     if (!asking || !hub || acting) return;
@@ -93,7 +106,9 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       <FloorRow
         item={need}
         look="blocked"
-        time={`waiting ${durationOf(need.since, now)} · since ${dayClock(need.since, now)}`}
+        time={
+          line ? `waiting ${durationOf(need.since, now)} · it’s paused until you answer` : `waiting ${durationOf(need.since, now)} · since ${dayClock(need.since, now)}`
+        }
         onOpen={open}
         tabbed={!actions}
       >
@@ -135,23 +150,47 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               {allowLabel(denied)}
             </button>
           )}
-          {target && need.answer.kind === "reply" && (
+          {line && (
+            <>
+              <button
+                type="button"
+                className="btn btn-signal"
+                aria-label={`Go to ${name}`}
+                disabled={need.stale || acting}
+                onClick={() => goToQuestions(need.who.id)}
+              >
+                Go to session
+              </button>
+              <button
+                type="button"
+                className="btn"
+                aria-label={`Dismiss “${need.ask}” from ${name}`}
+                disabled={need.stale || acting}
+                onClick={() => {
+                  setActing(true);
+                  setRefused(null);
+                  dismissQuestions([need.id.slice("line:".length)])
+                    .catch((e: unknown) => setRefused(plainError(e)))
+                    .finally(() => setActing(false));
+                }}
+              >
+                Dismiss
+              </button>
+            </>
+          )}
+          {!line && target && need.answer.kind === "reply" && (
             <button
               type="button"
               className="btn btn-signal"
               aria-label={`Reply to ${name}…`}
               disabled={need.stale || !!deciding}
               title={stale}
-              onClick={() => {
-                openTarget(target, { beside: true, reply: true });
-                // A question on a session's line is answered in its thread.
-                if (need.id.startsWith("line:")) requestFocus(`line:${need.who.id}`);
-              }}
+              onClick={() => openTarget(target, { beside: true, reply: true })}
             >
               Reply…
             </button>
           )}
-          {target && (
+          {!line && target && (
             <button
               type="button"
               className="btn"

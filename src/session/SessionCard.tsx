@@ -22,7 +22,8 @@ import { ENGINE_TITLE } from "../engines/engines";
 import { BreakerBanner } from "../spend/BreakerBanner";
 import { SpendStrip } from "../spend/SpendStrip";
 import { ImageBudget } from "../shell/RemoteImage";
-import { Thread } from "../line/Thread";
+import { LinePanel } from "../line/LinePanel";
+import { useLinePanel } from "../line/panel";
 import { ChargeStrip } from "../crew/ChargeBadge";
 
 const ENGINE = ENGINE_TITLE;
@@ -105,6 +106,11 @@ export function SessionCard({ session }: { session: Session }) {
             {session.goal || <span className="faint">Add a goal so you know what this one is for</span>}
           </button>
         )}
+        {session.view !== "desk" && (
+          <button type="button" className="link small session-line-history" onClick={() => useLinePanel.getState().show(session.id, "history")}>
+            Messages with Desk…
+          </button>
+        )}
       </div>
       <SpendStrip sessionId={session.id} />
       <BreakerBanner sessionId={session.id} />
@@ -118,7 +124,7 @@ export function SessionCard({ session }: { session: Session }) {
       )}
       <SessionBody session={session} />
       <Approval session={session} />
-      <Thread session={session} />
+      <LinePanel session={session} />
     </SidePanel>
   );
 }

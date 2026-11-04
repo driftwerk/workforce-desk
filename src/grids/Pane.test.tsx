@@ -599,3 +599,34 @@ describe("an agent's pane", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("a session's questions in a grid pane", () => {
+  it("are a slim bar under its terminal, shown there as in its side panel, with its line from the pane's options", async () => {
+    const { useLine } = await import("../line/store");
+    const { useLinePanel } = await import("../line/panel");
+    const { msg, S1, YOU } = await import("../line/testing");
+    const thread = [msg({ id: "q1", from: { ...S1, id: "s0" }, to: YOU, text: "Retire the legacy routes?", asked: "lapsed", chose: "keep both" })];
+    useLine.setState({ threads: {}, problems: {}, asked: {} });
+    useLinePanel.setState({ shown: {}, heights: {} });
+    useDesk.setState((s) => ({
+      hub: { closeTerminal, lineThread: vi.fn(() => Promise.resolve(thread)) } as never,
+      sessions: { ...s.sessions, s0: { ...s.sessions.s0!, live: true, state: "working" }, s1: { ...s.sessions.s1!, live: true } },
+    }));
+    layOut(MAIN_GRID, "quarters");
+    deliver(MAIN_GRID, sess("s0"));
+    deliver(MAIN_GRID, sess("s1"));
+    canvas();
+    await act(async () => {});
+    const pane = screen.getByRole("region", { name: "task-0" });
+    const bar = within(pane).getByRole("status");
+    expect(bar.textContent).toContain("It asked you 1 question · went ahead with its defaults");
+    // Nothing open on the other: nothing under its terminal.
+    expect(screen.getByRole("region", { name: "task-1" }).querySelector(".line-bar, .line-panel")).toBeNull();
+    fireEvent.click(within(bar).getByRole("button", { name: /^Show/ }));
+    expect(within(pane).getByText("It chose: keep both")).toBeTruthy();
+    expect(within(pane).queryByRole("textbox")).toBeNull();
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Messages with Desk…" }));
+    expect(within(pane).getByRole("region", { name: "Messages with Desk" })).toBeTruthy();
+  });
+});

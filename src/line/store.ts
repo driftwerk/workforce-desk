@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
-import type { DeskEvent, LineMessage } from "../hub/types";
+import type { DeskEvent, LineAsked, LineMessage } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { merged, onThread } from "./rows";
 
@@ -9,6 +9,9 @@ interface LineState {
   threads: Record<string, LineMessage[]>;
   /** Sessions whose thread couldn't be read, and why. */
   problems: Record<string, string>;
+  /** Where each question heard of since the Floor was read now stands:
+   *  answered or dismissed anywhere, it leaves the Floor at once. */
+  asked: Record<string, LineAsked>;
   /** Reads `sessionId`'s thread from the hub. */
   load: (sessionId: string) => Promise<void>;
   /** A message the hub announced (or answered with). */
@@ -22,6 +25,7 @@ let heardCount = 0;
 export const useLine = create<LineState>((set) => ({
   threads: {},
   problems: {},
+  asked: {},
   load: async (sessionId) => {
     // A message heard while the thread was being read may be newer than
     // what the read says: the read is then made again (a few times at
@@ -47,7 +51,8 @@ export const useLine = create<LineState>((set) => ({
       for (const [id, list] of Object.entries(s.threads)) {
         if (onThread(m, id)) threads = { ...threads, [id]: merged(list, m, removed) };
       }
-      return threads === s.threads ? s : { threads };
+      const asked = m.kind === "ask" && m.asked && s.asked[m.id] !== m.asked ? { ...s.asked, [m.id]: m.asked } : s.asked;
+      return threads === s.threads && asked === s.asked ? s : { threads, asked };
     });
   },
 }));

@@ -12,11 +12,10 @@ import { useNow } from "../chat/WorkingRow";
 
 const NONE: LineMessage[] = [];
 
-/** A session's line: what it, Desk, other sessions and you said to each
- *  other, newest at the bottom, each message saying where it stands; a
- *  question waiting on you is answered in place. The composer under it
- *  writes to the session. */
-export function Thread({ session }: { session: Session }) {
+/** A session's line as Desk has it, read from the hub (again as the
+ *  session moves on, for why a message waits), with whether it was read
+ *  and why it couldn't be. */
+export const useThread = (session: Session) => {
   const loaded = useLine((s) => session.id in s.threads);
   const kept = useLine((s) => s.threads[session.id] ?? NONE);
   // A boss's message that came while you drive waits on you: the hub says
@@ -30,6 +29,17 @@ export function Thread({ session }: { session: Session }) {
   useEffect(() => {
     if (connected) void useLine.getState().load(session.id);
   }, [connected, session.id, session.state, session.live]);
+  return { thread, loaded, problem, connected };
+};
+
+/** A session's line: what it, Desk, other sessions and you said to each
+ *  other, newest at the bottom, each message saying where it stands. In
+ *  Desk's own view of a session, a question waiting on you is answered in
+ *  place and the composer under it writes to the session; as `history`
+ *  (a terminal session's Messages with Desk), it is only read: you talk to
+ *  a terminal session in its terminal. */
+export function Thread({ session, history = false }: { session: Session; history?: boolean }) {
+  const { thread, loaded, problem, connected } = useThread(session);
   const line = lineOf(session);
   const now = useNow();
   // Reply… on the Floor focuses the first question waiting on you.
@@ -40,17 +50,25 @@ export function Thread({ session }: { session: Session }) {
       {thread.length > 0 && (
         <ol className="line-thread">
           {thread.map((m) => (
-            <Row key={m.id} m={m} session={session} now={now} focusKey={m.id === first ? `line:${session.id}` : `line:${session.id}:${m.id}`} />
+            <Row
+              key={m.id}
+              m={m}
+              session={session}
+              now={now}
+              answers={!history}
+              focusKey={m.id === first ? `line:${session.id}` : `line:${session.id}:${m.id}`}
+            />
           ))}
         </ol>
       )}
       {problem && <p className="small state-blocked line-note">Desk couldn’t read this session’s line: {problem}</p>}
-      {line.on ? <Composer session={session} /> : <p className="small faint line-note">{line.why}</p>}
+      {loaded && history && thread.length === 0 && <p className="small faint line-note">Nothing on its line yet.</p>}
+      {history ? null : line.on ? <Composer session={session} /> : <p className="small faint line-note">{line.why}</p>}
     </section>
   );
 }
 
-function Row({ m, session, now, focusKey }: { m: LineMessage; session: Session; now: number; focusKey: string }) {
+function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: Session; now: number; focusKey: string; answers: boolean }) {
   const out = outgoing(m, session.id);
   const status = [askedText(m), deliveryText(m, now)].filter(Boolean).join(" · ");
   const hop = m.from.kind === "session" && m.to.kind === "session" ? ` · hop ${m.hop}` : "";
@@ -65,7 +83,7 @@ function Row({ m, session, now, focusKey }: { m: LineMessage; session: Session; 
         </span>
       </span>
       {editable(m) ? <Editable m={m} /> : <span className="line-row-text">{m.text}</span>}
-      {waitsOnYou(m) && (
+      {answers && waitsOnYou(m) && (
         <LineAnswer
           compact
           focusKey={focusKey}

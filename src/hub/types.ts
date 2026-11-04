@@ -833,7 +833,9 @@ export type LineDelivery =
   | "withdrawn"
   /** Shown in the thread only, never typed into the session. */
   | "noted";
-export type LineAsked = "open" | "escalated" | "answered" | "withdrawn";
+/** "lapsed": its session stopped waiting and went ahead without an answer;
+ *  "dismissed": you set it aside unanswered. */
+export type LineAsked = "open" | "escalated" | "answered" | "withdrawn" | "lapsed" | "dismissed";
 /** Why a queued message hasn't gone in yet. */
 export type LineWait =
   | "stopped"
@@ -859,6 +861,9 @@ export interface LineMessage {
   asked: LineAsked | null;
   /** Why the overseer gave it to you, what it offered, and its draft. */
   escalation: { why: string; options: string[]; draft: string | null } | null;
+  /** An ask's: what the session said it goes ahead with if no answer comes
+   *  in time. Absent when it didn't say (and from older hubs). */
+  chose?: string | null;
   deliveredAt: string | null;
   updatedAt: string;
   waiting?: LineWait;
@@ -1006,6 +1011,20 @@ export interface FloorView {
   more: { done: number; lanes: number };
   /** Absent from older hubs; null until one is written. */
   summary?: FloorSummary | null;
+  /** Questions to you their sessions went ahead without, until answered or
+   *  dismissed. Absent when none (and from older hubs). */
+  wentAhead?: WentAhead[];
+}
+
+/** A question to you its session went ahead without. */
+export interface WentAhead {
+  /** `line:<message id>`. */
+  id: string;
+  who: Who;
+  ask: string;
+  chose?: string | null;
+  askedAt: string;
+  wentAheadAt: string;
 }
 
 export type PlanKind = "claude" | "chatgpt";

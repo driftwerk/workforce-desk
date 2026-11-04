@@ -1091,9 +1091,22 @@ button {
   min-width: 0;
 }
 .session-goal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 8px 16px;
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+.session-goal > input,
+.session-goal > .goal-text {
+  flex: 1;
+  min-width: 0;
+}
+/* The session's whole line, read under its terminal. */
+.session-line-history {
+  flex: none;
+  white-space: nowrap;
 }
 /* Where the session already is in the grids, with a way to each. */
 .session-where {
@@ -2795,4 +2808,150 @@ button.urow-open {
 .line-answer-done {
   background: transparent;
   padding: 0;
+}
+
+/* Under a terminal session: nothing while its line has nothing open; a slim
+   bar saying what is; shown, a panel you drag taller or shorter. The
+   terminal keeps a usable height whatever the panel asks for. */
+.line-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 10px 6px 14px;
+  background: var(--blocked-soft);
+  border-top: 1px solid color-mix(in srgb, var(--blocked) 40%, var(--border));
+}
+.line-bar .dot {
+  flex: none;
+}
+.line-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.line-bar-show {
+  flex: none;
+}
+.line-panel {
+  flex: 0 1 auto;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+.rpanel:has(> .line-panel) .terminal-frame,
+.gpane-body:has(> .line-panel) .terminal-frame {
+  min-height: min(140px, 45%);
+}
+.line-panel-handle {
+  flex: none;
+  height: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  touch-action: none;
+}
+.line-panel-handle::after {
+  content: "";
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.12s;
+}
+.line-panel-handle:hover::after,
+.line-panel-handle:focus-visible::after {
+  background: var(--handle-active);
+}
+.line-panel-handle:focus-visible {
+  outline: none;
+}
+body.line-resizing,
+body.line-resizing * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+.line-panel-head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 2px 14px 8px;
+  min-width: 0;
+}
+.line-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.line-panel > .line-note {
+  padding: 0 14px 6px;
+}
+.line-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+/* The whole line, read in the panel: its own padding and border give way. */
+.line-panel-body > .line {
+  padding: 0;
+  border: 0;
+  max-height: none;
+  background: transparent;
+}
+.line-questions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.line-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
+}
+.line-question-text {
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.line-question-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.line-question-chose {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
