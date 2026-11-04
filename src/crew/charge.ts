@@ -72,12 +72,15 @@ export interface ChargeChoice {
 }
 
 /** Hand to Sarah on a session she could run but doesn't (when she does
- *  more than watch); on one she runs, I'll drive or Hand back, and
- *  Release. */
+ *  more than watch); on one she runs, I'll drive (until it is pinned),
+ *  Hand back while you drive, and Release. */
 export const chargeChoices = (s: Session, c: ChargeView | null | undefined, boss: Boss | null): ChargeChoice[] => {
   if (c && !c.releasedAt) {
+    // While you drive unpinned, I'll drive keeps it yours past the quiet
+    // minutes.
     return [
-      driving(c) ? { verb: "handBack", label: "Hand back" } : { verb: "drive", label: "I’ll drive" },
+      ...(c.wheel !== "person_pinned" ? [{ verb: "drive" as const, label: "I’ll drive" }] : []),
+      ...(driving(c) ? [{ verb: "handBack" as const, label: "Hand back" }] : []),
       { verb: "release", label: "Release" },
     ];
   }

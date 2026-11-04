@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useChat } from "../chat/store";
 import { deskListeners, useDesk } from "../hub/store";
 import type { ChargeView, DeskEvent } from "../hub/types";
 import { withWheel } from "../line/rows";
@@ -39,12 +40,13 @@ export const useCharges = create<ChargeState>((set, get) => ({
     try {
       const list = await hub.charges();
       if (useDesk.getState().hub !== hub) return;
-      set({ bySession: Object.fromEntries((list ?? []).map((c) => [c.session, c])), supported: list !== null });
+      set({ bySession: Object.fromEntries((list ?? []).map((c) => [c.session, named(c)])), supported: list !== null });
     } catch {
       // Kept as last read; the next snapshot reads them again.
     }
   },
-  heard: (c) => {
+  heard: (heard) => {
+    const c = named(heard);
     const was = get().bySession[c.session];
     set((s) => ({ bySession: withCharge(s.bySession, c), supported: true }));
     // Why the boss's messages wait (or that they no longer do) changes
@@ -63,6 +65,16 @@ export const useCharges = create<ChargeState>((set, get) => ({
     get().heard(c);
   },
 }));
+
+/** `c` with its boss's name as the roster says it: the hub, not knowing
+ *  it (after a restart), sends its id. */
+const named = (c: ChargeView): ChargeView => {
+  const { hubs, roster } = useChat.getState();
+  const local = hubs.find((h) => h.local);
+  const agent = local && roster.find((a) => a.hubId === local.id && a.id === c.boss);
+  if (agent) return agent.name === c.bossName ? c : { ...c, bossName: agent.name };
+  return c.bossName === c.boss ? { ...c, bossName: "Your overseer" } : c;
+};
 
 const rewait = (sessionId: string, driving: boolean) => {
   const list = useLine.getState().threads[sessionId];

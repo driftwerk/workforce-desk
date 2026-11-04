@@ -39,9 +39,9 @@ describe("a session a boss runs", () => {
     expect(howText(charge({ how: "taken" }))).toBe("Sarah takes on every session");
   });
 
-  it("offers I'll drive while the boss has it, Hand back while you do, and Release either way", () => {
+  it("offers I'll drive until it's pinned, Hand back while you drive, and Release either way", () => {
     expect(chargeChoices(lined(), charge(), SARAH).map((c) => c.label)).toEqual(["I’ll drive", "Release"]);
-    expect(chargeChoices(lined(), charge({ wheel: "person" }), SARAH).map((c) => c.label)).toEqual(["Hand back", "Release"]);
+    expect(chargeChoices(lined(), charge({ wheel: "person" }), SARAH).map((c) => c.label)).toEqual(["I’ll drive", "Hand back", "Release"]);
     expect(chargeChoices(lined(), charge({ wheel: "person_pinned" }), SARAH).map((c) => c.verb)).toEqual(["handBack", "release"]);
   });
 

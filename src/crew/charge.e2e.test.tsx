@@ -261,13 +261,19 @@ describe("a session Sarah runs", () => {
     expect(within(pane).queryByText("Sarah has it")).toBeNull();
     // Why Sarah's message waits is read again with the wheel.
     expect(await screen.findByText(/Waiting: you're driving/)).toBeTruthy();
+    // One Sarah says while you drive waits too, though the hub's word on it
+    // says no more than that it's queued.
+    const later = msg({ id: "m-later", at: "2026-11-03T10:21:00Z", from: DESK, to: S1, kind: "tell", text: "Then rebase onto main.", asked: null, delivery: "queued", deliveredAt: null });
+    hub.thread = [...hub.thread, later];
+    act(() => hub.events!.say({ type: "line", message: later }));
+    expect(screen.getAllByText(/Waiting: you're driving/)).toHaveLength(2);
 
     // Hand back, from the pane's header: Sarah has it, and her message goes in.
     await act(async () => fireEvent.click(within(pane).getByRole("button", { name: "Hand back" })));
     expect(hub.requests).toContain("PATCH /api/desk/sessions/s1/charge");
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
-    expect(await screen.findByText(/Delivered/)).toBeTruthy();
-    expect(screen.queryByText(/Waiting: you're driving/)).toBeNull();
+    await waitFor(() => expect(screen.getAllByText(/Delivered/)).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByText(/Waiting: you're driving/)).toBeNull());
   });
 
   it("is released from its card, what Sarah held is withdrawn, and handed back to her from the pane's menu", async () => {
