@@ -215,6 +215,52 @@ async fn device_token(hub: &Hub, owner: &Owner, person: &Person) -> Result<Strin
     Ok(token)
 }
 
+/// How pairing waits for a hub that is slow to come up (the first start of
+/// a new binary on macOS can take minutes).
+struct Retry {
+    first: Duration,
+    max: Duration,
+    warn_after: Duration,
+}
+
+impl Default for Retry {
+    fn default() -> Self {
+        Self {
+            first: Duration::from_secs(2),
+            max: Duration::from_secs(30),
+            warn_after: Duration::from_secs(120),
+        }
+    }
+}
+
+/// Polls the hub until it answers, backing off from `first` to `max`. It
+/// never gives up: whoever runs it stops it when the hub process exits.
+async fn wait_for_hub(hub: &Hub, retry: &Retry) {
+    let started = std::time::Instant::now();
+    let mut delay = retry.first;
+    let mut warned = false;
+    loop {
+        if let Ok((200, _)) = hub
+            .call(reqwest::Method::GET, "/api/pair/devices", &hub.admin, None)
+            .await
+        {
+            if warned {
+                tracing::info!(
+                    waited_secs = started.elapsed().as_secs(),
+                    "the local hub came up; pairing Desk with it"
+                );
+            }
+            return;
+        }
+        if !warned && started.elapsed() >= retry.warn_after {
+            warned = true;
+            tracing::warn!("still waiting for the local hub to come up");
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(retry.max);
+    }
+}
+
 /// Waits for the hub, then makes sure Desk holds a device token for it that
 /// resolves to the owner.
 pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> {
@@ -229,20 +275,7 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
         base: gateway.trim_end_matches('/').to_string(),
         admin: admin_token.to_string(),
     };
-    let mut ready = false;
-    for _ in 0..120 {
-        if let Ok((200, _)) = hub
-            .call(reqwest::Method::GET, "/api/pair/devices", &hub.admin, None)
-            .await
-        {
-            ready = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-    if !ready {
-        eyre::bail!("the local hub did not come up for pairing");
-    }
+    wait_for_hub(&hub, &Retry::default()).await;
     // `git` runs to say who the person is: off the async threads.
     let person = tokio::task::spawn_blocking(person).await?;
     let owner = ensure_owner(&hub, paths, &person).await?;
@@ -267,6 +300,93 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A hub that refuses connections for `slow_for`, then answers 200 to
+    /// everything. Returns its address and how many requests it has seen.
+    async fn slow_hub(
+        slow_for: Duration,
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = probe.local_addr().unwrap();
+        drop(probe); // nothing listens yet: connections are refused
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = served.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(slow_for).await;
+            let l = tokio::net::TcpListener::bind(addr).await.unwrap();
+            loop {
+                let (mut sock, _) = l.accept().await.unwrap();
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+        (format!("http://{addr}"), served)
+    }
+
+    fn test_hub(base: String) -> Hub {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Hub {
+            http: reqwest::Client::builder().no_proxy().build().unwrap(),
+            base,
+            admin: "t".into(),
+        }
+    }
+
+    fn quick() -> Retry {
+        Retry {
+            first: Duration::from_millis(20),
+            max: Duration::from_millis(100),
+            warn_after: Duration::from_millis(150),
+        }
+    }
+
+    /// A hub that takes far longer than the old two-minute budget would
+    /// allow (scaled down) is still waited for.
+    #[tokio::test]
+    async fn pairing_keeps_waiting_for_a_slow_hub() {
+        let (base, served) = slow_hub(Duration::from_millis(700)).await;
+        let started = std::time::Instant::now();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            wait_for_hub(&test_hub(base), &quick()),
+        )
+        .await
+        .expect("pairing gave up on a hub that was only slow");
+        assert!(started.elapsed() >= Duration::from_millis(700));
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A hub that is up answers the first poll without any waiting.
+    #[tokio::test]
+    async fn a_ready_hub_is_paired_at_once() {
+        let (base, _) = slow_hub(Duration::ZERO).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let started = std::time::Instant::now();
+        wait_for_hub(&test_hub(base), &Retry::default()).await;
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// The wait has no end of its own: it is stopped from outside, which is
+    /// how a hub that exits ends it.
+    #[tokio::test]
+    async fn the_wait_ends_only_when_stopped() {
+        let (base, _) = slow_hub(Duration::from_secs(3600)).await;
+        let waiting = tokio::spawn({
+            let hub = test_hub(base);
+            async move { wait_for_hub(&hub, &quick()).await }
+        });
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!waiting.is_finished());
+        waiting.abort();
+        assert!(waiting.await.unwrap_err().is_cancelled());
+    }
 
     /// A command's output is waited for without holding back desk-hubd's
     /// other spawns: only starting it is.
