@@ -104,6 +104,12 @@ export interface ChatMessage {
   /** The kept message that says its words without its files: a live message
    *  whose files show on that one (an older hub keeps no person's files). */
   keptAs?: string;
+  /** The Desk turn it answers, where the hub said. */
+  turnRef?: string;
+  /** An answer the hub's turn end said it didn't keep under the id it
+   *  streamed with: its kept copy is known by what it says, as on a hub
+   *  that doesn't stream by id. */
+  byWords?: boolean;
 }
 
 // ── Desk as a surface of the hub (mirrors the hub's `workforce_core::desk`) ──
