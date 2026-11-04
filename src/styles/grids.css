@@ -252,6 +252,12 @@
     display: none;
   }
 }
+/* Hand back gives way with the badge: it's in the pane's menu too. */
+@container gpane-head (max-width: 440px) {
+  .gpane-head .gpane-charge-act {
+    display: none;
+  }
+}
 .gpane-body {
   flex: 1;
   min-height: 0;

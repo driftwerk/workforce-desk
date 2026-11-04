@@ -1,6 +1,6 @@
 // A pane's header as it narrows: its name keeps its room longest. The rest
 // gives way first, in this order: where a terminal is, then what the pane
-// is and its state, then the Tracked badge. grids.css hides each with a
+// is and its state, then the Tracked badge (and a boss's badge and Hand back with it). grids.css hides each with a
 // container query on `.gpane-head` at the width given here (head.test.ts
 // keeps the two in step), and the name, cut short at last, loses its
 // middle, so its start and end both stay.

@@ -269,8 +269,13 @@ describe("a session Sarah runs", () => {
     expect(screen.getAllByText(/Waiting: you're driving/)).toHaveLength(2);
 
     // Hand back, from the pane's header: Sarah has it, and her message goes in.
-    await act(async () => fireEvent.click(within(pane).getByRole("button", { name: "Hand back" })));
-    expect(hub.requests).toContain("PATCH /api/desk/sessions/s1/charge");
+    // Clicked twice before the hub answers, it's asked once.
+    const handBack = within(pane).getByRole("button", { name: "Hand back" });
+    await act(async () => {
+      fireEvent.click(handBack);
+      fireEvent.click(handBack);
+    });
+    expect(hub.requests.filter((r) => r === "PATCH /api/desk/sessions/s1/charge")).toHaveLength(1);
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
     await waitFor(() => expect(screen.getAllByText(/Delivered/)).toHaveLength(2));
     await waitFor(() => expect(screen.queryByText(/Waiting: you're driving/)).toBeNull());

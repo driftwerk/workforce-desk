@@ -142,16 +142,25 @@ export const merged = (list: readonly LineMessage[], m: LineMessage, removed = f
 export const onThread = (m: LineMessage, sessionId: string): boolean =>
   (m.from.kind === "session" && m.from.id === sessionId) || (m.to.kind === "session" && m.to.id === sessionId);
 
-/** `list` once the wheel of `sessionId`, which a boss runs, changed hands:
- *  the boss's messages still waiting to go in wait on you while you drive,
- *  and no longer once you don't. */
+/** Why a boss's message waits that holds whoever drives: the hub's
+ *  reasons it can't go in at all (stopped, the person typing, a turn it
+ *  can't be typed into) and Desk's breaker come before the wheel. Only
+ *  "asking" and no reason at all rank below it. */
+const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking"]);
+
+/** `list` once the wheel of `sessionId`, which a boss runs, changed hands,
+ *  as the hub's line gate reads it: the boss's tells still waiting to go in
+ *  wait on you while you drive, unless something the hub ranks first holds
+ *  them; once you don't, "you're driving" is no longer why. Its questions
+ *  and answers are never held for the wheel. */
 export const withWheel = (list: readonly LineMessage[], sessionId: string, driving: boolean): LineMessage[] => {
   let changed = false;
   const next = list.map((m) => {
-    if (m.delivery !== "queued" || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
-    if (driving === (m.waiting === "person_driving")) return m;
+    if (m.delivery !== "queued" || m.kind !== "tell" || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
+    const waiting = driving ? (BELOW_DRIVING.has(m.waiting) ? ("person_driving" as const) : m.waiting) : m.waiting === "person_driving" ? undefined : m.waiting;
+    if (waiting === m.waiting) return m;
     changed = true;
-    return { ...m, waiting: driving ? ("person_driving" as const) : undefined };
+    return { ...m, waiting };
   });
   return changed ? next : (list as LineMessage[]);
 };

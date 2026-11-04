@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { ChargeView, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
-import { badgeOf, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
+import { badgeOf, called, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
 import { useBoss, useCharge, useCharges } from "./chargeStore";
 
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
@@ -19,14 +19,30 @@ export function ChargeBadge({ charge, short = false, className = "" }: { charge:
 }
 
 /** What the person can do about who runs `session`, each ready to run: for
- *  menus (their problem goes to Desk's error line). */
-export const useChargeActions = (session: Session | null | undefined): (ChargeChoice & { run: () => void })[] => {
+ *  menus and the pane's header (their problem goes to Desk's error line).
+ *  One at a time: `busy` while one is on its way, and the others wait. */
+export const useChargeActions = (session: Session | null | undefined): (ChargeChoice & { run: () => void; busy: boolean })[] => {
   const charge = useCharge(session?.id);
   const boss = useBoss();
+  const [busy, setBusy] = useState(false);
+  const going = useRef(false);
   if (!session) return [];
   return chargeChoices(session, charge, boss).map((c) => ({
     ...c,
-    run: () => void useCharges.getState().act(session.id, c.verb).catch(useDesk.getState().fail),
+    busy,
+    run: () => {
+      if (going.current) return;
+      going.current = true;
+      setBusy(true);
+      useCharges
+        .getState()
+        .act(session.id, c.verb)
+        .catch(useDesk.getState().fail)
+        .finally(() => {
+          going.current = false;
+          setBusy(false);
+        });
+    },
   }));
 };
 
@@ -65,7 +81,7 @@ export function ChargeStrip({ session }: { session: Session }) {
     return (
       <div className="charge-strip charge-strip-quiet" role="group" aria-label={`Who runs ${name}`}>
         <span className="charge-strip-text">
-          <span className="small faint">{boss?.name} can run this session with you: it hears when each turn ends and tells it the next step.</span>
+          <span className="small faint">{called(boss?.name ?? "", true)} can run this session with you: it hears when each turn ends and tells it the next step.</span>
           {problem && (
             <span className="small state-blocked" role="alert">
               {problem}
@@ -102,7 +118,7 @@ function BossSuggestions({ sessionId, bossName }: { sessionId: string; bossName:
   const mine = Object.values(suggestions).filter((s) => s.state === "open" && s.subject?.kind === "session" && s.subject.id === sessionId);
   if (!mine.length) return null;
   return (
-    <ul className="charge-suggestions" aria-label={`What ${bossName} suggests`}>
+    <ul className="charge-suggestions" aria-label={`What ${called(bossName)} suggests`}>
       {mine.map((s) => (
         <BossSuggestion key={s.id} id={s.id} text={s.text} bossName={bossName} />
       ))}
@@ -122,7 +138,7 @@ function BossSuggestion({ id, text, bossName }: { id: string; text: string; boss
   return (
     <li className="charge-suggestion">
       <span className="small">
-        <b>{bossName} suggests</b> {text}
+        <b>{called(bossName, true)} suggests</b> {text}
       </span>
       <span className="charge-strip-buttons">
         <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => act("accept")}>

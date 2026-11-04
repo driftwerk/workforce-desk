@@ -351,8 +351,8 @@ export function GridPane({
           {chargeActions
             .filter((a) => a.verb === "handBack")
             .map((a) => (
-              <button key={a.verb} type="button" className="link small gpane-act" onClick={a.run}>
-                {a.label}
+              <button key={a.verb} type="button" className="link small gpane-act gpane-charge-act" disabled={a.busy} onClick={a.run}>
+                {a.busy ? `${a.label}…` : a.label}
               </button>
             ))}
           <button

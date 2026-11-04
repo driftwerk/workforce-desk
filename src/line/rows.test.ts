@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askedText, deliveryText, editable, headOf, lineOf, merged, onThread, steerOf, waitsOnYou } from "./rows";
+import { askedText, deliveryText, editable, headOf, lineOf, merged, onThread, steerOf, waitsOnYou, withWheel } from "./rows";
 import { DESK, lined, msg, S1, S2, YOU } from "./testing";
 
 const NOW = new Date("2026-11-03T12:00:00Z").getTime();
@@ -23,6 +23,42 @@ describe("a line's rows", () => {
     expect(to({ delivery: "handed" })).toBe("On its way");
     expect(to({ delivery: "delivered" })).toMatch(/^Delivered /);
     expect(deliveryText(msg(), NOW)).toBeNull();
+  });
+
+  it("hold only the boss's tells for the wheel, and never over a reason the hub ranks first", () => {
+    const tell = (id: string, more: Parameters<typeof msg>[0] = {}) =>
+      msg({ id, from: DESK, to: S1, kind: "tell", asked: null, delivery: "queued", deliveredAt: null, ...more });
+    const list = [
+      tell("plain"),
+      tell("asking", { waiting: "asking" }),
+      tell("paused", { waiting: "paused" }),
+      tell("typing", { waiting: "typing" }),
+      tell("stopped", { waiting: "stopped" }),
+      tell("working", { waiting: "working" }),
+      msg({ id: "ask", from: DESK, to: S1, kind: "ask", delivery: "queued", deliveredAt: null }),
+      msg({ id: "answer", from: DESK, to: S1, kind: "answer", asked: null, delivery: "queued", deliveredAt: null }),
+      tell("yours", { from: YOU }),
+      tell("sent", { delivery: "delivered" }),
+      tell("other", { to: S2 }),
+    ];
+    const waits = (l: typeof list) => Object.fromEntries(l.map((m) => [m.id, m.waiting]));
+    const driven = withWheel(list, "s1", true);
+    expect(waits(driven)).toEqual({
+      plain: "person_driving",
+      asking: "person_driving",
+      paused: "paused",
+      typing: "typing",
+      stopped: "stopped",
+      working: "working",
+      ask: undefined,
+      answer: undefined,
+      yours: undefined,
+      sent: undefined,
+      other: undefined,
+    });
+    const back = withWheel(driven, "s1", false);
+    expect(waits(back)).toEqual({ ...waits(list), plain: undefined, asking: undefined });
+    expect(withWheel(list, "s1", false)).toBe(list);
   });
 
   it("say what became of the boss's messages while it runs the session: held while you drive, withdrawn once it lets go, and its notes", () => {

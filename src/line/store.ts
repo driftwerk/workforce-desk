@@ -15,27 +15,41 @@ interface LineState {
   heard: (m: LineMessage, removed?: boolean) => void;
 }
 
+/** How many messages were heard: a read that began before the last one
+ *  may not have it. */
+let heardCount = 0;
+
 export const useLine = create<LineState>((set) => ({
   threads: {},
   problems: {},
   load: async (sessionId) => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
-    try {
-      const thread = await hub.lineThread(sessionId);
-      set((s) => ({ threads: { ...s.threads, [sessionId]: thread }, problems: withoutKey(s.problems, sessionId) }));
-    } catch (e) {
-      set((s) => ({ problems: { ...s.problems, [sessionId]: plainError(e) } }));
+    // A message heard while the thread was being read may be newer than
+    // what the read says: the read is then made again (a few times at
+    // most), never laid over it.
+    for (let tries = 0; tries < 3; tries++) {
+      const hub = useDesk.getState().hub;
+      if (!hub) return;
+      const was = heardCount;
+      try {
+        const thread = await hub.lineThread(sessionId);
+        if (heardCount !== was && tries < 2) continue;
+        set((s) => ({ threads: { ...s.threads, [sessionId]: thread }, problems: withoutKey(s.problems, sessionId) }));
+      } catch (e) {
+        set((s) => ({ problems: { ...s.problems, [sessionId]: plainError(e) } }));
+      }
+      return;
     }
   },
-  heard: (m, removed = false) =>
+  heard: (m, removed = false) => {
+    heardCount++;
     set((s) => {
       let threads = s.threads;
       for (const [id, list] of Object.entries(s.threads)) {
         if (onThread(m, id)) threads = { ...threads, [id]: merged(list, m, removed) };
       }
       return threads === s.threads ? s : { threads };
-    }),
+    });
+  },
 }));
 
 const withoutKey = <T>(r: Record<string, T>, key: string): Record<string, T> => {

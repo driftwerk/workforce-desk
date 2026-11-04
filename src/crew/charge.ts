@@ -17,6 +17,10 @@ export interface Boss {
  *  session idle, as the hub counts it. */
 export const QUIET_MINUTES = 10;
 
+/** What a boss is called: its name, or, where Desk doesn't know it,
+ *  "Your overseer" starting a sentence and "your overseer" within one. */
+export const called = (name: string, start = false): string => name || (start ? "Your overseer" : "your overseer");
+
 /** Whether the person has the wheel. */
 export const driving = (c: ChargeView): boolean => c.wheel !== "boss";
 
@@ -26,18 +30,18 @@ export const driving = (c: ChargeView): boolean => c.wheel !== "boss";
 export const badgeOf = (c: ChargeView | null | undefined, short = false): { text: string; look: "boss" | "you" } | null => {
   if (!c || c.releasedAt) return null;
   if (driving(c)) return { text: short ? "Yours" : "You’re driving", look: "you" };
-  return { text: short ? `${c.bossName}’s` : `${c.bossName} has it`, look: "boss" };
+  return { text: short ? `${called(c.bossName, true)}’s` : `${called(c.bossName, true)} has it`, look: "boss" };
 };
 
 /** Who has the wheel, and what that means, in a sentence. */
 export const wheelText = (c: ChargeView): string => {
   switch (c.wheel) {
     case "boss":
-      return `${c.bossName} runs this session. Typing in it, prompting it or writing to it makes you the driver.`;
+      return `${called(c.bossName, true)} runs this session. Typing in it, prompting it or writing to it makes you the driver.`;
     case "person":
-      return `${c.bossName}’s messages to it wait while you drive. ${c.bossName} has it back after ${QUIET_MINUTES} quiet minutes.`;
+      return `${called(c.bossName, true)}’s messages to it wait while you drive. ${called(c.bossName, true)} has it back after ${QUIET_MINUTES} quiet minutes.`;
     case "person_pinned":
-      return `${c.bossName}’s messages to it wait until you hand it back.`;
+      return `${called(c.bossName, true)}’s messages to it wait until you hand it back.`;
   }
 };
 
@@ -45,11 +49,11 @@ export const wheelText = (c: ChargeView): string => {
 export const howText = (c: ChargeView): string => {
   switch (c.how) {
     case "started":
-      return `${c.bossName} started it`;
+      return `${called(c.bossName, true)} started it`;
     case "handed":
-      return `You handed it to ${c.bossName}`;
+      return `You handed it to ${called(c.bossName)}`;
     case "taken":
-      return `${c.bossName} takes on every session`;
+      return `${called(c.bossName, true)} takes on every session`;
   }
 };
 
@@ -85,5 +89,5 @@ export const chargeChoices = (s: Session, c: ChargeView | null | undefined, boss
     ];
   }
   if (!boss || !boss.level || boss.level === "watch" || !chargeable(s).ok) return [];
-  return [{ verb: "hand", label: `Hand to ${boss.name}` }];
+  return [{ verb: "hand", label: `Hand to ${called(boss.name)}` }];
 };

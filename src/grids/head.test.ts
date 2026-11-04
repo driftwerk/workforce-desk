@@ -29,6 +29,11 @@ describe("a pane's header as it narrows", () => {
     expect(queries).toEqual(HEAD_DROPS);
   });
 
+  it("hides a boss's Hand back with the badges, at the badge's width (it's in the pane's menu too)", () => {
+    const badge = HEAD_DROPS.find((d) => d.part === "badge")!.upTo;
+    expect(css).toMatch(new RegExp(`@container gpane-head \\(max-width: ${badge}px\\) \\{\\s*\\.gpane-head \\.gpane-charge-act \\{\\s*display: none;`));
+  });
+
   it("cuts a long name in the middle, keeping its start and end", () => {
     expect(nameParts("api-e7")).toEqual(["api-e7", ""]);
     expect(nameParts("invoice totals")).toEqual(["invoice totals", ""]);
