@@ -35,9 +35,15 @@ export function LinePanel({ session }: { session: Session }) {
 }
 
 function TerminalLine({ session }: { session: Session }) {
-  const { thread } = useThread(session);
+  const { thread, loaded } = useThread(session);
   const open = openOf(thread, session.id);
   const mode = useLinePanel((s) => s.shown[session.id]);
+  const nothing = loaded && !anyOpen(open);
+  // Once nothing is open its questions panel goes down, so the next
+  // question comes as the slim bar again (its height is kept).
+  useEffect(() => {
+    if (nothing && mode === "questions") useLinePanel.getState().hide(session.id);
+  }, [nothing, mode, session.id]);
   if (mode === "history") {
     return (
       <Panel session={session} title="Messages with Desk">

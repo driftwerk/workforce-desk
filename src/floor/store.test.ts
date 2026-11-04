@@ -219,6 +219,21 @@ describe("the floor's store", () => {
     expect(hubs.local!.days).toHaveLength(reads + 1);
   });
 
+  it("reads this computer's hub when a question on a session's line moves, even while its link is up", async () => {
+    useChat.setState({ hubs: [hub("local")] });
+    await settle();
+    floorHeard("local", new Set(["desk.floor"]));
+    await settle();
+    const reads = hubs.local!.days.length;
+    const { msg } = await import("../line/testing");
+    deskListeners.forEach((f) => f({ type: "line", message: msg({ kind: "tell", asked: null }) }));
+    await settle();
+    expect(hubs.local!.days).toHaveLength(reads);
+    deskListeners.forEach((f) => f({ type: "line", message: msg({ asked: "lapsed" }) }));
+    await settle();
+    expect(hubs.local!.days).toHaveLength(reads + 1);
+  });
+
   it("reads again for the new day at midnight", async () => {
     useChat.setState({ hubs: [hub("local")] });
     await settle();

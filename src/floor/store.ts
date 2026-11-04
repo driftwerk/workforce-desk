@@ -216,10 +216,12 @@ export const watchFloor = (): (() => void) => {
   window.addEventListener("focus", focused);
   const heard = (e: DeskEvent) => {
     const local = useChat.getState().hubs.find((h) => h.local)?.id;
-    // A question changing where it stands (asked, gone ahead without,
-    // answered, dismissed) moves the Floor too.
-    const moves = MOVES.has(e.type) || (e.type === "line" && e.message.kind === "ask");
-    if (local && moves && !useFloor.getState().heard[local] && supported().includes(local)) ask([local]);
+    if (!local || !supported().includes(local)) return;
+    // A question on a session's line changing where it stands (asked, gone
+    // ahead without, answered, dismissed) moves the Floor, whatever the
+    // hub's link says: its floor signal doesn't cover the lines.
+    const lineQuestion = e.type === "line" && e.message.kind === "ask";
+    if (lineQuestion || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
   };
   deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;

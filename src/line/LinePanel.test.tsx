@@ -55,6 +55,8 @@ describe("under a terminal session", () => {
     // Even a panel left shown last time doesn't come up for nothing.
     act(() => useLinePanel.getState().show("s1"));
     expect(container.querySelector(".gpane-body")!.childElementCount).toBe(0);
+    // ...and goes down, so the next question comes as the slim bar.
+    expect(useLinePanel.getState().shown.s1).toBeUndefined();
   });
 
   it("is a slim bar by default, and shown lists the questions with what it chose, with no composer", async () => {
