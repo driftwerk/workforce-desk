@@ -616,6 +616,19 @@ fn exit_line(outcome: &Result<Exit>) -> String {
     }
 }
 
+/// A hub's first start after an update can be slow (macOS scans a new
+/// binary), so its `--version` gets a long time. A miss is only logged.
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Stops its task when dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// `<binary> --version`, first line, or why it could not be had. Bounded,
 /// so a hub that hangs cannot hold the helper back.
 async fn version_of(binary: &Path) -> String {
@@ -624,7 +637,7 @@ async fn version_of(binary: &Path) -> String {
         .stdin(Stdio::null())
         .kill_on_drop(true)
         .output();
-    match tokio::time::timeout(Duration::from_secs(5), run).await {
+    match tokio::time::timeout(VERSION_PROBE_TIMEOUT, run).await {
         Ok(Ok(out)) if out.status.success() => String::from_utf8_lossy(&out.stdout)
             .lines()
             .next()
@@ -770,17 +783,6 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     }
 
     tracing::info!(gateway = %ports.gateway_url(), ?memories, "local hub starting");
-    {
-        let paths = paths.clone();
-        let gateway = ports.gateway_url();
-        let admin = secrets.get(Secret::GatewayToken).to_owned();
-        tokio::spawn(async move {
-            if let Err(e) = bootstrap::run(&paths, &gateway, &admin).await {
-                tracing::error!(error = %e, "could not pair Desk with its local hub");
-            }
-        });
-    }
-
     let mut term = signal(SignalKind::terminate())?;
     let mut int = signal(SignalKind::interrupt())?;
     let mut backoff = Duration::from_secs(1);
@@ -802,6 +804,19 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
             Ok(c) => c,
             Err(e) => break Err(e),
         };
+        // Pairing waits for as long as this hub process lives, and ends with
+        // it (dropped on every way out of this iteration); a restarted hub
+        // gets a fresh one.
+        let _pairing = AbortOnDrop(tokio::spawn({
+            let paths = paths.clone();
+            let gateway = ports.gateway_url();
+            let admin = secrets.get(Secret::GatewayToken).to_owned();
+            async move {
+                if let Err(e) = bootstrap::run(&paths, &gateway, &admin).await {
+                    tracing::error!(error = %e, "could not pair Desk with its local hub");
+                }
+            }
+        }));
         loop {
             tokio::select! {
                 _ = term.recv() => { stop(&mut hub, Duration::from_secs(20)).await; break 'run Ok(Exit::Terminated) }
