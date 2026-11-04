@@ -1,4 +1,4 @@
-import { authorOf } from "./history";
+import { authorOf, LOCAL_ID } from "./history";
 import {
   FEATURES,
   type Attachment,
@@ -82,6 +82,9 @@ export interface ConversationState {
   prompts: Prompt[];
   /** Messages the hub has taken into a live turn instead of starting one. */
   absorbed: number;
+  /** The ids of live messages given up for the hub's kept copy: a frame
+   *  that comes for one later is for what the kept copy already shows. */
+  settled?: ReadonlySet<string>;
 }
 
 export const emptyConversation = (): ConversationState => ({
@@ -174,7 +177,7 @@ export const statusOf = (w: Working, now: number): string => {
 };
 
 let counter = 0;
-const nextId = () => `m-${Date.now()}-${++counter}`;
+const nextId = () => `${LOCAL_ID}${Date.now()}-${++counter}`;
 
 const message = (role: ChatMessage["role"], content: string, status: ChatMessage["status"] = "complete"): ChatMessage => ({
   id: nextId(),
@@ -227,10 +230,14 @@ const streams = (s: ConversationState): boolean => !!s.features?.has(FEATURES.st
 /** Folds one server message into the conversation. Pure, so it is tested
  *  without a socket. */
 export const reduce = (s: ConversationState, msg: ServerMessage): ConversationState => {
+  // A late frame of an answer the hub's kept copy already shows: what it
+  // would write is there, and an answer made of it would show it twice.
+  if (msg.id && s.settled?.has(msg.id) && INTO_ANSWER.has(msg.type)) return s;
   const now = Date.now();
   const folded = fold(s, msg, now);
   const next = {
     ...folded,
+    messages: msg.turn_ref ? ofTurn(folded.messages, msg.turn_ref, msg) : folded.messages,
     turns: msg.turn_ref ? foldTurn(folded.turns, msg.turn_ref, msg, now) : folded.turns,
     prompts: foldPrompts(folded.prompts, msg),
   };
@@ -238,6 +245,39 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
   // prompt is only kept, unless the hub sends it on live.
   const unprompted = !next.working || msg.type === USER_MESSAGE ? false : s.working ? s.unprompted : true;
   return next.unprompted === unprompted ? next : { ...next, unprompted };
+};
+
+/** The frames that write into an answer. */
+const INTO_ANSWER: ReadonlySet<string> = new Set([
+  "stream_start",
+  "stream_delta",
+  "stream_end",
+  "stream_discard",
+  "turn_snapshot",
+  "message",
+  "image",
+  "tool_start",
+  "tool_end",
+]);
+
+/** `messages` with the answer of turn `ref` known as its: the message a frame
+ *  of it names by id says which turn it answers; and at the turn's end, the id
+ *  it was kept under is the answer's, or, kept under none the hub said, it is
+ *  known by its words. */
+const ofTurn = (messages: ChatMessage[], ref: string, msg: ServerMessage): ChatMessage[] => {
+  if (msg.type !== "turn_end")
+    return msg.id && messages.some((m) => m.id === msg.id && m.role === "assistant" && m.turnRef !== ref)
+      ? update(messages, msg.id, (m) => ({ ...m, turnRef: ref }))
+      : messages;
+  const answers = messages.filter((m) => m.turnRef === ref && m.role === "assistant");
+  if (answers.length === 0) return messages;
+  const keptId = msg.id;
+  if (keptId) {
+    // Kept under an id other than the one it streamed with: it's that one.
+    if (answers.length !== 1 || answers[0]!.id === keptId || messages.some((m) => m.id === keptId)) return messages;
+    return update(messages, answers[0]!.id, (m) => ({ ...m, id: keptId }));
+  }
+  return messages.map((m) => (m.turnRef === ref && m.role === "assistant" && !m.byWords ? { ...m, byWords: true } : m));
 };
 
 /** The frame a message of the DM you didn't type here comes as: the
@@ -532,6 +572,17 @@ export const wsPath = (agentId: string, channel = "desk"): string =>
     accept: "*/*",
   })}`;
 
+/** `s` without the live messages `ids`, which the hub's kept copy now shows:
+ *  a frame of theirs that comes later changes nothing. */
+/** How many settled ids a conversation remembers. */
+const SETTLED_KEPT = 1000;
+
+export const dropped = (s: ConversationState, ids: ReadonlySet<string>): ConversationState => ({
+  ...s,
+  messages: s.messages.filter((m) => !ids.has(m.id)),
+  settled: new Set([...(s.settled ?? []), ...ids].slice(-SETTLED_KEPT)),
+});
+
 /** Answers that finished in this step: assistant messages that became
  *  complete with something to say, by id. */
 export const finishedAnswers = (before: ConversationState, after: ConversationState): ChatMessage[] =>
@@ -762,7 +813,7 @@ export class Conversation {
   /** Forgets live messages the hub's kept copy now shows. */
   drop(ids: ReadonlySet<string>) {
     if (ids.size === 0) return;
-    this.set({ ...this.state, messages: this.state.messages.filter((m) => !ids.has(m.id)) });
+    this.set(dropped(this.state, ids));
   }
 
   /** Says which kept message each of these live messages goes before, and

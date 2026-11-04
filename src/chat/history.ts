@@ -115,6 +115,15 @@ export async function fetchHistory(hub: HubAccount, agentId: string, before?: st
 export const cursorIn = (messages: readonly { id: string }[], end: "first" | "last"): string | undefined =>
   (end === "first" ? messages : [...messages].reverse()).find((m) => !m.id.startsWith(FILE_PREFIX))?.id;
 
+/** What the id of a message Desk made itself starts with: one the hub never
+ *  named, so no kept message has it. */
+export const LOCAL_ID = "m-";
+
+/** Whether a live answer can be known only by what it says: one the hub
+ *  never gave an id, or one its turn's end said wasn't kept under the id
+ *  it streamed with. */
+const byWords = (m: ChatMessage): boolean => !!m.byWords || m.id.startsWith(LOCAL_ID);
+
 /** A file the hub shows as a message of its own carries an id no
  *  transcript message has. */
 export const FILE_PREFIX = "file:";
@@ -223,9 +232,10 @@ export interface Reading {
  *  page, oldest first) now shows: matched in order from the end, so a reply
  *  the hub hasn't kept yet stays live, and an older one that says the same
  *  thing doesn't stand in for it. On a hub that streams answers by id
- *  (`streamed`), an answer is known by its id alone; what you said, which
- *  the hub keeps under an id of its own, is still matched by its files or
- *  its text. One matched by its files or its text whose files the hub didn't
+ *  (`streamed`), an answer is known by its id alone, unless it has none the
+ *  hub gave or its turn's end said it wasn't kept under it; what you said,
+ *  which the hub keeps under an id of its own, is still matched by its files
+ *  or its text. One matched by its files or its text whose files the hub didn't
  *  return stays live, so they aren't lost.
  *
  *  One sent while the read ran (after `read.began`) is matched only as its
@@ -254,7 +264,7 @@ export const settle = (kept: ChatMessage[], all: ChatMessage[], before: string, 
       found.set(i, kept.findIndex((k) => k.id === m.id));
       continue;
     }
-    if ((streamed && m.role === "assistant") || m.status !== "complete" || m.at > before || m.role === "system") continue;
+    if ((streamed && m.role === "assistant" && !byWords(m)) || m.status !== "complete" || m.at > before || m.role === "system") continue;
     if (m.at > began) {
       during.push(i);
       continue;
@@ -385,6 +395,17 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
       rest.slice(0, k).forEach((m) => gone.add(m));
       break;
     }
+  }
+
+  // What the read has seen past that the hub kept no copy of goes by its own
+  // time, as a held message does, never after everything said since.
+  for (const m of rest) {
+    if (gone.has(m) || m.status !== "complete" || m.role === "system" || loadedAt === null || m.at > loadedAt) continue;
+    const t = Date.parse(m.at);
+    const at = Number.isNaN(t) ? -1 : history.findIndex((h) => Date.parse(h.at) > t + SKEW_MS);
+    if (at < 0) continue;
+    placed.set(at, [...(placed.get(at) ?? []), m]);
+    gone.add(m);
   }
 
   const merged = history.flatMap((h, i) => {
