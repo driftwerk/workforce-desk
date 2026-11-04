@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { driving } from "../crew/charge";
+import { useCharge } from "../crew/chargeStore";
 import { useDesk } from "../hub/store";
 import type { LineMessage, Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { Composer } from "./Composer";
 import { LineAnswer } from "./LineAnswer";
-import { askedText, deliveryText, editable, headOf, lineOf, outgoing, waitsOnYou } from "./rows";
+import { askedText, deliveryText, editable, headOf, lineOf, outgoing, waitsOnYou, withWheel } from "./rows";
 import { useLine } from "./store";
 import { useNow } from "../chat/WorkingRow";
 
@@ -16,7 +18,11 @@ const NONE: LineMessage[] = [];
  *  writes to the session. */
 export function Thread({ session }: { session: Session }) {
   const loaded = useLine((s) => session.id in s.threads);
-  const thread = useLine((s) => s.threads[session.id] ?? NONE);
+  const kept = useLine((s) => s.threads[session.id] ?? NONE);
+  // A boss's message that came while you drive waits on you: the hub says
+  // why only when the thread is read.
+  const charge = useCharge(session.id);
+  const thread = useMemo(() => withWheel(kept, session.id, !!charge && driving(charge)), [kept, session.id, charge]);
   const problem = useLine((s) => s.problems[session.id]);
   const connected = useDesk((s) => !!s.hub);
   // Why a message waits is read with the thread: again as the session

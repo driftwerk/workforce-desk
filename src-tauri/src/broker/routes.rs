@@ -65,6 +65,11 @@ const HTTP: &[Route] = &[
     route("PATCH", "/api/desk/line/{}"),
     route("DELETE", "/api/desk/line/{}"),
     route("POST", "/api/desk/line/{}/answer"),
+    // Charges: which boss runs which session; Hand to, Release, the wheel.
+    route("GET", "/api/desk/charges"),
+    route("POST", "/api/desk/sessions/{}/charge"),
+    route("DELETE", "/api/desk/sessions/{}/charge"),
+    route("PATCH", "/api/desk/sessions/{}/charge"),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),
     route("GET", "/api/desk/sessions/hidden"),

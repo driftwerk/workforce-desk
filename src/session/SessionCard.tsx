@@ -23,6 +23,7 @@ import { BreakerBanner } from "../spend/BreakerBanner";
 import { SpendStrip } from "../spend/SpendStrip";
 import { ImageBudget } from "../shell/RemoteImage";
 import { Thread } from "../line/Thread";
+import { ChargeStrip } from "../crew/ChargeBadge";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -107,6 +108,7 @@ export function SessionCard({ session }: { session: Session }) {
       </div>
       <SpendStrip sessionId={session.id} />
       <BreakerBanner sessionId={session.id} />
+      <ChargeStrip session={session} />
       {approvalsSwitchable(session) && (
         <label className="session-approvals small">
           <input type="checkbox" checked={session.approvals === "desk"} onChange={(e) => setApprovalsInDesk(session, e.target.checked)} />

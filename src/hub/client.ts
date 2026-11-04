@@ -28,6 +28,7 @@ import type {
   NewRoomMessage,
   HiddenSession,
   LineMessage,
+  ChargeView,
   NewSession,
   NewTerminal,
   Overview,
@@ -489,6 +490,24 @@ export class DeskHub {
   takeBackLine = (id: string): Promise<void> => this.call("DELETE", `/api/desk/line/${encodeURIComponent(id)}`);
   /** Your answer to a question on a session's line. */
   answerLine = (id: string, text: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/answer`, { text });
+  /** Every session a boss runs now, with who drives each; null from a hub
+   *  without charges (an older one). */
+  charges = async (): Promise<ChargeView[] | null> => {
+    try {
+      return await this.call<ChargeView[]>("GET", "/api/desk/charges");
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** Hands a session to its boss (the one there is, unless `boss` says). */
+  handTo = (id: string, boss?: string): Promise<ChargeView> =>
+    this.call("POST", `/api/desk/sessions/${encodeURIComponent(id)}/charge`, boss ? { boss } : {});
+  /** Takes a session back from the boss that runs it. */
+  releaseCharge = (id: string): Promise<ChargeView> => this.call("DELETE", `/api/desk/sessions/${encodeURIComponent(id)}/charge`);
+  /** **I'll drive** (`person_pinned`) or **Hand back** (`boss`). */
+  setWheel = (id: string, wheel: "person_pinned" | "boss"): Promise<ChargeView> =>
+    this.call("PATCH", `/api/desk/sessions/${encodeURIComponent(id)}/charge`, { wheel });
   /** Which agent oversees the crew, and how much it does on its own. */
   manager = (): Promise<Manager> => this.desk("GET", "/api/desk/manager");
   suggestions = async (): Promise<Suggestion[]> =>

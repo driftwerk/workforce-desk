@@ -211,6 +211,11 @@
   color: var(--signal-soft-text);
   white-space: nowrap;
 }
+/* Whose a session is: "You're driving" is dashed, not filled. */
+.gpane-badge.charge-you {
+  background: transparent;
+  color: var(--text);
+}
 .gpane-fill {
   flex: 1;
 }
@@ -244,6 +249,12 @@
 }
 @container gpane-head (max-width: 440px) {
   .gpane-badge {
+    display: none;
+  }
+}
+/* Hand back gives way with the badge: it's in the pane's menu too. */
+@container gpane-head (max-width: 440px) {
+  .gpane-head .gpane-charge-act {
     display: none;
   }
 }

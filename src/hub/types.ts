@@ -350,7 +350,10 @@ export type DeskEvent =
   | { type: "breaker"; breaker: BreakerView }
   /** A message on a session's line was sent or moved on; `removed` once
    *  you took it back. */
-  | { type: "line"; message: LineMessage; removed?: boolean };
+  | { type: "line"; message: LineMessage; removed?: boolean }
+  /** A boss took a session on or let it go (`releasedAt` set), or its
+   *  wheel changed hands. */
+  | { type: "charge"; charge: ChargeView };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 
@@ -703,7 +706,15 @@ export type ActivityKind =
   /** A question on a session's line. */
   | "asked"
   /** A message on a session's line. */
-  | "told";
+  | "told"
+  /** A boss took a session on, or the person handed it one. */
+  | "taken_on"
+  /** A boss let a session go, or the person took it back. */
+  | "released"
+  /** The person took the wheel of a session a boss runs. */
+  | "driving"
+  /** The wheel went back to the boss. */
+  | "handed_back";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -811,10 +822,28 @@ export interface MentionedQuestion {
 // ── Desk's line: sessions, the overseer and you, to each other ──────────
 
 export type LineKind = "ask" | "tell" | "answer";
-export type LineDelivery = "queued" | "handed" | "delivered" | "held" | "refused";
+export type LineDelivery =
+  | "queued"
+  | "handed"
+  | "delivered"
+  | "held"
+  | "refused"
+  /** Never delivered: its sender stopped running the session before it
+   *  went in, and the person runs it now. */
+  | "withdrawn"
+  /** Shown in the thread only, never typed into the session. */
+  | "noted";
 export type LineAsked = "open" | "escalated" | "answered" | "withdrawn";
 /** Why a queued message hasn't gone in yet. */
-export type LineWait = "stopped" | "working" | "typing" | "paused" | "asking";
+export type LineWait =
+  | "stopped"
+  | "working"
+  | "typing"
+  | "paused"
+  | "asking"
+  /** The person has the wheel of a session a boss runs: the boss's
+   *  messages wait until it is handed back. */
+  | "person_driving";
 
 /** One message on a session's line. */
 export interface LineMessage {
@@ -833,6 +862,33 @@ export interface LineMessage {
   deliveredAt: string | null;
   updatedAt: string;
   waiting?: LineWait;
+}
+
+// ── Charges: which boss runs which session, and who drives it ─────────
+
+/** Who drives a session a boss runs: the boss; the person, until they go
+ *  quiet for ten minutes with it idle; or the person until they hand it
+ *  back. */
+export type Wheel = "boss" | "person" | "person_pinned";
+
+/** How the boss came to run it: it started it, the person handed it over,
+ *  or it takes on every session. */
+export type ChargeHow = "started" | "handed" | "taken";
+
+/** One session a boss runs, as the hub shows it. */
+export interface ChargeView {
+  session: string;
+  /** The boss's sidebar group; null is the main boss. */
+  group: string | null;
+  /** The boss's agent id. */
+  boss: string;
+  bossName: string;
+  how: ChargeHow;
+  wheel: Wheel;
+  wheelSince: string | null;
+  since: string;
+  /** Set once it was let go: it no longer runs it. */
+  releasedAt: string | null;
 }
 
 // ── The floor: open needs, work, today's lanes, plan usage ───────────────

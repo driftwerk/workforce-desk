@@ -697,6 +697,87 @@ button {
   border-color: var(--working);
   color: var(--working);
 }
+/* A session a boss runs: "Sarah has it" in the signal's soft colour; while
+   you have the wheel, a dashed "You're driving". */
+.charge-badge {
+  flex: none;
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.charge-boss {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.charge-you {
+  background: transparent;
+  border-color: var(--border);
+  border-style: dashed;
+  color: var(--text);
+}
+/* In a sidebar row: the name gives way first. */
+.gi-charge {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 7px;
+}
+/* A session card's word on who runs it, under its goal. */
+.charge-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.charge-strip-quiet {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.charge-strip-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.charge-strip-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.charge-suggestions {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.charge-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--raised);
+}
+.charge-suggestion > .small:first-child {
+  flex: 1 1 200px;
+  min-width: 0;
+}
 
 /* ── Floor ──────────────────────────────────────────────────────────────── */
 

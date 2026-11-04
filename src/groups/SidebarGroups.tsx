@@ -37,6 +37,9 @@ import { badgeOfGroup, itemBadge, type Badge } from "../unread/badges";
 import { Marks, useBadgeData } from "../unread/Marks";
 import { levelOf, NOTIFY_LEVELS, setLevel } from "../unread/prefs";
 import { useSessionNames } from "./names";
+import { ChargeBadge } from "../crew/ChargeBadge";
+import { chargeChoices } from "../crew/charge";
+import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
   collapseGroup,
@@ -103,6 +106,7 @@ export function SidebarGroups() {
   const names = useSessionNames();
   const badges = useBadgeData();
   const managerId = useOverview((s) => s.manager?.agentId ?? null);
+  const boss = useBoss();
   const gridOrder = useGrids((s) => s.order);
   const allGrids = useGrids((s) => s.grids);
   const shownId = useGrids((s) => shownGrid(s)?.id ?? null);
@@ -296,6 +300,13 @@ export function SidebarGroups() {
       ...(item.kind === "session"
         ? [
             ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+            ...chargeChoices(item.session, useCharges.getState().bySession[item.session.id], boss).map(
+              (c): MenuEntry => ({
+                kind: "item",
+                label: c.label,
+                onSelect: () => void useCharges.getState().act(item.session.id, c.verb).catch(useDesk.getState().fail),
+              }),
+            ),
             { kind: "separator" as const },
             ...lifecycleActions(item.session).map(
               (a): MenuEntry => ({ kind: "item", label: a.label, kbd: a.label === "End session…" ? undefined : "⌫", onSelect: a.run }),
@@ -691,6 +702,7 @@ function ItemRow({
   onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
+  const charge = useCharge(session?.id);
   const inGrids = useGridNames(item.key);
   const says = inGrids.length ? inGridSays(inGrids) : null;
   const markId = `${useId()}-grid`;
@@ -718,6 +730,7 @@ function ItemRow({
       onRemove={onRemove}
       onHover={onHover}
     >
+      <ChargeBadge charge={charge} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />
     </SortRow>

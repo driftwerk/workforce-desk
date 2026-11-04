@@ -24,7 +24,18 @@ const fakeHub = () =>
     }),
     manager: vi.fn(() => Promise.resolve({ agentId: "desk", level: "watch" })),
     overview: vi.fn(() => Promise.resolve({ brief: null, counts: { working: 0, needsYou: 0, doneToday: 0 }, items: [] })),
+    engines: vi.fn(() => Promise.resolve(ENGINES)),
   }) as unknown as DeskHub;
+
+const caps = (line: "submit" | "paste" | "none") => ({ state: "hooks", approvals: "desk", resume: "byId", interrupt: "keys", plan: null, line, notes: [] });
+/** Claude Code and Codex have Desk's line; Gemini CLI hasn't, and Cursor
+ *  isn't installed. */
+const ENGINES = [
+  { engine: "claude", title: "Claude Code", program: "claude", installed: true, version: "2.1.300", signIn: { state: "unknown" }, views: ["terminal"], caps: { terminal: caps("submit") } },
+  { engine: "codex", title: "Codex", program: "codex", installed: true, version: "0.80.0", signIn: { state: "unknown" }, views: ["desk", "terminal"], caps: { desk: caps("paste") } },
+  { engine: "gemini", title: "Gemini CLI", program: "gemini", installed: true, version: "1", signIn: { state: "unknown" }, views: ["terminal"], caps: { terminal: caps("none") } },
+  { engine: "cursor", title: "Cursor CLI", program: null, installed: false, version: null, signIn: { state: "unknown" }, views: ["terminal"], caps: { terminal: caps("submit") } },
+];
 
 const oversight = () => (parse(file) as { oversight?: Record<string, unknown> }).oversight;
 
@@ -167,6 +178,44 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(field().value).toBe("5"));
     await act(async () => fireEvent.click(box()));
     await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 5 } }));
+  });
+
+  it("says how it works, and writes each choice to [oversight.work] as the hub reads it", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
+    expect(screen.getByRole("heading", { name: "How Ledger works" })).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: /Prefer real sessions/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /Only what I hand it/ }).getAttribute("aria-checked")).toBe("true");
+    const parallel = screen.getByRole("textbox", { name: "Sessions at once" }) as HTMLInputElement;
+    expect(parallel.value).toBe("4");
+    // The engines a session of it could run on: installed, with Desk's line.
+    const engine = screen.getByRole("combobox", { name: "New sessions run" }) as HTMLSelectElement;
+    await waitFor(() => expect([...engine.options].map((o) => o.textContent)).toEqual(["Claude Code", "Codex"]));
+
+    fireEvent.change(parallel, { target: { value: "13" } });
+    fireEvent.blur(parallel);
+    expect(screen.getByRole("alert").textContent).toBe("How many sessions it may run at once must be a whole number from 1 to 12.");
+    expect(hub.saveAgentConfig).not.toHaveBeenCalled();
+    fireEvent.change(parallel, { target: { value: "6" } });
+    await act(async () => fireEvent.keyDown(parallel, { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ work: { parallel: 6 } }));
+
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Every session it can/ })));
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Prefer real sessions/ })));
+    await act(async () => fireEvent.change(engine, { target: { value: "codex" } }));
+    const turns = screen.getByRole("textbox", { name: "Work turns an hour" });
+    fireEvent.change(turns, { target: { value: "90" } });
+    await act(async () => fireEvent.blur(turns));
+    await waitFor(() =>
+      expect(oversight()?.work).toEqual({ prefer_sessions: false, parallel: 6, take_on: "all", engine: "codex", max_turns_per_hour: 90 }),
+    );
+    expect(file).toContain("[oversight.work]");
+  });
+
+  it("says a watching overseer runs no sessions", () => {
+    show(fakeHub(), `${START}\n[oversight]\nenabled = true\n`);
+    expect(screen.getByText("At Watch, Ledger runs no sessions. Set it to Suggest or Act to hand it work.")).toBeTruthy();
   });
 
   it("isn't offered by a hub that has no overseer", () => {

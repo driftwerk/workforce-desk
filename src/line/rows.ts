@@ -62,6 +62,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Waiting: Desk's breaker paused it";
         case "asking":
           return "Waiting: it's asking you something";
+        case "person_driving":
+          return "Waiting: you're driving";
         default:
           return "Waiting to go in";
       }
@@ -73,8 +75,18 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
       return m.deliveredAt ? `Delivered ${dayClock(m.deliveredAt, now)}` : "Delivered";
     case "refused":
       return "Not delivered: it has ended";
+    case "withdrawn":
+      return `Not delivered: ${fromLabel(m, m.to.id)} no longer runs it`;
+    case "noted":
+      return "A note here only: not typed in";
+    default:
+      return unknown(m.delivery);
   }
 };
+
+/** A value a newer hub sends that this Desk doesn't know: no line, rather
+ *  than a wrong one. Typed so a value added to the union is handled above. */
+const unknown = (_: never): null => null;
 
 /** Where a question stands. */
 export const askedText = (m: LineMessage): string | null => {
@@ -129,3 +141,26 @@ export const merged = (list: readonly LineMessage[], m: LineMessage, removed = f
 /** Whether `m` belongs on `sessionId`'s thread. */
 export const onThread = (m: LineMessage, sessionId: string): boolean =>
   (m.from.kind === "session" && m.from.id === sessionId) || (m.to.kind === "session" && m.to.id === sessionId);
+
+/** Why a boss's message waits that holds whoever drives: the hub's
+ *  reasons it can't go in at all (stopped, the person typing, a turn it
+ *  can't be typed into) and Desk's breaker come before the wheel. Only
+ *  "asking" and no reason at all rank below it. */
+const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking"]);
+
+/** `list` once the wheel of `sessionId`, which a boss runs, changed hands,
+ *  as the hub's line gate reads it: the boss's tells still waiting to go in
+ *  wait on you while you drive, unless something the hub ranks first holds
+ *  them; once you don't, "you're driving" is no longer why. Its questions
+ *  and answers are never held for the wheel. */
+export const withWheel = (list: readonly LineMessage[], sessionId: string, driving: boolean): LineMessage[] => {
+  let changed = false;
+  const next = list.map((m) => {
+    if (m.delivery !== "queued" || m.kind !== "tell" || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
+    const waiting = driving ? (BELOW_DRIVING.has(m.waiting) ? ("person_driving" as const) : m.waiting) : m.waiting === "person_driving" ? undefined : m.waiting;
+    if (waiting === m.waiting) return m;
+    changed = true;
+    return { ...m, waiting };
+  });
+  return changed ? next : (list as LineMessage[]);
+};

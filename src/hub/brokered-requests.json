@@ -382,6 +382,36 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/charges"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/charge"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/charge"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/sessions/s1/charge"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/sessions/s1/charge"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/sessions/s1/charge"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/manager"
   },
   {
