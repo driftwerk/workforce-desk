@@ -62,6 +62,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Waiting: Desk's breaker paused it";
         case "asking":
           return "Waiting: it's asking you something";
+        case "person_driving":
+          return "Waiting: you're driving";
         default:
           return "Waiting to go in";
       }
@@ -73,8 +75,18 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
       return m.deliveredAt ? `Delivered ${dayClock(m.deliveredAt, now)}` : "Delivered";
     case "refused":
       return "Not delivered: it has ended";
+    case "withdrawn":
+      return `Not delivered: ${fromLabel(m, m.to.id)} no longer runs it`;
+    case "noted":
+      return "A note here only: not typed in";
+    default:
+      return unknown(m.delivery);
   }
 };
+
+/** A value a newer hub sends that this Desk doesn't know: no line, rather
+ *  than a wrong one. Typed so a value added to the union is handled above. */
+const unknown = (_: never): null => null;
 
 /** Where a question stands. */
 export const askedText = (m: LineMessage): string | null => {
@@ -129,3 +141,17 @@ export const merged = (list: readonly LineMessage[], m: LineMessage, removed = f
 /** Whether `m` belongs on `sessionId`'s thread. */
 export const onThread = (m: LineMessage, sessionId: string): boolean =>
   (m.from.kind === "session" && m.from.id === sessionId) || (m.to.kind === "session" && m.to.id === sessionId);
+
+/** `list` once the wheel of `sessionId`, which a boss runs, changed hands:
+ *  the boss's messages still waiting to go in wait on you while you drive,
+ *  and no longer once you don't. */
+export const withWheel = (list: readonly LineMessage[], sessionId: string, driving: boolean): LineMessage[] => {
+  let changed = false;
+  const next = list.map((m) => {
+    if (m.delivery !== "queued" || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
+    if (driving === (m.waiting === "person_driving")) return m;
+    changed = true;
+    return { ...m, waiting: driving ? ("person_driving" as const) : undefined };
+  });
+  return changed ? next : (list as LineMessage[]);
+};

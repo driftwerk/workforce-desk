@@ -1,6 +1,6 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OVERSIGHT, oversightOf, parseCheckins, parseMinutes, parseTime, readable, withOversight } from "./oversight";
+import { DEFAULT_OVERSIGHT, oversightOf, parseCheckins, parseMinutes, parseParallel, parseTime, readable, withOversight } from "./oversight";
 
 const CONFIG = `[llm]
 provider = "claude-code"
@@ -46,6 +46,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         messageTerminalSessions: false,
         answerSessions: false,
       },
+      work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
     });
   });
 
@@ -103,8 +104,62 @@ wake = { waiting_minutes = 2.5 }
         message_terminal_sessions: false,
         answer_sessions: true,
       },
+      work: { prefer_sessions: true, parallel: 4, take_on: "handed", engine: "claude", max_turns_per_hour: 60 },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
+  });
+
+  it("reads how it runs sessions, inline or as its own table, and writes it under [oversight.work] as the hub reads it", () => {
+    expect(DEFAULT_OVERSIGHT.work).toEqual({ preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 });
+    const inline = oversightOf(`[oversight]
+work = { prefer_sessions = false, parallel = 12, take_on = "all", engine = "codex", max_turns_per_hour = 1 }
+`);
+    const own = oversightOf(`[oversight]
+[oversight.work]
+prefer_sessions = false
+parallel = 12
+take_on = "all"
+engine = "codex"
+max_turns_per_hour = 1
+`);
+    expect(inline.work).toEqual({ preferSessions: false, parallel: 12, takeOn: "all", engine: "codex", maxTurnsPerHour: 1 });
+    expect(own).toEqual(inline);
+    const toml = withOversight(`${CONFIG}\n[oversight]\nenabled = true\n[oversight.work]\nfuture = 1\n`, {
+      ...DEFAULT_OVERSIGHT,
+      enabled: true,
+      work: { preferSessions: false, parallel: 6, takeOn: "all", engine: "codex", maxTurnsPerHour: 90 },
+    });
+    expect(toml).toContain("[oversight.work]");
+    expect((parse(toml) as { oversight: { work: unknown } }).oversight.work).toEqual({
+      future: 1,
+      prefer_sessions: false,
+      parallel: 6,
+      take_on: "all",
+      engine: "codex",
+      max_turns_per_hour: 90,
+    });
+  });
+
+  it("reads what the hub would refuse in [oversight.work] as the defaults, and never writes it", () => {
+    const o = oversightOf(`[oversight]
+work = { prefer_sessions = "yes", parallel = 13, take_on = "some", engine = "Claude Code", max_turns_per_hour = 601 }
+`);
+    expect(o.work).toEqual(DEFAULT_OVERSIGHT.work);
+    expect(oversightOf(`[oversight]\nwork = { parallel = 0, max_turns_per_hour = 0, engine = 3 }\n`).work).toEqual(DEFAULT_OVERSIGHT.work);
+    expect(oversightOf(`[oversight]\nwork = { parallel = 2.5 }\n`).work.parallel).toBe(4);
+    // Out of range in Desk's own state (it can't be typed, but still):
+    // what is written stays inside what the hub takes.
+    const doc = parse(withOversight(CONFIG, { ...DEFAULT_OVERSIGHT, work: { ...DEFAULT_OVERSIGHT.work, parallel: 40, maxTurnsPerHour: 0, engine: "Claude Code" } })) as {
+      oversight: { work: Record<string, unknown> };
+    };
+    expect(doc.oversight.work).toMatchObject({ parallel: 12, max_turns_per_hour: 1, engine: "claude" });
+  });
+
+  it("takes 1 to 12 sessions at once as typed, and says so in the hub's words otherwise", () => {
+    expect(parseParallel(" 4 ")).toEqual({ value: 4 });
+    expect(parseParallel("12")).toEqual({ value: 12 });
+    for (const bad of ["0", "13", "2.5", "four", ""])
+      expect(parseParallel(bad)).toEqual({ problem: "How many sessions it may run at once must be a whole number from 1 to 12." });
   });
 
   it("writes minutes of 0 for off, as the hub takes them, and reads them back as 0", () => {

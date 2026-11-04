@@ -39,7 +39,31 @@ export interface Oversight {
      *  deletes or sends still comes to you, with its draft. */
     answerSessions: boolean;
   };
+  /** How it runs sessions for you (`[oversight.work]`). */
+  work: Work;
 }
+
+/** Which sessions it takes on: only those it starts and you hand it, or
+ *  every one it can. */
+export type TakeOn = "handed" | "all";
+
+export interface Work {
+  /** Real, visible sessions for the work; helpers only for read-only
+   *  lookups. */
+  preferSessions: boolean;
+  /** How many of its sessions may be starting or working at once. */
+  parallel: number;
+  takeOn: TakeOn;
+  /** The engine new sessions run on when nothing says another. */
+  engine: string;
+  /** Its turns for its sessions' turn ends, in any hour. */
+  maxTurnsPerHour: number;
+}
+
+/** The most sessions it may run at once, as the hub allows. */
+export const MAX_PARALLEL = 12;
+/** The most turns an hour it may spend on its sessions, as the hub allows. */
+export const MAX_WORK_TURNS_PER_HOUR = 600;
 
 export const DEFAULT_OVERSIGHT: Oversight = {
   enabled: false,
@@ -59,6 +83,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     messageTerminalSessions: false,
     answerSessions: true,
   },
+  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
 };
 
 const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act"];
@@ -68,6 +93,11 @@ type Doc = Record<string, unknown>;
 const table = (v: unknown): Doc => (v && typeof v === "object" && !Array.isArray(v) ? (v as Doc) : {});
 const bool = (v: unknown, d: boolean): boolean => (typeof v === "boolean" ? v : d);
 const count = (v: unknown, d: number): number => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : d);
+/** A whole number from `lo` to `hi`, as the hub takes it; else `d`. */
+const within = (v: unknown, lo: number, hi: number, d: number): number =>
+  typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : d;
+/** An engine named in one word ("claude", "codex"), as the hub takes it. */
+const ENGINE_WORD = /^[a-z0-9]+$/;
 const time = (v: unknown, d: string): string => (typeof v === "string" && (v === "" || TIME.test(v)) ? v : d);
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -98,6 +128,7 @@ export const oversightOf = (source: string): Oversight => {
   const wake = table(o.wake);
   const summaries = table(o.summaries);
   const act = table(o.act);
+  const work = table(o.work);
   return {
     enabled: bool(o.enabled, d.enabled),
     level: LEVELS.includes(o.level as OversightLevel) ? (o.level as OversightLevel) : d.level,
@@ -126,6 +157,13 @@ export const oversightOf = (source: string): Oversight => {
       messageAgents: bool(act.message_agents, d.act.messageAgents),
       messageTerminalSessions: bool(act.message_terminal_sessions, d.act.messageTerminalSessions),
       answerSessions: bool(act.answer_sessions, d.act.answerSessions),
+    },
+    work: {
+      preferSessions: bool(work.prefer_sessions, d.work.preferSessions),
+      parallel: within(work.parallel, 1, MAX_PARALLEL, d.work.parallel),
+      takeOn: work.take_on === "handed" || work.take_on === "all" ? work.take_on : d.work.takeOn,
+      engine: typeof work.engine === "string" && ENGINE_WORD.test(work.engine.trim()) ? work.engine.trim() : d.work.engine,
+      maxTurnsPerHour: within(work.max_turns_per_hour, 1, MAX_WORK_TURNS_PER_HOUR, d.work.maxTurnsPerHour),
     },
   };
 };
@@ -168,6 +206,14 @@ export const withOversight = (source: string, o: Oversight): string => {
       message_terminal_sessions: o.act.messageTerminalSessions,
       answer_sessions: o.act.answerSessions,
     },
+    work: {
+      ...table(was.work),
+      prefer_sessions: o.work.preferSessions,
+      parallel: Math.min(MAX_PARALLEL, Math.max(1, Math.round(o.work.parallel))),
+      take_on: o.work.takeOn,
+      engine: ENGINE_WORD.test(o.work.engine) ? o.work.engine : DEFAULT_OVERSIGHT.work.engine,
+      max_turns_per_hour: Math.min(MAX_WORK_TURNS_PER_HOUR, Math.max(1, Math.round(o.work.maxTurnsPerHour))),
+    },
   };
   return stringify(doc) + "\n";
 };
@@ -199,6 +245,15 @@ export const parseTime = (typed: string): { value: string } | { problem: string 
 export const parseCheckins = (typed: string, most: number = MAX_CHECKINS): { value: number } | { problem: string } => {
   const t = typed.trim();
   if (!/^\d+$/.test(t) || Number(t) < 1 || Number(t) > most) return { problem: `Use a whole number from 1 to ${most}.` };
+  return { value: Number(t) };
+};
+
+/** A count of sessions at once as typed: 1 to 12, or why not (the hub's
+ *  words). */
+export const parseParallel = (typed: string): { value: number } | { problem: string } => {
+  const t = typed.trim();
+  if (!/^\d+$/.test(t) || Number(t) < 1 || Number(t) > MAX_PARALLEL)
+    return { problem: `How many sessions it may run at once must be a whole number from 1 to ${MAX_PARALLEL}.` };
   return { value: Number(t) };
 };
 

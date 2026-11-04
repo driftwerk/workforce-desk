@@ -7,16 +7,28 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
+import { startable } from "../engines/engines";
+import type { EngineInfo } from "../hub/types";
 import {
   MAX_CHECKINS_PER_HOUR,
+  MAX_WORK_TURNS_PER_HOUR,
   oversightOf,
   parseCheckins,
+  parseParallel,
   parseMinutes,
   parseTime,
   readable,
   setAgentOversight,
   type Oversight,
+  type TakeOn,
 } from "./oversight";
+import { ENGINE_TITLE } from "../engines/engines";
+
+/** Which sessions it takes on, as the person picks it. */
+const TAKE_ON = (name: string): { id: TakeOn; name: string; desc: string }[] => [
+  { id: "handed", name: "Only what I hand it", desc: `Sessions ${name} starts, and ones you hand it with Hand to ${name}.` },
+  { id: "all", name: "Every session it can", desc: `Each session on Desk’s line, as it starts. One you release stays yours.` },
+];
 
 const LEVELS: { id: OversightLevel; name: string; desc: string }[] = [
   { id: "watch", name: "Watch", desc: "Answers “what’s everyone doing?” and tells you when something needs you." },
@@ -49,9 +61,11 @@ const fieldsOf = (o: Oversight, was?: Record<Field, Typed>): Record<Field, Typed
   evening: typed(o.summaries.evening || (was?.evening.text ?? "18:00")),
   hourly: typed(String(o.maxCheckinsPerHour)),
   checkins: typed(String(o.maxCheckinsPerDay)),
+  parallel: typed(String(o.work.parallel)),
+  turns: typed(String(o.work.maxTurnsPerHour)),
 });
 
-type Field = "waiting" | "quiet" | "morning" | "evening" | "hourly" | "checkins";
+type Field = "waiting" | "quiet" | "morning" | "evening" | "hourly" | "checkins" | "parallel" | "turns";
 
 /** An agent's Settings section for overseeing the crew: on or off (one
  *  agent at a time), how much it does on its own, what it keeps track of,
@@ -150,6 +164,14 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     const r = parseCheckins(text);
     return "problem" in r ? r.problem : { ...o, maxCheckinsPerDay: r.value };
   };
+  const setParallel = (o: Oversight, text: string) => {
+    const r = parseParallel(text);
+    return "problem" in r ? r.problem : { ...o, work: { ...o.work, parallel: r.value } };
+  };
+  const setTurns = (o: Oversight, text: string) => {
+    const r = parseCheckins(text, MAX_WORK_TURNS_PER_HOUR);
+    return "problem" in r ? r.problem : { ...o, work: { ...o.work, maxTurnsPerHour: r.value } };
+  };
   /** Turning a row with a field on uses what's typed in it, if it can. */
   const turnOn = (f: Field, apply: (o: Oversight, text: string) => Oversight | string, off: Change) => (on: boolean) => {
     if (!o || !fields) return;
@@ -165,6 +187,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   };
 
   const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
+  const takeOn = TAKE_ON(name);
+  const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
 
   return (
     <section className="agent-section oversee" aria-labelledby={head}>
@@ -359,6 +383,76 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             {fields.checkins.problem && <Problem id={`${ids}-checkins`} text={fields.checkins.problem} />}
           </div>
 
+          <div className="oversee-part">
+            <h3>How {name} works</h3>
+            <span className="oversee-sub">
+              {o.level === "watch"
+                ? `At Watch, ${name} runs no sessions. Set it to Suggest or Act to hand it work.`
+                : o.level === "suggest"
+                  ? `At Suggest, each session ${name} would start or answer for comes to you to say yes to first.`
+                  : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving.`}
+            </span>
+            <div className="oversee-card">
+              <Check
+                label="Prefer real sessions"
+                sub={`${name} starts sessions you can watch, type into and take over. Helpers only for quick read-only lookups`}
+                checked={o.work.preferSessions}
+                onChange={(v) => update((x) => ({ ...x, work: { ...x.work, preferSessions: v } }))}
+              />
+              <div className="oversee-row">
+                <label className="oversee-check" htmlFor={`${ids}-engine`}>
+                  <span className="oversee-check-text">
+                    <b>New sessions run</b>
+                    <span className="oversee-sub">Unless {name} picks another for a piece of work</span>
+                  </span>
+                </label>
+                <EngineSelect id={`${ids}-engine`} value={o.work.engine} onChange={(engine) => update((x) => ({ ...x, work: { ...x.work, engine } }))} />
+              </div>
+            </div>
+            <div className="oversee-levels oversee-levels-2" role="radiogroup" aria-label="Which sessions it takes on">
+              {takeOn.map((t, i) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="radio"
+                  className="oversee-level"
+                  aria-checked={o.work.takeOn === t.id}
+                  tabIndex={i === takeOnAt ? 0 : -1}
+                  onClick={() => o.work.takeOn !== t.id && update((x) => ({ ...x, work: { ...x.work, takeOn: t.id } }))}
+                  onKeyDown={(e) =>
+                    radioKeys(e, takeOn, takeOnAt, (next) => next.id !== o.work.takeOn && update((x) => ({ ...x, work: { ...x.work, takeOn: next.id } })))
+                  }
+                >
+                  <b>{t.name}</b>
+                  <span>{t.desc}</span>
+                </button>
+              ))}
+            </div>
+            <span className="oversee-sub oversee-cap">
+              {name} runs at most{" "}
+              <Num
+                problemId={`${ids}-parallel`}
+                label="Sessions at once"
+                value={fields.parallel}
+                onChange={(t) => setField("parallel", t)}
+                onCommit={() => commit("parallel", setParallel)}
+                narrow
+              />{" "}
+              sessions at once and spends at most{" "}
+              <Num
+                problemId={`${ids}-turns`}
+                label="Work turns an hour"
+                value={fields.turns}
+                onChange={(t) => setField("turns", t)}
+                onCommit={() => commit("turns", setTurns)}
+                narrow
+              />{" "}
+              turns an hour on their turn ends. Taking on a session you hand it is never refused for the limit.
+            </span>
+            {fields.parallel.problem && <Problem id={`${ids}-parallel`} text={fields.parallel.problem} />}
+            {fields.turns.problem && <Problem id={`${ids}-turns`} text={fields.turns.problem} />}
+          </div>
+
           {o.level === "act" && (
             <div className="oversee-part">
               <h3>What {name} may do without asking</h3>
@@ -458,6 +552,40 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
         </Dialog>
       )}
     </section>
+  );
+}
+
+/** The engine new sessions run on: one this computer can start that has
+ *  Desk's line, or the one the config names. */
+function EngineSelect({ id, value, onChange }: { id: string; value: string; onChange: (engine: string) => void }) {
+  const hub = useDesk((s) => s.hub);
+  const [engines, setEngines] = useState<EngineInfo[] | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    hub
+      ?.engines()
+      .then((e) => live && setEngines(e))
+      .catch(() => live && setEngines(null));
+    return () => {
+      live = false;
+    };
+  }, [hub]);
+  const lined = (engines ?? []).filter((e) => {
+    const view = e.views[0];
+    const line = view ? e.caps[view]?.line : undefined;
+    return line !== undefined && line !== "none";
+  });
+  const choices: string[] = engines ? startable(lined) : ["claude", "codex"];
+  if (!choices.includes(value)) choices.unshift(value);
+  const title = (e: string) => ENGINE_TITLE[e as keyof typeof ENGINE_TITLE] ?? e;
+  return (
+    <select id={id} className="ability-select" aria-label="New sessions run" value={value} onChange={(e) => onChange(e.target.value)}>
+      {choices.map((e) => (
+        <option key={e} value={e}>
+          {title(e)}
+        </option>
+      ))}
+    </select>
   );
 }
 

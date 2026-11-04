@@ -15,6 +15,8 @@ import { plainError } from "../ui/plainError";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { BreakerBanner } from "../spend/BreakerBanner";
+import { ChargeBadge, useChargeActions } from "../crew/ChargeBadge";
+import { useCharge } from "../crew/chargeStore";
 import { Terminal } from "../session/Terminal";
 import { useSettings } from "../settings/store";
 import { shortcutLabel, terminalKeys } from "../shortcuts/keys";
@@ -270,7 +272,9 @@ export function GridPane({
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
   const actions = session ? sessionActions(session) : [];
-  const entries = usePaneMenu(gridId, pane, actions, session ?? null, () => remove(menu?.from));
+  const charge = useCharge(session?.id);
+  const chargeActions = useChargeActions(session);
+  const entries = usePaneMenu(gridId, pane, actions, session ?? null, () => remove(menu?.from), chargeActions);
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
@@ -309,6 +313,7 @@ export function GridPane({
             </span>
           )}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
+          <ChargeBadge charge={charge} className="gpane-badge" />
           <span className="gpane-fill" />
           {label.cwd && (
             <span id={`${said}-cwd`} className="gpane-cwd mono">
@@ -343,6 +348,13 @@ export function GridPane({
               {a.label}
             </button>
           ))}
+          {chargeActions
+            .filter((a) => a.verb === "handBack")
+            .map((a) => (
+              <button key={a.verb} type="button" className="link small gpane-act" onClick={a.run}>
+                {a.label}
+              </button>
+            ))}
           <button
             type="button"
             className="icon-btn-sm"
@@ -546,7 +558,14 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
 }
 
 /** A pane's options: close, replace, move to another grid. */
-function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], session: Session | null, onClose: () => void): MenuEntry[] {
+function usePaneMenu(
+  gridId: string,
+  pane: PaneData,
+  actions: SessionAction[],
+  session: Session | null,
+  onClose: () => void,
+  charge: { label: string; run: () => void }[] = [],
+): MenuEntry[] {
   const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   // Selected as they're kept (a list made in the selector would be new on
@@ -627,6 +646,7 @@ function usePaneMenu(gridId: string, pane: PaneData, actions: SessionAction[], s
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
     ...swap,
     ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+    ...charge.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
     ...(accounts.length ? [{ kind: "item" as const, label: "Account", submenu: account }] : []),
     ...(session && approvalsSwitchable(session)
       ? [

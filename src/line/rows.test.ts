@@ -25,6 +25,16 @@ describe("a line's rows", () => {
     expect(deliveryText(msg(), NOW)).toBeNull();
   });
 
+  it("say what became of the boss's messages while it runs the session: held while you drive, withdrawn once it lets go, and its notes", () => {
+    const boss = (m: Parameters<typeof msg>[0]) => deliveryText(msg({ from: DESK, to: S1, kind: "tell", asked: null, ...m }), NOW);
+    expect(boss({ delivery: "queued", waiting: "person_driving" })).toBe("Waiting: you're driving");
+    expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: Sarah no longer runs it");
+    expect(boss({ delivery: "noted" })).toBe("A note here only: not typed in");
+    // One a newer hub sends that this Desk doesn't know says nothing.
+    expect(boss({ delivery: "later" as never })).toBeNull();
+    expect(editable(msg({ from: YOU, to: S1, delivery: "withdrawn" }))).toBe(false);
+  });
+
   it("say where a question stands and whether it waits on you", () => {
     expect(askedText(msg())).toBe("Waiting on Sarah");
     expect(waitsOnYou(msg())).toBe(false);

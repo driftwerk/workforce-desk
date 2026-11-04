@@ -211,6 +211,11 @@
   color: var(--signal-soft-text);
   white-space: nowrap;
 }
+/* Whose a session is: "You're driving" is dashed, not filled. */
+.gpane-badge.charge-you {
+  background: transparent;
+  color: var(--text);
+}
 .gpane-fill {
   flex: 1;
 }
