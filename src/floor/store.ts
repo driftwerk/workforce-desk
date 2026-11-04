@@ -5,7 +5,8 @@ import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { deskListeners } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
-import type { DeskEvent, FloorView, Need, UsageView } from "../hub/types";
+import type { DeskEvent, FloorView, LineAsked, Need, UsageView } from "../hub/types";
+import { useLine } from "../line/store";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { useWatching, watched } from "../unread/watching";
@@ -215,7 +216,12 @@ export const watchFloor = (): (() => void) => {
   window.addEventListener("focus", focused);
   const heard = (e: DeskEvent) => {
     const local = useChat.getState().hubs.find((h) => h.local)?.id;
-    if (local && MOVES.has(e.type) && !useFloor.getState().heard[local] && supported().includes(local)) ask([local]);
+    if (!local || !supported().includes(local)) return;
+    // A question on a session's line changing where it stands (asked, gone
+    // ahead without, answered, dismissed) moves the Floor, whatever the
+    // hub's link says: its floor signal doesn't cover the lines.
+    const lineQuestion = e.type === "line" && e.message.kind === "ask";
+    if (lineQuestion || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
   };
   deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;
@@ -293,11 +299,26 @@ export const useMerged = (): Merged => {
   const list = useChat((s) => s.hubs);
   const seen = useNeedsSeen((s) => s.seen);
   const w = useWatching();
+  const asked = useLine((s) => s.asked);
   return useMemo(() => {
     const all = merged(hubs, list);
-    const needs = all.needs.filter((n) => stillNeeds(n, seen, (key) => watched(w, key)));
-    return needs.length === all.needs.length ? all : { ...all, needs, counts: { ...all.counts, needsYou: needs.length } };
-  }, [hubs, list, seen, w]);
+    const needs = all.needs.filter((n) => stillNeeds(n, seen, (key) => watched(w, key)) && !lineSettled(n, asked, NOT_WAITING));
+    const wentAhead = all.wentAhead.filter((n) => !lineSettled(n, asked, CLOSED));
+    if (needs.length === all.needs.length && wentAhead.length === all.wentAhead.length) return all;
+    return { ...all, needs, wentAhead, counts: { ...all.counts, needsYou: needs.length } };
+  }, [hubs, list, seen, w, asked]);
+};
+
+/** Where a question on this computer's lines no longer waits on you, and
+ *  where it is closed for good. A question only moves forward, so what the
+ *  line heard since the Floor was read is the newer word. */
+const NOT_WAITING: ReadonlySet<LineAsked> = new Set(["answered", "dismissed", "withdrawn", "lapsed"]);
+const CLOSED: ReadonlySet<LineAsked> = new Set(["answered", "dismissed", "withdrawn"]);
+
+const lineSettled = (n: { id: string; local: boolean }, asked: Readonly<Record<string, LineAsked>>, done: ReadonlySet<LineAsked>): boolean => {
+  if (!n.local || !n.id.startsWith("line:")) return false;
+  const a = asked[n.id.slice("line:".length)];
+  return !!a && done.has(a);
 };
 
 /** What's still waiting on the person, on every hub, oldest first. */

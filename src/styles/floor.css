@@ -127,6 +127,11 @@
   background: var(--blocked-soft);
   padding-bottom: 8px;
 }
+/* Gone ahead without you: it no longer needs you, so it isn't amber. */
+.floor-need-acts.floor-went-ahead {
+  border-color: var(--border);
+  background: var(--surface);
+}
 .floor-need-why {
   display: block;
   margin-top: 2px;

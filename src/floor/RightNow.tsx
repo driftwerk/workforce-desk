@@ -17,6 +17,7 @@ import { backgroundTasks } from "./background";
 import { happening, type FloorEntry } from "./happening";
 import type { Merged } from "./merge";
 import { NeedRow } from "./NeedRow";
+import { WentAheadRow } from "./WentAheadRow";
 import { FloorRow, useSubject, useWho } from "./Row";
 import { useMerged } from "./store";
 import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
@@ -73,6 +74,20 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
           </div>
         ))}
       />
+      {m.wentAhead.length > 0 && (
+        <Column
+          label={`It went ahead without you · ${m.wentAhead.length}`}
+          tone="idle"
+          empty=""
+          list="Questions it went ahead without"
+          rows={m.wentAhead.map((w) => (
+            <div key={w.key} role="listitem">
+              <WentAheadRow item={w} now={now} />
+            </div>
+          ))}
+          note="Answered or dismissed questions leave the Floor. Each session’s Messages with Desk… keeps their history."
+        />
+      )}
       <Column
         label="What’s happening"
         tone="working"
@@ -89,7 +104,7 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
  *  so what follows stays in view. With `list`, its rows are a list's items
  *  (named so), and the list stays, empty too, so focus left by a row that
  *  goes lands on it. */
-function Column({ label, tone, empty, rows, list }: { label: string; tone: string; empty: string; rows: ReactNode[]; list?: string }) {
+function Column({ label, tone, empty, rows, list, note }: { label: string; tone: string; empty: string; rows: ReactNode[]; list?: string; note?: string }) {
   return (
     <div className="right-now-col" role="group" aria-label={label}>
       <h3 className={`ov-label state-${tone}`}>{label}</h3>
@@ -101,6 +116,7 @@ function Column({ label, tone, empty, rows, list }: { label: string; tone: strin
         rows.length > 0 && <div className="right-now-list">{rows}</div>
       )}
       {rows.length === 0 && <p className="faint small">{empty}</p>}
+      {note && <p className="faint small">{note}</p>}
     </div>
   );
 }

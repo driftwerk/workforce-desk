@@ -481,3 +481,48 @@ describe("Right now's needs, answered in place", () => {
     expect(useDesk.getState().error).toBeNull();
   });
 });
+
+describe("questions sessions asked on their lines", () => {
+  it("lists those it went ahead without apart from what needs you, and one dismissed anywhere leaves at once", async () => {
+    const { useLine } = await import("../line/store");
+    useLine.setState({ asked: {} });
+    useFloor.setState({
+      hubs: {
+        local: ready(
+          view({
+            needs: [need("line:q1", session("s-1", "acme-web"), { ask: "May I push to main?", since: at(4) })],
+            wentAhead: [
+              {
+                id: "line:q2",
+                who: session("s-1", "acme-web"),
+                ask: "Retire the legacy routes?",
+                chose: "keep both routes for now.",
+                askedAt: at(300),
+                wentAheadAt: at(290),
+              },
+            ],
+          }),
+        ),
+      },
+    });
+    render(<RightNow brief={null} />);
+    const needs = screen.getByRole("group", { name: "Needs you · 1" });
+    expect(within(needs).getByText("May I push to main?")).toBeTruthy();
+    const went = screen.getByRole("group", { name: "It went ahead without you · 1" });
+    expect(within(went).getByText("Retire the legacy routes?")).toBeTruthy();
+    expect(within(went).getByText(/It chose: keep both routes for now\./)).toBeTruthy();
+    expect(within(went).getByText(/Messages with Desk/)).toBeTruthy();
+    // Dismissed in its pane (or answered anywhere): the hub's event clears both at once.
+    act(() => useLine.setState({ asked: { q1: "dismissed", q2: "dismissed" } }));
+    expect(screen.getByRole("group", { name: "Needs you · 0" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /It went ahead without you/ })).toBeNull();
+  });
+
+  it("moves a question that went ahead from what needs you", async () => {
+    const { useLine } = await import("../line/store");
+    useLine.setState({ asked: { q1: "lapsed" } });
+    useFloor.setState({ hubs: { local: ready(view({ needs: [need("line:q1", session("s-1", "acme-web"), { ask: "May I push?", since: at(4) })] })) } });
+    render(<RightNow brief={null} />);
+    expect(screen.getByRole("group", { name: "Needs you · 0" })).toBeTruthy();
+  });
+});

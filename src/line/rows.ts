@@ -100,6 +100,10 @@ export const askedText = (m: LineMessage): string | null => {
       return "Answered";
     case "withdrawn":
       return "Withdrawn";
+    case "lapsed":
+      return "It went ahead without an answer";
+    case "dismissed":
+      return "Dismissed";
     default:
       return null;
   }

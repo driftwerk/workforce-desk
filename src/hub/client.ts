@@ -490,6 +490,12 @@ export class DeskHub {
   takeBackLine = (id: string): Promise<void> => this.call("DELETE", `/api/desk/line/${encodeURIComponent(id)}`);
   /** Your answer to a question on a session's line. */
   answerLine = (id: string, text: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/answer`, { text });
+  /** Sets a session's question aside unanswered: it leaves what needs you,
+   *  and nothing is sent to the session. */
+  dismissLine = (id: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/dismiss`);
+  /** Puts `text` in a session's prompt without sending it, for you to add
+   *  to and send yourself. */
+  draftLine = (sessionId: string, text: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${encodeURIComponent(sessionId)}/draft`, { text });
   /** Every session a boss runs now, with who drives each; null from a hub
    *  without charges (an older one). */
   charges = async (): Promise<ChargeView[] | null> => {
