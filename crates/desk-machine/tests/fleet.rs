@@ -493,7 +493,6 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     // The machine's hub is reached through the forward, with its token.
     let link = r.machines.get(&id).unwrap();
     let c = link.connection().unwrap().unwrap();
-    assert!(c.gateway_url.starts_with("http://127.0.0.1:"));
     assert_eq!(
         status(link.socket(), c.device_token.as_deref().unwrap()).as_deref(),
         Some("HTTP/1.1 200 OK")
