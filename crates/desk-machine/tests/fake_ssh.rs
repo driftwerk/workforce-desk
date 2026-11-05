@@ -619,3 +619,91 @@ fn no_forward_outlives_desk() {
         "stopped"
     );
 }
+
+/// A port on this computer's loopback nothing holds now.
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+#[test]
+fn a_sign_ins_page_comes_back_through_a_forward_of_its_port_alone_while_it_runs() {
+    use desk_machine::callback::CallbackForward;
+    // The engine's sign-in on the machine, listening for its page.
+    let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
+    let there = sign_in.local_addr().unwrap().port();
+    let heard = std::thread::spawn(move || {
+        let (mut c, _) = sign_in.accept().unwrap();
+        let mut got = [0u8; 256];
+        let n = c.read(&mut got).unwrap();
+        c.write_all(b"HTTP/1.1 302 Found\r\nLocation: https://claude.ai/done\r\n\r\n")
+            .unwrap();
+        String::from_utf8_lossy(&got[..n]).into_owned()
+    });
+    let here = free_port();
+    let f = fake(json!([{
+        "target": "devbox",
+        "settings": "user dev\nhostname 203.0.113.7\n",
+        "forward_to": there,
+    }]));
+    let m = machine("devbox");
+    let forward = CallbackForward::open(&f.ssh, &m, here, Duration::from_secs(10)).unwrap();
+    assert_eq!(forward.port(), here);
+    let call = f
+        .calls()
+        .into_iter()
+        .find(|c| c.contains(&"-L".to_string()))
+        .unwrap();
+    assert!(
+        call.windows(2).any(|w| w
+            == [
+                "-L".to_string(),
+                format!("127.0.0.1:{here}:127.0.0.1:{here}")
+            ]),
+        "{call:?}"
+    );
+    assert!(call.contains(&"ExitOnForwardFailure=yes".to_string()));
+    assert!(
+        call.last().unwrap().starts_with("sleep "),
+        "it ends by itself: {call:?}"
+    );
+
+    // The browser's visit to the page's callback reaches the sign-in there.
+    let mut browser = std::net::TcpStream::connect(("127.0.0.1", here)).unwrap();
+    browser
+        .write_all(b"GET /callback?code=c0de&state=s1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut answer = String::new();
+    browser.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 302"), "{answer}");
+    assert!(heard.join().unwrap().starts_with("GET /callback?code=c0de"));
+
+    // Ended with the sign-in: the port is this computer's again.
+    drop(forward);
+    assert!(soon(3000, || TcpListener::bind(("127.0.0.1", here)).is_ok()));
+}
+
+#[test]
+fn a_sign_ins_port_another_program_holds_or_a_config_that_forwards_is_refused() {
+    use desk_machine::callback::CallbackForward;
+    let held = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port();
+    let f = fake(json!([{"target": "devbox", "settings": "user dev\nhostname 203.0.113.7\n"}]));
+    let m = machine("devbox");
+    let refused = CallbackForward::open(&f.ssh, &m, port, Duration::from_secs(5))
+        .err()
+        .unwrap();
+    assert!(refused.contains(&format!("port {port}")), "{refused}");
+    assert!(CallbackForward::open(&f.ssh, &m, 80, Duration::from_secs(5)).is_err());
+    let f = fake(
+        json!([{"target": "devbox", "settings": "user dev\nlocalforward [127.0.0.1]:5432 [10.0.1.30]:5432\n"}]),
+    );
+    let refused = CallbackForward::open(&f.ssh, &m, free_port(), Duration::from_secs(5))
+        .err()
+        .unwrap();
+    assert!(refused.contains("forwards ports"), "{refused}");
+    assert!(f.calls().iter().all(|c| !c.contains(&"-L".to_string())));
+}

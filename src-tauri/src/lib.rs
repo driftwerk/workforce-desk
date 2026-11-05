@@ -829,6 +829,8 @@ pub fn run() {
             broker::local_hub_fetch,
             broker::local_hub_socket_open,
             machines::machine_fetch,
+            machines::machine_sign_in_forward,
+            machines::machine_sign_in_forward_stop,
             machines::machine_socket_open,
             machine_setup::machines_list,
             machine_setup::machine_probe,
@@ -926,6 +928,11 @@ pub fn run() {
                 && let Some(fleet) = app.try_state::<Arc<desk_machine::fleet::Fleet>>()
             {
                 fleet.shutdown();
+            }
+            if let tauri::RunEvent::Exit = event
+                && let Some(io) = app.try_state::<machines::MachineIo>()
+            {
+                io.end_callbacks();
             }
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event
                 && let Some(store) = app.try_state::<Arc<state::StateStore>>()

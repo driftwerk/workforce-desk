@@ -168,6 +168,11 @@ impl Link {
         &self.machine
     }
 
+    /// The `ssh` it reaches the machine by.
+    pub fn ssh(&self) -> &SshExe {
+        &self.ssh
+    }
+
     pub fn tunnel(&self) -> &Tunnel {
         &self.tunnel
     }

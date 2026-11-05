@@ -80,6 +80,13 @@ export interface MachineNative {
   reconnect(id: MachineId): Promise<void>;
   /** Signs the machine's Claude Code in with this computer's account. */
   shareSignIn(id: MachineId, engine: "claude"): Promise<void>;
+  /** For machine `id`'s Claude sign-in `signIn`: forwards the one port its
+   *  page comes back to, from this computer's loopback to the machine's,
+   *  for as long as the sign-in runs; the page to open. The native side
+   *  reads the page from the machine's hub itself, and checks it. */
+  signInForward(id: MachineId, signIn: string): Promise<string>;
+  /** Ends machine `id`'s sign-in forward. */
+  signInForwardStop(id: MachineId): Promise<void>;
   /** Desk's Claude Code plugin folder on the machine (`<bin>/current/claude-plugin`). */
   pluginDir(id: MachineId): Promise<string | null>;
   /** The machine's engine's admin surface, through its own broker. */
@@ -97,6 +104,8 @@ export const native: MachineNative = {
   remove: (id) => invoke<void>("machine_remove", { id }),
   reconnect: (id) => invoke<void>("machine_reconnect", { id }),
   shareSignIn: (id, engine) => invoke<void>("machine_share_sign_in", { id, engine }),
+  signInForward: (id, signIn) => invoke<string>("machine_sign_in_forward", { machine: id, signIn }),
+  signInForwardStop: (id) => invoke<void>("machine_sign_in_forward_stop", { machine: id }),
   pluginDir: (id) => machinePluginDir(id),
   transport: machineTransport,
 };

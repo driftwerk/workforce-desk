@@ -56,6 +56,8 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     remove: vi.fn(async (_id: string) => undefined),
     reconnect: vi.fn(async (_id: string) => undefined),
     shareSignIn: vi.fn(async (_id: string, _engine: "claude") => undefined),
+    signInForward: vi.fn(async (_id: string, _signIn: string) => "https://claude.com/cai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A46009%2Fcallback" as string),
+    signInForwardStop: vi.fn(async (_id: string) => undefined),
     pluginDir: vi.fn(async (_id: string) => "/home/dev/.local/share/Desk/bin/current/claude-plugin" as string | null),
     transport: vi.fn((_id: string) => foldersTransport([])),
   };

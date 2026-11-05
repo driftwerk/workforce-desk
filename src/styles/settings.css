@@ -1074,6 +1074,13 @@ legend.set-label {
   flex-direction: column;
   gap: 6px;
 }
+.machine-row-signins {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 20px;
+}
 .machine-signing {
   display: flex;
   flex-direction: column;

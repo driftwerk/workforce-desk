@@ -46,6 +46,8 @@
     "allow-machine-reconnect",
     "allow-machine-remove",
     "allow-machine-share-sign-in",
+    "allow-machine-sign-in-forward",
+    "allow-machine-sign-in-forward-stop",
     "allow-socket-send",
     "allow-socket-ack",
     "allow-socket-close",

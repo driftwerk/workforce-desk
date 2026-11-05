@@ -427,7 +427,24 @@ export type AccountSignInState =
   | { state: "done"; account: string }
   | { state: "failed"; why: string };
 
-export type AccountSignIn = { id: string; engine: Engine; name: string } & AccountSignInState;
+export type AccountSignIn = {
+  id: string;
+  engine: Engine;
+  name: string;
+  /** For a sign-in made from another computer: the page that comes back to
+   *  the hub's computer by itself (`http://localhost:{port}/callback`
+   *  there), once the CLI has made it. */
+  direct?: { url: string; port: number };
+} & AccountSignInState;
+
+/** An engine's own sign-in where it has no browser (Codex's device
+ *  sign-in): the page to open and the code to type there. */
+export type EngineSignIn = { id: string; engine: Engine } & (
+  | { state: "starting" }
+  | { state: "device"; url: string; code: string }
+  | { state: "done" }
+  | { state: "failed"; why: string }
+);
 
 export interface AccountsInfo {
   accounts: EngineAccount[];

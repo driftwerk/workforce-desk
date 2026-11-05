@@ -8,6 +8,7 @@ import { useMachines } from "../machines/engines";
 import { fakeNative, machine, noEngines, withEngine } from "../machines/testing";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import { useUi } from "../shell/ui";
+import { openUrl } from "../platform";
 import { Machines } from "./Machines";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -39,7 +40,11 @@ beforeEach(() => {
   withEngine(
     "devbox",
     {
-      engines: vi.fn(async () => [engine({ engine: "claude", title: "Claude Code" }), engine({ engine: "codex", title: "Codex" })]),
+      engines: vi.fn(async () => [
+        engine({ engine: "claude", title: "Claude Code", signIn: { state: "in", via: "plan", who: "dev@example.com", plan: "max" } }),
+        engine({ engine: "codex", title: "Codex", signIn: { state: "out" } }),
+      ]),
+      accounts: vi.fn(async () => ({ accounts: [], store: "Desk's private file", signIns: [] })),
     } as unknown as DeskHub,
   );
   useMachines.setState({
@@ -61,7 +66,7 @@ it("lists this computer and each machine, saying where each stands", async () =>
   await act(async () => {});
   expect(row("This Mac").textContent).toContain("2 sessions · Desk 0.2.0");
   expect(row("devbox").textContent).toContain("dev@203.0.113.7");
-  expect(row("devbox").textContent).toContain("Connected · 2 sessions · Desk 0.2.0 · Linux x86_64 · Claude Code and Codex signed in");
+  expect(row("devbox").textContent).toContain("Connected · 2 sessions · Desk 0.2.0 · Linux x86_64");
   expect(row("devbox").querySelector(".dot-done")).toBeTruthy();
   expect(row("buildbox").textContent).toContain("Can’t reach it right now. Its sessions keep running; Desk reconnects when it can.");
   expect(row("buildbox").querySelector(".dot-blocked")).toBeTruthy();
@@ -71,6 +76,28 @@ it("lists this computer and each machine, saying where each stands", async () =>
   expect(row("old-box").textContent).toContain("It runs a newer Desk (0.3.0)");
   expect(within(row("devbox")).getByRole("button", { name: "Open a terminal" })).toBeTruthy();
   expect(within(row("buildbox")).queryByRole("button", { name: "Open a terminal" })).toBeNull();
+});
+
+it("shows each machine's sign-in per engine, with a Sign in for one that isn't, after the add card has closed", async () => {
+  const { native, fake } = fakeNative();
+  const device = { id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "WXYZ-98765" };
+  fake.transport.mockReturnValue({
+    fetch: async (_method: string, path: string) => (path.startsWith("/api/desk/engines/sign-ins") ? Response.json(device) : new Response(null, { status: 404 })),
+    socket: () => {
+      throw new Error("no sockets here");
+    },
+  });
+  render(<Machines native={native} />);
+  await act(async () => {});
+  const devbox = within(row("devbox"));
+  expect(devbox.getByRole("group", { name: "Claude" }).textContent).toContain("Signed in as dev@example.com");
+  expect(devbox.queryByRole("button", { name: "Sign in to Claude" })).toBeNull();
+  expect(devbox.getByRole("group", { name: "ChatGPT" }).textContent).toContain("Not signed in");
+  await act(async () => fireEvent.click(devbox.getByRole("button", { name: "Sign in to ChatGPT" })));
+  expect(openUrl).toHaveBeenCalledWith("https://auth.openai.com/codex/device");
+  expect(devbox.getByText("WXYZ-98765")).toBeTruthy();
+  // A machine that isn't connected shows none.
+  expect(within(row("buildbox")).queryByRole("group", { name: "Claude" })).toBeNull();
 });
 
 it("tries an unreachable machine again", async () => {
