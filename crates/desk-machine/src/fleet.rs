@@ -401,6 +401,10 @@ impl Fleet {
 
     /// The machine's link, made again if it was dropped.
     fn link(&self, machine: &Machine) -> Result<Arc<Link>, String> {
+        // One removed meanwhile (while it was being set up) stays removed.
+        if self.machine(machine.id.as_str()).is_none() {
+            return Err("That machine isn't in Desk any more.".into());
+        }
         match self.machines.get(machine.id.as_str()) {
             Some(l) => Ok(l),
             None => self.machines.insert(machine.clone()),
