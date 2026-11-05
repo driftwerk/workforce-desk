@@ -21,6 +21,8 @@ pub fn plugin_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>, host: &Host) -> 
                 .then(|| dir.to_string_lossy().into_owned())
         }
         Host::Wsl(w) => Some(format!("{}/current/claude-plugin", w.bin())),
+        // Named from the machine's home, read over SSH (`desk_machine::Link`).
+        Host::Ssh(_) => None,
     }
 }
 

@@ -215,6 +215,14 @@ const HTTP: &[Route] = &[
     route("DELETE", "/api/desk/terminals/{}"),
 ];
 
+/// What the page may ask of a machine's hub besides: the folders there, to
+/// type a session's folder, and what runs in one of its terminals (`ps` on
+/// this computer can't see it).
+const MACHINE_HTTP: &[Route] = &[
+    with_query("GET", "/api/desk/folders", &["path", "hidden"]),
+    route("GET", "/api/desk/terminals/{}/programs"),
+];
+
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
     route("GET", "/api/desk/events"),
@@ -245,6 +253,12 @@ impl std::fmt::Display for Refused {
 /// requests, or why it isn't one.
 pub fn http(method: &str, target: &str) -> Result<Allowed, Refused> {
     allowed(HTTP, method, target)
+}
+
+/// `method target` as one of `DeskHub`'s requests to a machine's hub: the
+/// same as to this computer's, and [`MACHINE_HTTP`].
+pub fn machine_http(method: &str, target: &str) -> Result<Allowed, Refused> {
+    http(method, target).or_else(|_| allowed(MACHINE_HTTP, method, target))
 }
 
 /// `target` as one of the sockets the page opens, or why it isn't one.
@@ -558,5 +572,28 @@ mod tests {
             e.to_string(),
             "Desk doesn't send GET /api/admin/x to this computer's hub."
         );
+    }
+
+    /// A machine's hub takes what this computer's does, and its folders
+    /// and a terminal's programs; nothing else.
+    #[test]
+    fn a_machine_takes_the_same_list_and_its_folders() {
+        assert!(machine_http("GET", "/api/desk/sessions").is_ok());
+        assert!(machine_http("GET", "/api/desk/folders?path=%2Fhome%2Fdev&hidden=1").is_ok());
+        assert!(machine_http("GET", "/api/desk/terminals/t1/programs").is_ok());
+        assert!(
+            http("GET", "/api/desk/folders").is_err(),
+            "not this computer's"
+        );
+        for (m, p) in [
+            ("GET", "/api/desk/folders?path=x&token=y"),
+            ("POST", "/api/desk/folders"),
+            ("GET", "/api/desk/terminals/t1/programs/x"),
+            ("GET", "/api/admin/reset-model"),
+            ("GET", "/api/vault/speech/openai/api_key"),
+            ("GET", "/api/desk/folders/%2e%2e"),
+        ] {
+            assert!(machine_http(m, p).is_err(), "{m} {p}");
+        }
     }
 }

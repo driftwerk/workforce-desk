@@ -8,6 +8,7 @@ pub mod holder;
 pub mod host;
 pub mod image_size;
 pub mod install;
+pub mod machine;
 pub mod net;
 #[cfg(unix)]
 pub mod process;
@@ -454,6 +455,9 @@ impl Secrets {
     ///   else a private file, chosen once and kept in `keys.toml`.
     pub fn for_host(paths: &Paths, host: &Host) -> Result<Self> {
         let store = match (std::env::var_os("DESK_HOME"), host) {
+            // Nothing of a machine's is kept on this computer: its secrets
+            // stay on it, and Desk holds its tokens only in memory.
+            (_, Host::Ssh(m)) => eyre::bail!("{}'s secrets stay on it", m.name),
             (Some(_), _) | (None, Host::Wsl(_)) => KeyStore::File,
             (None, Host::Native) if cfg!(any(target_os = "macos", windows)) => KeyStore::System,
             (None, Host::Native) => chosen(paths, || Keyring::answers(KEYRING_PROBE))?,

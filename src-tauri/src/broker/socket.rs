@@ -62,18 +62,22 @@ pub type Events = Arc<dyn Fn(InvokeResponseBody) + Send + Sync>;
 pub type Bearer = Arc<dyn Fn(bool) -> BoxFuture<'static, Result<Arc<str>, String>> + Send + Sync>;
 
 /// Which share of sockets one counts against: the local hub's admin
-/// sockets, or conversations and links to hubs. A page with many
-/// conversations open can't leave its terminals without, nor the other way.
+/// sockets, a machine's (each its own, as big as the local hub's), or
+/// conversations and links to hubs. A page with many conversations open
+/// can't leave its terminals without, nor one machine's terminals
+/// another's, nor the other way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pool {
     Local,
+    /// A machine's admin sockets, by the number its broker was given.
+    Machine(u32),
     Hubs,
 }
 
 impl Pool {
     fn limits(self) -> (usize, usize) {
         match self {
-            Pool::Local => (MAX_SOCKETS, MAX_PER_WINDOW),
+            Pool::Local | Pool::Machine(_) => (MAX_SOCKETS, MAX_PER_WINDOW),
             Pool::Hubs => (MAX_HUB_SOCKETS, MAX_HUB_PER_WINDOW),
         }
     }
@@ -139,6 +143,9 @@ pub struct Dial {
     pub legacy: Option<Legacy>,
     /// For a hub on this computer: told when its address can't be reached.
     pub unreachable: Option<Unreachable>,
+    /// For a machine's hub: the forward's Unix socket, the only way there
+    /// (the URL's host is never connected to).
+    pub unix: Option<std::path::PathBuf>,
 }
 
 /// What the page sends down a socket.
@@ -223,6 +230,7 @@ impl Sockets {
     /// Opens one of the local hub's admin sockets; see [`dial`].
     ///
     /// [`dial`]: Self::dial
+    #[cfg(test)]
     pub fn open(
         &self,
         owner: &str,
@@ -238,6 +246,7 @@ impl Sockets {
             pool: Pool::Local,
             legacy: None,
             unreachable,
+            unix: None,
         };
         self.dial(owner, page, dial, events)
     }
@@ -262,6 +271,7 @@ impl Sockets {
         {
             return Err(match pool {
                 Pool::Local => "Desk has too many connections to this computer's hub open.",
+                Pool::Machine(_) => "Desk has too many connections to that machine open.",
                 Pool::Hubs => "Desk has too many conversations open.",
             }
             .into());
@@ -415,6 +425,7 @@ impl Failed {
     fn said(&self, pool: Pool) -> String {
         let hub = match pool {
             Pool::Local => "This computer's hub",
+            Pool::Machine(_) => "The machine's hub",
             Pool::Hubs => "The workspace",
         };
         match self {
@@ -555,20 +566,81 @@ fn flush(events: &Events, credit: &Credit, batch: &mut Vec<u8>) {
     }
 }
 
-async fn relay(dial: Dial, mut said: mpsc::Receiver<Said>, events: Events, credit: Arc<Credit>) {
-    let mut ws = match handshake(&dial).await {
-        Ok(ws) => ws,
-        Err(why) => {
-            if !matches!(why, Failed::Refused(_) | Failed::Unsendable)
-                && let Some(unreachable) = &dial.unreachable
-            {
-                unreachable();
+/// A machine's socket: a handshake through the forward's Unix socket
+/// `path`, never to the URL's host, with the token in its header (read
+/// again once if the hub turns it away).
+#[cfg(unix)]
+async fn handshake_unix(
+    dial: &Dial,
+    path: &std::path::Path,
+) -> Result<tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>, Failed> {
+    let mut fresh = false;
+    loop {
+        let token = (dial.bearer)(fresh).await.map_err(|_| Failed::Other)?;
+        let mut request = dial
+            .url
+            .as_str()
+            .into_client_request()
+            .map_err(|_| Failed::Other)?;
+        let mut auth =
+            HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Failed::Unsendable)?;
+        auth.set_sensitive(true);
+        request.headers_mut().insert(AUTHORIZATION, auth);
+        let connect = async {
+            let stream = tokio::net::UnixStream::connect(path)
+                .await
+                .map_err(|_| Failed::Other)?;
+            match tokio_tungstenite::client_async(request, stream).await {
+                Ok((ws, _)) => Ok(ws),
+                Err(WsError::Http(r)) => Err(Failed::Refused(r.status())),
+                Err(_) => Err(Failed::Other),
             }
-            events(event(serde_json::json!({ "type": "error" })));
-            events(closed(1006, &why.said(dial.pool)));
-            return;
+        };
+        match tokio::time::timeout(HANDSHAKE, connect)
+            .await
+            .unwrap_or(Err(Failed::Late))
+        {
+            Err(Failed::Refused(StatusCode::UNAUTHORIZED)) if !fresh => fresh = true,
+            other => return other,
         }
+    }
+}
+
+async fn relay(dial: Dial, said: mpsc::Receiver<Said>, events: Events, credit: Arc<Credit>) {
+    let failed = |why: Failed| {
+        if !matches!(why, Failed::Refused(_) | Failed::Unsendable)
+            && let Some(unreachable) = &dial.unreachable
+        {
+            unreachable();
+        }
+        events(event(serde_json::json!({ "type": "error" })));
+        events(closed(1006, &why.said(dial.pool)));
     };
+    #[cfg(unix)]
+    if let Some(path) = &dial.unix {
+        match handshake_unix(&dial, path).await {
+            Ok(ws) => pump(ws, said, &events, &credit).await,
+            Err(why) => failed(why),
+        }
+        return;
+    }
+    #[cfg(not(unix))]
+    let _ = &dial.unix;
+    match handshake(&dial).await {
+        Ok(ws) => pump(ws, said, &events, &credit).await,
+        Err(why) => failed(why),
+    }
+}
+
+/// Relays an open socket `ws` until either side closes it.
+async fn pump<S>(
+    mut ws: tokio_tungstenite::WebSocketStream<S>,
+    mut said: mpsc::Receiver<Said>,
+    events: &Events,
+    credit: &Credit,
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     events(event(serde_json::json!({ "type": "open" })));
     let mut batch = Vec::new();
     let (code, reason) = 'relay: loop {
@@ -581,20 +653,20 @@ async fn relay(dial: Dial, mut said: mpsc::Receiver<Said>, events: Events, credi
                     match h {
                         Some(Ok(Message::Binary(b))) => batch.extend_from_slice(&b),
                         Some(Ok(Message::Text(t))) => {
-                            flush(&events, &credit, &mut batch);
+                            flush(events, credit, &mut batch);
                             let n = t.len();
-                            give(&events, &credit, n, event(serde_json::json!({ "type": "text", "data": t.as_str(), "n": n })));
+                            give(events, credit, n, event(serde_json::json!({ "type": "text", "data": t.as_str(), "n": n })));
                         }
                         // Its pong is queued; flushing sends it.
                         Some(Ok(Message::Ping(_))) => { let _ = ws.flush().await; }
                         Some(Ok(Message::Close(frame))) => {
-                            flush(&events, &credit, &mut batch);
+                            flush(events, credit, &mut batch);
                             let _ = ws.flush().await;
                             break 'relay frame.map_or((1005, String::new()), |f| (u16::from(f.code), f.reason.to_string()));
                         }
                         Some(Ok(_)) => {}
                         Some(Err(_)) | None => {
-                            flush(&events, &credit, &mut batch);
+                            flush(events, credit, &mut batch);
                             break 'relay (1006, String::new());
                         }
                     }
@@ -602,7 +674,7 @@ async fn relay(dial: Dial, mut said: mpsc::Receiver<Said>, events: Events, credi
                         heard = ws.next().now_or_never();
                     }
                 }
-                flush(&events, &credit, &mut batch);
+                flush(events, credit, &mut batch);
             },
             // The page has taken some: read the hub again.
             () = credit.acked.notified(), if !room => {}

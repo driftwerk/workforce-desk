@@ -81,7 +81,7 @@ impl Helper {
     fn wsl(&self) -> Option<&Wsl> {
         match &self.backend.host {
             Host::Wsl(w) => Some(w),
-            Host::Native => None,
+            Host::Native | Host::Ssh(_) => None,
         }
     }
 

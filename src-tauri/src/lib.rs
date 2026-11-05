@@ -11,6 +11,7 @@ mod helper;
 mod hub_io;
 mod hubs;
 mod logins;
+mod machines;
 mod navigation;
 mod pair_gate;
 mod paired;
@@ -64,7 +65,8 @@ fn backend_of(paths: &Paths) -> eyre::Result<Option<Backend>> {
     }
     Ok(match desk_core::backend::read_host(paths)? {
         Some(Host::Wsl(w)) => Some(Backend::wsl(w)),
-        Some(Host::Native) | None => None,
+        // A machine is never this computer's backend.
+        Some(Host::Native | Host::Ssh(_)) | None => None,
     })
 }
 
@@ -180,18 +182,28 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
 }
 
 #[tauri::command]
-async fn hubs_list(app: State<'_, App>) -> CommandResult<Vec<hubs::HubAccount>> {
+async fn hubs_list(
+    app: State<'_, App>,
+    machines: State<'_, machines::MachineIo>,
+) -> CommandResult<Vec<hubs::HubAccount>> {
     let (paths, backend) = (app.paths.clone(), app.backend.clone());
-    tauri::async_runtime::spawn_blocking(move || hubs::accounts(&paths, backend.as_ref()))
-        .await
-        .map_err(text)?
-        .map_err(text)
+    let mut all =
+        tauri::async_runtime::spawn_blocking(move || hubs::accounts(&paths, backend.as_ref()))
+            .await
+            .map_err(text)?
+            .map_err(text)?;
+    // Each machine's, once Desk has reached it.
+    all.extend(machines.accounts());
+    Ok(all)
 }
 
 /// Forgets a paired hub and its token. (A hub is paired, and its token
 /// kept, by `hub_io::pair_collect`: the page never holds one to hand over.)
 #[tauri::command]
 fn hubs_remove(app: State<'_, App>, io: State<'_, hub_io::HubIo>, id: String) -> CommandResult<()> {
+    if hubs::machine_of(&id).is_some() {
+        return Err("A machine is removed from Settings → Machines.".into());
+    }
     let removed = hubs::remove(&app.paths, &id).map_err(text);
     io.forget();
     removed
@@ -360,7 +372,7 @@ fn os_version(backend: Option<&Backend>) -> String {
                 .unwrap_or_default();
             format!("{os}\nWSL: {} (kernel {kernel})", w.distro)
         }
-        Some(Host::Native) | None => os,
+        Some(Host::Native | Host::Ssh(_)) | None => os,
     }
 }
 
@@ -525,6 +537,7 @@ fn grid_monitors(app: tauri::AppHandle) -> Vec<grid_windows::MonitorInfo> {
 fn backend_home(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<String> {
     match app.backend()?.host {
         Host::Wsl(w) => Ok(w.home),
+        Host::Ssh(m) => Err(format!("{} names its own home", m.name)),
         Host::Native => Ok(handle
             .path()
             .home_dir()
@@ -548,6 +561,7 @@ async fn pick_folder(
         let dialog = handle.dialog().file();
         let dialog = match &host {
             Host::Wsl(w) => dialog.set_directory(host.host_path(&w.home)),
+            Host::Ssh(m) => return Err(format!("A folder on {} is typed, not picked.", m.name)),
             Host::Native => dialog,
         };
         let Some(picked) = dialog.blocking_pick_folder() else {
@@ -560,7 +574,9 @@ async fn pick_folder(
                 "Pick a folder in {} or on a Windows drive.",
                 w.distro
             )),
-            (None, Host::Native) => Err(format!("Desk can't use {}", picked.display())),
+            (None, Host::Native | Host::Ssh(_)) => {
+                Err(format!("Desk can't use {}", picked.display()))
+            }
         }
     })
     .await
@@ -570,11 +586,23 @@ async fn pick_folder(
 /// Desk's Claude Code plugin folder, for the shells of grid terminals, as
 /// the backend names it; none when this build doesn't have it.
 #[tauri::command]
-fn claude_plugin_dir(
+async fn claude_plugin_dir(
     handle: tauri::AppHandle,
     app: State<'_, App>,
+    machines: State<'_, machines::MachineIo>,
+    machine: Option<String>,
 ) -> CommandResult<Option<String>> {
-    Ok(terminals::plugin_dir(&handle, &app.backend()?.host))
+    match machine {
+        // On a machine: beside its backend, named from its home there
+        // (read over SSH once).
+        Some(id) => {
+            let link = machines.link(&id)?;
+            tauri::async_runtime::spawn_blocking(move || link.plugin_dir().map(Some))
+                .await
+                .map_err(text)?
+        }
+        None => Ok(terminals::plugin_dir(&handle, &app.backend()?.host)),
+    }
 }
 
 /// What's running in a terminal whose shell is `pid`, shell first.
@@ -712,7 +740,18 @@ pub fn run() {
             // Every hub socket the page holds, the local hub's admin ones
             // and every paired hub's, and the hubs it reaches by id.
             let sockets = Arc::new(broker::socket::Sockets::default());
-            let paired = Arc::new(paired::Paired::new(paths.clone(), backend.clone()));
+            // The person's own machines, reached over SSH (none until one
+            // is added).
+            let machines = Arc::new(desk_machine::Machines::new(
+                desk_machine::SshExe::system(),
+                &paths.root.join("machines"),
+            ));
+            let paired = Arc::new(paired::Paired::new(
+                paths.clone(),
+                backend.clone(),
+                Arc::clone(&machines),
+            ));
+            app.manage(machines::MachineIo::new(machines, Arc::clone(&sockets)));
             app.manage(attachments::Files::new(Arc::clone(&paired)));
             app.manage(broker::Broker::new(backend.clone(), Arc::clone(&sockets)));
             app.manage(hub_io::HubIo::new(paired, Arc::clone(&sockets)));
@@ -763,6 +802,8 @@ pub fn run() {
             hub_connection,
             broker::local_hub_fetch,
             broker::local_hub_socket_open,
+            machines::machine_fetch,
+            machines::machine_socket_open,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,

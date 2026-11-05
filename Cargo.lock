@@ -1027,6 +1027,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "desk-core",
+ "desk-machine",
  "desk-tuple",
  "desk-voice",
  "desk-wsl",
@@ -1112,6 +1113,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq 3.5.0",
+]
+
+[[package]]
+name = "desk-machine"
+version = "0.1.0"
+dependencies = [
+ "desk-core",
+ "eyre",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

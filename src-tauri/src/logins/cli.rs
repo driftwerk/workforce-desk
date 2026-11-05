@@ -61,6 +61,7 @@ pub fn cli(backend: &Backend, program: &str, args: &[&str], env: &[(&str, &str)]
     }
     match &backend.host {
         Host::Native => native::cli(program, args, env),
+        Host::Ssh(m) => eyre::bail!("{program} signs in on {} itself", m.name),
         Host::Wsl(_) => {
             let assigns: String = env
                 .iter()
@@ -86,6 +87,8 @@ pub fn cli(backend: &Backend, program: &str, args: &[&str], env: &[(&str, &str)]
 pub fn installed(backend: &Backend, program: &str) -> bool {
     match &backend.host {
         Host::Native => native::installed(program),
+        // Signed in to on the machine itself, never from here.
+        Host::Ssh(_) => false,
         Host::Wsl(_) => {
             let p = quote(program);
             backend
@@ -102,6 +105,7 @@ pub fn installed(backend: &Backend, program: &str) -> bool {
 pub fn installer(backend: &Backend, script: &str) -> Result<Cli> {
     match &backend.host {
         Host::Native => native::installer(script),
+        Host::Ssh(m) => eyre::bail!("Desk installs nothing on {} from here", m.name),
         Host::Wsl(_) => Ok(Cli {
             invocation: backend.host.invocation("/bin/bash", &["-lc", script]),
             env: None,
@@ -118,6 +122,7 @@ pub fn private_dir(backend: &Backend, name: &str) -> Result<(PathBuf, String)> {
         Host::Native => {
             native::private_dir(&here).map(|p| (p.clone(), p.to_string_lossy().into_owned()))
         }
+        Host::Ssh(m) => eyre::bail!("{} keeps its own files", m.name),
         Host::Wsl(w) => {
             let there = format!("{}/{name}", w.root());
             let q = quote(&there);

@@ -1,7 +1,7 @@
 //! Where Desk's backend runs, as the app sees it: on this computer itself,
-//! or inside a WSL distro on Windows. Starting a program there and writing a
-//! path for either side go through [`Host`], so nothing else needs to know
-//! which it is.
+//! inside a WSL distro on Windows, or on a machine of the person's own that
+//! Desk reaches over SSH. Starting a program there and writing a path for
+//! each side go through [`Host`], so nothing else needs to know which it is.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -9,12 +9,16 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::LINUX_HELPER_EXECUTABLE;
+pub use crate::machine::Machine;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Host {
     Native,
     Wsl(Wsl),
+    /// A Linux machine the person owns (a build server), reached with their
+    /// own `ssh`.
+    Ssh(Machine),
 }
 
 /// A WSL distro the backend runs in, as setup found it.
@@ -104,6 +108,21 @@ impl Host {
                 args: args.collect(),
             },
             Host::Wsl(w) => w.wsl(std::iter::once(program.to_string()).chain(args)),
+            Host::Ssh(m) => m.command(
+                &std::iter::once(program.to_string())
+                    .chain(args)
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+
+    /// Desk Helper where this host runs it: none on this computer, where
+    /// the app finds its own.
+    pub fn helper(&self) -> Option<String> {
+        match self {
+            Host::Native => None,
+            Host::Wsl(w) => Some(w.helper()),
+            Host::Ssh(m) => Some(m.helper()),
         }
     }
 
@@ -126,6 +145,9 @@ impl Host {
                     format!("\\\\wsl.localhost\\{}\\{}", w.distro, rest.join("\\")).into()
                 }
             },
+            // Not on this computer at all: the path as the machine says it,
+            // which nothing here opens.
+            Host::Ssh(_) => backend.into(),
         }
     }
 
@@ -133,8 +155,11 @@ impl Host {
     /// can't reach (a network share, another distro).
     pub fn backend_path(&self, picked: &Path) -> Option<String> {
         let picked = picked.to_string_lossy();
-        let Host::Wsl(w) = self else {
-            return Some(picked.into_owned());
+        let w = match self {
+            Host::Native => return Some(picked.into_owned()),
+            // A folder picked on this computer isn't on the machine.
+            Host::Ssh(_) => return None,
+            Host::Wsl(w) => w,
         };
         let picked = picked
             .strip_prefix(r"\\?\UNC\")
@@ -313,7 +338,7 @@ mod tests {
             automount: "/win/".into(),
             ..match ubuntu() {
                 Host::Wsl(w) => w,
-                Host::Native => unreachable!(),
+                Host::Native | Host::Ssh(_) => unreachable!(),
             }
         });
         assert_eq!(host.host_path("/win/e/data"), PathBuf::from(r"E:\data"));

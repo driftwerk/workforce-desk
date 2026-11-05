@@ -16,6 +16,7 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 bytes = "1.12.1"
 desk-core = { workspace = true }
+desk-machine = { workspace = true }
 desk-tuple = { path = "../crates/desk-tuple" }
 desk-voice = { path = "../crates/desk-voice" }
 desk-wsl = { workspace = true }

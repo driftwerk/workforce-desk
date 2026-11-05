@@ -6,6 +6,8 @@ pub const COMMANDS: &[&str] = &[
     "hub_connection",
     "local_hub_fetch",
     "local_hub_socket_open",
+    "machine_fetch",
+    "machine_socket_open",
     "socket_send",
     "socket_ack",
     "socket_close",
