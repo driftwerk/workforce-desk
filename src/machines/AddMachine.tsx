@@ -267,7 +267,7 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
         )}
 
         {flow.at === "setup" && ready && flow.machine && (
-          <SignInOn machine={flow.machine} name={flow.name} native={native} signedIn={flow.signedIn} onSignedIn={(engine) => dispatch({ type: "signedIn", engine })} />
+          <SignInOn machine={flow.machine} name={flow.name} signedIn={flow.signedIn} onSignedIn={(engine) => dispatch({ type: "signedIn", engine })} />
         )}
 
         <footer className="sheet-foot">
