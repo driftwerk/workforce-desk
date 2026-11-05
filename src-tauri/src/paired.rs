@@ -299,17 +299,27 @@ impl Paired {
                 }
                 attempt(now).await?.map_err(unreachable)?
             }
-            // Through the forward, a hub that moved shows as a connection
-            // ssh took and closed: read again over SSH, which rebuilds the
-            // forward (at a new address here) if the gateway moved.
+            // Through the forward: nothing took the connection (ssh had
+            // ended; it never got anywhere), or ssh took it and closed it
+            // before any answer. Read again over SSH, which rebuilds the
+            // forward. The first is sent again wherever the forward is now;
+            // the second only when the machine's gateway moved, so ssh's
+            // channel had nothing to reach.
             Err(e)
                 if reach.machine.is_some()
                     && (e.is_connect() || (e.is_request() && !e.is_timeout())) =>
             {
                 let link = Arc::clone(reach.machine.as_ref().expect("a machine"));
-                let _ = tauri::async_runtime::spawn_blocking(move || link.read()).await;
+                let gateway = link.gateway();
+                let read = Arc::clone(&link);
+                let _ = tauri::async_runtime::spawn_blocking(move || read.read()).await;
                 let now = self.reach_async(id).await?;
-                if now.base == reach.base {
+                let again = if e.is_connect() {
+                    now.base != reach.base
+                } else {
+                    link.gateway() != gateway
+                };
+                if !again {
                     return Err(unreachable(e));
                 }
                 attempt(now).await?.map_err(unreachable)?

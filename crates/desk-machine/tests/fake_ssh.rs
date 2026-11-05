@@ -424,22 +424,31 @@ fn a_moved_gateway_rebuilds_the_forward_on_a_new_port() {
     assert_eq!(forwards, 2);
 }
 
-/// A port here that something else already holds is never taken for the
-/// forward: ssh can't bind it and ends, and Desk starts again elsewhere.
+/// A port here that something else took between Desk choosing it and ssh
+/// binding it is never taken for the forward: ssh can't bind it and ends,
+/// and the tunnel says so rather than handing out that address (whatever
+/// holds it would be sent the token). The next start takes another port.
 #[test]
 fn a_port_another_program_holds_is_never_taken_for_the_forward() {
-    let (box_port, _) = hub(ADMIN);
+    let (box_port, seen) = hub(ADMIN);
     let f = fake(json!([host("devbox", box_port, ADMIN, DEVICE)]));
     let link = link(&f, "devbox");
+    let squatter = TcpListener::bind("127.0.0.1:0").unwrap();
+    squatter.set_nonblocking(true).unwrap();
+    let taken = squatter.local_addr().unwrap().port();
+    link.tunnel().start_next_on(taken);
+    let e = link.read().unwrap_err();
+    assert!(e.contains("Could not request local forwarding"), "{e}");
+    assert!(link.tunnel().up().is_none());
+    assert!(squatter.accept().is_err(), "nothing was sent to it");
     let c = link.read().unwrap().unwrap();
-    let held: u16 = c.gateway_url.rsplit(':').next().unwrap().parse().unwrap();
-    // The fake's listener is up: a second forward on the same port fails,
-    // and the tunnel says why rather than taking it.
-    let mut i = machine("devbox").forward(held, box_port);
-    i.args.insert(0, "-v".into());
-    let out = f.ssh.output(&i).unwrap();
-    assert_eq!(out.status.code(), Some(255));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("Could not request local forwarding"));
+    assert!(!c.gateway_url.ends_with(&format!(":{taken}")));
+    assert_eq!(
+        get(&c.gateway_url, &c.admin_token).as_deref(),
+        Some("HTTP/1.1 200 OK")
+    );
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert!(squatter.accept().is_err(), "nor since");
 }
 
 #[test]

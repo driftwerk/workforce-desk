@@ -29,6 +29,7 @@ use crate::ssh::{self, SshExe};
 pub const READY_WITHIN: Duration = Duration::from_secs(30);
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+#[cfg(unix)]
 /// How long ssh has to end after it is asked to (it ends a `ProxyCommand`
 /// it started on the way out) before it is killed.
 const STOP_WAIT: Duration = Duration::from_secs(2);
@@ -65,6 +66,8 @@ struct Shared {
     changed: Condvar,
     ready_within: Duration,
     backoff: (Duration, Duration),
+    /// The port the next start takes instead of a free one: for the tests.
+    first_port: Mutex<Option<u16>>,
 }
 
 impl Shared {
@@ -97,8 +100,20 @@ impl Tunnel {
                 changed: Condvar::new(),
                 ready_within,
                 backoff: (first_backoff, max_backoff),
+                first_port: Mutex::default(),
             }),
         }
+    }
+
+    /// Has the next start take `port` here rather than a free one, as if
+    /// something took it between Desk choosing it and ssh binding it.
+    #[doc(hidden)]
+    pub fn start_next_on(&self, port: u16) {
+        *self
+            .shared
+            .first_port
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(port);
     }
 
     /// The forward, while it is up.
@@ -284,7 +299,15 @@ fn hold(shared: &Shared, box_port: u16, last_mac: &mut Option<u16>) -> Result<()
     // carried by this always-open connection too.
     let settings = ssh::settings(&shared.ssh, machine)?;
     ssh::no_forwards(machine, &settings)?;
-    let mac_port = free_port(*last_mac).map_err(|e| e.to_string())?;
+    let chosen = shared
+        .first_port
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    let mac_port = match chosen {
+        Some(port) => port,
+        None => free_port(*last_mac).map_err(|e| e.to_string())?,
+    };
     *last_mac = Some(mac_port);
     let mut invocation = machine.forward(mac_port, box_port);
     invocation.args.insert(0, "-v".into());

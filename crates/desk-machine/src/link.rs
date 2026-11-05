@@ -149,6 +149,12 @@ impl Link {
         })
     }
 
+    /// The machine's gateway port, as last read: whether it moved since a
+    /// request failed decides whether that request may be sent again.
+    pub fn gateway(&self) -> Option<u16> {
+        self.kept().as_ref().map(|k| k.box_port)
+    }
+
     /// Forgets the tokens read: the next connection reads them again.
     pub fn forget(&self) {
         *self.kept() = None;
