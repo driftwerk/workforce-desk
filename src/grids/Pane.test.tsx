@@ -619,7 +619,7 @@ describe("a session's questions in a grid pane", () => {
     await act(async () => {});
     const pane = screen.getByRole("region", { name: "task-0" });
     const bar = within(pane).getByRole("status");
-    expect(bar.textContent).toContain("It asked you 1 question · went ahead with its defaults");
+    expect(bar.textContent).toContain("Retire the legacy routes? · went ahead");
     // Nothing open on the other: nothing under its terminal.
     expect(screen.getByRole("region", { name: "task-1" }).querySelector(".line-bar, .line-panel")).toBeNull();
     fireEvent.click(within(bar).getByRole("button", { name: /^Show/ }));

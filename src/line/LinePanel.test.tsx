@@ -20,6 +20,22 @@ const hub = {
 const went = (id: string, text: string, chose: string | null = null) =>
   msg({ id, from: S1, to: YOU, text, asked: "lapsed", chose, at: "2026-11-03T03:37:00Z" });
 
+/** A question asked in parts, gone ahead with its default. */
+const asked = () =>
+  msg({
+    id: "w7",
+    from: S1,
+    to: YOU,
+    asked: "lapsed",
+    at: "2026-11-03T07:19:00Z",
+    text: "Should PR 2 include the stub service?",
+    about: "W7 · PR 2",
+    why: "The design lists it; the brief doesn't.",
+    chose: "include it, as the design says",
+    details: "The design's table lists:\n\n- the stub service\n- its `api_url` in the dev config",
+    question: { headline: "Should PR 2 include the stub service?", details: "The design's table lists:\n\n- the stub service\n- its `api_url` in the dev config" },
+  });
+
 const show = async (more: Partial<Session> = {}) => {
   const session = lined(more);
   useDesk.setState({ hub: hub as never, sessions: { s1: session } });
@@ -73,7 +89,7 @@ describe("under a terminal session", () => {
     expect((panel as HTMLElement).style.height).toBe(`${PANEL_HEIGHT}px`);
     expect(within(panel).getByText("Global assignments too, or only Agency/Self?")).toBeTruthy();
     expect(within(panel).getByText("It chose: keep it to Agency/Self only.")).toBeTruthy();
-    expect(within(panel).getAllByText(/^Went ahead with its default · asked /)).toHaveLength(2);
+    expect(within(panel).getAllByText(/^Went ahead · \S.*\d(\s?[AP]M)?$/)).toHaveLength(2);
     for (const name of ["Discuss in terminal", "Copy all", "Dismiss all", "Hide"]) expect(within(panel).getByRole("button", { name })).toBeTruthy();
     // You talk to it in its terminal: no composer, no answer box.
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -82,6 +98,53 @@ describe("under a terminal session", () => {
     expect(JSON.parse(localStorage.getItem("desk.linePanel")!).shown).toEqual({ s1: "questions" });
     fireEvent.click(within(panel).getByRole("button", { name: "Hide" }));
     expect(screen.getByRole("status").textContent).toContain("It asked you 2 questions");
+  });
+
+  it("heads a card with its work item and one line, says what it chose, and folds its details away", async () => {
+    thread = [asked()];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    const { container } = await show();
+    const card = container.querySelector(".line-question") as HTMLElement;
+    const status = card.querySelector(".line-question-status")!;
+    expect(status.querySelector(".mono")!.textContent).toBe("W7 · PR 2 · ");
+    expect(status.textContent).toMatch(/^W7 · PR 2 · went ahead · \S.*\d(\s?[AP]M)?$/);
+    expect(within(card).getByText("Should PR 2 include the stub service?").className).toBe("line-question-text");
+    expect(within(card).getByText("It chose: include it, as the design says")).toBeTruthy();
+    // The details are there, as markdown, but folded until opened.
+    const details = card.querySelector("details")!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")!.textContent).toBe("Details");
+    expect(within(details).getByText("Why: The design lists it; the brief doesn't.")).toBeTruthy();
+    expect(details.querySelectorAll("li")).toHaveLength(2);
+    expect(details.querySelector("code")!.textContent).toBe("api_url");
+    // Nothing of the details is in the card's own text.
+    expect(card.querySelector(".line-question-text")!.textContent).not.toContain("table");
+    fireEvent.click(within(card).getByRole("button", { name: "Dismiss “Should PR 2 include the stub service?”" }));
+    await act(async () => {});
+    expect(hub.dismissLine).toHaveBeenCalledWith("w7");
+  });
+
+  it("puts all of a question in the prompt and on the clipboard, details too", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    thread = [asked()];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: "Discuss in terminal" }));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await act(async () => {});
+    const [, text] = hub.draftLine.mock.calls[0] as unknown as [string, string];
+    for (const part of [
+      "W7 · PR 2",
+      "“Should PR 2 include the stub service?”",
+      "Why: The design lists it; the brief doesn't.",
+      "You went ahead with: include it, as the design says",
+      "- the stub service",
+      "- its `api_url` in the dev config",
+    ])
+      expect(text).toContain(part);
+    expect(writeText).toHaveBeenCalledWith(text);
   });
 
   it("dismisses a question, and the panel goes once nothing is open", async () => {

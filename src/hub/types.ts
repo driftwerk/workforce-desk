@@ -868,6 +868,12 @@ export type LineWait =
   | "person_driving";
 
 /** One message on a session's line. */
+/** An ask's headline, and its details when it has any. */
+export interface LineQuestion {
+  headline: string;
+  details?: string | null;
+}
+
 export interface LineMessage {
   id: string;
   at: string;
@@ -884,6 +890,16 @@ export interface LineMessage {
   /** An ask's: what the session said it goes ahead with if no answer comes
    *  in time. Absent when it didn't say (and from older hubs). */
   chose?: string | null;
+  /** An ask's short work-item label ("W7 · PR 2"), as its session said it. */
+  about?: string | null;
+  /** An ask's one line on why it asks. */
+  why?: string | null;
+  /** An ask's details, as its session wrote them (markdown). */
+  details?: string | null;
+  /** An ask as Desk shows it: its one-line headline, and the rest. A
+   *  question asked in one block of text (before asks had parts) is split
+   *  by the hub, so nothing of it is lost. Absent from older hubs. */
+  question?: LineQuestion | null;
   deliveredAt: string | null;
   updatedAt: string;
   waiting?: LineWait;
@@ -965,6 +981,9 @@ export interface Need {
   /** What the answers do, when the ask needs it said. */
   why?: string | null;
   options: string[] | null;
+  /** A session's question: what it said it goes ahead with if no answer
+   *  comes in time. */
+  chose?: string | null;
   since: string;
   place: Place;
   answer: Answer;
