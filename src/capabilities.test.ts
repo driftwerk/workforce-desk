@@ -145,7 +145,18 @@ const declared = (): string[] => [...commandsRs.matchAll(/^ {4}"([a-z_]+)",$/gm)
  *  which the page calls before the native side (PR MS) declares them: until
  *  it does, a call of one fails and the page goes on without machines. Once
  *  one is declared, a grid's window must be granted it like any other. */
-const MACHINE_COMMANDS: ReadonlySet<string> = new Set(["machines_list", "machine_fetch", "machine_socket_open"]);
+const MACHINE_COMMANDS: ReadonlySet<string> = new Set([
+  "machines_list",
+  "machine_fetch",
+  "machine_socket_open",
+  "machine_probe",
+  "machine_trust",
+  "machine_public_key",
+  "machine_add",
+  "machine_reconnect",
+  "machine_remove",
+  "machine_share_sign_in",
+]);
 
 describe("each window's capabilities", () => {
   it("grant a grid's window every command its panes can reach", () => {

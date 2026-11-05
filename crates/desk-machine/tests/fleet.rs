@@ -541,7 +541,7 @@ fn a_machine_on_a_newer_desk_is_driven_no_further() {
     assert!(!b.home().join(".local/share/Desk/bin/0.2.0").exists());
     assert!(r.machines.get(&id).is_none());
     assert!(!r.fleet.drivable(&id));
-    assert_eq!(r.said.dropped.lock().unwrap().as_slice(), [id.clone()]);
+    assert_eq!(*r.said.dropped.lock().unwrap(), vec![id.clone()]);
     let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
     assert_eq!(row["state"], "newer");
     assert_eq!(row["version"], "0.3.0");
@@ -602,7 +602,7 @@ fn a_removed_machine_is_reached_no_more() {
     r.fleet.remove(&id).unwrap();
     assert!(r.fleet.list().is_empty());
     assert!(r.machines.get(&id).is_none());
-    assert_eq!(r.said.dropped.lock().unwrap().as_slice(), [id.clone()]);
+    assert_eq!(*r.said.dropped.lock().unwrap(), vec![id.clone()]);
     // Its forward ends though something still holds the link.
     until("the forward gone", || link.tunnel().up().is_none());
     let kept: Value = serde_json::from_str(
