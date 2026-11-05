@@ -17,7 +17,15 @@
 //!   computer it names, closing one it can't reach as ssh does;
 //! - `banner`: printed on its error output first, as a machine's banner is
 //!   (one may claim anything);
-//! - `listen: false`: a forward that never binds, only says things.
+//! - `listen: false`: a forward that never binds, only says things;
+//! - `exec`: `{home, path}`, to run each command for real instead, with
+//!   `sh -c` in that home (as sshd runs it through the account's shell),
+//!   only `HOME` and `PATH` (`path` first) set, and its input passed on;
+//! - `host_key`: the key it shows (`ssh-ed25519 AAAA…`). A connection that
+//!   may learn it (`StrictHostKeyChecking=accept-new`) writes it into the
+//!   `UserKnownHostsFile` it was given and then is refused, as one signing
+//!   in with nothing is; any other is checked against the first
+//!   `userknownhostsfile` its `settings` name, as ssh checks it.
 
 use std::io::Write;
 #[cfg(unix)]
@@ -40,6 +48,14 @@ struct Host {
     commands: Vec<Command>,
     banner: String,
     listen: Option<bool>,
+    exec: Option<Exec>,
+    host_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Exec {
+    home: std::path::PathBuf,
+    path: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -92,6 +108,9 @@ fn main() {
         std::process::exit(0);
     }
     eprint!("{}", host.banner);
+    if let Some(key) = &host.host_key {
+        check_host_key(options, target, key, &host.settings);
+    }
     if let Some(refuse) = &host.refuse {
         fail(&refuse.stderr, refuse.code);
     }
@@ -104,12 +123,66 @@ fn main() {
         forward(&options[i + 1]);
     }
     let line = rest[1..].join(" ");
+    if let Some(exec) = &host.exec {
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&line)
+            .env_clear()
+            .env("HOME", &exec.home)
+            .env("PATH", format!("{}:/usr/bin:/bin", exec.path))
+            .current_dir(&exec.home)
+            .status()
+            .unwrap_or_else(|e| fail(&format!("sh: {e}"), 127));
+        std::process::exit(status.code().unwrap_or(1));
+    }
     let Some(answer) = host.commands.iter().find(|c| line.contains(&c.contains)) else {
         fail(&format!("sh: 1: {line}: not found"), 127);
     };
     print!("{}", answer.stdout);
     eprint!("{}", answer.stderr);
     std::process::exit(answer.code);
+}
+
+/// The value of `-o <name>=<value>`, if given.
+fn option<'a>(options: &'a [String], name: &str) -> Option<&'a str> {
+    options
+        .windows(2)
+        .filter(|w| w[0] == "-o")
+        .find_map(|w| w[1].strip_prefix(name)?.strip_prefix('='))
+}
+
+/// As ssh checks the key `key` that `target` shows.
+fn check_host_key(options: &[String], target: &str, key: &str, settings: &str) {
+    let line = format!("{target} {key}");
+    if option(options, "StrictHostKeyChecking") == Some("accept-new") {
+        let file = option(options, "UserKnownHostsFile")
+            .unwrap_or_else(|| fail("fake ssh: no file", 2));
+        std::fs::write(file, format!("{line}\n")).expect("the known hosts file");
+        fail(&format!("dev@{target}: Permission denied (publickey)."), 255);
+    }
+    let known = settings
+        .lines()
+        .find_map(|l| l.strip_prefix("userknownhostsfile "))
+        .and_then(|v| v.split_whitespace().next())
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .unwrap_or_default();
+    let words = |l: &str| l.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+    if known.lines().any(|l| words(l) == line) {
+        return;
+    }
+    if known
+        .lines()
+        .any(|l| l.split_whitespace().next() == Some(target))
+    {
+        fail(
+            &format!("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key for {target} has changed and you have requested strict checking.\nHost key verification failed."),
+            255,
+        );
+    }
+    fail(
+        &format!("No ED25519 host key is known for {target} and you have requested strict checking.\nHost key verification failed."),
+        255,
+    );
 }
 
 fn fail(said: &str, code: i32) -> ! {
