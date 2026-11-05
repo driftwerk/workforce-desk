@@ -234,7 +234,7 @@ mod tests {
             serde_json::json!({"ok": true, "glibc": "2.39", "arch": "x86_64", "loopback": true, "root_on_ext4": true})
         );
         assert!(Check::of(None, "aarch64", true, true).ok);
-        assert!(!Check::of(Some("2.31".into()), "x86_64", true, true).ok);
+        assert!(!Check::of(Some("2.35".into()), "x86_64", true, true).ok);
         assert!(!Check::of(Some("2.39".into()), "riscv64", true, true).ok);
         assert!(!Check::of(Some("2.39".into()), "x86_64", false, true).ok);
         assert!(!Check::of(Some("2.39".into()), "x86_64", true, false).ok);

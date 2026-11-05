@@ -10,6 +10,7 @@ pub mod host;
 pub mod image_size;
 pub mod install;
 pub mod machine;
+pub mod machine_backend;
 pub mod net;
 #[cfg(unix)]
 pub mod process;
@@ -126,6 +127,10 @@ impl Paths {
     /// The backend's installed versions, inside WSL and on a machine.
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
+    }
+    /// The Linux backend kept for machines, a folder per version.
+    pub fn machine_backends(&self) -> PathBuf {
+        self.root.join("machines").join("backend")
     }
     /// The backend the app uses, where setup chose one (WSL on Windows).
     pub fn backend_host(&self) -> PathBuf {

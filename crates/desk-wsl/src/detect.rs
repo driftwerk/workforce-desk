@@ -1,5 +1,5 @@
 //! Finding a WSL distro Desk's backend can run in: WSL 2, x86_64 or arm64,
-//! glibc 2.35 or newer, and a normal default user.
+//! glibc 2.36 or newer, and a normal default user.
 
 use desk_core::backend::glibc_supported;
 use desk_core::host::{DEFAULT_AUTOMOUNT, Host, Wsl};
@@ -30,7 +30,7 @@ impl std::fmt::Display for WslProblem {
             WslProblem::Arch { found } => write!(f, "Desk doesn't run on {found} Linux"),
             WslProblem::OldLinux { glibc } => write!(
                 f,
-                "Desk needs Ubuntu 22.04 or newer, or Debian 12 (this one has glibc {glibc})"
+                "Desk needs a Linux with glibc 2.36 or newer, such as Debian 12, Ubuntu 24.04, Fedora 37 or RHEL 10 (this one has glibc {glibc})"
             ),
             WslProblem::RootUser { distro } => write!(
                 f,
@@ -360,9 +360,9 @@ mod tests {
             })
         );
         assert_eq!(
-            check("x86_64", "sarah", "ldd (Ubuntu GLIBC 2.31-0ubuntu9) 2.31"),
+            check("x86_64", "sarah", "ldd (Ubuntu GLIBC 2.35-0ubuntu3.8) 2.35"),
             Some(WslProblem::OldLinux {
-                glibc: "2.31".into()
+                glibc: "2.35".into()
             })
         );
         assert_eq!(
@@ -421,10 +421,10 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(WslProblem::OldLinux {
-                glibc: "2.31".into()
+                glibc: "2.35".into()
             })
             .unwrap(),
-            serde_json::json!({"kind": "old_linux", "glibc": "2.31"})
+            serde_json::json!({"kind": "old_linux", "glibc": "2.35"})
         );
     }
 }

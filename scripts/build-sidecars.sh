@@ -29,8 +29,12 @@
 #                   the same for vellev and vellev.ref (VELLEV_REPO defaults
 #                   to https://github.com/driftwerk/vellev.git)
 #   ORT_X86_64      ONNX Runtime built for Intel Macs by
-#                   scripts/onnxruntime-x86_64.sh (its DIR), which vellev
-#                   links for x86_64-apple-darwin; built there when unset
+#                   scripts/onnxruntime.sh (its DIR), which vellev links for
+#                   x86_64-apple-darwin; built there when unset
+#   ORT_FROM_SOURCE on Linux, 1 links ONNX Runtime built here by
+#                   scripts/onnxruntime.sh (in ORT_DIR, default
+#                   <cache>/onnxruntime-<arch>) instead of ort's own, which
+#                   needs glibc 2.38: the backend for machines and WSL
 #   TARGETS         targets (default "aarch64-apple-darwin x86_64-apple-darwin" on
 #                   macOS, this machine's elsewhere); one target skips the
 #                   universal binary
@@ -100,14 +104,14 @@ hub_target=${HUB_TARGET_DIR:-$hub/target}
 vellev_target=${VELLEV_TARGET_DIR:-$vellev/target}
 
 # vellev's ort links ONNX Runtime 1.28's static library: ort's own build
-# for Apple Silicon, and ours for Intel (it has none). A vellev.ref whose
-# ort wants another version needs onnxruntime-x86_64.sh's pin moved too.
-# On Linux ort's own builds serve both architectures.
-case " $targets " in
-  *" x86_64-apple-darwin "*)
+# for Apple Silicon, and ours for Intel (it has none) and, with
+# ORT_FROM_SOURCE, for Linux. A vellev.ref whose ort wants another version
+# needs onnxruntime.sh's pin moved too.
+case " $targets ${ORT_FROM_SOURCE:+from-source} " in
+  *" x86_64-apple-darwin "* | *" from-source "*)
     ort_sys=$(awk '/^name = "ort-sys"$/ { getline; print $3 }' "$vellev/Cargo.lock" | tr -d '"')
     [ "$ort_sys" = "2.0.0-rc.13" ] ||
-      die "vellev.ref locks ort-sys $ort_sys; onnxruntime-x86_64.sh builds the ONNX Runtime 2.0.0-rc.13 links (1.28.0): move its pin"
+      die "vellev.ref locks ort-sys $ort_sys; onnxruntime.sh builds the ONNX Runtime 2.0.0-rc.13 links (1.28.0): move its pin"
     ;;
 esac
 
@@ -133,8 +137,15 @@ for t in $targets; do
     rustup target add "$t" >/dev/null
     if [ "$t" = x86_64-apple-darwin ]; then
       ort=${ORT_X86_64:-$cache/onnxruntime-x86_64}
-      "$root/scripts/onnxruntime-x86_64.sh" "$ort"
+      "$root/scripts/onnxruntime.sh" "$ort"
       export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
+    elif [ "${ORT_FROM_SOURCE:-}" = 1 ]; then
+      ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
+      "$root/scripts/onnxruntime.sh" "$ort"
+      export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
+      # ONNX Runtime 1.28's model packages are a library of their own, which
+      # this ort doesn't link.
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=$ort/Release/model_package/libmodel_package.a"
     fi
     CARGO_TARGET_DIR="$vellev_target" cargo build --release --locked -p vellev --target "$t"
   )

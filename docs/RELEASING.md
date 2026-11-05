@@ -43,22 +43,35 @@ hub keeps memories in SQLite; then it moves them into the store, once.
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
      Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
      the job builds ONNX Runtime 1.28 from source
-     (`scripts/onnxruntime-x86_64.sh`, cached by its pin)
+     (`scripts/onnxruntime.sh`, cached by its pin)
    - builds the app with `tauri build --target universal-apple-darwin`
    - signs inside out with the Developer ID, using the hardened runtime and
      the entitlements in `src-tauri/entitlements/`
    - notarizes and staples the app, then builds, signs, notarizes and staples
      the disk image
    - writes the macOS updater artifact: `Desk.app.tar.gz` and its `.sig`
-4. Beside it, the `linux-x86_64` job builds on Ubuntu 22.04 (glibc 2.35, the
-   oldest Desk supports):
+4. Beside it, the `linux-x86_64` job builds the Linux desktop app on Ubuntu
+   22.04 (glibc 2.35):
    - the three sidecars under their Linux names (`desk-helper`,
      `desk-agents`, `desk-memory`), with ort's own ONNX Runtime;
    - `Desk_<version>_amd64.AppImage` with its updater `.sig`, and
-     `Desk_<version>_amd64.deb`;
-   - the `backend-linux-x86_64` workflow artifact (the three programs and
-     the Claude Code plugin), which Desk on Windows installs inside WSL.
-5. The `windows` job builds on Windows, once the Linux job is done:
+     `Desk_<version>_amd64.deb`.
+5. The `backend` job (`backend-build.yml`) builds the Linux backend alone,
+   for x86_64 (on `ubuntu-24.04`) and aarch64 (on `ubuntu-24.04-arm`), each
+   inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
+   (`scripts/openssl-static.sh`) and ONNX Runtime built there
+   (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
+   programs need only glibc 2.28. The Postgres Desk Helper embeds
+   (theseus-rs' builds) needs glibc 2.36, so the backend runs on Debian 12,
+   Ubuntu 24.04, Fedora 37, RHEL 10 and newer — not yet on Amazon Linux
+   2023, RHEL/Rocky/Alma 9 or Ubuntu 22.04 (glibc 2.34–2.35). It then runs
+   `scripts/backend-smoke.sh` on Debian 12, Ubuntu 24.04 and Fedora for each
+   architecture. A pull request that changes how it is built runs the same
+   workflow, publishing nothing.
+   - the `backend-linux-x86_64` and `backend-linux-aarch64` workflow
+     artifacts (the three programs and the Claude Code plugin). Desk on
+     Windows installs the x86_64 one inside WSL.
+6. The `windows` job builds on Windows, once the backend job is done:
    - `Desk Helper.exe` (`crates/desk-wsl`), which keeps the backend running
      inside the person's WSL distro from sign-in;
    - the per-user NSIS installer with its updater `.sig`, and an `.msi` for
@@ -68,9 +81,21 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    Windows builds are unsigned unless the `WINDOWS_SIGNING` variable is
    `true`: SmartScreen then warns on first run. With it on, Azure Trusted
    Signing signs the app, `Desk Helper.exe` and the installers.
-6. The `publish` job writes one `latest.json` (`darwin-aarch64`,
-   `darwin-x86_64`, `linux-x86_64` and `windows-x86_64`) and publishes
+7. The `publish` job writes one `latest.json` (`darwin-aarch64`,
+   `darwin-x86_64`, `linux-x86_64` and `windows-x86_64`), packs each backend
+   artifact as `desk-backend-linux-<arch>-<version>.tar.gz` with its `.sig`,
+   signed with the updater key (`scripts/backend-tarball.sh`), and publishes
    everything to a GitHub release.
+
+The backend tarballs are what Desk installs on machines (Linux boxes it
+drives over SSH). Desk downloads the one for its own version and the
+machine's architecture beside `latest.json`, checks its signature against
+`plugins.updater.pubkey` (and that it was signed under that file name), and
+keeps it per version in `~/Library/Application Support/Desk/machines/backend`.
+Nothing unsigned leaves the Mac, apart from a development build's
+`DESK_MACHINE_BACKEND=<folder>`: an unpacked `backend-linux-<arch>` artifact,
+installed as `<version>+dev.<hash of the folder>` and said aloud. Release
+builds ignore that variable.
 
 Installed copies check `latest.json` on launch and every four hours. They
 download the update in the background and offer **Restart to update**. A
@@ -152,7 +177,7 @@ git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
 ```
 
 When it builds for Intel Macs, `build-sidecars.sh` refuses a vellev whose
-locked `ort-sys` is not the one `scripts/onnxruntime-x86_64.sh` builds ONNX
+locked `ort-sys` is not the one `scripts/onnxruntime.sh` builds ONNX
 Runtime for; move that script's pin (version and commit) to the ONNX Runtime
 the new `ort-sys` links.
 
