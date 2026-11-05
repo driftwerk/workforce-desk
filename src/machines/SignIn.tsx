@@ -1,61 +1,49 @@
 import { useEffect, useState } from "react";
 import { signInStep } from "../engines/accounts";
 import type { DeskHub } from "../hub/client";
-import type { AccountSignIn, Engine } from "../hub/types";
+import type { AccountSignIn } from "../hub/types";
 import { openUrl } from "../platform";
-import { useHost } from "../shell/host";
 import { plainError } from "../ui/plainError";
 import { useHubOf, type MachineId } from "./engines";
-import type { MachineNative } from "./native";
-import { thisComputerLower } from "./words";
+import { openTerminalOn } from "./watch";
+
+/** Codex's sign-in for a computer with no browser of its own. */
+export const CODEX_LOGIN = "codex login --device-auth";
 
 /** How often a sign-in in the browser is read again, while it waits. */
 export const SIGN_IN_POLL_MS = 2000;
 
-/** "Sign in on devbox": Claude with this computer's account or another, and
- *  ChatGPT for Codex if the person wants it. Each sign-in is kept on the
- *  machine; one in the browser is the machine's own engine's sign-in, its
- *  page opened here and its code pasted back. */
+/** "Sign in on devbox": Claude through the machine's own engine (its sign-in
+ *  page opened here, its code pasted back), and ChatGPT for Codex if the
+ *  person wants it, in a terminal there. Each sign-in is kept on the
+ *  machine. Nothing is offered that only refuses: using this computer's
+ *  Claude account there waits on `machine_share_sign_in`, and the hub's
+ *  accounts can't sign Codex in from here. */
 export function SignInOn({
   machine,
   name,
-  native,
   signedIn,
   onSignedIn,
 }: {
   machine: MachineId;
   name: string;
-  native: MachineNative;
   signedIn: { claude: boolean; codex: boolean };
   onSignedIn: (engine: "claude" | "codex") => void;
 }) {
   const hub = useHubOf(machine);
-  const platform = useHost((h) => h.platform);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [signing, setSigning] = useState<{ engine: "claude" | "codex"; signIn: AccountSignIn } | null>(null);
+  const [signing, setSigning] = useState<AccountSignIn | null>(null);
 
-  const share = async () => {
-    setBusy("share");
-    setProblem(null);
-    try {
-      await native.shareSignIn(machine, "claude");
-      onSignedIn("claude");
-    } catch (e) {
-      setProblem(plainError(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const begin = async (engine: "claude" | "codex") => {
+  const begin = async () => {
     if (!hub) return;
-    setBusy(engine);
+    setBusy("claude");
     setProblem(null);
     try {
-      const added = await hub.addAccount({ engine: engine as Engine, name: engine === "claude" ? "Claude" : "ChatGPT", makeDefault: true });
-      if (added.kind === "account") onSignedIn(engine);
+      const added = await hub.addAccount({ engine: "claude", name: "Claude", makeDefault: true });
+      if (added.kind === "account") onSignedIn("claude");
       else {
-        setSigning({ engine, signIn: added.signIn });
+        setSigning(added.signIn);
         const url = "url" in added.signIn ? added.signIn.url : null;
         if (url) openUrl(url);
       }
@@ -76,10 +64,7 @@ export function SignInOn({
           <span className="small">Signed in</span>
         ) : (
           <>
-            <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => void share()}>
-              Use {thisComputerLower(platform)}’s account
-            </button>
-            <button type="button" className="btn btn-sm" disabled={!!busy || !hub} onClick={() => void begin("claude")}>
+            <button type="button" className="btn btn-sm" disabled={!!busy || !hub} onClick={() => void begin()}>
               Sign in to another…
             </button>
           </>
@@ -90,20 +75,23 @@ export function SignInOn({
         {signedIn.codex ? (
           <span className="small">Signed in</span>
         ) : (
-          <>
-            <button type="button" className="btn btn-sm" disabled={!!busy || !hub} onClick={() => void begin("codex")}>
-              Sign in…
-            </button>
-            <span className="small muted">optional, for Codex</span>
-          </>
+          <span className="machine-signin-terminal">
+            <span className="small muted">Optional, for Codex. Sign in in a terminal on {name}:</span>
+            <span className="machine-line">
+              <code className="mono small">{CODEX_LOGIN}</code>
+              <button type="button" className="btn btn-sm" onClick={() => openTerminalOn(machine)}>
+                Open a terminal
+              </button>
+            </span>
+          </span>
         )}
       </div>
       {signing && hub && (
         <SigningIn
           hub={hub}
-          signIn={signing.signIn}
+          signIn={signing}
           onDone={(ok) => {
-            if (ok) onSignedIn(signing.engine);
+            if (ok) onSignedIn("claude");
             setSigning(null);
           }}
         />

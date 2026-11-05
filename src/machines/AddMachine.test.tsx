@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { DeskHub } from "../hub/client";
+import { useGrids } from "../grids/store";
+import { useDesk } from "../hub/store";
 import { useHost, DEFAULT_HOST } from "../shell/host";
+import { useUi } from "../shell/ui";
 import { AddMachine } from "./AddMachine";
 import { fakeNative, noEngines, probeOf, withEngine } from "./testing";
 
@@ -60,24 +63,34 @@ it("trusts a new machine by its fingerprint, sets it up step by step, and signs 
   expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(false);
 
   const signIn = screen.getByRole("group", { name: "Sign in on devbox" });
-  expect(signIn.textContent).toContain("optional, for Codex");
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this Mac’s account" })));
-  expect(fake.shareSignIn).toHaveBeenCalledWith("devbox", "claude");
-  expect(list.textContent).toContain("Signed in to Claude");
-
+  expect(signIn.textContent).toContain("Optional, for Codex");
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(onClose).toHaveBeenCalled();
 });
 
-it("names this computer by what it is off a Mac", async () => {
-  useHost.setState({ ...DEFAULT_HOST, platform: "linux" });
-  const { native, emit } = fakeNative();
-  withEngine("devbox", {} as DeskHub);
+it("offers no sign-in that only refuses: Claude through the machine's engine, ChatGPT in a terminal there", async () => {
+  const { native, fake, emit } = fakeNative();
+  withEngine("devbox", { addAccount: vi.fn() } as unknown as DeskHub);
+  useUi.getState().openSettings("machines");
   render(<AddMachine native={native} onClose={() => {}} />);
   await typeAndGo("devbox");
   act(() => emit({ machine: "devbox", step: "install", state: "done" }));
   act(() => emit({ machine: "devbox", step: "engines", state: "done" }));
-  expect(screen.getByRole("button", { name: "Use this computer’s account" })).toBeTruthy();
+
+  const signIn = screen.getByRole("group", { name: "Sign in on devbox" });
+  // This computer's account isn't offered until the native side can share it.
+  expect(signIn.textContent).not.toMatch(/account/);
+  expect(screen.queryByRole("button", { name: /Use this/ })).toBeNull();
+  expect(screen.getByRole("button", { name: "Sign in to another…" })).toBeTruthy();
+  // ChatGPT: the device sign-in, in a terminal on the machine.
+  expect(screen.queryByRole("button", { name: "Sign in…" })).toBeNull();
+  expect(signIn.textContent).toContain("Sign in in a terminal on devbox:");
+  expect(screen.getByText("codex login --device-auth")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open a terminal" }));
+  const panes = Object.values(useGrids.getState().grids).flatMap((g) => g.panes);
+  expect(panes.some((p) => p.content?.kind === "terminal" && p.content.machine === "devbox")).toBe(true);
+  expect(useDesk.getState().view).toBe("grids");
+  expect(fake.shareSignIn).not.toHaveBeenCalled();
 });
 
 it("signs another Claude account in on the machine, through its own engine", async () => {
