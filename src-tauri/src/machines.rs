@@ -31,7 +31,8 @@ struct ForwardsInner<T> {
     next: u64,
     /// The number each sign-in's start took, and its machine.
     wanted: HashMap<String, (u64, String)>,
-    open: HashMap<String, T>,
+    /// Each sign-in's listener, and the port it listens on.
+    open: HashMap<String, (u16, T)>,
 }
 
 impl<T> Default for Forwards<T> {
@@ -54,7 +55,7 @@ impl<T> Forwards<T> {
     /// Sign-in `sign_in` on `machine` is to have a listener: its number.
     /// Any other on that machine ends.
     pub fn begin(&self, machine: &str, sign_in: &str) -> u64 {
-        let ended: Vec<T>;
+        let ended: Vec<(u16, T)>;
         let n = {
             let mut st = self.lock();
             let others: Vec<String> = st
@@ -82,14 +83,27 @@ impl<T> Forwards<T> {
 
     /// Keeps `forward` for start `n` of `sign_in`, if that start is still
     /// wanted; else gives it back, to be ended.
-    pub fn settle(&self, sign_in: &str, n: u64, forward: T) -> Result<(), T> {
+    pub fn settle(&self, sign_in: &str, n: u64, port: u16, forward: T) -> Result<(), T> {
         let mut st = self.lock();
         if st.wanted.get(sign_in).is_some_and(|(w, _)| *w == n) {
-            st.open.insert(sign_in.to_string(), forward);
+            st.open.insert(sign_in.to_string(), (port, forward));
             Ok(())
         } else {
             Err(forward)
         }
+    }
+
+    /// Whether start `n` of `sign_in` is still the one wanted.
+    pub fn wanted(&self, sign_in: &str, n: u64) -> bool {
+        self.lock()
+            .wanted
+            .get(sign_in)
+            .is_some_and(|(w, _)| *w == n)
+    }
+
+    /// The port `sign_in`'s listener is up on, if one is.
+    pub fn open_port(&self, sign_in: &str) -> Option<u16> {
+        self.lock().open.get(sign_in).map(|(p, _)| *p)
     }
 
     /// Ends `sign_in`'s listener, or its start under way.
@@ -117,7 +131,7 @@ impl<T> Forwards<T> {
 
     /// Ends every listener on `machine`.
     pub fn stop_machine(&self, machine: &str) {
-        let ended: Vec<T> = {
+        let ended: Vec<(u16, T)> = {
             let mut st = self.lock();
             let ids: Vec<String> = st
                 .wanted
@@ -140,7 +154,7 @@ impl<T> Forwards<T> {
         let ended: Vec<T> = {
             let mut st = self.lock();
             st.wanted.clear();
-            st.open.drain().map(|(_, f)| f).collect()
+            st.open.drain().map(|(_, (_, f))| f).collect()
         };
         drop(ended);
     }
@@ -287,7 +301,7 @@ async fn direct_page(
     let port = callback::direct_port(url)
         .filter(|p| said["port"].as_u64() == Some(u64::from(*p)))
         .ok_or_else(refused)?;
-    let page = callback::sign_in_page(url, callback::CLAUDE_HOSTS).ok_or_else(refused)?;
+    let page = callback::sign_in_page(url, callback::CLAUDE_PAGES).ok_or_else(refused)?;
     Ok((page, port))
 }
 
@@ -304,12 +318,94 @@ fn open_page(app: &tauri::AppHandle, page: &url::Url) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// What starting a sign-in's listener did.
+#[derive(Debug, PartialEq, Eq)]
+enum Started {
+    /// A new listener, start `n`: its time runs from now.
+    New(u64),
+    /// Its listener was already up on that port: only the page opens again.
+    Reused,
+}
+
+const ENDED: &str = "That sign-in has ended.";
+
+/// Starts `sign_in`'s listener: numbered before the page is read from the
+/// machine (`fetch`), so a stop while it is read is never lost; reused when
+/// it is already up on the page's port ("Open the sign-in page again");
+/// `listen` binds and carries. The page to open.
+async fn start_forward<T, Fe, Fl>(
+    forwards: &Forwards<T>,
+    machine: &str,
+    sign_in: &str,
+    fetch: impl FnOnce() -> Fe,
+    listen: impl FnOnce(u16) -> Fl,
+) -> Result<(url::Url, Started), String>
+where
+    Fe: std::future::Future<Output = Result<(url::Url, u16), String>>,
+    Fl: std::future::Future<Output = Result<T, String>>,
+{
+    if let Some(up) = forwards.open_port(sign_in) {
+        let (page, port) = fetch().await?;
+        if port == up && forwards.open_port(sign_in) == Some(up) {
+            return Ok((page, Started::Reused));
+        }
+        // The page now comes back elsewhere: a new listener.
+        return start_new(
+            forwards,
+            machine,
+            sign_in,
+            || async move { Ok((page, port)) },
+            listen,
+        )
+        .await;
+    }
+    start_new(forwards, machine, sign_in, fetch, listen).await
+}
+
+async fn start_new<T, Fe, Fl>(
+    forwards: &Forwards<T>,
+    machine: &str,
+    sign_in: &str,
+    fetch: impl FnOnce() -> Fe,
+    listen: impl FnOnce(u16) -> Fl,
+) -> Result<(url::Url, Started), String>
+where
+    Fe: std::future::Future<Output = Result<(url::Url, u16), String>>,
+    Fl: std::future::Future<Output = Result<T, String>>,
+{
+    let n = forwards.begin(machine, sign_in);
+    // Asked only once numbered: a stop from now on is seen.
+    let (page, port) = match fetch().await {
+        Ok(p) => p,
+        Err(e) => {
+            forwards.expire(sign_in, n);
+            return Err(e);
+        }
+    };
+    if !forwards.wanted(sign_in, n) {
+        return Err(ENDED.into());
+    }
+    let forward = match listen(port).await {
+        Ok(f) => f,
+        Err(e) => {
+            forwards.expire(sign_in, n);
+            return Err(e);
+        }
+    };
+    if let Err(late) = forwards.settle(sign_in, n, port, forward) {
+        drop(late);
+        return Err(ENDED.into());
+    }
+    Ok((page, Started::New(n)))
+}
+
 /// For machine `machine`'s Claude sign-in `sign_in`: listens on the one
 /// port its page comes back to, on this computer's loopback alone, and
 /// carries each connection to that port on the machine's, for the length
 /// of the sign-in (ended by `machine_sign_in_forward_stop`, another sign-in
 /// there, Desk quitting, or after `CALLBACK_FOR_SECS`); then opens the page
-/// in the browser. The page names neither the port nor the page.
+/// in the browser. Asked again while it listens, it opens the page again
+/// on the same listener. The page names neither the port nor the page.
 #[tauri::command]
 pub async fn machine_sign_in_forward(
     app: tauri::AppHandle,
@@ -317,32 +413,30 @@ pub async fn machine_sign_in_forward(
     machine: String,
     sign_in: String,
 ) -> CommandResult<()> {
-    let (page, port) = direct_page(&io, &machine, &sign_in).await?;
-    let n = io.callbacks.begin(&machine, &sign_in);
     let link = io.link(&machine)?;
-    let opened = tauri::async_runtime::spawn_blocking(move || {
-        CallbackForward::open(link.ssh(), link.machine(), port)
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    let forward = match opened {
-        Ok(f) => f,
-        Err(e) => {
-            io.callbacks.expire(&sign_in, n);
-            return Err(e);
-        }
-    };
-    if let Err(late) = io.callbacks.settle(&sign_in, n, forward) {
-        drop(late);
-        return Err("That sign-in has ended.".into());
+    let (page, started) = start_forward(
+        &io.callbacks,
+        &machine,
+        &sign_in,
+        || direct_page(&io, &machine, &sign_in),
+        |port| async move {
+            tauri::async_runtime::spawn_blocking(move || {
+                CallbackForward::open(link.ssh(), link.machine(), port)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        },
+    )
+    .await?;
+    if let Started::New(n) = started {
+        let callbacks = Arc::clone(&io.callbacks);
+        let ending = sign_in.clone();
+        tauri::async_runtime::spawn(async move {
+            let secs = u64::from(desk_core::machine::CALLBACK_FOR_SECS);
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+            callbacks.expire(&ending, n);
+        });
     }
-    let callbacks = Arc::clone(&io.callbacks);
-    let ending = sign_in.clone();
-    tauri::async_runtime::spawn(async move {
-        let secs = u64::from(desk_core::machine::CALLBACK_FOR_SECS);
-        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-        callbacks.expire(&ending, n);
-    });
     open_page(&app, &page)?;
     Ok(())
 }
@@ -370,8 +464,8 @@ pub fn machine_open_sign_in_page(
     url: String,
 ) -> CommandResult<()> {
     let hosts = match engine.as_str() {
-        "claude" => callback::CLAUDE_HOSTS,
-        "codex" => callback::CODEX_HOSTS,
+        "claude" => callback::CLAUDE_PAGES,
+        "codex" => callback::CODEX_PAGES,
         _ => return Err("Desk doesn't sign that in.".into()),
     };
     let page = callback::sign_in_page(&url, hosts)
@@ -410,6 +504,74 @@ mod tests {
         }
     }
 
+    fn page() -> url::Url {
+        url::Url::parse("https://claude.com/cai/oauth/authorize?code=true").unwrap()
+    }
+
+    #[test]
+    fn a_stop_while_the_page_is_read_from_the_machine_is_never_lost() {
+        let ended = Arc::new(Mutex::new(Vec::new()));
+        let f: Forwards<Probe> = Forwards::default();
+        let listened = std::cell::Cell::new(false);
+        let got = tauri::async_runtime::block_on(start_forward(
+            &f,
+            "devbox",
+            "s1",
+            || {
+                f.stop("s1"); // Cancel, while the machine is asked.
+                async { Ok((page(), 46009)) }
+            },
+            |_| {
+                listened.set(true);
+                let e = Arc::clone(&ended);
+                async move { Ok(Probe(e, "s1")) }
+            },
+        ));
+        assert_eq!(got.err().as_deref(), Some(ENDED));
+        assert!(!listened.get(), "nothing bound for a stopped sign-in");
+        assert_eq!(f.open_port("s1"), None);
+        // A read that fails leaves nothing wanted.
+        let got = tauri::async_runtime::block_on(start_forward(
+            &f,
+            "devbox",
+            "s2",
+            || async { Err::<(url::Url, u16), String>("gone".into()) },
+            |_| async { Ok(Probe(Arc::clone(&ended), "s2")) },
+        ));
+        assert!(got.is_err());
+        assert!(!f.wanted("s2", 1) && !f.wanted("s2", 2) && !f.wanted("s2", 3));
+    }
+
+    #[test]
+    fn opening_the_page_again_reuses_the_listener_already_up() {
+        let ended = Arc::new(Mutex::new(Vec::new()));
+        let f: Forwards<Probe> = Forwards::default();
+        let binds = std::cell::Cell::new(0);
+        let start = |port: u16| {
+            tauri::async_runtime::block_on(start_forward(
+                &f,
+                "devbox",
+                "s1",
+                || async move { Ok((page(), port)) },
+                |_| {
+                    binds.set(binds.get() + 1);
+                    let e = Arc::clone(&ended);
+                    async move { Ok(Probe(e, "s1")) }
+                },
+            ))
+            .unwrap()
+            .1
+        };
+        assert!(matches!(start(46009), Started::New(_)));
+        assert_eq!(start(46009), Started::Reused);
+        assert_eq!(binds.get(), 1, "never bound again");
+        assert!(ended.lock().unwrap().is_empty());
+        // A page that now comes back elsewhere gets a listener of its own.
+        assert!(matches!(start(46010), Started::New(_)));
+        assert_eq!(binds.get(), 2);
+        assert_eq!(f.open_port("s1"), Some(46010));
+    }
+
     #[test]
     fn a_listener_that_opens_after_its_sign_in_was_stopped_is_ended_at_once() {
         let ended = Arc::new(Mutex::new(Vec::new()));
@@ -417,7 +579,7 @@ mod tests {
         let n = f.begin("devbox", "s1");
         f.stop("s1"); // Cancel, while it opens.
         let late = f
-            .settle("s1", n, Probe(Arc::clone(&ended), "s1"))
+            .settle("s1", n, 1, Probe(Arc::clone(&ended), "s1"))
             .err()
             .unwrap();
         drop(late);
@@ -426,17 +588,26 @@ mod tests {
         // A newer sign-in on that machine ends the older one's, and the
         // older one's late start is never kept.
         let a = f.begin("devbox", "s2");
-        assert!(f.settle("s2", a, Probe(Arc::clone(&ended), "s2")).is_ok());
+        assert!(
+            f.settle("s2", a, 1, Probe(Arc::clone(&ended), "s2"))
+                .is_ok()
+        );
         let b = f.begin("devbox", "s3");
         assert_eq!(*ended.lock().unwrap(), ["s1", "s2"]);
         assert!(
-            f.settle("s2", a, Probe(Arc::clone(&ended), "s2-late"))
+            f.settle("s2", a, 1, Probe(Arc::clone(&ended), "s2-late"))
                 .is_err()
         );
-        assert!(f.settle("s3", b, Probe(Arc::clone(&ended), "s3")).is_ok());
+        assert!(
+            f.settle("s3", b, 1, Probe(Arc::clone(&ended), "s3"))
+                .is_ok()
+        );
         // Another machine's is its own; a timer ends only its own start.
         let c = f.begin("gpu", "s4");
-        assert!(f.settle("s4", c, Probe(Arc::clone(&ended), "s4")).is_ok());
+        assert!(
+            f.settle("s4", c, 1, Probe(Arc::clone(&ended), "s4"))
+                .is_ok()
+        );
         f.expire("s3", a);
         assert!(!ended.lock().unwrap().contains(&"s3"));
         f.expire("s3", b);

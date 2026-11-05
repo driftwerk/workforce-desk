@@ -36,18 +36,57 @@ use crate::ssh::SshExe;
 
 /// The lowest port a page may come back to.
 const LOWEST_PORT: u16 = 1024;
+/// The most connections carried at once for one sign-in: a browser makes
+/// one or two. More are closed rather than given an `ssh` each.
+pub const MAX_CARRIED: usize = 8;
 /// How often the listener looks for a new connection, or for its end.
 const ACCEPT_EVERY: Duration = Duration::from_millis(50);
 
-/// Claude's sign-in hosts.
-pub const CLAUDE_HOSTS: &[&str] = &["claude.ai", "anthropic.com", "claude.com"];
-/// The hosts of Codex's device page: OpenAI's sign-in.
-pub const CODEX_HOSTS: &[&str] = &["auth.openai.com", "chatgpt.com"];
+/// A sign-in page Desk opens: on exactly this host, at exactly one of these
+/// paths, with a query only when `query` says so.
+pub struct SignInPage {
+    pub host: &'static str,
+    pub paths: &'static [&'static str],
+    pub query: bool,
+}
 
-/// `said` as a web page on one of `hosts` (or a subdomain of one), read as a
-/// browser reads it (so a `\`, an `@` or an escape can't move its host):
-/// https, no user or password, the default port. None for anything else.
-pub fn sign_in_page(said: &str, hosts: &[&str]) -> Option<url::Url> {
+/// The paths Claude Code's sign-in page is at (`claude setup-token` 2.1.318
+/// shows `https://claude.com/cai/oauth/authorize?…`; earlier ones
+/// `https://claude.ai/oauth/authorize?…`).
+const CLAUDE_PATHS: &[&str] = &["/oauth/authorize", "/cai/oauth/authorize"];
+
+/// Claude's sign-in pages: nothing else on its domains (a page someone
+/// published there) is ever opened for a machine.
+pub const CLAUDE_PAGES: &[SignInPage] = &[
+    SignInPage {
+        host: "claude.ai",
+        paths: CLAUDE_PATHS,
+        query: true,
+    },
+    SignInPage {
+        host: "claude.com",
+        paths: CLAUDE_PATHS,
+        query: true,
+    },
+    SignInPage {
+        host: "platform.claude.com",
+        paths: CLAUDE_PATHS,
+        query: true,
+    },
+];
+
+/// Codex's device page: exactly `https://auth.openai.com/codex/device`.
+pub const CODEX_PAGES: &[SignInPage] = &[SignInPage {
+    host: "auth.openai.com",
+    paths: &["/codex/device"],
+    query: false,
+}];
+
+/// `said` as one of `pages`, read as a browser reads it (so a `\`, an `@`,
+/// an escape or a `..` can't move its host or path): https, no user,
+/// password, port or fragment, on exactly its host and path. None for
+/// anything else.
+pub fn sign_in_page(said: &str, pages: &[SignInPage]) -> Option<url::Url> {
     if said.len() > 4096 || said.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
     }
@@ -56,6 +95,7 @@ pub fn sign_in_page(said: &str, hosts: &[&str]) -> Option<url::Url> {
         || !page.username().is_empty()
         || page.password().is_some()
         || page.port().is_some()
+        || page.fragment().is_some()
     {
         return None;
     }
@@ -63,9 +103,11 @@ pub fn sign_in_page(said: &str, hosts: &[&str]) -> Option<url::Url> {
         return None;
     };
     let host = host.to_ascii_lowercase();
-    hosts
+    pages
         .iter()
-        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+        .any(|p| {
+            host == p.host && p.paths.contains(&page.path()) && (p.query || page.query().is_none())
+        })
         .then_some(page)
 }
 
@@ -73,7 +115,7 @@ pub fn sign_in_page(said: &str, hosts: &[&str]) -> Option<url::Url> {
 /// that comes back to exactly `http://localhost:{port}/callback`, on an
 /// unprivileged port; none for anything else.
 pub fn direct_port(url: &str) -> Option<u16> {
-    let page = sign_in_page(url, CLAUDE_HOSTS)?;
+    let page = sign_in_page(url, CLAUDE_PAGES)?;
     let mut redirects = page.query_pairs().filter(|(k, _)| k == "redirect_uri");
     let (_, redirect) = redirects.next()?;
     if redirects.next().is_some() {
@@ -197,6 +239,15 @@ fn carry(
     browser: TcpStream,
     carriers: &Mutex<Vec<Child>>,
 ) {
+    {
+        let mut held = carriers.lock().unwrap_or_else(|e| e.into_inner());
+        held.retain_mut(|c| matches!(c.try_wait(), Ok(None)));
+        if held.len() >= MAX_CARRIED {
+            // Closed: no `ssh` for it.
+            let _ = browser.shutdown(std::net::Shutdown::Both);
+            return;
+        }
+    }
     let _ = browser.set_nonblocking(false);
     let mut command = ssh.command(&machine.stdio_forward(port));
     command
@@ -308,6 +359,7 @@ mod tests {
                 page("http%3A%2F%2Flocalhost%3A34503%2Fcallback")
             ),
             "https://claude.com.evil.example/a?redirect_uri=http%3A%2F%2Flocalhost%3A34503%2Fcallback".into(),
+            "https://claude.ai/public/artifacts/x?redirect_uri=http%3A%2F%2Flocalhost%3A34503%2Fcallback".into(),
             "https://user@claude.ai/a?redirect_uri=http%3A%2F%2Flocalhost%3A34503%2Fcallback".into(),
             "https://evil.example\\@claude.ai/a?redirect_uri=http%3A%2F%2Flocalhost%3A34503%2Fcallback".into(),
             "https://evil.example\\.claude.ai/a?redirect_uri=http%3A%2F%2Flocalhost%3A34503%2Fcallback".into(),
@@ -321,35 +373,59 @@ mod tests {
 
     #[test]
     fn a_machines_page_is_opened_only_on_its_engines_own_hosts() {
-        assert!(sign_in_page("https://auth.openai.com/codex/device", CODEX_HOSTS).is_some());
+        assert!(sign_in_page("https://auth.openai.com/codex/device", CODEX_PAGES).is_some());
         assert!(
             sign_in_page(
                 "https://claude.com/cai/oauth/authorize?code=true",
-                CLAUDE_HOSTS
+                CLAUDE_PAGES
             )
             .is_some()
         );
+        assert!(
+            sign_in_page(
+                "https://platform.claude.com/oauth/authorize?code=true",
+                CLAUDE_PAGES
+            )
+            .is_some()
+        );
+        assert!(
+            sign_in_page("https://claude.ai/oauth/authorize?code=true", CLAUDE_PAGES).is_some()
+        );
         for (bad, hosts) in [
-            ("https://auth.openai.com/codex/device", CLAUDE_HOSTS),
-            ("https://claude.ai/oauth", CODEX_HOSTS),
+            ("https://auth.openai.com/codex/device", CLAUDE_PAGES),
+            ("https://claude.ai/oauth", CODEX_PAGES),
             (
                 "https://evil.example\\@auth.openai.com/codex/device",
-                CODEX_HOSTS,
+                CODEX_PAGES,
             ),
             (
                 "https://auth.openai.com.evil.example/codex/device",
-                CODEX_HOSTS,
+                CODEX_PAGES,
             ),
-            ("https://platform.openai.com/codex/device", CODEX_HOSTS),
-            ("http://auth.openai.com/codex/device", CODEX_HOSTS),
-            ("javascript:alert(1)", CODEX_HOSTS),
-            ("file:///etc/passwd", CLAUDE_HOSTS),
-            ("https://auth.openai.com:444/codex/device", CODEX_HOSTS),
+            ("https://platform.openai.com/codex/device", CODEX_PAGES),
+            ("http://auth.openai.com/codex/device", CODEX_PAGES),
+            ("javascript:alert(1)", CODEX_PAGES),
+            ("file:///etc/passwd", CLAUDE_PAGES),
+            ("https://auth.openai.com:444/codex/device", CODEX_PAGES),
+            // Pages someone published on the engines' own domains.
+            ("https://claude.ai/public/artifacts/abc", CLAUDE_PAGES),
+            ("https://chatgpt.com/share/abc", CODEX_PAGES),
+            ("https://auth.openai.com/codex/device?next=x", CODEX_PAGES),
+            ("https://auth.openai.com/codex/device#x", CODEX_PAGES),
+            (
+                "https://claude.com/cai/oauth/authorize/../../public/x",
+                CLAUDE_PAGES,
+            ),
+            ("https://www.claude.ai/oauth/authorize", CLAUDE_PAGES),
+            ("https://claude.ai/oauth/code/callback", CLAUDE_PAGES),
         ] {
             assert!(sign_in_page(bad, hosts).is_none(), "{bad}");
         }
     }
 
+    // Desk forwards from macOS and Linux only (Windows lets a port be taken
+    // over another way, and refuses this outright: see `open`).
+    #[cfg(unix)]
     #[test]
     fn a_port_something_here_holds_even_on_every_address_is_never_shared() {
         // A service on 0.0.0.0, which allows its port to be shared.

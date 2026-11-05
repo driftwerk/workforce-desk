@@ -730,3 +730,48 @@ fn a_sign_ins_port_another_program_holds_on_any_address_is_refused() {
     assert!(CallbackForward::open(&f.ssh, &m, 80).is_err());
     assert!(f.calls().is_empty());
 }
+
+#[test]
+fn a_sign_ins_listener_carries_a_few_connections_at_once_and_closes_the_rest() {
+    use desk_machine::callback::{CallbackForward, MAX_CARRIED};
+    // The machine's sign-in takes connections and never answers them.
+    let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
+    let there = sign_in.local_addr().unwrap().port();
+    let held = Arc::new(Mutex::new(Vec::new()));
+    let keep = Arc::clone(&held);
+    std::thread::spawn(move || {
+        for c in sign_in.incoming().flatten() {
+            keep.lock().unwrap().push(c);
+        }
+    });
+    let here = free_port();
+    let f = fake(json!([{
+        "target": "devbox",
+        "settings": "user dev\nhostname 203.0.113.7\n",
+        "forward_to": there,
+    }]));
+    let forward = CallbackForward::open(&f.ssh, &machine("devbox"), here).unwrap();
+    let carried = || {
+        f.calls()
+            .iter()
+            .filter(|c| c.contains(&"-W".to_string()))
+            .count()
+    };
+    let mut browsers = Vec::new();
+    for _ in 0..MAX_CARRIED {
+        browsers.push(std::net::TcpStream::connect(("127.0.0.1", here)).unwrap());
+    }
+    assert!(soon(5000, || carried() == MAX_CARRIED
+        && held.lock().unwrap().len() == MAX_CARRIED));
+    // One more is closed, with no ssh for it.
+    let mut extra = std::net::TcpStream::connect(("127.0.0.1", here)).unwrap();
+    extra
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut buf = [0u8; 8];
+    assert_eq!(extra.read(&mut buf).unwrap_or(0), 0);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(carried(), MAX_CARRIED);
+    drop(forward);
+    drop(browsers);
+}
