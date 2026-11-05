@@ -221,7 +221,7 @@ pub fn release(
     arch: Arch,
     pubkey: &str,
     updater_endpoint: &str,
-    mut fetch: impl FnMut(&str) -> Result<Vec<u8>>,
+    mut fetch: impl FnMut(&str, u64) -> Result<Vec<u8>>,
 ) -> Result<Backend> {
     let asset = asset_name(arch, version);
     let url = release_url(updater_endpoint, version, &asset)?;
@@ -249,7 +249,7 @@ pub fn release(
         }
     }
     let mut fetch_at_most = |url: &str, max: u64| -> Result<Vec<u8>> {
-        let got = fetch(url)?;
+        let got = fetch(url, max)?;
         if got.len() as u64 > max {
             eyre::bail!("{url} is larger than a backend can be ({max} bytes)");
         }
@@ -502,7 +502,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = text("test.key.pub");
         let server = Server::new(data(SIGNED));
-        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -517,13 +517,13 @@ mod tests {
                 .ends_with("/v0.3.0/desk-backend-linux-x86_64-0.3.0.tar.gz.sig")
         );
         // Kept, and checked again rather than trusted.
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
         assert_eq!(server.asked.borrow().len(), 2, "taken from the cache");
         std::fs::write(&kept, b"changed on disk").unwrap();
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -540,7 +540,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = text("test.key.pub");
         let server = Server::new(data(SIGNED));
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -553,7 +553,7 @@ mod tests {
             .unwrap()
             .set_len(MAX_TARBALL_BYTES + 1)
             .unwrap();
-        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -571,8 +571,8 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |url| {
-                asked.push(url.to_string());
+            |url, max| {
+                asked.push(format!("{url} at most {max}"));
                 // A server that answers more than a signature can be.
                 Ok(vec![b'x'; MAX_SIG_BYTES as usize + 1])
             },
@@ -583,6 +583,11 @@ mod tests {
             "{e:#}"
         );
         assert_eq!(asked.len(), 1, "stopped at the signature");
+        // The signature's download is told it may be a signature's size only.
+        assert!(
+            asked[0].ends_with(&format!(".sig at most {MAX_SIG_BYTES}")),
+            "{asked:?}"
+        );
         assert!(!dir.path().join("0.3.0").exists());
     }
 
@@ -608,7 +613,7 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |u| server.fetch(u),
+            |u, _| server.fetch(u),
         )
         .unwrap_err();
         assert!(format!("{e:#}").contains("doesn't match"), "{e:#}");
@@ -619,7 +624,7 @@ mod tests {
             Arch::X86_64,
             &text("other.key.pub"),
             ENDPOINT,
-            |u| Server::new(data(SIGNED)).fetch(u),
+            |u, _| Server::new(data(SIGNED)).fetch(u),
         );
         assert!(other.is_err(), "signed with another key");
         assert!(!dir.path().join("0.3.0").join(SIGNED).exists());

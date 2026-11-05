@@ -96,7 +96,9 @@ pub fn look_script() -> String {
          d=\"$HOME/{root}\"\n\
          printf 'desk_root=%s\\n' \"$([ -d \"$d\" ] && echo yes)\"\n\
          printf 'desk_marker=%s\\n' \"$([ -e \"$d/{marker}\" ] && echo yes)\"\n\
-         printf 'desk_bin=%s\\n' \"$([ -e \"$d/bin/current\" ] && echo yes)\"\n\
+         p=$(cat \"$d/hub/run/desk-hubd.pid\" 2>/dev/null)\n\
+         printf 'desk_running=%s\\n' \"$([ -n \"$p\" ] && tr '\\000' ' ' < \"/proc/$p/cmdline\" 2>/dev/null | grep -q -- '{flag}' && echo machine)\"\n\
+         printf 'desk_autostart=%s\\n' \"$(ls \"${{XDG_CONFIG_HOME:-$HOME/.config}}\"/autostart/*[Dd]esk*.desktop >/dev/null 2>&1 && echo yes)\"\n\
          printf 'desk_keys=%s\\n' \"$(sed -n 's/^store *= *\"\\(.*\\)\"/\\1/p' \"$d/keys.toml\" 2>/dev/null | head -n 1)\"\n\
          u=\"${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user/{unit}\"\n\
          printf 'desk_unit=%s\\n' \"$(if [ -f \"$u\" ]; then if grep -q -- '{flag}' \"$u\"; then echo machine; else echo desktop; fi; fi)\"\n",
@@ -111,8 +113,9 @@ impl Look {
     pub fn parse(said: &str) -> Result<Look, String> {
         let mut look = Look::default();
         let mut uid = None;
-        let (mut root, mut marker, mut machine_bin, mut keyring, mut desktop_unit) =
+        let (mut root, mut marker, mut keyring, mut desktop_unit, mut autostart) =
             (false, false, false, false, false);
+        let (mut machine_unit, mut running_machine) = (false, false);
         for line in said.lines() {
             let Some((k, v)) = line.split_once('=') else {
                 continue;
@@ -143,16 +146,23 @@ impl Look {
                 "service" => look.service = v == "enabled",
                 "desk_root" => root = v == "yes",
                 "desk_marker" => marker = v == "yes",
-                "desk_bin" => machine_bin = v == "yes",
+                "desk_running" => running_machine = v == "machine",
+                "desk_autostart" => autostart = v == "yes",
                 "desk_keys" => keyring = v == "system",
-                "desk_unit" => desktop_unit = v == "desktop",
+                "desk_unit" => {
+                    desktop_unit = v == "desktop";
+                    machine_unit = v == "machine";
+                }
                 _ => {}
             }
         }
         look.root = uid == Some(0);
-        // A folder with installed versions and no marker is a machine's
-        // from before the marker.
-        look.desktop = (root && !marker && !machine_bin) || keyring || desktop_unit;
+        // A folder without the marker is a machine's only on positive
+        // evidence: its service, or the helper running there, is machine
+        // mode's (one installed before the marker). Installed versions alone
+        // aren't: a Windows Desk's backend in WSL has them too.
+        let machine_mode = machine_unit || running_machine;
+        look.desktop = keyring || desktop_unit || autostart || (root && !marker && !machine_mode);
         if look.user.is_empty() || look.arch.is_empty() {
             return Err("The machine didn't say what it is.".into());
         }
@@ -461,16 +471,29 @@ mod tests {
         // the marker.
         let base = "user=dev\nhome=/home/dev\nkernel=Linux\narch=x86_64\n";
         let desktop = |more: &str| Look::parse(&format!("{base}{more}")).unwrap().desktop;
-        assert!(desktop("desk_root=yes\ndesk_marker=\ndesk_bin=\n"));
+        assert!(desktop("desk_root=yes\ndesk_marker=\n"));
+        // A Windows Desk's WSL backend: installed versions, file keys, no
+        // marker, no service.
+        assert!(desktop(
+            "desk_root=yes\ndesk_marker=\ndesk_keys=file\ndesk_unit=\ndesk_running=\n"
+        ));
+        assert!(desktop(
+            "desk_root=yes\ndesk_marker=yes\ndesk_autostart=yes\n"
+        ));
+        // devbox, installed before the marker: its service and its running
+        // helper are machine mode's.
+        assert!(!desktop(
+            "desk_root=yes\ndesk_marker=\ndesk_keys=file\ndesk_unit=machine\n"
+        ));
+        assert!(!desktop(
+            "desk_root=yes\ndesk_marker=\ndesk_keys=file\ndesk_running=machine\n"
+        ));
         assert!(desktop(
             "desk_root=yes\ndesk_marker=yes\ndesk_keys=system\n"
         ));
         assert!(desktop("desk_unit=desktop\n"));
         assert!(!desktop(
             "desk_root=yes\ndesk_marker=yes\ndesk_keys=file\ndesk_unit=machine\n"
-        ));
-        assert!(!desktop(
-            "desk_root=yes\ndesk_marker=\ndesk_bin=yes\ndesk_keys=file\n"
         ));
         assert!(!desktop(""));
     }

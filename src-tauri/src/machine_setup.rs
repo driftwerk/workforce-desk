@@ -86,9 +86,11 @@ impl Host for AppHost {
                     .timeout(std::time::Duration::from_secs(600))
                     .build()
                     .map_err(|e| e.to_string())?;
-                let fetch = |url: &str| -> eyre::Result<Vec<u8>> {
+                // Each download stops at the most it may be (a signature's
+                // far less than a tarball's).
+                let fetch = |url: &str, max: u64| -> eyre::Result<Vec<u8>> {
                     let r = client.get(url).send()?.error_for_status()?;
-                    read_capped(r, machine_backend::MAX_TARBALL_BYTES)
+                    read_capped(r, max)
                 };
                 machine_backend::release(
                     &self.cache,

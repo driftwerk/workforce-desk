@@ -908,3 +908,58 @@ fn an_account_that_runs_desktop_desk_is_never_taken_over() {
         "store = \"system\"\n"
     );
 }
+
+#[test]
+fn a_windows_desks_wsl_backend_is_never_taken_over() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    // As desk-wsl installs it: versions under bin, current flipped, file
+    // keys; no marker, no service.
+    let root = b.home().join(".local/share/Desk");
+    std::fs::create_dir_all(root.join("bin/0.1.0")).unwrap();
+    std::os::unix::fs::symlink("0.1.0", root.join("bin/current")).unwrap();
+    std::fs::write(root.join("keys.toml"), "store = \"file\"\n").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(
+        matches!(&p.access, Some(Access::Unreachable { message }) if message.contains("desktop app")),
+        "{p:?}"
+    );
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("refused", || {
+        step(&r, "connect", StepState::Failed).is_some()
+    });
+    assert!(matches!(r.fleet.state(&id), Some(State::Failed { .. })));
+    assert_eq!(b.installed().as_deref(), Some("0.1.0"), "not flipped");
+    assert!(!root.join("machine").exists());
+}
+
+#[test]
+fn a_machine_installed_before_the_marker_is_still_a_machine() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    // As devbox was: installed, its service in machine mode, no marker.
+    let root = b.home().join(".local/share/Desk");
+    std::fs::create_dir_all(root.join("bin/0.1.0")).unwrap();
+    std::os::unix::fs::symlink("0.1.0", root.join("bin/current")).unwrap();
+    std::fs::write(root.join("keys.toml"), "store = \"file\"\n").unwrap();
+    let unit = b.home().join(".config/systemd/user/desk-helper.service");
+    std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    std::fs::write(
+        &unit,
+        format!(
+            "[Service]\nExecStart=\"{}/bin/current/desk-helper\" \"--machine\"\n",
+            root.display()
+        ),
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(matches!(p.access, Some(Access::Ok { .. })), "{p:?}");
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+    assert!(root.join("machine").is_file(), "marked now");
+}
