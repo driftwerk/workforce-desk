@@ -4,12 +4,30 @@ import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/
 import { pluginEnv } from "../grids/terminals";
 import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo } from "../hub/types";
+import { keyOf, LOCAL, useHubOf, useMachines, type MachineId } from "../machines/engines";
+import { native as machineNative, type MachineNative } from "../machines/native";
+import { MachineFolder, RunOn } from "../machines/RunOn";
+import { nameOfMachine } from "../machines/words";
 import { pickFolder } from "../platform";
+import { useHost } from "../shell/host";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
 
-export function NewSession({ onClose }: { onClose: () => void }) {
-  const { hub, fail, open } = useDesk();
+/** A machine's plugin folder, for its sessions' Claude Code. */
+const machineEnv = async (native: Pick<MachineNative, "pluginDir">, machine: MachineId): Promise<Record<string, string>> => {
+  const dir = await native.pluginDir(machine).catch(() => null);
+  return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
+};
+
+export function NewSession({ onClose, native = machineNative }: { onClose: () => void; native?: MachineNative }) {
+  const { fail, open } = useDesk();
+  // Where it runs: this computer, or a machine once there's one.
+  const [runOn, setRunOn] = useState<MachineId>(LOCAL);
+  const remote = runOn !== LOCAL;
+  const hub = useHubOf(runOn);
+  const machines = useMachines((s) => s.machines);
+  const platform = useHost((h) => h.platform);
+  const where = nameOfMachine(runOn, machines, platform);
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState("");
   const [name, setName] = useState("");
@@ -33,10 +51,16 @@ export function NewSession({ onClose }: { onClose: () => void }) {
     };
   }, [hub]);
   const offered = startable(engines);
+  // An engine the chosen computer doesn't have gives way to one it has.
+  useEffect(() => {
+    if (offered.length && !offered.includes(engine)) setEngine(offered[0]!);
+  }, [offered.join(" "), engine]);
   const caps = defaultCaps(engines?.find((e) => e.engine === engine));
   const inDesk = answersInDesk(engine, caps);
   const canApproveForMe = !!caps?.approveForMe;
-  const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
+  // A machine's accounts are its own; its sessions run on its default sign-in.
+  const accounts = !remote && hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
+  const missing = engines?.filter((e) => e.installed === false).map((e) => e.title) ?? [];
   const account = picked[engine] ?? defaultChoice(allAccounts, engine);
   useEffect(() => {
     void useAccounts.getState().load();
@@ -63,9 +87,9 @@ export function NewSession({ onClose }: { onClose: () => void }) {
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
         account: accounts.length > 0 ? accountOfChoice(account) : undefined,
         worktree: worktree.trim() || undefined,
-        env: await pluginEnv(),
+        env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
       });
-      open(s.id);
+      open(keyOf(runOn, s.id));
       onClose();
     } catch (err) {
       fail(err);
@@ -78,6 +102,16 @@ export function NewSession({ onClose }: { onClose: () => void }) {
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="sheet" onSubmit={submit} aria-label="New session">
         <h2 className="display-md">New session</h2>
+        <RunOn
+          value={runOn}
+          onChange={(m) => {
+            if (m === runOn) return;
+            setRunOn(m);
+            // A folder here isn't one there.
+            setCwd("");
+            setEngines(null);
+          }}
+        />
         <div className="seg" role="radiogroup" aria-label="Engine">
           {offered.map((k) => (
             <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
@@ -85,15 +119,30 @@ export function NewSession({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </div>
-        <label className="field">
-          <span>Folder</span>
-          <span className="field-row">
-            <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" required />
-            <button type="button" className="btn btn-ghost" onClick={choose}>
-              Choose…
-            </button>
-          </span>
-        </label>
+        {remote && missing.length > 0 && (
+          <p className="muted small">
+            {missing.join(" and ")} {missing.length === 1 ? "isn’t" : "aren’t"} installed on {where}.
+          </p>
+        )}
+        {remote ? (
+          <MachineFolder
+            machine={runOn}
+            name={where}
+            native={native}
+            value={cwd}
+            onChange={setCwd}
+          />
+        ) : (
+          <label className="field">
+            <span>Folder</span>
+            <span className="field-row">
+              <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" required />
+              <button type="button" className="btn btn-ghost" onClick={choose}>
+                Choose…
+              </button>
+            </span>
+          </label>
+        )}
         <label className="field">
           <span>Name</span>
           <input className="mono" value={name} onChange={(e) => setName(e.target.value)} placeholder="auth-fix" />
@@ -159,8 +208,8 @@ export function NewSession({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || !cwd}>
-            Start
+          <button type="submit" className="btn btn-signal" disabled={busy || !cwd || !hub}>
+            {remote ? `Start on ${where}` : "Start"}
           </button>
         </footer>
       </form>

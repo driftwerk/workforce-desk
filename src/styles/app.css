@@ -2511,7 +2511,8 @@ button.urow-open {
   background: var(--bg);
   color: var(--text);
 }
-.search-filters {
+.search-filters,
+.chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -2959,4 +2960,69 @@ body.line-resizing * {
 }
 .line-question-chose {
   overflow-wrap: anywhere;
+}
+
+/* ── Machines: their headings in the sidebar, "on devbox" chips ─────────── */
+
+.side-machine-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-machine-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 4px;
+  color: var(--faint);
+}
+.side-machine-head .dot {
+  width: 8px;
+  height: 8px;
+}
+.side-machine-off {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--blocked);
+}
+.side-machine-empty {
+  padding: 4px 12px;
+}
+.side-refusal {
+  margin: 6px 10px 0;
+}
+.chip-machine {
+  font-family: inherit;
+  flex: none;
+  white-space: nowrap;
+}
+.chip-machine-off {
+  color: var(--blocked);
+  border-color: color-mix(in srgb, var(--blocked) 45%, var(--border));
+}
+.chip-btn[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+.folder-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+}
+.folder-suggestion {
+  width: 100%;
+  text-align: left;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+}
+.folder-suggestion:hover,
+.folder-suggestion:focus-visible {
+  background: var(--surface);
+  color: var(--text);
 }

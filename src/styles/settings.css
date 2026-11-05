@@ -941,3 +941,135 @@ legend.set-label {
 .budget-refused {
   flex-basis: 100%;
 }
+
+/* ── Settings → Machines, and adding one ────────────────────────────────── */
+
+.machines-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
+}
+.machines-head h1 {
+  flex: 1;
+}
+.machine-list {
+  list-style: none;
+  margin: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.machine-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  flex-wrap: wrap;
+}
+.machine-row + .machine-row {
+  border-top: 1px solid var(--border);
+}
+.machine-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.machine-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.machine-add {
+  width: min(600px, calc(100vw - 32px));
+  max-height: 84vh;
+  overflow-y: auto;
+}
+.machine-add .field > span:first-child {
+  color: var(--muted);
+}
+.machine-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.machine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.machine-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.machine-line code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.machine-key {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.machine-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.machine-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.machine-check {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.machine-check .dot {
+  transform: translateY(1px);
+}
+.machine-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.machine-signin-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.machine-signin-name {
+  width: 64px;
+  font-weight: 600;
+}
+.machine-signing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}

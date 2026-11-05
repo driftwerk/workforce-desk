@@ -7,6 +7,7 @@ export const SETTINGS_SECTIONS = {
   chat: "Chat",
   hubs: "Workspaces",
   computer: "This computer",
+  machines: "Machines",
   providers: "Providers",
   connections: "Connections",
   engines: "Engines",

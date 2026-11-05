@@ -1,4 +1,5 @@
 import { RichMarkdown } from "@workforce/rich";
+import { OnMachine } from "../machines/OnMachine";
 import { useRef, useState } from "react";
 import { backgroundLine, backgroundOf, lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
@@ -80,6 +81,7 @@ export function SessionCard({ session }: { session: Session }) {
           <Mark name={name} engine={session.engine} state={lookOf(session)} />
           <span className="session-title">
             <span className="mono">{name}</span>
+            <OnMachine machine={machineOf(session)} />
             <span className="faint small">{where(session)}</span>
           </span>
         </>
