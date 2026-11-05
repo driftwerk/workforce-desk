@@ -25,6 +25,11 @@ on:
         description: "The version to stamp into the build; empty leaves the repo's"
         type: string
         default: ""
+    secrets:
+      VELLEV_REPO_TOKEN:
+        required: false
+      HUB_REPO_TOKEN:
+        required: false
   pull_request:
     paths:
       - scripts/build-sidecars.sh

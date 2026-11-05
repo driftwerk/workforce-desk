@@ -405,7 +405,9 @@ jobs:
     uses: ./.github/workflows/backend-build.yml
     with:
       version: ${{ needs.version.outputs.version }}
-    secrets: inherit
+    secrets:
+      VELLEV_REPO_TOKEN: ${{ secrets.VELLEV_REPO_TOKEN }}
+      HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
 
   windows:
     needs: [version, backend]
@@ -545,9 +547,33 @@ jobs:
         with:
           path: desk
 
+      # Beside Desk, where package.json finds the rich renderers, so the
+      # lockfile installs as it is (nothing here builds them).
+      - name: Read the hub ref
+        id: hub
+        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the hub at hub.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.hub.outputs.ref }}
+          path: workforce-public-desk
+          token: ${{ secrets.HUB_REPO_TOKEN || github.token }}
+
       - uses: actions/setup-node@v7
         with:
           node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            desk/package-lock.json
+            workforce-public-desk/packages/rich/package-lock.json
+
+      # The Tauri CLI that signs, at the version and checksum package-lock.json
+      # pins.
+      - name: Install Desk's packages
+        working-directory: desk
+        run: npm ci --ignore-scripts
 
       # The backend for machines: a tarball per architecture, with the
       # programs and the plugin at its top, signed with the updater key that
@@ -559,6 +585,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "no updater key to sign the backends with"; exit 1; }
+          export TAURI="$GITHUB_WORKSPACE/desk/node_modules/.bin/tauri"
           for arch in x86_64 aarch64; do
             desk/scripts/backend-tarball.sh "backend/backend-linux-$arch" "$arch" "$VERSION" out
             test -s "out/desk-backend-linux-$arch-$VERSION.tar.gz.sig"

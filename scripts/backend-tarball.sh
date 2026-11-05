@@ -10,8 +10,8 @@
 # machine unpacks it, and, when TAURI_SIGNING_PRIVATE_KEY is set, its .sig
 # from `tauri signer sign` (TAURI_SIGNING_PRIVATE_KEY_PASSWORD too), which
 # Desk checks against plugins.updater.pubkey before anything leaves the Mac.
-# TAURI names the Tauri CLI to sign with (default: the version in
-# package-lock.json, through npx).
+# TAURI names the Tauri CLI to sign with (default: the one `npm ci`
+# installed from package-lock.json, node_modules/.bin/tauri).
 set -euo pipefail
 
 dir=$(cd "${1:?usage: $0 DIR ARCH VERSION OUT}" && pwd)
@@ -41,13 +41,9 @@ tar -czf "$tarball" --owner=0 --group=0 --numeric-owner -C "$dir" \
 echo "$tarball"
 
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-  if [ -z "${TAURI:-}" ]; then
-    cli=$(sed -n '/"node_modules\/@tauri-apps\/cli"/,/"version"/s/.*"version": "\(.*\)".*/\1/p' \
-      "$root/package-lock.json")
-    [ -n "$cli" ] || die "no @tauri-apps/cli version in package-lock.json"
-    TAURI="npx --yes @tauri-apps/cli@$cli"
-  fi
-  $TAURI signer sign "$tarball" >/dev/null
+  TAURI=${TAURI:-$root/node_modules/.bin/tauri}
+  [ -x "$TAURI" ] || die "no Tauri CLI at $TAURI (npm ci installs it)"
+  "$TAURI" signer sign "$tarball" >/dev/null
   [ -s "$tarball.sig" ] || die "signing $tarball wrote no signature"
   echo "$tarball.sig"
 fi

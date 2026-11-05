@@ -121,7 +121,9 @@ pub fn verify(pubkey: &str, asset: &str, data: &[u8], sig: &str) -> Result<()> {
         .map_err(|e| eyre::eyre!("reading the updater's public key: {e}"))?;
     let signature = Signature::decode(&base64_text("backend's signature", sig)?)
         .map_err(|e| eyre::eyre!("reading the backend's signature: {e}"))?;
-    key.verify(data, &signature, true)
+    // Only prehashed (Ed25519ph) signatures, as `tauri signer` makes: never
+    // the legacy kind.
+    key.verify(data, &signature, false)
         .map_err(|e| eyre::eyre!("the backend's signature doesn't match it: {e}"))?;
     // Read only once checked: the signature covers the trusted comment.
     let signed_as = signature
@@ -144,9 +146,36 @@ pub struct Backend {
     /// folder's (`<Desk's version>+dev.<hash>`).
     pub version: String,
     pub arch: Arch,
-    pub tarball: PathBuf,
+    /// The tarball's bytes, as checked: what is copied to the machine, so
+    /// nothing can change between the check and the copy.
+    pub data: Vec<u8>,
     /// Whether its signature was checked: false for a development folder.
     pub signed: bool,
+}
+
+/// The most a backend tarball or its signature may be: a download that
+/// would be larger is stopped there, not kept or checked.
+pub const MAX_TARBALL_BYTES: u64 = 1 << 30;
+pub const MAX_SIG_BYTES: u64 = 4096;
+
+/// Whether a download may follow a redirect to `url`: to https only (a
+/// GitHub release's assets redirect to its storage), never to plain http.
+pub fn redirect_allowed(url: &url::Url) -> bool {
+    url.scheme() == "https"
+}
+
+/// The redirect policy the app's download of a backend uses: https only,
+/// and at most ten.
+pub fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            attempt.error("too many redirects")
+        } else if redirect_allowed(attempt.url()) {
+            attempt.follow()
+        } else {
+            attempt.error("a backend is downloaded over https only")
+        }
+    })
 }
 
 /// Where the backend comes from.
@@ -158,17 +187,20 @@ pub enum Source {
 }
 
 /// The release, unless a build that isn't a release build is given a
-/// development folder in [`DEV_OVERRIDE_ENV`]. A release build ignores it,
-/// and says so.
-pub fn source(release_build: bool, env: &BTreeMap<String, String>) -> Source {
-    let Some(folder) = env.get(DEV_OVERRIDE_ENV).filter(|v| !v.trim().is_empty()) else {
-        return Source::Release;
-    };
-    if release_build {
-        tracing::warn!("{DEV_OVERRIDE_ENV} is set but this is a release build; it is ignored");
-        return Source::Release;
+/// development folder in [`DEV_OVERRIDE_ENV`]. In a release build the
+/// variable isn't read at all: that code isn't in it.
+#[cfg(debug_assertions)]
+pub fn source(env: &BTreeMap<String, String>) -> Source {
+    match env.get(DEV_OVERRIDE_ENV).filter(|v| !v.trim().is_empty()) {
+        Some(folder) => Source::Development(folder.into()),
+        None => Source::Release,
     }
-    Source::Development(folder.into())
+}
+
+/// The release: a release build never reads [`DEV_OVERRIDE_ENV`].
+#[cfg(not(debug_assertions))]
+pub fn source(_env: &BTreeMap<String, String>) -> Source {
+    Source::Release
 }
 
 /// Writes `bytes` to `path` whole or not at all.
@@ -182,42 +214,53 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// The release's backend for `version` and `arch`: from `cache/<version>`
 /// when it is there and its signature still checks, else fetched with
-/// `fetch` (a URL to its bytes), checked, then kept there. Nothing that
-/// fails the check is kept or used.
+/// `fetch` (a URL and the most bytes it may answer, to its bytes: it stops
+/// a download that would be larger, and follows [`redirect_policy`]),
+/// checked, then kept there. Nothing that fails the check is kept or used;
+/// what is answered is the bytes that were checked.
 pub fn release(
     cache: &Path,
     version: &str,
     arch: Arch,
     pubkey: &str,
     updater_endpoint: &str,
-    mut fetch: impl FnMut(&str) -> Result<Vec<u8>>,
+    mut fetch: impl FnMut(&str, u64) -> Result<Vec<u8>>,
 ) -> Result<Backend> {
     let asset = asset_name(arch, version);
     let url = release_url(updater_endpoint, version, &asset)?;
     let dir = cache.join(version);
     let tarball = dir.join(&asset);
     let sig_path = dir.join(format!("{asset}.sig"));
-    let backend = Backend {
+    let backend = |data: Vec<u8>| Backend {
         version: version.to_string(),
         arch,
-        tarball: tarball.clone(),
+        data,
         signed: true,
     };
     if let (Ok(data), Ok(sig)) = (std::fs::read(&tarball), std::fs::read_to_string(&sig_path)) {
         match verify(pubkey, &asset, &data, &sig) {
-            Ok(()) => return Ok(backend),
+            Ok(()) => return Ok(backend(data)),
             Err(e) => {
                 tracing::warn!(error = %e, "the kept backend doesn't check; fetching it again")
             }
         }
     }
-    let sig = fetch(&format!("{url}.sig")).with_context(|| format!("downloading {asset}.sig"))?;
+    let mut fetch_at_most = |url: &str, max: u64| -> Result<Vec<u8>> {
+        let got = fetch(url, max)?;
+        if got.len() as u64 > max {
+            eyre::bail!("{url} is larger than a backend can be ({max} bytes)");
+        }
+        Ok(got)
+    };
+    let sig = fetch_at_most(&format!("{url}.sig"), MAX_SIG_BYTES)
+        .with_context(|| format!("downloading {asset}.sig"))?;
     let sig = String::from_utf8(sig).context("reading the backend's signature")?;
-    let data = fetch(&url).with_context(|| format!("downloading {asset}"))?;
+    let data =
+        fetch_at_most(&url, MAX_TARBALL_BYTES).with_context(|| format!("downloading {asset}"))?;
     verify(pubkey, &asset, &data, &sig)?;
     write_atomically(&tarball, &data)?;
     write_atomically(&sig_path, sig.as_bytes())?;
-    Ok(backend)
+    Ok(backend(data))
 }
 
 /// What the files of a backend folder hash to: its programs and plugin,
@@ -342,7 +385,7 @@ pub fn development(cache: &Path, folder: &Path, desk_version: &str, arch: Arch) 
     Ok(Backend {
         version,
         arch,
-        tarball,
+        data: std::fs::read(&tarball).with_context(|| format!("reading {}", tarball.display()))?,
         signed: false,
     })
 }
@@ -440,7 +483,7 @@ mod tests {
                 tarball,
             }
         }
-        fn fetch(&self, url: &str) -> Result<Vec<u8>> {
+        fn fetch(&self, url: &str, _max: u64) -> Result<Vec<u8>> {
             self.asked.borrow_mut().push(url.to_string());
             Ok(if url.ends_with(".sig") {
                 data(&format!("{SIGNED}.sig"))
@@ -455,27 +498,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = text("test.key.pub");
         let server = Server::new(data(SIGNED));
-        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
-            server.fetch(u)
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
+            server.fetch(u, m)
         })
         .unwrap();
-        assert_eq!(got.tarball, dir.path().join("0.3.0").join(SIGNED));
+        let kept = dir.path().join("0.3.0").join(SIGNED);
         assert!(got.signed);
-        assert_eq!(std::fs::read(&got.tarball).unwrap(), data(SIGNED));
+        // The bytes checked are the bytes answered, and the ones kept.
+        assert_eq!(got.data, data(SIGNED));
+        assert_eq!(std::fs::read(&kept).unwrap(), data(SIGNED));
         assert_eq!(server.asked.borrow().len(), 2);
         assert!(
             server.asked.borrow()[0]
                 .ends_with("/v0.3.0/desk-backend-linux-x86_64-0.3.0.tar.gz.sig")
         );
         // Kept, and checked again rather than trusted.
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
-            server.fetch(u)
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
+            server.fetch(u, m)
         })
         .unwrap();
         assert_eq!(server.asked.borrow().len(), 2, "taken from the cache");
-        std::fs::write(&got.tarball, b"changed on disk").unwrap();
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
-            server.fetch(u)
+        std::fs::write(&kept, b"changed on disk").unwrap();
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
+            server.fetch(u, m)
         })
         .unwrap();
         assert_eq!(
@@ -483,7 +528,44 @@ mod tests {
             4,
             "a kept file that fails is fetched again"
         );
-        assert_eq!(std::fs::read(&got.tarball).unwrap(), data(SIGNED));
+        assert_eq!(std::fs::read(&kept).unwrap(), data(SIGNED));
+    }
+
+    #[test]
+    fn a_download_larger_than_a_backend_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut asked = Vec::new();
+        let e = release(
+            dir.path(),
+            "0.3.0",
+            Arch::X86_64,
+            &text("test.key.pub"),
+            ENDPOINT,
+            |_url, max| {
+                asked.push(max);
+                // A server that answers more than it was allowed to.
+                Ok(vec![b'x'; max as usize + 1])
+            },
+        )
+        .unwrap_err();
+        assert!(
+            format!("{e:#}").contains("larger than a backend can be"),
+            "{e:#}"
+        );
+        assert_eq!(asked, [MAX_SIG_BYTES], "stopped at the signature");
+        assert!(!dir.path().join("0.3.0").exists());
+    }
+
+    #[test]
+    fn redirects_are_followed_to_https_only() {
+        let url = |u: &str| url::Url::parse(u).unwrap();
+        assert!(redirect_allowed(&url(
+            "https://release-assets.githubusercontent.com/x"
+        )));
+        assert!(!redirect_allowed(&url(
+            "http://release-assets.githubusercontent.com/x"
+        )));
+        assert!(!redirect_allowed(&url("file:///etc/passwd")));
     }
 
     #[test]
@@ -496,7 +578,7 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |u| server.fetch(u),
+            |u, m| server.fetch(u, m),
         )
         .unwrap_err();
         assert!(format!("{e:#}").contains("doesn't match"), "{e:#}");
@@ -507,30 +589,31 @@ mod tests {
             Arch::X86_64,
             &text("other.key.pub"),
             ENDPOINT,
-            |u| Server::new(data(SIGNED)).fetch(u),
+            |u, m| Server::new(data(SIGNED)).fetch(u, m),
         );
         assert!(other.is_err(), "signed with another key");
         assert!(!dir.path().join("0.3.0").join(SIGNED).exists());
     }
 
+    /// A development build (as `tauri dev` and these tests are) reads it.
+    #[cfg(debug_assertions)]
     #[test]
-    fn the_override_is_read_only_by_a_development_build() {
+    fn a_development_build_reads_the_override() {
         let env = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), "/x/backend".to_string())]);
-        assert_eq!(
-            source(false, &env),
-            Source::Development("/x/backend".into())
-        );
-        assert_eq!(
-            source(true, &env),
-            Source::Release,
-            "ignored in a release build"
-        );
-        assert_eq!(source(false, &BTreeMap::new()), Source::Release);
+        assert_eq!(source(&env), Source::Development("/x/backend".into()));
+        assert_eq!(source(&BTreeMap::new()), Source::Release);
         let blank = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), " ".to_string())]);
-        assert_eq!(source(false, &blank), Source::Release);
-        // The tests are a debug build, as `tauri dev` is; a release build is
-        // `tauri build`'s.
-        assert_eq!(RELEASE_BUILD, !cfg!(debug_assertions));
+        assert_eq!(source(&blank), Source::Release);
+    }
+
+    /// A release build (`cargo test --release`, as `tauri build` builds)
+    /// never does.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_ignores_the_override() {
+        let env = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), "/x/backend".to_string())]);
+        assert_eq!(source(&env), Source::Release);
+        assert!(RELEASE_BUILD);
     }
 
     /// A backend folder as a CI artifact unpacks: programs for `machine`
@@ -573,15 +656,13 @@ mod tests {
         let got = development(&cache, &f, "0.3.0", Arch::X86_64).unwrap();
         assert!(!got.signed);
         assert!(got.version.starts_with("0.3.0+dev."));
-        assert_eq!(
-            got.tarball,
-            cache
-                .join(&got.version)
-                .join(asset_name(Arch::X86_64, &got.version))
-        );
+        let packed = cache
+            .join(&got.version)
+            .join(asset_name(Arch::X86_64, &got.version));
+        assert_eq!(got.data, std::fs::read(&packed).unwrap());
         let listed = std::process::Command::new("tar")
             .arg("-tzf")
-            .arg(&got.tarball)
+            .arg(&packed)
             .output()
             .unwrap();
         let mut names: Vec<String> = String::from_utf8_lossy(&listed.stdout)
