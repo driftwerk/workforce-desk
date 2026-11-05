@@ -167,6 +167,16 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
           <div className="machine-box" role="alert" aria-label="Desk can’t add it">
             <span className="ov-label state-blocked">Desk can’t add it</span>
             <span>{flow.problem}</span>
+            {flow.suggest ? (
+              <div className="machine-actions">
+                <span>
+                  Did you mean <span className="mono">{flow.suggest}</span>?
+                </span>
+                <button type="button" className="btn btn-sm btn-signal" onClick={() => dispatch({ type: "edit", target: flow.suggest ?? "" })}>
+                  Use {flow.suggest}
+                </button>
+              </div>
+            ) : null}
             <span className="small muted">Change the address above to try another machine or account.</span>
           </div>
         )}

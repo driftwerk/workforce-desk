@@ -351,6 +351,13 @@ pub fn plain(text: &str) -> bool {
 /// and said to be the machine's words, so it can't pass for Desk's own
 /// advice. None when nothing is left.
 pub fn said_by(name: &str, text: &str) -> Option<String> {
+    quoted_line(text).map(|q| format!("{name} said: {q}"))
+}
+
+/// `text` as Desk quotes it, whoever said it: cleaned as [`said_by`] does,
+/// between “ and ”. None when nothing is left. Callers say whose words
+/// these are.
+pub fn quoted_line(text: &str) -> Option<String> {
     let line: String = text
         .chars()
         .map(|c| match c {
@@ -367,7 +374,7 @@ pub fn said_by(name: &str, text: &str) -> Option<String> {
     }
     let cut: String = line.chars().take(MAX_SAID).collect();
     let more = if cut.len() < line.len() { "…" } else { "" };
-    Some(format!("{name} said: “{cut}{more}”"))
+    Some(format!("“{cut}{more}”"))
 }
 
 /// The forwards `ssh -G`'s output says the config sets, by name.

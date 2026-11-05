@@ -244,6 +244,10 @@ pub enum Access {
     Locked,
     Unreachable {
         message: String,
+        /// Another spelling of the address that the person's SSH config
+        /// knows ("Did you mean devbox?"), when the name didn't resolve.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggest: Option<String>,
     },
 }
 
@@ -281,6 +285,7 @@ pub fn probe(ssh: &SshExe, machine: &Machine, user: Option<String>, files: &File
             ProbeKey::Known,
             Some(Access::Unreachable {
                 message: DESKTOP.into(),
+                suggest: None,
             }),
         ),
         Ok(look) => answer(
@@ -307,13 +312,23 @@ pub fn probe(ssh: &SshExe, machine: &Machine, user: Option<String>, files: &File
                     None,
                 )
             }
-            Err(message) => answer(ProbeKey::Known, Some(Access::Unreachable { message })),
+            Err(message) => answer(
+                ProbeKey::Known,
+                Some(Access::Unreachable {
+                    message,
+                    suggest: None,
+                }),
+            ),
         },
         Err(Missed::Refused) if locked(files) => answer(ProbeKey::Known, Some(Access::Locked)),
         Err(Missed::Refused) => answer(ProbeKey::Known, Some(Access::Refused { user })),
-        Err(Missed::Unreachable(message)) => {
-            answer(ProbeKey::Known, Some(Access::Unreachable { message }))
-        }
+        Err(Missed::Unreachable(message)) => answer(
+            ProbeKey::Known,
+            Some(Access::Unreachable {
+                message,
+                suggest: None,
+            }),
+        ),
     }
 }
 

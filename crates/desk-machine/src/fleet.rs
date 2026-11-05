@@ -24,9 +24,10 @@ use serde::{Deserialize, Serialize};
 use crate::admit::{self, Confirm, Gate, Question};
 use crate::hostkey::{self, Files, TrustConfirm};
 use crate::link::{Link, Machines};
-use crate::probe::{self, Missed, Probe, System};
+use crate::probe::{self, Access, Missed, Probe, System};
 use crate::setup::{self, Person};
 use crate::ssh::{self, SshExe};
+use crate::suggest;
 
 /// Where a machine stands, as the page reads it (`readState`): a word, or
 /// `{"failed": {"message": …}}`.
@@ -575,7 +576,15 @@ impl Fleet {
         ssh::no_forwards(&machine, &settings)?;
         let files = Files::parse(&said, &self.home);
         *self.files.lock().unwrap_or_else(|e| e.into_inner()) = Some(files.clone());
-        Ok(probe::probe(&self.ssh, &machine, settings.user, &files))
+        let mut probe = probe::probe(&self.ssh, &machine, settings.user, &files);
+        // A name that didn't resolve may be spelled differently in the
+        // person's SSH config; the config's text is read, nothing is run.
+        if let Some(Access::Unreachable { message, suggest }) = &mut probe.access
+            && message.contains("Could not resolve hostname")
+        {
+            *suggest = suggest::did_you_mean(&self.home, machine.target.as_str());
+        }
+        Ok(probe)
     }
 
     /// Trusts `target`'s host key (`machine_trust`), when it is the one with
