@@ -11,6 +11,7 @@ mod helper;
 mod hub_io;
 mod hubs;
 mod logins;
+mod machine_setup;
 mod machines;
 mod navigation;
 mod pair_gate;
@@ -751,7 +752,32 @@ pub fn run() {
                 backend.clone(),
                 Arc::clone(&machines),
             ));
-            app.manage(machines::MachineIo::new(machines, Arc::clone(&sockets)));
+            app.manage(machines::MachineIo::new(
+                Arc::clone(&machines),
+                Arc::clone(&sockets),
+            ));
+            // The machines added (machines.json), each connected to, and
+            // upgraded when it is on an older Desk.
+            let home = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            let fleet = desk_machine::fleet::Fleet::new(
+                desk_machine::SshExe::system(),
+                machines,
+                paths.root.join("machines.json"),
+                home.clone(),
+                Arc::new(machine_setup::AppHost {
+                    app: app.handle().clone(),
+                    version: app.package_info().version.to_string(),
+                    cache: paths.root.join("machines").join("backend"),
+                    home,
+                }),
+                Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
+                Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
+                desk_machine::fleet::Timing::default(),
+            );
+            app.manage(Arc::clone(&fleet));
+            std::thread::spawn(move || fleet.load());
             app.manage(attachments::Files::new(Arc::clone(&paired)));
             app.manage(broker::Broker::new(backend.clone(), Arc::clone(&sockets)));
             app.manage(hub_io::HubIo::new(paired, Arc::clone(&sockets)));
@@ -804,6 +830,14 @@ pub fn run() {
             broker::local_hub_socket_open,
             machines::machine_fetch,
             machines::machine_socket_open,
+            machine_setup::machines_list,
+            machine_setup::machine_probe,
+            machine_setup::machine_trust,
+            machine_setup::machine_public_key,
+            machine_setup::machine_add,
+            machine_setup::machine_reconnect,
+            machine_setup::machine_remove,
+            machine_setup::machine_share_sign_in,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,
@@ -886,6 +920,12 @@ pub fn run() {
             // Quitting, however it happens, writes what's pending first.
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 grid_windows::quitting();
+            }
+            // Machines' forwards end with Desk, not after it.
+            if let tauri::RunEvent::Exit = event
+                && let Some(fleet) = app.try_state::<Arc<desk_machine::fleet::Fleet>>()
+            {
+                fleet.shutdown();
             }
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event
                 && let Some(store) = app.try_state::<Arc<state::StateStore>>()

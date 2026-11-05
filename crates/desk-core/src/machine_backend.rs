@@ -20,7 +20,7 @@ use minisign_verify::{PublicKey, Signature};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::{LINUX_HELPER_EXECUTABLE, LINUX_HUB_EXECUTABLE, LINUX_MEMORY_EXECUTABLE};
+use crate::LINUX_HELPER_EXECUTABLE;
 
 /// Names an unpacked backend folder to install on machines instead of the
 /// release's; read only by builds that aren't release builds.
@@ -29,13 +29,9 @@ pub const DEV_OVERRIDE_ENV: &str = "DESK_MACHINE_BACKEND";
 /// Whether this is a release build, which never reads [`DEV_OVERRIDE_ENV`].
 pub const RELEASE_BUILD: bool = !cfg!(debug_assertions);
 
-/// What a backend holds at its top.
-const PROGRAMS: [&str; 3] = [
-    LINUX_HELPER_EXECUTABLE,
-    LINUX_HUB_EXECUTABLE,
-    LINUX_MEMORY_EXECUTABLE,
-];
-const PLUGIN: &str = "claude-plugin";
+/// What a backend holds at its top: the programs and the plugin, as the
+/// install scripts name them.
+use crate::backend_install::{PLUGIN, PROGRAMS};
 
 /// A machine's processor, as the release builds a backend for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -94,16 +90,9 @@ pub fn release_url(updater_endpoint: &str, version: &str, asset: &str) -> Result
     ))
 }
 
-/// Letters, digits and `.+-`, never `..`: safe in a path and a URL.
-fn plain(version: &str) -> bool {
-    !version.is_empty()
-        && version.len() <= 64
-        && version
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
-        && !version.starts_with(['.', '-'])
-        && !version.contains("..")
-}
+/// Letters, digits and `.+-`, never `..`: safe in a path and a URL (as
+/// a version names its folder under `bin`).
+use crate::backend_install::valid_version as plain;
 
 fn base64_text(what: &str, b64: &str) -> Result<String> {
     let bytes = base64::engine::general_purpose::STANDARD
@@ -232,7 +221,7 @@ pub fn release(
     arch: Arch,
     pubkey: &str,
     updater_endpoint: &str,
-    mut fetch: impl FnMut(&str) -> Result<Vec<u8>>,
+    mut fetch: impl FnMut(&str, u64) -> Result<Vec<u8>>,
 ) -> Result<Backend> {
     let asset = asset_name(arch, version);
     let url = release_url(updater_endpoint, version, &asset)?;
@@ -246,7 +235,12 @@ pub fn release(
         data,
         signed: true,
     };
-    if let (Ok(data), Ok(sig)) = (std::fs::read(&tarball), std::fs::read_to_string(&sig_path)) {
+    // What is kept is read only if it is no larger than a backend can be.
+    let small = |p: &Path, max: u64| std::fs::metadata(p).is_ok_and(|m| m.len() <= max);
+    if small(&tarball, MAX_TARBALL_BYTES)
+        && small(&sig_path, MAX_SIG_BYTES)
+        && let (Ok(data), Ok(sig)) = (std::fs::read(&tarball), std::fs::read_to_string(&sig_path))
+    {
         match verify(pubkey, &asset, &data, &sig) {
             Ok(()) => return Ok(backend(data)),
             Err(e) => {
@@ -255,7 +249,7 @@ pub fn release(
         }
     }
     let mut fetch_at_most = |url: &str, max: u64| -> Result<Vec<u8>> {
-        let got = fetch(url)?;
+        let got = fetch(url, max)?;
         if got.len() as u64 > max {
             eyre::bail!("{url} is larger than a backend can be ({max} bytes)");
         }
@@ -508,7 +502,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = text("test.key.pub");
         let server = Server::new(data(SIGNED));
-        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -523,13 +517,13 @@ mod tests {
                 .ends_with("/v0.3.0/desk-backend-linux-x86_64-0.3.0.tar.gz.sig")
         );
         // Kept, and checked again rather than trusted.
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
         assert_eq!(server.asked.borrow().len(), 2, "taken from the cache");
         std::fs::write(&kept, b"changed on disk").unwrap();
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
             server.fetch(u)
         })
         .unwrap();
@@ -542,6 +536,32 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_file_larger_than_a_backend_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = text("test.key.pub");
+        let server = Server::new(data(SIGNED));
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
+            server.fetch(u)
+        })
+        .unwrap();
+        // The kept tarball grows past what a backend can be (sparse: no
+        // gigabyte is written): it is fetched again, not read.
+        let kept = dir.path().join("0.3.0").join(SIGNED);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&kept)
+            .unwrap()
+            .set_len(MAX_TARBALL_BYTES + 1)
+            .unwrap();
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, _| {
+            server.fetch(u)
+        })
+        .unwrap();
+        assert_eq!(server.asked.borrow().len(), 4, "fetched again");
+        assert_eq!(got.data, data(SIGNED));
+    }
+
+    #[test]
     fn a_download_larger_than_a_backend_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let mut asked: Vec<String> = Vec::new();
@@ -551,8 +571,8 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |url| {
-                asked.push(url.to_string());
+            |url, max| {
+                asked.push(format!("{url} at most {max}"));
                 // A server that answers more than a signature can be.
                 Ok(vec![b'x'; MAX_SIG_BYTES as usize + 1])
             },
@@ -563,6 +583,11 @@ mod tests {
             "{e:#}"
         );
         assert_eq!(asked.len(), 1, "stopped at the signature");
+        // The signature's download is told it may be a signature's size only.
+        assert!(
+            asked[0].ends_with(&format!(".sig at most {MAX_SIG_BYTES}")),
+            "{asked:?}"
+        );
         assert!(!dir.path().join("0.3.0").exists());
     }
 
@@ -588,7 +613,7 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |u| server.fetch(u),
+            |u, _| server.fetch(u),
         )
         .unwrap_err();
         assert!(format!("{e:#}").contains("doesn't match"), "{e:#}");
@@ -599,7 +624,7 @@ mod tests {
             Arch::X86_64,
             &text("other.key.pub"),
             ENDPOINT,
-            |u| Server::new(data(SIGNED)).fetch(u),
+            |u, _| Server::new(data(SIGNED)).fetch(u),
         );
         assert!(other.is_err(), "signed with another key");
         assert!(!dir.path().join("0.3.0").join(SIGNED).exists());

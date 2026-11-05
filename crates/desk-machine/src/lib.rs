@@ -10,6 +10,9 @@
 //!   person's yes, and a host key already known.
 //! - [`tunnel`] keeps the one forward to the machine's hub open, from a
 //!   Unix socket only the person can reach.
+//! - [`fleet`] keeps the person's machines (`machines.json`), adds one
+//!   ([`probe`], [`hostkey`], [`setup`]), and connects to each, upgrading
+//!   one on an older Desk.
 //! - [`link`] reads the machine's hub tokens over SSH, holds them only in
 //!   memory, and hands them on to go only through the forward's socket.
 //!
@@ -17,7 +20,11 @@
 //! scenario and really forwards a port, as `ssh -L` does.
 
 pub mod admit;
+pub mod fleet;
+pub mod hostkey;
 pub mod link;
+pub mod probe;
+pub mod setup;
 pub mod ssh;
 pub mod tunnel;
 

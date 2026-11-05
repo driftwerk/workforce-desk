@@ -179,11 +179,19 @@ impl Tunnel {
     }
 }
 
-impl Drop for Tunnel {
-    fn drop(&mut self) {
+impl Tunnel {
+    /// Ends the forward now, whoever still holds the tunnel (a machine
+    /// removed from Desk).
+    pub fn stop(&self) {
         let mut state = self.shared.lock();
         state.stopping = true;
         self.shared.changed.notify_all();
+    }
+}
+
+impl Drop for Tunnel {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

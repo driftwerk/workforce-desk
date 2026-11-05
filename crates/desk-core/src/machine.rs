@@ -380,6 +380,136 @@ pub fn config_forwards(settings: &str) -> Vec<String> {
         .collect()
 }
 
+// ── Host keys (MD3) ─────────────────────────────────────────────────────
+
+/// What Desk adds to read the key a machine shows without trusting it:
+/// ssh may write the key into `known` (a file of Desk's own, empty), and
+/// nowhere else; no other known hosts are read, none is learned from a
+/// command; and no way of signing in is tried, so nothing of the person's
+/// reaches a machine they haven't trusted yet. ssh always ends at "Permission
+/// denied", once the key is written.
+fn capture_options(known: &std::path::Path) -> Vec<String> {
+    let mut o: Vec<String> = [
+        "-T",
+        "-x",
+        "-a",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    o.extend([
+        "-o".into(),
+        format!("UserKnownHostsFile={}", known.display()),
+    ]);
+    for opt in [
+        "GlobalKnownHostsFile=/dev/null",
+        "KnownHostsCommand=none",
+        "HashKnownHosts=no",
+        "UpdateHostKeys=no",
+        "ControlMaster=no",
+        "ControlPath=none",
+        "PermitLocalCommand=no",
+        "Tunnel=no",
+        "ConnectTimeout=15",
+        "LogLevel=ERROR",
+        "ClearAllForwardings=yes",
+        "RemoteCommand=none",
+        "PubkeyAuthentication=no",
+        "PasswordAuthentication=no",
+        "KbdInteractiveAuthentication=no",
+        "GSSAPIAuthentication=no",
+        "HostbasedAuthentication=no",
+    ] {
+        o.extend(["-o".into(), opt.into()]);
+    }
+    o
+}
+
+impl Machine {
+    /// Has ssh write the host key the machine shows into `known` (a file
+    /// of Desk's own), trusting nothing and signing in with nothing.
+    pub fn capture_host_key(&self, known: &std::path::Path) -> Invocation {
+        let mut args = capture_options(known);
+        args.extend(["--".into(), self.target.0.clone(), "true".into()]);
+        Invocation {
+            program: SSH.into(),
+            args,
+        }
+    }
+}
+
+/// A host key, as a known_hosts line holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostKey {
+    /// The key's type as ssh names it (`ssh-ed25519`).
+    pub algorithm: String,
+    /// The key itself, base64.
+    pub key: String,
+    /// `SHA256:…`, as `ssh-keygen -l` and ssh's own messages show it.
+    pub fingerprint: String,
+}
+
+impl HostKey {
+    /// The key in a known_hosts line (`<hosts> <type> <key> [comment]`);
+    /// none for a comment, a marker line or anything else.
+    pub fn of_line(line: &str) -> Option<HostKey> {
+        use base64::Engine as _;
+        let mut words = line.split_whitespace();
+        let hosts = words.next()?;
+        if hosts.starts_with('#') || hosts.starts_with('@') {
+            return None;
+        }
+        let algorithm = words.next()?.to_string();
+        let key = words.next()?.to_string();
+        let blob = base64::engine::general_purpose::STANDARD
+            .decode(&key)
+            .ok()?;
+        // The blob starts with its own type: a line that says otherwise
+        // isn't one ssh wrote.
+        let len = u32::from_be_bytes(blob.get(..4)?.try_into().ok()?) as usize;
+        if blob.get(4..4 + len)? != algorithm.as_bytes() {
+            return None;
+        }
+        use sha2::Digest as _;
+        let digest = sha2::Sha256::digest(&blob);
+        let fingerprint = format!(
+            "SHA256:{}",
+            base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)
+        );
+        Some(HostKey {
+            algorithm,
+            key,
+            fingerprint,
+        })
+    }
+
+    /// The key's type as `ssh-keygen -l` says it (`ED25519`).
+    pub fn kind(&self) -> String {
+        let a = self.algorithm.as_str();
+        let base = a.strip_prefix("sk-").unwrap_or(a);
+        let name = if base.starts_with("ssh-ed25519") {
+            "ED25519"
+        } else if base.starts_with("ecdsa-") {
+            "ECDSA"
+        } else if base.starts_with("ssh-rsa") || base.starts_with("rsa-") {
+            "RSA"
+        } else if base.starts_with("ssh-dss") {
+            "DSA"
+        } else {
+            return a.to_string();
+        };
+        if a.starts_with("sk-") {
+            format!("{name}-SK")
+        } else {
+            name.to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,5 +698,46 @@ mod tests {
             host.helper().as_deref(),
             Some(".local/share/Desk/bin/current/desk-helper")
         );
+    }
+
+    #[test]
+    fn a_captured_key_trusts_nothing_and_signs_in_with_nothing() {
+        let i = devbox().capture_host_key(std::path::Path::new("/private/desk/known"));
+        let dash = i.args.iter().position(|a| a == "--").unwrap();
+        assert_eq!(&i.args[dash + 1..], ["dev@devbox", "true"]);
+        for want in [
+            "StrictHostKeyChecking=accept-new",
+            "UserKnownHostsFile=/private/desk/known",
+            "GlobalKnownHostsFile=/dev/null",
+            "KnownHostsCommand=none",
+            "PubkeyAuthentication=no",
+            "PasswordAuthentication=no",
+            "KbdInteractiveAuthentication=no",
+            "BatchMode=yes",
+        ] {
+            assert!(i.args[..dash].contains(&want.to_string()), "{want}");
+        }
+        assert!(!i.args.contains(&"StrictHostKeyChecking=yes".to_string()));
+    }
+
+    #[test]
+    fn a_host_key_is_read_from_its_line_with_its_fingerprint() {
+        // devbox's own, and the fingerprint ssh-keygen -lf gives it.
+        let k = HostKey::of_line("2.29.244.189 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVryCC2LMDehVH2s0X1phBfYDkIBfEp4uRw/+7lxe8F").unwrap();
+        assert_eq!(
+            k.fingerprint,
+            "SHA256:cMQjkpgAup3Z2qvE9D0nGAgCQu0F+mxQUK9Jc7YPO6s"
+        );
+        assert_eq!(k.kind(), "ED25519");
+        // A blob of another type than the line says, a comment, a marker.
+        assert!(
+            HostKey::of_line(
+                "h ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAINVryCC2LMDehVH2s0X1phBfYDkIBfEp4uRw/+7lxe8F"
+            )
+            .is_none()
+        );
+        assert!(HostKey::of_line("# h ssh-ed25519 AAAA").is_none());
+        assert!(HostKey::of_line("@revoked h ssh-ed25519 AAAA").is_none());
+        assert!(HostKey::of_line("h ssh-ed25519 !!!").is_none());
     }
 }

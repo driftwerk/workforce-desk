@@ -58,6 +58,12 @@ impl MachineIo {
         Ok(broker)
     }
 
+    /// Drops machine `id`'s broker now (it was removed, or is on a newer
+    /// Desk), so its old link and forward end with it.
+    pub fn forget(&self, id: &str) {
+        self.brokers.lock().expect("brokers").remove(id);
+    }
+
     /// Every machine's hub Desk can reach now, for the hubs the page reads.
     pub fn accounts(&self) -> Vec<crate::hubs::HubAccount> {
         crate::hubs::machine_accounts(&self.machines)
@@ -81,8 +87,32 @@ pub async fn machine_fetch(
     let machine =
         header(request.headers(), "x-desk-machine").ok_or("The request didn't say its machine.")?;
     let (method, path, body) = broker::brokered(&request)?;
+    if chatgpt_sign_in(&method, &path, body.as_ref().map(|(_, b)| b.as_slice())) {
+        let name = io
+            .link(&machine)
+            .map(|l| l.machine().name.clone())
+            .unwrap_or_else(|_| "the machine".into());
+        return Ok(Answer {
+            status: 409,
+            content_type: Some("application/json".into()),
+            body: serde_json::json!({"error": crate::machine_setup::chatgpt_refusal(&name)})
+                .to_string(),
+        });
+    }
     let broker = io.broker(&machine)?;
     broker.fetch(&method, &path, body).await
+}
+
+/// Whether a request is signing in to ChatGPT on a machine, which Desk
+/// doesn't do yet: ChatGPT's sign-in comes back to an address on the machine
+/// itself, which this computer's browser doesn't reach.
+fn chatgpt_sign_in(method: &str, path: &str, body: Option<&[u8]>) -> bool {
+    let path = path.split('?').next().unwrap_or(path);
+    method.eq_ignore_ascii_case("POST")
+        && path.trim_end_matches('/') == "/api/desk/accounts"
+        && body
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+            .is_some_and(|v| v["engine"] == "codex")
 }
 
 /// Opens one of the page's sockets to machine `machine`'s hub; its frames,
@@ -101,4 +131,24 @@ pub async fn machine_socket_open(
     });
     let broker = io.broker(&machine)?;
     broker.open_socket(webview.label(), &path, events).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signing_in_to_chatgpt_on_a_machine_is_found() {
+        let codex = br#"{"engine":"codex","name":"ChatGPT","makeDefault":true}"#;
+        assert!(chatgpt_sign_in("POST", "/api/desk/accounts", Some(codex)));
+        assert!(chatgpt_sign_in("post", "/api/desk/accounts/", Some(codex)));
+        let claude = br#"{"engine":"claude","name":"Claude"}"#;
+        assert!(!chatgpt_sign_in("POST", "/api/desk/accounts", Some(claude)));
+        assert!(!chatgpt_sign_in("GET", "/api/desk/accounts", None));
+        assert!(!chatgpt_sign_in(
+            "POST",
+            "/api/desk/accounts/sign-ins/x/code",
+            Some(codex)
+        ));
+    }
 }

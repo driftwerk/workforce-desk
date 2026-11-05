@@ -1,0 +1,43 @@
+name: Machines live-check tool
+
+# machine-live for macOS: the add flow's native steps as a command
+# (crates/desk-machine/src/bin/machine-live.rs), for the live check against
+# a real machine before machines ship (designs/desk-remote-machines-design.md
+# §12). Built where the person runs it, since only a Mac's own ssh is what
+# Desk uses there. It publishes nothing but a short-lived workflow artifact.
+
+on:
+  pull_request:
+    paths:
+      - crates/desk-machine/**
+      - crates/desk-core/src/machine.rs
+      - crates/desk-core/src/machine_backend.rs
+      - crates/desk-core/src/backend_install.rs
+      - .github/workflows/machine-live.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: machine-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: machine-live for macOS
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: machine-live
+      - run: cargo build -p desk-machine --bin machine-live
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: machine-live-macos
+          path: target/debug/machine-live
+          retention-days: 3
+          if-no-files-found: error
