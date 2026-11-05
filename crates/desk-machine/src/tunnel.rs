@@ -269,41 +269,71 @@ fn spawn(shared: &Shared, invocation: &desk_core::host::Invocation) -> std::io::
     command.spawn()
 }
 
+/// The process group `pid` leads, if it leads one: never a pid of 1 or
+/// less (which `kill` reads as every process, or the caller's own group),
+/// and only a process that is its group's leader (as ssh is, from
+/// [`spawn`]).
+#[cfg(unix)]
+fn group_of(pid: u32) -> Option<libc::pid_t> {
+    let pid = libc::pid_t::try_from(pid).ok().filter(|&p| p > 1)?;
+    // SAFETY: getpgid has no memory preconditions.
+    (unsafe { libc::getpgid(pid) } == pid).then_some(pid)
+}
+
+/// Sends `signal` to the process group `pid` leads, if it leads one.
+#[cfg(unix)]
+fn signal_group(pid: u32, signal: libc::c_int) -> bool {
+    match group_of(pid) {
+        // SAFETY: kill has no memory preconditions.
+        Some(group) => unsafe { libc::kill(-group, signal) == 0 },
+        None => false,
+    }
+}
+
 /// Asks `child` and its process group to end (ssh ends its `ProxyCommand`
-/// on the way out), then makes sure they have.
+/// on the way out), then makes sure they have. The group is signalled only
+/// while `child` hasn't been reaped: once it has, its pid (and so the
+/// group's id) may be another's.
 fn stop(child: &mut Child) {
+    if !matches!(child.try_wait(), Ok(None)) {
+        return;
+    }
     #[cfg(unix)]
     {
-        let group = child.id() as libc::pid_t;
-        // SAFETY: kill has no memory preconditions.
-        unsafe { libc::kill(-group, libc::SIGTERM) };
+        let pid = child.id();
+        if !signal_group(pid, libc::SIGTERM) {
+            let _ = desk_core::process::terminate(pid);
+        }
         let until = Instant::now() + STOP_WAIT;
         while Instant::now() < until {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                unsafe { libc::kill(-group, libc::SIGKILL) };
+            if !matches!(child.try_wait(), Ok(None)) {
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        unsafe { libc::kill(-group, libc::SIGKILL) };
+        // Still not reaped: the group is still its.
+        signal_group(pid, libc::SIGKILL);
     }
     let _ = child.kill();
     let _ = child.wait();
 }
 
-/// Stops a forward to this socket a Desk that ended left running.
+/// Stops a forward to this socket a Desk that ended left running: only a
+/// process that is still that forward (its command names this socket),
+/// and its group only when it leads one.
 fn stop_left_behind(shared: &Shared) {
     #[cfg(unix)]
     if let Some(pid) = std::fs::read_to_string(shared.pid_file())
         .ok()
         .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|&pid| pid > 1)
         && desk_core::process::args_of(pid)
             .is_some_and(|args| args.contains(&*shared.socket.to_string_lossy()))
     {
         tracing::info!(machine = %shared.machine.name, pid, "stopping a forward left behind");
-        // SAFETY: kill has no memory preconditions.
-        unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGTERM) };
-        let _ = desk_core::process::terminate(pid);
+        if !signal_group(pid, libc::SIGTERM) {
+            let _ = desk_core::process::terminate(pid);
+        }
     }
     let _ = std::fs::remove_file(shared.pid_file());
 }
@@ -438,10 +468,51 @@ fn hold(shared: &Arc<Shared>, box_port: u16) -> Result<(), String> {
             hear(&mut said, line);
         }
         if let Ok(Some(status)) = child.try_wait() {
+            // Reaped: its group is no longer Desk's to signal.
             tracing::info!(machine = %machine.name, %status, "the forward ended");
-            // Whatever it started goes with it.
-            stop(&mut child);
             return Ok(());
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_group_leader_above_one_is_signalled_as_a_group() {
+        assert_eq!(group_of(0), None);
+        assert_eq!(group_of(1), None);
+        assert_eq!(group_of(u32::MAX), None);
+        // The test itself isn't its group's leader under cargo.
+        let me = std::process::id();
+        // SAFETY: getpgid has no memory preconditions.
+        let leads = unsafe { libc::getpgid(me as libc::pid_t) } == me as libc::pid_t;
+        assert_eq!(group_of(me).is_some(), leads);
+        let mut leader = {
+            use std::os::unix::process::CommandExt;
+            let mut c = std::process::Command::new("sleep");
+            c.arg("30");
+            // SAFETY: only async-signal-safe calls between fork and exec.
+            unsafe {
+                c.pre_exec(|| {
+                    libc::setpgid(0, 0);
+                    Ok(())
+                });
+            }
+            c.spawn().unwrap()
+        };
+        assert!(group_of(leader.id()).is_some());
+        let mut plain = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        assert_eq!(group_of(plain.id()), None);
+        stop(&mut leader);
+        assert!(matches!(leader.try_wait(), Ok(Some(_))));
+        // Reaped: stopping again signals nothing.
+        stop(&mut leader);
+        let _ = plain.kill();
+        let _ = plain.wait();
     }
 }

@@ -586,6 +586,15 @@ async fn handshake_unix(
             HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Failed::Unsendable)?;
         auth.set_sensitive(true);
         request.headers_mut().insert(AUTHORIZATION, auth);
+        // The Host the hub is at on the machine, not the name that
+        // resolves nowhere.
+        if let Some(port) = dial.url.port() {
+            let host =
+                HeaderValue::from_str(&format!("127.0.0.1:{port}")).map_err(|_| Failed::Other)?;
+            request
+                .headers_mut()
+                .insert(tokio_tungstenite::tungstenite::http::header::HOST, host);
+        }
         let connect = async {
             let stream = tokio::net::UnixStream::connect(path)
                 .await

@@ -160,18 +160,21 @@ impl Broker {
         link: Arc<desk_machine::Link>,
         sockets: Arc<socket::Sockets>,
         pool: u32,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let name = link.machine().name.clone();
-        Self::machine_with(&name, link, sockets, pool)
+        Self::machine_with(&name, link, sockets, pool, false)
     }
 
-    /// A machine's broker reaching it through `machine`.
+    /// A machine's broker reaching it through `machine`'s socket; refused
+    /// without one, unless it is a stand-in on loopback TCP (`tcp`, the
+    /// tests').
     fn machine_with(
         name: &str,
         machine: Arc<dyn Reached>,
         sockets: Arc<socket::Sockets>,
         pool: u32,
-    ) -> Self {
+        tcp: bool,
+    ) -> Result<Self, String> {
         let mut broker = Self::with_source(
             Arc::new(|| Err(eyre::eyre!("a machine is read through its link"))),
             sockets,
@@ -179,6 +182,9 @@ impl Broker {
         // Through the forward's socket and nothing else, whatever host its
         // address names.
         let socket = machine.socket();
+        if socket.is_none() && !tcp {
+            return Err(format!("Desk has no connection to {name}."));
+        }
         #[cfg(unix)]
         if let Some(socket) = socket {
             broker.client = desk_core::net::machine(&socket);
@@ -193,7 +199,7 @@ impl Broker {
             routes: routes::machine_http,
             pool: socket::Pool::Machine(pool),
         };
-        broker
+        Ok(broker)
     }
 
     fn with_source(source: Source, sockets: Arc<socket::Sockets>) -> Self {
@@ -213,7 +219,7 @@ impl Broker {
 
     async fn local(&self) -> Result<Local, String> {
         match &self.machine {
-            Some(m) => through(m, &self.place.idle).await,
+            Some(m) => through(m, self.unix.is_some(), &self.place.idle).await,
             None => read(&self.source, &self.local, &self.place.idle).await,
         }
     }
@@ -269,6 +275,12 @@ impl Broker {
                 .client
                 .request(method.clone(), url?)
                 .bearer_auth(&local.bearer);
+            // Through the forward: the Host the hub is at on the machine.
+            if self.unix.is_some()
+                && let Some(host) = desk_core::net::machine_host(&local.base)
+            {
+                request = request.header(reqwest::header::HOST, host);
+            }
             if let Some((kind, bytes)) = &body {
                 request = request
                     .header(CONTENT_TYPE, kind.as_str())
@@ -356,6 +368,7 @@ impl Broker {
             .map_err(|_| "This computer's hub has no socket address.".to_string())?;
         let (source, kept) = (Arc::clone(&self.source), Arc::clone(&self.local));
         let (idle, machine) = (Arc::clone(&self.place.idle), self.machine.clone());
+        let forwarded = self.unix.is_some();
         let bearer: socket::Bearer = Arc::new(move |fresh| {
             let (source, kept) = (Arc::clone(&source), Arc::clone(&kept));
             let (idle, machine) = (Arc::clone(&idle), machine.clone());
@@ -364,7 +377,7 @@ impl Broker {
                     if fresh {
                         m.forget();
                     }
-                    return through(&m, &idle).await.map(|l| l.bearer);
+                    return through(&m, forwarded, &idle).await.map(|l| l.bearer);
                 }
                 if fresh {
                     *kept.lock().expect("local") = None;
@@ -388,15 +401,23 @@ impl Broker {
 }
 
 /// A machine's hub where its forward is now, with its tokens as kept (or
-/// read now over SSH): the address checked as this computer's loopback.
-async fn through(machine: &Arc<dyn Reached>, idle: &str) -> Result<Local, String> {
+/// read now over SSH). Through the forward's socket its address is checked
+/// as one that resolves nowhere (`<id>.machine.invalid`), so no client not
+/// bound to the socket could reach anything with it; a stand-in reached
+/// over TCP (the tests') must be on this computer's loopback.
+async fn through(machine: &Arc<dyn Reached>, forwarded: bool, idle: &str) -> Result<Local, String> {
     let m = Arc::clone(machine);
     let conn = tauri::async_runtime::spawn_blocking(move || m.connection())
         .await
         .map_err(|e| e.to_string())??
         .ok_or_else(|| idle.to_string())?;
+    let base = if forwarded {
+        desk_core::net::machine_url(&conn.gateway_url)?
+    } else {
+        loopback(&conn.gateway_url)?
+    };
     Ok(Local {
-        base: loopback(&conn.gateway_url)?,
+        base,
         bearer: conn.admin_token.into(),
     })
 }
@@ -905,6 +926,7 @@ mod tests {
         gateway: Mutex<u16>,
         next: Mutex<Option<(String, u16)>>,
         reads: std::sync::atomic::AtomicUsize,
+        socket: Option<std::path::PathBuf>,
     }
 
     impl Reached for FakeMachine {
@@ -928,7 +950,7 @@ mod tests {
             Some(*self.gateway.lock().unwrap())
         }
         fn socket(&self) -> Option<std::path::PathBuf> {
-            None
+            self.socket.clone()
         }
     }
 
@@ -938,6 +960,7 @@ mod tests {
             gateway: Mutex::new(4226),
             next: Mutex::default(),
             reads: Default::default(),
+            socket: None,
         })
     }
 
@@ -948,7 +971,9 @@ mod tests {
             Arc::clone(machine) as Arc<dyn Reached>,
             Arc::default(),
             7,
-        );
+            true,
+        )
+        .unwrap();
         broker.reread = Arc::new(crate::reread::Reread::every(Duration::ZERO));
         broker
     }
@@ -1052,6 +1077,68 @@ mod tests {
                 .is_err(),
             "not sent again"
         );
+    }
+
+    /// A machine's broker is never made without the forward's socket (a
+    /// stand-in over TCP is the tests' only), and through the socket it
+    /// takes only an address that resolves nowhere: a real one here, which
+    /// a client not bound to the socket would reach, is refused.
+    #[tokio::test]
+    async fn a_machines_broker_goes_only_through_its_socket() {
+        let machine = fake_machine("http://127.0.0.1:4226");
+        let refused = Broker::machine_with(
+            "devbox",
+            Arc::clone(&machine) as Arc<dyn Reached>,
+            Arc::default(),
+            7,
+            false,
+        );
+        assert!(refused.is_err());
+        let as_machine = Arc::clone(&machine) as Arc<dyn Reached>;
+        let e = through(&as_machine, true, "idle").await.err().unwrap();
+        assert!(e.contains("isn't at an address Desk gave it"), "{e}");
+        *machine.at.lock().unwrap() = desk_core::net::machine_base("devbox", 4226);
+        let local = through(&as_machine, true, "idle").await.unwrap();
+        assert_eq!(local.base.host_str(), Some("devbox.machine.invalid"));
+    }
+
+    /// Through the forward's socket a request reaches the hub whatever its
+    /// address names, and carries the Host the hub is at on the machine.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_request_goes_through_the_socket_with_the_machines_host() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hub.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let (tx, mut heard) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            let n = s.read(&mut buf).await.unwrap();
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase());
+            s.write_all(OK_JSON.as_bytes()).await.unwrap();
+        });
+        let machine = Arc::new(FakeMachine {
+            at: Mutex::new(desk_core::net::machine_base("devbox", 4226)),
+            gateway: Mutex::new(4226),
+            next: Mutex::default(),
+            reads: Default::default(),
+            socket: Some(path),
+        });
+        let broker = Broker::machine_with("devbox", machine, Arc::default(), 7, false).unwrap();
+        let answer = broker
+            .fetch("GET", "/api/desk/sessions", None)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        let head = heard.recv().await.unwrap();
+        assert!(
+            head.starts_with("get /api/desk/sessions http/1.1"),
+            "{head}"
+        );
+        assert!(head.contains("host: 127.0.0.1:4226"), "{head}");
+        assert!(head.contains(&format!("bearer {}", SENTINEL.to_ascii_lowercase())));
     }
 
     /// Nothing about a machine's address is kept by its broker: each

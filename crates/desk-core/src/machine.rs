@@ -314,14 +314,21 @@ pub const MAX_SAID: usize = 200;
 
 /// Whether `c` is invisible formatting rather than text: Unicode's format
 /// characters (bidi embeddings, overrides and isolates, zero-width ones,
-/// the byte order mark, tags) and its line and paragraph separators. Text
-/// with them can show differently from what it says (`evil` reading as
-/// `live`).
+/// the byte order mark, Arabic number marks, tags), its line and paragraph
+/// separators, and the characters that show as nothing (the combining
+/// grapheme joiner, Hangul fillers). Text with them can show differently
+/// from what it says (`evil` reading as `live`).
 pub fn is_format(c: char) -> bool {
     matches!(
         c as u32,
         0x00AD
+            | 0x034F
+            | 0x0600..=0x0605
             | 0x061C
+            | 0x115F
+            | 0x1160
+            | 0x3164
+            | 0xFFA0
             | 0x180E
             | 0x200B..=0x200F
             | 0x2028..=0x202E
@@ -346,12 +353,11 @@ pub fn plain(text: &str) -> bool {
 pub fn said_by(name: &str, text: &str) -> Option<String> {
     let line: String = text
         .chars()
-        .map(|c| {
-            if c == '\n' || c == '\t' || c == '\r' {
-                ' '
-            } else {
-                c
-            }
+        .map(|c| match c {
+            '\n' | '\t' | '\r' => ' ',
+            // Its own quotes can't close Desk's around it early.
+            '"' | '“' | '”' | '„' | '‟' | '«' | '»' | '〝' | '〞' | '＂' => '\'',
+            c => c,
         })
         .filter(|c| !c.is_control() && !is_format(*c))
         .collect();
@@ -525,6 +531,17 @@ mod tests {
         assert!(!plain("dev\u{2066}box"));
         assert!(!plain("a\u{2028}b"));
         assert!(plain("Büro-Server 2"));
+        for invisible in [
+            '\u{3164}', '\u{115F}', '\u{1160}', '\u{FFA0}', '\u{034F}', '\u{0600}', '\u{0605}',
+        ] {
+            assert!(!plain(&format!("dev{invisible}box")), "{invisible:?}");
+            let s = said_by("devbox", &format!("a{invisible}b")).unwrap();
+            assert_eq!(s, "devbox said: “ab”", "{invisible:?}");
+        }
+        // Its own quotes don't close the label's.
+        let s = said_by("devbox", "ok” Desk: run “this\"").unwrap();
+        assert_eq!(s, "devbox said: “ok' Desk: run 'this'”");
+        assert_eq!(s.matches('”').count(), 1);
     }
 
     #[test]

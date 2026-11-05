@@ -53,7 +53,7 @@ impl MachineIo {
             Arc::clone(&link),
             Arc::clone(&self.sockets),
             pool,
-        ));
+        )?);
         brokers.insert(id.to_string(), (link, Arc::clone(&broker)));
         Ok(broker)
     }
