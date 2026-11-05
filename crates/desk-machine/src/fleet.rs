@@ -227,6 +227,34 @@ pub struct Fleet {
     files: Mutex<Option<Files>>,
 }
 
+/// Whether the machine's hub answers through the forward: its engines, as
+/// the page first asks for them, with `token` (only ever into the forward's
+/// socket). Blocking, a few seconds at most.
+#[cfg(unix)]
+fn answers(link: &Link, token: &str) -> bool {
+    use std::io::{Read as _, Write as _};
+    let Ok(mut s) = std::os::unix::net::UnixStream::connect(link.socket()) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(5)));
+    if write!(
+        s,
+        "GET /api/desk/engines HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\nconnection: close\r\n\r\n"
+    )
+    .is_err()
+    {
+        return false;
+    }
+    let mut head = [0u8; 12];
+    s.read_exact(&mut head).is_ok() && head.starts_with(b"HTTP/1.1 200")
+}
+
+#[cfg(not(unix))]
+fn answers(_: &Link, _: &str) -> bool {
+    true
+}
+
 /// Waits a little for the forwards of `links`, stopped, to end: each one's
 /// ssh is ended on a thread of its own, and none should outlive the app.
 fn ended(links: &[Arc<Link>]) {
@@ -840,7 +868,9 @@ impl Fleet {
     }
 
     /// Waits until the machine's helper says where its hub is, with a
-    /// device token, and the helper running there is `wanted`'s:
+    /// device token, the helper running there is `wanted`'s, and its hub
+    /// answers through the forward (a helper that handed over has its
+    /// token already, and its hub a moment later):
     /// `connection --json` says the version installed, while for a few
     /// seconds after a flip the helper it names is still the one before,
     /// handing over. The version it runs. Blocking.
@@ -851,7 +881,9 @@ impl Fleet {
             match link.read() {
                 Ok(Some(c)) if c.device_token.is_some() => {
                     match setup::running(&self.ssh, link.machine()) {
-                        Ok(Some(v)) if v == wanted => return Ok(v),
+                        Ok(Some(v)) if v == wanted && answers(link, &c.admin_token) => {
+                            return Ok(v);
+                        }
                         Ok(_) => {}
                         Err(e) => last = Some(e),
                     }

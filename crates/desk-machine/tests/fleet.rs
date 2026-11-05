@@ -246,8 +246,8 @@ impl Box_ {
     }
 }
 
-/// A hub on this computer's loopback that answers 200 to `good()`'s
-/// device token and 401 to any other.
+/// A hub on this computer's loopback that answers 200 to the admin token
+/// and `good`'s device token, and 401 to any other.
 fn hub(good: Arc<Mutex<String>>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -268,7 +268,7 @@ fn hub(good: Arc<Mutex<String>>) -> u16 {
                 .find_map(|l| l.strip_prefix("authorization: Bearer "))
                 .unwrap_or_default()
                 .to_string();
-            let status = if auth == *good.lock().unwrap() {
+            let status = if auth == *good.lock().unwrap() || auth == "ADMIN" {
                 "200 OK"
             } else {
                 "401 Unauthorized"
