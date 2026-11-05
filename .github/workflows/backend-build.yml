@@ -1,0 +1,199 @@
+name: Linux backend build
+
+# The Linux backend alone — Desk Helper, the hub at hub.ref and the memory
+# store at vellev.ref, under their Linux names, with Desk's Claude Code
+# plugin — in release mode, for x86_64 and aarch64, each on its own
+# architecture's runner. What Desk installs inside WSL and on machines
+# (Linux boxes Desk drives over SSH), so it is built to run on every common
+# distribution:
+#   - inside manylinux_2_28 (AlmaLinux 8), so it needs only glibc 2.28;
+#   - with OpenSSL linked in, so it needs no libssl of the distribution's
+#     (1.1 on RHEL 8, 3 elsewhere);
+#   - with ONNX Runtime built here, since ort's own needs glibc 2.38.
+# Then each build runs scripts/backend-smoke.sh on the oldest and newest
+# distributions it is for.
+#
+# The release calls it (release.yml, with the version to stamp); a pull
+# request runs it when what it is built with changes. It publishes nothing.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version to stamp into the build; empty leaves the repo's"
+        type: string
+        default: ""
+  pull_request:
+    paths:
+      - scripts/build-sidecars.sh
+      - scripts/onnxruntime.sh
+      - scripts/openssl-static.sh
+      - scripts/backend-tarball.sh
+      - .github/workflows/backend-build.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64:2026.10.25-1@sha256:e2808351a165aa85913d79f1f8457b4f6d74047b47fba07b5b9a5e6c0055a017
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64:2026.10.25-1@sha256:743e05864cdd8dc63dbf568898abd7ff616d121440770fda36263294c6f711c6
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 300
+    steps:
+      # Perl for building OpenSSL, on top of the image's compilers, cmake,
+      # git and Python.
+      - name: Build tools
+        run: dnf install -y perl-core which
+
+      - name: Check out Desk
+        uses: actions/checkout@v7
+        with:
+          path: desk
+
+      - name: Read the hub and vellev refs
+        id: refs
+        run: |
+          echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+          echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out vellev at vellev.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/vellev
+          ref: ${{ steps.refs.outputs.vellev }}
+          path: vellev
+          token: ${{ secrets.VELLEV_REPO_TOKEN || github.token }}
+
+      - name: Check out the hub at hub.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.refs.outputs.hub }}
+          path: workforce-public-desk
+          token: ${{ secrets.HUB_REPO_TOKEN || github.token }}
+
+      # The checkouts belong to the runner's user, not the container's root.
+      - name: Let git read the checkouts
+        run: git config --global --add safe.directory '*'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set the version
+        if: inputs.version != ''
+        working-directory: desk
+        run: scripts/set-version.sh "${{ inputs.version }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desk -> target
+            workforce-public-desk -> target
+            vellev -> target
+          key: backend-${{ matrix.arch }}-hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
+          cache-on-failure: true
+
+      # The slowest step on a cold cache, keyed by its pin.
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/onnxruntime
+          key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+
+      - name: OpenSSL (static)
+        run: desk/scripts/openssl-static.sh "$RUNNER_TEMP/openssl"
+
+      - name: Build the helper, hub and memory store
+        working-directory: desk
+        env:
+          HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
+          VELLEV_SOURCE: ${{ github.workspace }}/vellev
+          MIN_FREE_GB: "12"
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENSSL_STATIC: "1"
+          ORT_FROM_SOURCE: "1"
+          ORT_DIR: ${{ github.workspace }}/onnxruntime
+        run: OPENSSL_DIR="$RUNNER_TEMP/openssl" scripts/build-sidecars.sh
+
+      - name: Collect
+        working-directory: desk
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          dir="backend-linux-$ARCH"
+          mkdir -p "$dir"
+          for name in desk-helper desk-agents desk-memory; do
+            cp "src-tauri/binaries/$name-$ARCH-unknown-linux-gnu" "$dir/$name"
+          done
+          cp -R src-tauri/resources/claude-plugin "$dir/claude-plugin"
+          # Nothing newer than the image's glibc, and no libssl.
+          for name in desk-helper desk-agents desk-memory; do
+            newest=$(objdump -T "$dir/$name" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+            echo "$name needs $newest"
+            [ "$(printf '%s\n' "$newest" GLIBC_2.28 | sort -V | tail -1)" = GLIBC_2.28 ] ||
+              { echo "$name needs a glibc newer than 2.28"; exit 1; }
+            if ldd "$dir/$name" | grep -E 'libssl|libcrypto'; then
+              echo "$name links the system's OpenSSL"
+              exit 1
+            fi
+          done
+          ls -la "$dir"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: backend-linux-${{ matrix.arch }}
+          path: desk/backend-linux-${{ matrix.arch }}/
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke test (${{ matrix.arch }}, ${{ matrix.distro }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        distro: ["almalinux:8", "amazonlinux:2023", "ubuntu:24.04"]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    container: ${{ matrix.distro }}
+    timeout-minutes: 30
+    steps:
+      # What the smoke test uses, and a normal user to run it as: Postgres
+      # won't run as root.
+      - name: Tools and a user
+        run: |
+          if command -v dnf >/dev/null; then
+            dnf install -y --allowerasing curl jq procps-ng tar gzip findutils shadow-utils util-linux
+          else
+            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl jq procps ca-certificates
+          fi
+          useradd -m smoke
+
+      - uses: actions/checkout@v7
+        with:
+          path: desk
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: backend-linux-${{ matrix.arch }}
+          path: backend
+
+      - name: Smoke test
+        run: |
+          chmod 755 backend/desk-helper backend/desk-agents backend/desk-memory
+          cp -R backend /home/smoke/backend
+          cp desk/scripts/backend-smoke.sh /home/smoke/backend-smoke.sh
+          chown -R smoke /home/smoke
+          su smoke -c 'cd ~ && bash ~/backend-smoke.sh ~/backend'

@@ -62,9 +62,9 @@ pub fn remove_everything(paths: &Paths, secrets: &Secrets) -> Result<()> {
     }
 }
 
-/// The oldest glibc the Linux backend runs on: Ubuntu 22.04's, which it is
-/// built on.
-pub const MIN_GLIBC: (u32, u32) = (2, 35);
+/// The oldest glibc the Linux backend runs on: AlmaLinux 8's
+/// (manylinux_2_28), which the release builds it on.
+pub const MIN_GLIBC: (u32, u32) = (2, 28);
 
 /// Whether a glibc version (`2.39`, `2.35.1`) is [`MIN_GLIBC`] or newer.
 pub fn glibc_supported(version: &str) -> bool {
@@ -116,7 +116,7 @@ impl Check {
             Some(format!("Desk doesn't run on {}", self.arch))
         } else {
             Some(format!(
-                "Desk needs Ubuntu 22.04 or newer, or Debian 12 (this Linux has glibc {})",
+                "Desk needs a Linux with glibc 2.28 or newer, such as Ubuntu 20.04, Debian 11, RHEL 8 or Amazon Linux 2023 (this Linux has glibc {})",
                 self.glibc.as_deref().unwrap_or("of unknown version")
             ))
         }
@@ -255,9 +255,9 @@ mod tests {
             Check::of(Some("2.39".into()), "x86_64", true, true).problem(),
             None
         );
-        let old = Check::of(Some("2.31".into()), "x86_64", true, true);
+        let old = Check::of(Some("2.27".into()), "x86_64", true, true);
         assert!(!old.ok);
-        assert!(old.problem().unwrap().contains("glibc 2.31"));
+        assert!(old.problem().unwrap().contains("glibc 2.27"));
         assert!(
             Check::of(None, "x86_64", true, false)
                 .problem()
@@ -296,7 +296,9 @@ mod tests {
             ("2.39", true),
             ("3.0", true),
             ("2.35.1", true),
-            ("2.31", false),
+            ("2.31", true),
+            ("2.28", true),
+            ("2.27", false),
             ("1.99", false),
             ("", false),
             ("musl", false),
