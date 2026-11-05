@@ -15,7 +15,6 @@
 //! `--remove` forgets the machine on this computer at the end (Desk stays
 //! installed there, as Remove from Desk leaves it).
 
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -72,6 +71,27 @@ impl TrustConfirm for Answer {
         println!("asked: {}", q.text().replace('\n', " / "));
         false
     }
+}
+
+/// `GET path` with `token` through the forward's socket: what came back.
+#[cfg(unix)]
+fn get(socket: &std::path::Path, path: &str, token: &str) -> String {
+    use std::io::{Read as _, Write as _};
+    let mut s =
+        std::os::unix::net::UnixStream::connect(socket).unwrap_or_else(|e| fail(&e.to_string()));
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\nconnection: close\r\n\r\n"
+    )
+    .unwrap_or_else(|e| fail(&e.to_string()));
+    let mut said = String::new();
+    let _ = s.read_to_string(&mut said);
+    said
+}
+
+#[cfg(not(unix))]
+fn get(_: &std::path::Path, _: &str, _: &str) -> String {
+    fail("machines are reached from macOS and Linux")
 }
 
 fn fail(said: &str) -> ! {
@@ -153,15 +173,7 @@ fn main() {
         ("/api/desk/folders?path=", c.admin_token.as_str()),
     ] {
         let at = Instant::now();
-        let mut s = std::os::unix::net::UnixStream::connect(link.socket())
-            .unwrap_or_else(|e| fail(&e.to_string()));
-        write!(
-            s,
-            "GET {path} HTTP/1.1\r\nhost: 127.0.0.1\r\nauthorization: Bearer {token}\r\nconnection: close\r\n\r\n"
-        )
-        .unwrap_or_else(|e| fail(&e.to_string()));
-        let mut said = String::new();
-        let _ = s.read_to_string(&mut said);
+        let said = get(link.socket(), path, token);
         let body = said.split("\r\n\r\n").nth(1).unwrap_or_default();
         println!(
             "GET {path}: {} in {} ms, {} bytes",

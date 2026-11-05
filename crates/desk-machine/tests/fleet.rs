@@ -4,7 +4,9 @@
 //! Code and Codex there, and a backend whose Desk Helper is a script that
 //! answers `--check`, `--machine`, `--stop` and `connection --json` as the
 //! real one does. Its hub is a fake on this computer's loopback, reached
-//! through the fake's real forward.
+//! through the fake's real forward. Forwards are to Unix sockets, and the
+//! scripts are `sh`'s, so these run where those are.
+#![cfg(unix)]
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
