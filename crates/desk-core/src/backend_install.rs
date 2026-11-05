@@ -522,6 +522,7 @@ mod tests {
         assert!(enable_linger_script().contains("|| sudo -n loginctl enable-linger \"$user\""));
     }
 
+    #[cfg(target_os = "linux")]
     fn sh(script: &str, stdin: Option<&[u8]>) -> std::process::Output {
         use std::io::Write;
         let mut child = std::process::Command::new("sh")
@@ -537,6 +538,7 @@ mod tests {
         child.wait_with_output().unwrap()
     }
 
+    #[cfg(target_os = "linux")]
     fn ok(out: std::process::Output) -> String {
         assert!(
             out.status.success(),
@@ -546,6 +548,7 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
+    #[cfg(target_os = "linux")]
     /// A backend tarball as the release makes it: the programs (without
     /// their modes, as a downloaded artifact has them) and the plugin, at
     /// its top; `without` left out.
