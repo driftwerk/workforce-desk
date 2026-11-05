@@ -9,6 +9,7 @@ import { Sessions } from "../settings/Sessions";
 import { endSession, lifecycleActions } from "./actions";
 import { LifecycleDialogs } from "./LifecycleDialogs";
 import { askLifecycle, closeLifecycle, useLifecycle } from "./lifecycle";
+import { useHubLayout } from "../groups/hubLayout";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -87,6 +88,21 @@ describe("a session's life in its menus", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "End session" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(hub.end).toHaveBeenCalledWith("s1");
+  });
+});
+
+describe("a machine's session", () => {
+  it("is named in its End and Remove confirms by its own name, not this computer's with the same id", () => {
+    useHubLayout.setState({ layout: { groups: [], ungrouped: { items: [], collapsed: false } } as never });
+    const theirs = { ...session({ live: true, state: "working", displayName: "checkout on devbox" }), machine: "devbox" };
+    useDesk.setState({ sessions: { s1: session({ live: true, state: "working", displayName: "api here" }), "devbox/s1": theirs } });
+    render(<LifecycleDialogs />);
+    act(() => askLifecycle({ kind: "end", sessionId: "devbox/s1" }));
+    expect(screen.getByRole("dialog", { name: "End “checkout on devbox”?" })).toBeTruthy();
+    act(() => closeLifecycle());
+    act(() => askLifecycle({ kind: "remove", sessionId: "devbox/s1" }));
+    expect(screen.getByRole("dialog").textContent).toContain("checkout on devbox");
+    useHubLayout.setState({ layout: null });
   });
 });
 

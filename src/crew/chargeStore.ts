@@ -38,8 +38,11 @@ export const withCharge = (all: Record<string, ChargeView>, c: ChargeView, machi
   return { ...all, [key]: c };
 };
 
-/** Bumped by each charge heard: a read that began before it is older. */
-let heardCount = 0;
+/** Charges heard from each engine, by machine: a read of an engine's that
+ *  began before one of its own was heard is older (another engine's says
+ *  nothing about it). */
+const heardCount = new Map<MachineId, number>();
+const heardOf = (machine: MachineId): number => heardCount.get(machine) ?? 0;
 
 /** Every charge but `machine`'s. */
 const others = (all: Record<string, ChargeView>, machine: MachineId): Record<string, ChargeView> =>
@@ -52,11 +55,11 @@ export const useCharges = create<ChargeState>((set, get) => ({
   load: async (machine = LOCAL) => {
     const hub = hubOf(machine);
     if (!hub) return;
-    const was = heardCount;
+    const was = heardOf(machine);
     try {
       const list = await hub.charges();
       // Another hub by now, or a charge heard since: what was read is older.
-      if (hubOf(machine) !== hub || heardCount !== was) return;
+      if (hubOf(machine) !== hub || heardOf(machine) !== was) return;
       const mine = Object.fromEntries((list ?? []).map((c) => [keyOf(machine, c.session), named(c, machine)]));
       set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, ...(machine === LOCAL ? { supported: list !== null } : {}) }));
     } catch {
@@ -64,7 +67,7 @@ export const useCharges = create<ChargeState>((set, get) => ({
     }
   },
   heard: (heard, machine = LOCAL) => {
-    heardCount++;
+    heardCount.set(machine, heardOf(machine) + 1);
     const c = named(heard, machine);
     const key = keyOf(machine, c.session);
     const was = get().bySession[key];

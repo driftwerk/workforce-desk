@@ -27,7 +27,7 @@ export function LifecycleDialogs() {
 }
 
 function EndSession({ session, onClose }: { session: Session; onClose: () => void }) {
-  const name = useSessionName(session.id, session.name);
+  const name = useSessionName(sessionKey(session), session.name);
   return (
     <Confirm title={`End “${name}”?`} action="End session" onConfirm={() => endSessionNow(sessionKey(session))} onClose={onClose}>
       <p className="muted">It's working: ending it stops it now. It leaves the sidebar, and you can resume it later from Settings → Sessions.</p>
@@ -38,7 +38,7 @@ function EndSession({ session, onClose }: { session: Session; onClose: () => voi
 /** Asks before removing `session` from Desk; deleting its engine's
  *  transcript too is the person's choice, unticked. */
 export function RemoveSession({ session, onClose, onRemoved }: { session: Session; onClose: () => void; onRemoved?: () => void }) {
-  const name = useSessionName(session.id, session.name);
+  const name = useSessionName(sessionKey(session), session.name);
   const [transcript, setTranscript] = useState(false);
   const engine = ENGINE_TITLE[session.engine];
   const running = runs(session);

@@ -510,8 +510,11 @@ function SessionPane({ id }: { id: string }) {
     const resume = () => {
       setProblem(null);
       const on = splitKey(id);
-      hubOf(on.machine)
-        ?.resume(on.id)
+      const hub = hubOf(on.machine);
+      // A machine Desk no longer reaches (let go, or not connected yet).
+      if (!hub) return setProblem("Desk isn’t connected to the machine this session ran on, so it can’t resume it from here.");
+      hub
+        .resume(on.id)
         .catch((e) => setProblem(e instanceof HubError && e.status === 404 ? "It was removed from Desk, so there's nothing to resume." : plainError(e)));
     };
     return (

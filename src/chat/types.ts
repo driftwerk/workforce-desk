@@ -17,6 +17,20 @@ export interface HubAccount {
   revision: string;
 }
 
+const onlyWorkspaces = new WeakMap<readonly HubAccount[], readonly HubAccount[]>();
+
+/** The hubs that are workspaces (this computer's among them): every hub
+ *  account but a machine's engine, whose boss alone Desk shows, by its own
+ *  path. The same list for the same hubs, so it is safe in a selector. */
+export const workspaces = (hubs: readonly HubAccount[]): readonly HubAccount[] => {
+  let out = onlyWorkspaces.get(hubs);
+  if (!out) {
+    out = hubs.some((h) => h.machine) ? hubs.filter((h) => !h.machine) : hubs;
+    onlyWorkspaces.set(hubs, out);
+  }
+  return out;
+};
+
 export interface Agent {
   hubId: string;
   id: string;

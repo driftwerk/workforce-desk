@@ -5,7 +5,10 @@ import { agent, session } from "./testing";
 describe("the needs index", () => {
   it("keys this computer's sessions by id, another hub's by its hub, and agents by hub", () => {
     expect(itemKeyOf({ hubId: "local", local: true, who: session("s-1") })).toBe("session:s-1");
-    expect(itemKeyOf({ hubId: "b", local: false, who: session("s-1") })).toBe("session:b/s-1");
+    expect(itemKeyOf({ hubId: "b", local: false, who: session("s-1") })).toBe("session:hub:b/s-1");
+    // A machine's session, and a workspace's whose hub has the machine's id, are two items.
+    expect(itemKeyOf({ hubId: "devbox-hub", local: false, machine: "devbox", who: session("s-1") })).toBe("session:devbox/s-1");
+    expect(itemKeyOf({ hubId: "devbox", local: false, who: session("s-1") })).toBe("session:hub:devbox/s-1");
     expect(itemKeyOf({ hubId: "b", local: false, who: agent("scout") })).toBe("agent:b/scout");
   });
 

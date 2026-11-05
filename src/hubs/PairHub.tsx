@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
+import { workspaces } from "../chat/types";
 import { hubAccounts, openUrl } from "../platform";
 import { deskState } from "../restore/boot";
 import {
@@ -44,7 +45,7 @@ export const resumePairing = (): void => {
 const knownEmail = async (): Promise<string | null> => {
   const remembered = lastEmail(deskState);
   if (remembered) return remembered;
-  const hubs = [...useChat.getState().hubs].sort((a, b) => Number(b.local) - Number(a.local));
+  const hubs = [...workspaces(useChat.getState().hubs)].sort((a, b) => Number(b.local) - Number(a.local));
   for (const hub of hubs) {
     const who = await whoAmI(hub);
     if (who.state === "person" && who.email?.includes("@")) return who.email;

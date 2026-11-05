@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
-import type { HubAccount, Me } from "../chat/types";
+import { workspaces, type HubAccount, type Me } from "../chat/types";
 import { sendPicture } from "../hub/client";
 import { pictureRefusal, spreadPicture, spreadSaid } from "../pictures/everywhere";
 import { PictureField } from "../pictures/PictureField";
@@ -11,7 +11,7 @@ import { Mark } from "../ui/Mark";
 /** Your picture on each workspace you're connected to, as that workspace
  *  shows you (in Slack and its web app too, and in its places in Desk). */
 export function Profile() {
-  const hubs = useChat((s) => s.hubs);
+  const hubs = useChat((s) => workspaces(s.hubs));
   const me = useChat((s) => s.me);
   useEffect(() => {
     for (const hub of hubs) void useChat.getState().refreshMe(hub.id);

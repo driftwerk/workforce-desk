@@ -1,5 +1,5 @@
 import { useChat } from "../chat/store";
-import { agentKey, type HubAccount, type Me } from "../chat/types";
+import { agentKey, workspaces, type HubAccount, type Me } from "../chat/types";
 import { agentPicturePath, MY_PICTURE, useImage, type ImageRef } from "./pictures";
 
 /** You as Desk shows you on `hubId`'s places (its DMs and chats with its
@@ -16,7 +16,7 @@ export const youOn = (hubs: readonly HubAccount[], me: Readonly<Record<string, M
   const local = hubs.find((h) => h.local);
   const mine = local ? me[local.id] : undefined;
   if (local && mine?.picture) return { hub: local, me: mine };
-  const other = hubs.find((h) => me[h.id]?.picture);
+  const other = workspaces(hubs).find((h) => me[h.id]?.picture);
   if (other) return { hub: other, me: { ...me[other.id]!, name: mine?.name ?? me[other.id]!.name } };
   return local && mine ? { hub: local, me: mine } : null;
 };
