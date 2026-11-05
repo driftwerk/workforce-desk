@@ -146,20 +146,20 @@ fn an_old_linux_is_refused_with_its_glibc() {
     let f = fake(json!([
         {"args": ["--status"], "code": 0},
         {"args": ["--list", "--verbose"], "stdout": "* Ubuntu-24.04 Running 2\n"},
-        {"starts": ["-d", "Ubuntu-24.04", "--exec", "sh", "-c"], "stdout": probe("sarah", "2.27")}
+        {"starts": ["-d", "Ubuntu-24.04", "--exec", "sh", "-c"], "stdout": probe("sarah", "2.35")}
     ]));
     let found = detect(&f.wsl);
     assert_eq!(
         found.distros[0].problem,
         Some(WslProblem::OldLinux {
-            glibc: "2.27".into()
+            glibc: "2.35".into()
         })
     );
     assert_eq!(found.distros[0].host(), None);
 }
 
 fn check(ok: bool) -> String {
-    json!({"ok": ok, "glibc": if ok { "2.39" } else { "2.27" }, "arch": "x86_64", "loopback": true, "root_on_ext4": true}).to_string()
+    json!({"ok": ok, "glibc": if ok { "2.39" } else { "2.35" }, "arch": "x86_64", "loopback": true, "root_on_ext4": true}).to_string()
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn a_failed_check_leaves_the_current_version() {
         {"starts": into("/bin/sh"), "contains": "mv -Tf"}
     ]));
     let e = install::install(&f.wsl, &sarah(), Path::new(r"C:\Desk\backend"), "0.3.0").unwrap_err();
-    assert!(format!("{e:#}").contains("glibc 2.27"), "{e:#}");
+    assert!(format!("{e:#}").contains("glibc 2.35"), "{e:#}");
     assert_eq!(f.calls().len(), 2, "never flipped");
 }
 

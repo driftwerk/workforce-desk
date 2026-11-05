@@ -9,10 +9,9 @@ name: Release
 #   - Windows (x86_64): the per-user NSIS installer, which updates itself,
 #     and an MSI for managed installs, carrying the Linux backend Desk
 #     installs into WSL; Authenticode-signed only when WINDOWS_SIGNING is on;
-#   - the Linux backend alone, for x86_64 and aarch64, built against glibc
-#     2.28 (AlmaLinux 8, manylinux_2_28) so it runs on every common
-#     distribution: what Desk installs into WSL, and on machines (Linux boxes
-#     Desk drives over SSH) as signed tarballs;
+#   - the Linux backend alone, for x86_64 and aarch64 (backend-build.yml),
+#     for glibc 2.36 and newer: what Desk installs into WSL, and on machines
+#     (Linux boxes Desk drives over SSH) as signed tarballs;
 # then publishes them with the signed updater artifacts (latest.json) as a
 # GitHub release. See docs/RELEASING.md.
 

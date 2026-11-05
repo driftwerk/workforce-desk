@@ -62,9 +62,10 @@ pub fn remove_everything(paths: &Paths, secrets: &Secrets) -> Result<()> {
     }
 }
 
-/// The oldest glibc the Linux backend runs on: AlmaLinux 8's
-/// (manylinux_2_28), which the release builds it on.
-pub const MIN_GLIBC: (u32, u32) = (2, 28);
+/// The oldest glibc the Linux backend runs on: Debian 12's, which the
+/// Postgres it embeds (theseus-rs' builds) needs. Desk's own programs need
+/// only 2.28 (the release builds them in manylinux_2_28).
+pub const MIN_GLIBC: (u32, u32) = (2, 36);
 
 /// Whether a glibc version (`2.39`, `2.35.1`) is [`MIN_GLIBC`] or newer.
 pub fn glibc_supported(version: &str) -> bool {
@@ -116,7 +117,7 @@ impl Check {
             Some(format!("Desk doesn't run on {}", self.arch))
         } else {
             Some(format!(
-                "Desk needs a Linux with glibc 2.28 or newer, such as Ubuntu 20.04, Debian 11, RHEL 8 or Amazon Linux 2023 (this Linux has glibc {})",
+                "Desk needs a Linux with glibc 2.36 or newer, such as Debian 12, Ubuntu 24.04, Fedora 37 or RHEL 10 (this Linux has glibc {})",
                 self.glibc.as_deref().unwrap_or("of unknown version")
             ))
         }
@@ -255,9 +256,9 @@ mod tests {
             Check::of(Some("2.39".into()), "x86_64", true, true).problem(),
             None
         );
-        let old = Check::of(Some("2.27".into()), "x86_64", true, true);
+        let old = Check::of(Some("2.35".into()), "x86_64", true, true);
         assert!(!old.ok);
-        assert!(old.problem().unwrap().contains("glibc 2.27"));
+        assert!(old.problem().unwrap().contains("glibc 2.35"));
         assert!(
             Check::of(None, "x86_64", true, false)
                 .problem()
@@ -290,15 +291,15 @@ mod tests {
     }
 
     #[test]
-    fn glibc_must_be_ubuntu_22_04s_or_newer() {
+    fn glibc_must_be_debian_12s_or_newer() {
         for (v, ok) in [
-            ("2.35", true),
+            ("2.36", true),
+            ("2.35", false),
             ("2.39", true),
             ("3.0", true),
-            ("2.35.1", true),
-            ("2.31", true),
-            ("2.28", true),
-            ("2.27", false),
+            ("2.36.1", true),
+            ("2.34", false),
+            ("2.28", false),
             ("1.99", false),
             ("", false),
             ("musl", false),

@@ -60,11 +60,14 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    for x86_64 (on `ubuntu-24.04`) and aarch64 (on `ubuntu-24.04-arm`), each
    inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
    (`scripts/openssl-static.sh`) and ONNX Runtime built there
-   (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so it runs on
-   Ubuntu 20.04+, Debian 11+, Amazon Linux 2023, RHEL/Rocky/Alma 8+ and
-   Fedora. It then runs `scripts/backend-smoke.sh` on AlmaLinux 8, Amazon
-   Linux 2023 and Ubuntu 24.04 for each architecture. A pull request that
-   changes how it is built runs the same workflow, publishing nothing.
+   (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
+   programs need only glibc 2.28. The Postgres Desk Helper embeds
+   (theseus-rs' builds) needs glibc 2.36, so the backend runs on Debian 12,
+   Ubuntu 24.04, Fedora 37, RHEL 10 and newer — not yet on Amazon Linux
+   2023, RHEL/Rocky/Alma 9 or Ubuntu 22.04 (glibc 2.34–2.35). It then runs
+   `scripts/backend-smoke.sh` on Debian 12, Ubuntu 24.04 and Fedora for each
+   architecture. A pull request that changes how it is built runs the same
+   workflow, publishing nothing.
    - the `backend-linux-x86_64` and `backend-linux-aarch64` workflow
      artifacts (the three programs and the Claude Code plugin). Desk on
      Windows installs the x86_64 one inside WSL.

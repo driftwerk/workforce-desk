@@ -4,14 +4,16 @@ name: Linux backend build
 # store at vellev.ref, under their Linux names, with Desk's Claude Code
 # plugin — in release mode, for x86_64 and aarch64, each on its own
 # architecture's runner. What Desk installs inside WSL and on machines
-# (Linux boxes Desk drives over SSH), so it is built to run on every common
-# distribution:
-#   - inside manylinux_2_28 (AlmaLinux 8), so it needs only glibc 2.28;
-#   - with OpenSSL linked in, so it needs no libssl of the distribution's
-#     (1.1 on RHEL 8, 3 elsewhere);
+# (Linux boxes Desk drives over SSH), so it is built to run on as many
+# distributions as it can:
+#   - inside manylinux_2_28 (AlmaLinux 8), so Desk's own programs need only
+#     glibc 2.28;
+#   - with OpenSSL linked in, so they need no libssl of the distribution's;
 #   - with ONNX Runtime built here, since ort's own needs glibc 2.38.
-# Then each build runs scripts/backend-smoke.sh on the oldest and newest
-# distributions it is for.
+# The Postgres the helper embeds (theseus-rs' builds) needs glibc 2.36, so
+# the backend as a whole runs on Debian 12, Ubuntu 24.04, Fedora 37, RHEL 10
+# and newer. Each build then runs scripts/backend-smoke.sh on Debian 12,
+# Ubuntu 24.04 and Fedora.
 #
 # The release calls it (release.yml, with the version to stamp); a pull
 # request runs it when what it is built with changes. It publishes nothing.
@@ -106,9 +108,21 @@ jobs:
           key: backend-${{ matrix.arch }}-hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
           cache-on-failure: true
 
-      # The slowest step on a cold cache, keyed by its pin.
-      - name: Cache ONNX Runtime
-        uses: actions/cache@v6
+      # The slowest step on a cold cache, keyed by its pin, and kept as soon
+      # as it is built, whatever the build after it does.
+      - name: Restore ONNX Runtime
+        id: ort
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/onnxruntime
+          key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+
+      - name: ONNX Runtime
+        run: desk/scripts/onnxruntime.sh "$GITHUB_WORKSPACE/onnxruntime"
+
+      - name: Keep ONNX Runtime
+        if: always() && steps.ort.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/onnxruntime
           key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
@@ -165,7 +179,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-        distro: ["almalinux:8", "amazonlinux:2023", "ubuntu:24.04"]
+        distro: ["debian:12", "ubuntu:24.04", "fedora:42"]
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     container: ${{ matrix.distro }}
     timeout-minutes: 30
