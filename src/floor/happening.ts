@@ -59,6 +59,7 @@ const entryOf = (w: FloorWork, who: Who, subject: string | null, now: number): F
   return {
     hubId: w.hubId,
     local: w.local,
+    ...(w.machine ? { machine: w.machine } : {}),
     stale: w.stale,
     key: keyOf(w, who),
     who,
@@ -83,7 +84,7 @@ export const happening = (
   m: Pick<Merged, "working" | "done">,
   now: number,
   whoOf: (w: FloorWork) => Who | null = (w) => w.who,
-  subjectOf: (item: { local: boolean; who: Who }) => string | null = ({ who }) => (who.kind === "session" ? ownName(who) : null),
+  subjectOf: (item: { local: boolean; machine?: string; who: Who }) => string | null = ({ who }) => (who.kind === "session" ? ownName(who) : null),
 ): FloorEntry[] => {
   const lately = m.done.filter((w) => w.endedAt !== null && now - Date.parse(w.endedAt) <= DONE_FOR_MS);
   const when = (w: FloorWork): string => w.endedAt ?? w.since;
@@ -101,6 +102,6 @@ export const happening = (
     if (better) chosen.set(key, { w, who });
   }
   return [...chosen.values()]
-    .map(({ w, who }) => entryOf(w, who, subjectOf({ local: w.local, who }), now))
+    .map(({ w, who }) => entryOf(w, who, subjectOf({ local: w.local, machine: w.machine, who }), now))
     .sort((a, b) => RANK[a.state] - RANK[b.state] || b.at.localeCompare(a.at) || a.who.name.localeCompare(b.who.name));
 };

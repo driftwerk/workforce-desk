@@ -7,6 +7,7 @@ import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
+import { nativeMachines, watchMachines } from "../hub/engines";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
 import { hubAccounts, inApp, localHub, onThemesChanged, subscribe } from "../platform";
 import { useSettings } from "../settings/store";
@@ -144,6 +145,8 @@ export function App() {
   }, []);
 
   useEffect(watchFloor, []);
+  // Each machine's engine, beside this computer's.
+  useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);
 
   // Agents on this computer still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);

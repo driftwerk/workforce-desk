@@ -6,6 +6,8 @@
 // it; a pane with no rectangle is parked: out of the layout, its content
 // kept until a layout has room for it again.
 
+import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
+
 /** Steps across and down: twelfths. */
 export const STEPS = 12;
 
@@ -17,13 +19,47 @@ export interface Rect {
   h: number;
 }
 
+/** What a pane shows. A session or a terminal is on the machine `machine`
+ *  names (see hub/machines.ts); on this computer when it names none, as
+ *  every pane stored before machines does. This computer's are stored
+ *  without one. */
 export type PaneContent =
-  | { kind: "session"; sessionId: string }
+  | { kind: "session"; sessionId: string; machine?: MachineId }
   /** A conversation with an agent, by agent key (`<hub>/<agent>`). */
   | { kind: "agent"; agent: string }
   /** A login shell the hub hosts; `terminalId` is null until the hub has
    *  opened it (or again after the hub lost it), `cwd` where it was last. */
-  | { kind: "terminal"; terminalId: string | null; cwd?: string | null };
+  | { kind: "terminal"; terminalId: string | null; cwd?: string | null; machine?: MachineId };
+
+/** What shows session `key` (see `keyOf`): this computer's without a machine. */
+export const sessionContent = (key: string): Extract<PaneContent, { kind: "session" }> => {
+  const { machine, id } = splitKey(key);
+  return machine === LOCAL ? { kind: "session", sessionId: id } : { kind: "session", sessionId: id, machine };
+};
+
+/** What shows terminal `key` (see `keyOf`), opened. */
+export const terminalContent = (key: string, cwd?: string | null): Extract<PaneContent, { kind: "terminal" }> => {
+  const { machine, id } = splitKey(key);
+  const t: Extract<PaneContent, { kind: "terminal" }> = { kind: "terminal", terminalId: id, ...(cwd === undefined ? {} : { cwd }) };
+  return machine === LOCAL ? t : { ...t, machine };
+};
+
+/** The key of the session `c` shows, if it shows one. */
+export const sessionKeyIn = (c: PaneContent | null | undefined): string | null =>
+  c?.kind === "session" ? keyOf(machineOf(c), c.sessionId) : null;
+
+/** The key of the terminal `c` shows, once the hub has opened it. */
+export const terminalKeyIn = (c: PaneContent | null | undefined): string | null =>
+  c?.kind === "terminal" && c.terminalId ? keyOf(machineOf(c), c.terminalId) : null;
+
+/** `c` as stored: a machine only where it is one (`local`, or none, is
+ *  this computer, and is left out). */
+export const storedContent = (c: PaneContent): PaneContent => {
+  if (c.kind === "agent" || !("machine" in c)) return c;
+  if (c.machine && c.machine !== LOCAL) return c;
+  const { machine: _local, ...rest } = c;
+  return rest;
+};
 
 export interface Pane {
   id: string;
@@ -100,7 +136,11 @@ export const presetOf = (panes: readonly Pane[]): PresetId | null => {
 /** What a pane holds, as one string: the same session, agent or terminal
  *  twice in a grid is one thing. */
 export const contentKey = (c: PaneContent): string =>
-  c.kind === "session" ? `session:${c.sessionId}` : c.kind === "agent" ? `agent:${c.agent}` : `terminal:${c.terminalId ?? "new"}`;
+  c.kind === "session"
+    ? `session:${keyOf(machineOf(c), c.sessionId)}`
+    : c.kind === "agent"
+      ? `agent:${c.agent}`
+      : `terminal:${keyOf(machineOf(c), c.terminalId ?? "new")}`;
 
 export const findContent = (panes: readonly Pane[], c: PaneContent): Pane | undefined =>
   c.kind === "terminal" && !c.terminalId ? undefined : panes.find((p) => p.content && contentKey(p.content) === contentKey(c));

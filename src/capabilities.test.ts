@@ -141,10 +141,17 @@ const commandsOf = (cap: ReturnType<typeof capability>): Set<string> =>
 
 const declared = (): string[] => [...commandsRs.matchAll(/^ {4}"([a-z_]+)",$/gm)].map((m) => m[1]!);
 
+/** The machines' commands (designs/desk-remote-machines-design.md §6.1),
+ *  which the page calls before the native side (PR MS) declares them: until
+ *  it does, a call of one fails and the page goes on without machines. Once
+ *  one is declared, a grid's window must be granted it like any other. */
+const MACHINE_COMMANDS: ReadonlySet<string> = new Set(["machines_list", "machine_fetch", "machine_socket_open"]);
+
 describe("each window's capabilities", () => {
   it("grant a grid's window every command its panes can reach", () => {
     const granted = commandsOf(capability("grid"));
-    const missing = [...gridCommands()].filter((c) => !granted.has(c));
+    const all = declared();
+    const missing = [...gridCommands()].filter((c) => !granted.has(c) && (all.includes(c) || !MACHINE_COMMANDS.has(c)));
     expect(missing).toEqual([]);
   });
 

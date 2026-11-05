@@ -21,13 +21,17 @@ const bytesOf = async (body: Body | undefined): Promise<Uint8Array> => {
   return new Uint8Array(await body.data.arrayBuffer());
 };
 
-const fetchVia = async (method: string, path: string, body?: Body): Promise<Response> => {
+/** How a request reaches the native side: its body's bytes and the headers
+ *  that say what it is, answered as `local_hub_fetch` answers. */
+type Send = (bytes: Uint8Array, headers: Record<string, string>) => Promise<Answer>;
+
+const fetchVia = async (send: Send, method: string, path: string, body?: Body): Promise<Response> => {
   const headers: Record<string, string> = {
     "x-desk-method": encodeURIComponent(method),
     "x-desk-path": encodeURIComponent(path),
   };
   if (body) headers["x-desk-type"] = encodeURIComponent(body.type);
-  const a = await invoke<Answer>("local_hub_fetch", await bytesOf(body), { headers });
+  const a = await send(await bytesOf(body), headers);
   return new Response(EMPTY.has(a.status) ? null : a.body, {
     status: a.status,
     headers: a.contentType ? { "content-type": a.contentType } : {},
@@ -195,6 +199,21 @@ export class BridgedSocket implements DeskSocket {
 
 /** The local hub, in the app. */
 export const brokered: DeskTransport = {
-  fetch: fetchVia,
+  fetch: (method, path, body) => fetchVia((bytes, headers) => invoke<Answer>("local_hub_fetch", bytes, { headers }), method, path, body),
   socket: (path) => new BridgedSocket((events) => invoke<number>("local_hub_socket_open", { path, events })),
 };
+
+/** A machine's engine, in the app: the same admin surface and allowlist as
+ *  the local hub's, through the machine's own broker on the native side,
+ *  which it picks by `x-desk-machine` (designs/desk-remote-machines-design.md
+ *  §6.1). The page names only the machine's id. */
+export const machineTransport = (machine: string): DeskTransport => ({
+  fetch: (method, path, body) =>
+    fetchVia(
+      (bytes, headers) => invoke<Answer>("machine_fetch", bytes, { headers: { ...headers, "x-desk-machine": encodeURIComponent(machine) } }),
+      method,
+      path,
+      body,
+    ),
+  socket: (path) => new BridgedSocket((events) => invoke<number>("machine_socket_open", { machine, path, events })),
+});

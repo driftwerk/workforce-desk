@@ -13,6 +13,8 @@ import { FloorRow, useStaleNote, useWhoName } from "./Row";
 import { useFloor } from "./store";
 import { placeLabel, targetOf } from "./target";
 import { dayClock, durationOf } from "./time";
+import { hubFor } from "../hub/store";
+import { sessionKeyOfItem } from "./needs";
 
 /** Focus in a row that goes moves to the list it was in. */
 const useFocusKept = () => {
@@ -60,6 +62,7 @@ const choicesOf = (need: FloorNeed): Choice[] => {
 /** Opens a session as the side panel beside the Floor (never in a grid,
  *  even when one shows it), with its questions shown under its terminal. */
 export const goToQuestions = (sessionId: string): void => {
+  // `sessionId` is the session's key (see `keyOf`).
   useLinePanel.getState().show(sessionId);
   openTarget({ kind: "session", sessionId }, { beside: true });
 };
@@ -76,14 +79,16 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   // A session on this computer whose turn ended asking: what Desk read, and
   // what answers it here.
   const asking = useDesk((s): Session | null => {
-    const session = need.local && need.who.kind === "session" ? s.sessions[need.who.id] : undefined;
+    const key = sessionKeyOfItem(need);
+    const session = key ? s.sessions[key] : undefined;
     return session?.state === "asking" && session.asked ? session : null;
   });
   const [acting, setActing] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
-  const line = isLineNeed(need) && need.local && need.who.kind === "session";
+  const ours = sessionKeyOfItem(need);
+  const line = isLineNeed(need) && !!ours;
   const act = (what: "allowAsked" | "dismissAsked") => () => {
-    const hub = useDesk.getState().hub;
+    const hub = asking ? hubFor(asking) : null;
     if (!asking || !hub || acting) return;
     setActing(true);
     setRefused(null);
@@ -158,7 +163,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
                 className="btn btn-signal"
                 aria-label={`Go to ${name}`}
                 disabled={need.stale || acting}
-                onClick={() => goToQuestions(need.who.id)}
+                onClick={() => goToQuestions(ours!)}
               >
                 Go to session
               </button>
@@ -170,7 +175,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
                 onClick={() => {
                   setActing(true);
                   setRefused(null);
-                  dismissQuestions([need.id.slice("line:".length)])
+                  dismissQuestions([need.id.slice("line:".length)], need.machine)
                     .catch((e: unknown) => setRefused(plainError(e)))
                     .finally(() => setActing(false));
                 }}

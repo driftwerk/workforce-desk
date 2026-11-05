@@ -168,6 +168,9 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       return answer(undefined);
     case "themes_list":
       return answer([]);
+    case "machines_list":
+      // Machines are reached over SSH by the app; the preview has none.
+      return answer([]);
     case "fonts_list":
       // What a computer's own list looks like; the app reads the real one.
       return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);

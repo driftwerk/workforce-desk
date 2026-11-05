@@ -7,6 +7,7 @@ import { openUrl } from "../platform";
 import { openAgent, openAgentBeside } from "../rooms/AgentPanel";
 import { requestFocus } from "./focus";
 import { useUi } from "./ui";
+import { sessionContent } from "../grids/engine";
 
 /** Somewhere Desk can take the person: a session, a DM, a room (or one of
  *  its threads), or a Slack conversation. */
@@ -73,7 +74,7 @@ export const openTarget = (t: Target, opts: { reply?: boolean; beside?: boolean 
   switch (t.kind) {
     case "session": {
       if (!useDesk.getState().sessions[t.sessionId]) return;
-      if (opts.beside || !reveal({ kind: "session", sessionId: t.sessionId })) useDesk.getState().open(t.sessionId);
+      if (opts.beside || !reveal(sessionContent(t.sessionId))) useDesk.getState().open(t.sessionId);
       return void focus(focusKeyOf(t));
     }
     case "agent": {

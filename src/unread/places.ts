@@ -45,6 +45,8 @@ export const parsePlace = (key: string): Place | null => {
   if (colon < 0 || !a || more.length) return null;
   if (kind === "room" && !b) return { kind: "room", room: a };
   if (kind === "session" && !b) return { kind: "session", session: a };
+  // A machine's session, by its key (`<machine>/<id>`).
+  if (kind === "session" && b) return { kind: "session", session: `${a}/${b}` };
   if (kind === "thread" && b) return { kind: "thread", room: a, thread: b };
   if (kind === "dm" && b) return { kind: "dm", hub: a, agent: b };
   return null;

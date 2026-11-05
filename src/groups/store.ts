@@ -10,6 +10,8 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { onHub, useHubLayout } from "./hubLayout";
+// Each machine's groups are kept beside this computer's.
+import "./machineLayouts";
 import {
   createGroup as created,
   deleteGroup as deleted,

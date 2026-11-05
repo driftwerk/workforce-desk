@@ -1,6 +1,7 @@
 import { shownGrid, useGrids } from "./store";
 import type { Place } from "./where";
 import { addToGrid, goTo } from "./windows";
+import { terminalContent } from "./engine";
 
 /** Where a session or agent already is (see `placesOf`), each with a way
  *  there: its own pane in a grid, the terminal in a grid a session runs in,
@@ -32,7 +33,7 @@ export function ShownIn({ places, loose, onShown }: { places: Place[]; loose: st
           <button
             type="button"
             className="link small"
-            onClick={() => addToGrid({ kind: "terminal", terminalId: loose }, shownGrid(useGrids.getState())?.id ?? null).shown && onShown()}
+            onClick={() => addToGrid(terminalContent(loose), shownGrid(useGrids.getState())?.id ?? null).shown && onShown()}
           >
             Show it
           </button>

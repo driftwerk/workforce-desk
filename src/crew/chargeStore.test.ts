@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
-import { deskListeners, useDesk } from "../hub/store";
+import { announce, useDesk } from "../hub/store";
 import type { ChargeView, DeskEvent, LineMessage } from "../hub/types";
 import { useLine } from "../line/store";
 import { DESK, S1, msg } from "../line/testing";
@@ -28,7 +28,7 @@ const later = <T,>() => {
   return { promise, settle };
 };
 
-const say = (e: DeskEvent) => deskListeners.forEach((f) => f(e));
+const say = (e: DeskEvent) => announce(e);
 
 beforeEach(() => {
   useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }], roster: [] });

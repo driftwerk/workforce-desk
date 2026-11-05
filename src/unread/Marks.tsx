@@ -13,6 +13,7 @@ import { useChat } from "../chat/store";
 import { useSessionNames } from "../groups/names";
 import { useOverview } from "../overview/store";
 import { unreadRows, type UnreadRow } from "./rows";
+import { keyOf } from "../hub/machines";
 
 /** A row's mark: the number for you, else a dot for something new. */
 export function Marks({ badge }: { badge: Marked }) {
@@ -47,13 +48,22 @@ export const useUnreadDms = () => {
   return useMemo(() => dmsNotHere(pastPoints(counted, points), here), [counted, points, here]);
 };
 
-/** This computer's summary less what's on screen here and what's been read
- *  past what it counted. */
+/** This computer's summary with each machine's sessions in it, by key
+ *  (see `keyOf`): what's unread is summed over the engines. Only sessions
+ *  count from a machine (its rooms, Activity and brief aren't shown). */
+export const withMachines = (local: UnreadSummary | null, machines: Readonly<Record<string, UnreadSummary>>): UnreadSummary | null => {
+  const theirs = Object.entries(machines).flatMap(([m, u]) => u.sessions.map((x) => ({ ...x, id: keyOf(m, x.id) })));
+  return local && theirs.length ? { ...local, sessions: [...local.sessions, ...theirs] } : local;
+};
+
+/** This computer's summary (with the machines' sessions) less what's on
+ *  screen here and what's been read past what it counted. */
 export const useLocalUnread = (): UnreadSummary | null => {
   const local = useUnread((s) => s.local);
+  const machines = useUnread((s) => s.machines);
   const points = useReads((s) => s.local);
   const here = useHere();
-  return useMemo(() => notHere(local, points, here), [local, points, here]);
+  return useMemo(() => notHere(withMachines(local, machines), points, here), [local, machines, points, here]);
 };
 
 /** What every item's badge is read from. */

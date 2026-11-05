@@ -10,10 +10,11 @@ import { isQuestion, terminalAsk } from "../session/pending";
 export const notificationFor = (
   before: SessionState | undefined,
   s: Session,
+  key: string = s.id,
 ): { title: string; body: string } | null => {
   const state = shownState(s);
   if (before === undefined || before === state) return null;
-  const name = sessionName(s.id, s.name, s);
+  const name = sessionName(key, s.name, s);
   if (state === "blocked")
     return {
       title: `${name} needs you`,

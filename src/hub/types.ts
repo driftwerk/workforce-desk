@@ -113,6 +113,9 @@ export interface Asked {
 
 export interface Session {
   id: string;
+  /** The machine it runs on, stamped by Desk as its engine is read (see
+   *  hub/machines.ts); none for this computer's. */
+  machine?: string;
   engine: Engine;
   /** Where it runs and what Desk can do with it; absent from older hubs. */
   view?: View;

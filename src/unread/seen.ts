@@ -7,6 +7,7 @@ import { placeKey, type Place } from "./places";
 import { advance, laterPoint, pointOf, useReads } from "./reads";
 import { useUnread } from "./summary";
 import { release, useWatching, watchOff, watchOn } from "./watching";
+import { LOCAL, splitKey } from "../hub/machines";
 
 // The one rule for read: something is read once it has been on screen for
 // half a second while its window is visible and has focus (a detached
@@ -269,7 +270,11 @@ export function useOnScreen(
  *  while it's on screen, through each change of its state and each turn
  *  its hub counts as unread. */
 export function useSeenSession(session: string | null | undefined, ref: RefObject<HTMLElement | null>, { enabled }: { enabled: boolean }) {
-  const since = useUnread((s) => (session ? s.local?.sessions.find((u) => u.id === session)?.since : undefined));
+  const since = useUnread((s) => {
+    if (!session) return undefined;
+    const { machine, id } = splitKey(session);
+    return (machine === LOCAL ? s.local : s.machines[machine])?.sessions.find((u) => u.id === id)?.since;
+  });
   const state = useDesk((s) => (session ? s.sessions[session]?.state : undefined));
   const updatedAt = useDesk((s) => (session ? s.sessions[session]?.updatedAt : undefined));
   // When it came into the state it's in, as this window heard it.

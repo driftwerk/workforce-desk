@@ -1,6 +1,6 @@
 import type { Need, Place, Room } from "../hub/types";
 import type { Target } from "../shell/navigate";
-import type { OnHub } from "./needs";
+import { sessionKeyOfItem, type OnHub } from "./needs";
 
 const slackUrl = (place: Extract<Place, { kind: "slack" }>): string =>
   `https://slack.com/app_redirect?${new URLSearchParams({ ...(place.team ? { team: place.team } : {}), channel: place.channel })}`;
@@ -11,7 +11,7 @@ const slackUrl = (place: Extract<Place, { kind: "slack" }>): string =>
 export const besideOf = (item: OnHub): Target | null => {
   switch (item.who.kind) {
     case "session":
-      return item.local ? { kind: "session", sessionId: item.who.id } : null;
+      return sessionKeyOfItem(item) ? { kind: "session", sessionId: sessionKeyOfItem(item)! } : null;
     case "agent":
       return { kind: "agent", key: `${item.hubId}/${item.who.id}` };
     // Desk itself (its breaker holding new sessions) opens nowhere.

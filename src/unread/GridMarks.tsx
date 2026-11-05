@@ -2,13 +2,14 @@ import { sessionItem } from "../groups/model";
 import type { Grid } from "../grids/model";
 import { badgeOfGrid, itemBadge } from "./badges";
 import { Marks, useBadgeData } from "./Marks";
+import { sessionKeyIn } from "../grids/engine";
 
 /** A grid row's badge: what's unread in the sessions and DMs its panes show. */
 export function GridMarks({ grid }: { grid: Grid }) {
   const data = useBadgeData();
   const items = grid.panes.flatMap((p) =>
     p.content?.kind === "session"
-      ? [sessionItem(p.content.sessionId)]
+      ? [sessionItem(sessionKeyIn(p.content)!)]
       : p.content?.kind === "agent"
         ? [`agent:${p.content.agent}`]
         : [],

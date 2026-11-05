@@ -6,7 +6,7 @@ import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { useGridDrag } from "./drag";
-import { laidOut, PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Preset, type PresetId, type Splitter } from "./engine";
+import { laidOut, PRESETS, presetOf, splitterKey, splitterRange, splitters, STEPS, type Preset, type PresetId, type Splitter, sessionKeyIn, terminalKeyIn } from "./engine";
 import { GridPane, PaneDragChip, ParkedTray } from "./Pane";
 import { dismissUndo, dragSplitter, filledPane, layOut, newTerminal, renameGrid, toggleFill, undoFor, undoLayout, unfill, useGrids } from "./store";
 import { useAppShortcut } from "../shortcuts/manager";
@@ -68,8 +68,8 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
   for (const p of shown) {
     const c = p.content;
     let s: Session | null | undefined = null;
-    if (c?.kind === "session") s = sessions[c.sessionId];
-    else if (c?.kind === "terminal") s = trackedIn(sessions, c.terminalId);
+    if (c?.kind === "session") s = sessions[sessionKeyIn(c)!];
+    else if (c?.kind === "terminal") s = trackedIn(sessions, terminalKeyIn(c));
     else if (c?.kind === "agent" && conversations[c.agent]?.working) working += 1;
     const state = s && shownState(s);
     if (state === "blocked" || state === "asking") needsYou += 1;

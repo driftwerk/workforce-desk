@@ -1,12 +1,14 @@
 import { useRef, useState } from "react";
-import { useDesk } from "../hub/store";
+import { hubOf } from "../hub/store";
 import { useFocusRequest } from "../shell/focus";
 import { plainError } from "../ui/plainError";
 import { useLine } from "./store";
+import { splitKey } from "../hub/machines";
 
 /** What a question on a session's line offers you to answer with. */
 export interface Asking {
   id: string;
+  /** Its session's key (see `keyOf`): the line is on that session's engine. */
   sessionId: string;
   /** Who asked: the session's name. */
   session: string;
@@ -30,13 +32,14 @@ export function LineAnswer({ asking, focusKey, compact = false }: { asking: Aski
   const field = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(focusKey ?? null, field);
   const send = async (answer: string) => {
-    const hub = useDesk.getState().hub;
+    const { machine } = splitKey(asking.sessionId);
+    const hub = hubOf(machine);
     if (!hub || !answer.trim() || busy) return;
     setBusy(true);
     setProblem(null);
     try {
       const m = await hub.answerLine(asking.id, answer.trim());
-      useLine.getState().heard(m);
+      useLine.getState().heard(m, false, machine);
       setSent(answer.trim());
       setText("");
     } catch (e) {

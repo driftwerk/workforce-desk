@@ -3,7 +3,8 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { trackedIn } from "../grids/terminals";
-import { useDesk } from "../hub/store";
+import { keyOf, LOCAL, sessionKey, type MachineId } from "../hub/machines";
+import { hubOf, useDesk, useHubOf } from "../hub/store";
 import type { DeskSocket } from "../hub/transport";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
@@ -44,18 +45,25 @@ export const reattachPrefix = (rows: number, alternate = false): string =>
 export function Terminal({
   sessionId,
   terminalId,
+  machine = LOCAL,
   autoFocus = true,
 }: {
   sessionId?: string;
   /** A terminal the hub hosts for a grid pane, instead of a session's. */
   terminalId?: string;
+  /** The engine it is on: this computer's when none. */
+  machine?: MachineId;
   autoFocus?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<XTerm | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
-  const hub = useDesk((s) => s.hub);
-  const session = useDesk((s) => sessionId ?? trackedIn(s.sessions, terminalId ?? null)?.id ?? null);
+  const hub = useHubOf(machine);
+  const session = useDesk((s) => {
+    if (sessionId) return keyOf(machine, sessionId);
+    const tracked = trackedIn(s.sessions, terminalId ? keyOf(machine, terminalId) : null);
+    return tracked ? sessionKey(tracked) : null;
+  });
   useFocusRequest(session && `session:${session}`, term);
   const theme = useTheme();
   /** Shown while another viewer is the one typing into this terminal. */
@@ -104,7 +112,7 @@ export function Terminal({
     const attach = () => {
       // The hub as Desk now has it: where to reach it is read again for
       // each socket, so one that moved is found.
-      const current = useDesk.getState().hub ?? hub;
+      const current = hubOf(machine) ?? hub;
       const again = away;
       const s = terminalId ? current.terminalSocket(terminalId) : current.ptySocket(sessionId!);
       ws = s;
@@ -148,7 +156,7 @@ export function Terminal({
     // hub answers again, attach again, unless it no longer has it.
     const reattach = async () => {
       if (gone) return;
-      const current = useDesk.getState().hub ?? hub;
+      const current = hubOf(machine) ?? hub;
       let there: boolean;
       try {
         const id = terminalId ?? sessionId;
@@ -198,7 +206,7 @@ export function Terminal({
       viewerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- theme changes are applied below without reconnecting
-  }, [hub, sessionId, terminalId]);
+  }, [hub, sessionId, terminalId, machine]);
 
   useEffect(() => {
     if (term.current) term.current.options.theme = xtermTheme(theme);

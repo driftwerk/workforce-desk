@@ -5,7 +5,8 @@
 
 import { sessionItem, type ItemKey } from "../groups/model";
 import type { Session } from "../hub/types";
-import type { PaneContent } from "./engine";
+import { sessionKeyIn, terminalKeyIn, type PaneContent } from "./engine";
+import { sessionKey } from "../hub/machines";
 import type { GridsState } from "./store";
 import { trackedIn } from "./terminals";
 
@@ -24,10 +25,10 @@ export interface Place {
  *  one running in a terminal), or an agent. */
 export const itemOf = (sessions: Record<string, Session>, content: PaneContent | null): ItemKey | null => {
   if (!content) return null;
-  if (content.kind === "session") return sessionItem(content.sessionId);
+  if (content.kind === "session") return sessionItem(sessionKeyIn(content)!);
   if (content.kind === "agent") return `agent:${content.agent}`;
-  const tracked = trackedIn(sessions, content.terminalId);
-  return tracked ? sessionItem(tracked.id) : null;
+  const tracked = trackedIn(sessions, terminalKeyIn(content));
+  return tracked ? sessionItem(sessionKey(tracked)) : null;
 };
 
 /** Every pane showing `item`, grid by grid in the sidebar's order, in each

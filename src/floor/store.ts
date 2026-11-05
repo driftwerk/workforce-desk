@@ -15,6 +15,7 @@ import { merged, type Merged } from "./merge";
 import { countsByItem } from "./needs";
 import { nextLocalMidnight, startOfLocalDay } from "./time";
 import { plans, type PlanCard } from "./usage";
+import { keyOf } from "../hub/machines";
 
 /** What Desk knows of one hub's floor. */
 export interface HubFloor {
@@ -315,9 +316,9 @@ export const useMerged = (): Merged => {
 const NOT_WAITING: ReadonlySet<LineAsked> = new Set(["answered", "dismissed", "withdrawn", "lapsed"]);
 const CLOSED: ReadonlySet<LineAsked> = new Set(["answered", "dismissed", "withdrawn"]);
 
-const lineSettled = (n: { id: string; local: boolean }, asked: Readonly<Record<string, LineAsked>>, done: ReadonlySet<LineAsked>): boolean => {
-  if (!n.local || !n.id.startsWith("line:")) return false;
-  const a = asked[n.id.slice("line:".length)];
+const lineSettled = (n: { id: string; local: boolean; machine?: string }, asked: Readonly<Record<string, LineAsked>>, done: ReadonlySet<LineAsked>): boolean => {
+  if (!(n.local || n.machine) || !n.id.startsWith("line:")) return false;
+  const a = asked[keyOf(n.local ? null : n.machine, n.id.slice("line:".length))];
   return !!a && done.has(a);
 };
 

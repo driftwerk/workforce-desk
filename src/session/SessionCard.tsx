@@ -2,7 +2,7 @@ import { RichMarkdown } from "@workforce/rich";
 import { useRef, useState } from "react";
 import { backgroundLine, backgroundOf, lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
-import { useDesk } from "../hub/store";
+import { useDesk, hubFor } from "../hub/store";
 import type { Session } from "../hub/types";
 import { PutInGrid } from "../grids/PutInGrid";
 import { ShownIn } from "../grids/ShownIn";
@@ -27,6 +27,8 @@ import { useLinePanel } from "../line/panel";
 import { ChargeStrip } from "../crew/ChargeBadge";
 import { SessionTicketChip } from "../board/TicketChip";
 import { SubjectHistory } from "../board/History";
+import { keyOf, machineOf, sessionKey } from "../hub/machines";
+import { sessionContent } from "../grids/engine";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -44,23 +46,28 @@ const where = (s: Session): string => {
 };
 
 export function SessionCard({ session }: { session: Session }) {
-  const { hub, fail, open, sessions } = useDesk();
-  const name = useSessionName(session.id, session.name);
+  const { fail, open, sessions } = useDesk();
+  const key = sessionKey(session);
+  const machine = machineOf(session);
+  const name = useSessionName(key, session.name);
   const actions = sessionActions(session);
   const lifecycle = lifecycleActions(session);
   const order = useGrids((s) => s.order);
   const grids = useGrids((s) => s.grids);
-  const places = placesOf({ order, grids }, sessions, sessionItem(session.id));
+  const places = placesOf({ order, grids }, sessions, sessionItem(key));
   // Running in a Desk terminal that no pane shows (nor the session itself),
   // while the hub has it.
-  const ranIn = useTerminals((s) => (session.terminalId && s.byId[session.terminalId]?.live ? session.terminalId : null));
+  const ranIn = useTerminals((s) => {
+    const t = session.terminalId ? keyOf(machine, session.terminalId) : null;
+    return t && s.byId[t]?.live ? t : null;
+  });
   const loose = !places.length && session.live ? ranIn : null;
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
   const [history, setHistory] = useState(false);
   const saveGoal = () => {
     setEditingGoal(false);
-    if (goal !== session.goal) hub?.update(session.id, { goal }).catch(fail);
+    if (goal !== session.goal) hubFor(session)?.update(session.id, { goal }).catch(fail);
   };
   return (
     <SidePanel
@@ -84,7 +91,7 @@ export function SessionCard({ session }: { session: Session }) {
               {a.label}
             </button>
           ))}
-          {!places.length && !loose && <PutInGrid content={{ kind: "session", sessionId: session.id }} label="Put this session in a grid" onShown={() => open(null)} />}
+          {!places.length && !loose && <PutInGrid content={sessionContent(key)} label="Put this session in a grid" onShown={() => open(null)} />}
           {lifecycle.map((a) => (
             <button key={a.label} type="button" className="link" onClick={a.run}>
               {a.label}
@@ -95,7 +102,7 @@ export function SessionCard({ session }: { session: Session }) {
     >
       {(places.length > 0 || loose) && <ShownIn places={places} loose={loose} onShown={() => open(null)} />}
       <div className="session-goal">
-        <SessionTicketChip session={session.id} />
+        <SessionTicketChip session={key} />
         {editingGoal ? (
           <input
             autoFocus
@@ -111,7 +118,7 @@ export function SessionCard({ session }: { session: Session }) {
           </button>
         )}
         {session.view !== "desk" && (
-          <button type="button" className="link small session-line-history" onClick={() => useLinePanel.getState().show(session.id, "history")}>
+          <button type="button" className="link small session-line-history" onClick={() => useLinePanel.getState().show(key, "history")}>
             Messages with Desk…
           </button>
         )}
@@ -119,9 +126,9 @@ export function SessionCard({ session }: { session: Session }) {
           {history ? "Hide history" : "History"}
         </button>
       </div>
-      {history && <SubjectHistory subject={session.id} label={`What ${name} did`} />}
-      <SpendStrip sessionId={session.id} />
-      <BreakerBanner sessionId={session.id} />
+      {history && <SubjectHistory subject={session.id} machine={machine} label={`What ${name} did`} />}
+      <SpendStrip sessionId={key} />
+      <BreakerBanner sessionId={key} />
       <ChargeStrip session={session} />
       {approvalsSwitchable(session) && (
         <label className="session-approvals small">
@@ -144,15 +151,15 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
   // It's read while the card or pane it is in is on screen: the element
   // around it, whether it runs or not.
   const host = useRef<HTMLElement | null>(null);
-  useSeenSession(session.id, host, { enabled: !useOutOfSight() });
+  useSeenSession(sessionKey(session), host, { enabled: !useOutOfSight() });
   const seen = <span hidden ref={(el) => void (host.current = el?.parentElement ?? null)} />;
   return session.live ? (
     <>
       {seen}
       {session.terminalId ? (
-        <Terminal key={session.terminalId} terminalId={session.terminalId} autoFocus={autoFocus} />
+        <Terminal key={session.terminalId} terminalId={session.terminalId} machine={machineOf(session)} autoFocus={autoFocus} />
       ) : (
-        <Terminal key={session.id} sessionId={session.id} autoFocus={autoFocus} />
+        <Terminal key={session.id} sessionId={session.id} machine={machineOf(session)} autoFocus={autoFocus} />
       )}
     </>
   ) : (

@@ -2,7 +2,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
 import type { DeskEvent, Session } from "../hub/types";
-import { deskListeners, useDesk } from "../hub/store";
+import { deskListeners, useDesk, localSessions } from "../hub/store";
 import { resumeLater, takeResume, updating } from "../platform";
 
 /** How often Desk looks for a new version while it runs. */
@@ -98,5 +98,5 @@ export async function resumeAfterUpdate(): Promise<void> {
     if (!pending.size || Date.now() > until) deskListeners.delete(listener);
   };
   deskListeners.add(listener);
-  attempt(Object.values(useDesk.getState().sessions));
+  attempt(Object.values(localSessions(useDesk.getState().sessions)));
 }

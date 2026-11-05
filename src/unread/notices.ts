@@ -1,12 +1,13 @@
 import { useChat } from "../chat/store";
 import type { DeliveryKind } from "../chat/types";
 import { shownState } from "../floor/background";
-import { useDesk } from "../hub/store";
-import type { DeskEvent, Room, RoomMessage, SessionState, Urgency } from "../hub/types";
+import { useDesk, type EngineEvent } from "../hub/store";
+import type { Room, RoomMessage, SessionState, Urgency } from "../hub/types";
 import { notificationFor, notify } from "../shell/notify";
 import type { Place } from "./places";
 import { levelOf, type NotifyLevel } from "./prefs";
 import { laterPoint, pointOf } from "./reads";
+import { keyOf, LOCAL, machineOf } from "../hub/machines";
 
 // One gate for every notification Desk sends: a session, a DM, a room.
 // Each place's level says what may interrupt you; the main window alone
@@ -83,23 +84,26 @@ const delivered = (room: Room | undefined, m: RoomMessage) => {
 /** What each session showed last, to tell a change from a repeat. */
 const shownBefore = new Map<string, SessionState>();
 
-/** The events socket's part: a session that starts needing you or
- *  finishes, and a delivery into one of your rooms. */
-export function noticesFrom(e: DeskEvent): void {
-  if (e.type === "snapshot") for (const s of e.sessions) shownBefore.set(s.id, shownState(s));
+/** An events socket's part: a session that starts needing you or
+ *  finishes, on any engine (by its key, see `keyOf`), and a delivery into
+ *  one of your rooms (this computer's). */
+export function noticesFrom(e: EngineEvent): void {
+  const machine = machineOf(e);
+  if (e.type === "snapshot") for (const s of e.sessions) shownBefore.set(keyOf(machine, s.id), shownState(s));
   if (e.type === "session") {
+    const key = keyOf(machine, e.session.id);
     const state = shownState(e.session);
-    const n = notificationFor(shownBefore.get(e.session.id), e.session);
-    shownBefore.set(e.session.id, state);
+    const n = notificationFor(shownBefore.get(key), e.session, key);
+    shownBefore.set(key, state);
     if (n)
       notifyPlace({
         ...n,
-        place: { kind: "session", session: e.session.id },
+        place: { kind: "session", session: key },
         urgency: state === "blocked" ? "needs" : "forYou",
-        id: `session:${e.session.id}:${state}:${e.session.updatedAt}`,
+        id: `session:${key}:${state}:${e.session.updatedAt}`,
       });
   }
-  if (e.type === "roomMessage" && e.message.delivery) delivered(useDesk.getState().rooms[e.message.roomId], e.message);
+  if (machine === LOCAL && e.type === "roomMessage" && e.message.delivery) delivered(useDesk.getState().rooms[e.message.roomId], e.message);
 }
 
 /** For a test: forget what was sent. */

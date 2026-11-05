@@ -1,19 +1,28 @@
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
 import type { Engine, Who } from "../hub/types";
 import { ENGINES, sessionOf } from "../engines/engines";
+import { keyOf, type MachineId } from "../hub/machines";
 
 /** An agent or session on a hub, and whether that hub is this computer's. */
 export interface OnHub {
   hubId: string;
   local: boolean;
+  /** A machine's engine's (see hub/machines.ts). */
+  machine?: MachineId;
   who: Pick<Who, "kind" | "id">;
 }
+
+/** The key (see `keyOf`) of the session of Desk's an item is about: one of
+ *  this computer's, or of a machine's; null for an agent, or a session on
+ *  another hub. */
+export const sessionKeyOfItem = ({ local, machine, who }: Pick<OnHub, "local" | "machine" | "who">): string | null =>
+  who.kind !== "session" ? null : local ? who.id : machine ? keyOf(machine, who.id) : null;
 
 /** The sidebar item a hub's agent or session is: `session:<id>` for one of
  *  this computer's sessions (another hub's is keyed by its hub, and has no
  *  row), `agent:<hub>/<agent>` for an agent. */
-export const itemKeyOf = ({ hubId, local, who }: OnHub): ItemKey =>
-  who.kind === "session" ? sessionItem(local ? who.id : `${hubId}/${who.id}`) : agentItem({ hubId, id: who.id });
+export const itemKeyOf = ({ hubId, local, machine, who }: OnHub): ItemKey =>
+  who.kind === "session" ? sessionItem(sessionKeyOfItem({ local, machine, who }) ?? `${hubId}/${who.id}`) : agentItem({ hubId, id: who.id });
 
 /** The agent whose turn ran in folder `cwd`. A hub runs an agent's turn on
  *  its Claude Code subscription in a folder of the agent's own:
@@ -61,8 +70,10 @@ export const readableName = (who: Who): string => {
 
 /** What an agent or session is called here: one of this computer's
  *  sessions by the name the person gave it (`names`, by id). */
-export const nameOf = ({ who, local }: { who: Who; local: boolean }, names: Readonly<Record<string, string>>): string =>
-  (who.kind === "session" && local ? names[who.id] : undefined) ?? readableName(who);
+export const nameOf = ({ who, local, machine }: { who: Who; local: boolean; machine?: MachineId }, names: Readonly<Record<string, string>>): string => {
+  const key = sessionKeyOfItem({ local, machine, who });
+  return (key ? names[key] : undefined) ?? readableName(who);
+};
 
 /** How many needs wait on each item: the one count every badge shows. */
 export const countsByItem = (needs: readonly OnHub[]): Map<ItemKey, number> =>

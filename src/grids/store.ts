@@ -29,6 +29,8 @@ import {
   type Side,
   type Splitter,
   type Zone,
+  terminalContent,
+  terminalKeyIn,
 } from "./engine";
 import { gridKey, INDEX_KEY, MAIN_GRID, mainGrid, newId, nextName, paneId, readGrid, readIndex, type Grid, type Placement } from "./model";
 import { GRID_PREFIX, type GridStorage } from "./storage";
@@ -106,9 +108,10 @@ export const setAskingCheck = (f: (panes: readonly Pane[]) => string[]): void =>
   askingIn = f;
 };
 
-/** The Desk terminal content keeps open: a terminal's own, or the one a
- *  session runs in (the hub's sessions know; see terminals.ts). */
-let terminalOf: (c: PaneContent) => string | null = (c) => (c.kind === "terminal" ? c.terminalId : null);
+/** The Desk terminal content keeps open, by key (see `keyOf`): a
+ *  terminal's own, or the one a session runs in (the hub's sessions know;
+ *  see terminals.ts). */
+let terminalOf: (c: PaneContent) => string | null = (c) => terminalKeyIn(c);
 
 export const setTerminalCheck = (f: (c: PaneContent) => string | null): void => {
   terminalOf = f;
@@ -403,10 +406,10 @@ const showsTerminal = (gridId: string, panes: readonly Pane[], id: string, s: Gr
 const keepReplaced = (gridId: string, panes: Pane[], old: PaneContent | null | undefined): Pane[] => {
   const id = old && terminalOf(old);
   if (!old || !id || showsTerminal(gridId, panes, id)) return panes;
-  return [...panes, { id: paneId(), rect: null, content: old.kind === "terminal" ? old : { kind: "terminal", terminalId: id } }];
+  return [...panes, { id: paneId(), rect: null, content: old.kind === "terminal" ? old : terminalContent(id) }];
 };
 
-/** The Desk terminal only pane `pane` keeps open, as it shows a session in
+/** The Desk terminal (by key) only pane `pane` keeps open, as it shows a session in
  *  place of the terminal that session runs in: closing the pane closes it
  *  too, as closing the terminal's own pane would. */
 export const hostedBy = (gridId: string, pane: string, s: GridsState = get()): string | null => {
@@ -542,6 +545,8 @@ export const newTerminalHere = (): void => newTerminal(shownGrid(get())?.id ?? c
 /** A terminal pane's hub id, once the hub has opened it (or opened it again). */
 export const setTerminal = (gridId: string, pane: string, terminalId: string, cwd?: string | null): void =>
   void changePanes(gridId, (panes) =>
-    panes.map((p) => (p.id === pane && p.content?.kind === "terminal" ? { ...p, content: { kind: "terminal", terminalId, cwd: cwd ?? p.content.cwd ?? null } } : p)),
+    panes.map((p) =>
+      p.id === pane && p.content?.kind === "terminal" ? { ...p, content: { ...p.content, terminalId, cwd: cwd ?? p.content.cwd ?? null } } : p,
+    ),
   );
 

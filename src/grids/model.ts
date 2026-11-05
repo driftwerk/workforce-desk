@@ -2,7 +2,7 @@
 // or in a window of its own on a monitor. Kept under `grid.index` (the
 // order) and `grid.<id>` (each grid).
 
-import { blank, type Pane } from "./engine";
+import { blank, storedContent, type Pane } from "./engine";
 
 import type { GridWindowMode } from "../platform";
 
@@ -66,7 +66,13 @@ export const readGrid = (v: unknown): Grid | null => {
           monitor: g.placement.monitor ?? null,
         }
       : { kind: "main" };
-  const panes = g.panes.filter((p): p is Pane => !!p && typeof p === "object" && typeof (p as Pane).id === "string");
+  // A pane stored before machines names none: it is this computer's.
+  const panes = g.panes
+    .filter((p): p is Pane => !!p && typeof p === "object" && typeof (p as Pane).id === "string")
+    .map((p) => {
+      const content = p.content && typeof p.content === "object" ? storedContent(p.content) : p.content;
+      return content === p.content ? p : { ...p, content };
+    });
   return { id: g.id, name: g.name, panes: panes.length ? panes : blank(paneId), placement };
 };
 

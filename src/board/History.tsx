@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { deskListeners, useDesk } from "../hub/store";
-import type { ActivityEvent, DeskEvent } from "../hub/types";
+import { LOCAL, machineOf, type MachineId } from "../hub/machines";
+import { engineListeners, useHubOf, type EngineEvent } from "../hub/store";
+import type { ActivityEvent } from "../hub/types";
 import { ActivityRow } from "../overview/ActivityRail";
 import { plainError } from "../ui/plainError";
 
 /** What a session or an agent did, and had done to it, newest first, as
  *  it happens; each row about a ticket carries its key (as Activity's do). */
-export function SubjectHistory({ subject, label }: { subject: string; label: string }) {
-  const hub = useDesk((s) => s.hub);
+export function SubjectHistory({ subject, label, machine = LOCAL }: { subject: string; label: string; machine?: MachineId }) {
+  const hub = useHubOf(machine);
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -22,16 +23,17 @@ export function SubjectHistory({ subject, label }: { subject: string; label: str
         setMore(p.more);
       })
       .catch((e) => live && setProblem(plainError(e)));
-    const listen = (e: DeskEvent) => {
+    const listen = (e: EngineEvent) => {
+      if (machineOf(e) !== machine) return;
       if (e.type !== "activity" || (e.event.actor.id !== subject && e.event.subject?.id !== subject)) return;
       setEvents((was) => (was && !was.some((x) => x.id === e.event.id) ? [e.event, ...was] : was));
     };
-    deskListeners.add(listen);
+    engineListeners.add(listen);
     return () => {
       live = false;
-      deskListeners.delete(listen);
+      engineListeners.delete(listen);
     };
-  }, [hub, subject]);
+  }, [hub, subject, machine]);
   const older = () => {
     const last = events?.at(-1);
     if (!hub || !last) return;

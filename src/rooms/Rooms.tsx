@@ -8,7 +8,7 @@ import { PromptCard } from "../chat/Approvals";
 import { AgentAccess } from "../computer/AgentAccess";
 import { withHistory } from "../chat/history";
 import { isRunning, useChat } from "../chat/store";
-import { useDesk } from "../hub/store";
+import { useDesk, localSessions } from "../hub/store";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
 import { agentKey, describeAgent, DESK_DM } from "../chat/types";
@@ -112,7 +112,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const manager = useOverview((s) => s.manager);
   // The sessions overseen, counted: what each is doing isn't shown here.
   const trackedOverview = useOverview((s) => (s.overview ? s.overview.items.filter((i) => i.kind === "session").length : null));
-  const trackedSessions = useDesk((s) => Object.values(s.sessions).filter((x) => x.state !== "closed").length);
+  const trackedSessions = useDesk((s) => Object.values(localSessions(s.sessions)).filter((x) => x.state !== "closed").length);
   // Each agent's tab, kept while you visit others (and across launches).
   const tabs = useUi((u) => u.agentTabs);
   const setAgentTab = useUi((u) => u.setAgentTab);

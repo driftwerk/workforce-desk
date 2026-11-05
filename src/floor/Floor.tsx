@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { sortedSessions, useDesk } from "../hub/store";
+import { sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { Session } from "../hub/types";
 import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
@@ -49,7 +49,7 @@ export function Floor({ onNewSession }: { onNewSession: () => void }) {
 
 /** Today's sessions, grouped by what they're doing. */
 export function SessionsFloor() {
-  const sessions = sortedSessions(useDesk((s) => s.sessions));
+  const sessions = sortedSessions(useDesk((s) => localSessions(s.sessions)));
   const blocked = sessions.filter(waitsOnYou).length;
   const seen = new Set<string>();
   const groups = GROUPS.map((g) => {
