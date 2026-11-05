@@ -8,9 +8,10 @@
 //! - [`ssh`] runs it, and says what went wrong in the person's words.
 //! - [`admit`] is the check before a machine is added: the target, the
 //!   person's yes, and a host key already known.
-//! - [`tunnel`] keeps the one forward to the machine's hub open.
+//! - [`tunnel`] keeps the one forward to the machine's hub open, from a
+//!   Unix socket only the person can reach.
 //! - [`link`] reads the machine's hub tokens over SSH, holds them only in
-//!   memory, and hands them on with the forward's loopback address.
+//!   memory, and hands them on to go only through the forward's socket.
 //!
 //! Tested against a fake `ssh` (`src/bin/fake-ssh.rs`) that answers from a
 //! scenario and really forwards a port, as `ssh -L` does.

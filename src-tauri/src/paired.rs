@@ -8,7 +8,7 @@
 //!
 //! A machine's hub (`machine:<id>`) is read from its `desk_machine::Link`,
 //! not from the hubs Desk keeps: its device token as read over SSH and held
-//! in memory, at the forward's address on this computer's loopback. A token
+//! in memory, reached only through the forward's Unix socket here. A token
 //! it turns away is read again over SSH, since Desk Helper there renews it
 //! at every start.
 
@@ -57,6 +57,8 @@ pub struct Reach {
     pub local: bool,
     /// A machine's hub, through the forward to it.
     pub machine: Option<Arc<desk_machine::Link>>,
+    /// For a machine's hub: the forward's Unix socket, the only way there.
+    pub unix: Option<std::path::PathBuf>,
     pub client: reqwest::Client,
     /// For an upload, each bounded by `desk_core::net::upload_timeout`.
     pub uploads: reqwest::Client,
@@ -90,6 +92,8 @@ pub struct Paired {
     loopback: Clients,
     remote: Clients,
     machines: Arc<desk_machine::Machines>,
+    /// Each machine's clients, by the socket they go through.
+    machine_clients: Mutex<std::collections::HashMap<std::path::PathBuf, Arc<Clients>>>,
 }
 
 impl Paired {
@@ -129,6 +133,7 @@ impl Paired {
             loopback: Clients::new(true),
             remote: Clients::new(false),
             machines: Arc::default(),
+            machine_clients: Mutex::default(),
         }
     }
 
@@ -225,6 +230,7 @@ impl Paired {
             token: hub.token.into(),
             local: hub.local,
             machine: None,
+            unix: None,
             client: clients.requests.clone(),
             uploads: clients.uploads.clone(),
         })
@@ -251,14 +257,40 @@ impl Paired {
         })?;
         debug_assert_eq!(hub.id, id);
         let base = desk_core::net::loopback_url(&hub.url).map_err(Failure::Refused)?;
+        let socket = link.socket().to_path_buf();
+        let clients = self.machine_clients(&socket)?;
         Ok(Reach {
             base,
             token: hub.token.into(),
             local: false,
             machine: Some(link),
-            client: self.loopback.requests.clone(),
-            uploads: self.loopback.uploads.clone(),
+            unix: Some(socket),
+            client: clients.requests.clone(),
+            uploads: clients.uploads.clone(),
         })
+    }
+
+    /// The clients that go through the forward's socket `socket`, and
+    /// nowhere else.
+    fn machine_clients(&self, socket: &std::path::Path) -> Result<Arc<Clients>, Failure> {
+        #[cfg(unix)]
+        {
+            let mut kept = self.machine_clients.lock().expect("clients");
+            let clients = kept.entry(socket.to_path_buf()).or_insert_with(|| {
+                Arc::new(Clients {
+                    requests: desk_core::net::machine(socket),
+                    uploads: desk_core::net::machine_uploading(socket),
+                })
+            });
+            Ok(Arc::clone(clients))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (socket, &self.machine_clients);
+            Err(Failure::Refused(
+                "Desk reaches machines from macOS and Linux.".into(),
+            ))
+        }
     }
 
     /// [`reach`] off the async runtime's threads.
@@ -300,11 +332,8 @@ impl Paired {
                 attempt(now).await?.map_err(unreachable)?
             }
             // Through the forward: nothing took the connection (ssh had
-            // ended; it never got anywhere), or ssh took it and closed it
-            // before any answer. Read again over SSH, which rebuilds the
-            // forward. The first is sent again wherever the forward is now;
-            // the second only when the machine's gateway moved, so ssh's
-            // channel had nothing to reach.
+            // ended), or ssh took it and closed it before any answer. Read
+            // again over SSH, which rebuilds the forward.
             Err(e)
                 if reach.machine.is_some()
                     && (e.is_connect() || (e.is_request() && !e.is_timeout())) =>
@@ -314,11 +343,11 @@ impl Paired {
                 let read = Arc::clone(&link);
                 let _ = tauri::async_runtime::spawn_blocking(move || read.read()).await;
                 let now = self.reach_async(id).await?;
-                let again = if e.is_connect() {
-                    now.base != reach.base
-                } else {
-                    link.gateway() != gateway
-                };
+                // A refused connection reached nothing: sent again. One ssh
+                // took and closed is sent again only when it changes
+                // nothing (GET, HEAD) and the gateway moved.
+                let again =
+                    e.is_connect() || (safe_again(build, &reach) && link.gateway() != gateway);
                 if !again {
                     return Err(unreachable(e));
                 }
@@ -334,6 +363,14 @@ impl Paired {
             .await?
             .map_err(unreachable)
     }
+}
+
+/// Whether the request `build` makes changes nothing, and so may be sent
+/// again when it is unknown whether the hub had it: a GET or HEAD.
+fn safe_again(build: &impl Fn(&Reach) -> Option<reqwest::RequestBuilder>, reach: &Reach) -> bool {
+    build(reach)
+        .and_then(|b| b.build().ok())
+        .is_some_and(|r| matches!(*r.method(), reqwest::Method::GET | reqwest::Method::HEAD))
 }
 
 #[cfg(test)]

@@ -200,10 +200,17 @@ pub fn connection_over(
     let out = run(&host.invocation(&helper, &["connection", "--json"]))
         .with_context(|| format!("asking Desk Helper {place} for its hub"))?;
     if !out.status.success() {
-        eyre::bail!(
-            "Desk Helper {place} couldn't say: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        match host {
+            // A machine's words are its own: shown as such, and cleaned.
+            Host::Ssh(m) => eyre::bail!(
+                "Desk Helper {place} couldn't say where its hub is.{}",
+                crate::machine::said_by(&m.name, &stderr)
+                    .map(|s| format!(" {s}"))
+                    .unwrap_or_default()
+            ),
+            _ => eyre::bail!("Desk Helper {place} couldn't say: {}", stderr.trim()),
+        }
     }
     parse_connection(&out.stdout)
 }

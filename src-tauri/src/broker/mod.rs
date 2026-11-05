@@ -7,8 +7,8 @@
 //!
 //! A machine's hub (a computer of the person's own, reached over SSH) is
 //! brokered the same way, by a broker of its own: its tokens are read over
-//! SSH and kept in memory (`desk_machine::Link`), and go only to the
-//! forward to it on this computer's loopback.
+//! SSH and kept in memory (`desk_machine::Link`), and go only through the
+//! forward's Unix socket here.
 //!
 //! Every other hub request the page makes (to the local hub as the person,
 //! with its paired-device token, and to every paired hub) goes through
@@ -72,6 +72,9 @@ pub trait Reached: Send + Sync + 'static {
     fn forget(&self);
     /// The machine's gateway port, as last read.
     fn gateway(&self) -> Option<u16>;
+    /// The forward's Unix socket here, the only way to the machine's hub;
+    /// none for a stand-in reached over loopback TCP in tests.
+    fn socket(&self) -> Option<std::path::PathBuf>;
 }
 
 impl Reached for desk_machine::Link {
@@ -86,6 +89,9 @@ impl Reached for desk_machine::Link {
     }
     fn gateway(&self) -> Option<u16> {
         desk_machine::Link::gateway(self)
+    }
+    fn socket(&self) -> Option<std::path::PathBuf> {
+        Some(desk_machine::Link::socket(self).to_path_buf())
     }
 }
 
@@ -117,6 +123,8 @@ pub struct Broker {
     place: Place,
     /// For a machine's hub: where it is and its tokens, read each time.
     machine: Option<Arc<dyn Reached>>,
+    /// The forward's socket its requests and sockets go through.
+    unix: Option<std::path::PathBuf>,
     local: Kept,
     /// Reading it again when it can't be reached where it was.
     reread: Arc<crate::reread::Reread>,
@@ -168,6 +176,13 @@ impl Broker {
             Arc::new(|| Err(eyre::eyre!("a machine is read through its link"))),
             sockets,
         );
+        // Through the forward's socket and nothing else, whatever host its
+        // address names.
+        #[cfg(unix)]
+        if let Some(socket) = machine.socket() {
+            broker.client = desk_core::net::machine(&socket);
+            broker.unix = Some(socket);
+        }
         broker.machine = Some(machine);
         broker.place = Place {
             hub: name.into(),
@@ -183,6 +198,7 @@ impl Broker {
             source,
             place: Place::local(),
             machine: None,
+            unix: None,
             local: Kept::default(),
             reread: Arc::default(),
             // The token goes to the hub on this computer and nowhere else:
@@ -268,7 +284,9 @@ impl Broker {
             Err(e) if e.is_connect() => {
                 self.reread().await;
                 let now = self.local().await?;
-                if now.base == local.base {
+                // A machine's forward refused it: nothing got it, and the
+                // forward is up again now (or `local` failed).
+                if now.base == local.base && self.machine.is_none() {
                     return Err(unreachable(e));
                 }
                 send(now)?.await.map_err(unreachable)?
@@ -278,7 +296,14 @@ impl Broker {
             // machine's gateway turns out to have moved, so ssh's channel
             // had nothing to reach: the forward ending under a request that
             // got through (a new port here once it is back) is not that.
-            Err(e) if self.machine.is_some() && e.is_request() && !e.is_timeout() => {
+            // Only a request that changes nothing (GET, HEAD) is: anything
+            // else may have been done before the hub moved.
+            Err(e)
+                if self.machine.is_some()
+                    && e.is_request()
+                    && !e.is_timeout()
+                    && matches!(method, Method::GET | Method::HEAD) =>
+            {
                 let machine = self.machine.as_ref().expect("a machine");
                 let gateway = machine.gateway();
                 self.reread().await;
@@ -353,6 +378,7 @@ impl Broker {
             pool: self.place.pool,
             legacy: None,
             unreachable: Some(unreachable),
+            unix: self.unix.clone(),
         };
         self.sockets.dial(owner, page, dial, events)
     }
@@ -898,6 +924,9 @@ mod tests {
         fn gateway(&self) -> Option<u16> {
             Some(*self.gateway.lock().unwrap())
         }
+        fn socket(&self) -> Option<std::path::PathBuf> {
+            None
+        }
     }
 
     fn fake_machine(at: &str) -> Arc<FakeMachine> {
@@ -982,6 +1011,32 @@ mod tests {
             .fetch(
                 "POST",
                 "/api/desk/sessions",
+                Some(("application/json".into(), b"{}".to_vec())),
+            )
+            .await
+            .unwrap_err();
+        assert!(e.contains("couldn't reach devbox"), "{e}");
+        assert_eq!(took.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), seen.recv())
+                .await
+                .is_err(),
+            "not sent again"
+        );
+    }
+
+    /// Even when the gateway moved, a request that changes something isn't
+    /// sent again after ssh took it and closed it: only a GET or HEAD is.
+    #[tokio::test]
+    async fn only_a_request_that_changes_nothing_is_sent_again() {
+        let (dropped, took) = hub_that_drops().await;
+        let (moved, mut seen) = hub(vec![OK_JSON]).await;
+        let machine = fake_machine(&dropped);
+        *machine.next.lock().unwrap() = Some((moved, 4300));
+        let e = machine_broker(&machine)
+            .fetch(
+                "PATCH",
+                "/api/desk/sessions/s1",
                 Some(("application/json".into(), b"{}".to_vec())),
             )
             .await

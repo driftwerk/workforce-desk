@@ -60,6 +60,36 @@ pub fn loopback_blocking() -> reqwest::blocking::Client {
         .expect("an HTTP client")
 }
 
+/// A client for a machine's hub, reached only through the forward's Unix
+/// socket `socket` here (whatever host a URL names): no proxy, no
+/// redirects. With no `read_timeout`, for uploads (see [`uploading`]).
+#[cfg(unix)]
+pub fn through_socket(socket: &std::path::Path, read_timeout: Option<Duration>) -> reqwest::Client {
+    let builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .no_proxy()
+        .unix_socket(socket);
+    match read_timeout {
+        Some(t) => builder.read_timeout(t),
+        None => builder,
+    }
+    .build()
+    .expect("an HTTP client")
+}
+
+/// [`through_socket`] for requests.
+#[cfg(unix)]
+pub fn machine(socket: &std::path::Path) -> reqwest::Client {
+    through_socket(socket, Some(READ_TIMEOUT))
+}
+
+/// [`through_socket`] for uploads.
+#[cfg(unix)]
+pub fn machine_uploading(socket: &std::path::Path) -> reqwest::Client {
+    through_socket(socket, UPLOAD_READ_TIMEOUT)
+}
+
 /// A client for hubs elsewhere: through the system's proxy when it has one
 /// (a corporate network may need it), over https only, no redirects.
 pub fn remote() -> reqwest::Client {

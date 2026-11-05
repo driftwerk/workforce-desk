@@ -48,21 +48,41 @@ pub struct NativeConfirm<R: tauri::Runtime = tauri::Wry>(pub tauri::AppHandle<R>
 
 impl<R: tauri::Runtime> Confirm for NativeConfirm<R> {
     fn pair_with(&self, host: &str) -> bool {
-        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        self.0
-            .dialog()
-            .message(format!(
+        self.ask(
+            "Pair with a new workspace",
+            format!(
                 "Pair Desk with {host}?\n\nOnly pair with a workspace you meant to add. \
                  Once paired, Desk sends it your conversations."
-            ))
-            .title("Pair with a new workspace")
+            ),
+            "Pair",
+        )
+    }
+}
+
+impl<R: tauri::Runtime> NativeConfirm<R> {
+    /// Asks `message`, with Cancel first (the default, what Return and
+    /// Escape choose) and `yes` second: true only when `yes` itself was
+    /// clicked. Any other answer, or none, is a Cancel.
+    fn ask(&self, title: &str, message: String, yes: &str) -> bool {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let answer = self
+            .0
+            .dialog()
+            .message(message)
+            .title(title)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "Pair".into(),
                 "Cancel".into(),
+                yes.into(),
             ))
-            .blocking_show()
+            .blocking_show_with_result();
+        said_yes(&answer, yes)
     }
+}
+
+/// Whether the dialog's answer is the `yes` button, by its label.
+fn said_yes(answer: &tauri_plugin_dialog::MessageDialogResult, yes: &str) -> bool {
+    matches!(answer, tauri_plugin_dialog::MessageDialogResult::Custom(s) if s == yes)
 }
 
 /// The question before Desk adds a machine (`desk_machine::admit`), as the
@@ -70,17 +90,7 @@ impl<R: tauri::Runtime> Confirm for NativeConfirm<R> {
 /// it.
 impl<R: tauri::Runtime> desk_machine::admit::Confirm for NativeConfirm<R> {
     fn run_on(&self, question: &desk_machine::admit::Question) -> bool {
-        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        self.0
-            .dialog()
-            .message(question.text())
-            .title("Add a machine")
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Add".into(),
-                "Cancel".into(),
-            ))
-            .blocking_show()
+        self.ask("Add a machine", question.text(), "Add Machine")
     }
 }
 
@@ -233,6 +243,27 @@ impl PairGate {
 
 #[cfg(test)]
 pub mod tests {
+    use tauri_plugin_dialog::MessageDialogResult;
+
+    /// Only the yes button itself is a yes: Cancel (first, the default),
+    /// the window closed, or any other answer is not.
+    #[test]
+    fn only_the_yes_button_is_a_yes() {
+        assert!(super::said_yes(
+            &MessageDialogResult::Custom("Pair".into()),
+            "Pair"
+        ));
+        for no in [
+            MessageDialogResult::Custom("Cancel".into()),
+            MessageDialogResult::Ok,
+            MessageDialogResult::Yes,
+            MessageDialogResult::Cancel,
+            MessageDialogResult::Custom("pair".into()),
+        ] {
+            assert!(!super::said_yes(&no, "Pair"), "{no:?}");
+        }
+    }
+
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

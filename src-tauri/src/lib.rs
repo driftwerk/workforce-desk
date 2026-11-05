@@ -742,7 +742,10 @@ pub fn run() {
             let sockets = Arc::new(broker::socket::Sockets::default());
             // The person's own machines, reached over SSH (none until one
             // is added).
-            let machines = Arc::new(desk_machine::Machines::default());
+            let machines = Arc::new(desk_machine::Machines::new(
+                desk_machine::SshExe::system(),
+                &paths.root.join("machines"),
+            ));
             let paired = Arc::new(paired::Paired::new(
                 paths.clone(),
                 backend.clone(),

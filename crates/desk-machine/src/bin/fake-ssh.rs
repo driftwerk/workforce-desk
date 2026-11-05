@@ -10,13 +10,18 @@
 //!   (an unknown host key, a locked key);
 //! - `commands`: `[{contains, stdout, stderr, code}]`, the first whose
 //!   `contains` is in the command line answering it;
-//! - for `-L`, a real forward: it binds the port here (exiting 255 as
-//!   `ExitOnForwardFailure` does when it can't), says it listens as
-//!   `ssh -v` does, and pipes each connection to the port on this computer
-//!   it names, closing one it can't reach as ssh does.
+//! - for `-L <socket>:127.0.0.1:<port>`, a real forward: it binds the Unix
+//!   socket here (`0600`, removing one already there, as
+//!   `StreamLocalBindUnlink` does; exiting 255 as `ExitOnForwardFailure`
+//!   does when it can't), and pipes each connection to the port on this
+//!   computer it names, closing one it can't reach as ssh does;
+//! - `banner`: printed on its error output first, as a machine's banner is
+//!   (one may claim anything);
+//! - `listen: false`: a forward that never binds, only says things.
 
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use std::net::TcpStream;
 
 use serde::Deserialize;
 
@@ -33,6 +38,8 @@ struct Host {
     settings: String,
     refuse: Option<Said>,
     commands: Vec<Command>,
+    banner: String,
+    listen: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -84,10 +91,16 @@ fn main() {
         print!("{}", host.settings);
         std::process::exit(0);
     }
+    eprint!("{}", host.banner);
     if let Some(refuse) = &host.refuse {
         fail(&refuse.stderr, refuse.code);
     }
     if let Some(i) = options.iter().position(|o| o == "-L") {
+        if host.listen == Some(false) {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
         forward(&options[i + 1]);
     }
     let line = rest[1..].join(" ");
@@ -104,24 +117,24 @@ fn fail(said: &str, code: i32) -> ! {
     std::process::exit(code);
 }
 
-/// `-L 127.0.0.1:<here>:127.0.0.1:<there>`, for real.
+/// `-L <socket>:127.0.0.1:<there>`, for real.
+#[cfg(unix)]
 fn forward(spec: &str) -> ! {
-    let parts: Vec<&str> = spec.split(':').collect();
-    let [bind, here, to, there] = parts.as_slice() else {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixListener;
+    let mut parts = spec.rsplitn(3, ':');
+    let (Some(there), Some(to), Some(socket)) = (parts.next(), parts.next(), parts.next()) else {
         fail(&format!("Bad local forwarding specification '{spec}'"), 255);
     };
-    eprintln!(
-        "debug1: Local connections to {bind}:{here} forwarded to remote address {to}:{there}"
-    );
-    eprintln!("debug1: Local forwarding listening on {bind} port {here}.");
-    let listener = match TcpListener::bind(format!("{bind}:{here}")) {
+    let _ = std::fs::remove_file(socket);
+    let listener = match UnixListener::bind(socket) {
         Ok(l) => l,
-        Err(_) => {
-            eprintln!("bind [{bind}]:{here}: Address already in use");
+        Err(e) => {
+            eprintln!("unix_listener: cannot bind to path {socket}: {e}");
             fail("Could not request local forwarding.", 255);
         }
     };
-    eprintln!("debug1: channel 0: new port-listener [port listener] (inactive timeout: 0)");
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600)).expect("mode");
     let there = format!("{to}:{there}");
     for client in listener.incoming() {
         let Ok(client) = client else { continue };
@@ -135,7 +148,13 @@ fn forward(spec: &str) -> ! {
     std::process::exit(0);
 }
 
-fn pipe(a: TcpStream, b: TcpStream) {
+#[cfg(not(unix))]
+fn forward(_: &str) -> ! {
+    fail("fake ssh: forwards need Unix sockets", 255);
+}
+
+#[cfg(unix)]
+fn pipe(a: std::os::unix::net::UnixStream, b: TcpStream) {
     let (mut a2, mut b2) = (a.try_clone().expect("a"), b.try_clone().expect("b"));
     let (mut a, mut b) = (a, b);
     let up = std::thread::spawn(move || {

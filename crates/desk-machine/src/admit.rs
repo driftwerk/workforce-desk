@@ -6,9 +6,11 @@
 //!    destination, never an option (`-oProxyCommand=…`), and every `ssh`
 //!    Desk runs puts `--` before it.
 //! 2. The person says yes, natively (outside the page, where script can't
-//!    click it), to a question naming the machine and the account things
-//!    will run as there. One question at a time, and after a Cancel none
-//!    for a while, doubling with each Cancel in a row, as pairing asks.
+//!    click it), to a question naming the machine, with its exact SSH
+//!    address on a line of its own; Cancel is the default. One question at
+//!    a time, and after a Cancel none for a while, doubling with each
+//!    Cancel in a row, as pairing asks. Before the yes nothing runs, not
+//!    even `ssh -G` (a config's `Match exec` runs commands).
 //! 3. The person's own `ssh` must already reach it without a prompt, its
 //!    host key already in `known_hosts` and unchanged. Desk never accepts
 //!    a key itself.
@@ -43,26 +45,14 @@ pub trait Confirm: Send + Sync + 'static {
 pub struct Question {
     pub name: String,
     pub target: String,
-    /// The account things will run as there, as their SSH config says;
-    /// none when it doesn't say (ssh then uses their name on this Mac).
-    pub user: Option<String>,
-    /// How ssh gets there when not directly (`ProxyJump bastion`).
-    pub via: Option<String>,
 }
 
 impl Question {
-    /// The question as the dialog words it.
+    /// The question as the dialog words it: the exact target alone on its
+    /// line, so a name can't stand in for where Desk will connect.
     pub fn text(&self) -> String {
-        let account = match &self.user {
-            Some(u) => format!("as {u}"),
-            None => "as your account".to_string(),
-        };
-        let via = match &self.via {
-            Some(v) => format!(", through {v}"),
-            None => String::new(),
-        };
         format!(
-            "Let Desk run sessions on {} ({}{via})?\n\nDesk installs its engine there. Anything you start runs {account} on that machine, with full access to it.",
+            "Let Desk run sessions on {}?\n\n{}\n\nDesk installs its engine there. Anything you start runs on that machine as the account your SSH settings use for it, with full access to it.",
             self.name, self.target
         )
     }
@@ -172,23 +162,27 @@ pub fn admit(
 ) -> Result<(Machine, Settings), String> {
     let target = Target::new(target).map_err(|e| e.to_string())?;
     let name = name.trim();
-    if name.is_empty() || name.chars().any(char::is_control) || name.len() > 64 {
+    if name.is_empty() || name.chars().count() > 64 {
         return Err("Give the machine a short name.".into());
+    }
+    // Shown as it says: nothing that could make it read as something else.
+    if !desk_core::machine::plain(name) {
+        return Err(
+            "A machine's name can only have letters, numbers, spaces and punctuation.".into(),
+        );
     }
     let machine = Machine {
         id,
         name: name.to_string(),
         target,
     };
-    // Read without connecting, for the question and what Desk won't carry.
-    let settings = ssh::settings(ssh, &machine)?;
-    ssh::no_forwards(&machine, &settings)?;
     gate.ask(&Question {
         name: machine.name.clone(),
         target: machine.target.to_string(),
-        user: settings.user.clone(),
-        via: settings.via.clone(),
     })?;
+    // Only now: reading the config can run what it says (`Match exec`).
+    let settings = ssh::settings(ssh, &machine)?;
+    ssh::no_forwards(&machine, &settings)?;
     known_host(ssh, &machine)?;
     Ok((machine, settings))
 }
@@ -214,8 +208,6 @@ mod tests {
         let q = Question {
             name: "devbox".into(),
             target: "devbox".into(),
-            user: None,
-            via: None,
         };
         assert!(gate.ask(&q).unwrap_err().contains("cancelled"));
         assert!(gate.ask(&q).unwrap_err().contains("Try again"));
@@ -223,20 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn the_question_names_the_machine_and_the_account() {
+    fn the_question_shows_the_exact_target_on_its_own_line() {
         let q = Question {
             name: "prod-api".into(),
-            target: "prod-api".into(),
-            user: Some("ec2-user".into()),
-            via: Some("bastion".into()),
+            target: "ec2-user@prod-api".into(),
         };
         let text = q.text();
-        assert!(
-            text.contains("prod-api (prod-api, through bastion)"),
-            "{text}"
-        );
-        assert!(text.contains("runs as ec2-user"), "{text}");
-        let q = Question { user: None, ..q };
-        assert!(q.text().contains("as your account"));
+        assert!(text.lines().any(|l| l == "ec2-user@prod-api"), "{text}");
+        assert!(text.starts_with("Let Desk run sessions on prod-api?"));
     }
 }

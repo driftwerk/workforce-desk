@@ -1,21 +1,25 @@
-//! The one forward to a machine's hub: `ssh -N -L` from a free port on this
-//! computer's loopback to the gateway on the machine's loopback, kept open
-//! by a supervisor thread. Everything Desk sends the machine goes through
-//! it, so the hub's tokens only ever go to `127.0.0.1` here, and on from
-//! there only inside SSH.
+//! The one forward to a machine's hub: `ssh -N -L` from a Unix socket on
+//! this computer to the gateway on the machine's loopback, kept open by a
+//! supervisor thread. No TCP port is opened here: the socket is in a folder
+//! only the person can open (`0700`, theirs), the socket itself theirs
+//! alone (`0600`), and only Desk's own native side connects to it. So the
+//! hub's tokens go only into this socket, and on from there only inside
+//! SSH.
 //!
-//! - The forward is up only once ssh has said it is listening (`-v`'s
-//!   "[port listener]" line, which ssh prints only after its own bind
-//!   worked) and is still running: a port another program took first makes
-//!   ssh exit (`ExitOnForwardFailure`), and is never taken for the forward.
-//!   An ssh that never says so is never taken as up either.
-//! - When ssh ends (the network dropped, the Mac slept), it is started
+//! - The forward is up once the socket is there, is a socket, belongs to
+//!   the person with no access for anyone else, takes a connection, and ssh
+//!   is still running. Nothing ssh or the machine prints decides it.
+//! - When ssh ends (the network dropped, the Mac slept), the forward is
+//!   down at once (its error output closing says so), and it is started
 //!   again, backing off from 1 s to 30 s.
 //! - When the machine's gateway moves to another port, the forward is
-//!   rebuilt at once, on a new port here: whatever kept the old address
-//!   fails to reach it, reads again, and finds the new one.
+//!   rebuilt at once on the same socket.
+//! - ssh runs in a process group of its own, so stopping it stops a
+//!   `ProxyCommand` it started too; on Linux it ends if Desk does, and a
+//!   forward a Desk that ended left behind is stopped at the next start.
 
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
@@ -29,27 +33,20 @@ use crate::ssh::{self, SshExe};
 pub const READY_WITHIN: Duration = Duration::from_secs(30);
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
-#[cfg(unix)]
 /// How long ssh has to end after it is asked to (it ends a `ProxyCommand`
 /// it started on the way out) before it is killed.
+#[cfg(unix)]
 const STOP_WAIT: Duration = Duration::from_secs(2);
-/// What `ssh -v` prints once a forward's listener is bound and listening.
-const LISTENING: &str = "[port listener]";
-
-/// The forward, while it is up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Up {
-    /// The machine's gateway port, on its loopback.
-    pub box_port: u16,
-    /// Where it is reached here, on `127.0.0.1`.
-    pub mac_port: u16,
-}
 
 #[derive(Default)]
 struct State {
     /// The machine's gateway port the forward should reach.
     want: Option<u16>,
-    up: Option<Up>,
+    /// The gateway port the forward reaches while it is up, and which start
+    /// of ssh holds it.
+    up: Option<(u16, u64)>,
+    /// Each start of ssh, counted.
+    starts: u64,
     /// Starts that failed, and why the last one did.
     failures: u64,
     problem: Option<String>,
@@ -62,17 +59,23 @@ struct State {
 struct Shared {
     ssh: SshExe,
     machine: Machine,
+    /// The forward's socket here.
+    socket: PathBuf,
     state: Mutex<State>,
     changed: Condvar,
     ready_within: Duration,
     backoff: (Duration, Duration),
-    /// The port the next start takes instead of a free one: for the tests.
-    first_port: Mutex<Option<u16>>,
 }
 
 impl Shared {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Where the running ssh's process id is kept, to stop one a Desk that
+    /// ended left behind.
+    fn pid_file(&self) -> PathBuf {
+        self.socket.with_extension("pid")
     }
 }
 
@@ -81,13 +84,23 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    pub fn new(ssh: SshExe, machine: Machine) -> Self {
-        Self::with_timing(ssh, machine, READY_WITHIN, FIRST_BACKOFF, MAX_BACKOFF)
+    /// The forward to `machine` at `socket`, which must be in a folder only
+    /// the person can open (see `link::socket_dir`).
+    pub fn new(ssh: SshExe, machine: Machine, socket: PathBuf) -> Self {
+        Self::with_timing(
+            ssh,
+            machine,
+            socket,
+            READY_WITHIN,
+            FIRST_BACKOFF,
+            MAX_BACKOFF,
+        )
     }
 
     pub fn with_timing(
         ssh: SshExe,
         machine: Machine,
+        socket: PathBuf,
         ready_within: Duration,
         first_backoff: Duration,
         max_backoff: Duration,
@@ -96,29 +109,23 @@ impl Tunnel {
             shared: Arc::new(Shared {
                 ssh,
                 machine,
+                socket,
                 state: Mutex::default(),
                 changed: Condvar::new(),
                 ready_within,
                 backoff: (first_backoff, max_backoff),
-                first_port: Mutex::default(),
             }),
         }
     }
 
-    /// Has the next start take `port` here rather than a free one, as if
-    /// something took it between Desk choosing it and ssh binding it.
-    #[doc(hidden)]
-    pub fn start_next_on(&self, port: u16) {
-        *self
-            .shared
-            .first_port
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(port);
+    /// The forward's socket here.
+    pub fn socket(&self) -> &Path {
+        &self.shared.socket
     }
 
-    /// The forward, while it is up.
-    pub fn up(&self) -> Option<Up> {
-        self.shared.lock().up
+    /// The machine's gateway port the forward reaches, while it is up.
+    pub fn up(&self) -> Option<u16> {
+        self.shared.lock().up.map(|(port, _)| port)
     }
 
     /// Why it last failed to start, while it isn't up.
@@ -127,14 +134,13 @@ impl Tunnel {
         state.up.is_none().then(|| state.problem.clone()).flatten()
     }
 
-    /// The port here that reaches the machine's gateway at `box_port`,
-    /// once the forward is up (rebuilt if it reached another port);
-    /// blocking, up to `wait`.
-    pub fn ensure(&self, box_port: u16, wait: Duration) -> Result<u16, String> {
+    /// Waits for the forward to the machine's gateway at `box_port` to be
+    /// up (rebuilt if it reached another port); blocking, up to `wait`.
+    pub fn ensure(&self, box_port: u16, wait: Duration) -> Result<(), String> {
         let shared = &self.shared;
         let mut state = shared.lock();
         state.want = Some(box_port);
-        if state.up.is_none_or(|u| u.box_port != box_port) {
+        if state.up.is_none_or(|(p, _)| p != box_port) {
             state.kick = true;
         }
         if !state.running {
@@ -149,8 +155,8 @@ impl Tunnel {
         let failures = state.failures;
         let deadline = Instant::now() + wait;
         loop {
-            if let Some(up) = state.up.filter(|u| u.box_port == box_port) {
-                return Ok(up.mac_port);
+            if state.up.is_some_and(|(p, _)| p == box_port) {
+                return Ok(());
             }
             if state.failures > failures {
                 return Err(state.problem.clone().unwrap_or_else(|| {
@@ -181,10 +187,9 @@ impl Drop for Tunnel {
     }
 }
 
-fn supervise(shared: &Shared) {
+fn supervise(shared: &Arc<Shared>) {
     let (first, max) = shared.backoff;
     let mut backoff = first;
-    let mut last_mac = None;
     loop {
         let box_port = {
             let mut state = shared.lock();
@@ -201,7 +206,9 @@ fn supervise(shared: &Shared) {
             state.want.expect("wanted")
         };
         let started = Instant::now();
-        let outcome = hold(shared, box_port, &mut last_mac);
+        let outcome = hold(shared, box_port);
+        let _ = std::fs::remove_file(&shared.socket);
+        let _ = std::fs::remove_file(shared.pid_file());
         let mut state = shared.lock();
         state.up = None;
         if let Err(why) = outcome {
@@ -241,48 +248,85 @@ fn supervise(shared: &Shared) {
     shared.lock().running = false;
 }
 
-/// A free port on this computer's loopback, not `avoid`: ssh binds it
-/// itself, and fails (ending) if something took it meanwhile.
-fn free_port(avoid: Option<u16>) -> std::io::Result<u16> {
-    loop {
-        let port = std::net::TcpListener::bind("127.0.0.1:0")?
-            .local_addr()?
-            .port();
-        if Some(port) != avoid {
-            return Ok(port);
+/// Starts `invocation` in a process group of its own (so stopping it stops
+/// what it started), ending with Desk on Linux.
+fn spawn(shared: &Shared, invocation: &desk_core::host::Invocation) -> std::io::Result<Child> {
+    let mut command = shared.ssh.command(invocation);
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: only async-signal-safe calls between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setpgid(0, 0);
+                #[cfg(target_os = "linux")]
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
         }
     }
+    command.spawn()
 }
 
-/// Asks `child` to end (ssh ends its `ProxyCommand` on the way out), then
-/// makes sure it has.
+/// Asks `child` and its process group to end (ssh ends its `ProxyCommand`
+/// on the way out), then makes sure they have.
 fn stop(child: &mut Child) {
     #[cfg(unix)]
     {
-        let _ = desk_core::process::terminate(child.id());
+        let group = child.id() as libc::pid_t;
+        // SAFETY: kill has no memory preconditions.
+        unsafe { libc::kill(-group, libc::SIGTERM) };
         let until = Instant::now() + STOP_WAIT;
         while Instant::now() < until {
             if matches!(child.try_wait(), Ok(Some(_))) {
+                unsafe { libc::kill(-group, libc::SIGKILL) };
                 return;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+        unsafe { libc::kill(-group, libc::SIGKILL) };
     }
     let _ = child.kill();
     let _ = child.wait();
 }
 
-/// Keeps what ssh said that wasn't its debug chatter (the last of it, to
-/// say why it failed); whether it said it is listening.
-fn hear(said: &mut Vec<String>, line: String) -> bool {
-    let listening = line.contains(LISTENING);
-    if !line.starts_with("debug") {
-        said.push(line);
-        if said.len() > 40 {
-            said.remove(0);
-        }
+/// Stops a forward to this socket a Desk that ended left running.
+fn stop_left_behind(shared: &Shared) {
+    #[cfg(unix)]
+    if let Some(pid) = std::fs::read_to_string(shared.pid_file())
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        && desk_core::process::args_of(pid)
+            .is_some_and(|args| args.contains(&*shared.socket.to_string_lossy()))
+    {
+        tracing::info!(machine = %shared.machine.name, pid, "stopping a forward left behind");
+        // SAFETY: kill has no memory preconditions.
+        unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGTERM) };
+        let _ = desk_core::process::terminate(pid);
     }
-    listening
+    let _ = std::fs::remove_file(shared.pid_file());
+}
+
+/// Whether the forward's socket is ready: a socket, the person's, open to
+/// no one else, taking a connection.
+#[cfg(unix)]
+fn ready(socket: &Path) -> bool {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let Ok(meta) = std::fs::symlink_metadata(socket) else {
+        return false;
+    };
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    meta.file_type().is_socket()
+        && meta.uid() == me
+        && meta.mode() & 0o077 == 0
+        && std::os::unix::net::UnixStream::connect(socket).is_ok()
+}
+
+#[cfg(not(unix))]
+fn ready(_: &Path) -> bool {
+    false
 }
 
 /// Whether the supervisor should stop holding the forward to `box_port`.
@@ -291,62 +335,65 @@ fn unwanted(shared: &Shared, box_port: u16) -> bool {
     state.stopping || state.want != Some(box_port)
 }
 
+/// Keeps the last of what ssh said, to say why it failed.
+fn hear(said: &mut Vec<String>, line: String) {
+    said.push(line);
+    if said.len() > 40 {
+        said.remove(0);
+    }
+}
+
 /// Starts the forward to `box_port` and holds it while it runs and is
 /// wanted: an error when it never came up.
-fn hold(shared: &Shared, box_port: u16, last_mac: &mut Option<u16>) -> Result<(), String> {
+fn hold(shared: &Arc<Shared>, box_port: u16) -> Result<(), String> {
     let machine = &shared.machine;
+    if cfg!(not(unix)) {
+        return Err("Desk reaches machines from macOS and Linux.".into());
+    }
     // The person's config is read each time: a forward it sets would be
     // carried by this always-open connection too.
     let settings = ssh::settings(&shared.ssh, machine)?;
     ssh::no_forwards(machine, &settings)?;
-    let chosen = shared
-        .first_port
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let mac_port = match chosen {
-        Some(port) => port,
-        None => free_port(*last_mac).map_err(|e| e.to_string())?,
-    };
-    *last_mac = Some(mac_port);
-    let mut invocation = machine.forward(mac_port, box_port);
-    invocation.args.insert(0, "-v".into());
-    let mut child = shared
-        .ssh
-        .command(&invocation)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
+    stop_left_behind(shared);
+    let _ = std::fs::remove_file(&shared.socket);
+    let mut child = spawn(shared, &machine.forward(&shared.socket, box_port))
         .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+    let _ = std::fs::write(shared.pid_file(), child.id().to_string());
+    let start = {
+        let mut state = shared.lock();
+        state.starts += 1;
+        state.starts
+    };
+    // What ssh says; when it stops saying anything, it has ended, and the
+    // forward is down at once, not at the next look.
     let (lines_tx, lines) = mpsc::channel::<String>();
     let stderr = child.stderr.take().expect("piped");
+    let ended = Arc::clone(shared);
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if lines_tx.send(line).is_err() {
-                break;
-            }
+            let _ = lines_tx.send(line);
+        }
+        let mut state = ended.lock();
+        if state.up.is_some_and(|(_, s)| s == start) {
+            state.up = None;
+            ended.changed.notify_all();
         }
     });
     let mut said: Vec<String> = Vec::new();
     let problem = |said: &[String]| ssh::problem(machine, said.join("\n").as_bytes());
-    // Up once ssh says it listens, and is still running.
     let deadline = Instant::now() + shared.ready_within;
-    let mut listening = false;
-    while !listening {
-        match lines.recv_timeout(Duration::from_millis(100)) {
-            Ok(line) => listening = hear(&mut said, line),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let _ = child.wait();
-                return Err(problem(&said));
-            }
+    loop {
+        while let Ok(line) = lines.try_recv() {
+            hear(&mut said, line);
         }
         if let Ok(Some(_)) = child.try_wait() {
-            // What it said last, to say why.
             while let Ok(line) = lines.recv_timeout(Duration::from_millis(200)) {
                 hear(&mut said, line);
             }
             return Err(problem(&said));
+        }
+        if ready(&shared.socket) {
+            break;
         }
         if unwanted(shared, box_port) {
             stop(&mut child);
@@ -359,21 +406,20 @@ fn hold(shared: &Shared, box_port: u16, last_mac: &mut Option<u16>) -> Result<()
                 machine.name
             ));
         }
-    }
-    // A line just after it may still be its bind failing.
-    while let Ok(line) = lines.recv_timeout(Duration::from_millis(150)) {
-        hear(&mut said, line);
-    }
-    if let Ok(Some(_)) = child.try_wait() {
-        return Err(problem(&said));
+        std::thread::sleep(Duration::from_millis(50));
     }
     {
         let mut state = shared.lock();
-        state.up = Some(Up { box_port, mac_port });
+        // Still running now: up.
+        if !matches!(child.try_wait(), Ok(None)) {
+            drop(state);
+            return Err(problem(&said));
+        }
+        state.up = Some((box_port, start));
         state.problem = None;
         shared.changed.notify_all();
     }
-    tracing::info!(machine = %machine.name, mac_port, box_port, "the forward is up");
+    tracing::info!(machine = %machine.name, box_port, "the forward is up");
     loop {
         {
             let state = shared.lock();
@@ -388,12 +434,13 @@ fn hold(shared: &Shared, box_port: u16, last_mac: &mut Option<u16>) -> Result<()
                 return Ok(());
             }
         }
-        // Drained, so ssh never blocks on a full pipe.
         while let Ok(line) = lines.try_recv() {
             hear(&mut said, line);
         }
         if let Ok(Some(status)) = child.try_wait() {
-            tracing::info!(machine = %machine.name, %status, said = %said.last().map(String::as_str).unwrap_or_default(), "the forward ended");
+            tracing::info!(machine = %machine.name, %status, "the forward ended");
+            // Whatever it started goes with it.
+            stop(&mut child);
             return Ok(());
         }
     }

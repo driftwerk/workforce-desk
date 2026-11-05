@@ -25,13 +25,19 @@ pub const MAX_TARGET: usize = 255;
 /// the command line is read first):
 /// - no terminal, no X11 and no agent forwarding: sessions outlive the
 ///   connection, and the box would hold the Mac's keys meanwhile;
-/// - never a prompt (a passphrase key must be in the agent), and only a
-///   host already in `known_hosts`, its key unchanged: Desk never accepts
-///   or learns a key itself;
+/// - never a prompt (a passphrase key must be in the agent), and the
+///   machine itself only when it is already in `known_hosts`, its key
+///   unchanged: Desk never accepts or learns a key itself. The machine's
+///   key is checked end to end even through a jump host; a `ProxyJump`
+///   host's or a `ProxyCommand`'s own connection is made by the person's
+///   config as it is in a terminal, and these options don't reach it;
 /// - its own connection, never a shared one (`ControlMaster`), whose owner
-///   would carry Desk's forward under its own settings, or fork into the
-///   background (`ControlPersist`) and look to Desk as if it had ended;
+///   would carry Desk's forward under its own settings; never forking into
+///   the background (`ForkAfterAuthentication`, `ControlPersist`), which
+///   would look to Desk as if it had ended and outlive it;
 /// - no local command and no tunnel device;
+/// - errors said, whatever log level the config asks for (a host key
+///   refused is said at `ERROR`), and nothing chattier;
 /// - a dead connection noticed within 45 seconds.
 const ALWAYS: &[&str] = &[
     "-T",
@@ -48,6 +54,10 @@ const ALWAYS: &[&str] = &[
     "-o",
     "ControlPath=none",
     "-o",
+    "ForkAfterAuthentication=no",
+    "-o",
+    "LogLevel=ERROR",
+    "-o",
     "PermitLocalCommand=no",
     "-o",
     "Tunnel=no",
@@ -63,7 +73,14 @@ const ALWAYS: &[&str] = &[
 /// sets, and the command Desk gives rather than one from the config.
 /// (`ClearAllForwardings` also clears forwards given on the command line,
 /// so the forward itself can't take it; see [`Machine::forward`].)
-const COMMAND: &[&str] = &["-o", "ClearAllForwardings=yes", "-o", "RemoteCommand=none"];
+const COMMAND: &[&str] = &[
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "RemoteCommand=none",
+    "-o",
+    "SessionType=default",
+];
 
 /// The forwards a person's SSH config can set for a host, as `ssh -G`
 /// prints them. Desk's forward runs all the time, so it won't carry any.
@@ -264,21 +281,87 @@ impl Machine {
         self.ssh(&[&["-G"], ALWAYS], None)
     }
 
-    /// The forward from `mac_port` on this computer's loopback to the
-    /// machine's gateway at `box_port` on its loopback. It can't clear the
-    /// person's config's forwards (`ClearAllForwardings` would clear this
-    /// one too), so Desk reads [`Machine::settings`] for any first.
-    pub fn forward(&self, mac_port: u16, box_port: u16) -> Invocation {
-        let spec = format!("127.0.0.1:{mac_port}:127.0.0.1:{box_port}");
+    /// The forward from the Unix socket `socket` on this computer (in a
+    /// folder only the person can open, the socket itself theirs alone) to
+    /// the machine's gateway at `box_port` on its loopback. No TCP port is
+    /// opened here at all. It can't clear the person's config's forwards
+    /// (`ClearAllForwardings` would clear this one too), so Desk reads
+    /// [`Machine::settings`] for any first.
+    pub fn forward(&self, socket: &std::path::Path, box_port: u16) -> Invocation {
+        let spec = format!("{}:127.0.0.1:{box_port}", socket.display());
         self.ssh(
             &[
                 &["-N"],
                 ALWAYS,
-                &["-o", "ExitOnForwardFailure=yes", "-L", &spec],
+                &[
+                    "-o",
+                    "ExitOnForwardFailure=yes",
+                    "-o",
+                    "StreamLocalBindUnlink=yes",
+                    "-o",
+                    "StreamLocalBindMask=0177",
+                    "-L",
+                    &spec,
+                ],
             ],
             None,
         )
     }
+}
+
+/// The most of what a machine said that Desk shows.
+pub const MAX_SAID: usize = 200;
+
+/// Whether `c` is invisible formatting rather than text: Unicode's format
+/// characters (bidi embeddings, overrides and isolates, zero-width ones,
+/// the byte order mark, tags) and its line and paragraph separators. Text
+/// with them can show differently from what it says (`evil` reading as
+/// `live`).
+pub fn is_format(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x061C
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x1D173..=0x1D17A
+            | 0xE0000..=0xE007F
+    )
+}
+
+/// Whether `text` shows as it says: no control or format characters.
+pub fn plain(text: &str) -> bool {
+    !text.chars().any(|c| c.is_control() || is_format(c))
+}
+
+/// What machine `name` said (an error, a banner), as Desk shows it: on
+/// one line, without control or format characters, cut to [`MAX_SAID`],
+/// and said to be the machine's words, so it can't pass for Desk's own
+/// advice. None when nothing is left.
+pub fn said_by(name: &str, text: &str) -> Option<String> {
+    let line: String = text
+        .chars()
+        .map(|c| {
+            if c == '\n' || c == '\t' || c == '\r' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .filter(|c| !c.is_control() && !is_format(*c))
+        .collect();
+    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let cut: String = line.chars().take(MAX_SAID).collect();
+    let more = if cut.len() < line.len() { "…" } else { "" };
+    Some(format!("{name} said: “{cut}{more}”"))
 }
 
 /// The forwards `ssh -G`'s output says the config sets, by name.
@@ -361,7 +444,7 @@ mod tests {
         for i in [
             m.reachable(),
             m.settings(),
-            m.forward(41000, 4226),
+            m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226),
             m.command(&["x".into()]),
         ] {
             assert_eq!(i.program, std::path::PathBuf::from("/usr/bin/ssh"));
@@ -384,11 +467,22 @@ mod tests {
             // Only the command's line comes after the target.
             assert!(i.args.len() <= dash + 3);
         }
-        let f = m.forward(41000, 4226);
+        let f = m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226);
         assert!(
             f.args
                 .windows(2)
-                .any(|w| w == ["-L", "127.0.0.1:41000:127.0.0.1:4226"])
+                .any(|w| w == ["-L", "/run/desk/devbox.sock:127.0.0.1:4226"])
+        );
+        assert!(f.args.contains(&"StreamLocalBindMask=0177".to_string()));
+        for i in [&f, &m.reachable(), &m.settings()] {
+            assert!(i.args.contains(&"ForkAfterAuthentication=no".to_string()));
+            assert!(i.args.contains(&"LogLevel=ERROR".to_string()));
+        }
+        assert!(!f.args.contains(&"SessionType=default".to_string()));
+        assert!(
+            m.reachable()
+                .args
+                .contains(&"SessionType=default".to_string())
         );
         assert!(f.args.contains(&"ExitOnForwardFailure=yes".to_string()));
         assert!(!f.args.iter().any(|a| a.starts_with("ClearAllForwardings")));
@@ -413,6 +507,24 @@ mod tests {
         );
         let login = crate::host::Host::Ssh(m).login_invocation("echo ~");
         assert_eq!(login.args.last().unwrap(), "/bin/sh -lc 'echo ~'");
+    }
+
+    #[test]
+    fn what_a_machine_said_is_shown_as_its_words_only() {
+        let s = said_by(
+            "devbox",
+            "Run \u{202E}lmth.exe\u{202C} now\n\x1b[31mred\x1b[0m\u{200B}",
+        )
+        .unwrap();
+        assert!(s.starts_with("devbox said: “"), "{s}");
+        assert!(plain(&s), "{s:?}");
+        assert!(!s.contains('\u{1b}'));
+        let long = said_by("devbox", &"x".repeat(5000)).unwrap();
+        assert!(long.chars().count() < MAX_SAID + 30);
+        assert_eq!(said_by("devbox", "\u{202E}\n\t "), None);
+        assert!(!plain("dev\u{2066}box"));
+        assert!(!plain("a\u{2028}b"));
+        assert!(plain("Büro-Server 2"));
     }
 
     #[test]

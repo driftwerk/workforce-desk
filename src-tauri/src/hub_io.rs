@@ -183,6 +183,7 @@ impl HubIo {
             bearer,
             pool: Pool::Hubs,
             unreachable,
+            unix: reach.unix.clone(),
             legacy: Some(Legacy {
                 hub: hub.to_string(),
                 hubs: Arc::clone(&self.legacy),
