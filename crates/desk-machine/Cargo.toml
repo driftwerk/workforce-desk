@@ -13,6 +13,13 @@ name = "fake-ssh"
 path = "src/bin/fake-ssh.rs"
 test = false
 
+# The add flow's native steps as a command, for the live check against a
+# real machine (designs §12; built for macOS by machine-live.yml).
+[[bin]]
+name = "machine-live"
+path = "src/bin/machine-live.rs"
+test = false
+
 [dependencies]
 desk-core = { workspace = true }
 eyre = { workspace = true }
