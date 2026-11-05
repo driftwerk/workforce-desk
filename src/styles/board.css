@@ -3,6 +3,7 @@
    here is only what those don't draw, from the theme's tokens. */
 
 .board {
+  container-type: inline-size;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -50,17 +51,46 @@
   max-width: 560px;
 }
 
-/* Five columns sharing the width; a narrow window scrolls them sideways
-   inside the board, never the page. */
+/* Five columns sharing the width, none narrower than 180px. Where five
+   don't fit (a side panel open, a narrow window) as many whole columns as
+   fit share it and the rest are a sideways scroll away, snapping column by
+   column: a column is never cut off at the edge, and nothing covers one. */
 .board-cols {
+  --board-col: calc((100cqw - 56px - 56px) / 5);
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, var(--board-col));
   gap: 14px;
   padding: 18px 28px 20px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 28px;
+}
+.board-col {
+  scroll-snap-align: start;
+}
+/* 4, 3, 2 or 1 columns in view: (width - padding - gaps) / count. */
+@container (max-width: 1011px) {
+  .board-cols {
+    --board-col: calc((100cqw - 56px - 42px) / 4);
+  }
+}
+@container (max-width: 817px) {
+  .board-cols {
+    --board-col: calc((100cqw - 56px - 28px) / 3);
+  }
+}
+@container (max-width: 623px) {
+  .board-cols {
+    --board-col: calc((100cqw - 56px - 14px) / 2);
+  }
+}
+@container (max-width: 429px) {
+  .board-cols {
+    --board-col: calc(100cqw - 56px);
+  }
 }
 .board-col {
   padding: 16px 14px;
