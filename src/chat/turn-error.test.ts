@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dropped, emptyConversation, reduce, toShow, type ConversationState } from "./conversation";
 import { readableError } from "./agentError";
+import { dayClock } from "../floor/time";
 import { settle, withHistory } from "./history";
 import { FEATURES, type ChatMessage, type ServerMessage } from "./types";
 
@@ -88,7 +89,8 @@ describe("an error a turn ended with, in plain words", () => {
 
   it("says a plan at its usage limit is, until when, with no ids, and offers to sign in", () => {
     const e = readableError(LIMIT, NOW);
-    expect(e.text).toMatch(/^Couldn’t answer: the Claude plan Desk uses is at its usage limit until .+16:00\. Sign in another Claude account, or wait\.$/);
+    const until = dayClock(Date.parse("2026-11-06T16:00:00Z"), NOW);
+    expect(e.text).toBe(`Couldn’t answer: the Claude plan Desk uses is at its usage limit until ${until}. Sign in another Claude account, or wait.`);
     expect(e.text).not.toContain(ID);
     expect(e.text).not.toMatch(/agent_user|system_shared|UTC|claude-code/);
     expect(e.signIn).toBe("claude");
