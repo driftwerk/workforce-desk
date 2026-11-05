@@ -300,7 +300,10 @@ describe("a ticket's panel", () => {
     expect(within(needs).getByRole("button", { name: /ACM-15.*Retire the legacy routes.*Backlog/ })).toBeTruthy();
     expect(within(panel).getByText("PR #491")).toBeTruthy();
     const history = within(panel).getByRole("region", { name: "History" });
-    const rows = within(history).getAllByRole("listitem").map((li) => li.textContent?.replace(/^\d\d:\d\d/, ""));
+    // The time as this computer says it, whatever its locale, then the words.
+    const rows = within(history)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent!.slice(li.querySelector("time")!.textContent!.length));
     expect(rows).toEqual(["You created it", "You gave it to acme-web", "acme-web noted “Both gateways already hash; checking partner keys.”"]);
     await waitFor(() => expect(within(history).getByText("412k tokens · $3.10 this month")).toBeTruthy());
   });
