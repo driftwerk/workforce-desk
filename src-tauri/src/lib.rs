@@ -1003,6 +1003,7 @@ mod tests {
             gateway_url: "http://127.0.0.1:3".into(),
             admin_token: SENTINEL.into(),
             device_token: Some("device".into()),
+            version: None,
         };
         let json = serde_json::to_value(HubConnection::from(c)).unwrap();
         assert_eq!(json, serde_json::json!({ "url": "http://127.0.0.1:3" }));

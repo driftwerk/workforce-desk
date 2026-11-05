@@ -16,9 +16,10 @@ pub enum Install {
     /// Installed by the system's package manager, which replaces the
     /// programs in place.
     Package,
-    /// One of the versions Desk on Windows installs inside WSL, under
-    /// `bin`: an update installs another and flips `bin/current` to it.
-    Wsl { bin: PathBuf },
+    /// One of the versions Desk installs under `bin` — inside WSL from
+    /// Windows, on a machine from the Mac: an update installs another and
+    /// flips `bin/current` to it.
+    Versioned { bin: PathBuf },
     /// A development build, left running whatever is rebuilt.
     Development,
 }
@@ -30,7 +31,7 @@ impl Install {
         } else if let Some(path) = env.get("APPIMAGE") {
             Install::AppImage { path: path.into() }
         } else if exe.starts_with(paths.bin()) {
-            Install::Wsl { bin: paths.bin() }
+            Install::Versioned { bin: paths.bin() }
         } else if exe.starts_with("/usr/") || exe.starts_with("/opt/") {
             Install::Package
         } else {
@@ -46,7 +47,7 @@ impl Install {
             Install::AppImage { path } => vec![path.clone()],
             // Through `current`: the flip points it at the new version's
             // files, and their metadata (read through the link) changes.
-            Install::Wsl { bin } => programs
+            Install::Versioned { bin } => programs
                 .iter()
                 .filter_map(|p| p.file_name())
                 .map(|name| bin.join("current").join(name))
@@ -90,7 +91,7 @@ mod tests {
         assert_eq!(of("/usr/bin/desk-helper", &[]), Install::Package);
         assert_eq!(
             of("/home/sarah/.local/share/Desk/bin/0.3.0/desk-helper", &[]),
-            Install::Wsl {
+            Install::Versioned {
                 bin: "/home/sarah/.local/share/Desk/bin".into()
             }
         );
@@ -120,7 +121,7 @@ mod tests {
             PathBuf::from("/home/sarah/.local/share/Desk/bin/0.3.0/desk-memory"),
         ];
         assert_eq!(
-            Install::Wsl {
+            Install::Versioned {
                 bin: "/home/sarah/.local/share/Desk/bin".into()
             }
             .watched(&wsl),

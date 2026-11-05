@@ -8,14 +8,18 @@ use std::time::{Duration, Instant};
 
 use desk_core::backend::Check;
 use desk_core::host::Host;
+use desk_core::install::Install;
 use desk_core::{Paths, Secrets, backend, process};
 use eyre::{Context, Result};
 
 /// What the helper was started to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
-    /// Keep the hub running (no arguments, or `--workforce` / `--memory`).
-    Run,
+    /// Keep the hub running (no arguments, or `--workforce` / `--memory`);
+    /// with `--machine`, as a machine's ([`crate::config::Mode::Machine`]).
+    Run {
+        machine: bool,
+    },
     Stop,
     Connection,
     RemoveEverything,
@@ -31,7 +35,9 @@ impl Command {
             _ if has("--stop") => Command::Stop,
             _ if has("--remove-everything") => Command::RemoveEverything,
             _ if has("--check") => Command::Check,
-            _ => Command::Run,
+            _ => Command::Run {
+                machine: has(desk_core::backend_install::MACHINE_FLAG),
+            },
         })
     }
 }
@@ -74,12 +80,33 @@ pub fn stop(paths: &Paths) -> Result<()> {
     Ok(())
 }
 
-/// `connection --json`: how to reach the hub, or `null` until it is set up.
+/// `connection --json`: how to reach the hub, with the version installed
+/// here, or `null` until it is set up.
 pub fn connection(paths: &Paths, env: &BTreeMap<String, String>) -> Result<String> {
     let secrets = Secrets::for_host(paths, &Host::running_here(env))?;
-    Ok(serde_json::to_string(&backend::read_connection(
-        paths, &secrets,
-    )?)?)
+    let exe = std::env::current_exe()?;
+    let version = installed_version(&Install::of(&exe, env, paths), &exe);
+    Ok(serde_json::to_string(
+        &backend::read_connection(paths, &secrets)?.map(|c| backend::Connection {
+            version: Some(version),
+            ..c
+        }),
+    )?)
+}
+
+/// The version this program is: the name of its version's folder where
+/// Desk installs versions (a development build's says `+dev.…`, which its
+/// own number doesn't), else the number it was built as.
+pub fn installed_version(install: &Install, exe: &Path) -> String {
+    let folder = match install {
+        Install::Versioned { .. } => exe
+            .parent()
+            .and_then(Path::file_name)
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| n != "current"),
+        _ => None,
+    };
+    folder.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
 /// `--remove-everything`: ends the PTY holder (and the hub's terminals),
@@ -149,6 +176,7 @@ pub fn check(paths: &Paths) -> Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
@@ -156,10 +184,15 @@ mod tests {
 
     #[test]
     fn each_command_is_read_from_its_arguments() {
-        assert_eq!(Command::parse(&args(&[])).unwrap(), Command::Run);
+        let desktop = Command::Run { machine: false };
+        assert_eq!(Command::parse(&args(&[])).unwrap(), desktop);
         assert_eq!(
             Command::parse(&args(&["--workforce", "/x/workforce"])).unwrap(),
-            Command::Run
+            desktop
+        );
+        assert_eq!(
+            Command::parse(&args(&["--machine"])).unwrap(),
+            Command::Run { machine: true }
         );
         assert_eq!(Command::parse(&args(&["--stop"])).unwrap(), Command::Stop);
         assert_eq!(
@@ -172,6 +205,24 @@ mod tests {
             Command::RemoveEverything
         );
         assert_eq!(Command::parse(&args(&["--check"])).unwrap(), Command::Check);
+    }
+
+    #[test]
+    fn the_version_is_its_folders_where_desk_installs_versions() {
+        let bin = PathBuf::from("/home/ana/.local/share/Desk/bin");
+        let versioned = Install::Versioned { bin: bin.clone() };
+        assert_eq!(
+            installed_version(&versioned, &bin.join("0.3.0+dev.4f2a9c1e0b7d/desk-helper")),
+            "0.3.0+dev.4f2a9c1e0b7d"
+        );
+        assert_eq!(
+            installed_version(&versioned, &bin.join("current/desk-helper")),
+            env!("CARGO_PKG_VERSION")
+        );
+        assert_eq!(
+            installed_version(&Install::Package, Path::new("/usr/bin/desk-helper")),
+            env!("CARGO_PKG_VERSION")
+        );
     }
 
     #[test]

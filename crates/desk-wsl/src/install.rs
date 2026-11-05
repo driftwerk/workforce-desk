@@ -4,120 +4,51 @@
 //! A running backend notices the flip and hands over, as it does when an
 //! update replaces it anywhere else.
 
-use std::cmp::Ordering;
 use std::path::Path;
 
-use desk_core::LINUX_HELPER_EXECUTABLE;
 use desk_core::backend::Check;
+use desk_core::backend_install as scripts;
 use desk_core::host::{Host, Wsl};
 use eyre::{Context, Result};
-use serde::Serialize;
+
+pub use desk_core::backend_install::{Plan, compare, plan, quote};
 
 use crate::run::WslExe;
 
-/// What the app does about the backend in the distro, given the version it
-/// carries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Plan {
-    Nothing,
-    Install,
-    Upgrade {
-        from: String,
-    },
-    /// The distro has a newer one: refused unless the person asks to
-    /// reinstall this version.
-    Downgrade {
-        from: String,
-    },
-}
-
-/// `1.2.3` and `1.2.3-rc.1` in order: a pre-release before its release.
-fn version_key(v: &str) -> (Vec<u64>, bool, String) {
-    let (release, pre) = v.trim().split_once('-').unwrap_or((v.trim(), ""));
-    let numbers = release.split('.').map(|n| n.parse().unwrap_or(0)).collect();
-    (numbers, pre.is_empty(), pre.to_string())
-}
-
-pub fn compare(a: &str, b: &str) -> Ordering {
-    version_key(a).cmp(&version_key(b))
-}
-
-pub fn plan(installed: Option<&str>, bundled: &str) -> Plan {
-    match installed {
-        None => Plan::Install,
-        Some(v) => match compare(v, bundled) {
-            Ordering::Equal => Plan::Nothing,
-            Ordering::Less => Plan::Upgrade { from: v.into() },
-            Ordering::Greater => Plan::Downgrade { from: v.into() },
-        },
-    }
-}
-
-/// A word for `sh`, single-quoted.
-pub fn quote(word: &str) -> String {
-    format!("'{}'", word.replace('\'', r"'\''"))
-}
-
-const PROGRAMS: [&str; 3] = [
-    LINUX_HELPER_EXECUTABLE,
-    desk_core::LINUX_HUB_EXECUTABLE,
-    desk_core::LINUX_MEMORY_EXECUTABLE,
-];
-
 /// Copies the bundled backend (`source`, a Windows folder) into
 /// `bin/<version>`.
-pub fn copy_script(w: &Wsl, source: &str, version: &str) -> String {
-    let dest = quote(&format!("{}/{version}", w.bin()));
-    let installs: String = PROGRAMS
-        .iter()
-        .map(|p| format!("install -Dm755 \"$src/{p}\" {dest}/{p}\n"))
-        .collect();
-    format!(
+pub fn copy_script(w: &Wsl, source: &str, version: &str) -> Result<String> {
+    Ok(format!(
         "set -eu\n\
          src=$(wslpath -u {source})\n\
-         {installs}\
-         rm -rf {dest}/claude-plugin\n\
-         cp -R \"$src/claude-plugin\" {dest}/claude-plugin\n",
+         {install}",
         source = quote(source),
-    )
+        install = scripts::install_from_src(&w.bin(), version)?,
+    ))
 }
 
 /// Points `bin/current` at `version` in one step, then removes every
 /// version but it and the one before.
-pub fn flip_script(w: &Wsl, version: &str) -> String {
-    format!(
-        "set -eu\n\
-         bin={bin}\n\
-         previous=$(readlink \"$bin/current\" 2>/dev/null || true)\n\
-         ln -sfn {version} \"$bin/current.next\"\n\
-         mv -Tf \"$bin/current.next\" \"$bin/current\"\n\
-         for dir in \"$bin\"/*/; do\n  \
-           name=$(basename \"$dir\")\n  \
-           case \"$name\" in current | {version} | \"$previous\") ;; *) rm -rf \"$bin/$name\" ;; esac\n\
-         done\n",
-        bin = quote(&w.bin()),
-        version = quote(version),
-    )
+pub fn flip_script(w: &Wsl, version: &str) -> Result<String> {
+    scripts::flip_script(&w.bin(), version)
 }
 
 /// The version `bin/current` points at; empty when none is installed.
 pub fn installed_script(w: &Wsl) -> String {
-    format!("readlink {}/current 2>/dev/null || true", quote(&w.bin()))
+    scripts::installed_script(&w.bin())
 }
 
 pub fn installed(wsl: &WslExe, w: &Wsl) -> Result<Option<String>> {
     let host = Host::Wsl(w.clone());
     let said = wsl.answer(&host.login_invocation(&installed_script(w)))?;
-    let version = said.trim();
-    Ok((!version.is_empty()).then(|| version.to_string()))
+    Ok(scripts::parse_installed(&said))
 }
 
 /// Copies `version` from `source` (the app's bundled backend, a Windows
 /// folder) into the distro.
 pub fn copy(wsl: &WslExe, w: &Wsl, source: &Path, version: &str) -> Result<()> {
     let host = Host::Wsl(w.clone());
-    wsl.answer(&host.login_invocation(&copy_script(w, &source.to_string_lossy(), version)))
+    wsl.answer(&host.login_invocation(&copy_script(w, &source.to_string_lossy(), version)?))
         .context("copying Desk into Linux")?;
     Ok(())
 }
@@ -126,7 +57,7 @@ pub fn copy(wsl: &WslExe, w: &Wsl, source: &Path, version: &str) -> Result<()> {
 /// when it can't.
 pub fn check(wsl: &WslExe, w: &Wsl, version: &str) -> Result<Check> {
     let host = Host::Wsl(w.clone());
-    let helper = format!("{}/{version}/{LINUX_HELPER_EXECUTABLE}", w.bin());
+    let helper = scripts::helper_in(&w.bin(), version)?;
     let said = wsl
         .answer(&host.invocation(&helper, &["--check"]))
         .context("checking Desk runs in Linux")?;
@@ -141,7 +72,7 @@ pub fn check(wsl: &WslExe, w: &Wsl, version: &str) -> Result<Check> {
 /// Makes `version` the one that runs.
 pub fn flip(wsl: &WslExe, w: &Wsl, version: &str) -> Result<()> {
     let host = Host::Wsl(w.clone());
-    wsl.answer(&host.login_invocation(&flip_script(w, version)))
+    wsl.answer(&host.login_invocation(&flip_script(w, version)?))
         .context("switching to the new version")?;
     Ok(())
 }
@@ -169,51 +100,13 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_follows_the_versions() {
-        assert_eq!(plan(None, "0.3.0"), Plan::Install);
-        assert_eq!(plan(Some("0.3.0"), "0.3.0"), Plan::Nothing);
-        assert_eq!(
-            plan(Some("0.2.9"), "0.3.0"),
-            Plan::Upgrade {
-                from: "0.2.9".into()
-            }
-        );
-        assert_eq!(
-            plan(Some("0.10.0"), "0.9.0"),
-            Plan::Downgrade {
-                from: "0.10.0".into()
-            }
-        );
-        assert_eq!(
-            plan(Some("0.3.0-rc.1"), "0.3.0"),
-            Plan::Upgrade {
-                from: "0.3.0-rc.1".into()
-            }
-        );
-        assert_eq!(
-            plan(Some("0.3.0-rc.2"), "0.3.0-rc.10"),
-            Plan::Downgrade {
-                from: "0.3.0-rc.2".into()
-            }
-        );
-    }
-
-    #[test]
-    fn words_are_quoted_for_sh() {
-        assert_eq!(
-            quote("C:\\Program Files\\Desk\\backend"),
-            "'C:\\Program Files\\Desk\\backend'"
-        );
-        assert_eq!(quote("it's"), r"'it'\''s'");
-    }
-
-    #[test]
     fn the_copy_installs_each_program_and_the_plugin_into_its_version() {
         let script = copy_script(
             &sarah(),
             r"C:\Users\Sarah\AppData\Local\Programs\Desk\backend",
             "0.3.0",
-        );
+        )
+        .unwrap();
         assert_eq!(
             script,
             "set -eu\n\
@@ -228,7 +121,7 @@ mod tests {
 
     #[test]
     fn the_flip_is_one_rename_and_keeps_the_version_before() {
-        let script = flip_script(&sarah(), "0.3.0");
+        let script = flip_script(&sarah(), "0.3.0").unwrap();
         assert!(script.contains(
             "ln -sfn '0.3.0' \"$bin/current.next\"\nmv -Tf \"$bin/current.next\" \"$bin/current\"\n"
         ));
@@ -249,7 +142,7 @@ mod tests {
         let source = dir.path().join("backend");
         std::fs::create_dir_all(source.join("claude-plugin/hooks")).unwrap();
         std::fs::write(source.join("claude-plugin/hooks/hooks.json"), "{}").unwrap();
-        for p in PROGRAMS {
+        for p in scripts::PROGRAMS {
             std::fs::write(source.join(p), "#!/bin/sh\n").unwrap();
         }
         let sh = |script: String| {
@@ -268,8 +161,8 @@ mod tests {
         };
         let source = source.to_string_lossy();
         for v in ["0.1.0", "0.2.0", "0.3.0"] {
-            sh(copy_script(&w, &source, v));
-            sh(flip_script(&w, v));
+            sh(copy_script(&w, &source, v).unwrap());
+            sh(flip_script(&w, v).unwrap());
             assert_eq!(sh(installed_script(&w)), v);
         }
         let bin = Path::new(&w.bin()).to_path_buf();

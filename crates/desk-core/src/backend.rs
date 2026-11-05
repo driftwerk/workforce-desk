@@ -17,6 +17,10 @@ pub struct Connection {
     /// Desk's own device token, once Desk Helper has paired Desk with the
     /// hub.
     pub device_token: Option<String>,
+    /// The backend version installed there, as `connection --json` says it
+    /// (older helpers don't).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -41,6 +45,7 @@ pub fn read_connection(paths: &Paths, secrets: &Secrets) -> Result<Option<Connec
         gateway_url: ports.gateway_url(),
         admin_token,
         device_token: secrets.get_account(&device_token_account(LOCAL_HUB_ID))?,
+        version: None,
     }))
 }
 
@@ -244,8 +249,21 @@ mod tests {
         let paired = read_connection(&paths, &secrets).unwrap().unwrap();
         assert_eq!(paired.device_token.as_deref(), Some("device"));
         let said = serde_json::to_vec(&Some(paired.clone())).unwrap();
-        assert_eq!(parse_connection(&said).unwrap(), Some(paired));
+        assert_eq!(parse_connection(&said).unwrap(), Some(paired.clone()));
         assert_eq!(parse_connection(b"null").unwrap(), None);
+        // What an older helper says, without its version, still reads.
+        let older =
+            br#"{"gateway_url":"http://127.0.0.1:3","admin_token":"admin","device_token":null}"#;
+        assert_eq!(parse_connection(older).unwrap().unwrap().version, None);
+        let said = serde_json::to_vec(&Connection {
+            version: Some("0.3.0".into()),
+            ..paired.clone()
+        })
+        .unwrap();
+        assert_eq!(
+            parse_connection(&said).unwrap().unwrap().version.as_deref(),
+            Some("0.3.0")
+        );
         assert!(parse_connection(b"Welcome to Ubuntu").is_err());
     }
 

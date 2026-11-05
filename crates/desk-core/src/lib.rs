@@ -3,6 +3,7 @@
 //! its PTY holder, and what this computer and its person are called.
 
 pub mod backend;
+pub mod backend_install;
 #[cfg(unix)]
 pub mod holder;
 pub mod host;
@@ -14,6 +15,7 @@ pub mod net;
 pub mod process;
 pub mod redact;
 pub mod remote_image;
+pub mod systemd;
 pub mod vault;
 // A Unix login shell's environment: on Windows the CLIs run inside WSL.
 #[cfg(unix)]
@@ -112,7 +114,7 @@ impl Paths {
     pub fn helper_pid(&self) -> PathBuf {
         self.hub().join("run").join("desk-hubd.pid")
     }
-    /// The backend's installed versions, inside WSL.
+    /// The backend's installed versions, inside WSL and on a machine.
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
     }

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use desk_core::backend_install::PLUGIN;
 use desk_core::host::Host;
 use desk_core::install::Install;
 use desk_core::{
@@ -98,6 +99,37 @@ fn hub_env(login: &BTreeMap<String, String>) -> BTreeMap<String, String> {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
+}
+
+/// The environment with Desk's Claude Code plugin folder added after the
+/// person's own, each once (`:`-separated, as Claude Code splits it). On a
+/// machine no Desk passes it to the sessions it starts, so the hub's own
+/// environment carries it to every session, the boss's too.
+fn with_plugin_dir(mut env: BTreeMap<String, String>, dir: &str) -> BTreeMap<String, String> {
+    let mut dirs: Vec<String> = Vec::new();
+    for d in env
+        .get(PLUGIN_DIRS)
+        .into_iter()
+        .flat_map(|v| v.split(':'))
+        .chain(std::iter::once(dir))
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        if !dirs.iter().any(|x| x == d) {
+            dirs.push(d.to_string());
+        }
+    }
+    env.insert(PLUGIN_DIRS.into(), dirs.join(":"));
+    env
+}
+
+/// Desk's Claude Code plugin on a machine: the version that runs, through
+/// `current`, where Desk installed it; else beside this program.
+fn machine_plugin_dir(install: &Install, exe: &Path) -> PathBuf {
+    match install {
+        Install::Versioned { bin } => bin.join("current").join(PLUGIN),
+        _ => exe.with_file_name(PLUGIN),
+    }
 }
 
 /// The local Postgres's settings. `max_connections` is given on every
@@ -689,14 +721,18 @@ async fn log_startup(workforce: &Path, store: Option<&Path>) {
 /// Runs the helper, and says why it ended in `desk-hubd.log` whichever way
 /// that is: a signal, an error, a panic.
 #[tokio::main]
-pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<()> {
+pub async fn run(
+    paths: Paths,
+    process_env: BTreeMap<String, String>,
+    mode: config::Mode,
+) -> Result<()> {
     init_logging(&paths);
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         tracing::error!("exiting: panic: {info}");
         default_hook(info);
     }));
-    let outcome = run_helper(&paths, process_env).await;
+    let outcome = run_helper(&paths, process_env, mode).await;
     match &outcome {
         Ok(_) => tracing::info!("{}", exit_line(&outcome)),
         Err(_) => tracing::error!("{}", exit_line(&outcome)),
@@ -704,7 +740,11 @@ pub async fn run(paths: Paths, process_env: BTreeMap<String, String>) -> Result<
     outcome.map(|_| ())
 }
 
-async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Result<Exit> {
+async fn run_helper(
+    paths: &Paths,
+    process_env: BTreeMap<String, String>,
+    mode: config::Mode,
+) -> Result<Exit> {
     let paths = paths.clone();
     if commands::root_on_windows_drive(&paths.root) {
         eyre::bail!(
@@ -729,10 +769,8 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     let exe = std::env::current_exe()?;
     let mut programs = vec![exe.clone(), workforce.clone()];
     programs.extend(store.clone());
-    let updated = replaced(
-        Install::of(&exe, &process_env, &paths).watched(&programs),
-        Duration::from_secs(10),
-    );
+    let install = Install::of(&exe, &process_env, &paths);
+    let updated = replaced(install.watched(&programs), Duration::from_secs(10));
     tokio::pin!(updated);
     // Once memories have moved into the store the hub always opens them
     // there: SQLite no longer holds them.
@@ -743,12 +781,18 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     };
     let keys = Secrets::for_host(&paths, &Host::running_here(&process_env))?;
     let key_store = keys.store();
-    write_config(&paths, &ports, memories, key_store)?;
+    write_config(&paths, &ports, memories, key_store, mode)?;
     let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
     config::ensure_rich(&desk_agent)?;
     config::ensure_oversight(&desk_agent)?;
     let login = desk_core::shell::login_env();
-    let env = hub_env(&login);
+    let mut env = hub_env(&login);
+    if mode == config::Mode::Machine {
+        let plugin = machine_plugin_dir(&install, &exe);
+        tracing::info!(plugin = %plugin.display(), "running as a machine: sessions are resumed after a restart");
+        env = with_plugin_dir(env, &plugin.to_string_lossy());
+    }
+    let person = bootstrap::Named::from_env(&process_env);
     let secrets = HubSecrets::load(&keys)?;
     let pg = start_postgres(
         &paths,
@@ -796,7 +840,8 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
     let mut switch_pending = node.is_some() && memories == config::Memories::Sqlite;
     if switch_pending && *model_rx.borrow() {
         switch_pending = false;
-        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store).await;
+        memories =
+            switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store, mode).await;
     }
 
     tracing::info!(gateway = %ports.gateway_url(), ?memories, "local hub starting");
@@ -828,8 +873,9 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
             let paths = paths.clone();
             let gateway = ports.gateway_url();
             let admin = secrets.get(Secret::GatewayToken).to_owned();
+            let person = person.clone();
             async move {
-                if let Err(e) = bootstrap::run(&paths, &gateway, &admin).await {
+                if let Err(e) = bootstrap::run(&paths, &gateway, &admin, &person).await {
                     tracing::error!(error = %e, "could not pair Desk with its local hub");
                 }
             }
@@ -848,7 +894,7 @@ async fn run_helper(paths: &Paths, process_env: BTreeMap<String, String>) -> Res
                     if ready.is_ok() {
                         tracing::info!("the memory store's model is here; moving memories into the store");
                         stop(&mut hub, Duration::from_secs(20)).await;
-                        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store).await;
+                        memories = switch_to_store(&workforce, &paths, &ports, &env, &secrets, key_store, mode).await;
                         tracing::info!(?memories, "local hub starting again");
                         continue 'run;
                     }
@@ -891,10 +937,11 @@ fn write_config(
     ports: &HubPorts,
     memories: config::Memories,
     keys: KeyStore,
+    mode: config::Mode,
 ) -> Result<()> {
     desk_core::write_private(
         &paths.hub_config(),
-        &config::render(paths, ports, memories, keys),
+        &config::render(paths, ports, memories, keys, mode),
     )
 }
 
@@ -909,13 +956,14 @@ async fn switch_to_store(
     env: &BTreeMap<String, String>,
     secrets: &HubSecrets,
     keys: KeyStore,
+    mode: config::Mode,
 ) -> config::Memories {
     let url = memory::url(ports);
     let key = secrets.get(Secret::MemoryKey);
     let moved = async {
         memory::ready(&url, Duration::from_secs(120)).await?;
         memory::ensure_tenant(&url, key).await?;
-        write_config(paths, ports, config::Memories::Store, keys)?;
+        write_config(paths, ports, config::Memories::Store, keys, mode)?;
         moving::move_sqlite(workforce, paths, env, secrets).await
     }
     .await;
@@ -926,7 +974,7 @@ async fn switch_to_store(
         }
         Err(e) => {
             tracing::error!(error = %format!("{e:#}"), "could not move memories into the memory store; staying on SQLite");
-            if let Err(e) = write_config(paths, ports, config::Memories::Sqlite, keys) {
+            if let Err(e) = write_config(paths, ports, config::Memories::Sqlite, keys, mode) {
                 tracing::error!(error = %e, "could not write the hub's config");
             }
             config::Memories::Sqlite
@@ -1008,6 +1056,37 @@ mod tests {
         // The person's own plugin folders stay; the hub adds Desk's.
         assert_eq!(claude, ["CLAUDE_CODE_PLUGIN_DIRS"]);
         assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
+    }
+
+    #[test]
+    fn a_machines_hub_has_desks_plugin_after_the_persons_each_once() {
+        let mine = BTreeMap::from([(
+            "CLAUDE_CODE_PLUGIN_DIRS".to_string(),
+            "/mine: /theirs".to_string(),
+        )]);
+        let dir = "/home/ana/.local/share/Desk/bin/current/claude-plugin";
+        let env = with_plugin_dir(mine, dir);
+        assert_eq!(
+            env["CLAUDE_CODE_PLUGIN_DIRS"],
+            format!("/mine:/theirs:{dir}")
+        );
+        assert_eq!(with_plugin_dir(env.clone(), dir), env);
+        assert_eq!(
+            with_plugin_dir(BTreeMap::new(), dir)["CLAUDE_CODE_PLUGIN_DIRS"],
+            dir
+        );
+        let bin = PathBuf::from("/home/ana/.local/share/Desk/bin");
+        assert_eq!(
+            machine_plugin_dir(
+                &Install::Versioned { bin: bin.clone() },
+                &bin.join("0.3.0/desk-helper")
+            ),
+            PathBuf::from(dir)
+        );
+        assert_eq!(
+            machine_plugin_dir(&Install::Development, Path::new("/x/backend/desk-helper")),
+            PathBuf::from("/x/backend/claude-plugin")
+        );
     }
 
     /// The hub's command carries none of its secrets in its environment,
@@ -1097,7 +1176,7 @@ mod tests {
             std::fs::write(bin.join(v).join("desk-helper"), format!("version {v}")).unwrap();
         }
         std::os::unix::fs::symlink("1", bin.join("current")).unwrap();
-        let watched = Install::Wsl { bin: bin.clone() }.watched(&[bin.join("1/desk-helper")]);
+        let watched = Install::Versioned { bin: bin.clone() }.watched(&[bin.join("1/desk-helper")]);
         let every = Duration::from_millis(20);
         let watch = tokio::spawn(replaced(watched, every));
         tokio::time::sleep(every * 3).await;
