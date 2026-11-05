@@ -25,6 +25,8 @@ import { ImageBudget } from "../shell/RemoteImage";
 import { LinePanel } from "../line/LinePanel";
 import { useLinePanel } from "../line/panel";
 import { ChargeStrip } from "../crew/ChargeBadge";
+import { SessionTicketChip } from "../board/TicketChip";
+import { SubjectHistory } from "../board/History";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -55,6 +57,7 @@ export function SessionCard({ session }: { session: Session }) {
   const loose = !places.length && session.live ? ranIn : null;
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
+  const [history, setHistory] = useState(false);
   const saveGoal = () => {
     setEditingGoal(false);
     if (goal !== session.goal) hub?.update(session.id, { goal }).catch(fail);
@@ -92,6 +95,7 @@ export function SessionCard({ session }: { session: Session }) {
     >
       {(places.length > 0 || loose) && <ShownIn places={places} loose={loose} onShown={() => open(null)} />}
       <div className="session-goal">
+        <SessionTicketChip session={session.id} />
         {editingGoal ? (
           <input
             autoFocus
@@ -111,7 +115,11 @@ export function SessionCard({ session }: { session: Session }) {
             Messages with Desk…
           </button>
         )}
+        <button type="button" className="link small session-line-history" aria-expanded={history} onClick={() => setHistory((h) => !h)}>
+          {history ? "Hide history" : "History"}
+        </button>
       </div>
+      {history && <SubjectHistory subject={session.id} label={`What ${name} did`} />}
       <SpendStrip sessionId={session.id} />
       <BreakerBanner sessionId={session.id} />
       <ChargeStrip session={session} />

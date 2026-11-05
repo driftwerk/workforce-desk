@@ -6,7 +6,8 @@ vi.mock("./navigate", () => ({ openTarget: vi.fn() }));
 const { openUrl } = await import("../platform");
 const { openTarget } = await import("./navigate");
 const { useDesk } = await import("../hub/store");
-const { deskLink, linkParts, openLink, parseDeskLink } = await import("./links");
+const { deskLink, linkParts, openLink, parseDeskLink, parseTicketLink, ticketLink } = await import("./links");
+const { useBoard } = await import("../board/store");
 
 const ROOM = "6f1c2a4e-0b7d-4c55-9a51-3d2e8f9b1c07";
 const MSG = "11111111-2222-4333-8444-555555555555";
@@ -18,6 +19,17 @@ beforeEach(() => {
 });
 
 describe("desk links", () => {
+  it("name a board's ticket too, and open it beside whatever shows", () => {
+    expect(ticketLink(MSG)).toBe(`desk://ticket/${MSG}`);
+    expect(parseTicketLink(`desk://ticket/${MSG.toUpperCase()}`)).toBe(MSG);
+    expect(parseTicketLink(`desk://ticket/ACM-12`)).toBeNull();
+    expect(parseDeskLink(ticketLink(MSG))).toBeNull();
+    openLink(ticketLink(MSG));
+    expect(useBoard.getState().open).toBe(MSG);
+    expect(openTarget).not.toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
   it("name a room message, and nothing else", () => {
     expect(deskLink({ room: ROOM, message: MSG })).toBe(`desk://room/${ROOM}/msg/${MSG}`);
     expect(parseDeskLink(deskLink({ room: ROOM, message: MSG }))).toEqual({ room: ROOM, message: MSG });

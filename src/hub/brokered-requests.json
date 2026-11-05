@@ -422,6 +422,101 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/boards"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/boards"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/boards/b1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/boards/b1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/boards/b1/tickets"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/boards/b1/tickets?state=doing&assignee=none&q=keys"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/tickets"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/tickets/search?q=ACM-12"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/tickets/t1"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/tickets/t1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/tickets/t1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/tickets/t1/move"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/tickets/t1/needs/t2"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/tickets/t1/needs/t2"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/tickets/t1/assign"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/tickets/t1/history"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/tickets/t1/history?before=e1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/history?subject=s1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/history?subject=s1&before=e1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/manager"
   },
   {

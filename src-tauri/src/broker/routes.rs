@@ -73,6 +73,28 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/sessions/{}/charge"),
     route("DELETE", "/api/desk/sessions/{}/charge"),
     route("PATCH", "/api/desk/sessions/{}/charge"),
+    // The board: boards, tickets, moves, needs, assignment and history.
+    route("GET", "/api/desk/boards"),
+    route("POST", "/api/desk/boards"),
+    route("PATCH", "/api/desk/boards/{}"),
+    route("DELETE", "/api/desk/boards/{}"),
+    with_query(
+        "GET",
+        "/api/desk/boards/{}/tickets",
+        &["state", "assignee", "q"],
+    ),
+    route("POST", "/api/desk/tickets"),
+    // Before `tickets/{}`: the first route that matches is the one checked.
+    with_query("GET", "/api/desk/tickets/search", &["q"]),
+    route("GET", "/api/desk/tickets/{}"),
+    route("PATCH", "/api/desk/tickets/{}"),
+    route("DELETE", "/api/desk/tickets/{}"),
+    route("POST", "/api/desk/tickets/{}/move"),
+    route("PUT", "/api/desk/tickets/{}/needs/{}"),
+    route("DELETE", "/api/desk/tickets/{}/needs/{}"),
+    route("POST", "/api/desk/tickets/{}/assign"),
+    with_query("GET", "/api/desk/tickets/{}/history", &["before"]),
+    with_query("GET", "/api/desk/history", &["subject", "before"]),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),
     route("GET", "/api/desk/sessions/hidden"),
@@ -468,6 +490,16 @@ mod tests {
             ("GET", "/api/desk/spend?period=day&token=x"),
             ("GET", "/api/desk/spend?period=day&%74oken=x"),
             ("GET", "/api/desk/spend?other=1"),
+            // The board, the wrong way.
+            ("PUT", "/api/desk/boards/b1"),
+            ("GET", "/api/desk/boards/b1"),
+            ("POST", "/api/desk/tickets/t1"),
+            ("PATCH", "/api/desk/tickets/t1/needs/t2"),
+            ("GET", "/api/desk/tickets/t1/move"),
+            ("GET", "/api/desk/tickets/search?q=a&token=x"),
+            ("GET", "/api/desk/tickets/t1?q=a"),
+            ("GET", "/api/desk/history?subject=s1&limit=500"),
+            ("GET", "/api/desk/boards/b1/tickets?token=x"),
             ("GET", "/api/desk/spend?period=a#b"),
             ("GET", "/api/desk/spend?period=a b"),
         ] {
@@ -497,6 +529,10 @@ mod tests {
         assert!(http("PUT", "/api/desk/state/grid%2Fa%20b").is_ok());
         assert!(http("PUT", "/api/desk/state/grid%2F..x").is_ok());
         assert_eq!(http("GET", "/api/desk/sessions?").unwrap().query, None);
+        // Search is its own route, not a ticket called "search".
+        assert!(http("GET", "/api/desk/tickets/search?q=ACM-12").is_ok());
+        assert!(http("GET", "/api/desk/tickets/t1").is_ok());
+        assert!(http("GET", "/api/desk/history?subject=s1&before=e1").is_ok());
     }
 
     #[test]

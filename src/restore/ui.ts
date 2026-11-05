@@ -86,7 +86,7 @@ export const sanitize = (raw: unknown): MainUi => {
       : {};
   return {
     v: 1,
-    view: o.view === "rooms" || o.view === "floor" || o.view === "grids" ? o.view : DEFAULT_UI.view,
+    view: o.view === "rooms" || o.view === "floor" || o.view === "grids" || o.view === "board" ? o.view : DEFAULT_UI.view,
     room: text(o.room),
     dm: text(o.dm),
     session: text(o.session),

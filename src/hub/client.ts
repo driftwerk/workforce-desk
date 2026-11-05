@@ -29,6 +29,13 @@ import type {
   HiddenSession,
   LineMessage,
   ChargeView,
+  Board,
+  Ticket,
+  NewTicket,
+  TicketPatch,
+  TicketMove,
+  TicketState,
+  AssignTo,
   NewSession,
   NewTerminal,
   Overview,
@@ -514,6 +521,55 @@ export class DeskHub {
   /** **I'll drive** (`person_pinned`) or **Hand back** (`boss`). */
   setWheel = (id: string, wheel: "person_pinned" | "boss"): Promise<ChargeView> =>
     this.call("PATCH", `/api/desk/sessions/${encodeURIComponent(id)}/charge`, { wheel });
+  /** The person's boards; null from a hub without a board (an older one). */
+  boards = async (): Promise<Board[] | null> => {
+    try {
+      return await this.call<Board[]>("GET", "/api/desk/boards");
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** A new board; its prefix comes from its name unless said. */
+  createBoard = (b: { name: string; group?: string | null; prefix?: string }): Promise<Board> => this.call("POST", "/api/desk/boards", b);
+  /** Renames a board, moves it to a group (null: ungrouped), or changes its
+   *  prefix while it has no tickets. */
+  updateBoard = (id: string, patch: { name?: string; group?: string | null; prefix?: string }): Promise<Board> =>
+    this.call("PATCH", `/api/desk/boards/${encodeURIComponent(id)}`, patch);
+  deleteBoard = (id: string): Promise<void> => this.call("DELETE", `/api/desk/boards/${encodeURIComponent(id)}`);
+  /** A board's tickets, each with what the board computes of it. */
+  tickets = (board: string, q: { state?: TicketState; assignee?: string; q?: string } = {}): Promise<Ticket[]> => {
+    const params = new URLSearchParams();
+    if (q.state) params.set("state", q.state);
+    if (q.assignee) params.set("assignee", q.assignee);
+    if (q.q) params.set("q", q.q);
+    const query = params.toString();
+    return this.call("GET", `/api/desk/boards/${encodeURIComponent(board)}/tickets${query ? `?${query}` : ""}`);
+  };
+  createTicket = (t: NewTicket): Promise<Ticket> => this.call("POST", "/api/desk/tickets", t);
+  /** Tickets on any board, by their words or their key (`ACM-12`). */
+  searchTickets = (q: string): Promise<Ticket[]> => this.call("GET", `/api/desk/tickets/search?q=${encodeURIComponent(q)}`);
+  ticket = (id: string): Promise<Ticket> => this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}`);
+  /** What it says, its pin and its snooze; its state changes by `moveTicket`. */
+  editTicket = (id: string, patch: TicketPatch): Promise<Ticket> => this.call("PATCH", `/api/desk/tickets/${encodeURIComponent(id)}`, patch);
+  deleteTicket = (id: string): Promise<void> => this.call("DELETE", `/api/desk/tickets/${encodeURIComponent(id)}`);
+  /** A drop anywhere in a column. */
+  moveTicket = (id: string, move: TicketMove): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/move`, move);
+  /** Ticket `id` needs `other` done first (`needs`), or no longer does; a
+   *  cycle is refused in plain words. */
+  needTicket = (id: string, other: string, needs: boolean): Promise<Ticket> =>
+    this.call(needs ? "PUT" : "DELETE", `/api/desk/tickets/${encodeURIComponent(id)}/needs/${encodeURIComponent(other)}`);
+  /** Gives a ticket to a session, an agent or a new session, as you. */
+  assignTicket = (id: string, to: AssignTo): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/assign`, { to });
+  /** A page of a ticket's history, newest first. */
+  ticketHistory = (id: string, before?: string): Promise<ActivityPage> =>
+    this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}/history${before ? `?before=${encodeURIComponent(before)}` : ""}`);
+  /** A page of what a session or an agent did, and had done to it. */
+  history = (subject: string, before?: string): Promise<ActivityPage> => {
+    const params = new URLSearchParams({ subject });
+    if (before) params.set("before", before);
+    return this.call("GET", `/api/desk/history?${params}`);
+  };
   /** Which agent oversees the crew, and how much it does on its own. */
   manager = (): Promise<Manager> => this.desk("GET", "/api/desk/manager");
   suggestions = async (): Promise<Suggestion[]> =>

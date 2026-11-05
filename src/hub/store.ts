@@ -9,7 +9,7 @@ import { afterPage, inWindow, isLive, ofPlace, placeKey, shown, type PageDir, ty
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 
 /** The main window's views: the Floor, Rooms, and Grids. */
-export type View = "rooms" | "floor" | "grids";
+export type View = "rooms" | "floor" | "grids" | "board";
 
 interface DeskState {
   hub: DeskHub | null;

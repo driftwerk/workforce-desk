@@ -35,6 +35,9 @@ import { useMainKey, useMainName } from "./mainName";
 import { NewSession } from "../session/NewSession";
 import { SessionCard } from "../session/SessionCard";
 import { LedgerPanel } from "../spend/Ledger";
+import { Board } from "../board/BoardView";
+import { OpenTicket } from "../board/TicketDetail";
+import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
@@ -247,6 +250,10 @@ export function App() {
     useUi.getState().closeSettings();
     useDesk.getState().setInbox(true);
   }, true, { fromFields: false });
+  useAppShortcut("board", () => {
+    useUi.getState().closeSettings();
+    useDesk.getState().setView("board");
+  }, true, { fromFields: false });
 
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
@@ -257,6 +264,7 @@ export function App() {
   const panels: OpenPanel[] = [];
   const searching = useUi((u) => u.search !== null);
   const ledger = useUi((u) => u.ledger);
+  const ticketOpen = useBoard((s) => s.open !== null);
   if (thread) {
     panels.push({
       kind: "thread",
@@ -297,6 +305,17 @@ export function App() {
       element: (
         <ErrorBoundary name="ledger">
           <LedgerPanel />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (ticketOpen) {
+    panels.push({
+      kind: "ticket",
+      label: "Ticket",
+      element: (
+        <ErrorBoundary name="ticket">
+          <OpenTicket />
         </ErrorBoundary>
       ),
     });
@@ -344,7 +363,15 @@ export function App() {
             panels={panels}
             main={
               <ErrorBoundary name="main">
-                {view === "floor" ? <Floor onNewSession={() => setNewSession(true)} /> : view === "grids" ? <GridsMain /> : <Rooms />}
+                {view === "floor" ? (
+                  <Floor onNewSession={() => setNewSession(true)} />
+                ) : view === "grids" ? (
+                  <GridsMain />
+                ) : view === "board" ? (
+                  <Board />
+                ) : (
+                  <Rooms />
+                )}
               </ErrorBoundary>
             }
           />

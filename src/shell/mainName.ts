@@ -11,6 +11,7 @@ export function useMainName(): string {
   const agent = useChat((s) => (s.activeAgent ? s.roster.find((a) => agentKey(a) === s.activeAgent)?.name : undefined));
   const grid = useGrids((s) => shownGrid(s)?.name);
   if (view === "floor") return "Floor";
+  if (view === "board") return "Board";
   if (view === "grids") return grid ?? "Grids";
   return room ?? agent ?? "Rooms";
 }

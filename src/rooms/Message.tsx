@@ -15,6 +15,7 @@ import { Steps } from "./ProgressCard";
 import { ImageBudget } from "../shell/RemoteImage";
 import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
+import { TicketKeys } from "../board/TicketChip";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -30,13 +31,14 @@ const time = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 
-/** Plain text with its links clickable: the web's, and Desk's own. */
+/** Plain text with its links clickable (the web's, and Desk's own), and
+ *  the keys of tickets on the board as their chips. */
 function Linked({ text }: { text: string }) {
   return (
     <>
       {linkParts(text).map((p, i) =>
         p.kind === "text" ? (
-          p.text
+          <TicketKeys key={i} text={p.text} />
         ) : (
           <a
             key={i}

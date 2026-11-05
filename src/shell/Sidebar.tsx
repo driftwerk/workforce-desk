@@ -47,6 +47,24 @@ function UnreadRow() {
   );
 }
 
+/** The board's row: opens the board, as the Unread row opens its page. */
+function BoardRow() {
+  const on = useDesk((s) => s.view === "board");
+  const setView = useDesk((s) => s.setView);
+  const keys = useSettings((s) => s.keys);
+  return (
+    <button
+      type="button"
+      className={`side-unread${on ? " on" : ""}`}
+      aria-current={on ? "page" : undefined}
+      title={`Board (${shortcutLabel(keys.board)})`}
+      onClick={() => setView("board")}
+    >
+      <span className="gi-name">Board</span>
+    </button>
+  );
+}
+
 /** Whether a scroller has more above and below what shows. */
 export const scrollEdges = (el: Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">): { above: boolean; below: boolean } => ({
   above: el.scrollTop > 1,
@@ -162,6 +180,7 @@ export function Sidebar({
             </button>
           ))}
         </div>
+        <BoardRow />
         <UnreadRow />
       </div>
       <div className="side-mid">
