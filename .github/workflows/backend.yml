@@ -1,8 +1,9 @@
 name: Linux backend
 
-# The backend Desk runs on Linux and inside WSL — Desk Helper, the hub at
-# hub.ref and the memory store at vellev.ref — built in debug and run end to
-# end by scripts/backend-smoke.sh. On changes to what it is built from, and
+# The backend Desk runs on Linux, inside WSL and on machines — Desk Helper,
+# the hub at hub.ref and the memory store at vellev.ref — built in debug and
+# run end to end by scripts/backend-smoke.sh, as a computer runs it and as a
+# machine does (--machine). On changes to what it is built from, and
 # nightly for what hub.ref and vellev.ref bring.
 
 on:
@@ -13,6 +14,7 @@ on:
       - hub.ref
       - vellev.ref
       - scripts/**
+      - src-tauri/resources/claude-plugin/**
       - .github/workflows/backend.yml
   push:
     branches: [main]
@@ -22,6 +24,7 @@ on:
       - hub.ref
       - vellev.ref
       - scripts/**
+      - src-tauri/resources/claude-plugin/**
       - .github/workflows/backend.yml
   schedule:
     - cron: "17 3 * * *"
@@ -35,8 +38,12 @@ concurrency:
 
 jobs:
   backend-linux:
-    name: Linux backend smoke test
-    runs-on: ubuntu-24.04
+    name: Linux backend smoke test${{ matrix.runner == 'ubuntu-24.04-arm' && ' (aarch64)' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     permissions:
       contents: read
@@ -91,4 +98,6 @@ jobs:
           cp desk/target/debug/desk-hubd "$bin/desk-helper"
           cp workforce-public-desk/target/debug/workforce "$bin/desk-agents"
           cp vellev/target/debug/vellev "$bin/desk-memory"
+          cp -R desk/src-tauri/resources/claude-plugin "$bin/claude-plugin"
           desk/scripts/backend-smoke.sh "$bin"
+          desk/scripts/backend-smoke.sh --machine "$bin"

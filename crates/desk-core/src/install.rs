@@ -16,11 +16,18 @@ pub enum Install {
     /// Installed by the system's package manager, which replaces the
     /// programs in place.
     Package,
-    /// One of the versions Desk on Windows installs inside WSL, under
-    /// `bin`: an update installs another and flips `bin/current` to it.
-    Wsl { bin: PathBuf },
+    /// One of the versions Desk installs under `bin` — inside WSL from
+    /// Windows, on a machine from the Mac: an update installs another and
+    /// flips `bin/current` to it.
+    Versioned { bin: PathBuf },
     /// A development build, left running whatever is rebuilt.
     Development,
+}
+
+/// A path with its links resolved, where it can be (a home reached through
+/// a symlink, `/home` → `/data/home`); as given where it can't.
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 impl Install {
@@ -29,8 +36,8 @@ impl Install {
             Install::MacBundle
         } else if let Some(path) = env.get("APPIMAGE") {
             Install::AppImage { path: path.into() }
-        } else if exe.starts_with(paths.bin()) {
-            Install::Wsl { bin: paths.bin() }
+        } else if canonical(exe).starts_with(canonical(&paths.bin())) {
+            Install::Versioned { bin: paths.bin() }
         } else if exe.starts_with("/usr/") || exe.starts_with("/opt/") {
             Install::Package
         } else {
@@ -46,7 +53,7 @@ impl Install {
             Install::AppImage { path } => vec![path.clone()],
             // Through `current`: the flip points it at the new version's
             // files, and their metadata (read through the link) changes.
-            Install::Wsl { bin } => programs
+            Install::Versioned { bin } => programs
                 .iter()
                 .filter_map(|p| p.file_name())
                 .map(|name| bin.join("current").join(name))
@@ -90,13 +97,34 @@ mod tests {
         assert_eq!(of("/usr/bin/desk-helper", &[]), Install::Package);
         assert_eq!(
             of("/home/sarah/.local/share/Desk/bin/0.3.0/desk-helper", &[]),
-            Install::Wsl {
+            Install::Versioned {
                 bin: "/home/sarah/.local/share/Desk/bin".into()
             }
         );
         assert_eq!(
             of("/home/sarah/src/desk/target/debug/desk-hubd", &[]),
             Install::Development
+        );
+    }
+
+    /// The running program's path has its links resolved; Desk's folder may
+    /// be named through one (a home on another disk).
+    #[cfg(unix)]
+    #[test]
+    fn a_version_is_recognised_through_a_linked_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("data/home/ana");
+        std::fs::create_dir_all(real.join(".local/share/Desk/bin/0.3.0")).unwrap();
+        std::fs::write(real.join(".local/share/Desk/bin/0.3.0/desk-helper"), "").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("data/home"), dir.path().join("home")).unwrap();
+        let paths = Paths::at(dir.path().join("home/ana/.local/share/Desk"));
+        let exe = real
+            .join(".local/share/Desk/bin/0.3.0/desk-helper")
+            .canonicalize()
+            .unwrap();
+        assert_eq!(
+            Install::of(&exe, &BTreeMap::new(), &paths),
+            Install::Versioned { bin: paths.bin() }
         );
     }
 
@@ -120,7 +148,7 @@ mod tests {
             PathBuf::from("/home/sarah/.local/share/Desk/bin/0.3.0/desk-memory"),
         ];
         assert_eq!(
-            Install::Wsl {
+            Install::Versioned {
                 bin: "/home/sarah/.local/share/Desk/bin".into()
             }
             .watched(&wsl),

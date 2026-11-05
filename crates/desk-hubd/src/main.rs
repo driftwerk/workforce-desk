@@ -7,6 +7,11 @@
 //! hub, the memory store and Postgres (never the holder) on SIGTERM, and
 //! when an update replaces it, so the new one is started.
 //!
+//! On a machine — a Linux box Desk on another computer drives over SSH —
+//! it runs with `--machine`: its sessions are resumed after the box
+//! restarts, and Desk's Claude Code plugin is in every session's
+//! environment, since nobody's Desk there passes it.
+//!
 //! Asked rather than run, it stops the one running (`--stop`), says how to
 //! reach the hub (`connection --json`), checks it can run here (`--check`),
 //! or removes everything it keeps (`--remove-everything`).
@@ -39,7 +44,15 @@ fn main() -> eyre::Result<()> {
     let env = std::env::vars().collect();
     let paths = desk_core::Paths::new()?;
     match Command::parse(&args)? {
-        Command::Run => supervise::run(paths, env),
+        Command::Run { machine } => supervise::run(
+            paths,
+            env,
+            if machine {
+                config::Mode::Machine
+            } else {
+                config::Mode::Desktop
+            },
+        ),
         Command::Stop => commands::stop(&paths),
         Command::Connection => {
             println!("{}", commands::connection(&paths, &env)?);

@@ -10,13 +10,13 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use desk_core::backend::Backend;
 use desk_core::install::Install;
-use desk_core::{LINUX_HELPER_EXECUTABLE, Paths, process};
+use desk_core::{LINUX_HELPER_EXECUTABLE, Paths, process, systemd};
 use eyre::{Context, Result};
 
 use super::{Login, Status, development};
 
 /// The service's name, and its file's.
-pub const UNIT: &str = "desk-helper.service";
+pub use desk_core::systemd::UNIT;
 /// The autostart entry's file.
 pub const DESKTOP: &str = "desk-helper.desktop";
 
@@ -42,22 +42,8 @@ pub fn launch(install: &Install, exe: &Path) -> Option<Launch> {
             args: Vec::new(),
             appimage: None,
         }),
-        Install::MacBundle | Install::Wsl { .. } | Install::Development => None,
+        Install::MacBundle | Install::Versioned { .. } | Install::Development => None,
     }
-}
-
-/// A value in a systemd unit, quoted: `%` is a specifier there.
-fn systemd_value(value: &str) -> String {
-    let escaped = value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%");
-    format!("\"{escaped}\"")
-}
-
-/// A word of a systemd command line, quoted: `$` expands there too.
-fn systemd_word(word: &str) -> String {
-    systemd_value(&word.replace('$', "$$"))
 }
 
 /// A word of a desktop entry's `Exec`, quoted, then escaped as the entry's
@@ -83,32 +69,16 @@ fn command_line(launch: &Launch, word: fn(&str) -> String) -> String {
 
 /// The systemd user service that runs Desk Helper from login, restarting it
 /// as launchd's KeepAlive does.
-pub fn unit_text(launch: &Launch) -> String {
-    let environment = launch
-        .appimage
-        .as_ref()
-        .map(|path| {
-            format!(
-                "Environment={}\n",
-                systemd_value(&format!("APPIMAGE={}", path.display()))
-            )
-        })
-        .unwrap_or_default();
-    format!(
-        "[Unit]\n\
-         Description=Desk Helper: keeps Desk's agents and sessions running\n\
-         \n\
-         [Service]\n\
-         ExecStart={}\n\
-         {environment}\
-         Restart=always\n\
-         RestartSec=2\n\
-         TimeoutStopSec=90\n\
-         \n\
-         [Install]\n\
-         WantedBy=default.target\n",
-        command_line(launch, systemd_word),
-    )
+pub fn unit_text(launch: &Launch) -> Result<String> {
+    systemd::unit_text(&systemd::Unit {
+        program: launch.program.to_string_lossy().into_owned(),
+        args: launch.args.clone(),
+        env: launch
+            .appimage
+            .iter()
+            .map(|path| ("APPIMAGE".to_string(), path.display().to_string()))
+            .collect(),
+    })
 }
 
 /// The XDG autostart entry for a session without systemd.
@@ -241,7 +211,7 @@ impl Helper {
     fn try_ensure(&self, launch: &Launch) -> Result<Status> {
         match Starter::here()? {
             Starter::Systemd { unit } => {
-                let wanted = unit_text(launch);
+                let wanted = unit_text(launch)?;
                 let before = self.status();
                 if std::fs::read_to_string(&unit).ok().as_deref() != Some(wanted.as_str()) {
                     std::fs::create_dir_all(unit.parent().expect("the unit's folder"))?;
@@ -454,9 +424,10 @@ mod tests {
     #[test]
     fn the_service_runs_the_appimage_with_its_path_and_restarts() {
         assert_eq!(
-            unit_text(&appimage()),
+            unit_text(&appimage()).unwrap(),
             "[Unit]\n\
              Description=Desk Helper: keeps Desk's agents and sessions running\n\
+             StartLimitIntervalSec=0\n\
              \n\
              [Service]\n\
              ExecStart=\"/home/sarah/Apps/Desk 0.3.AppImage\" \"--helper\"\n\
@@ -464,12 +435,13 @@ mod tests {
              Restart=always\n\
              RestartSec=2\n\
              TimeoutStopSec=90\n\
+             KillMode=process\n\
              \n\
              [Install]\n\
              WantedBy=default.target\n"
         );
         let package = launch(&Install::Package, Path::new("/usr/bin/desk")).unwrap();
-        let text = unit_text(&package);
+        let text = unit_text(&package).unwrap();
         assert!(text.contains("ExecStart=\"/usr/bin/desk-helper\"\n"));
         assert!(!text.contains("APPIMAGE"));
     }
@@ -491,10 +463,6 @@ mod tests {
 
     #[test]
     fn odd_characters_are_quoted_for_each_format() {
-        assert_eq!(
-            systemd_word(r#"/a/100% "b"$c\d"#),
-            r#""/a/100%% \"b\"$$c\\d""#
-        );
         assert_eq!(
             desktop_word(r#"/a/100% "b"$c"#),
             r#""/a/100%% \\"b\\"\\$c""#

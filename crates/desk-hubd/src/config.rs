@@ -45,6 +45,14 @@ pub enum Memories {
     Store,
 }
 
+/// Where this helper runs: on the person's own computer, or on a machine
+/// (`--machine`), a Linux box Desk on another computer drives over SSH.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Desktop,
+    Machine,
+}
+
 /// The memory store's tenant: everything this computer remembers.
 pub const MEMORY_TENANT: &str = "desk";
 
@@ -316,7 +324,13 @@ fn s(v: &str) -> Value {
     Value::String(v.to_string())
 }
 
-pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories, keys: KeyStore) -> String {
+pub fn render(
+    paths: &Paths,
+    ports: &HubPorts,
+    memories: Memories,
+    keys: KeyStore,
+    mode: Mode,
+) -> String {
     let mut doc = Table::new();
     doc.insert(
         "hub".into(),
@@ -389,21 +403,24 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories, keys: KeyStor
     );
     // Terminals and sessions live in the PTY holder desk-hubd starts, so
     // they outlive the hub restarting; it takes the hub's admin token.
-    doc.insert(
-        "desk".into(),
-        table(&[
-            ("enabled", Value::Boolean(true)),
-            (
-                "pty_holder_socket",
-                s(&paths.pty_socket().to_string_lossy()),
-            ),
-            (
-                "pty_holder_token",
-                s(&format!("${{{}}}", Secret::GatewayToken.env())),
-            ),
-            ("accounts", accounts(paths, keys)),
-        ]),
-    );
+    let mut desk = vec![
+        ("enabled", Value::Boolean(true)),
+        (
+            "pty_holder_socket",
+            s(&paths.pty_socket().to_string_lossy()),
+        ),
+        (
+            "pty_holder_token",
+            s(&format!("${{{}}}", Secret::GatewayToken.env())),
+        ),
+        ("accounts", accounts(paths, keys)),
+    ];
+    // Nobody is at a machine to be asked after it restarts: its sessions
+    // are resumed, each in its folder.
+    if mode == Mode::Machine {
+        desk.push(("restore", s("auto")));
+    }
+    doc.insert("desk".into(), table(&desk));
     // A job or workflow made in Desk that needs the person's approval asks
     // them in Desk, where they decide it; nothing else is routed without
     // `[permissions]` rules.
@@ -521,7 +538,50 @@ mod tests {
 
     fn rendered(memories: Memories) -> Table {
         let paths = Paths::at("/Users/k/Library/Application Support/Desk");
-        toml::from_str(&render(&paths, &ports(), memories, KeyStore::File)).unwrap()
+        toml::from_str(&render(
+            &paths,
+            &ports(),
+            memories,
+            KeyStore::File,
+            Mode::Desktop,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_machine_resumes_its_sessions_and_a_computer_asks() {
+        let paths = Paths::at("/home/ana/.local/share/Desk");
+        let machine: Table = toml::from_str(&render(
+            &paths,
+            &ports(),
+            Memories::Store,
+            KeyStore::File,
+            Mode::Machine,
+        ))
+        .unwrap();
+        assert_eq!(machine["desk"]["restore"].as_str(), Some("auto"));
+        // Still loopback only: the Mac reaches it through SSH.
+        assert_eq!(
+            machine["gateway"]["listen"].as_str(),
+            Some("127.0.0.1:54003")
+        );
+        assert_eq!(machine["hub"]["listen"].as_str(), Some("127.0.0.1:54002"));
+        let desktop = rendered(Memories::Store);
+        assert!(
+            desktop["desk"].get("restore").is_none(),
+            "the hub's own default"
+        );
+        let mut without = machine.clone();
+        without["desk"].as_table_mut().unwrap().remove("restore");
+        let desktop_on_the_same_paths: Table = toml::from_str(&render(
+            &paths,
+            &ports(),
+            Memories::Store,
+            KeyStore::File,
+            Mode::Desktop,
+        ))
+        .unwrap();
+        assert_eq!(without, desktop_on_the_same_paths, "nothing else differs");
     }
 
     #[test]
@@ -587,8 +647,14 @@ mod tests {
     fn engine_accounts_are_kept_where_desks_own_secrets_are() {
         let paths = Paths::at("/Users/k/Library/Application Support/Desk");
         let at = |keys| {
-            let doc: Table =
-                toml::from_str(&render(&paths, &ports(), Memories::Store, keys)).unwrap();
+            let doc: Table = toml::from_str(&render(
+                &paths,
+                &ports(),
+                Memories::Store,
+                keys,
+                Mode::Desktop,
+            ))
+            .unwrap();
             doc["desk"]["accounts"].clone()
         };
         let file = at(KeyStore::File);
@@ -724,7 +790,13 @@ mod tests {
         let mine = "# mine\n[memory]\npassive = false\nconsolidation = false\n\n[advisor]\nenabled = false\n\n[know_how]\nenabled = false\n\n[tools.programs]\nenabled = false\n";
         std::fs::write(dir.path().join("config.toml"), mine).unwrap();
         let paths = Paths::at(dir.path());
-        let _ = render(&paths, &ports(), Memories::Store, KeyStore::File);
+        let _ = render(
+            &paths,
+            &ports(),
+            Memories::Store,
+            KeyStore::File,
+            Mode::Desktop,
+        );
         ensure_rich(dir.path()).unwrap();
         ensure_oversight(dir.path()).unwrap();
         let kept = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();

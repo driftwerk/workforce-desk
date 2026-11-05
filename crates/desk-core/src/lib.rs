@@ -3,6 +3,7 @@
 //! its PTY holder, and what this computer and its person are called.
 
 pub mod backend;
+pub mod backend_install;
 #[cfg(unix)]
 pub mod holder;
 pub mod host;
@@ -14,6 +15,7 @@ pub mod net;
 pub mod process;
 pub mod redact;
 pub mod remote_image;
+pub mod systemd;
 pub mod vault;
 // A Unix login shell's environment: on Windows the CLIs run inside WSL.
 #[cfg(unix)]
@@ -28,6 +30,9 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use crate::host::Host;
+
+/// The file that marks Desk's folder a machine's ([`Paths::machine_marker`]).
+pub const MACHINE_MARKER: &str = "machine";
 
 /// Desk's bundle identifier.
 pub const BUNDLE_ID: &str = "xyz.driftwerk.desk";
@@ -112,7 +117,13 @@ impl Paths {
     pub fn helper_pid(&self) -> PathBuf {
         self.hub().join("run").join("desk-hubd.pid")
     }
-    /// The backend's installed versions, inside WSL.
+    /// There when this folder is a machine's (a Linux box Desk on another
+    /// computer drives over SSH): the install writes it, and Desk Helper in
+    /// machine mode too.
+    pub fn machine_marker(&self) -> PathBuf {
+        self.root.join(MACHINE_MARKER)
+    }
+    /// The backend's installed versions, inside WSL and on a machine.
     pub fn bin(&self) -> PathBuf {
         self.root.join("bin")
     }
@@ -208,12 +219,19 @@ pub fn write_private(path: &Path, contents: &str) -> Result<()> {
         .ok_or_else(|| eyre::eyre!("{} has no folder", path.display()))?;
     std::fs::create_dir_all(dir)?;
     let tmp = path.with_extension("tmp");
-    let mut f = std::fs::File::create(&tmp)?;
+    // Made private from the start: one an earlier write left, perhaps with
+    // other permissions, goes first.
+    let _ = std::fs::remove_file(&tmp);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut f = options
+        .open(&tmp)
+        .with_context(|| format!("writing {}", tmp.display()))?;
     f.write_all(contents.as_bytes())?;
     f.sync_all()?;
     std::fs::rename(&tmp, path).with_context(|| format!("writing {}", path.display()))
@@ -436,6 +454,26 @@ fn chosen(paths: &Paths, answers: impl FnOnce() -> bool) -> Result<KeyStore> {
     Ok(store)
 }
 
+/// Which store [`Secrets::for_host`] uses, with `answers` asking the Secret
+/// Service.
+fn store_for(
+    paths: &Paths,
+    host: &Host,
+    desk_home: bool,
+    answers: impl FnOnce() -> bool,
+) -> Result<KeyStore> {
+    Ok(match host {
+        // Nothing of a machine's is kept on this computer: its secrets
+        // stay on it, and Desk holds its tokens only in memory.
+        Host::Ssh(m) => eyre::bail!("{}'s secrets stay on it", m.name),
+        _ if desk_home => KeyStore::File,
+        Host::Wsl(_) => KeyStore::File,
+        Host::Native if cfg!(any(target_os = "macos", windows)) => KeyStore::System,
+        Host::Native if paths.machine_marker().exists() => KeyStore::File,
+        Host::Native => chosen(paths, answers)?,
+    })
+}
+
 /// How long a Linux session's Secret Service gets to answer.
 const KEYRING_PROBE: Duration = Duration::from_secs(2);
 
@@ -451,17 +489,16 @@ impl Secrets {
     /// - inside WSL: a private file (no session bus or keyring there by
     ///   default, and the distro's files are already the person's);
     /// - macOS and Windows: the keychain or Credential Manager;
+    /// - a machine (its folder has [`Paths::machine_marker`]): a private
+    ///   file, whatever desktop session the box may also have, so Desk
+    ///   Helper there, `connection --json` and `--remove-everything` over
+    ///   SSH all find the same secrets;
     /// - a Linux desktop: the Secret Service when it answers the first time,
     ///   else a private file, chosen once and kept in `keys.toml`.
     pub fn for_host(paths: &Paths, host: &Host) -> Result<Self> {
-        let store = match (std::env::var_os("DESK_HOME"), host) {
-            // Nothing of a machine's is kept on this computer: its secrets
-            // stay on it, and Desk holds its tokens only in memory.
-            (_, Host::Ssh(m)) => eyre::bail!("{}'s secrets stay on it", m.name),
-            (Some(_), _) | (None, Host::Wsl(_)) => KeyStore::File,
-            (None, Host::Native) if cfg!(any(target_os = "macos", windows)) => KeyStore::System,
-            (None, Host::Native) => chosen(paths, || Keyring::answers(KEYRING_PROBE))?,
-        };
+        let store = store_for(paths, host, std::env::var_os("DESK_HOME").is_some(), || {
+            Keyring::answers(KEYRING_PROBE)
+        })?;
         Ok(Self::of(paths, store))
     }
 
@@ -593,6 +630,56 @@ mod tests {
             .decode(key)
             .unwrap();
         assert_eq!(raw.len(), 32);
+    }
+
+    /// A machine's secrets are always in Desk's file, even where a desktop
+    /// session's Secret Service would answer; a desktop's stay its choice.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_machine_keeps_its_secrets_in_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.machine_marker(), "").unwrap();
+        let asked = std::cell::Cell::new(false);
+        let store = store_for(&paths, &Host::Native, false, || {
+            asked.set(true);
+            true
+        })
+        .unwrap();
+        assert_eq!(store, KeyStore::File);
+        assert!(!asked.get(), "the keyring is never asked on a machine");
+        // Even where an earlier run chose the keyring.
+        write_private(&paths.keys(), "store = \"system\"\n").unwrap();
+        assert_eq!(
+            store_for(&paths, &Host::Native, false, || true).unwrap(),
+            KeyStore::File
+        );
+        let desktop = tempfile::tempdir().unwrap();
+        let desktop = Paths::at(desktop.path());
+        assert_eq!(
+            store_for(&desktop, &Host::Native, false, || true).unwrap(),
+            KeyStore::System
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_never_leaves_its_file_open_to_others() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.toml");
+        // A leftover from an earlier write, readable by anyone.
+        std::fs::write(path.with_extension("tmp"), "old").unwrap();
+        std::fs::set_permissions(
+            path.with_extension("tmp"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        write_private(&path, "a = 1\n").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = 1\n");
+        assert!(!path.with_extension("tmp").exists());
     }
 
     #[test]

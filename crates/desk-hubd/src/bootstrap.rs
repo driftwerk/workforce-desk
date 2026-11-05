@@ -41,12 +41,43 @@ fn command(program: &str, args: &[&str]) -> Option<String> {
     (out.status.success() && !s.is_empty()).then_some(s)
 }
 
-/// The computer's owner as its system and git know them.
-pub fn person() -> Person {
+/// Who the owner is, where whoever started the helper said: a machine's
+/// service names the person Desk on their own computer knows, since the
+/// machine's account (`dev`, `ec2-user`) may say nothing about them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Named {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+impl Named {
+    pub fn from_env(env: &std::collections::BTreeMap<String, String>) -> Self {
+        let said = |key: &str| {
+            env.get(key)
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        Self {
+            name: said(desk_core::backend_install::PERSON_NAME_ENV),
+            email: said(desk_core::backend_install::PERSON_EMAIL_ENV),
+        }
+    }
+}
+
+/// The computer's owner as they were named, else as its system and git
+/// know them.
+pub fn person(named: &Named) -> Person {
     let host = desk_core::computer_name().unwrap_or_else(|| "this computer".into());
     Person {
-        display_name: desk_core::person_name().unwrap_or_else(|| "you".into()),
-        email: command("git", &["config", "--global", "user.email"]),
+        display_name: named
+            .name
+            .clone()
+            .or_else(desk_core::person_name)
+            .unwrap_or_else(|| "you".into()),
+        email: named
+            .email
+            .clone()
+            .or_else(|| command("git", &["config", "--global", "user.email"])),
         device_name: format!("Desk on {host}"),
     }
 }
@@ -263,7 +294,7 @@ async fn wait_for_hub(hub: &Hub, retry: &Retry) {
 
 /// Waits for the hub, then makes sure Desk holds a device token for it that
 /// resolves to the owner.
-pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> {
+pub async fn run(paths: &Paths, gateway: &str, admin_token: &str, named: &Named) -> Result<()> {
     let hub = Hub {
         // The admin token goes to the hub on this computer only: never
         // through a proxy, never after a redirect.
@@ -277,7 +308,8 @@ pub async fn run(paths: &Paths, gateway: &str, admin_token: &str) -> Result<()> 
     };
     wait_for_hub(&hub, &Retry::default()).await;
     // `git` runs to say who the person is: off the async threads.
-    let person = tokio::task::spawn_blocking(person).await?;
+    let named = named.clone();
+    let person = tokio::task::spawn_blocking(move || person(&named)).await?;
     let owner = ensure_owner(&hub, paths, &person).await?;
     let env = std::env::vars().collect();
     let secrets = Secrets::for_host(paths, &Host::running_here(&env))?;
@@ -401,6 +433,29 @@ mod tests {
             "a spawn waited for a running command"
         );
         assert_eq!(waiting.join().unwrap().as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn a_machine_takes_its_owner_from_its_service() {
+        let env = std::collections::BTreeMap::from([
+            ("DESK_PERSON_NAME".to_string(), " Ana Lima ".to_string()),
+            ("DESK_PERSON_EMAIL".to_string(), "".to_string()),
+        ]);
+        let named = Named::from_env(&env);
+        assert_eq!(
+            named,
+            Named {
+                name: Some("Ana Lima".into()),
+                email: None
+            }
+        );
+        assert_eq!(person(&named).display_name, "Ana Lima");
+        let named = Named {
+            name: None,
+            email: Some("ana@example.com".into()),
+        };
+        assert_eq!(person(&named).email.as_deref(), Some("ana@example.com"));
+        assert_eq!(Named::from_env(&Default::default()), Named::default());
     }
 
     #[test]
