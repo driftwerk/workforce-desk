@@ -106,9 +106,19 @@ const onMachine = (place: Place): { machine: MachineId; key: string } | null => 
   return machine === LOCAL ? null : { machine, key: `session:${id}` };
 };
 
-/** Every point this computer's hub keeps, read afresh. */
+/** Whether place key `k` is a machine's session's, kept here under its key. */
+const onAMachine = (k: string): boolean => k.startsWith("session:") && splitKey(k.slice("session:".length)).machine !== LOCAL;
+
+/** Every point this computer's hub keeps, read afresh; the machines'
+ *  sessions' points, which their own engines keep, stay as they were. */
 export const loadLocal = (rows: readonly ReadRow[]): void =>
-  useReads.setState({ local: Object.fromEntries(rows.map((r) => [r.place, { at: r.at, message: r.message }])), loaded: true });
+  useReads.setState((s) => ({
+    local: {
+      ...Object.fromEntries(Object.entries(s.local).filter(([k]) => onAMachine(k))),
+      ...Object.fromEntries(rows.map((r) => [r.place, { at: r.at, message: r.message }])),
+    },
+    loaded: true,
+  }));
 
 /** Called after a DM point is written: its hub's counts are read again. */
 let dmWritten: (hub: HubAccount) => void = () => {};
@@ -328,10 +338,11 @@ export async function markEverythingRead(dms: Readonly<Record<string, Conversati
   const desk = useDesk.getState().hub;
   const moved = desk ? await desk.markAllRead("everything") : [];
   heard(moved);
-  // Each machine's sessions too, on its own engine.
-  for (const [machine, engine] of Object.entries(useDesk.getState().engines)) {
-    if (machine === LOCAL) continue;
-    const theirs = await engine.hub.markAllRead("everything").catch(() => [] as ReadRow[]);
+  // Each machine's sessions too, on its own engine: those connected, all at
+  // once (one that can't be reached keeps its counts until it answers).
+  const machines = Object.entries(useDesk.getState().engines).filter(([machine, engine]) => machine !== LOCAL && engine.connected);
+  const read = await Promise.all(machines.map(([machine, engine]) => engine.hub.markAllRead("everything").then((rows) => [machine, rows] as const, () => [machine, [] as ReadRow[]] as const)));
+  for (const [machine, theirs] of read) {
     heardOn(machine, theirs);
     for (const r of theirs) {
       const place = machinePlace(machine, r.place);

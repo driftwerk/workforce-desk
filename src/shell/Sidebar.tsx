@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useChat } from "../chat/store";
+import { workspaces } from "../chat/types";
 import { GridsSection } from "../grids/Grids";
 import { SortList, SortRow } from "../groups/rows";
 import { arranged, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
@@ -150,7 +151,7 @@ export function Sidebar({
     sayRoom(id);
     requestAnimationFrame(() => roomRows.current.get(id)?.focus());
   };
-  const hubs = useChat((s) => s.hubs);
+  const hubs = useChat((s) => workspaces(s.hubs));
   const theme = useTheme();
   const keys = useSettings((s) => s.keys);
   // Where it was scrolled is kept (in `ui.main`) and put back.

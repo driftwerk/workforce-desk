@@ -55,6 +55,18 @@ describe("the charges Desk keeps", () => {
     expect(useCharges.getState().bySession.s1?.wheel).toBe("person_pinned");
   });
 
+  it("lays this computer's read over a charge heard from a machine meanwhile: each engine counts its own", async () => {
+    const read = later<ChargeView[]>();
+    useDesk.setState({ hub: { charges: () => read.promise } as never });
+    useCharges.setState({ bySession: {}, supported: null });
+    const loading = useCharges.getState().load();
+    useCharges.getState().heard(charge({ session: "s7" }), "devbox");
+    read.settle([charge({ wheel: "person_pinned" })]);
+    await loading;
+    expect(useCharges.getState().bySession.s1?.wheel).toBe("person_pinned");
+    expect(useCharges.getState().bySession["devbox/s7"]).toBeTruthy();
+  });
+
   it("forgets another hub's charges, and reads them again on every snapshot, even from a hub that had none", async () => {
     const charges = vi.fn(() => Promise.resolve(null as ChargeView[] | null));
     useDesk.setState({ hub: { charges } as never });

@@ -355,6 +355,17 @@ describe("a session's pane", () => {
     await waitFor(() => expect(resume).toHaveBeenCalledWith("closed-1"));
   });
 
+  it("says why a machine's closed session can't be resumed while Desk doesn't reach that machine", async () => {
+    useDesk.setState({ hub: { closeTerminal, stop, resume } as never, engines: {} });
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "gone-1", machine: "devbox" });
+    canvas();
+    const pane = screen.getByRole("region", { name: "Session" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Resume" }));
+    expect(within(pane).getByText("Desk isn’t connected to the machine this session ran on, so it can’t resume it from here.")).toBeTruthy();
+    expect(resume).not.toHaveBeenCalledWith("gone-1");
+  });
+
   it("offers neither for one running in another terminal", () => {
     const pane = shown({ origin: "external" });
     expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();

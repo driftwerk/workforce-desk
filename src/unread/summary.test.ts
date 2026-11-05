@@ -34,6 +34,21 @@ beforeEach(() => {
 });
 
 describe("DM counts", () => {
+  it("on a machine's engine count only its boss's DM, and the machine is no workspace", async () => {
+    const { workspaces } = await import("../chat/types");
+    const devbox = { id: "devbox-hub", label: "devbox", url: "", local: false, machine: "devbox", revision: "t" };
+    useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [{ hubId: "devbox-hub", id: "desk", name: "Desk", model: null, provider: null, isDefault: false }] });
+    dmsFrom(devbox, [row("desk", 1), row("scout", 3)]);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["devbox-hub/desk", "local/scout"]);
+    const hubs = useChat.getState().hubs;
+    expect(workspaces(hubs).map((h) => h.id)).toEqual(["local", "dw"]);
+    expect(workspaces(hubs)).toBe(workspaces(hubs));
+    const plain = [hubs[0]!];
+    expect(workspaces(plain)).toBe(plain);
+    useChat.setState({ roster: [] });
+  });
+
+
   it("take a hub's listing as all that's unread on it, leaving other hubs' alone, and its read points", () => {
     useUnread.setState((s) => ({ dms: { ...s.dms, "dw/sarah": { count: 5, for_you: 5, first: null, last: null, capped: false } } }));
     dmsFrom(dw, [row("allan", 2), row("sarah", 0), { agent_id: "allan", channel: "desk:r1", updated_at: "" }]);

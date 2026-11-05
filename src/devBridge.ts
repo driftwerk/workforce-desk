@@ -5,7 +5,7 @@
 // Only reachable from development builds.
 
 import { HubError } from "./hub/client";
-import { deskListeners } from "./hub/store";
+import { announce as announceEvent, deskListeners } from "./hub/store";
 import { setDevToken } from "./hub/devTokens";
 import { DEFAULT_HOST } from "./shell/host";
 
@@ -578,7 +578,7 @@ const needsYou = (e: Event) => e.kind === "needs_you" || e.kind === "question";
 
 const record = (e: Event) => {
   events.push(e);
-  for (const f of deskListeners) f({ type: "activity", event: e });
+  announceEvent({ type: "activity", event: e });
 };
 
 let live: ReturnType<typeof setInterval> | undefined;

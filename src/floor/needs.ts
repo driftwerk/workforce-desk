@@ -19,10 +19,16 @@ export const sessionKeyOfItem = ({ local, machine, who }: Pick<OnHub, "local" | 
   who.kind !== "session" ? null : local ? who.id : machine ? keyOf(machine, who.id) : null;
 
 /** The sidebar item a hub's agent or session is: `session:<id>` for one of
- *  this computer's sessions (another hub's is keyed by its hub, and has no
- *  row), `agent:<hub>/<agent>` for an agent. */
+ *  this computer's sessions, `session:<machine>/<id>` for a machine's,
+ *  `session:hub:<hub>/<id>` for a workspace's (which has no row),
+ *  `agent:<hub>/<agent>` for an agent. */
 export const itemKeyOf = ({ hubId, local, machine, who }: OnHub): ItemKey =>
-  who.kind === "session" ? sessionItem(sessionKeyOfItem({ local, machine, who }) ?? `${hubId}/${who.id}`) : agentItem({ hubId, id: who.id });
+  who.kind === "session" ? sessionItem(sessionKeyOfItem({ local, machine, who }) ?? workspaceSession(hubId, who.id)) : agentItem({ hubId, id: who.id });
+
+/** A session on a workspace's hub, which Desk doesn't hold: keyed apart
+ *  from a machine's sessions (`<machine>/<id>`), so a hub whose id is a
+ *  machine's can't be taken for it. */
+export const workspaceSession = (hubId: string, id: string): string => `hub:${hubId}/${id}`;
 
 /** The agent whose turn ran in folder `cwd`. A hub runs an agent's turn on
  *  its Claude Code subscription in a folder of the agent's own:
