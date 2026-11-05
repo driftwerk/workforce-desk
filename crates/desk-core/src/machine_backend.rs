@@ -146,8 +146,11 @@ pub struct Backend {
     /// folder's (`<Desk's version>+dev.<hash>`).
     pub version: String,
     pub arch: Arch,
-    /// The tarball's bytes, as checked: what is copied to the machine, so
-    /// nothing can change between the check and the copy.
+    /// Where it is kept on this Mac.
+    pub tarball: PathBuf,
+    /// The tarball's bytes, as checked: what to copy to the machine, so
+    /// nothing can change between the check and the copy (the kept file
+    /// could).
     pub data: Vec<u8>,
     /// Whether its signature was checked: false for a development folder.
     pub signed: bool,
@@ -189,8 +192,12 @@ pub enum Source {
 /// The release, unless a build that isn't a release build is given a
 /// development folder in [`DEV_OVERRIDE_ENV`]. In a release build the
 /// variable isn't read at all: that code isn't in it.
+/// `release_build` is [`RELEASE_BUILD`] (a test gives either).
 #[cfg(debug_assertions)]
-pub fn source(env: &BTreeMap<String, String>) -> Source {
+pub fn source(release_build: bool, env: &BTreeMap<String, String>) -> Source {
+    if release_build {
+        return Source::Release;
+    }
     match env.get(DEV_OVERRIDE_ENV).filter(|v| !v.trim().is_empty()) {
         Some(folder) => Source::Development(folder.into()),
         None => Source::Release,
@@ -199,7 +206,7 @@ pub fn source(env: &BTreeMap<String, String>) -> Source {
 
 /// The release: a release build never reads [`DEV_OVERRIDE_ENV`].
 #[cfg(not(debug_assertions))]
-pub fn source(_env: &BTreeMap<String, String>) -> Source {
+pub fn source(_release_build: bool, _env: &BTreeMap<String, String>) -> Source {
     Source::Release
 }
 
@@ -214,9 +221,10 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// The release's backend for `version` and `arch`: from `cache/<version>`
 /// when it is there and its signature still checks, else fetched with
-/// `fetch` (a URL and the most bytes it may answer, to its bytes: it stops
-/// a download that would be larger, and follows [`redirect_policy`]),
-/// checked, then kept there. Nothing that fails the check is kept or used;
+/// `fetch` (a URL to its bytes; it should stop a download larger than
+/// [`MAX_TARBALL_BYTES`] and follow [`redirect_policy`]), checked, then kept
+/// there. Anything larger than a backend or its signature can be is
+/// refused. Nothing that fails the check is kept or used;
 /// what is answered is the bytes that were checked.
 pub fn release(
     cache: &Path,
@@ -224,7 +232,7 @@ pub fn release(
     arch: Arch,
     pubkey: &str,
     updater_endpoint: &str,
-    mut fetch: impl FnMut(&str, u64) -> Result<Vec<u8>>,
+    mut fetch: impl FnMut(&str) -> Result<Vec<u8>>,
 ) -> Result<Backend> {
     let asset = asset_name(arch, version);
     let url = release_url(updater_endpoint, version, &asset)?;
@@ -234,6 +242,7 @@ pub fn release(
     let backend = |data: Vec<u8>| Backend {
         version: version.to_string(),
         arch,
+        tarball: tarball.clone(),
         data,
         signed: true,
     };
@@ -246,7 +255,7 @@ pub fn release(
         }
     }
     let mut fetch_at_most = |url: &str, max: u64| -> Result<Vec<u8>> {
-        let got = fetch(url, max)?;
+        let got = fetch(url)?;
         if got.len() as u64 > max {
             eyre::bail!("{url} is larger than a backend can be ({max} bytes)");
         }
@@ -386,6 +395,7 @@ pub fn development(cache: &Path, folder: &Path, desk_version: &str, arch: Arch) 
         version,
         arch,
         data: std::fs::read(&tarball).with_context(|| format!("reading {}", tarball.display()))?,
+        tarball,
         signed: false,
     })
 }
@@ -483,7 +493,7 @@ mod tests {
                 tarball,
             }
         }
-        fn fetch(&self, url: &str, _max: u64) -> Result<Vec<u8>> {
+        fn fetch(&self, url: &str) -> Result<Vec<u8>> {
             self.asked.borrow_mut().push(url.to_string());
             Ok(if url.ends_with(".sig") {
                 data(&format!("{SIGNED}.sig"))
@@ -498,8 +508,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = text("test.key.pub");
         let server = Server::new(data(SIGNED));
-        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
-            server.fetch(u, m)
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+            server.fetch(u)
         })
         .unwrap();
         let kept = dir.path().join("0.3.0").join(SIGNED);
@@ -513,14 +523,14 @@ mod tests {
                 .ends_with("/v0.3.0/desk-backend-linux-x86_64-0.3.0.tar.gz.sig")
         );
         // Kept, and checked again rather than trusted.
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
-            server.fetch(u, m)
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+            server.fetch(u)
         })
         .unwrap();
         assert_eq!(server.asked.borrow().len(), 2, "taken from the cache");
         std::fs::write(&kept, b"changed on disk").unwrap();
-        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u, m| {
-            server.fetch(u, m)
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+            server.fetch(u)
         })
         .unwrap();
         assert_eq!(
@@ -534,17 +544,17 @@ mod tests {
     #[test]
     fn a_download_larger_than_a_backend_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let mut asked = Vec::new();
+        let mut asked: Vec<String> = Vec::new();
         let e = release(
             dir.path(),
             "0.3.0",
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |_url, max| {
-                asked.push(max);
-                // A server that answers more than it was allowed to.
-                Ok(vec![b'x'; max as usize + 1])
+            |url| {
+                asked.push(url.to_string());
+                // A server that answers more than a signature can be.
+                Ok(vec![b'x'; MAX_SIG_BYTES as usize + 1])
             },
         )
         .unwrap_err();
@@ -552,7 +562,7 @@ mod tests {
             format!("{e:#}").contains("larger than a backend can be"),
             "{e:#}"
         );
-        assert_eq!(asked, [MAX_SIG_BYTES], "stopped at the signature");
+        assert_eq!(asked.len(), 1, "stopped at the signature");
         assert!(!dir.path().join("0.3.0").exists());
     }
 
@@ -578,7 +588,7 @@ mod tests {
             Arch::X86_64,
             &text("test.key.pub"),
             ENDPOINT,
-            |u, m| server.fetch(u, m),
+            |u| server.fetch(u),
         )
         .unwrap_err();
         assert!(format!("{e:#}").contains("doesn't match"), "{e:#}");
@@ -589,7 +599,7 @@ mod tests {
             Arch::X86_64,
             &text("other.key.pub"),
             ENDPOINT,
-            |u, m| Server::new(data(SIGNED)).fetch(u, m),
+            |u| Server::new(data(SIGNED)).fetch(u),
         );
         assert!(other.is_err(), "signed with another key");
         assert!(!dir.path().join("0.3.0").join(SIGNED).exists());
@@ -600,10 +610,14 @@ mod tests {
     #[test]
     fn a_development_build_reads_the_override() {
         let env = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), "/x/backend".to_string())]);
-        assert_eq!(source(&env), Source::Development("/x/backend".into()));
-        assert_eq!(source(&BTreeMap::new()), Source::Release);
+        assert_eq!(
+            source(false, &env),
+            Source::Development("/x/backend".into())
+        );
+        assert_eq!(source(true, &env), Source::Release);
+        assert_eq!(source(false, &BTreeMap::new()), Source::Release);
         let blank = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), " ".to_string())]);
-        assert_eq!(source(&blank), Source::Release);
+        assert_eq!(source(false, &blank), Source::Release);
     }
 
     /// A release build (`cargo test --release`, as `tauri build` builds)
@@ -612,7 +626,8 @@ mod tests {
     #[test]
     fn a_release_build_ignores_the_override() {
         let env = BTreeMap::from([(DEV_OVERRIDE_ENV.to_string(), "/x/backend".to_string())]);
-        assert_eq!(source(&env), Source::Release);
+        // Even asked as a development build would be: the code isn't there.
+        assert_eq!(source(false, &env), Source::Release);
         assert!(RELEASE_BUILD);
     }
 
@@ -659,6 +674,7 @@ mod tests {
         let packed = cache
             .join(&got.version)
             .join(asset_name(Arch::X86_64, &got.version));
+        assert_eq!(got.tarball, packed);
         assert_eq!(got.data, std::fs::read(&packed).unwrap());
         let listed = std::process::Command::new("tar")
             .arg("-tzf")

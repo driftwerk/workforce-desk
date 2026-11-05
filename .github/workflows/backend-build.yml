@@ -123,10 +123,12 @@ jobs:
           key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
 
       - name: ONNX Runtime
+        id: ort-build
         run: desk/scripts/onnxruntime.sh "$GITHUB_WORKSPACE/onnxruntime"
 
+      # Only a finished build: one cut short would be restored as if it were.
       - name: Keep ONNX Runtime
-        if: always() && steps.ort.outputs.cache-hit != 'true'
+        if: always() && steps.ort.outputs.cache-hit != 'true' && steps.ort-build.outcome == 'success'
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/onnxruntime

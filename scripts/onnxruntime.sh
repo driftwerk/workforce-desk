@@ -45,6 +45,12 @@ if [ -f "$dir/.built-$COMMIT" ]; then
   say "ONNX Runtime $VERSION for $arch already built in $dir"
   exit 0
 fi
+# A build that didn't finish names tools that are gone (its CMake cache
+# holds the throwaway venv's ninja): it starts again from nothing.
+if [ -d "$dir" ]; then
+  say "starting again: $dir holds a build that didn't finish"
+  rm -rf "$dir"
+fi
 
 if [ ! -d "$src/.git" ]; then
   say "fetching ONNX Runtime $VERSION"
