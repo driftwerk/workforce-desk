@@ -73,3 +73,23 @@ describe("sessions", () => {
     expect(sent).toEqual([{ title: "acme-web needs you", body: "Waiting for an answer" }]);
   });
 });
+
+describe("a machine's sessions", () => {
+  it("notify as this computer's do, each by its key, the same id on each engine apart", async () => {
+    const { noticesFrom } = await import("./notices");
+    const { withMachines } = await import("./Marks");
+    const s = (state: string) => ({ id: "s1", name: "web-d2", engine: "claude", state, live: true, pending: null, updatedAt: state }) as never;
+    noticesFrom({ type: "snapshot", sessions: [s("working")], restore: [], rooms: [] });
+    noticesFrom({ type: "snapshot", sessions: [s("working")], restore: [], rooms: [], machine: "devbox" });
+    noticesFrom({ type: "session", session: s("done"), machine: "devbox" });
+    expect(sent).toMatchObject([{ title: "web-d2 is done" }]);
+    // This computer's s1 still shows working: done there is news of its own.
+    noticesFrom({ type: "session", session: s("done") });
+    expect(sent).toHaveLength(2);
+    // Their unread sessions count with this computer's, by key.
+    const local = { floor: "f", rooms: [], sessions: [{ id: "s1", since: "a", urgency: "forYou" as const }], activity: { count: 0, lastAt: null }, brief: null, update: null };
+    const theirs = { ...local, sessions: [{ id: "s1", since: "b", urgency: "new" as const }] };
+    expect(withMachines(local, { devbox: theirs })!.sessions.map((u) => u.id)).toEqual(["s1", "devbox/s1"]);
+    expect(withMachines(local, {})).toBe(local);
+  });
+});
