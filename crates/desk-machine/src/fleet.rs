@@ -400,9 +400,9 @@ impl Fleet {
     }
 
     /// The machine's link, made again if it was dropped.
-    fn link(&self, machine: &Machine) -> Arc<Link> {
+    fn link(&self, machine: &Machine) -> Result<Arc<Link>, String> {
         match self.machines.get(machine.id.as_str()) {
-            Some(l) => l,
+            Some(l) => Ok(l),
             None => self.machines.insert(machine.clone()),
         }
     }
@@ -422,8 +422,6 @@ impl Fleet {
         self.gate.ask(&Question {
             name: machine.name.clone(),
             target: machine.target.to_string(),
-            user: None,
-            via: None,
         })
     }
 
@@ -671,7 +669,10 @@ impl Fleet {
             Ok(k) => k,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
-        let link = self.link(&machine);
+        let link = match self.link(&machine) {
+            Ok(l) => l,
+            Err(m) => return self.step_failed(id, Step::Install, m),
+        };
         let version = match self.wait_ready(&link, &wanted) {
             Ok(v) => v,
             Err(m) => return self.step_failed(id, Step::Install, m),
@@ -880,7 +881,10 @@ impl Fleet {
             Ok(w) => w,
             Err(message) => return State::Failed { message },
         };
-        let link = self.link(machine);
+        let link = match self.link(machine) {
+            Ok(l) => l,
+            Err(message) => return State::Failed { message },
+        };
         let kept = match install::plan(look.installed.as_deref(), &wanted) {
             Plan::Downgrade { from } => {
                 tracing::info!(machine = id, %from, %wanted, "machine on a newer Desk");

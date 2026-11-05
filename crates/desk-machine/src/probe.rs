@@ -18,22 +18,7 @@ use crate::ssh::{self, SSH_FAILED, SshExe};
 /// The most of a machine's words Desk keeps.
 const MAX_WORDS: usize = 80;
 
-/// Whether `c` is invisible formatting (bidi controls, zero-width
-/// characters, tags) rather than text.
-fn formatting(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x00AD
-            | 0x061C
-            | 0x180E
-            | 0x200B..=0x200F
-            | 0x2028..=0x202E
-            | 0x2060..=0x206F
-            | 0xFEFF
-            | 0xFFF9..=0xFFFB
-            | 0xE0000..=0xE007F
-    )
-}
+use desk_core::machine::is_format as formatting;
 
 /// A machine's words as Desk shows them: one line, nothing invisible, cut
 /// short; none when nothing is left.

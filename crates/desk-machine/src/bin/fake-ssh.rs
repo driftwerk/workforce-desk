@@ -155,10 +155,13 @@ fn option<'a>(options: &'a [String], name: &str) -> Option<&'a str> {
 fn check_host_key(options: &[String], target: &str, key: &str, settings: &str) {
     let line = format!("{target} {key}");
     if option(options, "StrictHostKeyChecking") == Some("accept-new") {
-        let file = option(options, "UserKnownHostsFile")
-            .unwrap_or_else(|| fail("fake ssh: no file", 2));
+        let file =
+            option(options, "UserKnownHostsFile").unwrap_or_else(|| fail("fake ssh: no file", 2));
         std::fs::write(file, format!("{line}\n")).expect("the known hosts file");
-        fail(&format!("dev@{target}: Permission denied (publickey)."), 255);
+        fail(
+            &format!("dev@{target}: Permission denied (publickey)."),
+            255,
+        );
     }
     let known = settings
         .lines()
@@ -175,12 +178,16 @@ fn check_host_key(options: &[String], target: &str, key: &str, settings: &str) {
         .any(|l| l.split_whitespace().next() == Some(target))
     {
         fail(
-            &format!("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key for {target} has changed and you have requested strict checking.\nHost key verification failed."),
+            &format!(
+                "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key for {target} has changed and you have requested strict checking.\nHost key verification failed."
+            ),
             255,
         );
     }
     fail(
-        &format!("No ED25519 host key is known for {target} and you have requested strict checking.\nHost key verification failed."),
+        &format!(
+            "No ED25519 host key is known for {target} and you have requested strict checking.\nHost key verification failed."
+        ),
         255,
     );
 }

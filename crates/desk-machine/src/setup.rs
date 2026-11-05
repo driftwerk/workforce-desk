@@ -30,8 +30,8 @@ fn failed(machine: &Machine, what: &str, out: &std::process::Output) -> String {
     if out.status.code() == Some(SSH_FAILED) {
         return ssh::problem(machine, &out.stderr);
     }
-    match words(&String::from_utf8_lossy(&out.stderr)) {
-        Some(said) => format!("{what}. {} said: “{said}”", machine.name),
+    match desk_core::machine::said_by(&machine.name, &String::from_utf8_lossy(&out.stderr)) {
+        Some(said) => format!("{what}. {said}"),
         None => format!("{what}."),
     }
 }

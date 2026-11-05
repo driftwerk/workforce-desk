@@ -7,7 +7,8 @@
 //! through the fake's real forward.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -235,9 +236,11 @@ fn hub(good: Arc<Mutex<String>>) -> u16 {
     port
 }
 
-fn status(url: &str, token: &str) -> Option<String> {
-    let addr = url.strip_prefix("http://")?;
-    let mut s = TcpStream::connect(addr).ok()?;
+/// A request with `token` through the forward's socket, as the broker
+/// sends one: the status line, or none when nothing answered.
+fn status(socket: &Path, token: &str) -> Option<String> {
+    let addr = "127.0.0.1";
+    let mut s = UnixStream::connect(socket).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     write!(
         s,
@@ -330,7 +333,7 @@ struct Run {
 fn fleet(b: &Box_, wanted: &str, answer: bool) -> Run {
     let said = Arc::new(Said::default());
     let asked = Arc::new(Yes(AtomicUsize::new(0), answer));
-    let machines = Arc::new(Machines::new(b.ssh.clone()));
+    let machines = Arc::new(Machines::new(b.ssh.clone(), &b.dir.path().join("socks")));
     let tarball = b.backend(wanted);
     let fleet = Fleet::new(
         b.ssh.clone(),
@@ -442,10 +445,11 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     assert!(row["system"]["arch"].is_string());
 
     // The machine's hub is reached through the forward, with its token.
-    let c = r.machines.get(&id).unwrap().connection().unwrap().unwrap();
+    let link = r.machines.get(&id).unwrap();
+    let c = link.connection().unwrap().unwrap();
     assert!(c.gateway_url.starts_with("http://127.0.0.1:"));
     assert_eq!(
-        status(&c.gateway_url, c.device_token.as_deref().unwrap()).as_deref(),
+        status(link.socket(), c.device_token.as_deref().unwrap()).as_deref(),
         Some("HTTP/1.1 200 OK")
     );
     // No token ever went into an ssh command line.
@@ -570,14 +574,14 @@ fn a_restarted_helper_is_followed_to_its_new_token() {
     let now = std::fs::read_to_string(b.fake("starts")).unwrap();
     *good.lock().unwrap() = format!("DEVICE-{}", now.trim());
     assert_eq!(
-        status(&before.gateway_url, &old).as_deref(),
+        status(link.socket(), &old).as_deref(),
         Some("HTTP/1.1 401 Unauthorized")
     );
     // Read again over ssh, as chat and the Floor do on a 401: the new one.
     let after = link.read().unwrap().unwrap();
     assert_ne!(after.device_token.as_deref(), Some(old.as_str()));
     assert_eq!(
-        status(&after.gateway_url, after.device_token.as_deref().unwrap()).as_deref(),
+        status(link.socket(), after.device_token.as_deref().unwrap()).as_deref(),
         Some("HTTP/1.1 200 OK")
     );
 
