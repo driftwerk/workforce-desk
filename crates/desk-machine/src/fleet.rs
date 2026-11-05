@@ -1074,12 +1074,20 @@ impl Fleet {
     /// `machines.json` as it is.
     pub fn shutdown(&self) {
         let rows = std::mem::take(&mut *self.rows());
+        let mut links = Vec::new();
         for (id, row) in rows {
             row.kick.1.notify_all();
             if let Some(link) = self.machines.get(&id) {
                 link.tunnel().stop();
+                links.push(link);
             }
             self.machines.remove(&id);
+        }
+        // Each forward's ssh is ended on its own thread: wait for them, a
+        // little, so none outlives the app.
+        let until = Instant::now() + Duration::from_secs(3);
+        while links.iter().any(|l| l.tunnel().up().is_some()) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 

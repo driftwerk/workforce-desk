@@ -185,8 +185,12 @@ fn main() {
             println!("engines: {}", body.chars().take(400).collect::<String>());
         }
     }
-    if args.iter().any(|a| a == "--remove") {
+    let remove = args.iter().any(|a| a == "--remove");
+    if remove {
         fleet.remove(&id).unwrap_or_else(|e| fail(&e));
         println!("removed {id}; forward up: {}", link.tunnel().up().is_some());
     }
+    // The forward ends with this run.
+    fleet.shutdown();
+    println!("forward up after: {}", link.tunnel().up().is_some());
 }

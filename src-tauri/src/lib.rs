@@ -921,6 +921,12 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 grid_windows::quitting();
             }
+            // Machines' forwards end with Desk, not after it.
+            if let tauri::RunEvent::Exit = event
+                && let Some(fleet) = app.try_state::<Arc<desk_machine::fleet::Fleet>>()
+            {
+                fleet.shutdown();
+            }
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event
                 && let Some(store) = app.try_state::<Arc<state::StateStore>>()
                 && let Err(e) = store.flush()
