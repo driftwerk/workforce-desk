@@ -37,14 +37,17 @@ const SYSTEMCTL: &str = r#"#!/bin/sh
 # systemctl --user, as far as Desk uses it.
 f="$HOME/.fake"; mkdir -p "$f"
 [ "$1" = --user ] && shift
-start() { "$HOME/.local/share/Desk/bin/current/desk-helper" --machine; }
+# As systemd: starting one that runs does nothing; restarting starts it again.
+run() { "$HOME/.local/share/Desk/bin/current/desk-helper" --machine; }
+start() { [ -e "$f/running" ] || run; }
 case "$1" in
   show-environment) [ -e "$f/no-systemd" ] && exit 1; exit 0 ;;
   is-enabled) [ -e "$f/enabled" ] && { echo enabled; exit 0; }; echo disabled; exit 1 ;;
   is-active) [ -e "$f/running" ] && { echo active; exit 0; }; echo inactive; exit 3 ;;
   daemon-reload) echo reload >> "$f/systemctl.log"; exit 0 ;;
   enable) touch "$f/enabled"; [ "$2" = --now ] && start; exit 0 ;;
-  start|restart) start; exit 0 ;;
+  start) start; exit 0 ;;
+  restart) run; exit 0 ;;
 esac
 exit 0
 "#;
@@ -75,8 +78,11 @@ EOF
 "#;
 
 /// Desk Helper, at version `VERSION`: running is a file saying its version
-/// and the number of its start (its device token); a flip ends one Desk
-/// started itself, and restarts the service's at the new version.
+/// and the number of its start (its device token). `connection --json`
+/// says the version it is itself (the one installed) and the running one's
+/// token, as the real one does. A flip ends one Desk started itself; the
+/// service's hands over a few reads later, as the real one notices the flip
+/// after a few seconds, and starts again at the new version.
 const HELPER: &str = r#"#!/bin/sh
 f="$HOME/.fake"; mkdir -p "$f"
 bin="$HOME/.local/share/Desk/bin"
@@ -91,10 +97,12 @@ case "$1" in
     read v n < "$f/running"
     current=$(readlink "$bin/current")
     if [ "$v" != "$current" ]; then
-      if [ -e "$f/enabled" ]; then "$bin/current/desk-helper" --machine; read v n < "$f/running"
+      if [ -e "$f/enabled" ]; then
+        h=$(( $(cat "$f/handover" 2>/dev/null || echo 0) + 1 )); echo $h > "$f/handover"
+        if [ $h -ge 3 ]; then rm -f "$f/handover"; "$bin/current/desk-helper" --machine; read v n < "$f/running"; fi
       else rm -f "$f/running"; echo null; exit 0; fi
     fi
-    printf '{"gateway_url":"http://127.0.0.1:%s","admin_token":"ADMIN","device_token":"DEVICE-%s","version":"%s"}\n' "$(cat "$f/port")" "$n" "$v" ;;
+    printf '{"gateway_url":"http://127.0.0.1:%s","admin_token":"ADMIN","device_token":"DEVICE-%s","version":"%s"}\n' "$(cat "$f/port")" "$n" "VERSION" ;;
 esac
 "#;
 
@@ -527,6 +535,14 @@ fn an_older_machine_is_upgraded_when_desk_connects() {
             && r.fleet.list()[0].version.as_deref() == Some("0.2.0")
     });
     assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+    // Ready once the new version's helper runs, not while the one before
+    // was still handing over.
+    assert!(
+        std::fs::read_to_string(b.fake("running"))
+            .unwrap()
+            .starts_with("0.2.0 "),
+        "the helper running is the new one"
+    );
     // The version before is kept beside it.
     assert!(b.home().join(".local/share/Desk/bin/0.1.0").is_dir());
     let kept: Value = serde_json::from_str(

@@ -227,6 +227,15 @@ pub struct Fleet {
     files: Mutex<Option<Files>>,
 }
 
+/// Waits a little for the forwards of `links`, stopped, to end: each one's
+/// ssh is ended on a thread of its own, and none should outlive the app.
+fn ended(links: &[Arc<Link>]) {
+    let until = Instant::now() + Duration::from_secs(3);
+    while links.iter().any(|l| l.tunnel().up().is_some()) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// An id for `name`: lowercase letters, digits and `-`, never `local`, and
 /// none of `taken`.
 pub fn id_for(name: &str, taken: &dyn Fn(&str) -> bool) -> MachineId {
@@ -412,11 +421,13 @@ impl Fleet {
     }
 
     fn drop_link(&self, id: &str) {
-        if let Some(link) = self.machines.get(id) {
+        let link = self.machines.get(id);
+        if let Some(link) = &link {
             link.tunnel().stop();
         }
         self.machines.remove(id);
         self.host.dropped(id);
+        ended(link.as_slice());
     }
 
     // ── Before adding ───────────────────────────────────────────────────
@@ -666,10 +677,10 @@ impl Fleet {
                 self.supervise(id);
                 return;
             }
-            Plan::Nothing => self.keep(&machine, &look),
+            Plan::Nothing => self.keep(&machine, &look).map(|k| (k, None)),
             Plan::Install | Plan::Upgrade { .. } => self.update(&machine, &look),
         };
-        let keep = match keep {
+        let (keep, replacing) = match keep {
             Ok(k) => k,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
@@ -677,7 +688,7 @@ impl Fleet {
             Ok(l) => l,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
-        let version = match self.wait_ready(&link, &wanted) {
+        let version = match self.wait_ready(&link, &wanted, replacing.as_deref()) {
             Ok(v) => v,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
@@ -716,6 +727,7 @@ impl Fleet {
                 // The hub finds its engines' programs as it starts: one
                 // installed after it started needs it started again.
                 if engines.installed {
+                    let replacing = link.ready().and_then(|c| c.device_token);
                     let restarted = setup::restart(
                         &self.ssh,
                         &machine,
@@ -724,9 +736,10 @@ impl Fleet {
                         keep == Keep::Service,
                     );
                     link.forget();
-                    if let Err(m) =
-                        restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop))
-                    {
+                    if let Err(m) = restarted.and_then(|()| {
+                        self.wait_ready(&link, &wanted, replacing.as_deref())
+                            .map(drop)
+                    }) {
                         tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
                     }
                 }
@@ -785,9 +798,25 @@ impl Fleet {
     }
 
     /// Copies this Desk's backend there and flips to it, then keeps it
-    /// running. Blocking.
-    fn update(&self, machine: &Machine, look: &probe::Look) -> Result<Keep, String> {
+    /// running; with the device token of the helper that was running
+    /// before, which the new one replaces (it hands over on the flip, after
+    /// a few seconds, with a token of its own). Blocking.
+    fn update(
+        &self,
+        machine: &Machine,
+        look: &probe::Look,
+    ) -> Result<(Keep, Option<String>), String> {
         let arch = Self::fits(machine, look)?;
+        // Never said: compared, then dropped.
+        let replacing = match look.installed {
+            Some(_) => self
+                .link(machine)?
+                .read()
+                .ok()
+                .flatten()
+                .and_then(|c| c.device_token),
+            None => None,
+        };
         let backend = self.host.backend(arch)?;
         if !backend.signed {
             tracing::warn!(machine = %machine.id, version = %backend.version, "installing a development backend; its signature isn't checked");
@@ -805,7 +834,7 @@ impl Fleet {
             l.forget();
         }
         tracing::info!(machine = %machine.id, version = %backend.version, "installed Desk on a machine");
-        self.keep(machine, look)
+        Ok((self.keep(machine, look)?, replacing))
     }
 
     /// Keeps Desk Helper running there: its service where linger is on (or
@@ -829,17 +858,29 @@ impl Fleet {
     }
 
     /// Waits until the machine's helper says where its hub is, with a
-    /// device token, at `wanted`; the version it says. Blocking.
-    fn wait_ready(&self, link: &Link, wanted: &str) -> Result<String, String> {
+    /// device token, at `wanted`, and (when one is `replacing` another) a
+    /// token of its own: `connection --json` says the version installed,
+    /// while the helper it names may still be the one before; the version
+    /// it says. Blocking.
+    fn wait_ready(
+        &self,
+        link: &Link,
+        wanted: &str,
+        replacing: Option<&str>,
+    ) -> Result<String, String> {
         let until = Instant::now() + self.timing.ready_within;
         let mut last = None;
         loop {
             match link.read() {
-                Ok(Some(c)) if c.device_token.is_some() => match c.version {
-                    Some(v) if v == wanted => return Ok(v),
-                    None => return Ok(wanted.to_string()),
-                    Some(_) => {}
-                },
+                Ok(Some(c))
+                    if c.device_token.is_some() && c.device_token.as_deref() != replacing =>
+                {
+                    match c.version {
+                        Some(v) if v == wanted => return Ok(v),
+                        None => return Ok(wanted.to_string()),
+                        Some(_) => {}
+                    }
+                }
                 Ok(_) => {}
                 Err(e) => last = Some(e),
             }
@@ -923,18 +964,19 @@ impl Fleet {
                 let running = matches!(link.read(), Ok(Some(_)));
                 let move_to_service = !look.service && look.systemd && look.linger == Some(true);
                 if running && !move_to_service {
-                    Ok(Keep::Service)
+                    Ok((Keep::Service, None))
                 } else if look.service {
-                    setup::start_service(&self.ssh, machine).map(|()| Keep::Service)
+                    setup::start_service(&self.ssh, machine).map(|()| (Keep::Service, None))
                 } else {
-                    self.keep(machine, &look)
+                    self.keep(machine, &look).map(|k| (k, None))
                 }
             }
         };
-        if let Err(message) = kept {
-            return State::Failed { message };
-        }
-        match self.wait_ready(&link, &wanted) {
+        let replacing = match kept {
+            Ok((_, replacing)) => replacing,
+            Err(message) => return State::Failed { message },
+        };
+        match self.wait_ready(&link, &wanted, replacing.as_deref()) {
             Ok(version) => {
                 if self.rows().get(id).and_then(|r| r.kept.version.clone()) != Some(version.clone())
                 {
@@ -1083,12 +1125,7 @@ impl Fleet {
             }
             self.machines.remove(&id);
         }
-        // Each forward's ssh is ended on its own thread: wait for them, a
-        // little, so none outlives the app.
-        let until = Instant::now() + Duration::from_secs(3);
-        while links.iter().any(|l| l.tunnel().up().is_some()) && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        ended(&links);
     }
 
     /// Whether the page may drive machine `id` now: not one on a newer Desk.
