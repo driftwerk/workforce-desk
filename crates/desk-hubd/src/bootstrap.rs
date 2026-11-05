@@ -399,10 +399,17 @@ mod tests {
     #[tokio::test]
     async fn a_ready_hub_is_paired_at_once() {
         let (base, _) = slow_hub(Duration::ZERO).await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Until it listens: on a busy machine that can take longer than any
+        // fixed pause, and a refused first poll waits a retry.
+        let addr = base.trim_start_matches("http://").to_string();
+        while tokio::net::TcpStream::connect(&addr).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let retry = Retry::default();
         let started = std::time::Instant::now();
-        wait_for_hub(&test_hub(base), &Retry::default()).await;
-        assert!(started.elapsed() < Duration::from_secs(1));
+        wait_for_hub(&test_hub(base), &retry).await;
+        // Sooner than the first retry: the first poll was the one answered.
+        assert!(started.elapsed() < retry.first);
     }
 
     /// The wait has no end of its own: it is stopped from outside, which is
