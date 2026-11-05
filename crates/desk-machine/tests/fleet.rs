@@ -86,12 +86,22 @@ EOF
 const HELPER: &str = r#"#!/bin/sh
 f="$HOME/.fake"; mkdir -p "$f"
 bin="$HOME/.local/share/Desk/bin"
+pidfile="$HOME/.local/share/Desk/hub/run/desk-hubd.pid"
+here=$(cd "$(dirname "$0")" && pwd -P)
+stop() { [ -e "$pidfile" ] && kill "$(cat "$pidfile")" 2>/dev/null; rm -f "$pidfile" "$f/running"; }
 case "$1" in
   --check) [ -e "$f/check-fails" ] && { echo "this machine can't run Desk" >&2; exit 1; }; exit 0 ;;
   --machine)
+    stop
     n=$(( $(cat "$f/starts" 2>/dev/null || echo 0) + 1 )); echo $n > "$f/starts"
+    # A process of this version's own, as the real helper is, named by
+    # its pid file.
+    [ -x "$here/fake-runner" ] || cp /bin/sleep "$here/fake-runner"
+    mkdir -p "$(dirname "$pidfile")"
+    "$here/fake-runner" 3600 </dev/null >/dev/null 2>&1 &
+    echo $! > "$pidfile"
     echo "VERSION $n" > "$f/running"; exit 0 ;;
-  --stop) rm -f "$f/running"; exit 0 ;;
+  --stop) stop; exit 0 ;;
   connection)
     [ -e "$f/running" ] || { echo null; exit 0; }
     read v n < "$f/running"
@@ -100,7 +110,7 @@ case "$1" in
       if [ -e "$f/enabled" ]; then
         h=$(( $(cat "$f/handover" 2>/dev/null || echo 0) + 1 )); echo $h > "$f/handover"
         if [ $h -ge 3 ]; then rm -f "$f/handover"; "$bin/current/desk-helper" --machine; read v n < "$f/running"; fi
-      else rm -f "$f/running"; echo null; exit 0; fi
+      else stop; echo null; exit 0; fi
     fi
     printf '{"gateway_url":"http://127.0.0.1:%s","admin_token":"ADMIN","device_token":"DEVICE-%s","version":"%s"}\n' "$(cat "$f/port")" "$n" "VERSION" ;;
 esac
@@ -124,6 +134,19 @@ fn script(path: &Path, text: &str) {
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+impl Drop for Box_ {
+    /// Ends the stand-ins for the machine's helper this test started.
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg(format!(
+                "{}/home/.local/share/Desk/bin/",
+                self.dir.path().display()
+            ))
+            .status();
     }
 }
 
@@ -617,7 +640,11 @@ fn a_restarted_helper_is_followed_to_its_new_token() {
     );
 
     // A helper that stopped is started again at the next connect.
-    std::fs::remove_file(b.fake("running")).unwrap();
+    std::process::Command::new(b.home().join(".local/share/Desk/bin/current/desk-helper"))
+        .arg("--stop")
+        .env("HOME", b.home())
+        .status()
+        .unwrap();
     r.fleet.reconnect(&id).unwrap();
     until("running again", || b.fake("running").exists());
     until("ready again", || r.fleet.state(&id) == Some(State::Ready));

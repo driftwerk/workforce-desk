@@ -677,10 +677,10 @@ impl Fleet {
                 self.supervise(id);
                 return;
             }
-            Plan::Nothing => self.keep(&machine, &look).map(|k| (k, None)),
+            Plan::Nothing => self.keep(&machine, &look),
             Plan::Install | Plan::Upgrade { .. } => self.update(&machine, &look),
         };
-        let (keep, replacing) = match keep {
+        let keep = match keep {
             Ok(k) => k,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
@@ -688,7 +688,7 @@ impl Fleet {
             Ok(l) => l,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
-        let version = match self.wait_ready(&link, &wanted, replacing.as_deref()) {
+        let version = match self.wait_ready(&link, &wanted) {
             Ok(v) => v,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
@@ -727,7 +727,6 @@ impl Fleet {
                 // The hub finds its engines' programs as it starts: one
                 // installed after it started needs it started again.
                 if engines.installed {
-                    let replacing = link.ready().and_then(|c| c.device_token);
                     let restarted = setup::restart(
                         &self.ssh,
                         &machine,
@@ -736,10 +735,9 @@ impl Fleet {
                         keep == Keep::Service,
                     );
                     link.forget();
-                    if let Err(m) = restarted.and_then(|()| {
-                        self.wait_ready(&link, &wanted, replacing.as_deref())
-                            .map(drop)
-                    }) {
+                    if let Err(m) =
+                        restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop))
+                    {
                         tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
                     }
                 }
@@ -798,25 +796,9 @@ impl Fleet {
     }
 
     /// Copies this Desk's backend there and flips to it, then keeps it
-    /// running; with the device token of the helper that was running
-    /// before, which the new one replaces (it hands over on the flip, after
-    /// a few seconds, with a token of its own). Blocking.
-    fn update(
-        &self,
-        machine: &Machine,
-        look: &probe::Look,
-    ) -> Result<(Keep, Option<String>), String> {
+    /// running. Blocking.
+    fn update(&self, machine: &Machine, look: &probe::Look) -> Result<Keep, String> {
         let arch = Self::fits(machine, look)?;
-        // Never said: compared, then dropped.
-        let replacing = match look.installed {
-            Some(_) => self
-                .link(machine)?
-                .read()
-                .ok()
-                .flatten()
-                .and_then(|c| c.device_token),
-            None => None,
-        };
         let backend = self.host.backend(arch)?;
         if !backend.signed {
             tracing::warn!(machine = %machine.id, version = %backend.version, "installing a development backend; its signature isn't checked");
@@ -834,7 +816,7 @@ impl Fleet {
             l.forget();
         }
         tracing::info!(machine = %machine.id, version = %backend.version, "installed Desk on a machine");
-        Ok((self.keep(machine, look)?, replacing))
+        self.keep(machine, look)
     }
 
     /// Keeps Desk Helper running there: its service where linger is on (or
@@ -858,27 +840,20 @@ impl Fleet {
     }
 
     /// Waits until the machine's helper says where its hub is, with a
-    /// device token, at `wanted`, and (when one is `replacing` another) a
-    /// token of its own: `connection --json` says the version installed,
-    /// while the helper it names may still be the one before; the version
-    /// it says. Blocking.
-    fn wait_ready(
-        &self,
-        link: &Link,
-        wanted: &str,
-        replacing: Option<&str>,
-    ) -> Result<String, String> {
+    /// device token, and the helper running there is `wanted`'s:
+    /// `connection --json` says the version installed, while for a few
+    /// seconds after a flip the helper it names is still the one before,
+    /// handing over. The version it runs. Blocking.
+    fn wait_ready(&self, link: &Link, wanted: &str) -> Result<String, String> {
         let until = Instant::now() + self.timing.ready_within;
         let mut last = None;
         loop {
             match link.read() {
-                Ok(Some(c))
-                    if c.device_token.is_some() && c.device_token.as_deref() != replacing =>
-                {
-                    match c.version {
-                        Some(v) if v == wanted => return Ok(v),
-                        None => return Ok(wanted.to_string()),
-                        Some(_) => {}
+                Ok(Some(c)) if c.device_token.is_some() => {
+                    match setup::running(&self.ssh, link.machine()) {
+                        Ok(Some(v)) if v == wanted => return Ok(v),
+                        Ok(_) => {}
+                        Err(e) => last = Some(e),
                     }
                 }
                 Ok(_) => {}
@@ -964,19 +939,18 @@ impl Fleet {
                 let running = matches!(link.read(), Ok(Some(_)));
                 let move_to_service = !look.service && look.systemd && look.linger == Some(true);
                 if running && !move_to_service {
-                    Ok((Keep::Service, None))
+                    Ok(Keep::Service)
                 } else if look.service {
-                    setup::start_service(&self.ssh, machine).map(|()| (Keep::Service, None))
+                    setup::start_service(&self.ssh, machine).map(|()| Keep::Service)
                 } else {
-                    self.keep(machine, &look).map(|k| (k, None))
+                    self.keep(machine, &look)
                 }
             }
         };
-        let replacing = match kept {
-            Ok((_, replacing)) => replacing,
-            Err(message) => return State::Failed { message },
-        };
-        match self.wait_ready(&link, &wanted, replacing.as_deref()) {
+        if let Err(message) = kept {
+            return State::Failed { message };
+        }
+        match self.wait_ready(&link, &wanted) {
             Ok(version) => {
                 if self.rows().get(id).and_then(|r| r.kept.version.clone()) != Some(version.clone())
                 {

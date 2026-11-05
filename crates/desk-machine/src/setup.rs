@@ -200,6 +200,30 @@ pub fn start_service(ssh: &SshExe, machine: &Machine) -> Result<(), String> {
     .map(drop)
 }
 
+/// The version of the Desk Helper running there (its version's folder,
+/// from the process its pid file names); empty when none runs.
+pub fn running_script() -> String {
+    format!(
+        "p=$(cat \"$HOME/{root}/hub/run/desk-hubd.pid\" 2>/dev/null) || exit 0\n\
+         exe=$(readlink \"/proc/$p/exe\" 2>/dev/null) || exit 0\n\
+         case \"$exe\" in \"$HOME/{root}/bin/\"*) basename \"$(dirname \"$exe\")\" ;; esac\n",
+        root = desk_core::machine::MACHINE_ROOT,
+    )
+}
+
+/// The version of the Desk Helper running there, if one is. Blocking.
+pub fn running(ssh: &SshExe, machine: &Machine) -> Result<Option<String>, String> {
+    let said = run(
+        ssh,
+        machine,
+        &running_script(),
+        "Desk couldn't ask what runs there",
+    )?;
+    Ok(Some(said.trim())
+        .filter(|v| install::valid_version(v))
+        .map(str::to_string))
+}
+
 /// Claude Code's and Codex's own installers, as their makers give them:
 /// each for the account, into `~/.local/bin`, without sudo. Each is
 /// fetched to a file first, so a download cut short runs nothing. One
