@@ -162,6 +162,11 @@ const notEarlier = (k: ChatMessage, m: ChatMessage): boolean => {
   return Number.isNaN(kt) || Number.isNaN(mt) || kt >= mt - SKEW_MS;
 };
 
+/** Whether the hub's `k` is the error `m` Desk showed of a turn: the same
+ *  words, not from well before it. */
+const keptError = (k: ChatMessage, m: ChatMessage): boolean =>
+  k.role !== "user" && m.content.trim() !== "" && k.content.trim() === m.content.trim() && notEarlier(k, m);
+
 /** Whether the hub's `k` could be the live `m`: `m`'s files say so, or it
  *  says the same and isn't from well before `m` was. */
 const copyOf = (k: ChatMessage, m: ChatMessage): boolean =>
@@ -381,9 +386,12 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
   const after = live.filter((m) => !gone.has(m));
   const firstSaid = after.findIndex((m) => m.role === "user");
   const rest = live.filter((m) => !held.has(m));
+  // An error Desk shows of a turn is no message of the transcript: the tail
+  // the hub kept is matched against what was said around it.
+  const said = rest.filter((m) => m.status !== "error");
   let candidates = 0;
-  while (candidates < rest.length) {
-    const m = rest[candidates]!;
+  while (candidates < said.length) {
+    const m = said[candidates]!;
     const known = loadedAt !== null && m.at <= loadedAt && m.status === "complete";
     const echo = m.role === "assistant" && m.status === "complete" && (firstSaid < 0 || after.indexOf(m) < firstSaid);
     if (!known && !echo) break;
@@ -391,16 +399,22 @@ export const withHistory = (history: ChatMessage[], all: ChatMessage[], loadedAt
   }
   for (let k = Math.min(candidates, history.length); k > 0; k--) {
     const tail = history.slice(-k);
-    if (tail.every((m, i) => same(m, rest[i]!))) {
-      rest.slice(0, k).forEach((m) => gone.add(m));
+    if (tail.every((m, i) => same(m, said[i]!))) {
+      said.slice(0, k).forEach((m) => gone.add(m));
       break;
     }
   }
 
-  // What the read has seen past that the hub kept no copy of goes by its own
-  // time, as a held message does, never after everything said since.
+  // An error the hub kept too shows once, as it kept it.
   for (const m of rest) {
-    if (gone.has(m) || m.status !== "complete" || m.role === "system" || loadedAt === null || m.at > loadedAt) continue;
+    if (m.status === "error" && history.some((h) => keptError(h, m))) gone.add(m);
+  }
+
+  // What the read has seen past that the hub kept no copy of goes by its own
+  // time, as a held message does, never after everything said since: an
+  // error Desk showed as much as an answer.
+  for (const m of rest) {
+    if (gone.has(m) || m.status === "streaming" || loadedAt === null || m.at > loadedAt) continue;
     const t = Date.parse(m.at);
     const at = Number.isNaN(t) ? -1 : history.findIndex((h) => Date.parse(h.at) > t + SKEW_MS);
     if (at < 0) continue;
