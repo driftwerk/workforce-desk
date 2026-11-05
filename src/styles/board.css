@@ -431,3 +431,33 @@ button.ticket-chip:hover {
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
+
+/* Who wrote a ticket that wasn't the person, on its card and its panel. */
+.board-by {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.board-pinned + .board-by {
+  margin-left: 0;
+}
+.ticket-by {
+  margin: -6px 0 0;
+}
+/* An edit made over a change heard meanwhile: theirs, and the choice. */
+.ticket-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--blocked);
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+}
+.ticket-conflict p {
+  margin: 0;
+}

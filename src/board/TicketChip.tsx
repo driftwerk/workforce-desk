@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Ticket } from "../hub/types";
 import { keyParts } from "./board";
-import { useBoard, useSessionTicket } from "./store";
+import { useBoard, useSessionTicket, useTicketKeys } from "./store";
 
 /** A ticket's key as a chip: opens the ticket beside whatever is shown.
  *  `still` draws it without a button of its own, for rows that are one. */
@@ -45,8 +45,7 @@ export function EventTicketChip({ id }: { id: string }) {
 
 /** Text with the keys of tickets there are as their chips: `ACM-12`. */
 export function TicketKeys({ text }: { text: string }) {
-  const tickets = useBoard((s) => s.tickets);
-  const byKey = useMemo(() => new Map(Object.values(tickets).flatMap((t) => (t.key ? [[t.key.toUpperCase(), t] as const] : []))), [tickets]);
+  const byKey = useTicketKeys();
   const parts = useMemo(() => keyParts(text, new Set(byKey.keys())), [text, byKey]);
   return (
     <>

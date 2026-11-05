@@ -7,6 +7,7 @@ import { useDesk } from "../hub/store";
 import type { ActivityParty, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
 import { blockers, needsLine } from "./board";
+import type { TicketState } from "../hub/types";
 
 /** Who has a ticket, as a card or the ticket's panel says it: their dot,
  *  their name, and that a boss runs them or that they wait on you. */
@@ -30,10 +31,26 @@ export function Assignee({ who, waiting }: { who: ActivityParty; waiting: boolea
   );
 }
 
-/** Who made a ticket that wasn't you: "acme-api added this". */
+/** Who made a ticket that wasn't you, by their name here. */
+const useMakerName = (who: ActivityParty): string => {
+  const session = useSessionName(who.kind === "session" ? who.id : null, who.name);
+  const agent = useLocalAgent(who.kind === "agent" ? who.id : null);
+  return who.kind === "session" ? session : (agent?.name ?? who.name);
+};
+
+/** "acme-api added this", while it waits to be taken up. */
 function Maker({ who }: { who: ActivityParty }) {
-  const name = useSessionName(who.kind === "session" ? who.id : null, who.name);
-  return <span className="floor-item-what">{who.kind === "session" ? name : who.name} added this</span>;
+  return <span className="floor-item-what">{useMakerName(who)} added this</span>;
+}
+
+/** A quiet "by acme-api" once it's been taken up: its words stay theirs. */
+function By({ who }: { who: ActivityParty }) {
+  const name = useMakerName(who);
+  return (
+    <span className="board-by" title={`Written by ${name}`}>
+      by {name}
+    </span>
+  );
 }
 
 /** One ticket on the board: its key, title, and what it waits on or who has
@@ -42,6 +59,7 @@ function Maker({ who }: { who: ActivityParty }) {
 export function TicketCard({
   ticket: t,
   all,
+  states,
   waiting,
   settled = false,
   buttonRef,
@@ -50,16 +68,18 @@ export function TicketCard({
 }: {
   ticket: Ticket;
   all: Readonly<Record<string, Ticket>>;
+  /** Every ticket's state, worked out once for the board. */
+  states: ReadonlyMap<string, TicketState>;
   waiting: boolean;
   settled?: boolean;
   buttonRef?: (el: HTMLButtonElement | null) => void;
   onOpen: () => void;
   onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
-  const theirs = t.createdBy.kind !== "you" && t.state === "backlog" && !t.assignee;
-  const states = new Map(Object.values(all).map((o) => [o.id, o.state] as const));
+  const written = t.createdBy.kind !== "you";
+  const theirs = written && t.state === "backlog" && !t.assignee;
   const blocked = (t.state === "todo" || t.state === "doing") && blockers(t, states).length > 0;
-  const needs = needsLine(t, all);
+  const needs = needsLine(t, all, states);
   const pr = t.links.find((l) => l.kind === "pr");
   const look = settled ? "board-card-settled" : waiting ? "board-card-waiting" : theirs ? "board-card-theirs" : "";
   return (
@@ -78,6 +98,7 @@ export function TicketCard({
         <span className="mono board-key">{t.key}</span>
         {t.pinned && <span className="board-pinned">Pinned</span>}
         {t.state === "dropped" && <span className="faint small">Dropped</span>}
+        {written && !theirs && <By who={t.createdBy} />}
       </span>
       <b className="board-title">{t.title}</b>
       {pr?.kind === "pr" && (

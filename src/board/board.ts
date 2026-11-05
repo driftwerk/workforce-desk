@@ -170,9 +170,11 @@ export const moved = (t: Ticket, move: TicketMove, all: Readonly<Record<string, 
   return { ...t, state, rank: rank ?? t.rank, stateAt: state === t.state ? t.stateAt : now, updatedAt: now };
 };
 
+/** Every ticket's state, by id: worked out once for a board's cards. */
+export const statesOf = (all: Readonly<Record<string, Ticket>>): Map<string, TicketState> => new Map(Object.values(all).map((o) => [o.id, o.state] as const));
+
 /** "needs ACM-12, ACM-3": the keys of what it waits on, as the card says. */
-export const needsLine = (t: Ticket, all: Readonly<Record<string, Ticket>>): string | null => {
-  const states = new Map(Object.values(all).map((o) => [o.id, o.state] as const));
+export const needsLine = (t: Ticket, all: Readonly<Record<string, Ticket>>, states: ReadonlyMap<string, TicketState> = statesOf(all)): string | null => {
   const keys = blockers(t, states)
     .map((id) => all[id]?.key)
     .filter((k): k is string => !!k);
@@ -264,4 +266,26 @@ export const keyParts = (text: string, known: ReadonlySet<string>): ({ kind: "te
   }
   if (at < text.length) parts.push({ kind: "text", text: text.slice(at) });
   return parts;
+};
+
+/** A move worked out among the cards shown, placed in the whole column
+ *  (`tickets`: the board's, the moved one too): between the card it lands
+ *  after and the one truly next to it, hidden by a filter or not, so the
+ *  hub's rank falls where it was shown. */
+export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: string): TicketMove => {
+  const column = tickets
+    .filter((t) => t.state === mv.state && t.id !== source)
+    .sort(byRank)
+    .map((t) => t.id);
+  const at = (id: string) => column.indexOf(id);
+  if (mv.before && at(mv.before) >= 0) {
+    const next = column[at(mv.before) + 1];
+    return { state: mv.state, before: mv.before, ...(next ? { after: next } : {}) };
+  }
+  if (mv.after && at(mv.after) >= 0) {
+    const prev = column[at(mv.after) - 1];
+    return { state: mv.state, ...(prev ? { before: prev } : {}), after: mv.after };
+  }
+  const last = column.at(-1);
+  return { state: mv.state, ...(last ? { before: last } : {}) };
 };

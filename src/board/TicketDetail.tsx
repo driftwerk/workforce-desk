@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
 import { deskListeners, sortedSessions, useDesk } from "../hub/store";
-import type { ActivityEvent, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
+import type { ActivityEvent, ActivityParty, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
 import { SidePanel } from "../panels/Stage";
 import { openUrl } from "../platform";
 import { ticketLink } from "../shell/links";
@@ -12,6 +12,7 @@ import { Confirm } from "../ui/Confirm";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { plainError } from "../ui/plainError";
 import { clock, dayClock } from "../floor/time";
+import { mergeEvents } from "../overview/activity";
 import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
@@ -37,39 +38,53 @@ const snoozeChoices = (now: Date): { label: string; until: Date }[] => {
 /** The most ledger pages read for a ticket's spend. */
 const SPEND_PAGES = 10;
 
+/** How often a ticket's spend is read again while its panel is open. */
+export const SPEND_EVERY_MS = 60_000;
+
 /** What a ticket's sessions spent on it this month, from the ledger's rows
- *  stamped with it; null until read, or where the hub has no ledger. */
-const useTicketSpend = (t: Ticket): { tokens: number; usd: number; calls: number } | null => {
+ *  stamped with it, read again each minute while it's open; null until
+ *  read, or where the hub has no ledger. `capped`: a session had more pages
+ *  than were read, so it's at least this. */
+const useTicketSpend = (t: Ticket): Spend | null => {
   const hub = useDesk((s) => s.hub);
   const sessions = sessionsOf(t).join(" ");
-  const [spend, setSpend] = useState<{ tokens: number; usd: number; calls: number } | null>(null);
-  const changed = t.updatedAt;
+  const [spend, setSpend] = useState<Spend | null>(null);
   useEffect(() => {
     if (!hub || !sessions) return setSpend(null);
     let live = true;
-    void (async () => {
+    const read = async () => {
       const rows = [];
+      let capped = false;
       try {
         for (const session of sessions.split(" ")) {
           let before: string | undefined;
-          for (let page = 0; page < SPEND_PAGES; page++) {
+          for (let page = 0; ; page++) {
+            if (page === SPEND_PAGES) {
+              capped = true;
+              break;
+            }
             const p = await hub.ledger({ period: "month", session, before });
             rows.push(...p.rows);
             if (!p.next) break;
             before = p.next;
           }
         }
-        if (live) setSpend(spendOf(rows, t.id));
+        if (live) setSpend({ ...spendOf(rows, t.id), capped });
       } catch {
         if (live) setSpend(null);
       }
-    })();
+    };
+    void read();
+    const every = setInterval(() => void read(), SPEND_EVERY_MS);
     return () => {
       live = false;
+      clearInterval(every);
     };
-  }, [hub, sessions, t.id, changed]);
+  }, [hub, sessions, t.id]);
   return spend;
 };
+
+type Spend = { tokens: number; usd: number; calls: number; capped: boolean };
 
 /** A ticket's history, newest last as it happened; the next page older. */
 const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; older: () => void; problem: string | null } => {
@@ -77,6 +92,8 @@ const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; 
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Older pages shown stay shown as the newest is read again.
+  const olderRead = useRef(false);
   const changed = t.updatedAt;
   useEffect(() => {
     if (!hub) return;
@@ -85,8 +102,8 @@ const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; 
       .ticketHistory(t.id)
       .then((p) => {
         if (!live) return;
-        setEvents(p.events);
-        setMore(p.more);
+        setEvents((was) => mergeEvents(was, p.events));
+        if (!olderRead.current) setMore(p.more);
         setProblem(null);
       })
       .catch((e) => live && setProblem(plainError(e)));
@@ -97,7 +114,7 @@ const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; 
   // What happens to it meanwhile, as it happens.
   useEffect(() => {
     const listen = (e: DeskEvent) => {
-      if (e.type === "activity" && e.event.ticket === t.id) setEvents((was) => (was.some((x) => x.id === e.event.id) ? was : [e.event, ...was]));
+      if (e.type === "activity" && e.event.ticket === t.id) setEvents((was) => mergeEvents(was, [e.event]));
     };
     deskListeners.add(listen);
     return () => void deskListeners.delete(listen);
@@ -108,7 +125,8 @@ const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; 
     hub
       .ticketHistory(t.id, last.id)
       .then((p) => {
-        setEvents((was) => [...was, ...p.events.filter((e) => !was.some((w) => w.id === e.id))]);
+        olderRead.current = true;
+        setEvents((was) => mergeEvents(was, p.events));
         setMore(p.more);
       })
       .catch((e) => setProblem(plainError(e)));
@@ -126,9 +144,9 @@ export function OpenTicket() {
   // Opened from a chip before the board was read: ask for it.
   useEffect(() => {
     if (!id || t || !hub || supported === false) return;
-    hub
-      .ticket(id)
-      .then((got) => useBoard.getState().heard(got))
+    useBoard
+      .getState()
+      .fetched(id)
       .catch(() => useBoard.getState().openTicket(null));
   }, [id, t, hub, supported]);
   return t ? <TicketDetail key={t.id} ticket={t} /> : null;
@@ -146,6 +164,11 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState<"title" | "body" | null>(null);
   const [draft, setDraft] = useState("");
+  /** What the field said when it was opened. */
+  const [base, setBase] = useState("");
+  /** An edit made over a change heard meanwhile: the person's, and the
+   *  ticket's as it now is, for them to choose between. */
+  const [conflict, setConflict] = useState<{ field: "title" | "body"; mine: string; theirs: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const handEntries = useHandEntries(t);
   const spend = useTicketSpend(t);
@@ -166,7 +189,14 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     if (!field) return;
     const value = field === "title" ? draft.trim() : draft;
     if ((field === "title" && !value) || value === t[field]) return;
+    if (t[field] !== base) return setConflict({ field, mine: value, theirs: t[field] });
     act(store().edit(t.id, { [field]: value }));
+  };
+  const startEditing = (field: "title" | "body") => {
+    setConflict(null);
+    setDraft(t[field]);
+    setBase(t[field]);
+    setEditing(field);
   };
   const snoozeEntries: MenuEntry[] = [
     ...snoozeChoices(new Date()).map((c) => ({ kind: "item" as const, label: c.label, onSelect: () => act(store().edit(t.id, { snoozedUntil: c.until.toISOString() })) })),
@@ -226,14 +256,33 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
               type="button"
               className="ticket-edit"
               title="Change the title"
-              onClick={() => {
-                setDraft(t.title);
-                setEditing("title");
-              }}
+              onClick={() => startEditing("title")}
             >
               {t.title}
             </button>
           </h2>
+        )}
+        {t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
+        {conflict && (
+          <div className="ticket-conflict" role="alert">
+            <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
+            <p className="ticket-text muted">{conflict.theirs || "(nothing)"}</p>
+            <div className="ticket-actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  act(store().edit(t.id, { [conflict.field]: conflict.mine }));
+                  setConflict(null);
+                }}
+              >
+                Keep mine
+              </button>
+              <button type="button" className="link" onClick={() => setConflict(null)}>
+                Take the new one
+              </button>
+            </div>
+          </div>
         )}
         <div className="ticket-row">
           <label htmlFor={`ticket-state-${t.id}`} className="ov-label muted">
@@ -296,10 +345,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             type="button"
             className="ticket-edit ticket-text"
             title="Change what it's about"
-            onClick={() => {
-              setDraft(t.body);
-              setEditing("body");
-            }}
+            onClick={() => startEditing("body")}
           >
             {t.body || <span className="faint">Add what it's about, and what done looks like</span>}
           </button>
@@ -311,6 +357,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             <h3 className="ov-label muted">History</h3>
             {spend && spend.calls > 0 && (
               <span className="floor-time" title="What its sessions spent on it this month, at API prices">
+                {spend.capped ? "at least " : ""}
                 {tokensText(spend.tokens)} tokens · {usdText(spend.usd)} this month
               </span>
             )}
@@ -364,6 +411,18 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
         </Confirm>
       )}
     </SidePanel>
+  );
+}
+
+/** Who wrote a ticket that wasn't the person: its words are theirs. */
+function WrittenBy({ who }: { who: ActivityParty }) {
+  const session = useSessionName(who.kind === "session" ? who.id : null, who.name);
+  const agent = useChat((s) => (who.kind === "agent" ? s.roster.find((a) => a.id === who.id)?.name : undefined));
+  const name = who.kind === "session" ? session : (agent ?? who.name);
+  return (
+    <p className="faint small ticket-by">
+      Written by <span className={who.kind === "session" ? "mono" : undefined}>{name}</span>: its title and description are its words, not yours.
+    </p>
   );
 }
 

@@ -63,6 +63,15 @@ class FakeHub implements DeskTransport {
   history: ActivityEvent[] = [];
   ledger: LedgerRow[] = [];
   refuseMoves = false;
+  /** Runs as a request arrives, before the hub answers: what happens meanwhile. */
+  meanwhile: ((route: string) => void) | null = null;
+  /** History older than the first page, for Show older. */
+  olderHistory: ActivityEvent[] = [];
+  /** Every ledger page says there's another. */
+  endlessLedger = false;
+  /** Tickets lists asked for: each one a change is heard during. */
+  ticketReads = 0;
+  churnReads = 0;
   events: Socket | null = null;
   sessions: Session[] = [];
 
@@ -76,19 +85,28 @@ class FakeHub implements DeskTransport {
     const route = `${method} ${path}`;
     const said = body ? (JSON.parse(String(body.data)) as Record<string, unknown>) : {};
     this.requests.push({ route, body: said });
+    this.meanwhile?.(route);
     const [p, query = ""] = path.split("?");
     const q = new URLSearchParams(query);
     if (route === "GET /api/desk/boards") return json([ACME]);
-    if (route === `GET /api/desk/boards/${ACME.id}/tickets`) return json([...this.tickets.values()]);
+    if (route === `GET /api/desk/boards/${ACME.id}/tickets`) {
+      const list = [...this.tickets.values()];
+      if (this.ticketReads++ < this.churnReads) this.put({ ...list[0]!, title: `Changed while read ${this.ticketReads}` });
+      return json(list);
+    }
     if (method === "GET" && p === "/api/desk/tickets/search") return json([...this.tickets.values()].filter((t) => t.key === q.get("q") || t.title.includes(q.get("q") ?? "")));
-    if (method === "GET" && p === "/api/desk/ledger") return json({ rows: this.ledger.filter((r) => r.session === q.get("session")), next: null });
+    if (method === "GET" && p === "/api/desk/ledger")
+      return json({ rows: q.get("before") ? [] : this.ledger.filter((r) => r.session === q.get("session")), next: this.endlessLedger ? "more" : null });
     const m = /^\/api\/desk\/tickets\/([^/]+)(?:\/(\w+))?(?:\/([^/]+))?$/.exec(p!);
     const t = m ? this.tickets.get(m[1]!) : undefined;
     if (m && !t) return json({ error: "There's no such ticket or board." }, 404);
     if (t && m) {
       const [, , verb, other] = m;
       if (method === "GET" && !verb) return json(t);
-      if (method === "GET" && verb === "history") return json({ events: this.history.filter((e) => e.ticket === t.id), more: false });
+      if (method === "GET" && verb === "history")
+        return q.get("before")
+          ? json({ events: this.olderHistory, more: false })
+          : json({ events: this.history.filter((e) => e.ticket === t.id), more: this.olderHistory.length > 0 });
       if (method === "POST" && verb === "move") {
         if (this.refuseMoves) return json({ error: "That ticket changed while this was being done; look at it again." }, 409);
         const state = said.state as TicketState;
@@ -97,7 +115,11 @@ class FakeHub implements DeskTransport {
         const rank = above !== undefined && below !== undefined ? (above + below) / 2 : below !== undefined ? below - 1024 : (above ?? 0) + 1024;
         return json(this.put({ ...t, state, rank, stateAt: state === t.state ? t.stateAt : AT, updatedAt: AT }));
       }
-      if (method === "PATCH" && !verb) return json(this.put({ ...t, ...said, snoozed: !!said.snoozedUntil, updatedAt: AT }));
+      if (method === "PATCH" && !verb) {
+        const changed = { ...t, ...said, snoozed: !!said.snoozedUntil, updatedAt: AT };
+        this.tickets.set(t.id, changed);
+        return json(changed);
+      }
       if (verb === "needs" && other) {
         const needs = method === "PUT" ? [...t.needs, other] : t.needs.filter((n) => n !== other);
         return json(this.put({ ...t, needs, updatedAt: AT }));
@@ -337,6 +359,30 @@ describe("a ticket's panel", () => {
     await waitFor(() => expect(moves().at(-1)).toEqual({ route: "POST /api/desk/tickets/t12/move", body: { state: "dropped" } }));
     await waitFor(() => expect(within(panel).getByRole("button", { name: "Bring it back" })).toBeTruthy());
   });
+
+  it("says its spend is at least what was read when a session's ledger has more pages, and doesn't read it again on every change", async () => {
+    hub.endlessLedger = true;
+    const panel = await open();
+    const history = within(panel).getByRole("region", { name: "History" });
+    await waitFor(() => expect(within(history).getByText("at least 412k tokens · $3.10 this month")).toBeTruthy());
+    const reads = hub.requests.filter((r) => r.route.startsWith("GET /api/desk/ledger")).length;
+    await act(async () => void hub.put({ ...hub.tickets.get("t12")!, title: "Hash keys", updatedAt: "2026-11-05T15:10:00Z" }));
+    await act(async () => void hub.put({ ...hub.tickets.get("t12")!, pinned: true, updatedAt: "2026-11-05T15:11:00Z" }));
+    expect(hub.requests.filter((r) => r.route.startsWith("GET /api/desk/ledger")).length).toBe(reads);
+  });
+
+  it("keeps older history it showed when the ticket changes and its history is read again", async () => {
+    hub.olderHistory = [{ id: "e0", at: "2026-11-04T09:00:00Z", kind: "ticket_edited", actor: { kind: "you", id: "you", name: "You" }, text: "made ACM-12 need ACM-10", ticket: "t12" }];
+    const panel = await open();
+    const history = within(panel).getByRole("region", { name: "History" });
+    fireEvent.click(await within(history).findByRole("button", { name: "Show older" }));
+    await waitFor(() => expect(within(history).getAllByRole("listitem")).toHaveLength(4));
+    await act(async () => void hub.put({ ...hub.tickets.get("t12")!, title: "Hash keys", updatedAt: "2026-11-05T15:10:00Z" }));
+    await waitFor(() => expect(hub.requests.filter((r) => r.route === "GET /api/desk/tickets/t12/history").length).toBe(2));
+    expect(within(history).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(history).getAllByRole("listitem")[0]!.textContent).toContain("made it need ACM-10");
+    expect(within(history).queryByRole("button", { name: "Show older" })).toBeNull();
+  });
 });
 
 describe("a ticket's key in a room message", () => {
@@ -350,5 +396,136 @@ describe("a ticket's key in a room message", () => {
     expect(screen.getByText(/XYZ-3\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open ticket ACM-12: Hash every partner key at rest" }));
     expect(useBoard.getState().open).toBe("t12");
+  });
+});
+
+describe("when the hub and Desk cross", () => {
+  it("keeps what a session did meanwhile when the hub refuses a move, and says why in the hub's words", async () => {
+    for (const t of [ticket(1, { state: "todo" }), ticket(3, { state: "doing" })]) hub.tickets.set(t.id, t);
+    hub.refuseMoves = true;
+    await connect();
+    render(<Board />);
+    // A session moves it to Review just before Desk's move is refused.
+    hub.meanwhile = (route) => {
+      if (route.endsWith("/move")) hub.put({ ...hub.tickets.get("t1")!, state: "review" });
+    };
+    await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowRight", altKey: true }));
+    await waitFor(() => expect(useDesk.getState().error).toBe("That ticket changed while this was being done; look at it again."));
+    expect(cardsIn("Review")).toEqual(["ACM-1"]);
+    expect(cardsIn("Doing")).toEqual(["ACM-3"]);
+  });
+
+  it("reads a refused ticket again rather than guessing how it was", async () => {
+    hub.tickets.set("t1", ticket(1, { state: "todo" }));
+    hub.refuseMoves = true;
+    await connect();
+    render(<Board />);
+    // The hub has it in Backlog by now, without a word on the socket.
+    hub.tickets.set("t1", { ...hub.tickets.get("t1")!, state: "backlog" });
+    await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowRight", altKey: true }));
+    await waitFor(() => expect(cardsIn("Backlog")).toEqual(["ACM-1"]));
+    expect(hub.requests.some((r) => r.route === "GET /api/desk/tickets/t1")).toBe(true);
+  });
+
+  it("drops the hub's answer to a pin when the ticket changed after the pin was asked", async () => {
+    hub.tickets.set("t1", ticket(1, { state: "doing" }));
+    await connect();
+    render(<Board />);
+    hub.meanwhile = (route) => {
+      // A session's move, announced before the pin's answer (which, read
+      // before it, still says Doing) comes back.
+      if (route === "PATCH /api/desk/tickets/t1") hub.events!.say({ type: "ticket", ticket: { ...hub.tickets.get("t1")!, state: "review", updatedAt: "2026-11-05T15:06:00Z" } });
+    };
+    await act(async () => useBoard.getState().edit("t1", { pinned: true }));
+    expect(useBoard.getState().tickets.t1!.state).toBe("review");
+  });
+
+  it("keeps what it read once changes keep coming, with each change heard on top, and never offers to make a board meanwhile", async () => {
+    hub.tickets.set("t1", ticket(1, { title: "First" }));
+    hub.tickets.set("t2", ticket(2));
+    hub.churnReads = 10;
+    render(<Board />);
+    expect(screen.queryByRole("button", { name: "Make a board" })).toBeNull();
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] });
+    });
+    await waitFor(() => expect(useBoard.getState().supported).toBe(true));
+    expect(hub.ticketReads).toBe(3);
+    expect(useBoard.getState().tickets.t1!.title).toBe("Changed while read 3");
+    expect(cardsIn("Backlog")).toEqual(["ACM-1", "ACM-2"]);
+  });
+
+  it("never moves a dropped ticket by keys or drag: it comes back by Bring it back", async () => {
+    hub.tickets.set("t9", ticket(9, { state: "dropped" }));
+    await connect();
+    render(<Board />);
+    fireEvent.click(screen.getByRole("button", { name: "1 more, settled after 3 days" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-9:/ }), { key: "ArrowLeft", altKey: true });
+    expect(moves()).toEqual([]);
+    expect(screen.getByText("ACM-9 is dropped: Bring it back from its panel first")).toBeTruthy();
+  });
+
+  it("moves a card among the filtered ones to its place in the whole column", async () => {
+    for (const t of [ticket(1, { state: "todo", rank: 1000 }), ticket(2, { state: "todo", rank: 2000, pinned: true }), ticket(3, { state: "todo", rank: 3000 }), ticket(4, { state: "todo", rank: 4000, pinned: true })])
+      hub.tickets.set(t.id, t);
+    await connect();
+    render(<Board />);
+    fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
+    await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-4:/ }), { key: "ArrowUp", altKey: true }));
+    expect(moves().at(-1)!.body).toEqual({ state: "todo", before: "t1", after: "t2" });
+  });
+});
+
+describe("a ticket a session wrote", () => {
+  it("says so on its card in every column and in its panel", async () => {
+    hub.sessions = [lined({ id: API.id, name: "acme-api", state: "working" })];
+    hub.tickets.set("t17", ticket(17, { title: "Flaky webhook test", createdBy: API }));
+    hub.tickets.set("t18", ticket(18, { title: "Retry the webhook", createdBy: API, state: "doing", assignee: WEB }));
+    await connect();
+    render(
+      <>
+        <Board />
+        <OpenTicket />
+      </>,
+    );
+    expect(within(screen.getByRole("button", { name: /^ACM-17:/ })).getByText("acme-api added this")).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: /^ACM-18:/ })).getByText("by acme-api")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^ACM-18:/ }));
+    const panel = await screen.findByRole("complementary", { name: "Ticket ACM-18" });
+    expect(within(panel).getByText(/^Written by/).textContent).toBe("Written by acme-api: its title and description are its words, not yours.");
+  });
+});
+
+describe("editing a ticket another changed meanwhile", () => {
+  const edited = async () => {
+    hub.tickets.set("t1", ticket(1, { title: "Hash keys" }));
+    await connect();
+    render(<OpenTicket />);
+    act(() => useBoard.getState().openTicket("t1"));
+    const panel = await screen.findByRole("complementary", { name: "Ticket ACM-1" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Hash keys" }));
+    const field = within(panel).getByRole("textbox", { name: "Title" });
+    fireEvent.change(field, { target: { value: "Hash partner keys" } });
+    await act(async () => void hub.put({ ...hub.tickets.get("t1")!, title: "Hash every key at rest" }));
+    fireEvent.blur(field);
+    return panel;
+  };
+
+  it("shows the newer words and saves the person's only if they keep theirs", async () => {
+    const panel = await edited();
+    expect(within(panel).getByRole("alert").textContent).toContain("Changed meanwhile. The title now says:Hash every key at rest");
+    expect(hub.requests.some((r) => r.route === "PATCH /api/desk/tickets/t1")).toBe(false);
+    fireEvent.click(within(panel).getByRole("button", { name: "Keep mine" }));
+    await waitFor(() => expect(hub.requests.find((r) => r.route === "PATCH /api/desk/tickets/t1")?.body).toEqual({ title: "Hash partner keys" }));
+  });
+
+  it("takes the new words without a word to the hub", async () => {
+    const panel = await edited();
+    fireEvent.click(within(panel).getByRole("button", { name: "Take the new one" }));
+    expect(within(panel).queryByText(/Changed meanwhile/)).toBeNull();
+    expect(within(panel).getByRole("heading", { name: "Hash every key at rest" })).toBeTruthy();
+    expect(hub.requests.some((r) => r.route === "PATCH /api/desk/tickets/t1")).toBe(false);
   });
 });

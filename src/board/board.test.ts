@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LedgerRow, Ticket } from "../hub/types";
 import {
   SETTLE_AFTER_MS,
+  anchored,
   blockers,
   columns,
   dropAt,
@@ -194,5 +195,25 @@ describe("keys in text", () => {
       { kind: "text", text: ", not XYZ-1 or acm-12." },
     ]);
     expect(keyParts("ACM-120", new Set(["ACM-12"]))).toEqual([{ kind: "text", text: "ACM-120" }]);
+  });
+});
+
+describe("a move placed in the whole column", () => {
+  const col = [ticket(1, { state: "todo", rank: 1000 }), ticket(2, { state: "todo", rank: 2000, pinned: true }), ticket(3, { state: "todo", rank: 3000 }), ticket(4, { state: "todo", rank: 4000, pinned: true })];
+
+  it("lands right after the card shown above it, ahead of the one truly next, hidden or not", () => {
+    // Pinned shows ACM-2 and ACM-4; ACM-4 nudged up lands after ACM-2, before the hidden ACM-3.
+    expect(anchored({ state: "todo", after: "t2" }, col, "t4")).toEqual({ state: "todo", before: "t1", after: "t2" });
+    expect(anchored({ state: "todo", before: "t2" }, col, "t4")).toEqual({ state: "todo", before: "t2", after: "t3" });
+    // The end of what's shown is the end of the column.
+    expect(anchored({ state: "todo" }, col, "t2")).toEqual({ state: "todo", before: "t4" });
+    expect(anchored({ state: "review" }, col, "t2")).toEqual({ state: "review" });
+  });
+
+  it("changes nothing where nothing is hidden", () => {
+    const cols = columns(col, everything);
+    const mv = nudge(cols, "t3", "up")!;
+    expect(anchored(mv, col, "t3")).toEqual({ state: "todo", before: "t1", after: "t2" });
+    expect(mv).toEqual({ state: "todo", before: "t1", after: "t2" });
   });
 });
