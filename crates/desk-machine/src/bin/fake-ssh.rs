@@ -96,7 +96,10 @@ fn main() {
         .append(true)
         .open(&scenario.log)
         .expect("the log");
-    writeln!(log, "{}", serde_json::to_string(&args).expect("the call")).expect("logging");
+    // One write per call: several at once (a listener's connections) would
+    // otherwise interleave their lines.
+    let line = format!("{}\n", serde_json::to_string(&args).expect("the call"));
+    log.write_all(line.as_bytes()).expect("logging");
     drop(log);
     let dash = args
         .iter()

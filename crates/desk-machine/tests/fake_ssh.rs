@@ -629,9 +629,22 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Desk's listener for a sign-in's page, on a free port. A free port can
+/// be taken by a test running beside this one before Desk binds it (on
+/// either loopback): then another.
+fn open_callback(ssh: &SshExe, m: &Machine) -> (u16, desk_machine::callback::CallbackForward) {
+    (0..20)
+        .find_map(|_| {
+            let here = free_port();
+            desk_machine::callback::CallbackForward::open(ssh, m, here)
+                .ok()
+                .map(|fw| (here, fw))
+        })
+        .expect("a free port")
+}
+
 #[test]
 fn a_sign_ins_page_comes_back_through_desks_own_listener_while_it_runs() {
-    use desk_machine::callback::CallbackForward;
     // The engine's sign-in on the machine, listening for its page.
     let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
     let there = sign_in.local_addr().unwrap().port();
@@ -647,14 +660,13 @@ fn a_sign_ins_page_comes_back_through_desks_own_listener_while_it_runs() {
         }
         got
     });
-    let here = free_port();
     let f = fake(json!([{
         "target": "devbox",
         "settings": "user dev\nhostname 203.0.113.7\n",
         "forward_to": there,
     }]));
     let m = machine("devbox");
-    let forward = CallbackForward::open(&f.ssh, &m, here).unwrap();
+    let (here, forward) = open_callback(&f.ssh, &m);
     assert_eq!(forward.port(), here);
     // Desk listens itself: nothing ran before a connection came.
     assert!(f.calls().is_empty(), "{:?}", f.calls());
@@ -733,7 +745,7 @@ fn a_sign_ins_port_another_program_holds_on_any_address_is_refused() {
 
 #[test]
 fn a_sign_ins_listener_carries_a_few_connections_at_once_and_closes_the_rest() {
-    use desk_machine::callback::{CallbackForward, MAX_CARRIED};
+    use desk_machine::callback::MAX_CARRIED;
     // The machine's sign-in takes connections and never answers them.
     let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
     let there = sign_in.local_addr().unwrap().port();
@@ -744,13 +756,12 @@ fn a_sign_ins_listener_carries_a_few_connections_at_once_and_closes_the_rest() {
             keep.lock().unwrap().push(c);
         }
     });
-    let here = free_port();
     let f = fake(json!([{
         "target": "devbox",
         "settings": "user dev\nhostname 203.0.113.7\n",
         "forward_to": there,
     }]));
-    let forward = CallbackForward::open(&f.ssh, &machine("devbox"), here).unwrap();
+    let (here, forward) = open_callback(&f.ssh, &machine("devbox"));
     let carried = || {
         f.calls()
             .iter()
