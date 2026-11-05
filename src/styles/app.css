@@ -2944,14 +2944,19 @@ body.line-resizing * {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.line-question-foot {
+/* Its work item and where it stands, with Dismiss; then its one line, what
+   it chose, and its details folded (the .msg-steps disclosure). */
+.line-question-head {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.line-question-chose {
+.line-question-status {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+.line-question-chose {
   overflow-wrap: anywhere;
 }

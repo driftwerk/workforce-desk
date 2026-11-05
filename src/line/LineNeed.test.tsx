@@ -66,4 +66,30 @@ describe("a session's question on the Floor", () => {
     await act(async () => {});
     expect(hub.dismissLine).toHaveBeenCalledWith("q2");
   });
+
+  it("shows only a question's one line and what it chose, never its details", () => {
+    const n = {
+      ...need("line:w7", who("s1", "acme-web"), { ask: "Should PR 2 include the stub service?", chose: "include it, as the design says" }),
+      ...tagged,
+      key: "local/line:w7",
+    };
+    const { container } = render(<NeedRow need={n} now={Date.now()} actions />);
+    expect(container.textContent).toContain("Should PR 2 include the stub service?");
+    expect(container.textContent).toContain("It chose: include it, as the design says");
+    expect(container.querySelector("details")).toBeNull();
+    cleanup();
+    const item = {
+      id: "line:w7",
+      who: who("s1", "acme-web"),
+      ask: "Should PR 2 include the stub service?",
+      chose: "include it, as the design says",
+      askedAt: "2026-11-03T07:16:00Z",
+      wentAheadAt: "2026-11-03T07:19:00Z",
+      ...tagged,
+      key: "local/line:w7",
+    };
+    const went = render(<WentAheadRow item={item} now={Date.parse("2026-11-03T09:00:00Z")} />);
+    expect(went.container.textContent).toContain("Should PR 2 include the stub service? It chose: include it, as the design says");
+    expect(went.container.querySelector("details")).toBeNull();
+  });
 });

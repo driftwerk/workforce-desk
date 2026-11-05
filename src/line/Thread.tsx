@@ -6,6 +6,8 @@ import type { LineMessage, Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { Composer } from "./Composer";
 import { LineAnswer } from "./LineAnswer";
+import { headlineOf } from "./questions";
+import { QuestionDetails } from "./QuestionDetails";
 import { askedText, deliveryText, editable, headOf, lineOf, outgoing, waitsOnYou, withWheel } from "./rows";
 import { useLine } from "./store";
 import { useNow } from "../chat/WorkingRow";
@@ -82,7 +84,8 @@ function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: 
           {status && ` · ${status}`}
         </span>
       </span>
-      {editable(m) ? <Editable m={m} /> : <span className="line-row-text">{m.text}</span>}
+      {editable(m) ? <Editable m={m} /> : <span className="line-row-text">{m.kind === "ask" ? headlineOf(m) : m.text}</span>}
+      {m.kind === "ask" && <QuestionDetails m={m} />}
       {answers && waitsOnYou(m) && (
         <LineAnswer
           compact
@@ -91,7 +94,7 @@ function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: 
             id: m.id,
             sessionId: session.id,
             session: m.from.name,
-            ask: m.text,
+            ask: headlineOf(m),
             why: m.escalation?.why,
             options: m.escalation?.options,
             draft: m.escalation?.draft,

@@ -4,7 +4,8 @@ import type { LineMessage, Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { useNow } from "../chat/WorkingRow";
 import { PANEL_HEIGHT, PANEL_MIN, useLinePanel } from "./panel";
-import { anyOpen, barText, discussText, openOf, statusOf } from "./questions";
+import { anyOpen, barText, discussText, headlineOf, openOf, statusOf } from "./questions";
+import { QuestionDetails } from "./QuestionDetails";
 import { useLine } from "./store";
 import { Thread, useThread } from "./Thread";
 
@@ -212,19 +213,23 @@ function Questions({ session, questions, waiting }: { session: Session; question
   );
 }
 
+/** One question as a card: its work item and where it stands, with Dismiss;
+ *  its one line; what it chose; and its details, folded. */
 function Question({ m, now }: { m: LineMessage; now: number }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const headline = headlineOf(m);
   return (
     <li className="line-question">
-      <span className="small state-blocked">{statusOf(m, now)}</span>
-      <span className="line-question-text">{m.text}</span>
-      <span className="line-question-foot">
-        <span className="small muted line-question-chose">{m.chose ? `It chose: ${m.chose}` : ""}</span>
+      <span className="line-question-head">
+        <span className="small state-blocked line-question-status">
+          {m.about && <span className="mono">{m.about} · </span>}
+          {statusOf(m, now)}
+        </span>
         <button
           type="button"
           className="btn btn-sm"
-          aria-label={`Dismiss “${m.text}”`}
+          aria-label={`Dismiss “${headline}”`}
           disabled={busy}
           onClick={() => {
             setBusy(true);
@@ -237,6 +242,9 @@ function Question({ m, now }: { m: LineMessage; now: number }) {
           Dismiss
         </button>
       </span>
+      <span className="line-question-text">{headline}</span>
+      {m.chose && <span className="small muted line-question-chose">It chose: {m.chose}</span>}
+      <QuestionDetails m={m} />
       {problem && (
         <span className="small state-blocked" role="alert">
           {problem}
