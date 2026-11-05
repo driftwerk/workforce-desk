@@ -10,6 +10,7 @@ import { Connections } from "./Connections";
 import { Engines } from "./Engines";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
+import { Machines } from "./Machines";
 import { Profile } from "./Profile";
 import { Providers } from "./Providers";
 import { Shortcuts } from "./Shortcuts";
@@ -55,6 +56,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "chat" && <Chat />}
       {section === "hubs" && <Hubs />}
       {section === "computer" && <Computer />}
+      {section === "machines" && <Machines />}
       {section === "providers" && <Providers />}
       {section === "connections" && <Connections />}
       {section === "engines" && <Engines />}

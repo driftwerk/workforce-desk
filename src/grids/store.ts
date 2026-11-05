@@ -7,6 +7,7 @@
 // write the same grid at once.
 
 import { create } from "zustand";
+import { LOCAL, type MachineId } from "../hub/machines";
 import {
   applyPreset,
   blank,
@@ -514,12 +515,14 @@ export const dragSplitter = (gridId: string, s: Splitter, to: { at: number } | {
     return moveSplitter(panes, live, "at" in to ? to.at : live.at + to.by);
   });
 
-/** A new terminal in grid `gridId`: in the focused pane if it's empty, else
- *  the first empty pane, else beside the focused pane. */
-export const newTerminal = (gridId: string): void => {
+/** A new terminal in grid `gridId`, on `machine` (this computer when
+ *  none): in the focused pane if it's empty, else the first empty pane,
+ *  else beside the focused pane. Its pane opens it on that machine's engine
+ *  (terminals.ts `useTerminalPane`). */
+export const newTerminal = (gridId: string, machine: MachineId = LOCAL): void => {
   const g = get().grids[gridId];
   if (!g) return;
-  const content: PaneContent = { kind: "terminal", terminalId: null };
+  const content: PaneContent = machine === LOCAL ? { kind: "terminal", terminalId: null } : { kind: "terminal", terminalId: null, machine };
   const shown = reading(laidOut(g.panes));
   const focused = shown.find((p) => p.id === get().focus[gridId]);
   const target = focused && !focused.content ? focused : shown.find((p) => !p.content);
@@ -540,7 +543,7 @@ export const newTerminal = (gridId: string): void => {
 
 /** New terminal's shortcut in the main window: a new terminal in the grid the Grids view shows,
  *  or in a new grid when it shows none. */
-export const newTerminalHere = (): void => newTerminal(shownGrid(get())?.id ?? createGrid());
+export const newTerminalHere = (machine: MachineId = LOCAL): void => newTerminal(shownGrid(get())?.id ?? createGrid(), machine);
 
 /** A terminal pane's hub id, once the hub has opened it (or opened it again). */
 export const setTerminal = (gridId: string, pane: string, terminalId: string, cwd?: string | null): void =>

@@ -12,6 +12,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { machineTransport } from "../hub/broker";
 import { HubError, type DeskHub } from "../hub/client";
 import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
 import { engineListeners, hubOf, useDesk, useHubOf, type EngineEvent } from "../hub/store";
@@ -126,15 +127,27 @@ export const pluginEnv = async (machine: MachineId = LOCAL): Promise<Record<stri
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
 
+/** How a machine is asked for its home folder: its folders route (MH1),
+ *  which names it. Tests set their own. */
+let machineHome = async (machine: MachineId): Promise<string | null> => {
+  const res = await machineTransport(machine).fetch("GET", "/api/desk/folders");
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { home?: unknown } | null;
+  return typeof body?.home === "string" && body.home ? body.home : null;
+};
+export const setMachineHome = (f: typeof machineHome): void => {
+  machineHome = f;
+};
+
 /** Where a new terminal opens when its pane names nowhere: this computer's
- *  home folder; on a machine, the folder its latest session worked in (the
- *  page has no way yet to ask a machine for its home), else nowhere. */
+ *  home folder; on a machine, the folder its latest session worked in, else
+ *  its home folder as it says, else nowhere. */
 const homeOn = async (machine: MachineId): Promise<string | null> => {
   if (machine === LOCAL) return inApp ? await backendHome().catch(() => "/") : "/";
   const latest = Object.values(useDesk.getState().sessions)
     .filter((s) => machineOf(s) === machine && s.cwd)
     .sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0];
-  return latest?.cwd ?? null;
+  return latest?.cwd ?? (await machineHome(machine).catch(() => null));
 };
 
 const opening = new Map<string, Promise<void>>();

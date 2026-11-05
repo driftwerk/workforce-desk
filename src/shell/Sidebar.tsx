@@ -8,6 +8,7 @@ import { DeleteRoom } from "../rooms/DeleteRoom";
 import { markRoomRead } from "../unread/reads";
 import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
+import { SidebarMachines, ThisComputerHeading } from "../machines/SidebarMachines";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
 import { useTheme } from "../theme/store";
@@ -267,7 +268,11 @@ export function Sidebar({
               {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
             </div>
           )}
-          <SidebarGroups />
+          <div className="side-machine-block">
+            <ThisComputerHeading />
+            <SidebarGroups />
+          </div>
+          <SidebarMachines />
           {view === "grids" && <p className="faint small side-hint">Drag a session or agent from here onto a pane. Hold ⇧ to drop it in the next free place.</p>}
         </div>
         <span className="side-fade side-fade-top" aria-hidden="true" />

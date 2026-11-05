@@ -7,6 +7,9 @@ import { NewSession } from "./NewSession";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
+  machinesList: vi.fn(async () => []),
+  onMachinesChanged: vi.fn(async () => () => {}),
+  machinePluginDir: vi.fn(async () => null),
   inApp: false,
   pickFolder: vi.fn(async () => null),
   claudePluginDir: vi.fn(async () => "/Applications/Desk.app/Contents/Resources/claude-plugin"),

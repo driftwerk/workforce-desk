@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { OnMachine } from "../machines/OnMachine";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
@@ -314,6 +315,7 @@ export function GridPane({
             <span className="gpane-name-start">{start}</span>
             {end && <span className="gpane-name-end">{end}</span>}
           </span>
+          <OnMachine machine={session ? machineOf(session) : machineOf(pane.content?.kind === "agent" ? null : pane.content)} />
           {label.meta && (
             <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
               {label.meta}

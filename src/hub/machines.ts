@@ -40,6 +40,8 @@ export interface Machine {
   /** The Desk version installed there, once known. */
   version: string | null;
   state: MachineState;
+  /** Its system, once Desk has looked (`Ubuntu 24.04`, `x86_64`). */
+  system?: { os: string; arch: string } | null;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -61,17 +63,25 @@ export const readState = (raw: unknown): MachineState => {
   return { kind: "failed", message: "Desk couldn’t read where this machine stands." };
 };
 
+/** A machine's system as listed; null when it isn't known. */
+const readSystem = (raw: unknown): Machine["system"] => {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  return o && typeof o.arch === "string" ? { os: typeof o.os === "string" ? o.os : "Linux", arch: o.arch } : null;
+};
+
 /** A machine as `machines_list` lists it; null for a row without an id. */
 export const readMachine = (raw: unknown): Machine | null => {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.id !== "string" || !o.id || o.id === LOCAL || o.id.includes("/")) return null;
+  const system = readSystem(o.system);
   return {
     id: o.id,
     name: typeof o.name === "string" && o.name ? o.name : o.id,
     target: typeof o.target === "string" ? o.target : "",
     version: typeof o.version === "string" ? o.version : null,
     state: readState(o.state),
+    ...(system ? { system } : {}),
   };
 };
 

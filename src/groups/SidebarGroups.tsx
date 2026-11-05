@@ -56,6 +56,8 @@ import {
   useLayout,
 } from "./store";
 import { ENGINE_SHORT } from "../engines/engines";
+import { LOCAL } from "../machines/engines";
+import { refuseAcross } from "../machines/SidebarMachines";
 import { lifecycleActions, sessionActions } from "../session/actions";
 import { askLifecycle } from "../session/lifecycle";
 
@@ -400,11 +402,13 @@ export function SidebarGroups() {
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 0);
         if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
+        // A machine's section takes none of this computer's.
+        if (!e.canceled && refuseAcross(LOCAL, e.operation.position.current)) return;
         if (!s || !d) return;
         dropItem(present, end(s).id, d);
       }}
     >
-      <div className="side-section groups" aria-label="Groups" role="region">
+      <div className="side-section groups" aria-label="Groups" role="region" data-machine={LOCAL}>
         <span className="side-label side-label-action side-head">
           Groups
           <button type="button" className="icon-btn-sm" aria-label="New group" title="New group" onClick={() => newGroup()}>
