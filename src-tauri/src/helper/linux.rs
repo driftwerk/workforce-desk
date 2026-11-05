@@ -69,7 +69,7 @@ fn command_line(launch: &Launch, word: fn(&str) -> String) -> String {
 
 /// The systemd user service that runs Desk Helper from login, restarting it
 /// as launchd's KeepAlive does.
-pub fn unit_text(launch: &Launch) -> String {
+pub fn unit_text(launch: &Launch) -> Result<String> {
     systemd::unit_text(&systemd::Unit {
         program: launch.program.to_string_lossy().into_owned(),
         args: launch.args.clone(),
@@ -211,7 +211,7 @@ impl Helper {
     fn try_ensure(&self, launch: &Launch) -> Result<Status> {
         match Starter::here()? {
             Starter::Systemd { unit } => {
-                let wanted = unit_text(launch);
+                let wanted = unit_text(launch)?;
                 let before = self.status();
                 if std::fs::read_to_string(&unit).ok().as_deref() != Some(wanted.as_str()) {
                     std::fs::create_dir_all(unit.parent().expect("the unit's folder"))?;
@@ -424,9 +424,10 @@ mod tests {
     #[test]
     fn the_service_runs_the_appimage_with_its_path_and_restarts() {
         assert_eq!(
-            unit_text(&appimage()),
+            unit_text(&appimage()).unwrap(),
             "[Unit]\n\
              Description=Desk Helper: keeps Desk's agents and sessions running\n\
+             StartLimitIntervalSec=0\n\
              \n\
              [Service]\n\
              ExecStart=\"/home/sarah/Apps/Desk 0.3.AppImage\" \"--helper\"\n\
@@ -440,7 +441,7 @@ mod tests {
              WantedBy=default.target\n"
         );
         let package = launch(&Install::Package, Path::new("/usr/bin/desk")).unwrap();
-        let text = unit_text(&package);
+        let text = unit_text(&package).unwrap();
         assert!(text.contains("ExecStart=\"/usr/bin/desk-helper\"\n"));
         assert!(!text.contains("APPIMAGE"));
     }

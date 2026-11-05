@@ -140,6 +140,10 @@ if [ -n "$machine" ]; then
   name=$(api "$admin" "/api/identities/$owner" | jq -r .display_name)
   [ "$name" = "Smoke Tester" ] || fail "the owner is called $name"
 
+  say "a machine keeps its secrets in Desk's private file"
+  [ -f "$DESK_HOME/machine" ] || fail "Desk's folder isn't marked a machine's"
+  [ -f "$DESK_HOME/secrets.toml" ] || fail "the secrets aren't in Desk's private file"
+
   say "a machine's hub resumes sessions by itself"
   grep -qx 'restore = "auto"' "$DESK_HOME/hub/workforce.toml" ||
     fail "workforce.toml doesn't say restore = \"auto\""

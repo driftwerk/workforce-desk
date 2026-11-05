@@ -38,8 +38,12 @@ concurrency:
 
 jobs:
   backend-linux:
-    name: Linux backend smoke test
-    runs-on: ubuntu-24.04
+    name: Linux backend smoke test${{ matrix.runner == 'ubuntu-24.04-arm' && ' (aarch64)' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     permissions:
       contents: read

@@ -171,7 +171,7 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         kept.sort();
-        assert_eq!(kept, ["0.2.0", "0.3.0", "current"]);
+        assert_eq!(kept, [".lock", "0.2.0", "0.3.0", "current"]);
         assert!(bin.join("current/claude-plugin/hooks/hooks.json").is_file());
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(bin.join("current/desk-helper"))

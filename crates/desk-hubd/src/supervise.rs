@@ -779,6 +779,12 @@ async fn run_helper(
     } else {
         config::Memories::Sqlite
     };
+    // A machine's folder says so, so what is asked over SSH later
+    // (`connection --json`, `--remove-everything`) finds its secrets where
+    // this helper keeps them: Desk's private file.
+    if mode == config::Mode::Machine && !paths.machine_marker().exists() {
+        desk_core::write_private(&paths.machine_marker(), "")?;
+    }
     let keys = Secrets::for_host(&paths, &Host::running_here(&process_env))?;
     let key_store = keys.store();
     write_config(&paths, &ports, memories, key_store, mode)?;
