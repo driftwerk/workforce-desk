@@ -61,6 +61,19 @@ esac
 
 const ENGINE: &str = "#!/bin/sh\necho \"9.9.9 (fake)\"\n";
 
+/// `curl -fsSL <installer> -o <file>`: an installer that puts its engine
+/// in `~/.local/bin`, as Claude Code's and Codex's do.
+const CURL: &str = r#"#!/bin/sh
+out=
+while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
+case "$out" in *claude.sh) n=claude ;; *) n=codex ;; esac
+cat > "$out" <<EOF
+mkdir -p "\$HOME/.local/bin"
+printf '#!/bin/sh\necho "1.0.0 (fake)"\n' > "\$HOME/.local/bin/$n"
+chmod +x "\$HOME/.local/bin/$n"
+EOF
+"#;
+
 /// Desk Helper, at version `VERSION`: running is a file saying its version
 /// and the number of its start (its device token); a flip ends one Desk
 /// started itself, and restarts the service's at the new version.
@@ -729,4 +742,33 @@ fn a_copy_that_fails_its_check_is_never_flipped_to() {
     assert!(matches!(r.fleet.state(&id), Some(State::Failed { .. })));
     // Not kept: it was never added.
     assert!(!b.dir.path().join("mac/machines.json").exists());
+}
+
+#[test]
+fn engines_installed_there_restart_desk_so_its_hub_finds_them() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    for e in ["claude", "codex"] {
+        std::fs::remove_file(b.dir.path().join("fakebin").join(e)).unwrap();
+    }
+    script(&b.dir.path().join("fakebin/curl"), CURL);
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let engines = step(&r, "engines", StepState::Done).unwrap();
+    assert_eq!(
+        engines.detail.as_deref(),
+        Some("Claude Code 1.0.0 and Codex 1.0.0 installed")
+    );
+    assert!(b.home().join(".local/bin/claude").exists());
+    // Started once by its service, and again after the engines came.
+    let starts: u32 = std::fs::read_to_string(b.fake("starts"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(starts >= 2, "{starts}");
+    let c = r.machines.get(&id).unwrap().connection().unwrap().unwrap();
+    assert_eq!(c.device_token, Some(format!("DEVICE-{starts}")));
 }

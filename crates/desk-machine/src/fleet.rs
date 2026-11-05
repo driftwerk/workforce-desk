@@ -712,10 +712,29 @@ impl Fleet {
 
         self.emit(self.say(id, Step::Engines, StepState::Running));
         match setup::engines(&self.ssh, &machine) {
-            Ok(detail) => self.emit(SetupEvent {
-                detail: Some(detail),
-                ..self.say(id, Step::Engines, StepState::Done)
-            }),
+            Ok(engines) => {
+                // The hub finds its engines' programs as it starts: one
+                // installed after it started needs it started again.
+                if engines.installed {
+                    let restarted = setup::restart(
+                        &self.ssh,
+                        &machine,
+                        &look.bin(),
+                        &self.host.person(),
+                        keep == Keep::Service,
+                    );
+                    link.forget();
+                    if let Err(m) =
+                        restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop))
+                    {
+                        tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
+                    }
+                }
+                self.emit(SetupEvent {
+                    detail: Some(engines.detail),
+                    ..self.say(id, Step::Engines, StepState::Done)
+                })
+            }
             Err(m) => self.emit(SetupEvent {
                 message: Some(m),
                 ..self.say(id, Step::Engines, StepState::Failed)

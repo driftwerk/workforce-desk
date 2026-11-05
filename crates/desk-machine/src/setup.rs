@@ -203,7 +203,8 @@ pub fn start_service(ssh: &SshExe, machine: &Machine) -> Result<(), String> {
 /// Claude Code's and Codex's own installers, as their makers give them:
 /// each for the account, into `~/.local/bin`, without sudo. Each is
 /// fetched to a file first, so a download cut short runs nothing. One
-/// already there is kept.
+/// already there is kept. It says `new=1` when it installed one: the hub
+/// there finds its engines' programs when it starts, so it is restarted.
 pub const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
 pub const CODEX_INSTALLER: &str = "https://chatgpt.com/codex/install.sh";
 
@@ -215,10 +216,12 @@ pub fn engines_script() -> String {
          tmp=$(mktemp -d)\n\
          trap 'rm -rf \"$tmp\"' EXIT\n\
          if ! command -v claude >/dev/null 2>&1; then\n  \
-           curl -fsSL {claude} -o \"$tmp/claude.sh\" && bash \"$tmp/claude.sh\" </dev/null >\"$tmp/claude.log\" 2>&1 || {{ tail -n 3 \"$tmp/claude.log\" >&2; echo 'Claude Code could not be installed' >&2; exit 4; }}\n\
+           curl -fsSL {claude} -o \"$tmp/claude.sh\" && bash \"$tmp/claude.sh\" </dev/null >\"$tmp/claude.log\" 2>&1 || {{ tail -n 3 \"$tmp/claude.log\" >&2; echo 'Claude Code could not be installed' >&2; exit 4; }}\n  \
+           echo new=1\n\
          fi\n\
          if ! command -v codex >/dev/null 2>&1; then\n  \
-           curl -fsSL {codex} -o \"$tmp/codex.sh\" && CODEX_NON_INTERACTIVE=1 sh \"$tmp/codex.sh\" </dev/null >\"$tmp/codex.log\" 2>&1 || {{ tail -n 3 \"$tmp/codex.log\" >&2; echo 'Codex could not be installed' >&2; exit 5; }}\n\
+           curl -fsSL {codex} -o \"$tmp/codex.sh\" && CODEX_NON_INTERACTIVE=1 sh \"$tmp/codex.sh\" </dev/null >\"$tmp/codex.log\" 2>&1 || {{ tail -n 3 \"$tmp/codex.log\" >&2; echo 'Codex could not be installed' >&2; exit 5; }}\n  \
+           echo new=1\n\
          fi\n\
          printf 'claude=%s\\n' \"$(claude --version 2>/dev/null | head -n 1)\"\n\
          printf 'codex=%s\\n' \"$(codex --version 2>/dev/null | head -n 1)\"\n",
@@ -245,15 +248,42 @@ pub fn engines_detail(said: &str) -> String {
     }
 }
 
+/// What the engines step did: what it says, and whether it installed one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engines {
+    pub detail: String,
+    pub installed: bool,
+}
+
 /// Installs Claude Code and Codex for the account there. Blocking.
-pub fn engines(ssh: &SshExe, machine: &Machine) -> Result<String, String> {
+pub fn engines(ssh: &SshExe, machine: &Machine) -> Result<Engines, String> {
     run(
         ssh,
         machine,
         &engines_script(),
         "Claude Code and Codex couldn't be installed",
     )
-    .map(|said| engines_detail(&said))
+    .map(|said| Engines {
+        detail: engines_detail(&said),
+        installed: said.lines().any(|l| l.trim() == "new=1"),
+    })
+}
+
+/// Restarts Desk there (its hub finds its engines' programs as it starts);
+/// its PTY holder, and so any session, stays. Blocking.
+pub fn restart(
+    ssh: &SshExe,
+    machine: &Machine,
+    bin: &str,
+    person: &Person,
+    service: bool,
+) -> Result<(), String> {
+    if service {
+        let script = format!("systemctl --user restart {}", desk_core::systemd::UNIT);
+        return run(ssh, machine, &script, "Desk couldn't restart there").map(drop);
+    }
+    stop(ssh, machine, bin)?;
+    start(ssh, machine, bin, person)
 }
 
 #[cfg(test)]
