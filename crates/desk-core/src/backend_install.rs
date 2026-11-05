@@ -241,8 +241,20 @@ pub fn machine_unit(bin: &str, name: Option<&str>, email: Option<&str>) -> Unit 
 /// Writes the service's unit (`systemd::UNIT` unless a test names
 /// another), reloads systemd when it changed, and enables and starts it;
 /// one already running is restarted when its unit changed.
-pub fn service_script(name: &str, unit: &Unit) -> Result<String> {
-    Ok(format!(
+/// A unit that can't be written (a value with a line break: see
+/// [`systemd::unit_text`]) is a script that says why and fails, so nothing
+/// is ever written from it.
+pub fn service_script(name: &str, unit: &Unit) -> String {
+    let text = match systemd::unit_text(unit) {
+        Ok(text) => text,
+        Err(e) => {
+            return format!(
+                "echo {} >&2\nexit 1\n",
+                quote(&format!("Desk's service can't be written: {e:#}"))
+            );
+        }
+    };
+    format!(
         "set -eu\n\
          dir=\"${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user\"\n\
          unit=\"$dir\"/{name}\n\
@@ -255,8 +267,8 @@ pub fn service_script(name: &str, unit: &Unit) -> Result<String> {
          systemctl --user enable --now {name}\n\
          if [ -n \"$changed\" ] && [ \"$was\" = active ]; then systemctl --user restart {name}; fi\n",
         name = quote(name),
-        text = quote(&systemd::unit_text(unit)?),
-    ))
+        text = quote(&text),
+    )
 }
 
 /// How Desk Helper is kept running on a machine.
@@ -546,14 +558,16 @@ mod tests {
                 env: vec![("DESK_PERSON_NAME".into(), "Sarah O'Neil".into())],
             }
         );
-        let script = service_script(systemd::UNIT, &unit).unwrap();
+        let script = service_script(systemd::UNIT, &unit);
         assert!(script.contains("unit=\"$dir\"/'desk-helper.service'\n"));
         // The unit's text goes in as one quoted word.
         assert!(script.contains("Environment=\"DESK_PERSON_NAME=Sarah O'\\''Neil\""));
         assert!(script.contains("systemctl --user enable --now 'desk-helper.service'\n"));
         // A name with a line break would be a line of its own in the unit.
         let sly = machine_unit(BIN, Some("Ana\nExecStartPre=/bin/evil"), None);
-        assert!(service_script(systemd::UNIT, &sly).is_err());
+        let refused = service_script(systemd::UNIT, &sly);
+        assert!(refused.ends_with("exit 1\n"), "{refused}");
+        assert!(!refused.contains("systemctl"), "{refused}");
     }
 
     #[test]
@@ -785,7 +799,7 @@ mod tests {
                 "export PATH='{}':\"$PATH\" XDG_CONFIG_HOME='{}'\n{}",
                 fake.display(),
                 dir.path().join("config").display(),
-                service_script("desk-test.service", unit).unwrap()
+                service_script("desk-test.service", unit)
             );
             ok(sh(&script, None));
             let said = std::fs::read_to_string(&log).unwrap_or_default();
