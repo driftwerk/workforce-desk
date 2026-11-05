@@ -79,10 +79,24 @@ const over = (s: { state: string }) => s.state === "done" || s.state === "failed
 type ClaudeRun =
   | { at: "idle" }
   | { at: "starting" }
-  /** Under way: in the browser by itself (`direct`), or with a code to paste. */
-  | { at: "running"; signIn: AccountSignIn; direct: boolean; codeAsked: boolean; why: string | null }
+  /** Under way: in the browser by itself (`direct`), or with a code to
+   *  paste (`codeAsked`); `page` is the page opened, to open again. */
+  | { at: "running"; signIn: AccountSignIn; direct: boolean; codeAsked: boolean; page: string | null; why: string | null }
   | { at: "done" }
   | { at: "failed"; why: string };
+
+/** What a sign-in has had done for it here: its forward asked for, the
+ *  page with a code wanted, the page last opened. */
+interface Seen {
+  id: string;
+  forwarding: boolean;
+  wantCode: boolean;
+  opened: string | null;
+  latest: AccountSignIn;
+}
+
+/** The page with a code a sign-in shows, once it does. */
+const codePage = (s: AccountSignIn): string | null => (s.state === "open" || s.state === "code" ? s.url : null);
 
 /** Signing Claude in on the machine as on this computer: the machine's hub
  *  runs Claude Code's sign-in, its page opens here, and the page comes back
@@ -91,7 +105,7 @@ type ClaudeRun =
  *  page with a code opens instead, and the code is pasted here. */
 function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: MachineNative, onDone: () => void) {
   const [run, setRun] = useState<ClaudeRun>({ at: "idle" });
-  const opened = useRef<{ id: string; direct: boolean; code: boolean } | null>(null);
+  const seenRef = useRef<Seen | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
   const live = useRef(true);
@@ -103,6 +117,19 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
   );
 
   const stopForward = useCallback(() => void native.signInForwardStop(machine).catch(() => undefined), [native, machine]);
+  const running = (f: (now: Extract<ClaudeRun, { at: "running" }>) => ClaudeRun) =>
+    setRun((now) => (now.at === "running" ? f(now) : now));
+
+  /** Opens the page with a code once the sign-in shows it, and asks for the code. */
+  const toCode = useCallback((seen: Seen) => {
+    seen.wantCode = true;
+    const page = codePage(seen.latest);
+    if (page && seen.opened !== page) {
+      seen.opened = page;
+      openUrl(page);
+    }
+    setRun((now) => (now.at === "running" ? { ...now, codeAsked: true, page: page ?? now.page } : now));
+  }, []);
 
   // What the page shows next, from where the sign-in is.
   const follow = useCallback(
@@ -119,41 +146,38 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
         setRun({ at: "failed", why: s.why });
         return;
       }
-      const seen = opened.current?.id === s.id ? opened.current : (opened.current = { id: s.id, direct: false, code: false });
-      setRun((now) => ({
-        at: "running",
-        signIn: s,
-        direct: now.at === "running" && now.signIn.id === s.id ? now.direct : false,
-        codeAsked: now.at === "running" && now.signIn.id === s.id ? now.codeAsked : false,
-        why: now.at === "running" && now.signIn.id === s.id ? now.why : null,
-      }));
-      if (s.direct && !seen.direct) {
-        seen.direct = true;
+      const fresh = seenRef.current?.id !== s.id;
+      const seen: Seen = fresh ? { id: s.id, forwarding: false, wantCode: false, opened: null, latest: s } : seenRef.current!;
+      seen.latest = s;
+      seenRef.current = seen;
+      setRun((now) =>
+        now.at === "running" && now.signIn.id === s.id
+          ? { ...now, signIn: s }
+          : { at: "running", signIn: s, direct: false, codeAsked: false, page: null, why: null },
+      );
+      if (seen.wantCode) return toCode(seen);
+      if (s.direct && !seen.forwarding) {
+        seen.forwarding = true;
         native
           .signInForward(machine, s.id)
           .then((url) => {
-            if (!live.current) return;
+            if (!live.current || seenRef.current !== seen) return;
+            seen.opened = url;
             openUrl(url);
-            setRun((now) => (now.at === "running" ? { ...now, direct: true } : now));
+            running((now) => ({ ...now, direct: true, page: url }));
           })
           .catch((e: unknown) => {
-            if (!live.current) return;
-            // The page with a code still works.
-            const url = s.state === "open" || s.state === "code" ? s.url : null;
-            if (url && !seen.code) {
-              seen.code = true;
-              openUrl(url);
-            }
-            setRun((now) => (now.at === "running" ? { ...now, codeAsked: true, why: plainError(e) } : now));
+            if (!live.current || seenRef.current !== seen) return;
+            // The page with a code still works: now, or once it shows.
+            running((now) => ({ ...now, why: plainError(e) }));
+            toCode(seen);
           });
-      } else if (!s.direct && s.state === "code" && s.url && !seen.code && !seen.direct) {
+      } else if (!s.direct && !seen.forwarding && codePage(s)) {
         // A hub that can't give the page that comes back: the page with a code.
-        seen.code = true;
-        openUrl(s.url);
-        setRun((now) => (now.at === "running" ? { ...now, codeAsked: true } : now));
+        toCode(seen);
       }
     },
-    [machine, native, stopForward],
+    [machine, native, stopForward, toCode],
   );
 
   const id = run.at === "running" ? run.signIn.id : null;
@@ -176,7 +200,7 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
   const begin = async () => {
     if (!hub) return;
     setRun({ at: "starting" });
-    opened.current = null;
+    seenRef.current = null;
     try {
       const accounts = await hub.accounts();
       // One already under way there (begun before the card closed) goes on.
@@ -209,10 +233,7 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
 
   /** "Use a code instead": the page with a code, and the field for it. */
   const withCode = () => {
-    if (run.at !== "running") return;
-    const url = run.signIn.state === "open" || run.signIn.state === "code" ? run.signIn.url : null;
-    if (url) openUrl(url);
-    setRun({ ...run, codeAsked: true });
+    if (seenRef.current) toCode(seenRef.current);
   };
 
   // Ended with the card: a sign-in under way goes on there, and is picked up
@@ -440,7 +461,9 @@ export function SignInOn({
                 {c.signIn.state === "checking"
                   ? "Checking the sign-in…"
                   : c.codeAsked
-                    ? "Approve it in your browser, then paste the code the page shows."
+                    ? c.page
+                      ? "Approve it in your browser, then paste the code the page shows."
+                      : "Opening Claude’s sign-in page with a code…"
                     : c.direct
                       ? "Finish signing in in your browser. Desk carries on by itself once you approve."
                       : "Opening Claude’s sign-in page…"}
@@ -448,6 +471,11 @@ export function SignInOn({
               {c.why && <p className="small state-blocked">{c.why}</p>}
               {c.codeAsked && <CodeField onSend={(code) => void claude.sendCode(code)} />}
               <span className="machine-actions">
+                {c.page && (
+                  <button type="button" className="link small" onClick={() => openUrl(c.page!)}>
+                    Open the sign-in page again
+                  </button>
+                )}
                 {c.direct && !c.codeAsked && (
                   <button type="button" className="link small" onClick={claude.withCode}>
                     Use a code instead

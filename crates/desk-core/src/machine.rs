@@ -284,7 +284,8 @@ impl Machine {
     /// The forward from the Unix socket `socket` on this computer (in a
     /// folder only the person can open, the socket itself theirs alone) to
     /// the machine's gateway at `box_port` on its loopback. No TCP port is
-    /// opened here at all. It can't clear the person's config's forwards
+    /// opened here for it (only a sign-in's callback is, for its length:
+    /// [`Machine::callback_forward`]). It can't clear the person's config's forwards
     /// (`ClearAllForwardings` would clear this one too), so Desk reads
     /// [`Machine::settings`] for any first.
     pub fn forward(&self, socket: &std::path::Path, box_port: u16) -> Invocation {

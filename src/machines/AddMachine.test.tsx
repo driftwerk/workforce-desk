@@ -187,6 +187,45 @@ it("falls back to the page with a code when the forward can't start, and says wh
   vi.useRealTimers();
 });
 
+it("opens the page with a code once the machine shows it, when the forward failed before it did", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = fakeEngine();
+  const native = fakeNative();
+  native.fake.signInForward.mockRejectedValueOnce(new Error("Desk couldn’t connect to devbox in time."));
+  await atSignIn(e.hub, native);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  // The page that comes back is made before the page with a code is shown.
+  e.run({ state: "starting", direct: { url: DIRECT, port: 46009 } });
+  await tick();
+  expect(screen.getByText("Desk couldn’t connect to devbox in time.")).toBeTruthy();
+  expect(screen.getByText("Opening Claude’s sign-in page with a code…")).toBeTruthy();
+  expect(openUrl).not.toHaveBeenCalled();
+  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  await tick();
+  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(native.fake.signInForward).toHaveBeenCalledTimes(1);
+  // Its tab closed: it opens again from here.
+  vi.mocked(openUrl).mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "Open the sign-in page again" }));
+  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  await tick();
+  expect(openUrl).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+});
+
+it("switches to the page with a code when asked, from a sign-in in the browser", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = fakeEngine();
+  await atSignIn(e.hub);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  await tick();
+  fireEvent.click(screen.getByRole("button", { name: "Use a code instead" }));
+  expect(openUrl).toHaveBeenLastCalledWith(MANUAL);
+  expect(screen.getByPlaceholderText("Code from the page")).toBeTruthy();
+  vi.useRealTimers();
+});
+
 it("on a machine whose Desk can't give the page that comes back, opens the page with a code", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = fakeEngine();
