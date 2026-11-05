@@ -311,7 +311,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             <h3 className="ov-label muted">History</h3>
             {spend && spend.calls > 0 && (
               <span className="floor-time" title="What its sessions spent on it this month, at API prices">
-                {tokensText(spend.tokens)} tokens · {usdText(spend.usd)}
+                {tokensText(spend.tokens)} tokens · {usdText(spend.usd)} this month
               </span>
             )}
           </div>

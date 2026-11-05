@@ -342,6 +342,11 @@ button.ticket-chip:hover {
   gap: 8px;
   min-width: 0;
 }
+.ticket-link > .chip,
+.board-card-meta > .chip {
+  flex: none;
+  white-space: nowrap;
+}
 .ticket-link > .link {
   min-width: 0;
   overflow: hidden;

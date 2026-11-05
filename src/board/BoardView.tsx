@@ -170,7 +170,6 @@ export function Board() {
         <input
           id="board-search"
           className="board-search"
-          type="search"
           value={q}
           placeholder={`Search or ${board.prefix ?? "ACM"}-12`}
           onChange={(e) => setQ(e.target.value)}

@@ -194,7 +194,7 @@ describe("the board", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
     expect([...cardsIn("Doing"), ...cardsIn("To do")]).toEqual(["ACM-13"]);
     fireEvent.click(screen.getByRole("button", { name: "All" }));
-    const search = screen.getByRole("searchbox", { name: "Search tickets" });
+    const search = screen.getByRole("textbox", { name: "Search tickets" });
     fireEvent.change(search, { target: { value: "acm-12" } });
     expect(cardsIn("Doing")).toEqual(["ACM-12"]);
     fireEvent.keyDown(search, { key: "Enter" });
@@ -302,7 +302,7 @@ describe("a ticket's panel", () => {
     const history = within(panel).getByRole("region", { name: "History" });
     const rows = within(history).getAllByRole("listitem").map((li) => li.textContent?.replace(/^\d\d:\d\d/, ""));
     expect(rows).toEqual(["You created it", "You gave it to acme-web", "acme-web noted “Both gateways already hash; checking partner keys.”"]);
-    await waitFor(() => expect(within(history).getByText("412k tokens · $3.10")).toBeTruthy());
+    await waitFor(() => expect(within(history).getByText("412k tokens · $3.10 this month")).toBeTruthy());
   });
 
   it("adds and drops a need, hands the ticket on, pins it and drops it, each through the hub", async () => {
@@ -321,6 +321,10 @@ describe("a ticket's panel", () => {
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /acme-api/ }));
     await waitFor(() => expect(hub.requests.find((r) => r.route === "POST /api/desk/tickets/t12/assign")?.body).toEqual({ to: { session: API.id } }));
     await waitFor(() => expect(useBoard.getState().tickets.t12!.assignee?.id).toBe(API.id));
+    // The session it went to wears its key; the one it left doesn't.
+    render(<SessionTicketChip session={API.id} />);
+    expect(screen.getAllByRole("button", { name: /^Open ticket ACM-12/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /^Open ticket ACM-12/ }).closest("aside")).toBeNull();
 
     fireEvent.click(within(panel).getByRole("button", { name: "Pin" }));
     await waitFor(() => expect(hub.requests.find((r) => r.route === "PATCH /api/desk/tickets/t12")?.body).toEqual({ pinned: true }));
