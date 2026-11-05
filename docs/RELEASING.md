@@ -61,13 +61,30 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
    (`scripts/openssl-static.sh`) and ONNX Runtime built there
    (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
-   programs need only glibc 2.28. The Postgres Desk Helper embeds
-   (theseus-rs' builds) needs glibc 2.36, so the backend runs on Debian 12,
-   Ubuntu 24.04, Fedora 37, RHEL 10 and newer — not yet on Amazon Linux
-   2023, RHEL/Rocky/Alma 9 or Ubuntu 22.04 (glibc 2.34–2.35). It then runs
-   `scripts/backend-smoke.sh` on Debian 12, Ubuntu 24.04 and Fedora for each
-   architecture. A pull request that changes how it is built runs the same
-   workflow, publishing nothing.
+   programs need only glibc 2.28.
+   - The Postgres Desk Helper embeds is built there too, from source
+     (`scripts/postgres-linux.sh`): theseus-rs' builds, which
+     `postgresql_embedded` downloads otherwise, are made on Debian 12 and
+     need glibc 2.36. The script builds the version `.cargo/config.toml`
+     pins from the release tarball (its checksum pinned), with nothing that
+     needs a library beyond the C library (no ICU, OpenSSL, zlib or
+     readline), and fails if any of its programs or libraries needs a glibc
+     newer than `MIN_GLIBC` (`crates/desk-core/src/backend.rs`, 2.34) or
+     links another library. The archive is reproducible (same source and
+     image, same bytes); the job's summary records its sha256, and the
+     `postgres-linux-<arch>` workflow artifact keeps it with its `.sha256`.
+     It is cached by the script's and `.cargo/config.toml`'s hash, and
+     checked again when restored. `build-sidecars.sh` (`POSTGRES_ARCHIVE`)
+     puts it at `~/.theseus/postgresql/postgresql-<version>-<target>.tar.gz`,
+     where `postgresql_embedded` takes it instead of downloading, rebuilds
+     `postgresql_embedded` and fails unless desk-hubd embedded that archive.
+   - So the backend runs on glibc 2.34 and newer: Ubuntu 22.04, Debian 12,
+     RHEL/Rocky/Alma 9, Amazon Linux 2023, Fedora. Desk Helper's `--check`
+     (what Desk runs inside WSL and on machines) refuses older ones.
+   - It then runs `scripts/backend-smoke.sh` (Postgres, the hub, a terminal)
+     on Ubuntu 22.04 and 24.04, Debian 12, Rocky 9, Amazon Linux 2023 and
+     Fedora, for each architecture. A pull request that changes how it is
+     built runs the same workflow, publishing nothing.
    - the `backend-linux-x86_64` and `backend-linux-aarch64` workflow
      artifacts (the three programs and the Claude Code plugin). Desk on
      Windows installs the x86_64 one inside WSL.

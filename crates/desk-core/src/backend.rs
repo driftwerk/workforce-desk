@@ -67,10 +67,20 @@ pub fn remove_everything(paths: &Paths, secrets: &Secrets) -> Result<()> {
     }
 }
 
-/// The oldest glibc the Linux backend runs on: Debian 12's, which the
-/// Postgres it embeds (theseus-rs' builds) needs. Desk's own programs need
-/// only 2.28 (the release builds them in manylinux_2_28).
-pub const MIN_GLIBC: (u32, u32) = (2, 36);
+/// The oldest glibc the Linux backend runs on: RHEL 9's and Amazon Linux
+/// 2023's. The backend itself needs only 2.28: the release builds Desk's
+/// programs and the Postgres it embeds in manylinux_2_28
+/// (scripts/postgres-linux.sh checks it against this). 2.34 is the oldest
+/// the release tests it on (backend-build.yml's smoke test).
+pub const MIN_GLIBC: (u32, u32) = (2, 34);
+
+/// What Desk needs of a Linux's C library, in the person's words.
+pub fn glibc_needed() -> String {
+    format!(
+        "Desk needs a Linux with glibc {}.{} or newer, such as Ubuntu 22.04, Debian 12, RHEL 9 or Amazon Linux 2023",
+        MIN_GLIBC.0, MIN_GLIBC.1
+    )
+}
 
 /// Whether a glibc version (`2.39`, `2.35.1`) is [`MIN_GLIBC`] or newer.
 pub fn glibc_supported(version: &str) -> bool {
@@ -122,7 +132,8 @@ impl Check {
             Some(format!("Desk doesn't run on {}", self.arch))
         } else {
             Some(format!(
-                "Desk needs a Linux with glibc 2.36 or newer, such as Debian 12, Ubuntu 24.04, Fedora 37 or RHEL 10 (this Linux has glibc {})",
+                "{} (this Linux has glibc {})",
+                glibc_needed(),
                 self.glibc.as_deref().unwrap_or("of unknown version")
             ))
         }
@@ -274,9 +285,16 @@ mod tests {
             Check::of(Some("2.39".into()), "x86_64", true, true).problem(),
             None
         );
-        let old = Check::of(Some("2.35".into()), "x86_64", true, true);
+        assert_eq!(
+            Check::of(Some("2.35".into()), "x86_64", true, true).problem(),
+            None,
+            "Ubuntu 22.04"
+        );
+        let old = Check::of(Some("2.31".into()), "x86_64", true, true);
         assert!(!old.ok);
-        assert!(old.problem().unwrap().contains("glibc 2.35"));
+        let said = old.problem().unwrap();
+        assert!(said.contains("glibc 2.34 or newer"), "{said}");
+        assert!(said.contains("glibc 2.31"), "{said}");
         assert!(
             Check::of(None, "x86_64", true, false)
                 .problem()
@@ -309,14 +327,16 @@ mod tests {
     }
 
     #[test]
-    fn glibc_must_be_debian_12s_or_newer() {
+    fn glibc_must_be_rhel_9s_or_newer() {
         for (v, ok) in [
+            ("2.34", true),
+            ("2.35", true),
             ("2.36", true),
-            ("2.35", false),
             ("2.39", true),
             ("3.0", true),
-            ("2.36.1", true),
-            ("2.34", false),
+            ("2.34.1", true),
+            ("2.33", false),
+            ("2.31", false),
             ("2.28", false),
             ("1.99", false),
             ("", false),

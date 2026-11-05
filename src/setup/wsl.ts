@@ -12,7 +12,7 @@ export const problemText = (p: WslProblem): string => {
     case "arch":
       return `Desk doesn’t run on ${p.found} Linux`;
     case "old_linux":
-      return `Desk needs a Linux with glibc 2.36 or newer, such as Debian 12, Ubuntu 24.04, Fedora 37 or RHEL 10 (this one has glibc ${p.glibc})`;
+      return `Desk needs a Linux with glibc 2.34 or newer, such as Ubuntu 22.04, Debian 12, RHEL 9 or Amazon Linux 2023 (this one has glibc ${p.glibc})`;
     case "root_user":
       return `Set a normal default user for ${p.distro}; Desk won’t run as root`;
   }

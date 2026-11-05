@@ -9,11 +9,14 @@ name: Linux backend build
 #   - inside manylinux_2_28 (AlmaLinux 8), so Desk's own programs need only
 #     glibc 2.28;
 #   - with OpenSSL linked in, so they need no libssl of the distribution's;
-#   - with ONNX Runtime built here, since ort's own needs glibc 2.38.
-# The Postgres the helper embeds (theseus-rs' builds) needs glibc 2.36, so
-# the backend as a whole runs on Debian 12, Ubuntu 24.04, Fedora 37, RHEL 10
-# and newer. Each build then runs scripts/backend-smoke.sh on Debian 12,
-# Ubuntu 24.04 and Fedora.
+#   - with ONNX Runtime built here, since ort's own needs glibc 2.38;
+#   - with the Postgres the helper embeds built here too
+#     (scripts/postgres-linux.sh), since theseus-rs' builds, which
+#     postgresql_embedded downloads otherwise, need glibc 2.36.
+# Desk says the backend runs on glibc 2.34 and newer (MIN_GLIBC in
+# crates/desk-core/src/backend.rs): Ubuntu 22.04, Debian 12, RHEL/Rocky/Alma
+# 9, Amazon Linux 2023, Fedora. Each build then runs scripts/backend-smoke.sh
+# on those, starting Postgres and the hub.
 #
 # The release calls it (release.yml, with the version to stamp); a pull
 # request runs it when what it is built with changes. It publishes nothing.
@@ -35,7 +38,10 @@ on:
       - scripts/build-sidecars.sh
       - scripts/onnxruntime.sh
       - scripts/openssl-static.sh
+      - scripts/postgres-linux.sh
       - scripts/backend-tarball.sh
+      - scripts/backend-smoke.sh
+      - .cargo/config.toml
       - .github/workflows/backend-build.yml
 
 permissions:
@@ -61,10 +67,17 @@ jobs:
     container: ${{ matrix.image }}
     timeout-minutes: 300
     steps:
-      # Perl for building OpenSSL, on top of the image's compilers, cmake,
-      # git and Python.
+      # Perl for building OpenSSL, and bison and flex for Postgres, on top of
+      # the image's compilers, cmake, git, patchelf and Python. Again when a
+      # mirror hands back empty metadata, as AlmaLinux's sometimes do.
       - name: Build tools
-        run: dnf install -y perl-core which
+        run: |
+          for try in 1 2 3; do
+            dnf install -y perl-core which bison flex && exit 0
+            dnf clean metadata
+            sleep 20
+          done
+          exit 1
 
       - name: Check out Desk
         uses: actions/checkout@v7
@@ -137,6 +150,44 @@ jobs:
       - name: OpenSSL (static)
         run: desk/scripts/openssl-static.sh "$RUNNER_TEMP/openssl"
 
+      # Postgres for the helper to embed, keyed by its pin like ONNX Runtime.
+      # A restored one is checked again (its checksum, and that it needs
+      # glibc MIN_GLIBC at most) before it's used.
+      - name: Restore Postgres
+        id: pg
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/postgres
+          key: postgres-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/postgres-linux.sh', 'desk/.cargo/config.toml') }}
+
+      - name: Postgres
+        id: pg-build
+        run: |
+          desk/scripts/postgres-linux.sh "$GITHUB_WORKSPACE/postgres"
+          archive=$(ls "$GITHUB_WORKSPACE"/postgres/postgresql-*-${{ matrix.arch }}-unknown-linux-gnu.tar.gz)
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Postgres (${{ matrix.arch }})"
+            echo '```'
+            cat "$archive.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep Postgres
+        if: always() && steps.pg.outputs.cache-hit != 'true' && steps.pg-build.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ github.workspace }}/postgres
+          key: postgres-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/postgres-linux.sh', 'desk/.cargo/config.toml') }}
+
+      # The archive and its checksum, beside the backend: what the helper
+      # embeds.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: postgres-linux-${{ matrix.arch }}
+          path: ${{ github.workspace }}/postgres/
+          if-no-files-found: error
+
       - name: Build the helper, hub and memory store
         working-directory: desk
         env:
@@ -147,6 +198,7 @@ jobs:
           OPENSSL_STATIC: "1"
           ORT_FROM_SOURCE: "1"
           ORT_DIR: ${{ github.workspace }}/onnxruntime
+          POSTGRES_ARCHIVE: ${{ steps.pg-build.outputs.archive }}
         run: OPENSSL_DIR="$RUNNER_TEMP/openssl" scripts/build-sidecars.sh
 
       - name: Collect
@@ -186,7 +238,14 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-        distro: ["debian:12", "ubuntu:24.04", "fedora:42"]
+        # The oldest each family Desk supports, and the newest.
+        distro:
+          - "ubuntu:22.04"
+          - "ubuntu:24.04"
+          - "debian:12"
+          - "rockylinux/rockylinux:9"
+          - "amazonlinux:2023"
+          - "fedora:42"
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     # With an init that reaps what the helper leaves, so a PTY holder that
     # was ended isn't still seen as a zombie.

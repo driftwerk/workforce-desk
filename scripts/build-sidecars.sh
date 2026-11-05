@@ -35,6 +35,11 @@
 #                   scripts/onnxruntime.sh (in ORT_DIR, default
 #                   <cache>/onnxruntime-<arch>) instead of ort's own, which
 #                   needs glibc 2.38: the backend for machines and WSL
+#   POSTGRES_ARCHIVE on Linux, the Postgres scripts/postgres-linux.sh built
+#                   (its .tar.gz), for desk-hubd to embed instead of
+#                   theseus-rs' build, which needs glibc 2.36: the backend
+#                   for machines and WSL. It replaces the download
+#                   postgresql_embedded keeps in ~/.theseus/postgresql.
 #   TARGETS         targets (default "aarch64-apple-darwin x86_64-apple-darwin" on
 #                   macOS, this machine's elsewhere); one target skips the
 #                   universal binary
@@ -126,7 +131,26 @@ mkdir -p "$bin"
 for t in $targets; do
   rustup target add "$t" >/dev/null
   say "desk-hubd for $t"
+  if [ -n "${POSTGRES_ARCHIVE:-}" ]; then
+    # postgresql_embedded bundles the archive it finds there for the pinned
+    # version, and keeps the one it bundled last until its build runs again.
+    pg_version=$(sed -n 's/^POSTGRESQL_VERSION = "=\(.*\)"$/\1/p' "$root/.cargo/config.toml")
+    pg_cached="$HOME/.theseus/postgresql/postgresql-$pg_version-$t.tar.gz"
+    [ "$(basename "$POSTGRES_ARCHIVE")" = "$(basename "$pg_cached")" ] ||
+      die "POSTGRES_ARCHIVE is $POSTGRES_ARCHIVE; desk-hubd for $t embeds $(basename "$pg_cached")"
+    mkdir -p "$(dirname "$pg_cached")"
+    cp "$POSTGRES_ARCHIVE" "$pg_cached"
+    cargo clean --release --quiet -p postgresql_embedded --target "$t" --manifest-path "$root/Cargo.toml"
+  fi
   cargo build --release --locked -p desk-hubd --target "$t" --manifest-path "$root/Cargo.toml"
+  if [ -n "${POSTGRES_ARCHIVE:-}" ]; then
+    bundled=("$desk_target/$t/release/build"/postgresql_embedded-*/out/postgresql.tar.gz)
+    [ -f "${bundled[0]}" ] || die "desk-hubd for $t bundled no Postgres"
+    for f in "${bundled[@]}"; do
+      cmp -s "$f" "$POSTGRES_ARCHIVE" || die "desk-hubd for $t bundled $f, not $POSTGRES_ARCHIVE"
+    done
+    say "desk-hubd for $t embeds $(basename "$POSTGRES_ARCHIVE")"
+  fi
   say "hub $ref for $t"
   CARGO_TARGET_DIR="$hub_target" cargo build --release --locked -p workforce-cli --bin workforce \
     --target "$t" --manifest-path "$hub/Cargo.toml"

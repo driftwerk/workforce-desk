@@ -10,7 +10,7 @@ name: Release
 #     and an MSI for managed installs, carrying the Linux backend Desk
 #     installs into WSL; Authenticode-signed only when WINDOWS_SIGNING is on;
 #   - the Linux backend alone, for x86_64 and aarch64 (backend-build.yml),
-#     for glibc 2.36 and newer: what Desk installs into WSL, and on machines
+#     for glibc 2.34 and newer: what Desk installs into WSL, and on machines
 #     (Linux boxes Desk drives over SSH) as signed tarballs;
 # then publishes them with the signed updater artifacts (latest.json) as a
 # GitHub release. See docs/RELEASING.md.

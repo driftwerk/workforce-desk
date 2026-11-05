@@ -115,6 +115,8 @@ device=$(jq -r .device_token <<<"$conn")
 api() { curl -fsS -H "Authorization: Bearer $1" "${@:3}" "$gateway$2"; }
 
 say "the hub knows Desk's device"
+# Paired is written before the hub's gateway is listening.
+until_ok 60 api "$device" /api/me || fail "the hub's gateway didn't answer at $gateway"
 me=$(api "$device" /api/me)
 [ -n "$(jq -r '.id // empty' <<<"$me")" ] || fail "/api/me answered $me"
 
