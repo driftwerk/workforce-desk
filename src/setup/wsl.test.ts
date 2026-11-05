@@ -34,7 +34,7 @@ describe("choosing a Linux", () => {
   });
 
   it("words every problem without the hub's name", () => {
-    expect(problemText({ kind: "old_linux", glibc: "2.35" })).toMatch(/glibc 2\.36 or newer/);
+    expect(problemText({ kind: "old_linux", glibc: "2.31" })).toMatch(/glibc 2\.34 or newer.*glibc 2\.31\)$/);
     expect(problemText({ kind: "not_installed" })).toBe("WSL isn’t on this computer yet");
   });
 });
