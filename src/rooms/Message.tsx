@@ -13,6 +13,8 @@ import type { Step } from "../hub/types";
 import { stepsOf } from "./progress";
 import { Steps } from "./ProgressCard";
 import { ImageBudget } from "../shell/RemoteImage";
+import { readableError } from "../chat/agentError";
+import { PlanSignIn } from "../floor/PlanCards";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -47,6 +49,30 @@ function Linked({ text }: { text: string }) {
             {p.text}
           </a>
         ),
+      )}
+    </>
+  );
+}
+
+/** An error a turn ended with, in plain words: signing in where that's what
+ *  would help, and the hub's own words folded away. */
+function TurnError({ raw }: { raw: string }) {
+  const said = readableError(raw);
+  return (
+    <>
+      <p className="msg-text state-blocked">
+        <Linked text={said.text} />
+      </p>
+      {said.signIn && (
+        <div className="plan-signin">
+          <PlanSignIn kind={said.signIn} />
+        </div>
+      )}
+      {said.details && (
+        <details className="msg-steps">
+          <summary className="small">Details</summary>
+          <p className="small muted">{said.details}</p>
+        </details>
       )}
     </>
   );
@@ -138,8 +164,10 @@ export const Message = memo(function Message({
             ))}
           </span>
         )}
-        {!message.content.trim() ? null : message.role !== "assistant" ? (
-          <p className={message.status === "error" ? "msg-text state-blocked" : "msg-text"}>
+        {!message.content.trim() ? null : message.status === "error" ? (
+          <TurnError raw={message.content} />
+        ) : message.role !== "assistant" ? (
+          <p className="msg-text">
             <Linked text={relayed?.text ?? message.content} />
           </p>
         ) : (

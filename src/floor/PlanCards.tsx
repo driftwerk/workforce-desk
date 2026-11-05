@@ -127,11 +127,21 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
 
 /** No plan of this kind signed in on this computer: sign in here. */
 function SignIn({ kind }: { kind: PlanKind }) {
-  const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
-  const login = usePlanLogin(kind, () => local && ask([local]));
   return (
     <div className="plan-signin">
       <p className="muted small">Not signed in on this computer, so there’s no usage to show.</p>
+      <PlanSignIn kind={kind} />
+    </div>
+  );
+}
+
+/** Signing in to a plan of this kind on this computer, and how it's going:
+ *  the plan's usage is read again once it's done. */
+export function PlanSignIn({ kind }: { kind: PlanKind }) {
+  const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  const login = usePlanLogin(kind, () => local && ask([local]));
+  return (
+    <>
       <PlanLoginAction login={login} label={`Sign in to ${NAME[kind]}`} />
       {login.status && (
         <span className={`small ${login.failed ? "state-blocked" : "muted"}`} role="status">
@@ -139,6 +149,6 @@ function SignIn({ kind }: { kind: PlanKind }) {
           <ReopenLink login={login} />
         </span>
       )}
-    </div>
+    </>
   );
 }
