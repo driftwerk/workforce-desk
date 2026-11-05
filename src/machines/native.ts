@@ -29,8 +29,10 @@ export type Access =
   | { kind: "refused"; user: string | null }
   /** The key needs a passphrase no agent holds (`ssh-add`). */
   | { kind: "locked" }
-  /** Couldn't connect at all (no route, no such host, timed out). */
-  | { kind: "unreachable"; message: string };
+  /** Couldn't connect at all (no route, no such host, timed out). `suggest`:
+   *  when the name didn't resolve, another spelling of it that the SSH
+   *  config knows ("Did you mean devbox?"). */
+  | { kind: "unreachable"; message: string; suggest?: string };
 
 /** What a first look at an address found. */
 export interface Probe {

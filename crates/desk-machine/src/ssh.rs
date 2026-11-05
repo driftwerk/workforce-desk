@@ -68,29 +68,72 @@ pub fn problem(machine: &Machine, stderr: &[u8]) -> String {
     if has("Permission denied") || has("Too many authentication failures") {
         return format!("{name} turned your SSH key away, or it needs unlocking first (ssh-add).");
     }
-    if has("Could not resolve hostname")
+    let reach = has("Could not resolve hostname")
         || has("Connection refused")
         || has("timed out")
         || has("No route to host")
         || has("Network is unreachable")
         || has("Connection closed by")
-        || has("kex_exchange_identification")
-    {
-        return format!("Desk couldn't reach {name}.{}", quoted(name, &said));
+        || has("kex_exchange_identification");
+    let (own, line) = last_line(&said);
+    if reach {
+        return if own {
+            own_said(&format!("SSH couldn't reach {name}"), &line)
+        } else {
+            format!("Desk couldn't reach {name}.{}", quoted(name, &line))
+        };
     }
-    format!("ssh to {name} failed.{}", quoted(name, &said))
+    if own {
+        return own_said(&format!("SSH to {name} failed"), &line);
+    }
+    format!("ssh to {name} failed.{}", quoted(name, &line))
 }
 
-/// The last thing said, as the machine's words (ssh's own lines can carry
-/// what the machine sent, a banner): cleaned and cut short, after a space;
-/// nothing when nothing was said.
-fn quoted(name: &str, said: &str) -> String {
+/// What ssh itself prints when it fails, as opposed to what a machine
+/// sends through it (a banner, a command's error).
+const SSH_OWN: &[&str] = &[
+    "ssh:",
+    "ssh_exchange_identification",
+    "kex_exchange_identification",
+    "Connection closed by",
+    "Connection reset by",
+    "Connection timed out",
+    "Connection refused",
+    "Connection to ",
+    "channel ",
+    "mux_client",
+    "Bad configuration",
+    "Could not resolve",
+];
+
+/// The last thing said, and whether ssh itself said it (not the machine).
+fn last_line(said: &str) -> (bool, String) {
     let line = said
         .lines()
         .rev()
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with("debug") && !harmless(l))
         .unwrap_or_default();
+    (
+        SSH_OWN.iter().any(|p| line.starts_with(p)),
+        line.to_string(),
+    )
+}
+
+/// `what` went wrong, then ssh's own last line quoted (without its `ssh:`
+/// prefix) as SSH's words, not the machine's.
+fn own_said(what: &str, line: &str) -> String {
+    let line = line.strip_prefix("ssh:").unwrap_or(line);
+    match desk_core::machine::quoted_line(line) {
+        Some(q) => format!("{what}: {q}"),
+        None => format!("{what}."),
+    }
+}
+
+/// A machine's last line, as the machine's words (a banner can arrive
+/// through ssh's error output): cleaned and cut short, after a space;
+/// nothing when nothing was said.
+fn quoted(name: &str, line: &str) -> String {
     desk_core::machine::said_by(name, line)
         .map(|s| format!(" {s}"))
         .unwrap_or_default()
@@ -182,9 +225,10 @@ mod tests {
         let unresolved =
             said("ssh: Could not resolve hostname devbox: nodename nor servname provided\n");
         assert!(
-            unresolved.starts_with("Desk couldn't reach devbox. devbox said: “ssh: Could not"),
+            unresolved.starts_with("SSH couldn't reach devbox: “Could not resolve hostname devbox"),
             "{unresolved}"
         );
+        assert!(!unresolved.contains("devbox said"), "{unresolved}");
         assert_eq!(said(""), "ssh to devbox failed.");
         assert!(said(&"x".repeat(5000)).chars().count() < 260);
         // A banner can't pass for Desk's advice, nor hide what it says.
@@ -202,6 +246,40 @@ mod tests {
         assert_eq!(
             said("setsockopt TCP_NODELAY: Operation not supported on socket\n"),
             "ssh to devbox failed."
+        );
+    }
+
+    #[test]
+    fn ssh_s_own_errors_are_not_the_machines_words() {
+        let m = devbox();
+        let said = |s: &str| problem(&m, s.as_bytes());
+        for own in [
+            "ssh: connect to host devbox port 22: Connection refused\n",
+            "Connection closed by 203.0.113.7 port 22\n",
+            "kex_exchange_identification: read: Connection reset by peer\n",
+        ] {
+            let s = said(own);
+            assert!(s.starts_with("SSH couldn't reach devbox: “"), "{s}");
+            assert!(!s.contains("devbox said"), "{s}");
+        }
+        assert_eq!(
+            said(
+                "ssh: Could not resolve hostname Devbox: nodename nor servname provided, or not known\n"
+            ),
+            "SSH couldn't reach devbox: “Could not resolve hostname Devbox: nodename nor servname provided, or not known”"
+        );
+        let other = said("Bad configuration option: foo\n");
+        assert!(other.starts_with("SSH to devbox failed: “"), "{other}");
+        // What the machine sent is still the machine's.
+        let banner = said("Welcome to the box\n");
+        assert!(
+            banner.contains("devbox said: “Welcome to the box”"),
+            "{banner}"
+        );
+        let after = said("Connection closed by 203.0.113.7 port 22\nthe box says no\n");
+        assert!(
+            after.starts_with("Desk couldn't reach devbox. devbox said: “the box says no”"),
+            "{after}"
         );
     }
 

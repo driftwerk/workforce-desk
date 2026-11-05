@@ -161,6 +161,22 @@ it("says why it can't reach a machine, and never asks the native side about a ba
   expect(screen.getByRole("alert", { name: "Desk can’t add it" }).textContent).toContain("Desk can’t reach devbox: no route to it.");
 });
 
+it("offers the spelling the SSH config knows when a name didn't resolve, and puts it in the address", async () => {
+  const { native, fake } = fakeNative();
+  fake.probe.mockResolvedValueOnce(
+    probeOf({ access: { kind: "unreachable", message: "SSH couldn’t reach Devbox: “Could not resolve hostname Devbox”", suggest: "devbox" } }),
+  );
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("Devbox");
+  const box = screen.getByRole("alert", { name: "Desk can’t add it" });
+  expect(box.textContent).toContain("Did you mean devbox?");
+  expect(box.textContent).toContain("SSH couldn’t reach Devbox");
+  fireEvent.click(screen.getByRole("button", { name: "Use devbox" }));
+  expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("devbox");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(fake.probe).toHaveBeenCalledTimes(1);
+});
+
 it("says plainly that an account running desktop Desk can't be a machine", async () => {
   const { native, fake } = fakeNative();
   const desktop = "This account already runs Desk as a desktop app; use another account for a machine. Desk won't change anything there.";

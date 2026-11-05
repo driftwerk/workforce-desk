@@ -59,6 +59,12 @@ describe("adding a machine", () => {
     expect(step(f, { type: "edit", target: "dev@devbox" })).toEqual({ at: "address", target: "dev@devbox", problem: null });
   });
 
+  it("keeps the address the SSH config knows another spelling of, until typing again", () => {
+    const f = run([...typed("Devbox"), { type: "probed", probe: probeOf({ access: { kind: "unreachable", message: "SSH couldn’t reach Devbox.", suggest: "devbox" } }) }]);
+    expect(f).toEqual({ at: "address", target: "Devbox", problem: "SSH couldn’t reach Devbox.", refused: true, suggest: "devbox" });
+    expect(step(f, { type: "edit", target: "devbox" })).toEqual({ at: "address", target: "devbox", problem: null });
+  });
+
   it("ticks the checklist off from the machine's setup events, and only that machine's", () => {
     let f = run([...typed("devbox"), { type: "probed", probe: probeOf() }, { type: "added", machine: "devbox" }]);
     f = step(f, { type: "setup", event: { machine: "other", step: "install", state: "done" } });

@@ -888,7 +888,7 @@ fn an_account_that_runs_desktop_desk_is_never_taken_over() {
     let r = fleet(&b, "0.2.0", true);
     let p = r.fleet.probe("devbox").unwrap();
     assert!(
-        matches!(&p.access, Some(Access::Unreachable { message }) if message.contains("desktop app")),
+        matches!(&p.access, Some(Access::Unreachable { message, .. }) if message.contains("desktop app")),
         "{p:?}"
     );
     let id = r.fleet.add("devbox", "devbox").unwrap();
@@ -923,7 +923,7 @@ fn a_windows_desks_wsl_backend_is_never_taken_over() {
     let r = fleet(&b, "0.2.0", true);
     let p = r.fleet.probe("devbox").unwrap();
     assert!(
-        matches!(&p.access, Some(Access::Unreachable { message }) if message.contains("desktop app")),
+        matches!(&p.access, Some(Access::Unreachable { message, .. }) if message.contains("desktop app")),
         "{p:?}"
     );
     let id = r.fleet.add("devbox", "devbox").unwrap();

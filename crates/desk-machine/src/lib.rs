@@ -26,6 +26,7 @@ pub mod link;
 pub mod probe;
 pub mod setup;
 pub mod ssh;
+pub mod suggest;
 pub mod tunnel;
 
 pub use link::{Link, Machines};

@@ -23,8 +23,9 @@ export type Steps = Record<SetupStep, Item>;
 export type Flow =
   /** Typing the address; `problem` from the last try, `refused` when it
    *  was the machine's (unreachable, or an account Desk won't use) rather
-   *  than the address's. */
-  | { at: "address"; target: string; problem: string | null; refused?: boolean }
+   *  than the address's; `suggest` is another spelling of it that the SSH
+   *  config knows. */
+  | { at: "address"; target: string; problem: string | null; refused?: boolean; suggest?: string }
   /** Looking at it. */
   | { at: "checking"; target: string }
   /** A machine this computer has never connected to: its fingerprint. */
@@ -70,7 +71,7 @@ const afterProbe = (target: string, probe: Probe): Flow => {
     case "locked":
       return { at: "key", target, name, user: null, why: "locked" };
     case "unreachable":
-      return { at: "address", target, problem: access.message || `Desk can’t reach ${name}.`, refused: true };
+      return { at: "address", target, problem: access.message || `Desk can’t reach ${name}.`, refused: true, ...(access.suggest ? { suggest: access.suggest } : {}) };
     case "ok": {
       const sys = access.system ? ` · ${access.system.os} · ${access.system.arch}` : "";
       return {
