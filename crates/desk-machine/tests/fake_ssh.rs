@@ -332,7 +332,12 @@ fn the_tokens_only_go_into_the_forwards_socket() {
     let f = fake(json!([host("devbox", box_port, ADMIN, DEVICE)]));
     let link = link(&f, "devbox");
     let c = link.read().unwrap().unwrap();
-    assert_eq!(c.gateway_url, format!("http://127.0.0.1:{box_port}"));
+    // A name that resolves nowhere: only the socket reaches anything.
+    assert_eq!(
+        c.gateway_url,
+        format!("http://devbox.machine.invalid:{box_port}")
+    );
+    assert!(desk_core::net::loopback_url(&c.gateway_url).is_err());
     assert_eq!(c.device_token.as_deref(), Some(DEVICE));
     let meta = std::fs::symlink_metadata(link.socket()).unwrap();
     assert!(meta.file_type().is_socket());

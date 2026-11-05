@@ -144,6 +144,40 @@ pub fn loopback_url(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
+/// The domain a machine's hub is named under: `.invalid` never resolves
+/// (RFC 6761), so a client that isn't bound to the forward's socket fails
+/// rather than reach anything at that address.
+pub const MACHINE_DOMAIN: &str = "machine.invalid";
+
+/// Machine `id`'s hub as Desk names it (reached only through its forward's
+/// socket): `http://<id>.machine.invalid:<port>`, the port its gateway's on
+/// the machine.
+pub fn machine_base(id: &str, port: u16) -> String {
+    format!("http://{id}.{MACHINE_DOMAIN}:{port}")
+}
+
+/// A machine's hub's address, checked: `http` to a name under
+/// [`MACHINE_DOMAIN`], with a port, and nothing else in it.
+pub fn machine_url(raw: &str) -> Result<Url, String> {
+    let refuse = || "That machine's hub isn't at an address Desk gave it.".to_string();
+    let url = Url::parse(raw).map_err(|_| refuse())?;
+    let named = url
+        .host_str()
+        .and_then(|h| h.strip_suffix(MACHINE_DOMAIN))
+        .is_some_and(|label| label.len() > 1 && label.ends_with('.'));
+    if url.scheme() != "http" || !named || url.port().is_none() || !bare(&url) {
+        return Err(refuse());
+    }
+    Ok(url)
+}
+
+/// The `Host` a machine's hub is sent (as the forward reaches it, on the
+/// machine's own loopback): `127.0.0.1:<port>`.
+pub fn machine_host(url: &Url) -> Option<String> {
+    machine_url(url.as_str()).ok()?;
+    url.port().map(|p| format!("127.0.0.1:{p}"))
+}
+
 /// A hub's address as Desk will send its token to it: `https` anywhere, or
 /// [`loopback_url`]; nothing else in it.
 pub fn hub_url(raw: &str) -> Result<Url, String> {
@@ -181,6 +215,29 @@ pub fn at(base: &Url, path: &str, query: Option<&str>) -> Result<Url, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_machines_address_never_resolves_and_is_checked() {
+        let base = machine_base("devbox", 4226);
+        assert_eq!(base, "http://devbox.machine.invalid:4226");
+        let url = machine_url(&base).unwrap();
+        assert_eq!(machine_host(&url).as_deref(), Some("127.0.0.1:4226"));
+        for refused in [
+            "http://127.0.0.1:4226",
+            "http://machine.invalid:4226",
+            "http://.machine.invalid:4226",
+            "http://devbox.machine.invalid",
+            "https://devbox.machine.invalid:4226",
+            "http://devbox.machine.invalid.example.com:4226",
+            "http://devbox.machine.invalid:4226/x",
+            "http://u:p@devbox.machine.invalid:4226",
+            "http://devboxmachine.invalid:4226",
+        ] {
+            assert!(machine_url(refused).is_err(), "{refused}");
+        }
+        // And the loopback rule refuses it: no loopback client takes it.
+        assert!(loopback_url(&base).is_err());
+    }
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;

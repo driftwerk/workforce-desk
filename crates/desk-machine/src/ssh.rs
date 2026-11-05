@@ -89,11 +89,18 @@ fn quoted(name: &str, said: &str) -> String {
         .lines()
         .rev()
         .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with("debug"))
+        .find(|l| !l.is_empty() && !l.starts_with("debug") && !harmless(l))
         .unwrap_or_default();
     desk_core::machine::said_by(name, line)
         .map(|s| format!(" {s}"))
         .unwrap_or_default()
+}
+
+/// Whether `line` is ssh's own noise that says nothing went wrong: it
+/// can't set `TCP_NODELAY` on a socket that isn't TCP (a `ProxyCommand`'s,
+/// a forward's Unix socket).
+fn harmless(line: &str) -> bool {
+    line.contains("setsockopt TCP_NODELAY") && line.contains("Operation not supported")
 }
 
 /// What `ssh -G` says the person's config makes of a machine, for the
@@ -187,6 +194,15 @@ mod tests {
             "{banner}"
         );
         assert!(desk_core::machine::plain(&banner), "{banner:?}");
+        // ssh's own noise about a socket isn't what is quoted.
+        let noisy =
+            said("kex failure\nsetsockopt TCP_NODELAY: Operation not supported on socket\n");
+        assert!(noisy.contains("“kex failure”"), "{noisy}");
+        assert!(!noisy.contains("TCP_NODELAY"), "{noisy}");
+        assert_eq!(
+            said("setsockopt TCP_NODELAY: Operation not supported on socket\n"),
+            "ssh to devbox failed."
+        );
     }
 
     #[test]

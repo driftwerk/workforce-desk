@@ -256,7 +256,8 @@ impl Paired {
             ))
         })?;
         debug_assert_eq!(hub.id, id);
-        let base = desk_core::net::loopback_url(&hub.url).map_err(Failure::Refused)?;
+        // A name that resolves nowhere, reached only through the socket.
+        let base = desk_core::net::machine_url(&hub.url).map_err(Failure::Refused)?;
         let socket = link.socket().to_path_buf();
         let clients = self.machine_clients(&socket)?;
         Ok(Reach {
@@ -316,6 +317,15 @@ impl Paired {
         let unreachable = |e: reqwest::Error| Failure::Unreachable(e.without_url().to_string());
         let attempt = |reach: Reach| async move {
             let request = build(&reach).ok_or(Failure::Unknown)?;
+            // A machine's hub is sent the Host it is at on the machine.
+            let request = match reach
+                .unix
+                .as_ref()
+                .and(desk_core::net::machine_host(&reach.base))
+            {
+                Some(host) => request.header(reqwest::header::HOST, host),
+                None => request,
+            };
             Ok::<_, Failure>(request.bearer_auth(&*reach.token).send().await)
         };
         let reach = self.reach_async(id).await?;

@@ -242,14 +242,14 @@ impl Link {
         Ok(Some(connection))
     }
 
-    /// `kept`, once the forward to it is up. Its address names the
-    /// machine's own gateway (`http://127.0.0.1:<port>` there), and is
-    /// reached only through [`Link::socket`]: no client sends it anywhere
-    /// else.
+    /// `kept`, once the forward to it is up. Its address
+    /// (`http://<id>.machine.invalid:<port>`, the gateway's port on the
+    /// machine) resolves nowhere: only a client bound to [`Link::socket`]
+    /// reaches anything with it.
     fn through(&self, kept: &Kept) -> Result<Connection, String> {
         self.tunnel.ensure(kept.box_port, self.wait)?;
         Ok(Connection {
-            gateway_url: format!("http://127.0.0.1:{}", kept.box_port),
+            gateway_url: desk_core::net::machine_base(self.machine.id.as_str(), kept.box_port),
             admin_token: kept.admin_token.clone(),
             device_token: kept.device_token.clone(),
         })
@@ -269,7 +269,7 @@ impl Link {
     pub fn ready(&self) -> Option<Connection> {
         let kept = self.kept().clone()?;
         (self.tunnel.up() == Some(kept.box_port)).then(|| Connection {
-            gateway_url: format!("http://127.0.0.1:{}", kept.box_port),
+            gateway_url: desk_core::net::machine_base(self.machine.id.as_str(), kept.box_port),
             admin_token: kept.admin_token,
             device_token: kept.device_token,
         })
