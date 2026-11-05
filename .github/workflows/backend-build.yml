@@ -181,7 +181,11 @@ jobs:
         arch: [x86_64, aarch64]
         distro: ["debian:12", "ubuntu:24.04", "fedora:42"]
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
-    container: ${{ matrix.distro }}
+    # With an init that reaps what the helper leaves, so a PTY holder that
+    # was ended isn't still seen as a zombie.
+    container:
+      image: ${{ matrix.distro }}
+      options: --init
     timeout-minutes: 30
     steps:
       # What the smoke test uses, and a normal user to run it as: Postgres
