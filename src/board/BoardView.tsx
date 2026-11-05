@@ -6,7 +6,7 @@ import { waitsOnYou } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
 import { PLUGINS, SENSORS, DragChip, MoreIcon, below, type Operation } from "../groups/rows";
-import { useDesk } from "../hub/store";
+import { useDesk, localSessions } from "../hub/store";
 import type { Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -19,7 +19,7 @@ import { TicketCard } from "./TicketCard";
 /** Whether a ticket's session or agent waits on the person, by the Floor's
  *  own rule (its needs, else the session's state). */
 export const useWaiting = (): ((t: Ticket) => boolean) => {
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const needs = useNeedCounts();
   const localHub = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
   return useCallback(

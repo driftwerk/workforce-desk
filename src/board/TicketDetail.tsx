@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
-import { deskListeners, sortedSessions, useDesk } from "../hub/store";
+import { deskListeners, sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { ActivityEvent, ActivityParty, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
 import { SidePanel } from "../panels/Stage";
 import { openUrl } from "../platform";
@@ -157,7 +157,7 @@ export function OpenTicket() {
  *  what it cost. */
 export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const all = useBoard((s) => s.tickets);
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const waiting = useWaiting()(t);
   const [menu, setMenu] = useState<{ kind: "hand" | "snooze"; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [starting, setStarting] = useState(false);
@@ -429,7 +429,7 @@ function WrittenBy({ who }: { who: ActivityParty }) {
 /** Whom it can go to: the sessions running, the agents on this computer,
  *  and taking it off whoever has it. */
 const useHandEntries = (t: Ticket): MenuEntry[] => {
-  const sessions = sortedSessions(useDesk((s) => s.sessions)).filter((s) => s.live);
+  const sessions = sortedSessions(useDesk((s) => localSessions(s.sessions))).filter((s) => s.live);
   const names = useSessionNames();
   const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
   const roster = useChat((s) => s.roster);

@@ -3,7 +3,7 @@ import { NeedRow } from "../floor/NeedRow";
 import { useMinute } from "../floor/RightNow";
 import { useNeeds } from "../floor/store";
 import { dayClock, durationOf, since } from "../floor/time";
-import { useDesk, type RoomDraft } from "../hub/store";
+import { useDesk, type RoomDraft, localSessions } from "../hub/store";
 import { flightRows, type FlightRow } from "../rooms/flight";
 import { MemberMark } from "../rooms/MemberMark";
 import { useAuthor } from "../rooms/names";
@@ -152,7 +152,7 @@ function StuckRow({ room, draft }: { room: string; draft: RoomDraft }) {
 function Row({ row, dim, now, nested = false, onRead }: { row: UnreadRow; dim: boolean; now: number; nested?: boolean; onRead: (r: UnreadRow) => void }) {
   const restart = useUpdates((s) => s.restart);
   const wait = useUpdates((s) => s.wait);
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const fail = useDesk((s) => s.fail);
   const preview = useDmPreview(row.place.kind === "dm" ? row.key.slice("dm:".length) : "", row.read.message);
   const line = preview?.line ?? row.line;

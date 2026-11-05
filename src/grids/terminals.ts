@@ -12,42 +12,74 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
-import { HubError } from "../hub/client";
-import { deskListeners, useDesk } from "../hub/store";
-import type { DeskEvent, Session, TerminalInfo } from "../hub/types";
-import { backendHome, claudePluginDir, inApp, programsUnder } from "../platform";
+import { HubError, type DeskHub } from "../hub/client";
+import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
+import { engineListeners, hubOf, useDesk, useHubOf, type EngineEvent } from "../hub/store";
+import type { Session, TerminalInfo } from "../hub/types";
+import { backendHome, claudePluginDir, inApp, machinePluginDir, programsUnder } from "../platform";
 import { baseName } from "../ui/paths";
-import type { Pane, PaneContent } from "./engine";
+import { sessionKeyIn, terminalKeyIn, type Pane, type PaneContent } from "./engine";
 import { newId } from "./model";
 import { setAskingCheck, setTerminal, setTerminalCheck, useGrids, writes } from "./store";
 
 interface TerminalsState {
-  /** Terminals as the hub last said. */
+  /** Terminals as their engines last said, by key (see `keyOf`): this
+   *  computer's by id, a machine's as `<machine>/<id>`. */
   byId: Record<string, TerminalInfo>;
-  /** The hub has listed its terminals (one that doesn't host them never does). */
+  /** This computer's hub has listed its terminals (one that doesn't host
+   *  them never does). */
   known: boolean;
-  /** What runs in each, shell first, where Desk can see. */
+  /** The machines whose engines have listed theirs. */
+  knownOn: Record<MachineId, true>;
+  /** What runs in each, shell first, where Desk can see, by key. */
   programs: Record<string, string[]>;
   /** Why a pane's terminal couldn't be opened, by pane id. */
   problems: Record<string, string>;
 }
 
-export const useTerminals = create<TerminalsState>(() => ({ byId: {}, known: false, programs: {}, problems: {} }));
+export const useTerminals = create<TerminalsState>(() => ({ byId: {}, known: false, knownOn: {}, programs: {}, problems: {} }));
 
-/** Keeps `useTerminals` as the hub announces terminals. */
-export const heardTerminals = (e: DeskEvent): void => {
+/** Whether engine `machine` has listed its terminals. */
+const knownIn = (s: TerminalsState, machine: MachineId): boolean => (machine === LOCAL ? s.known : !!s.knownOn[machine]);
+
+const listed = (s: TerminalsState, machine: MachineId): Partial<TerminalsState> =>
+  machine === LOCAL ? { known: true } : s.knownOn[machine] ? {} : { knownOn: { ...s.knownOn, [machine]: true } };
+
+/** Keeps `useTerminals` as each engine announces its terminals. */
+export const heardTerminals = (e: EngineEvent): void => {
+  const machine = machineOf(e);
   if (e.type === "snapshot" && e.terminals) {
-    useTerminals.setState({ byId: Object.fromEntries(e.terminals.map((t) => [t.id, t])), known: true });
+    const terminals = e.terminals;
+    useTerminals.setState((s) => ({
+      byId: {
+        ...Object.fromEntries(Object.entries(s.byId).filter(([k]) => splitKey(k).machine !== machine)),
+        ...Object.fromEntries(terminals.map((t) => [keyOf(machine, t.id), t])),
+      },
+      ...listed(s, machine),
+    }));
   } else if (e.type === "terminal") {
-    useTerminals.setState((s) => ({ byId: { ...s.byId, [e.terminal.id]: e.terminal }, known: true }));
+    const t = e.terminal;
+    useTerminals.setState((s) => ({ byId: { ...s.byId, [keyOf(machine, t.id)]: t }, ...listed(s, machine) }));
   } else if (e.type === "terminalRemoved") {
+    const key = keyOf(machine, e.id);
     useTerminals.setState((s) => {
-      const { [e.id]: _gone, ...byId } = s.byId;
+      const { [key]: _gone, ...byId } = s.byId;
       return { byId };
     });
   }
 };
-deskListeners.add(heardTerminals);
+engineListeners.add(heardTerminals);
+
+/** A machine let go: its terminals are no longer known here. */
+useDesk.subscribe((s, before) => {
+  if (s.engines === before.engines) return;
+  const gone = Object.keys(before.engines).filter((m) => m !== LOCAL && !s.engines[m]);
+  if (!gone.length) return;
+  useTerminals.setState((t) => ({
+    byId: Object.fromEntries(Object.entries(t.byId).filter(([k]) => !gone.includes(splitKey(k).machine))),
+    knownOn: Object.fromEntries(Object.entries(t.knownOn).filter(([m]) => !gone.includes(m))),
+  }));
+});
 
 const NO_ROUTE = "This hub doesn’t have that yet.";
 
@@ -57,7 +89,8 @@ const setProblem = (pane: string, problem: string | null) =>
     return { problems: problem ? { ...rest, [pane]: problem } : rest };
   });
 
-const remember = (info: TerminalInfo) => useTerminals.setState((s) => ({ byId: { ...s.byId, [info.id]: info } }));
+const remember = (machine: MachineId, info: TerminalInfo) =>
+  useTerminals.setState((s) => ({ byId: { ...s.byId, [keyOf(machine, info.id)]: info } }));
 
 const problemOf = (e: unknown): string =>
   e instanceof HubError && e.status === 404 && e.message === NO_ROUTE
@@ -67,31 +100,60 @@ const problemOf = (e: unknown): string =>
       : String(e);
 
 let pluginDirs: Promise<string | null> | null = null;
+/** Each machine's plugin folder, once asked; one that failed is asked again. */
+const machineDirs = new Map<MachineId, Promise<string | null>>();
+
+const dirOn = (machine: MachineId): Promise<string | null> => {
+  if (machine === LOCAL) return (pluginDirs ??= claudePluginDir().catch(() => null));
+  let dir = machineDirs.get(machine);
+  if (!dir) {
+    dir = machinePluginDir(machine).catch(() => {
+      machineDirs.delete(machine);
+      return null;
+    });
+    machineDirs.set(machine, dir);
+  }
+  return dir;
+};
 
 /** What Desk adds to a terminal's or a session's environment: its Claude
  *  Code plugin folder, which the hub joins to any the person already loads
  *  (the hub has no way to find it itself). The hub adds the terminal's id,
- *  the token its hooks present and where they post. */
-export const pluginEnv = async (): Promise<Record<string, string>> => {
-  const dir = await (pluginDirs ??= claudePluginDir().catch(() => null));
+ *  the token its hooks present and where they post. On a machine, it is
+ *  the machine's own plugin folder. */
+export const pluginEnv = async (machine: MachineId = LOCAL): Promise<Record<string, string>> => {
+  const dir = await dirOn(machine);
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
+};
+
+/** Where a new terminal opens when its pane names nowhere: this computer's
+ *  home folder; on a machine, the folder its latest session worked in (the
+ *  page has no way yet to ask a machine for its home), else nowhere. */
+const homeOn = async (machine: MachineId): Promise<string | null> => {
+  if (machine === LOCAL) return inApp ? await backendHome().catch(() => "/") : "/";
+  const latest = Object.values(useDesk.getState().sessions)
+    .filter((s) => machineOf(s) === machine && s.cwd)
+    .sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0];
+  return latest?.cwd ?? null;
 };
 
 const opening = new Map<string, Promise<void>>();
 
-/** Opens pane `pane`'s terminal on the hub — in `cwd` when it had one, else
- *  the home folder — under `id` when it had one; once, however often asked. */
-export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | null, id?: string): Promise<void> => {
+/** Opens pane `pane`'s terminal on its engine (`machine`) — in `cwd` when it
+ *  had one, else the home folder — under `id` when it had one; once,
+ *  however often asked. */
+export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | null, id?: string, machine: MachineId = LOCAL): Promise<void> => {
   const was = opening.get(pane);
   if (was) return was;
   const p = (async () => {
-    const hub = useDesk.getState().hub;
+    const hub = hubOf(machine);
     if (!hub || !writes(gridId)) return;
     try {
-      const where = cwd || (inApp ? await backendHome().catch(() => "/") : "/");
-      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await pluginEnv() });
+      const where = cwd || (await homeOn(machine));
+      if (!where) return setProblem(pane, "Desk doesn’t know a folder on this machine to open a terminal in yet.");
+      const info = await hub.openTerminal({ id: id ?? newId(), cwd: where, env: await pluginEnv(machine) });
       setProblem(pane, null);
-      remember(info);
+      remember(machine, info);
       setTerminal(gridId, pane, info.id, info.cwd);
     } catch (e) {
       setProblem(pane, problemOf(e));
@@ -102,14 +164,14 @@ export const openPaneTerminal = (gridId: string, pane: string, cwd?: string | nu
 };
 
 /** Starts a terminal whose shell ended again, where it was. */
-export const reopenTerminal = (pane: string, id: string): Promise<void> => {
+export const reopenTerminal = (pane: string, id: string, machine: MachineId = LOCAL): Promise<void> => {
   const was = opening.get(pane);
   if (was) return was;
   const p = (async () => {
-    const hub = useDesk.getState().hub;
+    const hub = hubOf(machine);
     if (!hub) return;
     try {
-      remember(await hub.reopenTerminal(id));
+      remember(machine, await hub.reopenTerminal(id));
       setProblem(pane, null);
     } catch (e) {
       setProblem(pane, problemOf(e));
@@ -122,8 +184,7 @@ export const reopenTerminal = (pane: string, id: string): Promise<void> => {
 /** Closes what a pane held, if the hub hosts it for the pane (a terminal). */
 export const closeContent = (c: PaneContent): void => {
   if (c.kind !== "terminal" || !c.terminalId) return;
-  const { hub, fail } = useDesk.getState();
-  hub?.closeTerminal(c.terminalId).catch(fail);
+  hubOf(machineOf(c))?.closeTerminal(c.terminalId).catch(useDesk.getState().fail);
 };
 
 /** How often what runs in a terminal is looked at. */
@@ -133,40 +194,44 @@ const WATCH_MS = 4_000;
  *  under its id if the hub no longer has it, or where it was if a reboot
  *  ended it; its folder kept with the pane; what runs in it looked at. */
 export function useTerminalPane(gridId: string, pane: string, content: Extract<PaneContent, { kind: "terminal" }>) {
-  const hub = useDesk((s) => s.hub);
-  const known = useTerminals((s) => s.known);
+  const machine = machineOf(content);
+  const hub: DeskHub | null = useHubOf(machine);
+  const known = useTerminals((s) => knownIn(s, machine));
   const { terminalId, cwd } = content;
-  const info = useTerminals((s) => (terminalId ? s.byId[terminalId] : undefined));
+  const key = terminalKeyIn(content);
+  const info = useTerminals((s) => (key ? s.byId[key] : undefined));
   const writer = useGridsWriter(gridId);
 
   useEffect(() => {
     if (!hub || !writer) return;
-    if (!terminalId) void openPaneTerminal(gridId, pane, cwd);
-    else if (known && !info) void openPaneTerminal(gridId, pane, cwd, terminalId);
-    else if (info?.state === "lost") void reopenTerminal(pane, info.id);
+    if (!terminalId) void openPaneTerminal(gridId, pane, cwd, undefined, machine);
+    else if (known && !info) void openPaneTerminal(gridId, pane, cwd, terminalId, machine);
+    else if (info?.state === "lost") void reopenTerminal(pane, info.id, machine);
     // `cwd` is where to open, read when needed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hub, writer, gridId, pane, terminalId, known, !!info, info?.state]);
+  }, [hub, writer, gridId, pane, terminalId, machine, known, !!info, info?.state]);
 
   useEffect(() => {
     if (writer && terminalId && info?.cwd && info.cwd !== cwd) setTerminal(gridId, pane, terminalId, info.cwd);
   }, [writer, gridId, pane, terminalId, info?.cwd, cwd]);
 
-  const pid = info?.live ? info.pid : null;
+  // What runs in it is looked at on this computer only: a machine's pid is
+  // no process here (its engine will say, once the page may ask it).
+  const pid = info?.live && machine === LOCAL ? info.pid : null;
   useEffect(() => {
-    if (!terminalId || !pid) return;
+    if (!key || !pid) return;
     let stopped = false;
     const look = () =>
       void programsUnder(pid)
         .catch(() => [])
-        .then((programs) => !stopped && useTerminals.setState((s) => ({ programs: { ...s.programs, [terminalId]: programs } })));
+        .then((programs) => !stopped && useTerminals.setState((s) => ({ programs: { ...s.programs, [key]: programs } })));
     look();
     const t = setInterval(look, WATCH_MS);
     return () => {
       stopped = true;
       clearInterval(t);
     };
-  }, [terminalId, pid]);
+  }, [key, pid]);
 
   return { info, known };
 }
@@ -184,13 +249,17 @@ export const describeTerminal = (info: TerminalInfo | undefined, programs: strin
   return { shell, running, codex: rest.some((p) => /^codex\b/.test(p)), claude: rest.some((p) => p === "claude") };
 };
 
-/** The session running in terminal `id`, once Desk's hooks have registered it. */
-export const trackedIn = (sessions: Record<string, Session>, id: string | null): Session | null =>
-  id ? (Object.values(sessions).find((s) => s.terminalId === id && s.live) ?? null) : null;
+/** The session running in terminal `key` (see `keyOf`), once Desk's hooks
+ *  have registered it: one on the terminal's own engine. */
+export const trackedIn = (sessions: Record<string, Session>, key: string | null): Session | null => {
+  if (!key) return null;
+  const { machine, id } = splitKey(key);
+  return Object.values(sessions).find((s) => s.terminalId === id && s.live && machineOf(s) === machine) ?? null;
+};
 
 /** The session pane `content` shows, or the one started in its terminal. */
 export const sessionIn = (sessions: Record<string, Session>, content: PaneContent | null): Session | null =>
-  content?.kind === "session" ? (sessions[content.sessionId] ?? null) : content?.kind === "terminal" ? trackedIn(sessions, content.terminalId) : null;
+  content?.kind === "session" ? (sessions[sessionKeyIn(content)!] ?? null) : content?.kind === "terminal" ? trackedIn(sessions, terminalKeyIn(content)) : null;
 
 /** The panes whose session is waiting on the person: on an approval, or on
  *  what its turn ended asking. */
@@ -202,12 +271,14 @@ export const askingIn = (panes: readonly Pane[], sessions: Record<string, Sessio
     })
     .map((p) => p.id);
 
-/** The Desk terminal `content` keeps open: a terminal's own, or the one a
- *  session runs in, while the hub still has it. */
+/** The Desk terminal `content` keeps open, by key: a terminal's own, or the
+ *  one a session runs in, while its engine still has it. */
 export const terminalOf = (content: PaneContent): string | null => {
-  if (content.kind === "terminal") return content.terminalId;
-  const id = content.kind === "session" ? useDesk.getState().sessions[content.sessionId]?.terminalId : null;
-  return id && useTerminals.getState().byId[id] ? id : null;
+  if (content.kind === "terminal") return terminalKeyIn(content);
+  if (content.kind !== "session") return null;
+  const id = useDesk.getState().sessions[sessionKeyIn(content)!]?.terminalId;
+  const key = id ? keyOf(machineOf(content), id) : null;
+  return key && useTerminals.getState().byId[key] ? key : null;
 };
 
 // A smaller layout keeps these first.

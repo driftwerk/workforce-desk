@@ -4,7 +4,8 @@ import type { ChargeView, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { badgeOf, called, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
-import { useBoss, useCharge, useCharges } from "./chargeStore";
+import { useBossOf, useCharge, useCharges } from "./chargeStore";
+import { sessionKey } from "../hub/machines";
 
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
  *  `short`), dashed "You're driving" while the person has the wheel. */
@@ -22,8 +23,8 @@ export function ChargeBadge({ charge, short = false, className = "" }: { charge:
  *  menus and the pane's header (their problem goes to Desk's error line).
  *  One at a time: `busy` while one is on its way, and the others wait. */
 export const useChargeActions = (session: Session | null | undefined): (ChargeChoice & { run: () => void; busy: boolean })[] => {
-  const charge = useCharge(session?.id);
-  const boss = useBoss();
+  const charge = useCharge(session && sessionKey(session));
+  const boss = useBossOf(session);
   const [busy, setBusy] = useState(false);
   const going = useRef(false);
   if (!session) return [];
@@ -36,7 +37,7 @@ export const useChargeActions = (session: Session | null | undefined): (ChargeCh
       setBusy(true);
       useCharges
         .getState()
-        .act(session.id, c.verb)
+        .act(sessionKey(session), c.verb)
         .catch(useDesk.getState().fail)
         .finally(() => {
           going.current = false;
@@ -51,8 +52,8 @@ export const useChargeActions = (session: Session | null | undefined): (ChargeCh
  *  boss suggests for it while you drive. One the boss could run, Hand to
  *  it, quietly. */
 export function ChargeStrip({ session }: { session: Session }) {
-  const charge = useCharge(session.id);
-  const boss = useBoss();
+  const charge = useCharge(sessionKey(session));
+  const boss = useBossOf(session);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const choices = chargeChoices(session, charge, boss);
@@ -63,7 +64,7 @@ export function ChargeStrip({ session }: { session: Session }) {
     setProblem(null);
     useCharges
       .getState()
-      .act(session.id, c.verb)
+      .act(sessionKey(session), c.verb)
       .catch((e: unknown) => setProblem(plainError(e)))
       .finally(() => setBusy(null));
   };

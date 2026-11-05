@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { advance } from "../unread/reads";
 import { useSeenWhole } from "../unread/seen";
 import { useSessionNames } from "../groups/names";
-import { useDesk } from "../hub/store";
+import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { CHECK_EVERY_MS, isLive, isWorking, useUpdates } from "./store";
@@ -28,7 +28,8 @@ const list = (names: string[]): string =>
  *  can instead have Desk wait until none is working. */
 export function UpdateNotice() {
   const { state, waiting, wait, restart } = useUpdates();
-  const sessions = useDesk((s) => s.sessions);
+  // This computer's: a machine updates on its own.
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const names = useSessionNames();
   const fail = useDesk((s) => s.fail);
   const [asking, setAsking] = useState(false);

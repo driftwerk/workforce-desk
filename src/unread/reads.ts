@@ -3,7 +3,8 @@ import { readConversation } from "../chat/history";
 import { useChat } from "../chat/store";
 import { DESK_DM, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
-import { useDesk } from "../hub/store";
+import { hubOf as engineOf, useDesk } from "../hub/store";
+import { keyOf, LOCAL, splitKey, type MachineId } from "../hub/machines";
 import type { ReadPoint, ReadRow, RoomMessage } from "../hub/types";
 import { putConversationRead } from "../hubs/surface";
 import { useOverview } from "../overview/store";
@@ -80,6 +81,30 @@ const keep = (hubId: string, w: Pending, e: unknown) => {
 /** Points the local hub says moved, in this window or another. */
 export const heard = (rows: readonly ReadRow[]): void =>
   useReads.setState((s) => ({ local: { ...s.local, ...Object.fromEntries(rows.map((r) => [r.place, { at: r.at, message: r.message }])) } }));
+
+/** A machine's session's place as Desk keys it (`session:<machine>/<id>`),
+ *  from its engine's (`session:<id>`); null for any other place, which on a
+ *  machine counts for nothing here. */
+const machinePlace = (machine: MachineId, place: string): string | null =>
+  place.startsWith("session:") ? `session:${keyOf(machine, place.slice("session:".length))}` : null;
+
+/** Points machine `machine`'s engine says moved (or holds): its sessions'. */
+export const heardOn = (machine: MachineId, rows: readonly ReadRow[]): void => {
+  if (machine === LOCAL) return heard(rows);
+  const mine = rows.flatMap((r) => {
+    const place = machinePlace(machine, r.place);
+    return place ? [[place, { at: r.at, message: r.message }] as const] : [];
+  });
+  if (mine.length) useReads.setState((s) => ({ local: { ...s.local, ...Object.fromEntries(mine) } }));
+};
+
+/** The machine a session place is on, and its place there; null for a
+ *  place of this computer's. */
+const onMachine = (place: Place): { machine: MachineId; key: string } | null => {
+  if (place.kind !== "session") return null;
+  const { machine, id } = splitKey(place.session);
+  return machine === LOCAL ? null : { machine, key: `session:${id}` };
+};
 
 /** Every point this computer's hub keeps, read afresh. */
 export const loadLocal = (rows: readonly ReadRow[]): void =>
@@ -191,8 +216,16 @@ function landed(place: Place, point: ReadPoint): void {
   if (k && k.point.at === point.at && k.point.message === point.message) deskState.set(KEPT_DMS, { ...keptDms(), [key]: { ...k, landed: Date.now() } });
 }
 
-/** Writes `point` for `place` on its hub, as `mark`. */
+/** Writes `point` for `place` on its hub, as `mark`: a machine's session's
+ *  on that machine's engine (one that can't be reached keeps it shown here
+ *  until its engine says otherwise). */
 async function write(place: Place, point: ReadPoint, mark: "advance" | "set"): Promise<void> {
+  const there = onMachine(place);
+  if (there) {
+    const engine = engineOf(there.machine);
+    if (engine) await engine.putReads([{ place: there.key, point, mark }]).then((rows) => heardOn(there.machine, rows), () => undefined);
+    return;
+  }
   const hub = hubOf(place);
   if (!hub) return;
   // A hub whose link said what it offers, without DM read points, takes
@@ -295,6 +328,16 @@ export async function markEverythingRead(dms: Readonly<Record<string, Conversati
   const desk = useDesk.getState().hub;
   const moved = desk ? await desk.markAllRead("everything") : [];
   heard(moved);
+  // Each machine's sessions too, on its own engine.
+  for (const [machine, engine] of Object.entries(useDesk.getState().engines)) {
+    if (machine === LOCAL) continue;
+    const theirs = await engine.hub.markAllRead("everything").catch(() => [] as ReadRow[]);
+    heardOn(machine, theirs);
+    for (const r of theirs) {
+      const place = machinePlace(machine, r.place);
+      if (place) moved.push({ ...r, place });
+    }
+  }
   const dmMoved: [Place, ReadPoint | undefined][] = [];
   for (const [key, u] of Object.entries(dms)) {
     if (!u.count || !u.last) continue;

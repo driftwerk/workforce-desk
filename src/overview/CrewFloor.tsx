@@ -10,7 +10,7 @@ import { isAgentTurn } from "../floor/needs";
 import { useLocalFloor, useMerged, useNeedCounts } from "../floor/store";
 import { Today } from "../floor/Today";
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
-import { sortedSessions, useDesk } from "../hub/store";
+import { sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { Overview, OverviewItem, Session } from "../hub/types";
 import { DockStrip, DockTab } from "../panels/DockTab";
 import { useSavedScroll } from "../restore/scroll";
@@ -73,7 +73,7 @@ export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyM
 /** The Floor as the crew's overview: the overseer's brief, then who needs
  *  you, who's working and what's done, beside what's happening. */
 export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const activitySupport = useOverview((s) => s.activitySupport);
   const manager = useOverview((s) => s.manager);
   const managerAgent = useLocalAgent(manager?.agentId);

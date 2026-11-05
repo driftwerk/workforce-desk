@@ -5,7 +5,8 @@ import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
-import { sortedSessions, useDesk } from "../hub/store";
+import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
+import { keyOf, machineOf, sessionKey, splitKey } from "../hub/machines";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
@@ -27,7 +28,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
-import { findContent, parkedOrder, STEPS, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
+import { findContent, parkedOrder, sessionContent, sessionKeyIn, STEPS, terminalContent, terminalKeyIn, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, UnfocusIcon, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
@@ -88,12 +89,13 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const roster = useChat((s) => s.roster);
   const hubs = useChat((s) => s.hubs);
   const working = useChat((s) => (content?.kind === "agent" ? (s.conversations[content.agent]?.working ?? null) : null));
-  const info = useTerminals((s) => (content?.kind === "terminal" && content.terminalId ? s.byId[content.terminalId] : undefined));
-  const programs = useTerminals((s) => (content?.kind === "terminal" && content.terminalId ? s.programs[content.terminalId] : undefined));
-  const sessionId = content?.kind === "session" ? content.sessionId : null;
-  const tracked = content?.kind === "terminal" ? trackedIn(sessions, content.terminalId) : null;
-  const session = sessionId ? sessions[sessionId] : tracked;
-  const name = useSessionName(session?.id, session?.name ?? "");
+  const terminal = terminalKeyIn(content);
+  const info = useTerminals((s) => (terminal ? s.byId[terminal] : undefined));
+  const programs = useTerminals((s) => (terminal ? s.programs[terminal] : undefined));
+  const shows = sessionKeyIn(content);
+  const tracked = content?.kind === "terminal" ? trackedIn(sessions, terminal) : null;
+  const session = shows ? sessions[shows] : tracked;
+  const name = useSessionName(session && sessionKey(session), session?.name ?? "");
   if (!content) return { name: "Empty pane", meta: "", state: null, tracked: null, asking: null, cwd: null, mono: false };
   if (content.kind === "agent") {
     const agent = roster.find((a) => agentKey(a) === content.agent);
@@ -150,11 +152,12 @@ interface CloseAsk {
 function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: (from?: HTMLElement | null) => void; dialog: ReactNode } {
   const [confirm, setConfirm] = useState(false);
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
-  const terminalId = pane.content?.kind === "terminal" ? pane.content.terminalId : hosted;
-  const running = useTerminals((s) => (terminalId ? describeTerminal(s.byId[terminalId], s.programs[terminalId]).running : null));
-  const shown = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined));
+  const terminal = pane.content?.kind === "terminal" ? terminalKeyIn(pane.content) : hosted;
+  const running = useTerminals((s) => (terminal ? describeTerminal(s.byId[terminal], s.programs[terminal]).running : null));
+  const shows = sessionKeyIn(pane.content);
+  const shown = useDesk((s) => (shows ? s.sessions[shows] : undefined));
   const inIt = label.tracked ?? (hosted && shown?.live ? shown : null);
-  const close = () => closePane(gridId, pane.id, (c) => closeContent(hosted ? { kind: "terminal", terminalId: hosted } : c));
+  const close = () => closePane(gridId, pane.id, (c) => closeContent(hosted ? terminalContent(hosted) : c));
   const remove = (from?: HTMLElement | null) => {
     // Clicking a button doesn't focus it everywhere (WebKit): focused, it's
     // where the dialog puts focus back when it's kept.
@@ -273,9 +276,10 @@ export function GridPane({
   const flash = useGrids((s) => (s.flash?.gridId === gridId && s.flash.paneIds.includes(pane.id) ? s.flash.n : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
-  const session = useDesk((s) => (pane.content?.kind === "session" ? s.sessions[pane.content.sessionId] : undefined)) ?? label.tracked;
+  const shows = sessionKeyIn(pane.content);
+  const session = useDesk((s) => (shows ? s.sessions[shows] : undefined)) ?? label.tracked;
   const actions = session ? sessionActions(session) : [];
-  const charge = useCharge(session?.id);
+  const charge = useCharge(session && sessionKey(session));
   const chargeActions = useChargeActions(session);
   const entries = usePaneMenu(gridId, pane, actions, session ?? null, () => remove(menu?.from), chargeActions);
   const handle = usePaneDrag(gridId, pane, label.name);
@@ -494,9 +498,10 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
   }
   if (c.kind === "terminal") return <TerminalBody gridId={gridId} pane={pane.id} content={c} />;
   if (c.kind === "agent") return <DirectMessage key={c.agent} agent={c.agent} />;
-  return <SessionPane id={c.sessionId} />;
+  return <SessionPane id={sessionKeyIn(c)!} />;
 }
 
+/** The session `id` (a key, see `keyOf`) in a pane. */
 function SessionPane({ id }: { id: string }) {
   const session = useDesk((s) => s.sessions[id]);
   const [problem, setProblem] = useState<string | null>(null);
@@ -504,9 +509,9 @@ function SessionPane({ id }: { id: string }) {
     // Closed (the hub lists only what's open) or removed: Resume finds out.
     const resume = () => {
       setProblem(null);
-      useDesk
-        .getState()
-        .hub?.resume(id)
+      const on = splitKey(id);
+      hubOf(on.machine)
+        ?.resume(on.id)
         .catch((e) => setProblem(e instanceof HubError && e.status === 404 ? "It was removed from Desk, so there's nothing to resume." : plainError(e)));
     };
     return (
@@ -555,11 +560,11 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
   if (info && !info.live && info.state === "exited") {
     return note(`The shell ended${info.exitCode ? ` (exit ${info.exitCode})` : ""}.`, {
       label: "Open it again",
-      run: () => void reopenTerminal(pane, info.id),
+      run: () => void reopenTerminal(pane, info.id, machineOf(content)),
     });
   }
   if (info && !info.live) return note("Opening the terminal again…");
-  return <Terminal key={content.terminalId} terminalId={content.terminalId} autoFocus={false} />;
+  return <Terminal key={terminalKeyIn(content)} terminalId={content.terminalId} machine={machineOf(content)} autoFocus={false} />;
 }
 
 /** A pane's options: close, replace, move to another grid. */
@@ -572,6 +577,9 @@ function usePaneMenu(
   charge: { label: string; run: () => void }[] = [],
 ): MenuEntry[] {
   const sessions = useDesk((s) => s.sessions);
+  // What to put here: this computer's sessions (a machine's are put in a
+  // pane where they're shown with their machine).
+  const mine = useDesk((s) => localSessions(s.sessions));
   const roster = useChat((s) => s.roster);
   // Selected as they're kept (a list made in the selector would be new on
   // every read, which zustand takes for a change).
@@ -582,7 +590,7 @@ function usePaneMenu(
   const keys = useSettings((s) => s.keys.newTerminal);
   // Sessions by the names given them, as the sidebar shows them.
   const names = useSessionNames();
-  const shown = sortedSessions(sessions).filter((s) => s.state !== "closed");
+  const shown = sortedSessions(mine).filter((s) => s.state !== "closed");
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
   // A pane showing a terminal takes the keys it takes there.
   const inShell = pane.content?.kind === "terminal" || pane.content?.kind === "session";
@@ -615,22 +623,22 @@ function usePaneMenu(
   const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
   // A tracked terminal shows as its session, and back: the same terminal
   // either way, so nothing starts or stops.
-  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, pane.content.terminalId) : null;
-  const ranIn = pane.content?.kind === "session" ? (sessions[pane.content.sessionId]?.terminalId ?? null) : null;
+  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, terminalKeyIn(pane.content)) : null;
+  const shows = sessionKeyIn(pane.content);
+  const ranInId = shows ? (sessions[shows]?.terminalId ?? null) : null;
+  // The terminal it runs in, on its own engine.
+  const ranIn = ranInId && shows ? keyOf(splitKey(shows).machine, ranInId) : null;
   const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));
   // A pane of its own in another grid: one here would be a second.
-  const terminalElsewhere = useGrids(
-    (s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], { kind: "terminal", terminalId: ranIn })),
-  );
+  const terminalElsewhere = useGrids((s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], terminalContent(ranIn))));
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
   const allAccounts = useAccounts((s) => s.accounts);
-  const hub = useDesk((s) => s.hub);
   const fail = useDesk((s) => s.fail);
   // Another account for a session Desk started (one in a terminal of its
   // own is moved there).
   const accounts = session && hasAccounts(session.caps) && !session.terminalId && session.origin === "desk" ? accountsOf(allAccounts, session.engine) : [];
   const onAccount = (to: string | null) => {
-    if (session) hub?.switchAccount(session.id, to).catch(fail);
+    if (session) hubFor(session)?.switchAccount(session.id, to).catch(fail);
   };
   const account: MenuEntry[] = session
     ? [
@@ -642,9 +650,9 @@ function usePaneMenu(
       ]
     : [];
   const swap: MenuEntry[] = tracked
-    ? [{ kind: "item", label: "Show as session", onSelect: () => put({ kind: "session", sessionId: tracked.id }) }]
-    : terminal && !terminalElsewhere
-      ? [{ kind: "item", label: "Show the terminal", onSelect: () => put({ kind: "terminal", terminalId: terminal.id, cwd: terminal.cwd }) }]
+    ? [{ kind: "item", label: "Show as session", onSelect: () => put(sessionContent(sessionKey(tracked))) }]
+    : terminal && ranIn && !terminalElsewhere
+      ? [{ kind: "item", label: "Show the terminal", onSelect: () => put(terminalContent(ranIn, terminal.cwd)) }]
       : [];
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
@@ -664,7 +672,7 @@ function usePaneMenu(
         ]
       : []),
     ...(session && session.view !== "desk"
-      ? [{ kind: "item" as const, label: "Messages with Desk…", onSelect: () => useLinePanel.getState().show(session.id, "history") }]
+      ? [{ kind: "item" as const, label: "Messages with Desk…", onSelect: () => useLinePanel.getState().show(sessionKey(session), "history") }]
       : []),
     ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
     ...(session ? [{ kind: "separator" as const }, ...lifecycleActions(session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run }))] : []),

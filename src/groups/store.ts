@@ -6,10 +6,13 @@
 // Desk's settings hold them, as before.
 
 import type { DeskHub } from "../hub/client";
-import { deskListeners, useDesk } from "../hub/store";
+import { deskListeners, hubOf, useDesk } from "../hub/store";
+import { LOCAL, splitKey } from "../hub/machines";
 import type { DeskEvent, Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { onHub, useHubLayout } from "./hubLayout";
+// Each machine's groups are kept beside this computer's.
+import "./machineLayouts";
 import {
   createGroup as created,
   deleteGroup as deleted,
@@ -130,11 +133,17 @@ export const moveGroup = (id: string, before: string | null): void =>
     (h) => h.moveGroup(id, before),
   );
 
+/** Whether `key` may be in this computer's groups: anything but a session
+ *  on a machine (`session:<machine>/<id>`), which is grouped on its own
+ *  engine; groups don't mix machines. */
+export const groupable = (key: ItemKey): boolean => !key.startsWith("session:") || splitKey(key.slice("session:".length)).machine === LOCAL;
+
 export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
+  void (groupable(key) &&
   changeLayout(
     (l) => moved(l, present, key, to, before),
     (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
-  );
+  ));
 
 export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
   changeLayout(
@@ -153,6 +162,16 @@ export const nameSession = (id: string, name: string, hubName: string): void => 
   const trimmed = name.trim();
   const given = trimmed && trimmed !== hubName ? trimmed : null;
   const { hub, sessions, fail } = useDesk.getState();
+  // A machine's session (by its key) is named on its own engine, which
+  // keeps its names.
+  const on = splitKey(id);
+  if (on.machine !== LOCAL) {
+    hubOf(on.machine)
+      ?.nameSession(on.id, given)
+      .then((now: Session) => useDesk.setState((s) => (s.sessions[id] ? { sessions: { ...s.sessions, [id]: { ...now, machine: on.machine } } } : {})))
+      .catch(fail);
+    return;
+  }
   if (onHub() && hub) {
     const was = sessions[id];
     if (was) useDesk.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...was, displayName: given } } }));

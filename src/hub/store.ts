@@ -4,6 +4,7 @@ import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, HubError, ROOM_PAGE } from "./client";
 import type { DeskTransport } from "./transport";
+import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "./machines";
 import { byTime, later } from "../rooms/time";
 import { afterPage, inWindow, isLive, ofPlace, placeKey, shown, type PageDir, type PlaceKey, type Window } from "../rooms/window";
 import type { DeskEvent, Room, RoomMessage, Session } from "./types";
@@ -11,9 +12,27 @@ import type { DeskEvent, Room, RoomMessage, Session } from "./types";
 /** The main window's views: the Floor, Rooms, and Grids. */
 export type View = "rooms" | "floor" | "grids" | "board";
 
-interface DeskState {
-  hub: DeskHub | null;
+/** One engine the page talks to: this computer's (`local`) or a machine's. Each
+ *  runs its own sessions, boss, board, lines, budgets and breaker. */
+export interface EngineConn {
+  hub: DeskHub;
+  /** Its events socket is open. */
   connected: boolean;
+  /** It has said which sessions it has. */
+  loaded: boolean;
+  error: string | null;
+}
+
+interface DeskState {
+  /** This computer's engine (`engines.local`), as everything that is about
+   *  this computer alone reaches it. */
+  hub: DeskHub | null;
+  /** This computer's engine's events socket is open. */
+  connected: boolean;
+  /** Every engine, by machine id; `local` is this computer. */
+  engines: Record<MachineId, EngineConn>;
+  /** Every engine's sessions, by key (see `keyOf`): this computer's by their own
+   *  id, a machine's as `<machine>/<id>`, stamped with its `machine`. */
   sessions: Record<string, Session>;
   restore: Session[];
   rooms: Record<string, Room>;
@@ -54,6 +73,9 @@ interface DeskState {
   /** With `notify: false`, this is a detached grid's window. */
   /** Talks to the local hub through `transport` (`brokered` in the app). */
   connect: (transport: DeskTransport, opts?: { notify?: boolean }) => () => void;
+  /** Talks to machine `machine`'s engine through `transport`
+   *  (`machineTransport` in the app); stopped, its engine and sessions go. */
+  connectMachine: (machine: MachineId, transport: DeskTransport) => () => void;
   open: (id: string | null) => void;
   setView: (view: View) => void;
   openRoom: (id: string | null) => Promise<void>;
@@ -112,8 +134,82 @@ export const answered = (drafts: Record<string, RoomDraft[]>, posted: RoomMessag
   return { ...drafts, [posted.roomId]: here.filter((d) => !answers(posted, d)) };
 };
 
-/** Others listening to the events socket (the overview, Activity). */
+/** Others listening to this computer's events socket (the overview, Activity, and
+ *  everything else that is about this computer alone). */
 export const deskListeners = new Set<(e: DeskEvent) => void>();
+
+/** An event as it came from its engine: a machine's says which (this computer's
+ *  say none, as before machines). Its sessions are stamped too. */
+export type EngineEvent = DeskEvent & { machine?: MachineId };
+
+/** Others listening to every engine's events socket, this computer's included:
+ *  what is about sessions wherever they run (panes, unread, notifications). */
+export const engineListeners = new Set<(e: EngineEvent) => void>();
+
+/** Tells everyone listening what engine `e`'s machine said: this
+ *  computer's events go to both sets, a machine's only to
+ *  `engineListeners`. */
+export const announce = (e: EngineEvent): void => {
+  if (machineOf(e) === LOCAL) for (const f of deskListeners) f(e);
+  for (const f of engineListeners) f(e);
+};
+
+/** `s` stamped with its machine; this computer's as they are. */
+const stamped = (s: Session, machine: MachineId): Session => (machine === LOCAL ? s : { ...s, machine });
+
+/** `e` as heard from `machine`: stamped, its sessions too. */
+export const stampEvent = (e: DeskEvent, machine: MachineId): EngineEvent => {
+  if (machine === LOCAL) return e;
+  switch (e.type) {
+    case "snapshot":
+      return { ...e, machine, sessions: e.sessions.map((x) => stamped(x, machine)), restore: e.restore.map((x) => stamped(x, machine)) };
+    case "session":
+      return { ...e, machine, session: stamped(e.session, machine) };
+    default:
+      return { ...e, machine };
+  }
+};
+
+/** Whether key `k` is one of `machine`'s sessions. */
+const onMachine = (k: string, machine: MachineId): boolean => splitKey(k).machine === machine;
+
+/** Every session but `machine`'s. */
+const others = (sessions: Record<string, Session>, machine: MachineId): Record<string, Session> =>
+  Object.values(sessions).some((s) => machineOf(s) === machine)
+    ? Object.fromEntries(Object.entries(sessions).filter(([k]) => !onMachine(k, machine)))
+    : sessions;
+
+/** Every session but this computer's, by key. */
+const remoteOf = (sessions: Record<string, Session>): Record<string, Session> =>
+  Object.fromEntries(Object.entries(sessions).filter(([k]) => !onMachine(k, LOCAL)));
+
+/** The engine `machine` (this computer when none), while the page talks to
+ *  it: this computer's is `hub`, as it has always been. */
+const engineIn = (s: DeskState, machine?: MachineId | null): DeskHub | null =>
+  !machine || machine === LOCAL ? s.hub : (s.engines[machine]?.hub ?? null);
+
+/** The engine `machine` (this computer when none), while the page talks to it. */
+export const hubOf = (machine?: MachineId | null): DeskHub | null => engineIn(useDesk.getState(), machine);
+
+/** The engine session `s` runs on. */
+export const hubFor = (s: { machine?: MachineId | null }): DeskHub | null => hubOf(machineOf(s));
+
+/** The engine `machine`, as a hook. */
+export const useHubOf = (machine?: MachineId | null): DeskHub | null => useDesk((s) => engineIn(s, machine));
+
+const localOnly = new WeakMap<Record<string, Session>, Record<string, Session>>();
+
+/** This computer's sessions alone, for what shows this computer's (the sidebar's
+ *  groups, the board, budgets): the same object while there are no others,
+ *  and the same object for the same sessions, so it is safe in a selector. */
+export const localSessions = (sessions: Record<string, Session>): Record<string, Session> => {
+  const was = localOnly.get(sessions);
+  if (was) return was;
+  const keys = Object.keys(sessions);
+  const mine = keys.every((k) => onMachine(k, LOCAL)) ? sessions : Object.fromEntries(keys.filter((k) => onMachine(k, LOCAL)).map((k) => [k, sessions[k]!]));
+  localOnly.set(sessions, mine);
+  return mine;
+};
 
 /** The latest three to reply, `author` now first. */
 const repliers = (was: readonly string[] | undefined, author: string): string[] => [author, ...(was ?? []).filter((a) => a !== author)].slice(0, 3);
@@ -184,14 +280,19 @@ const applyRooms = (rooms: Record<string, Room>, e: DeskEvent): Record<string, R
   }
 };
 
-const apply = (sessions: Record<string, Session>, e: DeskEvent): Record<string, Session> => {
+/** `sessions` once `machine`'s engine said `e` (already stamped): its
+ *  snapshot replaces its own sessions, and only those. */
+export const apply = (sessions: Record<string, Session>, e: DeskEvent, machine: MachineId = LOCAL): Record<string, Session> => {
   switch (e.type) {
-    case "snapshot":
-      return Object.fromEntries(e.sessions.map((s) => [s.id, s]));
+    case "snapshot": {
+      const mine = Object.fromEntries(e.sessions.map((s) => [keyOf(machine, s.id), s]));
+      // This computer's first, as before machines.
+      return machine === LOCAL ? { ...mine, ...remoteOf(sessions) } : { ...others(sessions, machine), ...mine };
+    }
     case "session":
-      return { ...sessions, [e.session.id]: e.session };
+      return { ...sessions, [keyOf(machine, e.session.id)]: e.session };
     case "removed": {
-      const { [e.id]: _gone, ...rest } = sessions;
+      const { [keyOf(machine, e.id)]: _gone, ...rest } = sessions;
       return rest;
     }
     default:
@@ -211,9 +312,14 @@ const queryFor = (w: Window | undefined, dir: PageDir): { before?: string; after
 /** Reads of each place under way, so the next waits for the last. */
 const reading = new Map<PlaceKey, Promise<void>>();
 
+/** `engines` with `machine`'s changed by `patch`, while it's there. */
+const patched = (engines: Record<MachineId, EngineConn>, machine: MachineId, patch: Partial<EngineConn>): Record<MachineId, EngineConn> =>
+  engines[machine] ? { ...engines, [machine]: { ...engines[machine]!, ...patch } } : engines;
+
 export const useDesk = create<DeskState>((set, get) => ({
   hub: null,
   connected: false,
+  engines: {},
   sessions: {},
   restore: [],
   rooms: {},
@@ -251,7 +357,11 @@ export const useDesk = create<DeskState>((set, get) => ({
   detached: false,
   connect: (transport, opts) => {
     const hub = new DeskHub(transport);
-    set({ hub, detached: opts?.notify === false });
+    set((s) => ({
+      hub,
+      detached: opts?.notify === false,
+      engines: { ...s.engines, [LOCAL]: { hub, connected: false, loaded: false, error: null } },
+    }));
     return hub.events(
       (e) => {
         set((s) => ({
@@ -272,17 +382,53 @@ export const useDesk = create<DeskState>((set, get) => ({
           sessions: apply(s.sessions, e),
           restore: e.type === "snapshot" ? e.restore : s.restore.filter((r) => e.type !== "session" || r.id !== e.session.id),
           openId: e.type === "removed" && s.openId === e.id ? null : s.openId,
+          engines: e.type === "snapshot" ? patched(s.engines, LOCAL, { loaded: true }) : s.engines,
         }));
-        for (const f of deskListeners) f(e);
+        announce(e);
       },
       (connected) => {
-        set({ connected });
+        set((s) => ({ connected, engines: s.engines[LOCAL]?.hub === hub ? patched(s.engines, LOCAL, { connected }) : s.engines }));
         // Back after a hub restart (or first connected after a restore):
         // the open room shows what was said meanwhile.
         const room = get().activeRoom;
         if (connected && room) void get().reloadRoom(room);
       },
     );
+  },
+  connectMachine: (machine, transport) => {
+    if (machine === LOCAL) throw new Error("This computer's engine is connected with `connect`.");
+    const hub = new DeskHub(transport);
+    set((s) => ({ engines: { ...s.engines, [machine]: { hub, connected: false, loaded: false, error: null } } }));
+    const mine = () => get().engines[machine]?.hub === hub;
+    const stop = hub.events(
+      (raw) => {
+        if (!mine()) return;
+        const e = stampEvent(raw, machine);
+        // Only its sessions: its rooms, restore list, layout and state are
+        // its own (this computer's are this computer's).
+        set((s) => ({
+          sessions: apply(s.sessions, e, machine),
+          openId:
+            (e.type === "removed" && s.openId === keyOf(machine, e.id)) ||
+            (e.type === "snapshot" && s.openId && onMachine(s.openId, machine) && !e.sessions.some((x) => keyOf(machine, x.id) === s.openId))
+              ? null
+              : s.openId,
+          engines: e.type === "snapshot" ? patched(s.engines, machine, { loaded: true }) : s.engines,
+        }));
+        announce(e);
+      },
+      (connected) => {
+        if (mine()) set((s) => ({ engines: patched(s.engines, machine, { connected }) }));
+      },
+    );
+    return () => {
+      stop();
+      if (!mine()) return;
+      set((s) => {
+        const { [machine]: _gone, ...engines } = s.engines;
+        return { engines, sessions: others(s.sessions, machine), openId: s.openId && onMachine(s.openId, machine) ? null : s.openId };
+      });
+    };
   },
   // The session opens as a column beside whatever the main area shows,
   // the Floor included.

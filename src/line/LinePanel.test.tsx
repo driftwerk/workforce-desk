@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deskListeners, useDesk } from "../hub/store";
+import { announce, useDesk } from "../hub/store";
 import type { LineMessage, Session } from "../hub/types";
 import { LinePanel } from "./LinePanel";
 import { PANEL_HEIGHT, useLinePanel } from "./panel";
@@ -163,7 +163,7 @@ describe("under a terminal session", () => {
     const { container } = await show();
     expect(screen.getByRole("status")).toBeTruthy();
     act(() => {
-      for (const l of deskListeners) l({ type: "line", message: { ...thread[0]!, asked: "dismissed" } });
+      announce({ type: "line", message: { ...thread[0]!, asked: "dismissed" } });
     });
     expect(container.querySelector(".gpane-body")!.childElementCount).toBe(0);
   });

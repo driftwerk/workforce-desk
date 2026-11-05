@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { driving } from "../crew/charge";
 import { useCharge } from "../crew/chargeStore";
-import { useDesk } from "../hub/store";
+import { hubOf, useHubOf } from "../hub/store";
 import type { LineMessage, Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { Composer } from "./Composer";
@@ -11,6 +11,7 @@ import { QuestionDetails } from "./QuestionDetails";
 import { askedText, deliveryText, editable, headOf, lineOf, outgoing, waitsOnYou, withWheel } from "./rows";
 import { useLine } from "./store";
 import { useNow } from "../chat/WorkingRow";
+import { machineOf, sessionKey, type MachineId } from "../hub/machines";
 
 const NONE: LineMessage[] = [];
 
@@ -18,19 +19,20 @@ const NONE: LineMessage[] = [];
  *  session moves on, for why a message waits), with whether it was read
  *  and why it couldn't be. */
 export const useThread = (session: Session) => {
-  const loaded = useLine((s) => session.id in s.threads);
-  const kept = useLine((s) => s.threads[session.id] ?? NONE);
+  const key = sessionKey(session);
+  const loaded = useLine((s) => key in s.threads);
+  const kept = useLine((s) => s.threads[key] ?? NONE);
   // A boss's message that came while you drive waits on you: the hub says
   // why only when the thread is read.
-  const charge = useCharge(session.id);
+  const charge = useCharge(key);
   const thread = useMemo(() => withWheel(kept, session.id, !!charge && driving(charge)), [kept, session.id, charge]);
-  const problem = useLine((s) => s.problems[session.id]);
-  const connected = useDesk((s) => !!s.hub);
+  const problem = useLine((s) => s.problems[key]);
+  const connected = !!useHubOf(machineOf(session));
   // Why a message waits is read with the thread: again as the session
   // moves on.
   useEffect(() => {
-    if (connected) void useLine.getState().load(session.id);
-  }, [connected, session.id, session.state, session.live]);
+    if (connected) void useLine.getState().load(key);
+  }, [connected, key, session.state, session.live]);
   return { thread, loaded, problem, connected };
 };
 
@@ -84,7 +86,7 @@ function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: 
           {status && ` · ${status}`}
         </span>
       </span>
-      {editable(m) ? <Editable m={m} /> : <span className="line-row-text">{m.kind === "ask" ? headlineOf(m) : m.text}</span>}
+      {editable(m) ? <Editable m={m} machine={machineOf(session)} /> : <span className="line-row-text">{m.kind === "ask" ? headlineOf(m) : m.text}</span>}
       {m.kind === "ask" && <QuestionDetails m={m} />}
       {answers && waitsOnYou(m) && (
         <LineAnswer
@@ -92,7 +94,7 @@ function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: 
           focusKey={focusKey}
           asking={{
             id: m.id,
-            sessionId: session.id,
+            sessionId: sessionKey(session),
             session: m.from.name,
             ask: headlineOf(m),
             why: m.escalation?.why,
@@ -106,7 +108,7 @@ function Row({ m, session, now, focusKey, answers }: { m: LineMessage; session: 
 }
 
 /** Your message that hasn't gone out: changed or taken back until it does. */
-function Editable({ m }: { m: LineMessage }) {
+function Editable({ m, machine }: { m: LineMessage; machine: MachineId }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const act = async (f: () => Promise<void>) => {
@@ -119,7 +121,7 @@ function Editable({ m }: { m: LineMessage }) {
   };
   const finish = (text: string | null) => {
     setEditing(null);
-    const hub = useDesk.getState().hub;
+    const hub = hubOf(machine);
     if (text === null || !hub || text.trim() === m.text || !text.trim()) return;
     void act(() => hub.editLine(m.id, text.trim()));
   };
@@ -165,7 +167,7 @@ function Editable({ m }: { m: LineMessage }) {
           aria-label="Take back your message"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            const hub = useDesk.getState().hub;
+            const hub = hubOf(machine);
             if (hub) void act(() => hub.takeBackLine(m.id));
             if (editing !== null) setEditing(null);
           }}

@@ -149,6 +149,18 @@ export const backendHome = (): Promise<string> => invoke("backend_home");
  *  a `claude` started there is tracked; null outside the app. */
 export const claudePluginDir = async (): Promise<string | null> => (preview ? null : invoke<string | null>("claude_plugin_dir"));
 
+/** A machine's Desk plugin folder, as the machine names it
+ *  (`<bin>/current/claude-plugin`); null outside the app. */
+export const machinePluginDir = async (machine: string): Promise<string | null> =>
+  preview ? null : invoke<string | null>("claude_plugin_dir", { machine });
+
+/** The machines Desk drives, as the native side lists them (unread: see
+ *  `readMachine`); none in the browser preview. */
+export const machinesList = async (): Promise<unknown[]> => (preview ? [] : invoke<unknown[]>("machines_list"));
+
+/** Any machine's state changed. */
+export const onMachinesChanged = (f: () => void): Promise<() => void> => listen("machines-changed", f);
+
 /** What's running in a terminal whose shell is `pid`, shell first; empty
  *  where Desk can't look (outside the app). */
 export const programsUnder = async (pid: number): Promise<string[]> => (preview ? [] : invoke<string[]>("programs_under", { pid }));

@@ -1,4 +1,5 @@
-import { useDesk } from "../hub/store";
+import { sessionKey } from "../hub/machines";
+import { hubFor, useDesk } from "../hub/store";
 import type { Session, SessionState } from "../hub/types";
 import { answersInDesk } from "../engines/engines";
 import { askLifecycle } from "./lifecycle";
@@ -26,8 +27,7 @@ export const resumable = (s: Session): boolean => !runs(s) && !!s.cliSessionId &
  *  (an older hub sends none: Claude Code and Codex allow all three). */
 export function sessionActions(session: Session): SessionAction[] {
   const call = (act: "interrupt" | "stop" | "resume") => () => {
-    const { hub, fail } = useDesk.getState();
-    hub?.[act](session.id).catch(fail);
+    hubFor(session)?.[act](session.id).catch(useDesk.getState().fail);
   };
   if (session.live) {
     return [
@@ -58,7 +58,7 @@ export function lifecycleActions(session: Session): LifecycleAction[] {
     ...(endable(session) ? [{ label: "End session…" as const, run: () => endSession(session) }] : []),
     {
       label: elsewhere ? ("Stop tracking…" as const) : ("Remove…" as const),
-      run: () => askLifecycle({ kind: "remove", sessionId: session.id }),
+      run: () => askLifecycle({ kind: "remove", sessionId: sessionKey(session) }),
     },
   ];
 }
@@ -66,11 +66,10 @@ export function lifecycleActions(session: Session): LifecycleAction[] {
 /** Ends a session: at once when it isn't working, else after asking. */
 export function endSession(session: Session): void {
   if (session.live && session.state !== "done" && session.state !== "idle") {
-    askLifecycle({ kind: "end", sessionId: session.id });
+    askLifecycle({ kind: "end", sessionId: sessionKey(session) });
     return;
   }
-  const { hub, fail } = useDesk.getState();
-  hub?.end(session.id).catch(fail);
+  hubFor(session)?.end(session.id).catch(useDesk.getState().fail);
 }
 
 /** Whether a session's approvals can be answered in Desk from its options:
@@ -82,6 +81,5 @@ export const approvalsSwitchable = (session: Session): boolean =>
 /** Switches where a session's approvals are answered: in Desk (the Floor, the
  *  card, the overseer within its level) or in its terminal. */
 export const setApprovalsInDesk = (session: Session, inDesk: boolean): void => {
-  const { hub, fail } = useDesk.getState();
-  hub?.update(session.id, { approvals: inDesk ? "desk" : "terminal" }).catch(fail);
+  hubFor(session)?.update(session.id, { approvals: inDesk ? "desk" : "terminal" }).catch(useDesk.getState().fail);
 };

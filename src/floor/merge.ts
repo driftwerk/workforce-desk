@@ -1,6 +1,7 @@
 import type { HubAccount } from "../chat/types";
 import type { Counts, FloorSummary, Lane, Need, Span, WentAhead, Work } from "../hub/types";
 import type { HubFloor } from "./store";
+import type { MachineId } from "../hub/machines";
 
 /** Which hub an item came from (and whether it's this computer's), its key
  *  across hubs, and whether that hub could be reached the last time it was
@@ -8,6 +9,9 @@ import type { HubFloor } from "./store";
 export interface Tagged {
   hubId: string;
   local: boolean;
+  /** The machine whose engine this hub is (see hub/machines.ts): its
+   *  sessions are Desk's, by key, as this computer's are. */
+  machine?: MachineId;
   key: string;
   stale: boolean;
 }
@@ -16,7 +20,7 @@ export type FloorNeed = Need & Tagged;
 export type FloorWentAhead = WentAhead & Tagged;
 export type FloorWork = Work & Tagged;
 export type FloorLane = Lane & Tagged;
-export type FloorParagraph = FloorSummary & Pick<Tagged, "hubId" | "local">;
+export type FloorParagraph = FloorSummary & Pick<Tagged, "hubId" | "local" | "machine">;
 
 export interface Merged {
   /** Oldest first. */
@@ -72,7 +76,7 @@ export const merged = (hubs: Readonly<Record<string, HubFloor>>, hubList: readon
     const f = hubs[hub.id];
     const view = f?.state === "ready" ? f.floor : null;
     if (!f || !view) return m;
-    const tag = { hubId: hub.id, local: hub.local, stale: f.stale };
+    const tag = { hubId: hub.id, local: hub.local, ...(hub.machine ? { machine: hub.machine } : {}), stale: f.stale };
     return {
       needs: [...m.needs, ...view.needs.map((n) => ({ ...n, since: shift(n.since, f.offset), ...tag, key: `${hub.id}/${n.id}` }))],
       wentAhead: [

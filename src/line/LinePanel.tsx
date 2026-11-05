@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useDesk } from "../hub/store";
+import { LOCAL, machineOf, sessionKey, type MachineId } from "../hub/machines";
+import { hubFor, hubOf } from "../hub/store";
 import type { LineMessage, Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { useNow } from "../chat/WorkingRow";
@@ -18,10 +19,10 @@ export const discussBlocked = (s: Session): string | null => {
 
 /** Sets questions aside unanswered: each leaves the Floor, the bar and the
  *  panel, and nothing is sent to the session. */
-export const dismissQuestions = async (ids: readonly string[]): Promise<void> => {
-  const hub = useDesk.getState().hub;
+export const dismissQuestions = async (ids: readonly string[], machine: MachineId = LOCAL): Promise<void> => {
+  const hub = hubOf(machine);
   if (!hub) return;
-  for (const id of ids) useLine.getState().heard(await hub.dismissLine(id));
+  for (const id of ids) useLine.getState().heard(await hub.dismissLine(id), false, machine);
 };
 
 /** What sits under a session's terminal for its line. Nothing at all while
@@ -38,13 +39,13 @@ export function LinePanel({ session }: { session: Session }) {
 function TerminalLine({ session }: { session: Session }) {
   const { thread, loaded } = useThread(session);
   const open = openOf(thread, session.id);
-  const mode = useLinePanel((s) => s.shown[session.id]);
+  const mode = useLinePanel((s) => s.shown[sessionKey(session)]);
   const nothing = loaded && !anyOpen(open);
   // Once nothing is open its questions panel goes down, so the next
   // question comes as the slim bar again (its height is kept).
   useEffect(() => {
-    if (nothing && mode === "questions") useLinePanel.getState().hide(session.id);
-  }, [nothing, mode, session.id]);
+    if (nothing && mode === "questions") useLinePanel.getState().hide(sessionKey(session));
+  }, [nothing, mode, session]);
   if (mode === "history") {
     return (
       <Panel session={session} title="Messages with Desk">
@@ -68,7 +69,7 @@ function Bar({ session, text }: { session: Session; text: string }) {
       <span className="line-bar-text small" title={text}>
         {text}
       </span>
-      <button type="button" className="btn btn-sm line-bar-show" aria-label={`Show: ${text}`} onClick={() => useLinePanel.getState().show(session.id)}>
+      <button type="button" className="btn btn-sm line-bar-show" aria-label={`Show: ${text}`} onClick={() => useLinePanel.getState().show(sessionKey(session))}>
         Show
       </button>
     </div>
@@ -79,7 +80,7 @@ function Bar({ session, text }: { session: Session; text: string }) {
  *  keys on it), its header with what acts on every question, and what it
  *  holds, scrolling. */
 function Panel({ session, title, questions, children }: { session: Session; title: string; questions?: LineMessage[]; children: React.ReactNode }) {
-  const height = useLinePanel((s) => s.heights[session.id]) ?? PANEL_HEIGHT;
+  const height = useLinePanel((s) => s.heights[sessionKey(session)]) ?? PANEL_HEIGHT;
   const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ y: number; h: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -118,7 +119,7 @@ function Panel({ session, title, questions, children }: { session: Session; titl
         }}
         onPointerMove={(e) => {
           const d = drag.current;
-          if (d && e.currentTarget.hasPointerCapture(e.pointerId)) useLinePanel.getState().setHeight(session.id, d.h + (d.y - e.clientY));
+          if (d && e.currentTarget.hasPointerCapture(e.pointerId)) useLinePanel.getState().setHeight(sessionKey(session), d.h + (d.y - e.clientY));
         }}
         onPointerUp={(e) => {
           e.currentTarget.releasePointerCapture(e.pointerId);
@@ -132,7 +133,7 @@ function Panel({ session, title, questions, children }: { session: Session; titl
         onKeyDown={(e) => {
           if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
           e.preventDefault();
-          useLinePanel.getState().setHeight(session.id, shownHeight() + (e.key === "ArrowUp" ? 24 : -24));
+          useLinePanel.getState().setHeight(sessionKey(session), shownHeight() + (e.key === "ArrowUp" ? 24 : -24));
         }}
       />
       <header className="line-panel-head">
@@ -147,7 +148,7 @@ function Panel({ session, title, questions, children }: { session: Session; titl
                 title={blocked ?? "Put these questions, with what it chose, in its prompt without sending"}
                 onClick={() =>
                   void act(async () => {
-                    await useDesk.getState().hub?.draftLine(session.id, text);
+                    await hubFor(session)?.draftLine(session.id, text);
                     setNote("In its prompt: add your words and send them in the terminal.");
                   })
                 }
@@ -167,12 +168,12 @@ function Panel({ session, title, questions, children }: { session: Session; titl
               >
                 Copy all
               </button>
-              <button type="button" className="link small" disabled={busy} onClick={() => void act(() => dismissQuestions(questions.map((m) => m.id)))}>
+              <button type="button" className="link small" disabled={busy} onClick={() => void act(() => dismissQuestions(questions.map((m) => m.id), machineOf(session)))}>
                 Dismiss all
               </button>
             </>
           )}
-          <button type="button" className="link small" onClick={() => useLinePanel.getState().hide(session.id)}>
+          <button type="button" className="link small" onClick={() => useLinePanel.getState().hide(sessionKey(session))}>
             Hide
           </button>
         </span>
@@ -194,7 +195,7 @@ function Questions({ session, questions, waiting }: { session: Session; question
       {questions.length > 0 && (
         <ol className="line-questions">
           {questions.map((m) => (
-            <Question key={m.id} m={m} now={now} />
+            <Question key={m.id} m={m} now={now} machine={machineOf(session)} />
           ))}
         </ol>
       )}
@@ -215,7 +216,7 @@ function Questions({ session, questions, waiting }: { session: Session; question
 
 /** One question as a card: its work item and where it stands, with Dismiss;
  *  its one line; what it chose; and its details, folded. */
-function Question({ m, now }: { m: LineMessage; now: number }) {
+function Question({ m, now, machine }: { m: LineMessage; now: number; machine: MachineId }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const headline = headlineOf(m);
@@ -234,7 +235,7 @@ function Question({ m, now }: { m: LineMessage; now: number }) {
           onClick={() => {
             setBusy(true);
             setProblem(null);
-            dismissQuestions([m.id])
+            dismissQuestions([m.id], machine)
               .catch((e: unknown) => setProblem(plainError(e)))
               .finally(() => setBusy(false));
           }}

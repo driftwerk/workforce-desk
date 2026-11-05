@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { sessionKey } from "../hub/machines";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
@@ -36,7 +37,7 @@ export const useSessionNames = (): Record<string, string> => {
       Object.fromEntries(
         [...restore, ...Object.values(sessions)].flatMap((s) => {
           const name = given(s);
-          return name ? [[s.id, name]] : [];
+          return name ? [[sessionKey(s), name]] : [];
         }),
       ),
     [sessions, restore],

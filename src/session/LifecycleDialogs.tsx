@@ -7,6 +7,7 @@ import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
 import { runs } from "./actions";
 import { clearFinished, closeLifecycle, endSessionNow, removeSession, useLifecycle } from "./lifecycle";
+import { sessionKey } from "../hub/machines";
 
 /** The confirms a session's life asks before it changes: ending one that
  *  works, removing one, clearing finished ones. Each opens with Cancel
@@ -28,7 +29,7 @@ export function LifecycleDialogs() {
 function EndSession({ session, onClose }: { session: Session; onClose: () => void }) {
   const name = useSessionName(session.id, session.name);
   return (
-    <Confirm title={`End “${name}”?`} action="End session" onConfirm={() => endSessionNow(session.id)} onClose={onClose}>
+    <Confirm title={`End “${name}”?`} action="End session" onConfirm={() => endSessionNow(sessionKey(session))} onClose={onClose}>
       <p className="muted">It's working: ending it stops it now. It leaves the sidebar, and you can resume it later from Settings → Sessions.</p>
     </Confirm>
   );
@@ -47,7 +48,7 @@ export function RemoveSession({ session, onClose, onRemoved }: { session: Sessio
       title={elsewhere ? `Stop tracking “${name}”?` : `Remove “${name}”?`}
       action={elsewhere ? "Stop tracking" : "Remove"}
       onConfirm={async () => {
-        await removeSession(session.id, transcript && !running);
+        await removeSession(sessionKey(session), transcript && !running);
         onRemoved?.();
       }}
       onClose={onClose}

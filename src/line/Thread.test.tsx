@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
-import { deskListeners } from "../hub/store";
+import { announce } from "../hub/store";
 import type { LineMessage } from "../hub/types";
 import { DeskActions } from "../overview/DeskActions";
 import { requestFocus } from "../shell/focus";
@@ -85,7 +85,7 @@ describe("a session's line", () => {
     expect(screen.getByRole("alert").textContent).toContain("already answered");
     // The hub's word that it was answered takes the card away.
     act(() => {
-      for (const f of deskListeners) f({ type: "line", message: msg({ id: "q", to: YOU, text: "Ship it?", asked: "answered" }) });
+      announce({ type: "line", message: msg({ id: "q", to: YOU, text: "Ship it?", asked: "answered" }) });
     });
     expect(screen.queryByRole("group", { name: "Answer acme-web" })).toBeNull();
     expect(within(rowOf("Ship it?")).getByText(/Answered/)).toBeTruthy();
@@ -102,7 +102,7 @@ describe("a session's line", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Take back your message" })));
     expect(hub.takeBackLine).toHaveBeenCalledWith("mine");
     act(() => {
-      for (const f of deskListeners) f({ type: "line", message: msg({ id: "mine", from: YOU, to: S1, kind: "tell", text: "run the tests" }), removed: true });
+      announce({ type: "line", message: msg({ id: "mine", from: YOU, to: S1, kind: "tell", text: "run the tests" }), removed: true });
     });
     expect(screen.queryByText("run the tests")).toBeNull();
   });

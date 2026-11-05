@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { DESK_DM, type HubAccount } from "../chat/types";
-import { deskListeners, useDesk } from "../hub/store";
+import { deskListeners, engineListeners, hubOf, useDesk, type EngineEvent } from "../hub/store";
+import { LOCAL, machineOf, type MachineId } from "../hub/machines";
 import type { DeskEvent, UnreadSummary } from "../hub/types";
 import { activeConversations, type Active, type ConversationUnread } from "../hubs/surface";
 import { deskState } from "../restore/boot";
@@ -11,7 +12,7 @@ import { useFloor } from "../floor/store";
 import { NEEDS_SEEN_KEY, noteSeen, seenFrom, useNeedsSeen } from "./needsSeen";
 import { useWatching } from "./watching";
 import { noticesFrom } from "./notices";
-import { checkInDmRead, dmPointsFrom, flushPending, heard, loadLocal, onDmWritten, restoreKeptDms, useReads } from "./reads";
+import { checkInDmRead, dmPointsFrom, flushPending, heard, heardOn, loadLocal, onDmWritten, restoreKeptDms, useReads } from "./reads";
 
 // What's unread, as the hubs that own it count it: this computer's hub's
 // summary of its places, and each agent hub's count of your DMs. Read on
@@ -21,6 +22,9 @@ import { checkInDmRead, dmPointsFrom, flushPending, heard, loadLocal, onDmWritte
 
 interface UnreadState {
   local: UnreadSummary | null;
+  /** Each machine's summary, by machine id, as its engine counts it: its
+   *  sessions' are summed with this computer's (see `useLocalUnread`). */
+  machines: Record<MachineId, UnreadSummary>;
   /** When `local` was read (ms), for "as of" while the hub is away. */
   localAt: number | null;
   /** What's unread in each DM, by agent key (`hub/agent`). */
@@ -29,7 +33,7 @@ interface UnreadState {
   dmsAt: Record<string, number>;
 }
 
-export const useUnread = create<UnreadState>(() => ({ local: null, localAt: null, dms: {}, dmsAt: {} }));
+export const useUnread = create<UnreadState>(() => ({ local: null, localAt: null, machines: {}, dms: {}, dmsAt: {} }));
 
 /** What a hub that keeps DM read points says it does. */
 export const FEATURE_READS = "desk.reads";
@@ -66,6 +70,31 @@ export async function refreshLocal(): Promise<void> {
     /* Its last counts stand until the hub answers. */
   }
 }
+
+/** Reads machine `machine`'s summary now, and its sessions' read points. */
+export async function refreshMachine(machine: MachineId): Promise<void> {
+  const hub = hubOf(machine);
+  if (!hub || machine === LOCAL) return;
+  try {
+    const summary = await hub.unread();
+    if (hubOf(machine) === hub) useUnread.setState((s) => ({ machines: { ...s.machines, [machine]: summary } }));
+  } catch {
+    /* Its last counts stand until its engine answers. */
+  }
+}
+
+const machineSoon = new Map<MachineId, ReturnType<typeof setTimeout>>();
+/** Reads machine `machine`'s summary once its events stop for a moment. */
+const refreshMachineSoon = (machine: MachineId): void => {
+  clearTimeout(machineSoon.get(machine));
+  machineSoon.set(
+    machine,
+    setTimeout(() => {
+      machineSoon.delete(machine);
+      void refreshMachine(machine);
+    }, SUMMARY_DEBOUNCE_MS),
+  );
+};
 
 let soon: ReturnType<typeof setTimeout> | undefined;
 /** Reads this computer's summary once events stop for a moment. */
@@ -168,6 +197,30 @@ const onEvent = (e: DeskEvent) => {
   } else if (CHANGES.has(e.type)) refreshLocalSoon();
 };
 
+/** A machine's engine's events: its sessions' notifications, and its
+ *  counts read again (this computer's are `onEvent`'s). */
+const onMachineEvent = (e: EngineEvent) => {
+  const machine = machineOf(e);
+  if (machine === LOCAL) return;
+  noticesFrom(e);
+  if (e.type === "read") heardOn(machine, [{ place: e.place, ...e.point }]);
+  if (e.type === "snapshot") {
+    void refreshMachine(machine);
+    void hubOf(machine)
+      ?.reads()
+      .then((rows) => heardOn(machine, rows))
+      .catch(() => undefined);
+  } else if (CHANGES.has(e.type)) refreshMachineSoon(machine);
+};
+
+/** A machine let go: its counts go with it. */
+const forgetMachines = (): (() => void) =>
+  useDesk.subscribe((s, before) => {
+    if (s.engines === before.engines) return;
+    const gone = Object.keys(useUnread.getState().machines).filter((m) => !s.engines[m]);
+    if (gone.length) useUnread.setState((u) => ({ machines: Object.fromEntries(Object.entries(u.machines).filter(([m]) => !gone.includes(m))) }));
+  });
+
 /** Each window keeps the counts: from the events socket, and in the main
  *  window from what was last counted while the hubs are away. A detached
  *  grid's tells nobody (`notifyPlace` sends from the main window only). */
@@ -177,15 +230,21 @@ export function startUnread(): () => void {
   if (kept?.local && !useUnread.getState().local) useUnread.setState({ local: kept.local, localAt: kept.at });
   restoreKeptDms();
   deskListeners.add(onEvent);
+  engineListeners.add(onMachineEvent);
+  const unforget = forgetMachines();
   const unwatch = watchDmTurns();
   const unshare = shareFocus();
   const unsee = watchNeedsSeen();
   return () => {
     deskListeners.delete(onEvent);
+    engineListeners.delete(onMachineEvent);
+    unforget();
     unwatch();
     unshare();
     unsee();
     clearTimeout(soon);
+    for (const t of machineSoon.values()) clearTimeout(t);
+    machineSoon.clear();
     for (const t of counting.values()) clearTimeout(t);
     counting.clear();
   };

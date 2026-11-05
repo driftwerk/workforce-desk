@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { useChat } from "../chat/store";
-import { deskListeners, useDesk } from "../hub/store";
-import type { ChargeView, DeskEvent } from "../hub/types";
+import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
+import { engineListeners, hubOf, useDesk, type EngineEvent } from "../hub/store";
+import type { ChargeView } from "../hub/types";
 import { withWheel } from "../line/rows";
 import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
@@ -9,91 +10,137 @@ import { useLocalAgent } from "../overview/people";
 import type { Boss, ChargeVerb } from "./charge";
 
 interface ChargeState {
-  /** The sessions a boss runs now, by session id. */
+  /** The sessions a boss runs now, by session key (see `keyOf`): each
+   *  engine's boss runs that engine's sessions. */
   bySession: Record<string, ChargeView>;
-  /** The hub keeps charges: false once it said it doesn't (an older one). */
+  /** This computer's hub keeps charges: false once it said it doesn't (an
+   *  older one). */
   supported: boolean | null;
-  load: () => Promise<void>;
-  /** A charge the hub announced, or answered with. */
-  heard: (c: ChargeView) => void;
-  /** Does what the person chose for `sessionId`; the hub's refusal is
-   *  thrown in its own words. */
-  act: (sessionId: string, verb: ChargeVerb) => Promise<void>;
+  /** Each machine's boss, as its engine names its overseer. */
+  bosses: Record<MachineId, Boss>;
+  /** Reads engine `machine`'s charges (this computer's when none). */
+  load: (machine?: MachineId) => Promise<void>;
+  /** A charge `machine`'s engine announced, or answered with. */
+  heard: (c: ChargeView, machine?: MachineId) => void;
+  /** Does what the person chose for session `key`, on its engine; the
+   *  engine's refusal is thrown in its own words. */
+  act: (key: string, verb: ChargeVerb) => Promise<void>;
 }
 
-/** `all` with `c` as it now stands: a released one gone. */
-export const withCharge = (all: Record<string, ChargeView>, c: ChargeView): Record<string, ChargeView> => {
+/** `all` with `c` (on `machine`) as it now stands: a released one gone. */
+export const withCharge = (all: Record<string, ChargeView>, c: ChargeView, machine: MachineId = LOCAL): Record<string, ChargeView> => {
+  const key = keyOf(machine, c.session);
   if (c.releasedAt) {
-    if (!(c.session in all)) return all;
-    const { [c.session]: _, ...rest } = all;
+    if (!(key in all)) return all;
+    const { [key]: _, ...rest } = all;
     return rest;
   }
-  return { ...all, [c.session]: c };
+  return { ...all, [key]: c };
 };
 
 /** Bumped by each charge heard: a read that began before it is older. */
 let heardCount = 0;
 
+/** Every charge but `machine`'s. */
+const others = (all: Record<string, ChargeView>, machine: MachineId): Record<string, ChargeView> =>
+  Object.fromEntries(Object.entries(all).filter(([k]) => splitKey(k).machine !== machine));
+
 export const useCharges = create<ChargeState>((set, get) => ({
   bySession: {},
   supported: null,
-  load: async () => {
-    const hub = useDesk.getState().hub;
+  bosses: {},
+  load: async (machine = LOCAL) => {
+    const hub = hubOf(machine);
     if (!hub) return;
     const was = heardCount;
     try {
       const list = await hub.charges();
       // Another hub by now, or a charge heard since: what was read is older.
-      if (useDesk.getState().hub !== hub || heardCount !== was) return;
-      set({ bySession: Object.fromEntries((list ?? []).map((c) => [c.session, named(c)])), supported: list !== null });
+      if (hubOf(machine) !== hub || heardCount !== was) return;
+      const mine = Object.fromEntries((list ?? []).map((c) => [keyOf(machine, c.session), named(c, machine)]));
+      set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, ...(machine === LOCAL ? { supported: list !== null } : {}) }));
     } catch {
       // Kept as last read; the next snapshot reads them again.
     }
   },
-  heard: (heard) => {
+  heard: (heard, machine = LOCAL) => {
     heardCount++;
-    const c = named(heard);
-    const was = get().bySession[c.session];
-    set((s) => ({ bySession: withCharge(s.bySession, c), supported: true }));
+    const c = named(heard, machine);
+    const key = keyOf(machine, c.session);
+    const was = get().bySession[key];
+    set((s) => ({ bySession: withCharge(s.bySession, c, machine), ...(machine === LOCAL ? { supported: true } : {}) }));
     // Why the boss's messages wait changes with the wheel: at once as far
     // as Desk can tell, then as the hub says on reading the thread again.
-    if (!was || was.wheel !== c.wheel || !!c.releasedAt) rewait(c.session, !c.releasedAt && c.wheel !== "boss");
+    if (!was || was.wheel !== c.wheel || !!c.releasedAt) rewait(key, c.session, !c.releasedAt && c.wheel !== "boss");
   },
-  act: async (sessionId, verb) => {
-    const hub = useDesk.getState().hub;
+  act: async (key, verb) => {
+    const { machine, id } = splitKey(key);
+    const hub = hubOf(machine);
     if (!hub) return;
     const c =
       verb === "hand"
-        ? await hub.handTo(sessionId)
+        ? await hub.handTo(id)
         : verb === "release"
-          ? await hub.releaseCharge(sessionId)
-          : await hub.setWheel(sessionId, verb === "drive" ? "person_pinned" : "boss");
-    get().heard(c);
+          ? await hub.releaseCharge(id)
+          : await hub.setWheel(id, verb === "drive" ? "person_pinned" : "boss");
+    get().heard(c, machine);
   },
 }));
 
+/** Reads machine `machine`'s boss: its engine's overseer, by the name its
+ *  roster gives it. */
+const loadBoss = async (machine: MachineId): Promise<void> => {
+  const hub = hubOf(machine);
+  if (!hub) return;
+  try {
+    const m = await hub.manager();
+    if (hubOf(machine) !== hub) return;
+    useCharges.setState((s) => {
+      const { [machine]: _was, ...bosses } = s.bosses;
+      return { bosses: m.agentId ? { ...bosses, [machine]: { id: m.agentId, name: rosterName(machine, m.agentId) ?? "", level: m.level } } : bosses };
+    });
+  } catch {
+    // Its boss stays as last read.
+  }
+};
+
+/** The name the roster gives agent `id` of `machine`'s engine. */
+const rosterName = (machine: MachineId, id: string): string | undefined => {
+  const { hubs, roster } = useChat.getState();
+  const hub = hubs.find((h) => (machine === LOCAL ? h.local : h.machine === machine));
+  return hub ? roster.find((a) => a.hubId === hub.id && a.id === id)?.name : undefined;
+};
+
 /** `c` with its boss's name as the roster says it; "" where neither the
  *  roster nor the hub knows it (the hub then sends its id). */
-const named = (c: ChargeView): ChargeView => {
-  const { hubs, roster } = useChat.getState();
-  const local = hubs.find((h) => h.local);
-  const agent = local && roster.find((a) => a.hubId === local.id && a.id === c.boss);
-  const name = agent?.name ?? (c.bossName === c.boss ? "" : c.bossName);
+const named = (c: ChargeView, machine: MachineId = LOCAL): ChargeView => {
+  const name = rosterName(machine, c.boss) ?? (c.bossName === c.boss ? "" : c.bossName);
   return name === c.bossName ? c : { ...c, bossName: name };
 };
 
-const rewait = (sessionId: string, driving: boolean) => {
+/** Session `key`'s line (its id on its engine is `id`) as the wheel now
+ *  stands, and read again. */
+const rewait = (key: string, id: string, driving: boolean) => {
   const line = useLine.getState();
-  const list = line.threads[sessionId];
+  const list = line.threads[key];
   if (!list) return;
-  const next = withWheel(list, sessionId, driving);
-  if (next !== list) useLine.setState((s) => ({ threads: { ...s.threads, [sessionId]: next } }));
-  void line.load(sessionId);
+  const next = withWheel(list, id, driving);
+  if (next !== list) useLine.setState((s) => ({ threads: { ...s.threads, [key]: next } }));
+  void line.load(key);
 };
 
 /** The charge on `sessionId`, if a boss runs it. */
 export const useCharge = (sessionId: string | null | undefined): ChargeView | undefined =>
   useCharges((s) => (sessionId ? s.bySession[sessionId] : undefined));
+
+/** The boss session `s` can be handed to: its engine's (a machine's own
+ *  boss runs a machine's sessions). */
+export const useBossOf = (s: { machine?: MachineId | null } | null | undefined): Boss | null => {
+  const local = useBoss();
+  const machine = machineOf(s);
+  const theirs = useCharges((c) => c.bosses[machine]);
+  return machine === LOCAL ? local : (theirs ?? null);
+};
 
 /** The boss sessions can be handed to: the overseer, by its name. */
 export const useBoss = (): Boss | null => {
@@ -103,35 +150,49 @@ export const useBoss = (): Boss | null => {
   return { id: manager.agentId, name: agent?.name ?? "", level: manager.level };
 };
 
-const onEvent = (e: DeskEvent) => {
+const onEvent = (e: EngineEvent) => {
   const s = useCharges.getState();
-  if (e.type === "charge") s.heard(e.charge);
+  const machine = machineOf(e);
+  const key = e.type === "removed" ? keyOf(machine, e.id) : null;
+  if (e.type === "charge") s.heard(e.charge, machine);
   // Read again on every snapshot (a hub that had none may have been
   // updated meanwhile).
-  else if (e.type === "snapshot") void s.load();
-  else if (e.type === "removed" && e.id in s.bySession) {
-    const { [e.id]: _, ...rest } = s.bySession;
+  else if (e.type === "snapshot") {
+    void s.load(machine);
+    if (machine !== LOCAL) void loadBoss(machine);
+  } else if (key && key in s.bySession) {
+    const { [key]: _, ...rest } = s.bySession;
     useCharges.setState({ bySession: rest });
   }
 };
-deskListeners.add(onEvent);
+engineListeners.add(onEvent);
 
-// Another hub (or none): what the last one said is no longer so.
+// Another hub (or none): what the last one said is no longer so; a machine
+// let go takes its charges and boss with it.
 useDesk.subscribe((now, before) => {
-  if (now.hub !== before.hub) useCharges.setState({ bySession: {}, supported: null });
+  if (now.hub !== before.hub) useCharges.setState((s) => ({ bySession: others(s.bySession, LOCAL), supported: null }));
+  if (now.engines === before.engines) return;
+  const gone = Object.keys(before.engines).filter((m) => m !== LOCAL && !now.engines[m]);
+  for (const m of gone)
+    useCharges.setState((s) => {
+      const { [m]: _boss, ...bosses } = s.bosses;
+      return { bySession: others(s.bySession, m), bosses };
+    });
 });
 
 // Names the roster brings after the charges came.
 useChat.subscribe((now, before) => {
   if (now.roster === before.roster && now.hubs === before.hubs) return;
-  const { bySession } = useCharges.getState();
+  const { bySession, bosses } = useCharges.getState();
   let changed = false;
   const next = Object.fromEntries(
-    Object.entries(bySession).map(([id, c]) => {
-      const n = named(c);
+    Object.entries(bySession).map(([key, c]) => {
+      const n = named(c, splitKey(key).machine);
       if (n !== c) changed = true;
-      return [id, n];
+      return [key, n];
     }),
   );
-  if (changed) useCharges.setState({ bySession: next });
+  const renamed = Object.fromEntries(Object.entries(bosses).map(([m, b]) => [m, { ...b, name: rosterName(m, b.id) ?? b.name }]));
+  const bossesChanged = Object.entries(renamed).some(([m, b]) => b.name !== bosses[m]?.name);
+  if (changed || bossesChanged) useCharges.setState({ ...(changed ? { bySession: next } : {}), ...(bossesChanged ? { bosses: renamed } : {}) });
 });

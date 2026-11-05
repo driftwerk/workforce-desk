@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deskListeners, useDesk } from "../hub/store";
+import { announce, useDesk } from "../hub/store";
 import type { HiddenSession, Session } from "../hub/types";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
@@ -157,7 +157,7 @@ describe("a session gone from the hub", () => {
         .grids[MAIN_GRID]!.panes.flatMap((p) => (p.content?.kind === "session" ? [p.content.sessionId] : []))
         .sort();
     expect(showing()).toEqual(["s1", "s2"]);
-    for (const f of deskListeners) f({ type: "removed", id: "s1" });
+    announce({ type: "removed", id: "s1" });
     expect(showing()).toEqual(["s2"]);
   });
 });

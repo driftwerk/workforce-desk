@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionNames } from "../groups/names";
 import { useLayout } from "../groups/store";
-import { useDesk } from "../hub/store";
+import { useDesk, localSessions } from "../hub/store";
 import type { BreakerView, BudgetScope, BudgetUnit, BudgetView, NewBudget, OnExceed, SpendPeriod } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import {
@@ -33,7 +33,7 @@ const grouped = (c: ScopeChoice): boolean => c === "desk" || c === "each_session
 
 /** The names Desk shows sessions, agents and groups by. */
 const useNames = (): Names => {
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const named = useSessionNames();
   const roster = useChat((s) => s.roster);
   const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
@@ -258,7 +258,7 @@ function EditBudget({
 }
 
 function AddBudget({ names, onAdd }: { names: Names; onAdd: (b: NewBudget) => Promise<boolean> }) {
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   const roster = useChat((s) => s.roster);
   const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
   const layout = useLayout();

@@ -3,6 +3,7 @@ import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
+import { nativeMachines, watchMachines } from "../hub/engines";
 import {
   closeGridWindow,
   gridWindowMonitor,
@@ -50,6 +51,9 @@ export function GridWindow({ gridId }: { gridId: string }) {
   // What its panes show is read here too: sessions by what the summary says
   // they did since, with the points every window writes.
   useEffect(() => startUnread(), []);
+  // Its panes may show a machine's sessions and terminals: it reaches each
+  // machine's engine itself, as it does this computer's.
+  useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);
 
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");

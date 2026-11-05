@@ -10,6 +10,7 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react
 import { create } from "zustand";
 import { close, zoneAt, type Pane, type PaneContent, type PresetId, type Zone } from "./engine";
 import { changePanes, createGrid, deliver, dropOnPane, layOut, movePane, movePaneWithin, useGrids } from "./store";
+import { sessionContent } from "./engine";
 
 export type GridTarget =
   | { kind: "pane"; gridId: string; paneId: string; zone: Zone }
@@ -47,7 +48,7 @@ const sameTarget = (a: GridTarget | null, b: GridTarget | null) => JSON.stringif
  *  pane holds. */
 export const contentOfItem = (key: string): PaneContent | null =>
   key.startsWith("session:")
-    ? { kind: "session", sessionId: key.slice("session:".length) }
+    ? sessionContent(key.slice("session:".length))
     : key.startsWith("agent:")
       ? { kind: "agent", agent: key.slice("agent:".length) }
       : null;

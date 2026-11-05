@@ -9,7 +9,7 @@ import { itemOf, placesOf } from "../grids/where";
 import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
 import { addToGrid as placeInGrid } from "../grids/windows";
 import { openAgentSettings } from "../rooms/AgentPanel";
-import { sortedSessions, useDesk } from "../hub/store";
+import { sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { openTarget, targetOfItem } from "../shell/navigate";
@@ -124,7 +124,8 @@ export function SidebarGroups() {
 
   const items = new Map<ItemKey, Item>();
   for (const a of roster) items.set(agentItem(a), { key: agentItem(a), kind: "agent", agent: a });
-  for (const s of sortedSessions(sessions)) if (s.state !== "closed") items.set(sessionItem(s.id), { key: sessionItem(s.id), kind: "session", session: s });
+  // This computer's alone: a machine's have their own groups, on its engine.
+  for (const s of sortedSessions(localSessions(sessions))) if (s.state !== "closed") items.set(sessionItem(s.id), { key: sessionItem(s.id), kind: "session", session: s });
   const present = [...items.keys()];
   const shown = resolve(layout, present);
 

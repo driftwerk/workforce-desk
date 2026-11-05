@@ -9,6 +9,7 @@ import { useGridDrag } from "./drag";
 import { closeGridWindow } from "../platform";
 import { createGrid, deleteGrid, hostedBy, moveGrid, nudgeGrid, renameGrid, setActive, setOpen, shownGrid, useGrids } from "./store";
 import { closeContent } from "./terminals";
+import { terminalContent } from "./engine";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
 import { GridMarks } from "../unread/GridMarks";
@@ -94,7 +95,7 @@ export function GridsSection() {
     setOpen(g.id, false);
     const hosted = hostedIn(g);
     deleteGrid(g.id, closeContent);
-    for (const terminalId of hosted) closeContent({ kind: "terminal", terminalId });
+    for (const key of hosted) closeContent(terminalContent(key));
   };
   /** An empty grid goes at once; one holding anything asks first. */
   const askToRemove = (g: Grid) => (g.panes.some((p) => p.content) ? setDeleting(g.id) : removeGrid(g));

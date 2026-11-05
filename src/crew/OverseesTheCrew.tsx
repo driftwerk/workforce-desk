@@ -267,7 +267,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               />
               <Check
                 label="Crew in your workspaces"
-                sub={workspacesLine(hubs.filter((h) => !h.local).map((h) => h.label))}
+                sub={workspacesLine(hubs.filter((h) => !h.local && !h.machine).map((h) => h.label))}
                 checked={o.track.workspaces}
                 onChange={(v) => update((x) => ({ ...x, track: { ...x.track, workspaces: v } }))}
               />

@@ -20,13 +20,15 @@ export function Hubs() {
   const fail = useDesk((s) => s.fail);
   const [connecting, setConnecting] = useState<{ again?: HubAccount } | null>(null);
   const [who, setWho] = useState<Record<string, Who>>({});
-  const remote = hubs.filter((h) => !h.local);
+  // A machine's engine is the person's own, not a workspace (Settings →
+  // Machines has it).
+  const remote = hubs.filter((h) => !h.local && !h.machine);
   /** Read again whenever a workspace's token changes (paired again). */
   const revisions = remote.map((h) => `${h.id}:${h.revision}`).join("\n");
 
   useEffect(() => {
     let live = true;
-    for (const h of useChat.getState().hubs.filter((x) => !x.local))
+    for (const h of useChat.getState().hubs.filter((x) => !x.local && !x.machine))
       void whoAmI(h).then((w) => live && setWho((all) => ({ ...all, [h.id]: w })));
     return () => {
       live = false;

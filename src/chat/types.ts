@@ -7,6 +7,10 @@ export interface HubAccount {
   label: string;
   url: string;
   local: boolean;
+  /** The machine whose engine this is (see hub/machines.ts), reached with
+   *  its device token for chat, the Floor and its link; none for every
+   *  other hub. Only its boss is shown of its agents. */
+  machine?: string;
   /** Changes whenever Desk's token for the hub does (paired again, or
    *  renewed): an opaque value, never the token, which only Desk's native
    *  side holds. */

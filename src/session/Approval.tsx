@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useDesk } from "../hub/store";
+import { machineOf, sessionKey } from "../hub/machines";
+import { useDesk, useHubOf } from "../hub/store";
 import type { Choice, Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
 import { OptionChips } from "../ui/OptionChips";
@@ -29,7 +30,8 @@ export const allowLabel = (denied: Denied): string => {
  *  allowing the tool auto mode refused and carrying on, replying in its
  *  terminal, or leaving it be. */
 export function Asked({ session, compact = false }: { session: Session; compact?: boolean }) {
-  const { hub, fail } = useDesk();
+  const fail = useDesk((s) => s.fail);
+  const hub = useHubOf(machineOf(session));
   const [busy, setBusy] = useState(false);
   const asked = session.asked;
   if (session.state !== "asking" || !asked) return null;
@@ -80,7 +82,8 @@ const CODEX_LABEL: Record<Choice, string> = {
 };
 
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {
-  const { hub, fail, open } = useDesk();
+  const { fail, open } = useDesk();
+  const hub = useHubOf(machineOf(session));
   const pending = session.pending;
   if (!pending) return <Asked session={session} compact={compact} />;
   if (!pending.answerable) {
@@ -92,7 +95,7 @@ export function Approval({ session, compact = false }: { session: Session; compa
           {!compact && <OptionChips options={pending.options} />}
         </span>
         {compact && (
-          <button type="button" className="btn btn-blocked" onClick={() => open(session.id)}>
+          <button type="button" className="btn btn-blocked" onClick={() => open(sessionKey(session))}>
             Open
           </button>
         )}

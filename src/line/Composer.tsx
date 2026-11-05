@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useDesk } from "../hub/store";
+import { hubFor } from "../hub/store";
 import type { Session } from "../hub/types";
 import { plainError } from "../ui/plainError";
 import { steerOf } from "./rows";
 import { useLine } from "./store";
+import { machineOf } from "../hub/machines";
 
 /** Writing to a session on its line: Send waits for its turn to end (it
  *  goes in at its prompt, never over what it is doing); Send now, where its
@@ -16,13 +17,13 @@ export function Composer({ session }: { session: Session }) {
   const steer = steerOf(session);
   const working = session.state === "working" || session.state === "blocked";
   const send = async (when: "queue" | "now") => {
-    const hub = useDesk.getState().hub;
+    const hub = hubFor(session);
     if (!hub || !text.trim() || busy) return;
     setBusy(true);
     setProblem(null);
     try {
       const m = await hub.postLine(session.id, text.trim(), when);
-      useLine.getState().heard(m);
+      useLine.getState().heard(m, false, machineOf(session));
       setText("");
     } catch (e) {
       setProblem(plainError(e));

@@ -120,3 +120,22 @@ describe("writing read points", () => {
     expect(state.get("unread.pending.local")).toBeUndefined();
   });
 });
+
+describe("a machine's session's point", () => {
+  it("is written on the machine's engine as its own place, and kept here under its key", async () => {
+    const theirs: unknown[][] = [];
+    const devbox = {
+      putReads: vi.fn(async (p: { place: string; point: { at: string; message: string | null } }[]) => {
+        theirs.push(p);
+        return p.map((x) => ({ place: x.place, ...x.point }));
+      }),
+    };
+    useDesk.setState({ engines: { devbox: { hub: devbox as never, connected: true, loaded: true, error: null } } });
+    await advance({ kind: "session", session: "devbox/s1" }, { at: at(5), message: null });
+    expect(theirs).toEqual([[{ place: "session:s1", point: { at: at(5), message: null }, mark: "advance" }]]);
+    expect(puts).toEqual([]);
+    expect(useReads.getState().local["session:devbox/s1"]).toEqual({ at: at(5), message: null });
+    expect(useReads.getState().local["session:s1"]).toBeUndefined();
+    useDesk.setState({ engines: {} });
+  });
+});

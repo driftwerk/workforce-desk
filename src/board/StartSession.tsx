@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ENGINE_TITLE, startable } from "../engines/engines";
-import { sortedSessions, useDesk } from "../hub/store";
+import { sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { Engine, EngineInfo, Ticket } from "../hub/types";
 import { pickFolder } from "../platform";
 import { useModal } from "../ui/Dialog";
@@ -12,7 +12,7 @@ import { useBoard } from "./store";
  *  ticket as its goal and first prompt, and the ticket moves to Doing. */
 export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: () => void }) {
   const hub = useDesk((s) => s.hub);
-  const sessions = useDesk((s) => s.sessions);
+  const sessions = useDesk((s) => localSessions(s.sessions));
   // The folder its sessions worked in, else the newest session's.
   const usual = sessionsOf(t)
     .map((id) => sessions[id]?.cwd)
