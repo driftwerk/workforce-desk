@@ -285,7 +285,7 @@ impl Machine {
     /// folder only the person can open, the socket itself theirs alone) to
     /// the machine's gateway at `box_port` on its loopback. No TCP port is
     /// opened here for it (only a sign-in's callback is, for its length:
-    /// [`Machine::callback_forward`]). It can't clear the person's config's forwards
+    /// [`Machine::stdio_forward`]). It can't clear the person's config's forwards
     /// (`ClearAllForwardings` would clear this one too), so Desk reads
     /// [`Machine::settings`] for any first.
     pub fn forward(&self, socket: &std::path::Path, box_port: u16) -> Invocation {
@@ -309,37 +309,21 @@ impl Machine {
         )
     }
 
-    /// The forward for one sign-in's page coming back: TCP port `port` on
-    /// this computer's loopback (IPv4, never another address), to the same
-    /// port on the machine's loopback, where the engine's sign-in listens
-    /// for its callback. Its command is a `sleep`, so it ends by itself after
-    /// [`CALLBACK_FOR_SECS`] even if Desk never ends it; the forwards of the
-    /// person's config are read for first, as for [`Machine::forward`].
-    pub fn callback_forward(&self, port: u16) -> Invocation {
-        let spec = format!("127.0.0.1:{port}:127.0.0.1:{port}");
+    /// One connection carried to TCP port `port` on the machine's loopback,
+    /// on ssh's own input and output (`-W`): for a sign-in's page coming
+    /// back, which Desk listens for here itself. `-W` forwards nothing
+    /// else, whatever the person's config sets.
+    pub fn stdio_forward(&self, port: u16) -> Invocation {
+        let to = format!("127.0.0.1:{port}");
         self.ssh(
-            &[
-                ALWAYS,
-                &[
-                    "-o",
-                    "ExitOnForwardFailure=yes",
-                    "-o",
-                    "GatewayPorts=no",
-                    "-o",
-                    "RemoteCommand=none",
-                    "-o",
-                    "SessionType=default",
-                    "-L",
-                    &spec,
-                ],
-            ],
-            Some(format!("sleep {CALLBACK_FOR_SECS}")),
+            &[ALWAYS, &["-o", "ClearAllForwardings=yes", "-W", &to]],
+            None,
         )
     }
 }
 
-/// The longest a sign-in's callback forward runs: a little over the 10
-/// minutes Claude Code's sign-in waits.
+/// The longest Desk listens for a sign-in's page coming back: a little
+/// over the 10 minutes Claude Code's sign-in waits.
 pub const CALLBACK_FOR_SECS: u32 = 15 * 60;
 
 /// The most of what a machine said that Desk shows.
@@ -614,7 +598,7 @@ mod tests {
             m.reachable(),
             m.settings(),
             m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226),
-            m.callback_forward(46009),
+            m.stdio_forward(46009),
             m.command(&["x".into()]),
         ] {
             assert_eq!(i.program, std::path::PathBuf::from("/usr/bin/ssh"));
@@ -637,15 +621,10 @@ mod tests {
             // Only the command's line comes after the target.
             assert!(i.args.len() <= dash + 3);
         }
-        let c = m.callback_forward(46009);
-        assert!(
-            c.args
-                .windows(2)
-                .any(|w| w == ["-L", "127.0.0.1:46009:127.0.0.1:46009"])
-        );
-        assert!(c.args.contains(&"ExitOnForwardFailure=yes".to_string()));
-        assert!(!c.args.contains(&"ClearAllForwardings=yes".to_string()));
-        assert_eq!(c.args.last().map(String::as_str), Some("sleep 900"));
+        let c = m.stdio_forward(46009);
+        assert!(c.args.windows(2).any(|w| w == ["-W", "127.0.0.1:46009"]));
+        assert!(c.args.contains(&"ClearAllForwardings=yes".to_string()));
+        assert!(!c.args.contains(&"-L".to_string()));
         let f = m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226);
         assert!(
             f.args

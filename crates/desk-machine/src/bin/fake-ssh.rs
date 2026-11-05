@@ -20,6 +20,9 @@
 //!   `ExitOnForwardFailure` does) and pipes each connection to `<there>`
 //!   on this computer, or to `forward_to` when the host names one (the
 //!   machine's loopback and this computer's are one in a test);
+//! - for `-W 127.0.0.1:<there>`, its input and output carried to `<there>`
+//!   on this computer (or `forward_to`), as ssh carries them to the
+//!   machine's;
 //! - `banner`: printed on its error output first, as a machine's banner is
 //!   (one may claim anything);
 //! - `listen: false`: a forward that never binds, only says things;
@@ -120,6 +123,9 @@ fn main() {
     if let Some(refuse) = &host.refuse {
         fail(&refuse.stderr, refuse.code);
     }
+    if let Some(i) = options.iter().position(|o| o == "-W") {
+        stdio(&options[i + 1], host.forward_to);
+    }
     if let Some(i) = options.iter().position(|o| o == "-L") {
         if host.listen == Some(false) {
             loop {
@@ -201,6 +207,36 @@ fn check_host_key(options: &[String], target: &str, key: &str, settings: &str) {
 fn fail(said: &str, code: i32) -> ! {
     eprintln!("{said}");
     std::process::exit(code);
+}
+
+/// `-W <to>:<there>`, for real: input and output carried to it.
+#[cfg(unix)]
+fn stdio(spec: &str, forward_to: Option<u16>) -> ! {
+    let Some((to, there)) = spec.rsplit_once(':') else {
+        fail(&format!("Bad stdio forwarding specification '{spec}'"), 255);
+    };
+    let there = forward_to.map_or_else(|| there.to_string(), |p| p.to_string());
+    let Ok(conn) = TcpStream::connect(format!("{to}:{there}")) else {
+        fail(
+            "channel 0: open failed: connect failed: Connection refused",
+            255,
+        );
+    };
+    let mut up = conn.try_clone().expect("conn");
+    let sending = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::stdin(), &mut up);
+        let _ = up.shutdown(std::net::Shutdown::Write);
+    });
+    let mut down = conn;
+    let _ = std::io::copy(&mut down, &mut std::io::stdout());
+    let _ = std::io::stdout().flush();
+    drop(sending);
+    std::process::exit(0);
+}
+
+#[cfg(not(unix))]
+fn stdio(_: &str, _: Option<u16>) -> ! {
+    fail("fake ssh: -W needs Unix", 255);
 }
 
 /// `-L 127.0.0.1:<here>:127.0.0.1:<there>`, for real.

@@ -831,6 +831,7 @@ pub fn run() {
             machines::machine_fetch,
             machines::machine_sign_in_forward,
             machines::machine_sign_in_forward_stop,
+            machines::machine_open_sign_in_page,
             machines::machine_socket_open,
             machine_setup::machines_list,
             machine_setup::machine_probe,

@@ -94,7 +94,8 @@ it("shows each machine's sign-in per engine, with a Sign in for one that isn't, 
   expect(devbox.queryByRole("button", { name: "Sign in to Claude" })).toBeNull();
   expect(devbox.getByRole("group", { name: "ChatGPT" }).textContent).toContain("Not signed in");
   await act(async () => fireEvent.click(devbox.getByRole("button", { name: "Sign in to ChatGPT" })));
-  expect(openUrl).toHaveBeenCalledWith("https://auth.openai.com/codex/device");
+  expect(fake.openSignInPage).toHaveBeenCalledWith("codex", "https://auth.openai.com/codex/device");
+  expect(openUrl).not.toHaveBeenCalled();
   expect(devbox.getByText("WXYZ-98765")).toBeTruthy();
   // A machine that isn't connected shows none.
   expect(within(row("buildbox")).queryByRole("group", { name: "Claude" })).toBeNull();

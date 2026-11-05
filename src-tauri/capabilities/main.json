@@ -48,6 +48,7 @@
     "allow-machine-share-sign-in",
     "allow-machine-sign-in-forward",
     "allow-machine-sign-in-forward-stop",
+    "allow-machine-open-sign-in-page",
     "allow-socket-send",
     "allow-socket-ack",
     "allow-socket-close",

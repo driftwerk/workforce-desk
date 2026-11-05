@@ -225,7 +225,19 @@ const MACHINE_HTTP: &[Route] = &[
     route("POST", "/api/desk/engines/sign-ins"),
     route("GET", "/api/desk/engines/sign-ins/{}"),
     route("DELETE", "/api/desk/engines/sign-ins/{}"),
+    // Asked by the native side alone (see NATIVE_ONLY).
+    route("GET", "/api/desk/accounts/sign-ins/{}/direct"),
 ];
+
+/// Of [`MACHINE_HTTP`], what only the native side asks, never the page: the
+/// page that comes back by itself for a sign-in, to listen for it.
+const NATIVE_ONLY: &[Route] = &[route("GET", "/api/desk/accounts/sign-ins/{}/direct")];
+
+/// Whether `method target` is one only the native side asks of a machine's
+/// hub, matched as every route is.
+pub fn native_only(method: &str, target: &str) -> bool {
+    allowed(NATIVE_ONLY, method, target).is_ok()
+}
 
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
@@ -588,6 +600,13 @@ mod tests {
         assert!(machine_http("POST", "/api/desk/engines/sign-ins").is_ok());
         assert!(machine_http("GET", "/api/desk/engines/sign-ins/e1").is_ok());
         assert!(machine_http("DELETE", "/api/desk/engines/sign-ins/e1").is_ok());
+        assert!(native_only("GET", "/api/desk/accounts/sign-ins/s1/direct"));
+        assert!(
+            native_only("GET", "/api/desk/accounts/sign-ins/s1/%64irect")
+                || machine_http("GET", "/api/desk/accounts/sign-ins/s1/%64irect").is_err()
+        );
+        assert!(!native_only("POST", "/api/desk/accounts/sign-ins/s1/code"));
+        assert!(http("GET", "/api/desk/accounts/sign-ins/s1/direct").is_err());
         assert!(
             http("GET", "/api/desk/folders").is_err(),
             "not this computer's"

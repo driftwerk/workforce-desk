@@ -433,8 +433,8 @@ export type AccountSignIn = {
   name: string;
   /** For a sign-in made from another computer: the page that comes back to
    *  the hub's computer by itself (`http://localhost:{port}/callback`
-   *  there), once the CLI has made it. */
-  direct?: { url: string; port: number };
+   *  there) can be asked for. Only the native side asks for it. */
+  directReady?: boolean;
 } & AccountSignInState;
 
 /** An engine's own sign-in where it has no browser (Codex's device

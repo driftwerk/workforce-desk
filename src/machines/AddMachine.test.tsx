@@ -26,8 +26,15 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  // A machine's page is never opened by the page itself: only through the
+  // native side, which checks it.
+  expect(openUrl).not.toHaveBeenCalled();
   vi.mocked(openUrl).mockClear();
 });
+
+/** The native side of the last card: the pages it was asked to open. */
+let last: ReturnType<typeof fakeNative> | null = null;
+const pages = () => last!.fake.openSignInPage.mock.calls;
 
 const typeAndGo = async (target: string) => {
   fireEvent.change(screen.getByLabelText("Address"), { target: { value: target } });
@@ -120,12 +127,12 @@ function fakeEngine(over: Record<string, unknown> = {}) {
   return { hub, state, run, signedIn, codex, transport };
 }
 
-const DIRECT = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=http%3A%2F%2Flocalhost%3A46009%2Fcallback&state=s";
 const MANUAL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=s";
 const tick = () => act(async () => void (await vi.advanceTimersByTimeAsync(SIGN_IN_POLL_MS)));
 
 /** The Add card at its sign-in, with `hub` as devbox's engine. */
 const atSignIn = async (hub: unknown, native = fakeNative(), transport?: DeskTransport) => {
+  last = native;
   withEngine("devbox", hub as DeskHub);
   if (transport) native.fake.transport.mockReturnValue(transport);
   const onClose = vi.fn();
@@ -148,11 +155,11 @@ it("signs Claude in on the machine as on this computer: its page opens here and 
   expect(screen.getByText("Opening Claude’s sign-in page…")).toBeTruthy();
 
   // The machine's CLI made its page: the forward starts, and that page opens here.
-  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  e.run({ state: "code", url: MANUAL, directReady: true });
   await tick();
   expect(n.fake.signInForward).toHaveBeenCalledWith("devbox", "si-1");
-  expect(openUrl).toHaveBeenCalledWith("https://claude.com/cai/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A46009%2Fcallback");
-  expect(openUrl).not.toHaveBeenCalledWith(MANUAL);
+  // The native side opens the page that comes back by itself; no page with a code.
+  expect(pages()).toEqual([]);
   expect(screen.getByText(/Desk carries on by itself once you approve/)).toBeTruthy();
   expect(screen.queryByPlaceholderText("Code from the page")).toBeNull();
   // A click beside the card or Esc, back from the browser, doesn't end it.
@@ -164,9 +171,43 @@ it("signs Claude in on the machine as on this computer: its page opens here and 
   e.signedIn();
   await tick();
   expect(e.hub.signInCode).not.toHaveBeenCalled();
-  expect(n.fake.signInForwardStop).toHaveBeenCalledWith("devbox");
+  expect(n.fake.signInForwardStop).toHaveBeenCalledWith("devbox", "si-1");
   expect(within(signIn).getByRole("group", { name: "Claude" }).textContent).toContain("Signed in");
   expect(screen.getByRole("group", { name: "Setting it up" }).textContent).toContain("Signed in to Claude");
+  vi.useRealTimers();
+});
+
+it("never opens the page of a sign-in cancelled while its listener was starting, and ends that listener", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = fakeEngine();
+  const native = fakeNative();
+  let opened: () => void = () => {};
+  native.fake.signInForward.mockImplementationOnce(() => new Promise<undefined>((r) => (opened = () => r(undefined))));
+  await atSignIn(e.hub, native);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  e.run({ state: "code", url: MANUAL, directReady: true });
+  await tick();
+  expect(native.fake.signInForward).toHaveBeenCalledWith("devbox", "si-1");
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })));
+  expect(e.hub.cancelSignIn).toHaveBeenCalledWith("si-1");
+  expect(native.fake.signInForwardStop).toHaveBeenCalledWith("devbox", "si-1");
+  await act(async () => opened());
+  expect(screen.queryByText(/Desk carries on by itself/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Sign in to Claude" })).toBeTruthy();
+  expect(pages()).toEqual([]);
+  vi.useRealTimers();
+});
+
+it("opens the page that comes back again through the native side", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = fakeEngine();
+  const n = await atSignIn(e.hub);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  e.run({ state: "code", url: MANUAL, directReady: true });
+  await tick();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open the sign-in page again" })));
+  expect(n.fake.signInForward).toHaveBeenCalledTimes(2);
+  expect(pages()).toEqual([]);
   vi.useRealTimers();
 });
 
@@ -177,9 +218,9 @@ it("falls back to the page with a code when the forward can't start, and says wh
   native.fake.signInForward.mockRejectedValueOnce(new Error("Another program on this computer is using port 46009, which the sign-in page comes back to."));
   await atSignIn(e.hub, native);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
-  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  e.run({ state: "code", url: MANUAL, directReady: true });
   await tick();
-  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(pages()).toContainEqual(["claude", MANUAL]);
   expect(screen.getByText(/is using port 46009/)).toBeTruthy();
   fireEvent.change(screen.getByPlaceholderText("Code from the page"), { target: { value: "abc-123" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
@@ -195,21 +236,21 @@ it("opens the page with a code once the machine shows it, when the forward faile
   await atSignIn(e.hub, native);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
   // The page that comes back is made before the page with a code is shown.
-  e.run({ state: "starting", direct: { url: DIRECT, port: 46009 } });
+  e.run({ state: "starting", directReady: true });
   await tick();
   expect(screen.getByText("Desk couldn’t connect to devbox in time.")).toBeTruthy();
   expect(screen.getByText("Opening Claude’s sign-in page with a code…")).toBeTruthy();
-  expect(openUrl).not.toHaveBeenCalled();
-  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  expect(pages()).toEqual([]);
+  e.run({ state: "code", url: MANUAL, directReady: true });
   await tick();
-  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(pages()).toContainEqual(["claude", MANUAL]);
   expect(native.fake.signInForward).toHaveBeenCalledTimes(1);
   // Its tab closed: it opens again from here.
-  vi.mocked(openUrl).mockClear();
+  last!.fake.openSignInPage.mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Open the sign-in page again" }));
-  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(pages()).toContainEqual(["claude", MANUAL]);
   await tick();
-  expect(openUrl).toHaveBeenCalledTimes(1);
+  expect(pages()).toHaveLength(1);
   vi.useRealTimers();
 });
 
@@ -218,10 +259,10 @@ it("switches to the page with a code when asked, from a sign-in in the browser",
   const e = fakeEngine();
   await atSignIn(e.hub);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
-  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  e.run({ state: "code", url: MANUAL, directReady: true });
   await tick();
   fireEvent.click(screen.getByRole("button", { name: "Use a code instead" }));
-  expect(openUrl).toHaveBeenLastCalledWith(MANUAL);
+  expect(pages().at(-1)).toEqual(["claude", MANUAL]);
   expect(screen.getByPlaceholderText("Code from the page")).toBeTruthy();
   vi.useRealTimers();
 });
@@ -234,7 +275,7 @@ it("on a machine whose Desk can't give the page that comes back, opens the page 
   e.run({ state: "code", url: MANUAL });
   await tick();
   expect(n.fake.signInForward).not.toHaveBeenCalled();
-  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(pages()).toContainEqual(["claude", MANUAL]);
   fireEvent.keyDown(screen.getByPlaceholderText("Code from the page"), { key: "Enter" });
   expect(e.hub.signInCode).not.toHaveBeenCalled();
   fireEvent.change(screen.getByPlaceholderText("Code from the page"), { target: { value: "abc-123" } });
@@ -246,7 +287,7 @@ it("on a machine whose Desk can't give the page that comes back, opens the page 
 it("picks up a sign-in already under way there rather than starting one its name would refuse", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = fakeEngine();
-  e.run({ state: "code", url: MANUAL, direct: { url: DIRECT, port: 46009 } });
+  e.run({ state: "code", url: MANUAL, directReady: true });
   const n = await atSignIn(e.hub);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
   expect(e.hub.addAccount).not.toHaveBeenCalled();
@@ -280,10 +321,10 @@ it("signs ChatGPT in for Codex by its device page: the page opens here and its c
   expect(e.codex.start).toHaveBeenCalled();
   e.codex.read.mockResolvedValue({ id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "WXYZ-98765" });
   await tick();
-  expect(openUrl).toHaveBeenCalledWith("https://auth.openai.com/codex/device");
+  expect(pages()).toContainEqual(["codex", "https://auth.openai.com/codex/device"]);
   expect(screen.getByText("WXYZ-98765")).toBeTruthy();
   await tick();
-  expect(vi.mocked(openUrl).mock.calls.filter(([u]) => u === "https://auth.openai.com/codex/device")).toHaveLength(1);
+  expect(pages().filter(([, u]) => u === "https://auth.openai.com/codex/device")).toHaveLength(1);
   e.codex.read.mockResolvedValue({ id: "cx-1", engine: "codex", state: "done" });
   await tick();
   expect(screen.getByRole("group", { name: "ChatGPT" }).textContent).toContain("Signed in");

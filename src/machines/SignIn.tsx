@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HubError, transportCall, type DeskHub } from "../hub/client";
 import type { DeskTransport } from "../hub/transport";
 import type { AccountSignIn, AccountsInfo, EngineInfo, EngineSignIn } from "../hub/types";
-import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
 import { useHubOf, type MachineId } from "./engines";
 import { native as realNative, type MachineNative } from "./native";
@@ -81,9 +80,13 @@ type ClaudeRun =
   | { at: "starting" }
   /** Under way: in the browser by itself (`direct`), or with a code to
    *  paste (`codeAsked`); `page` is the page opened, to open again. */
-  | { at: "running"; signIn: AccountSignIn; direct: boolean; codeAsked: boolean; page: string | null; why: string | null }
+  | { at: "running"; signIn: AccountSignIn; direct: boolean; codeAsked: boolean; page: Page | null; why: string | null }
   | { at: "done" }
   | { at: "failed"; why: string };
+
+/** The page opened for a sign-in: the one that comes back by itself (the
+ *  native side holds it, and opens it again), or the page with a code. */
+type Page = { kind: "direct" } | { kind: "code"; url: string };
 
 /** What a sign-in has had done for it here: its forward asked for, the
  *  page with a code wanted, the page last opened. */
@@ -116,7 +119,17 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
     [],
   );
 
-  const stopForward = useCallback(() => void native.signInForwardStop(machine).catch(() => undefined), [native, machine]);
+  const stopForward = useCallback(
+    (signIn: string | undefined = seenRef.current?.id) => {
+      if (signIn) void native.signInForwardStop(machine, signIn).catch(() => undefined);
+    },
+    [native, machine],
+  );
+  /** A page the machine gave, opened only once the native side has checked it. */
+  const open = useCallback(
+    (url: string) => void native.openSignInPage("claude", url).catch((e: unknown) => running((now) => ({ ...now, why: plainError(e) }))),
+    [native],
+  );
   const running = (f: (now: Extract<ClaudeRun, { at: "running" }>) => ClaudeRun) =>
     setRun((now) => (now.at === "running" ? f(now) : now));
 
@@ -126,23 +139,23 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
     const page = codePage(seen.latest);
     if (page && seen.opened !== page) {
       seen.opened = page;
-      openUrl(page);
+      open(page);
     }
-    setRun((now) => (now.at === "running" ? { ...now, codeAsked: true, page: page ?? now.page } : now));
-  }, []);
+    setRun((now) => (now.at === "running" ? { ...now, codeAsked: true, page: page ? { kind: "code", url: page } : now.page } : now));
+  }, [open]);
 
   // What the page shows next, from where the sign-in is.
   const follow = useCallback(
     (s: AccountSignIn) => {
       if (!live.current) return;
       if (s.state === "done") {
-        stopForward();
+        stopForward(s.id);
         setRun({ at: "done" });
         done.current();
         return;
       }
       if (s.state === "failed") {
-        stopForward();
+        stopForward(s.id);
         setRun({ at: "failed", why: s.why });
         return;
       }
@@ -156,15 +169,15 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
           : { at: "running", signIn: s, direct: false, codeAsked: false, page: null, why: null },
       );
       if (seen.wantCode) return toCode(seen);
-      if (s.direct && !seen.forwarding) {
+      if (s.directReady && !seen.forwarding) {
         seen.forwarding = true;
+        // The native side reads the page from the machine, listens for it
+        // coming back, and opens it: the page never names either.
         native
           .signInForward(machine, s.id)
-          .then((url) => {
+          .then(() => {
             if (!live.current || seenRef.current !== seen) return;
-            seen.opened = url;
-            openUrl(url);
-            running((now) => ({ ...now, direct: true, page: url }));
+            running((now) => ({ ...now, direct: true, page: { kind: "direct" } }));
           })
           .catch((e: unknown) => {
             if (!live.current || seenRef.current !== seen) return;
@@ -172,7 +185,7 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
             running((now) => ({ ...now, why: plainError(e) }));
             toCode(seen);
           });
-      } else if (!s.direct && !seen.forwarding && codePage(s)) {
+      } else if (!s.directReady && !seen.forwarding && codePage(s)) {
         // A hub that can't give the page that comes back: the page with a code.
         toCode(seen);
       }
@@ -200,6 +213,7 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
   const begin = async () => {
     if (!hub) return;
     setRun({ at: "starting" });
+    if (seenRef.current) stopForward(seenRef.current.id);
     seenRef.current = null;
     try {
       const accounts = await hub.accounts();
@@ -219,7 +233,20 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
   const cancel = () => {
     if (run.at === "running") void hub?.cancelSignIn(run.signIn.id).catch(() => undefined);
     stopForward();
+    // A forward or a page still on its way for it is never opened now.
+    seenRef.current = null;
     setRun({ at: "idle" });
+  };
+
+  /** "Open the sign-in page again". */
+  const reopen = () => {
+    if (run.at !== "running" || !run.page) return;
+    if (run.page.kind === "code") open(run.page.url);
+    else
+      void native.signInForward(machine, run.signIn.id).catch((e: unknown) => {
+        running((now) => ({ ...now, why: plainError(e) }));
+        if (seenRef.current) toCode(seenRef.current);
+      });
   };
 
   const sendCode = async (code: string) => {
@@ -238,9 +265,15 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
 
   // Ended with the card: a sign-in under way goes on there, and is picked up
   // again by the next Sign in; its forward doesn't outlive the page.
-  useEffect(() => () => void native.signInForwardStop(machine).catch(() => undefined), [native, machine]);
+  useEffect(
+    () => () => {
+      const id = seenRef.current?.id;
+      if (id) void native.signInForwardStop(machine, id).catch(() => undefined);
+    },
+    [native, machine],
+  );
 
-  return { run, begin, cancel, sendCode, withCode, busy: run.at === "starting" || run.at === "running" };
+  return { run, begin, cancel, reopen, sendCode, withCode, busy: run.at === "starting" || run.at === "running" };
 }
 
 /** Codex's device sign-in on a machine: routes of a machine's hub alone
@@ -278,6 +311,15 @@ function useCodexSignIn(machine: MachineId, hub: DeskHub | null, native: Machine
     [],
   );
 
+  /** The device page the machine gave, opened only once the native side has checked it. */
+  const openPage = useCallback(
+    (url: string) =>
+      void native.openSignInPage("codex", url).catch((e: unknown) => {
+        if (live.current) setRun({ at: "failed", why: plainError(e) });
+      }),
+    [native],
+  );
+
   const follow = useCallback((s: EngineSignIn) => {
     if (!live.current) return;
     switch (s.state) {
@@ -286,7 +328,7 @@ function useCodexSignIn(machine: MachineId, hub: DeskHub | null, native: Machine
       case "device":
         if (opened.current !== s.id) {
           opened.current = s.id;
-          openUrl(s.url);
+          openPage(s.url);
         }
         return setRun({ at: "device", signIn: s });
       case "done":
@@ -295,7 +337,7 @@ function useCodexSignIn(machine: MachineId, hub: DeskHub | null, native: Machine
       case "failed":
         return setRun({ at: "failed", why: s.why });
     }
-  }, []);
+  }, [openPage]);
 
   const id = run.at === "device" ? run.signIn.id : run.at === "waiting" ? run.id : null;
   useEffect(() => {
@@ -328,7 +370,7 @@ function useCodexSignIn(machine: MachineId, hub: DeskHub | null, native: Machine
     setRun({ at: "idle" });
   };
 
-  return { run, begin, cancel, busy: run.at === "starting" || run.at === "device" || run.at === "waiting" };
+  return { run, begin, cancel, openPage, busy: run.at === "starting" || run.at === "device" || run.at === "waiting" };
 }
 
 /** Copies `text`, saying so on the button for a moment. */
@@ -472,7 +514,7 @@ export function SignInOn({
               {c.codeAsked && <CodeField onSend={(code) => void claude.sendCode(code)} />}
               <span className="machine-actions">
                 {c.page && (
-                  <button type="button" className="link small" onClick={() => openUrl(c.page!)}>
+                  <button type="button" className="link small" onClick={claude.reopen}>
                     Open the sign-in page again
                   </button>
                 )}
@@ -524,7 +566,7 @@ export function SignInOn({
                 <CopyButton text={x.signIn.code} />
               </span>
               <span className="machine-actions">
-                <button type="button" className="link small" onClick={() => openUrl(x.signIn.url)}>
+                <button type="button" className="link small" onClick={() => codex.openPage(x.signIn.url)}>
                   Open the page again
                 </button>
                 <button type="button" className="link small" onClick={codex.cancel}>
