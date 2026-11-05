@@ -68,9 +68,16 @@ jobs:
     timeout-minutes: 300
     steps:
       # Perl for building OpenSSL, and bison and flex for Postgres, on top of
-      # the image's compilers, cmake, git, patchelf and Python.
+      # the image's compilers, cmake, git, patchelf and Python. Again when a
+      # mirror hands back empty metadata, as AlmaLinux's sometimes do.
       - name: Build tools
-        run: dnf install -y perl-core which bison flex
+        run: |
+          for try in 1 2 3; do
+            dnf install -y perl-core which bison flex && exit 0
+            dnf clean metadata
+            sleep 20
+          done
+          exit 1
 
       - name: Check out Desk
         uses: actions/checkout@v7
