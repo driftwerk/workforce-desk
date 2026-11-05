@@ -156,12 +156,20 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
           <span className="small muted">
             A host from your SSH config, or user@address. Jump hosts and cloud tunnels in your SSH config work as they do in a terminal.
           </span>
-          {flow.at === "address" && flow.problem && (
+          {flow.at === "address" && flow.problem && !flow.refused && (
             <span className="small state-blocked" role="alert">
               {flow.problem}
             </span>
           )}
         </div>
+
+        {flow.at === "address" && flow.problem && flow.refused && (
+          <div className="machine-box" role="alert" aria-label="Desk can’t add it">
+            <span className="ov-label state-blocked">Desk can’t add it</span>
+            <span>{flow.problem}</span>
+            <span className="small muted">Change the address above to try another machine or account.</span>
+          </div>
+        )}
 
         {flow.at === "checking" && <p className="small muted">Looking at {target}…</p>}
 
@@ -252,7 +260,7 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
             </ul>
             {failed && (
               <p className="small state-blocked" role="alert">
-                {failed.message ?? "Setting it up stopped."} It stays in Settings → Machines, where Try again picks up from here.
+                Setting it up stopped there. {flow.name} stays in Settings → Machines: Try again there picks up once that’s fixed, or Remove… takes it off.
               </p>
             )}
           </div>

@@ -145,15 +145,66 @@ it("says why it can't reach a machine, and never asks the native side about a ba
   expect(screen.getByRole("alert").textContent).toBe("An address can’t start with a dash.");
   expect(fake.probe).not.toHaveBeenCalled();
   await typeAndGo("devbox");
-  expect(screen.getByRole("alert").textContent).toBe("Desk can’t reach devbox: no route to it.");
+  expect(screen.getByRole("alert", { name: "Desk can’t add it" }).textContent).toContain("Desk can’t reach devbox: no route to it.");
+});
+
+it("says plainly that an account running desktop Desk can't be a machine", async () => {
+  const { native, fake } = fakeNative();
+  const desktop = "This account already runs Desk as a desktop app; use another account for a machine. Desk won't change anything there.";
+  fake.probe.mockResolvedValueOnce(probeOf({ access: { kind: "unreachable", message: desktop } }));
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("me@laptop");
+  const box = screen.getByRole("alert", { name: "Desk can’t add it" });
+  expect(box.textContent).toContain(desktop);
+  expect(box.textContent).toContain("Change the address above");
+  expect(fake.add).not.toHaveBeenCalled();
+  // The address can be changed again.
+  fireEvent.change(screen.getByLabelText("Address"), { target: { value: "dev@devbox" } });
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 it("shows a step that waits on the person with the line to run, and one that failed", async () => {
   const { native, emit } = fakeNative();
   render(<AddMachine native={native} onClose={() => {}} />);
   await typeAndGo("devbox");
-  act(() => emit({ machine: "devbox", step: "install", state: "blocked", line: "sudo loginctl enable-linger dev" }));
+  act(() =>
+    emit({
+      machine: "devbox",
+      step: "install",
+      state: "blocked",
+      detail: "Desk 0.2.0 is installed. To start it when devbox boots, run this there:",
+      message: "Until then Desk starts itself there each time it connects. Turning on linger for dev needs an administrator.",
+      line: "sudo loginctl enable-linger dev",
+    }),
+  );
+  const list = screen.getByRole("group", { name: "Setting it up" });
+  expect(list.textContent).toContain("Desk 0.2.0 is installed. To start it when devbox boots, run this there:");
+  expect(list.textContent).toContain("needs an administrator");
   expect(screen.getByText("sudo loginctl enable-linger dev")).toBeTruthy();
+  expect(list.querySelector(".dot-blocked")).toBeTruthy();
   act(() => emit({ machine: "devbox", step: "engines", state: "failed", message: "npm isn’t on devbox" }));
-  expect(screen.getByRole("alert").textContent).toContain("npm isn’t on devbox");
+  expect(list.textContent).toContain("npm isn’t on devbox");
+  expect(screen.getByRole("alert").textContent).toContain("devbox stays in Settings → Machines");
+});
+
+it("finishes while linger waits on an administrator: Desk starts itself on each connect", async () => {
+  const { native, emit } = fakeNative();
+  withEngine("devbox", {} as DeskHub);
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("devbox");
+  act(() => emit({ machine: "devbox", step: "install", state: "blocked", line: "sudo loginctl enable-linger dev" }));
+  act(() => emit({ machine: "devbox", step: "engines", state: "done" }));
+  expect((screen.getByRole("button", { name: "Done" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByRole("group", { name: "Sign in on devbox" })).toBeTruthy();
+  expect(screen.getByText("sudo loginctl enable-linger dev")).toBeTruthy();
+});
+
+it("shows the desktop refusal as the connect step's failure when it's found while adding", async () => {
+  const { native, emit } = fakeNative();
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("devbox");
+  act(() => emit({ machine: "devbox", step: "connect", state: "failed", message: "This account already runs Desk as a desktop app; use another account for a machine." }));
+  const list = screen.getByRole("group", { name: "Setting it up" });
+  expect(list.querySelector(".dot-failed")).toBeTruthy();
+  expect(list.textContent).toContain("already runs Desk as a desktop app");
 });

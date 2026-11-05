@@ -21,8 +21,10 @@ export interface Item {
 export type Steps = Record<SetupStep, Item>;
 
 export type Flow =
-  /** Typing the address; `problem` from the last try. */
-  | { at: "address"; target: string; problem: string | null }
+  /** Typing the address; `problem` from the last try, `refused` when it
+   *  was the machine's (unreachable, or an account Desk won't use) rather
+   *  than the address's. */
+  | { at: "address"; target: string; problem: string | null; refused?: boolean }
   /** Looking at it. */
   | { at: "checking"; target: string }
   /** A machine this computer has never connected to: its fingerprint. */
@@ -61,14 +63,14 @@ const afterProbe = (target: string, probe: Probe): Flow => {
   const { hostKey, access } = probe;
   if (hostKey.kind === "changed") return { at: "changed", target, name, fingerprint: hostKey.fingerprint, keyType: hostKey.keyType };
   if (hostKey.kind === "new") return { at: "trust", target, name, fingerprint: hostKey.fingerprint, keyType: hostKey.keyType };
-  if (!access) return { at: "address", target, problem: "Desk couldn’t look at that machine. Try again." };
+  if (!access) return { at: "address", target, problem: "Desk couldn’t look at that machine. Try again.", refused: true };
   switch (access.kind) {
     case "refused":
       return { at: "key", target, name, user: access.user, why: "refused" };
     case "locked":
       return { at: "key", target, name, user: null, why: "locked" };
     case "unreachable":
-      return { at: "address", target, problem: access.message || `Desk can’t reach ${name}.` };
+      return { at: "address", target, problem: access.message || `Desk can’t reach ${name}.`, refused: true };
     case "ok": {
       const sys = access.system ? ` · ${access.system.os} · ${access.system.arch}` : "";
       return {
@@ -86,7 +88,7 @@ const afterProbe = (target: string, probe: Probe): Flow => {
 export const step = (f: Flow, e: FlowEvent): Flow => {
   switch (e.type) {
     case "edit":
-      return f.at === "address" ? { ...f, target: e.target, problem: null } : f;
+      return f.at === "address" ? { at: "address", target: e.target, problem: null } : f;
     case "submit": {
       if (f.at !== "address") return f;
       const target = f.target.trim();
@@ -114,14 +116,17 @@ export const step = (f: Flow, e: FlowEvent): Flow => {
     case "failed":
       // Once added, a step says what failed; before, adding starts again.
       if (f.at === "setup" && f.machine) return f;
-      return { at: "address", target: f.target, problem: e.message };
+      return { at: "address", target: f.target, problem: e.message, refused: true };
     case "back":
       return f.at === "setup" ? f : { at: "address", target: f.target, problem: null };
   }
 };
 
 /** The setup is through: Desk is installed there and its engines are. */
-export const setUp = (f: Flow): boolean => f.at === "setup" && f.steps.install.state === "done" && f.steps.engines.state === "done";
+export const setUp = (f: Flow): boolean =>
+  // Waiting on the person to turn linger on still leaves Desk installed,
+  // starting itself each time it connects: set up enough to sign in.
+  f.at === "setup" && (f.steps.install.state === "done" || f.steps.install.state === "blocked") && f.steps.engines.state === "done";
 
 /** A step failed: the card says why, and adding goes no further. */
 export const setupFailed = (f: Flow): Item | null =>

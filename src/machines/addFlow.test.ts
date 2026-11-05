@@ -53,8 +53,10 @@ describe("adding a machine", () => {
 
   it("says why it can't reach one, back at the address", () => {
     const f = run([...typed("devbox"), { type: "probed", probe: probeOf({ access: { kind: "unreachable", message: "Desk can’t reach devbox: no route to it." } }) }]);
-    expect(f).toEqual({ at: "address", target: "devbox", problem: "Desk can’t reach devbox: no route to it." });
-    expect(run([...typed("devbox"), { type: "failed", message: "ssh isn’t there" }])).toEqual({ at: "address", target: "devbox", problem: "ssh isn’t there" });
+    expect(f).toEqual({ at: "address", target: "devbox", problem: "Desk can’t reach devbox: no route to it.", refused: true });
+    expect(run([...typed("devbox"), { type: "failed", message: "ssh isn’t there" }])).toEqual({ at: "address", target: "devbox", problem: "ssh isn’t there", refused: true });
+    // Typing again clears it.
+    expect(step(f, { type: "edit", target: "dev@devbox" })).toEqual({ at: "address", target: "dev@devbox", problem: null });
   });
 
   it("ticks the checklist off from the machine's setup events, and only that machine's", () => {
@@ -70,6 +72,8 @@ describe("adding a machine", () => {
     );
     expect(f).toMatchObject({ steps: { install: { state: "blocked", line: "sudo loginctl enable-linger dev" } } });
     expect(setUp(f)).toBe(false);
+    // Waiting on linger, Desk is still installed: once the engines are in, it's set up.
+    expect(setUp(step(f, { type: "setup", event: { machine: "devbox", step: "engines", state: "done" } }))).toBe(true);
     f = run(
       [
         { type: "setup", event: { machine: "devbox", step: "install", state: "done", detail: "Desk 0.2.0 installed, and set to start when it boots" } },
