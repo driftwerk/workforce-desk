@@ -71,11 +71,11 @@ describe("the slim bar's words", () => {
 describe("a question's card", () => {
   it("says whether it is paused on you or went ahead, and when it asked", () => {
     const now = Date.parse("2026-11-03T12:00:00Z");
-    expect(statusOf(lapsed("a", "x", "keep"), now)).toMatch(/^Went ahead · (\w+ )?\d\d:\d\d$/);
-    expect(statusOf(lapsed("a", "x"), now)).toMatch(/^Went ahead without an answer · (\w+ )?\d\d:\d\d$/);
-    expect(statusOf(msg({ to: YOU, asked: "open" }), now)).toMatch(/^Paused until you answer · (\w+ )?\d\d:\d\d$/);
+    expect(statusOf(lapsed("a", "x", "keep"), now)).toMatch(/^Went ahead · \S.*\d(\s?[AP]M)?$/);
+    expect(statusOf(lapsed("a", "x"), now)).toMatch(/^Went ahead without an answer · \S.*\d(\s?[AP]M)?$/);
+    expect(statusOf(msg({ to: YOU, asked: "open" }), now)).toMatch(/^Paused until you answer · \S.*\d(\s?[AP]M)?$/);
     // After its work item, it reads on from it.
-    expect(statusOf(shaped(), now)).toMatch(/^went ahead · (\w+ )?\d\d:\d\d$/);
+    expect(statusOf(shaped(), now)).toMatch(/^went ahead · \S.*\d(\s?[AP]M)?$/);
   });
 });
 

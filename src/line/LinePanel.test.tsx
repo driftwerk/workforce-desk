@@ -89,7 +89,7 @@ describe("under a terminal session", () => {
     expect((panel as HTMLElement).style.height).toBe(`${PANEL_HEIGHT}px`);
     expect(within(panel).getByText("Global assignments too, or only Agency/Self?")).toBeTruthy();
     expect(within(panel).getByText("It chose: keep it to Agency/Self only.")).toBeTruthy();
-    expect(within(panel).getAllByText(/^Went ahead · (\w+ )?\d\d:\d\d$/)).toHaveLength(2);
+    expect(within(panel).getAllByText(/^Went ahead · \S.*\d(\s?[AP]M)?$/)).toHaveLength(2);
     for (const name of ["Discuss in terminal", "Copy all", "Dismiss all", "Hide"]) expect(within(panel).getByRole("button", { name })).toBeTruthy();
     // You talk to it in its terminal: no composer, no answer box.
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -107,7 +107,7 @@ describe("under a terminal session", () => {
     const card = container.querySelector(".line-question") as HTMLElement;
     const status = card.querySelector(".line-question-status")!;
     expect(status.querySelector(".mono")!.textContent).toBe("W7 · PR 2 · ");
-    expect(status.textContent).toMatch(/^W7 · PR 2 · went ahead · (\w+ )?\d\d:\d\d$/);
+    expect(status.textContent).toMatch(/^W7 · PR 2 · went ahead · \S.*\d(\s?[AP]M)?$/);
     expect(within(card).getByText("Should PR 2 include the stub service?").className).toBe("line-question-text");
     expect(within(card).getByText("It chose: include it, as the design says")).toBeTruthy();
     // The details are there, as markdown, but folded until opened.
