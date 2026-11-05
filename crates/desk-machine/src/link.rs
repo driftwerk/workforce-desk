@@ -38,6 +38,8 @@ struct Kept {
     box_port: u16,
     admin_token: String,
     device_token: Option<String>,
+    /// The backend version installed there, as it said.
+    version: Option<String>,
 }
 
 /// The last read over SSH: when it ended, and what it found.
@@ -236,6 +238,7 @@ impl Link {
             box_port: box_port(&said.gateway_url, &self.machine)?,
             admin_token: said.admin_token,
             device_token: said.device_token,
+            version: said.version,
         };
         let connection = self.through(&kept)?;
         *self.kept() = Some(kept);
@@ -252,6 +255,7 @@ impl Link {
             gateway_url: desk_core::net::machine_base(self.machine.id.as_str(), kept.box_port),
             admin_token: kept.admin_token.clone(),
             device_token: kept.device_token.clone(),
+            version: kept.version.clone(),
         })
     }
 
@@ -272,6 +276,7 @@ impl Link {
             gateway_url: desk_core::net::machine_base(self.machine.id.as_str(), kept.box_port),
             admin_token: kept.admin_token,
             device_token: kept.device_token,
+            version: kept.version,
         })
     }
 

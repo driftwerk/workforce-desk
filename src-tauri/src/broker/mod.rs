@@ -937,6 +937,7 @@ mod tests {
                 gateway_url: self.at.lock().unwrap().clone(),
                 admin_token: SENTINEL.into(),
                 device_token: Some("device".into()),
+                version: None,
             }))
         }
         fn read(&self) -> Result<Option<Connection>, String> {
