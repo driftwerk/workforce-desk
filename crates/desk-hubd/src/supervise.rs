@@ -24,20 +24,37 @@ const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const POSTGRES_TIMEOUT: Duration = Duration::from_secs(180);
 
-fn free_port() -> Result<u16> {
-    Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
-}
-
 /// Ports from the last run, or new ones on first run. Asked once this
 /// helper holds the Desk home and has stopped what an earlier one left
 /// running ([`claim`]), so a saved port still busy is some other program's:
 /// that port alone moves, said loudly, rather than leaving the hub unable
 /// to start. Desk reads the new one from the hub's state.
 fn ports(paths: &Paths) -> Result<HubPorts> {
+    ports_where(paths, |p| TcpListener::bind(("127.0.0.1", p)).is_ok())
+}
+
+/// [`ports`], with `is_free` deciding whether a saved port may be kept.
+fn ports_where(paths: &Paths, is_free: impl Fn(u16) -> bool) -> Result<HubPorts> {
     let saved = read_ports(&paths.hub_state())?;
+    // The ports chosen so far. A port is let go as soon as it is tried, so
+    // the OS may hand it out again for the next ask: two of the four would
+    // then be one port, and a busy one moved onto another's.
+    let taken = std::cell::RefCell::new(Vec::<u16>::new());
+    let free_port = || -> Result<u16> {
+        loop {
+            let p = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+            if !taken.borrow().contains(&p) {
+                taken.borrow_mut().push(p);
+                return Ok(p);
+            }
+        }
+    };
     let keep = |what: &str, p: Option<u16>| -> Result<u16> {
         match p.filter(|&p| p != 0) {
-            Some(p) if TcpListener::bind(("127.0.0.1", p)).is_ok() => Ok(p),
+            Some(p) if !taken.borrow().contains(&p) && is_free(p) => {
+                taken.borrow_mut().push(p);
+                Ok(p)
+            }
             Some(p) => {
                 let moved = free_port()?;
                 tracing::warn!(
@@ -1134,16 +1151,43 @@ mod tests {
         assert!(dir.path().join("hub.log.1").is_file());
     }
 
+    /// Four saved ports, written as a Desk home would hold them. Whether
+    /// each is free is said to [`ports_where`] by the test, not asked of the
+    /// OS: a socket that a test opens or closes is seen by every other test
+    /// of this process that starts a process in that moment (the child holds
+    /// a copy of it until it execs), so a port tried and let go can look busy
+    /// to the very next ask, and fail a test about a different port moving.
+    /// The numbers are below any the OS hands out for port 0.
+    fn saved_quiet_ports(paths: &Paths) -> HubPorts {
+        use std::sync::atomic::{AtomicU16, Ordering::Relaxed};
+        static NEXT: AtomicU16 = AtomicU16::new(0);
+        let start = 12_000 + (std::process::id() % 3_990) as u16 * 2;
+        let pick = || {
+            let p = start + NEXT.fetch_add(1, Relaxed);
+            assert!(p < 20_000, "no quiet port left");
+            p
+        };
+        let saved = HubPorts {
+            postgres: pick(),
+            admin: pick(),
+            gateway: pick(),
+            memory: pick(),
+        };
+        write_ports(&paths.hub_state(), &saved).unwrap();
+        saved
+    }
+
     /// A saved port still busy once the helper holds the home is another
     /// program's: that port alone moves, and the move is saved.
     #[test]
     fn a_busy_saved_port_moves_and_no_other() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
-        let first = ports(&paths).unwrap();
-        assert_eq!(ports(&paths).unwrap(), first);
-        let _held = TcpListener::bind(("127.0.0.1", first.gateway)).unwrap();
-        let next = ports(&paths).unwrap();
+        let first = saved_quiet_ports(&paths);
+        let all_free = |_: u16| true;
+        assert_eq!(ports_where(&paths, all_free).unwrap(), first);
+        // Another program on the gateway's port, and on no other.
+        let next = ports_where(&paths, |p| p != first.gateway).unwrap();
         assert_ne!(next.gateway, first.gateway);
         assert_eq!(
             HubPorts { gateway: 0, ..next },
@@ -1155,14 +1199,45 @@ mod tests {
         assert_eq!(read_ports(&paths.hub_state()).unwrap(), Some(next));
     }
 
+    /// The four ports are four different ports, including from a state saved
+    /// with one port twice (as a run could once make), and a moved port never
+    /// lands on another's.
+    #[test]
+    fn the_ports_are_never_the_same_port() {
+        let all = |p: HubPorts| [p.postgres, p.admin, p.gateway, p.memory];
+        for _ in 0..50 {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = Paths::at(dir.path());
+            let mut v = all(ports(&paths).unwrap()).to_vec();
+            v.sort_unstable();
+            v.dedup();
+            assert_eq!(v.len(), 4);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let first = saved_quiet_ports(&paths);
+        let twice = HubPorts {
+            gateway: first.admin,
+            ..first
+        };
+        write_ports(&paths.hub_state(), &twice).unwrap();
+        let next = ports_where(&paths, |_| true).unwrap();
+        assert_eq!(
+            (next.postgres, next.admin, next.memory),
+            (first.postgres, first.admin, first.memory)
+        );
+        assert_ne!(next.gateway, next.admin);
+        assert_eq!(read_ports(&paths.hub_state()).unwrap(), Some(next));
+    }
+
     /// A saved state without a memory store port (an older Desk) gets one.
     #[test]
     fn a_missing_memory_port_is_given_one() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
-        let first = ports(&paths).unwrap();
+        let first = saved_quiet_ports(&paths);
         write_ports(&paths.hub_state(), &HubPorts { memory: 0, ..first }).unwrap();
-        let next = ports(&paths).unwrap();
+        let next = ports_where(&paths, |_| true).unwrap();
         assert_ne!(next.memory, 0);
         assert_eq!(
             HubPorts { memory: 0, ..next },
@@ -1344,7 +1419,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path().join("Desk"));
         let _running = RunLock::take(&paths).unwrap();
-        let saved = ports(&paths).unwrap();
+        let saved = saved_quiet_ports(&paths);
         let _held = TcpListener::bind(("127.0.0.1", saved.gateway)).unwrap();
         std::fs::write(paths.helper_pid(), "4242").unwrap();
         let hub = Fake::hub(&paths, &paths);
