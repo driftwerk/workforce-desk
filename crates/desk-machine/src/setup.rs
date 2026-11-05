@@ -123,19 +123,13 @@ pub fn flip(ssh: &SshExe, machine: &Machine, bin: &str, version: &str) -> Result
     .map(drop)
 }
 
-/// Linger, turned on by the account itself where it may: never `sudo`.
-pub fn linger_script() -> &'static str {
-    "user=$(id -un)\n\
-     loginctl enable-linger \"$user\" >/dev/null 2>&1 || true\n\
-     loginctl show-user \"$user\" -p Linger\n"
-}
-
-/// Turns linger on where the account may; whether it is on now. Blocking.
+/// Turns linger on where the account may (MD1's script: as the account
+/// itself, never `sudo`); whether it is on now. Blocking.
 pub fn linger(ssh: &SshExe, machine: &Machine) -> Result<bool, String> {
     let said = run(
         ssh,
         machine,
-        linger_script(),
+        install::enable_linger_script(),
         "Desk couldn't ask about linger there",
     )?;
     Ok(install::parse_linger(&said) == Some(true))
@@ -232,11 +226,11 @@ pub fn engines_script() -> String {
          tmp=$(mktemp -d)\n\
          trap 'rm -rf \"$tmp\"' EXIT\n\
          if ! command -v claude >/dev/null 2>&1; then\n  \
-           curl -fsSL {claude} -o \"$tmp/claude.sh\" && bash \"$tmp/claude.sh\" </dev/null >\"$tmp/claude.log\" 2>&1 || {{ tail -n 3 \"$tmp/claude.log\" >&2; echo 'Claude Code could not be installed' >&2; exit 4; }}\n  \
+           curl --proto =https --tlsv1.2 -fsSL {claude} -o \"$tmp/claude.sh\" && bash \"$tmp/claude.sh\" </dev/null >\"$tmp/claude.log\" 2>&1 || {{ tail -n 3 \"$tmp/claude.log\" >&2; echo 'Claude Code could not be installed' >&2; exit 4; }}\n  \
            echo new=1\n\
          fi\n\
          if ! command -v codex >/dev/null 2>&1; then\n  \
-           curl -fsSL {codex} -o \"$tmp/codex.sh\" && CODEX_NON_INTERACTIVE=1 sh \"$tmp/codex.sh\" </dev/null >\"$tmp/codex.log\" 2>&1 || {{ tail -n 3 \"$tmp/codex.log\" >&2; echo 'Codex could not be installed' >&2; exit 5; }}\n  \
+           curl --proto =https --tlsv1.2 -fsSL {codex} -o \"$tmp/codex.sh\" && CODEX_NON_INTERACTIVE=1 sh \"$tmp/codex.sh\" </dev/null >\"$tmp/codex.log\" 2>&1 || {{ tail -n 3 \"$tmp/codex.log\" >&2; echo 'Codex could not be installed' >&2; exit 5; }}\n  \
            echo new=1\n\
          fi\n\
          printf 'claude=%s\\n' \"$(claude --version 2>/dev/null | head -n 1)\"\n\
@@ -321,8 +315,15 @@ mod tests {
 
     #[test]
     fn linger_is_never_asked_of_sudo() {
-        assert!(!linger_script().contains("sudo"));
+        assert!(!install::enable_linger_script().contains("sudo"));
         assert!(!engines_script().contains("sudo"));
+        // The installers are fetched over https only.
+        assert_eq!(
+            engines_script()
+                .matches("curl --proto =https --tlsv1.2 ")
+                .count(),
+            2
+        );
     }
 
     #[test]

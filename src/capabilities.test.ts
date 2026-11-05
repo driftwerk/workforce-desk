@@ -175,7 +175,20 @@ describe("each window's capabilities", () => {
 
   it("keep pairing, setup, removal and reports to the main window", () => {
     const grid = commandsOf(capability("grid"));
-    for (const c of ["pair_request", "pair_collect", "hubs_remove", "data_remove", "report_save", "wsl_install", "wsl_setup", "helper_status"])
+    for (const c of [
+      "pair_request",
+      "pair_collect",
+      "hubs_remove",
+      "data_remove",
+      "report_save",
+      "wsl_install",
+      "wsl_setup",
+      "helper_status",
+      "machine_probe",
+      "machine_trust",
+      "machine_add",
+      "machine_remove",
+    ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);
     expect(capability("main").windows).toEqual(["main"]);

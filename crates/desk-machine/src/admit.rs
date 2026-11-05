@@ -11,9 +11,11 @@
 //!    a time, and after a Cancel none for a while, doubling with each
 //!    Cancel in a row, as pairing asks. Before the yes nothing runs, not
 //!    even `ssh -G` (a config's `Match exec` runs commands).
-//! 3. The person's own `ssh` must already reach it without a prompt, its
-//!    host key already in `known_hosts` and unchanged. Desk never accepts
-//!    a key itself.
+//! 3. The person's own `ssh` must reach it without a prompt, its host key
+//!    in `known_hosts` and unchanged: there already, or trusted from Desk
+//!    first (`hostkey::trust`: its fingerprint shown, read again, and a
+//!    native yes; never a changed or revoked key). ssh never accepts one
+//!    by itself.
 //!
 //! The person's `~/.ssh/config` is theirs, and applies as it does in a
 //! terminal: a `Host` alias, its `User`, `IdentityFile`, `ProxyJump` or

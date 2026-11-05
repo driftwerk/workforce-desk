@@ -184,10 +184,15 @@ impl Box_ {
 
     /// What devbox says from now on; with `key`, the host key it shows.
     fn say(&self, key: Option<&str>) {
+        self.say_with(key, "");
+    }
+
+    /// As [`Box_::say`], with `more` in its SSH settings.
+    fn say_with(&self, key: Option<&str>, more: &str) {
         let host = json!({
             "target": "devbox",
             "settings": format!(
-                "user dev\nhostname 203.0.113.7\nport 22\nidentityfile {}\nuserknownhostsfile {} {}\n",
+                "user dev\nhostname 203.0.113.7\nport 22\nidentityfile {}\nuserknownhostsfile {} {}\n{more}",
                 self.dir.path().join("mac/.ssh/id_ed25519").display(),
                 self.known_hosts().display(),
                 self.dir.path().join("mac/.ssh/known_hosts2").display(),
@@ -441,6 +446,9 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     assert_eq!(id, "devbox");
     until("ready", || r.fleet.state(&id) == Some(State::Ready));
     assert_eq!(r.asked.0.load(Ordering::SeqCst), 1, "asked once");
+    // The yes was used up by the add: looking again asks again.
+    r.fleet.probe("devbox").unwrap();
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), 2, "asked again");
 
     let connect = step(&r, "connect", StepState::Done).unwrap();
     assert!(connect.detail.unwrap().starts_with("Connected as "));
@@ -661,7 +669,12 @@ fn a_removed_machine_is_reached_no_more() {
     let link = r.machines.get(&id).unwrap();
     assert!(link.tunnel().up().is_some());
 
+    r.fleet.probe("devbox").unwrap();
+    let asked = r.asked.0.load(Ordering::SeqCst);
     r.fleet.remove(&id).unwrap();
+    // Removing it takes back the yes to it.
+    r.fleet.probe("devbox").unwrap();
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), asked + 1, "asked again");
     assert!(r.fleet.list().is_empty());
     assert!(r.machines.get(&id).is_none());
     assert_eq!(*r.said.dropped.lock().unwrap(), vec![id.clone()]);
@@ -832,4 +845,28 @@ fn engines_installed_there_restart_desk_so_its_hub_finds_them() {
     assert!(starts >= 2, "{starts}");
     let c = r.machines.get(&id).unwrap().connection().unwrap().unwrap();
     assert_eq!(c.device_token, Some(format!("DEVICE-{starts}")));
+}
+
+#[test]
+fn a_config_with_forwards_is_never_connected_to_to_trust_its_key() {
+    let b = Box_::new();
+    b.say_with(
+        Some(KEY),
+        "localforward [127.0.0.1]:5432 [10.0.1.30]:5432\n",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    // The look is refused (after the yes, before connecting); so is trusting.
+    assert!(r.fleet.probe("devbox").unwrap_err().contains("forwards"));
+    assert!(
+        r.fleet
+            .trust("devbox", FINGERPRINT)
+            .unwrap_err()
+            .contains("forwards")
+    );
+    assert!(
+        b.calls().iter().all(|c| c.contains(&"-G".to_string())),
+        "nothing but ssh -G ran: {:?}",
+        b.calls()
+    );
+    assert!(!b.known_hosts().exists());
 }

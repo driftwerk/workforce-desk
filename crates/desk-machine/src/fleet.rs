@@ -167,6 +167,14 @@ impl Admitted {
             .unwrap_or_else(|e| e.into_inner())
             .insert(target.to_string(), Instant::now());
     }
+
+    /// The yes to `target` is used up, or no longer stands.
+    fn forget(&self, target: &str) {
+        self.at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(target);
+    }
 }
 
 /// The question, asked once for an address while the yes stands.
@@ -220,8 +228,21 @@ pub struct Fleet {
     gate: Gate,
     admitted: Arc<Admitted>,
     trust: Arc<dyn TrustConfirm>,
+    /// One trust question at a time, none for a while after a Cancel.
+    trust_gate: hostkey::TrustGate,
     timing: Timing,
     rows: Mutex<BTreeMap<String, Row>>,
+    /// Held from a save's snapshot of the rows through its rename, so an
+    /// older snapshot can't land after a newer one (a removed machine
+    /// back).
+    saving: Mutex<()>,
+    /// Set when `machines.json` was there but didn't read: it is never
+    /// written over, and nothing is added until it is fixed or moved.
+    unreadable: std::sync::atomic::AtomicBool,
+    /// How long a save waits between its snapshot and its write: tests
+    /// only, to hold one there.
+    #[cfg(test)]
+    save_pause: Mutex<Duration>,
     /// What the person's ssh settings said about the address looked at
     /// last, for the public key it would sign in with.
     files: Mutex<Option<Files>>,
@@ -253,6 +274,44 @@ fn answers(link: &Link, token: &str) -> bool {
 #[cfg(not(unix))]
 fn answers(_: &Link, _: &str) -> bool {
     true
+}
+
+/// Writes `bytes` to `file` through a partial file of this write's own
+/// (0600), synced, then renamed into place and the folder synced.
+fn write_private(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = file.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let partial = dir.join(format!(
+        ".{name}.{}.{}.partial",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    let written = (|| {
+        let mut f = o.open(&partial)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&partial, file)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written?;
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
 }
 
 /// Where a development backend comes from.
@@ -323,8 +382,13 @@ impl Fleet {
             gate,
             admitted,
             trust,
+            trust_gate: hostkey::TrustGate::default(),
             timing,
             rows: Mutex::default(),
+            saving: Mutex::default(),
+            unreadable: Default::default(),
+            #[cfg(test)]
+            save_pause: Mutex::default(),
             files: Mutex::default(),
         })
     }
@@ -342,7 +406,9 @@ impl Fleet {
             Ok(s) => match serde_json::from_str::<Vec<Kept>>(&s) {
                 Ok(k) => k,
                 Err(e) => {
-                    tracing::warn!(file = %self.file.display(), error = %e, "the machines file doesn't read; it is kept as it is");
+                    tracing::warn!(file = %self.file.display(), error = %e, "the machines file doesn't read; it is kept as it is, and not written over");
+                    self.unreadable
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
                     return;
                 }
             },
@@ -370,23 +436,28 @@ impl Fleet {
         }
     }
 
-    /// Writes the machines added (whole, or not at all).
+    /// Writes the machines added: whole or not at all, private to the
+    /// person (0600), synced before it takes the file's place; one save at
+    /// a time, each with the rows as they are when it starts. Never over a
+    /// file that didn't read.
     fn save(&self) {
+        if self.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
+            tracing::warn!(file = %self.file.display(), "not writing over the machines file that didn't read");
+            return;
+        }
+        let _saving = self.saving.lock().unwrap_or_else(|e| e.into_inner());
         let kept: Vec<Kept> = self
             .rows()
             .values()
             .filter(|r| r.saved)
             .map(|r| r.kept.clone())
             .collect();
-        let write = || -> std::io::Result<()> {
-            if let Some(dir) = self.file.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let partial = self.file.with_extension("json.partial");
-            std::fs::write(&partial, serde_json::to_vec_pretty(&kept)?)?;
-            std::fs::rename(&partial, &self.file)
-        };
-        if let Err(e) = write() {
+        #[cfg(test)]
+        std::thread::sleep(*self.save_pause.lock().unwrap());
+        if let Err(e) = write_private(
+            &self.file,
+            &serde_json::to_vec_pretty(&kept).unwrap_or_default(),
+        ) {
             tracing::warn!(file = %self.file.display(), error = %e, "couldn't write the machines file");
         }
     }
@@ -516,14 +587,14 @@ impl Fleet {
             return Err("Look at the machine in Settings → Machines first.".into());
         }
         let said = self.settings_said(&machine)?;
+        // Nothing connects to a machine whose config would carry forwards.
+        ssh::no_forwards(&machine, &ssh::Settings::parse(&said))?;
         let files = Files::parse(&said, &self.home);
-        hostkey::trust(
-            &self.ssh,
-            &machine,
-            &files,
-            fingerprint,
-            self.trust.as_ref(),
-        )
+        let confirm = hostkey::Gated {
+            gate: &self.trust_gate,
+            confirm: self.trust.as_ref(),
+        };
+        hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)
     }
 
     /// This computer's public SSH key (`machine_public_key`): for the
@@ -542,6 +613,12 @@ impl Fleet {
     /// stands), and ssh reaches it with its key known.
     pub fn add(self: &Arc<Self>, target: &str, name: &str) -> Result<String, String> {
         let target = target.trim();
+        if self.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(format!(
+                "Desk couldn't read its list of machines ({}), so it won't add one until that file is fixed or moved away. Then quit and open Desk again.",
+                self.file.display()
+            ));
+        }
         if self
             .rows()
             .values()
@@ -554,6 +631,8 @@ impl Fleet {
             id_for(name, &|id| rows.contains_key(id))
         };
         let (machine, _) = admit::admit(&self.gate, &self.ssh, id.clone(), name, target)?;
+        // The yes is used up: adding it again, or another address, asks.
+        self.admitted.forget(machine.target.as_str());
         let id = id.to_string();
         {
             let mut rows = self.rows();
@@ -1143,6 +1222,8 @@ impl Fleet {
             return Err("That machine isn't in Desk any more.".into());
         };
         row.kick.1.notify_all();
+        // Adding it back asks again.
+        self.admitted.forget(row.kept.machine.target.as_str());
         if row.saved {
             self.save();
         }
@@ -1180,6 +1261,147 @@ impl Fleet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Quiet;
+
+    impl Host for Quiet {
+        fn changed(&self) {}
+        fn setup(&self, _: &SetupEvent) {}
+        fn dropped(&self, _: &str) {}
+        fn wanted(&self) -> Result<String, String> {
+            Ok("0.2.0".into())
+        }
+        fn backend(&self, _: Arch) -> Result<Backend, String> {
+            Err("none".into())
+        }
+        fn person(&self) -> Person {
+            Person::default()
+        }
+    }
+
+    struct No;
+
+    impl Confirm for No {
+        fn run_on(&self, _: &Question) -> bool {
+            false
+        }
+    }
+
+    impl TrustConfirm for No {
+        fn trust_key(&self, _: &hostkey::TrustQuestion) -> bool {
+            false
+        }
+    }
+
+    /// A fleet that reaches nothing, keeping `machines.json` in `dir`.
+    fn quiet(dir: &Path) -> Arc<Fleet> {
+        let ssh = SshExe::at(dir.join("no-ssh"));
+        Fleet::new(
+            ssh.clone(),
+            Arc::new(Machines::new(ssh, &dir.join("s"))),
+            dir.join("machines.json"),
+            dir.to_path_buf(),
+            Arc::new(Quiet),
+            Arc::new(No),
+            Arc::new(No),
+            Timing::default(),
+        )
+    }
+
+    fn kept(id: &str) -> Kept {
+        Kept {
+            machine: Machine {
+                id: MachineId::new(id).unwrap(),
+                name: id.into(),
+                target: Target::new(id).unwrap(),
+            },
+            version: Some("0.2.0".into()),
+            system: None,
+        }
+    }
+
+    fn row(id: &str) -> Row {
+        Row {
+            kept: kept(id),
+            state: State::Ready,
+            saved: true,
+            busy: false,
+            kick: Arc::default(),
+        }
+    }
+
+    #[test]
+    fn a_removed_machine_is_never_written_back_by_an_older_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let fleet = quiet(dir.path());
+        {
+            let mut rows = fleet.rows();
+            rows.insert("a".into(), row("a"));
+            rows.insert("gone".into(), row("gone"));
+        }
+        std::thread::scope(|s| {
+            // A save (a supervise thread's) takes its snapshot, with "gone"
+            // in it, and is held before it writes.
+            *fleet.save_pause.lock().unwrap() = Duration::from_millis(300);
+            s.spawn(|| fleet.save());
+            std::thread::sleep(Duration::from_millis(100));
+            *fleet.save_pause.lock().unwrap() = Duration::ZERO;
+            // Meanwhile the person removes it.
+            fleet.remove("gone").unwrap();
+        });
+        let said = std::fs::read_to_string(dir.path().join("machines.json")).unwrap();
+        let ids: Vec<String> = serde_json::from_str::<Vec<Kept>>(&said)
+            .unwrap()
+            .into_iter()
+            .map(|k| k.machine.id.to_string())
+            .collect();
+        assert_eq!(ids, ["a"]);
+        // No partial file is left behind, and the file is the person's own.
+        let left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains("partial"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.path().join("machines.json"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn a_machines_file_that_doesnt_read_is_never_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("machines.json");
+        std::fs::write(&file, "[{\"id\": \"devbox\", \"name\": ").unwrap();
+        let fleet = quiet(dir.path());
+        fleet.load();
+        assert!(fleet.list().is_empty());
+        fleet.rows().insert("a".into(), row("a"));
+        fleet.save();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "[{\"id\": \"devbox\", \"name\": "
+        );
+        // Nothing is added while it stands, and the person is told why.
+        let refused = fleet.add("devbox", "devbox").unwrap_err();
+        assert!(refused.contains("machines.json"), "{refused}");
+    }
+
+    #[test]
+    fn removing_a_machine_takes_back_the_yes_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let fleet = quiet(dir.path());
+        fleet.admitted.add("devbox");
+        fleet.rows().insert("devbox".into(), row("devbox"));
+        fleet.remove("devbox").unwrap();
+        assert!(!fleet.admitted.has("devbox"));
+    }
 
     #[test]
     fn a_state_reads_as_the_page_reads_it() {

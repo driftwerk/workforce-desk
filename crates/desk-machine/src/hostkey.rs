@@ -22,7 +22,8 @@ use crate::ssh::{self, SshExe};
 pub enum KeyTrouble {
     /// No key for it is known here.
     Unknown,
-    /// A key for it is known here, and it showed another.
+    /// A key for it is known here, and it showed another; or the key it
+    /// showed is one the person marked revoked. Never trusted from Desk.
     Changed,
 }
 
@@ -32,6 +33,8 @@ impl KeyTrouble {
         let has = |s: &str| said.contains(s);
         if has("REMOTE HOST IDENTIFICATION HAS CHANGED")
             || has("Host key for") && has("has changed")
+            || has("REVOKED HOST KEY")
+            || has("marked as revoked")
         {
             return Some(KeyTrouble::Changed);
         }
@@ -153,6 +156,105 @@ impl TrustQuestion {
     }
 }
 
+/// How long after a Cancel no new trust question is asked; doubled for
+/// each Cancel in a row, up to [`MAX_QUIET`].
+const QUIET_AFTER_CANCEL: std::time::Duration = std::time::Duration::from_secs(10);
+const MAX_QUIET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// The trust question as adding's is asked (`admit::Gate`): one at a time
+/// (another while it is open is refused, not queued), and after a Cancel
+/// none for a while, the wait doubling with each Cancel in a row, so script
+/// calling in a loop gets refusals, not a stream of dialogs.
+pub struct TrustGate {
+    quiet: std::time::Duration,
+    asking: std::sync::Mutex<Asking>,
+}
+
+#[derive(Default)]
+struct Asking {
+    open: bool,
+    cancels: u32,
+    quiet_until: Option<std::time::Instant>,
+}
+
+impl Default for TrustGate {
+    fn default() -> Self {
+        Self::with_quiet(QUIET_AFTER_CANCEL)
+    }
+}
+
+impl TrustGate {
+    pub fn with_quiet(quiet: std::time::Duration) -> Self {
+        Self {
+            quiet,
+            asking: Default::default(),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Asking> {
+        self.asking.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Asks with `ask`, unless a question is open or one was cancelled a
+    /// moment ago; whether the person said yes.
+    pub fn ask(&self, ask: impl FnOnce() -> bool) -> Result<bool, String> {
+        {
+            let mut a = self.lock();
+            if a.open {
+                return Err("Desk is already asking about trusting a machine.".into());
+            }
+            if let Some(left) = a
+                .quiet_until
+                .and_then(|u| u.checked_duration_since(std::time::Instant::now()))
+                .filter(|l| !l.is_zero())
+            {
+                return Err(format!(
+                    "Trusting a machine was cancelled. Try again in {} seconds.",
+                    left.as_secs().max(1)
+                ));
+            }
+            a.open = true;
+        }
+        // Closed however asking ends, a panic included.
+        struct Open<'a>(&'a TrustGate);
+        impl Drop for Open<'_> {
+            fn drop(&mut self) {
+                self.0.lock().open = false;
+            }
+        }
+        let open = Open(self);
+        let yes = ask();
+        {
+            let mut a = self.lock();
+            if yes {
+                a.cancels = 0;
+                a.quiet_until = None;
+            } else {
+                a.cancels = a.cancels.saturating_add(1);
+                let wait = self
+                    .quiet
+                    .saturating_mul(1 << (a.cancels - 1).min(16))
+                    .min(MAX_QUIET);
+                a.quiet_until = Some(std::time::Instant::now() + wait);
+            }
+        }
+        drop(open);
+        Ok(yes)
+    }
+}
+
+/// A trust question asked through `gate`.
+pub struct Gated<'a> {
+    pub gate: &'a TrustGate,
+    pub confirm: &'a dyn TrustConfirm,
+}
+
+impl Gated<'_> {
+    fn ask(&self, question: &TrustQuestion) -> Result<bool, String> {
+        self.gate.ask(|| self.confirm.trust_key(question))
+    }
+}
+
 /// Adds `machine`'s key to the person's known hosts (`files.known_hosts`),
 /// once it is the one whose fingerprint they saw (`seen`) and they said yes;
 /// refused when the key they know for it is another (a changed key is never
@@ -162,7 +264,7 @@ pub fn trust(
     machine: &Machine,
     files: &Files,
     seen: &str,
-    confirm: &dyn TrustConfirm,
+    confirm: &Gated<'_>,
 ) -> Result<(), String> {
     let name = &machine.name;
     let known_hosts = files.known_hosts.clone().ok_or_else(|| {
@@ -184,12 +286,12 @@ pub fn trust(
             key.fingerprint
         ));
     }
-    if !confirm.trust_key(&TrustQuestion {
+    if !confirm.ask(&TrustQuestion {
         name: name.clone(),
         target: machine.target.to_string(),
         kind: key.kind(),
         fingerprint: key.fingerprint.clone(),
-    }) {
+    })? {
         return Err("Trusting the machine was cancelled.".into());
     }
     // Read again after the yes: the line written is a key with the
@@ -282,6 +384,11 @@ mod tests {
             KeyTrouble::of(b"dev@devbox: Permission denied (publickey).\n"),
             None
         );
+        // A revoked key is never offered to be trusted.
+        assert_eq!(
+            KeyTrouble::of(b"@       WARNING: REVOKED HOST KEY DETECTED!       @\nThe ED25519 host key for devbox is marked as revoked.\nHost key verification failed.\n"),
+            Some(KeyTrouble::Changed)
+        );
     }
 
     #[test]
@@ -327,5 +434,36 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o700);
         }
+    }
+
+    #[test]
+    fn the_trust_question_is_asked_one_at_a_time_and_quietly_after_a_cancel() {
+        let gate = TrustGate::with_quiet(std::time::Duration::from_secs(60));
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        let no = || {
+            asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            false
+        };
+        assert_eq!(gate.ask(no), Ok(false));
+        assert!(gate.ask(|| true).unwrap_err().contains("Try again"));
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // While one is open, another is refused, not queued.
+        let open = TrustGate::default();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let (started_tx, started) = std::sync::mpsc::channel::<()>();
+        let gate = &open;
+        std::thread::scope(|s| {
+            s.spawn(move || {
+                gate.ask(move || {
+                    started_tx.send(()).unwrap();
+                    rx.recv().unwrap();
+                    true
+                })
+            });
+            started.recv().unwrap();
+            assert!(open.ask(|| true).unwrap_err().contains("already asking"));
+            tx.send(()).unwrap();
+        });
+        assert_eq!(open.ask(|| true), Ok(true), "closed once answered");
     }
 }
