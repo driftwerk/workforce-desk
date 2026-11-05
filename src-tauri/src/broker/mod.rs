@@ -5,6 +5,11 @@
 //! sockets (session and terminal PTYs, the event stream) are held here too,
 //! in [`socket`].
 //!
+//! A machine's hub (a computer of the person's own, reached over SSH) is
+//! brokered the same way, by a broker of its own: its tokens are read over
+//! SSH and kept in memory (`desk_machine::Link`), and go only to the
+//! forward to it on this computer's loopback.
+//!
 //! Every other hub request the page makes (to the local hub as the person,
 //! with its paired-device token, and to every paired hub) goes through
 //! `hub_io`, which holds those tokens the same way.
@@ -39,8 +44,37 @@ pub(crate) const BODY_TYPES: &[&str] = &[
 /// The largest body the page sends: a picture, at most.
 pub(crate) const MAX_BODY: usize = 16 * 1024 * 1024;
 
-/// Reads the local hub's connection; blocking (on Windows it asks WSL).
+/// Reads the hub's connection; blocking (on Windows it asks WSL, for a
+/// machine it asks over SSH).
 type Source = Arc<dyn Fn() -> eyre::Result<Option<Connection>> + Send + Sync>;
+
+/// Which hub a broker reaches, as the page is told of it.
+#[derive(Clone)]
+struct Place {
+    /// "this computer's hub", "devbox".
+    hub: Arc<str>,
+    /// Said while there is no hub there yet.
+    idle: Arc<str>,
+    /// What the page may ask of it.
+    routes: fn(&str, &str) -> Result<routes::Allowed, routes::Refused>,
+    pool: socket::Pool,
+    /// Reached through an SSH forward: a hub that isn't where the forward
+    /// goes shows as a connection ssh accepted and then closed, not one
+    /// refused.
+    forwarded: bool,
+}
+
+impl Place {
+    fn local() -> Self {
+        Self {
+            hub: "this computer's hub".into(),
+            idle: "This computer's hub isn't running yet.".into(),
+            routes: routes::http,
+            pool: socket::Pool::Local,
+            forwarded: false,
+        }
+    }
+}
 
 /// The local hub as the broker reaches it. Deliberately not `Debug`.
 #[derive(Clone)]
@@ -56,6 +90,7 @@ type Kept = Arc<Mutex<Option<Local>>>;
 
 pub struct Broker {
     source: Source,
+    place: Place,
     local: Kept,
     /// Reading it again when it can't be reached where it was.
     reread: Arc<crate::reread::Reread>,
@@ -85,9 +120,40 @@ impl Broker {
         )
     }
 
+    /// The broker for machine `link`'s hub, its sockets counted in a pool
+    /// of their own (`pool`, a number no other broker has).
+    pub fn machine(
+        link: Arc<desk_machine::Link>,
+        sockets: Arc<socket::Sockets>,
+        pool: u32,
+    ) -> Self {
+        let name = link.machine().name.clone();
+        Self::machine_with(
+            &name,
+            Arc::new(move || link.read().map_err(|e| eyre::eyre!(e))),
+            sockets,
+            pool,
+        )
+    }
+
+    /// A machine's broker with `source` reading where its forward is, and
+    /// its tokens.
+    fn machine_with(name: &str, source: Source, sockets: Arc<socket::Sockets>, pool: u32) -> Self {
+        let mut broker = Self::with_source(source, sockets);
+        broker.place = Place {
+            hub: name.into(),
+            idle: format!("{name} is up, but Desk isn't running there.").into(),
+            routes: routes::machine_http,
+            pool: socket::Pool::Machine(pool),
+            forwarded: true,
+        };
+        broker
+    }
+
     fn with_source(source: Source, sockets: Arc<socket::Sockets>) -> Self {
         Self {
             source,
+            place: Place::local(),
             local: Kept::default(),
             reread: Arc::default(),
             // The token goes to the hub on this computer and nowhere else:
@@ -98,7 +164,7 @@ impl Broker {
     }
 
     async fn local(&self) -> Result<Local, String> {
-        read(&self.source, &self.local).await
+        read(&self.source, &self.local, &self.place.idle).await
     }
 
     fn forget(&self) {
@@ -124,13 +190,14 @@ impl Broker {
         target: &str,
         body: Option<(String, Vec<u8>)>,
     ) -> Result<Answer, String> {
-        let allowed = routes::http(method, target).map_err(|e| e.to_string())?;
+        let hub = &self.place.hub;
+        let allowed = (self.place.routes)(method, target).map_err(|e| e.to_string())?;
         if let Some((kind, bytes)) = &body {
             if !BODY_TYPES.contains(&kind.as_str()) {
-                return Err(format!("Desk doesn't send {kind} to this computer's hub."));
+                return Err(format!("Desk doesn't send {kind} to {hub}."));
             }
             if bytes.len() > MAX_BODY {
-                return Err("That's too big to send to this computer's hub.".into());
+                return Err(format!("That's too big to send to {hub}."));
             }
         }
         let method = Method::from_bytes(allowed.method.as_bytes()).map_err(|e| e.to_string())?;
@@ -147,19 +214,15 @@ impl Broker {
             }
             Ok::<_, String>(request.send())
         };
-        let unreachable = |e: reqwest::Error| {
-            format!(
-                "Desk couldn't reach this computer's hub: {}",
-                e.without_url()
-            )
-        };
+        let unreachable =
+            |e: reqwest::Error| format!("Desk couldn't reach {hub}: {}", e.without_url());
         let local = self.local().await?;
         let mut response = match send(local.clone())?.await {
             Ok(r) => r,
             // Desk Helper may have moved the hub to new ports: where it is
             // is read again, and the request sent there if it moved (it
             // never reached the old address).
-            Err(e) if e.is_connect() => {
+            Err(e) if unreached(&e, self.place.forwarded) => {
                 self.reread().await;
                 let now = self.local().await?;
                 if now.base == local.base {
@@ -206,25 +269,40 @@ impl Broker {
         url.set_scheme("ws")
             .map_err(|_| "This computer's hub has no socket address.".to_string())?;
         let (source, kept) = (Arc::clone(&self.source), Arc::clone(&self.local));
+        let idle = Arc::clone(&self.place.idle);
         let bearer: socket::Bearer = Arc::new(move |fresh| {
-            let (source, kept) = (Arc::clone(&source), Arc::clone(&kept));
+            let (source, kept, idle) = (Arc::clone(&source), Arc::clone(&kept), Arc::clone(&idle));
             Box::pin(async move {
                 if fresh {
                     *kept.lock().expect("local") = None;
                 }
-                read(&source, &kept).await.map(|l| l.bearer)
+                read(&source, &kept, &idle).await.map(|l| l.bearer)
             })
         });
         // Desk Helper may have moved the hub: read again for the next one.
         let reread = Arc::clone(&self.reread);
         let unreachable: socket::Unreachable = Arc::new(move || reread.mark_stale());
-        self.sockets
-            .open(owner, page, url, bearer, Some(unreachable), events)
+        let dial = socket::Dial {
+            url,
+            bearer,
+            pool: self.place.pool,
+            legacy: None,
+            unreachable: Some(unreachable),
+        };
+        self.sockets.dial(owner, page, dial, events)
     }
 }
 
-/// The local hub as kept, or read now (and kept) if it isn't.
-async fn read(source: &Source, kept: &Kept) -> Result<Local, String> {
+/// Whether a request that failed never reached the hub where it was sent:
+/// nothing took the connection, or, through an SSH forward, ssh took it and
+/// closed it before any answer (its channel to the hub couldn't open).
+/// Either way it is sent again only if the hub turns out to have moved.
+fn unreached(e: &reqwest::Error, forwarded: bool) -> bool {
+    e.is_connect() || (forwarded && e.is_request() && !e.is_timeout())
+}
+
+/// The hub as kept, or read now (and kept) if it isn't.
+async fn read(source: &Source, kept: &Kept, idle: &str) -> Result<Local, String> {
     if let Some(l) = kept.lock().expect("local").clone() {
         return Ok(l);
     }
@@ -233,7 +311,7 @@ async fn read(source: &Source, kept: &Kept) -> Result<Local, String> {
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "This computer's hub isn't running yet.".to_string())?;
+        .ok_or_else(|| idle.to_string())?;
     let local = Local {
         base: loopback(&conn.gateway_url)?,
         bearer: conn.admin_token.into(),
@@ -273,6 +351,15 @@ pub async fn local_hub_fetch(
     broker: tauri::State<'_, Broker>,
     request: tauri::ipc::Request<'_>,
 ) -> CommandResult<Answer> {
+    let (method, path, body) = brokered(&request)?;
+    broker.fetch(&method, &path, body).await
+}
+
+/// The method, path and body of one of `DeskHub`'s brokered requests.
+pub(crate) type Brokered = (String, String, Option<(String, Vec<u8>)>);
+
+/// A brokered request as the page sends it: see [`local_hub_fetch`].
+pub(crate) fn brokered(request: &tauri::ipc::Request<'_>) -> Result<Brokered, String> {
     let headers = request.headers();
     let method = header(headers, "x-desk-method").ok_or("The request didn't say its method.")?;
     let path = header(headers, "x-desk-path").ok_or("The request didn't say its path.")?;
@@ -283,7 +370,7 @@ pub async fn local_hub_fetch(
         (None, InvokeBody::Json(v)) if v.as_object().is_some_and(|o| o.is_empty()) => None,
         _ => return Err("The request's body didn't say what it is.".into()),
     };
-    broker.fetch(&method, &path, body).await
+    Ok((method, path, body))
 }
 
 /// Opens one of the page's sockets to the local hub; its frames, and then
@@ -696,6 +783,132 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(said(&mut rx).await, "open");
+    }
+
+    /// What ssh does with a connection to its forward when nothing listens
+    /// where the forward goes on the machine: takes it, then closes it.
+    async fn forward_to_nothing() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((s, _)) = listener.accept().await {
+                drop(s);
+            }
+        });
+        url
+    }
+
+    /// A machine's broker reading from `at`, and how often it read it.
+    fn machine_following(at: Arc<Mutex<String>>) -> (Broker, Arc<std::sync::atomic::AtomicUsize>) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&reads);
+        let mut broker = Broker::machine_with(
+            "devbox",
+            Arc::new(move || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Some(Connection {
+                    gateway_url: at.lock().unwrap().clone(),
+                    admin_token: SENTINEL.into(),
+                    device_token: Some("device".into()),
+                }))
+            }),
+            Arc::default(),
+            7,
+        );
+        broker.reread = Arc::new(crate::reread::Reread::every(Duration::ZERO));
+        (broker, reads)
+    }
+
+    /// The machine's gateway moved: through the forward that shows as a
+    /// connection taken and closed, which reads again over SSH (the forward
+    /// is rebuilt at a new address here) and sends the request there.
+    #[tokio::test]
+    async fn a_machines_hub_that_moved_behind_its_forward_is_found_again() {
+        let (url, mut seen) = hub(vec![OK_JSON]).await;
+        let at = Arc::new(Mutex::new(forward_to_nothing().await));
+        let (broker, reads) = machine_following(Arc::clone(&at));
+        // Read once, kept; then the forward is rebuilt elsewhere.
+        broker.local().await.unwrap();
+        *at.lock().unwrap() = url;
+        let answer = broker
+            .fetch("GET", "/api/desk/sessions", None)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        assert_eq!(
+            seen.recv().await.unwrap().line,
+            "GET /api/desk/sessions HTTP/1.1"
+        );
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // This computer's hub isn't behind a forward: a connection taken
+        // and closed there may have reached it, and isn't sent again.
+        let closed = forward_to_nothing().await;
+        let e = broker_at(&closed, vec![])
+            .fetch("POST", "/api/desk/sessions", None)
+            .await
+            .unwrap_err();
+        assert!(e.contains("couldn't reach this computer's hub"), "{e}");
+    }
+
+    /// A machine's broker takes the same list as this computer's, and the
+    /// machine's folders and a terminal's programs; its errors name it.
+    #[tokio::test]
+    async fn a_machine_is_asked_only_what_the_list_allows() {
+        let (url, mut seen) = hub(vec![OK_JSON, OK_JSON]).await;
+        let (broker, _) = machine_following(Arc::new(Mutex::new(url.clone())));
+        broker
+            .fetch("GET", "/api/desk/folders?path=%2Fhome%2Fdev", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            seen.recv().await.unwrap().line,
+            "GET /api/desk/folders?path=%2Fhome%2Fdev HTTP/1.1"
+        );
+        for (m, p) in [
+            ("GET", "/api/vault/speech/openai/api_key"),
+            ("POST", "/api/admin/reset-model"),
+            ("GET", "/api/desk/folders?path=x&token=y"),
+        ] {
+            assert!(broker.fetch(m, p, None).await.is_err(), "{m} {p}");
+        }
+        let e = broker
+            .fetch(
+                "POST",
+                "/api/agents",
+                Some(("text/html".into(), b"<p>".to_vec())),
+            )
+            .await
+            .unwrap_err();
+        assert!(e.contains("to devbox"), "{e}");
+        assert!(
+            broker_at(&url, vec![])
+                .fetch("GET", "/api/desk/folders", None)
+                .await
+                .is_err(),
+            "not this computer's"
+        );
+    }
+
+    /// A machine's address must be this computer's loopback, as the local
+    /// hub's: its token goes nowhere else.
+    #[tokio::test]
+    async fn a_machines_token_only_goes_to_this_computer() {
+        for url in [
+            "http://203.0.113.7:4226",
+            "https://127.0.0.1:3",
+            "http://localhost:3",
+        ] {
+            let (broker, _) = machine_following(Arc::new(Mutex::new(url.into())));
+            let e = broker
+                .fetch("GET", "/api/desk/sessions", None)
+                .await
+                .unwrap_err();
+            assert!(
+                e.contains("isn't at an address on this computer"),
+                "{url}: {e}"
+            );
+        }
     }
 
     /// A hub that is down isn't read again for every request that fails:

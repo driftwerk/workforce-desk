@@ -1115,6 +1115,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "desk-machine"
+version = "0.1.0"
+dependencies = [
+ "desk-core",
+ "eyre",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "desk-tuple"
 version = "0.1.0"
 dependencies = [

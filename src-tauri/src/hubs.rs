@@ -26,6 +26,9 @@ pub struct HubAccount {
     pub label: String,
     pub url: String,
     pub local: bool,
+    /// The machine whose hub it is (one of the person's own computers,
+    /// reached over SSH); none for this computer's and every workspace.
+    pub machine: Option<String>,
     /// Changes whenever the token does, so the page can tell a hub paired
     /// again (or a renewed token) from the one it had; see [`revision`].
     pub revision: String,
@@ -41,9 +44,45 @@ impl HubAccount {
             label,
             url,
             local,
+            machine: None,
             token,
         }
     }
+}
+
+/// How a machine's hub is named among the hubs: `machine:<id>`. No hub's
+/// id from its address can have a `:`, so no workspace can take one.
+pub const MACHINE_HUB: &str = "machine:";
+
+/// The machine a hub id names, if it names one.
+pub fn machine_of(hub: &str) -> Option<&str> {
+    hub.strip_prefix(MACHINE_HUB)
+}
+
+/// Machine `link`'s hub as the page reaches it, with its device token,
+/// from `connection` (the tokens as read over SSH, the forward's address).
+pub fn machine_account(link: &desk_machine::Link, connection: Connection) -> Option<HubAccount> {
+    let m = link.machine();
+    let mut account = HubAccount::new(
+        format!("{MACHINE_HUB}{}", m.id),
+        m.name.clone(),
+        connection.gateway_url,
+        false,
+        connection.device_token?,
+    );
+    account.machine = Some(m.id.to_string());
+    Some(account)
+}
+
+/// Every machine whose hub Desk has reached and can reach now, without
+/// asking over SSH (the page reads this at each load).
+pub fn machine_accounts(machines: &desk_machine::Machines) -> Vec<HubAccount> {
+    machines
+        .list()
+        .iter()
+        .filter_map(|m| machines.get(m.id.as_str()))
+        .filter_map(|link| machine_account(&link, link.ready()?))
+        .collect()
 }
 
 /// An opaque stand-in for `token`: a hash of it under a key this run of

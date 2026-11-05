@@ -140,7 +140,7 @@ impl HubIo {
             let (paired, id) = (Arc::clone(&paired), id.clone());
             Box::pin(async move {
                 if fresh {
-                    paired.forget();
+                    paired.forget_token(&id);
                 }
                 paired
                     .reach_async(&id)
@@ -166,10 +166,18 @@ impl HubIo {
         // This computer's hub may have moved to new ports: read again for
         // the next socket when it can't be reached. A workspace elsewhere
         // isn't, which would only read every hub's token again.
-        let unreachable = reach.local.then(|| {
-            let paired = Arc::clone(&self.paired);
-            Arc::new(move || paired.local_unreachable()) as socket::Unreachable
-        });
+        let unreachable = match &reach.machine {
+            // A machine's gateway may have moved: its tokens and where it
+            // is are read again over SSH for the next socket.
+            Some(link) => {
+                let link = Arc::clone(link);
+                Some(Arc::new(move || link.forget()) as socket::Unreachable)
+            }
+            None => reach.local.then(|| {
+                let paired = Arc::clone(&self.paired);
+                Arc::new(move || paired.local_unreachable()) as socket::Unreachable
+            }),
+        };
         let dial = Dial {
             url,
             bearer,

@@ -62,18 +62,22 @@ pub type Events = Arc<dyn Fn(InvokeResponseBody) + Send + Sync>;
 pub type Bearer = Arc<dyn Fn(bool) -> BoxFuture<'static, Result<Arc<str>, String>> + Send + Sync>;
 
 /// Which share of sockets one counts against: the local hub's admin
-/// sockets, or conversations and links to hubs. A page with many
-/// conversations open can't leave its terminals without, nor the other way.
+/// sockets, a machine's (each its own, as big as the local hub's), or
+/// conversations and links to hubs. A page with many conversations open
+/// can't leave its terminals without, nor one machine's terminals
+/// another's, nor the other way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pool {
     Local,
+    /// A machine's admin sockets, by the number its broker was given.
+    Machine(u32),
     Hubs,
 }
 
 impl Pool {
     fn limits(self) -> (usize, usize) {
         match self {
-            Pool::Local => (MAX_SOCKETS, MAX_PER_WINDOW),
+            Pool::Local | Pool::Machine(_) => (MAX_SOCKETS, MAX_PER_WINDOW),
             Pool::Hubs => (MAX_HUB_SOCKETS, MAX_HUB_PER_WINDOW),
         }
     }
@@ -223,6 +227,7 @@ impl Sockets {
     /// Opens one of the local hub's admin sockets; see [`dial`].
     ///
     /// [`dial`]: Self::dial
+    #[cfg(test)]
     pub fn open(
         &self,
         owner: &str,
@@ -262,6 +267,7 @@ impl Sockets {
         {
             return Err(match pool {
                 Pool::Local => "Desk has too many connections to this computer's hub open.",
+                Pool::Machine(_) => "Desk has too many connections to that machine open.",
                 Pool::Hubs => "Desk has too many conversations open.",
             }
             .into());
@@ -415,6 +421,7 @@ impl Failed {
     fn said(&self, pool: Pool) -> String {
         let hub = match pool {
             Pool::Local => "This computer's hub",
+            Pool::Machine(_) => "The machine's hub",
             Pool::Hubs => "The workspace",
         };
         match self {

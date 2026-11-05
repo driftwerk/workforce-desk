@@ -1,0 +1,24 @@
+[package]
+name = "desk-machine"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+description = "Desk on a machine of the person's own: reaching its backend with their ssh, the forward to its hub, and adding it"
+
+# A stand-in for ssh that answers from a scenario file and forwards a port
+# as `ssh -L` does, for the tests.
+[[bin]]
+name = "fake-ssh"
+path = "src/bin/fake-ssh.rs"
+test = false
+
+[dependencies]
+desk-core = { workspace = true }
+eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

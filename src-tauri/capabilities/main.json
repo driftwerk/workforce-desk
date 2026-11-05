@@ -36,6 +36,8 @@
     "allow-hub-connection",
     "allow-local-hub-fetch",
     "allow-local-hub-socket-open",
+    "allow-machine-fetch",
+    "allow-machine-socket-open",
     "allow-socket-send",
     "allow-socket-ack",
     "allow-socket-close",

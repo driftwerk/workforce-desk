@@ -5,6 +5,12 @@
 //! The page names a hub by id; nothing it sends decides where a request
 //! goes or which token it carries. A hub's address is checked each time it
 //! is used: `https`, or the hub on this computer by loopback address.
+//!
+//! A machine's hub (`machine:<id>`) is read from its `desk_machine::Link`,
+//! not from the hubs Desk keeps: its device token as read over SSH and held
+//! in memory, at the forward's address on this computer's loopback. A token
+//! it turns away is read again over SSH, since Desk Helper there renews it
+//! at every start.
 
 use std::sync::{Arc, Mutex};
 
@@ -49,6 +55,8 @@ pub struct Reach {
     pub token: Arc<str>,
     /// The hub on this computer, whose address Desk Helper may change.
     pub local: bool,
+    /// A machine's hub, through the forward to it.
+    pub machine: Option<Arc<desk_machine::Link>>,
     pub client: reqwest::Client,
     /// For an upload, each bounded by `desk_core::net::upload_timeout`.
     pub uploads: reqwest::Client,
@@ -81,18 +89,25 @@ pub struct Paired {
     pub(crate) reread: crate::reread::Reread,
     loopback: Clients,
     remote: Clients,
+    machines: Arc<desk_machine::Machines>,
 }
 
 impl Paired {
-    pub fn new(paths: Paths, backend: Option<Backend>) -> Self {
+    pub fn new(
+        paths: Paths,
+        backend: Option<Backend>,
+        machines: Arc<desk_machine::Machines>,
+    ) -> Self {
         let local = backend.clone();
-        Self::with_sources(
+        let mut paired = Self::with_sources(
             Arc::new(move || hubs::accounts(&paths, backend.as_ref())),
             Arc::new(move || match &local {
                 Some(b) => Ok(b.connection()?.and_then(hubs::local_account)),
                 None => Ok(None),
             }),
-        )
+        );
+        paired.machines = machines;
+        paired
     }
 
     /// With `source` for every hub, the local one read from it too.
@@ -113,6 +128,16 @@ impl Paired {
             reread: crate::reread::Reread::default(),
             loopback: Clients::new(true),
             remote: Clients::new(false),
+            machines: Arc::default(),
+        }
+    }
+
+    /// Forgets what hub `id`'s token was, after it turned it away: a
+    /// machine's is read again over SSH, any other's with the hubs.
+    pub fn forget_token(&self, id: &str) {
+        match hubs::machine_of(id).and_then(|m| self.machines.get(m)) {
+            Some(link) => link.forget(),
+            None => self.forget(),
         }
     }
 
@@ -177,6 +202,9 @@ impl Paired {
     /// How to reach hub `id`; blocking (reading the hubs may ask the
     /// keychain once, or WSL).
     pub fn reach(&self, id: &str) -> Result<Reach, Failure> {
+        if let Some(machine) = hubs::machine_of(id) {
+            return self.reach_machine(id, machine);
+        }
         let hub = self.hub(id).ok_or(Failure::Unknown)?;
         // The local hub only ever on this computer; any other over https,
         // or on this computer too (a hub run for development).
@@ -196,8 +224,40 @@ impl Paired {
             base,
             token: hub.token.into(),
             local: hub.local,
+            machine: None,
             client: clients.requests.clone(),
             uploads: clients.uploads.clone(),
+        })
+    }
+
+    /// Machine `machine`'s hub, as hub `id`: its tokens as kept or read
+    /// now over SSH (blocking), only ever at a loopback address here.
+    fn reach_machine(&self, id: &str, machine: &str) -> Result<Reach, Failure> {
+        let link = self.machines.get(machine).ok_or(Failure::Unknown)?;
+        let connection = link
+            .connection()
+            .map_err(Failure::Unreachable)?
+            .ok_or_else(|| {
+                Failure::Unreachable(format!(
+                    "{} is up, but Desk isn't running there.",
+                    link.machine().name
+                ))
+            })?;
+        let hub = hubs::machine_account(&link, connection).ok_or_else(|| {
+            Failure::Unreachable(format!(
+                "Desk on {} hasn't paired itself yet.",
+                link.machine().name
+            ))
+        })?;
+        debug_assert_eq!(hub.id, id);
+        let base = desk_core::net::loopback_url(&hub.url).map_err(Failure::Refused)?;
+        Ok(Reach {
+            base,
+            token: hub.token.into(),
+            local: false,
+            machine: Some(link),
+            client: self.loopback.requests.clone(),
+            uploads: self.loopback.uploads.clone(),
         })
     }
 
@@ -239,12 +299,27 @@ impl Paired {
                 }
                 attempt(now).await?.map_err(unreachable)?
             }
+            // Through the forward, a hub that moved shows as a connection
+            // ssh took and closed: read again over SSH, which rebuilds the
+            // forward (at a new address here) if the gateway moved.
+            Err(e)
+                if reach.machine.is_some()
+                    && (e.is_connect() || (e.is_request() && !e.is_timeout())) =>
+            {
+                let link = Arc::clone(reach.machine.as_ref().expect("a machine"));
+                let _ = tauri::async_runtime::spawn_blocking(move || link.read()).await;
+                let now = self.reach_async(id).await?;
+                if now.base == reach.base {
+                    return Err(unreachable(e));
+                }
+                attempt(now).await?.map_err(unreachable)?
+            }
             Err(e) => return Err(unreachable(e)),
         };
         if response.status() != StatusCode::UNAUTHORIZED {
             return Ok(response);
         }
-        self.forget();
+        self.forget_token(id);
         attempt(self.reach_async(id).await?)
             .await?
             .map_err(unreachable)
@@ -262,6 +337,7 @@ pub(crate) mod tests {
             label: id.into(),
             url: url.into(),
             local,
+            machine: None,
             revision: hubs::revision(token),
             token: token.into(),
         }

@@ -65,6 +65,25 @@ impl<R: tauri::Runtime> Confirm for NativeConfirm<R> {
     }
 }
 
+/// The question before Desk adds a machine (`desk_machine::admit`), as the
+/// same native dialog asks it: outside the page, where script can't click
+/// it.
+impl<R: tauri::Runtime> desk_machine::admit::Confirm for NativeConfirm<R> {
+    fn run_on(&self, question: &desk_machine::admit::Question) -> bool {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        self.0
+            .dialog()
+            .message(question.text())
+            .title("Add a machine")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Add".into(),
+                "Cancel".into(),
+            ))
+            .blocking_show()
+    }
+}
+
 pub struct PairGate {
     paths: Paths,
     confirm: Arc<dyn Confirm>,

@@ -82,6 +82,7 @@ fn remove_backend(backend: &Backend) -> Result<()> {
             .host
             .invocation(&helper.to_string_lossy(), &["--remove-everything"]),
         (Host::Native, None) => return remove_here(backend),
+        (Host::Ssh(m), _) => eyre::bail!("Desk doesn't remove what {} keeps from here", m.name),
     };
     let out = invocation.command().output()?;
     if !out.status.success() {

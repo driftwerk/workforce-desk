@@ -9,14 +9,23 @@ use serde::{Deserialize, Serialize};
 use crate::host::{Host, Invocation, Wsl};
 use crate::{LOCAL_HUB_ID, Paths, Secret, SecretStore, Secrets, device_token_account, read_ports};
 
-/// How to talk to the local hub.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// How to talk to the local hub. Its `Debug` leaves the tokens out.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub gateway_url: String,
     pub admin_token: String,
     /// Desk's own device token, once Desk Helper has paired Desk with the
     /// hub.
     pub device_token: Option<String>,
+}
+
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("gateway_url", &self.gateway_url)
+            .field("device_token", &self.device_token.as_ref().map(|_| "…"))
+            .finish_non_exhaustive()
+    }
 }
 
 /// The connection as the backend's own files hold it; none until Desk
@@ -171,20 +180,32 @@ impl Backend {
             Host::Native => {
                 read_connection(&self.paths, &Secrets::for_host(&self.paths, &self.host)?)
             }
-            Host::Wsl(w) => {
-                let out = run(&self.host.invocation(&w.helper(), &["connection", "--json"]))
-                    .context("asking Desk Helper in WSL for the local hub")?;
-                if !out.status.success() {
-                    eyre::bail!(
-                        "Desk Helper in {} couldn't say: {}",
-                        w.distro,
-                        String::from_utf8_lossy(&out.stderr).trim()
-                    );
-                }
-                parse_connection(&out.stdout)
-            }
+            host => connection_over(host, run),
         }
     }
+}
+
+/// The connection as Desk Helper on `host` (a WSL distro, a machine over
+/// SSH) says it, with `run` running what it is asked. What it printed holds
+/// the tokens, so no error here ever carries it.
+pub fn connection_over(
+    host: &Host,
+    run: impl FnOnce(&Invocation) -> std::io::Result<std::process::Output>,
+) -> Result<Option<Connection>> {
+    let (helper, place) = match host {
+        Host::Native => eyre::bail!("Desk Helper here is read from its own files"),
+        Host::Wsl(w) => (w.helper(), format!("in {}", w.distro)),
+        Host::Ssh(m) => (m.helper(), format!("on {}", m.name)),
+    };
+    let out = run(&host.invocation(&helper, &["connection", "--json"]))
+        .with_context(|| format!("asking Desk Helper {place} for its hub"))?;
+    if !out.status.success() {
+        eyre::bail!(
+            "Desk Helper {place} couldn't say: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    parse_connection(&out.stdout)
 }
 
 #[cfg(test)]
