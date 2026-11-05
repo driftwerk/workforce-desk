@@ -748,6 +748,9 @@ impl Fleet {
         if let Err(m) = Self::fits(&machine, &look) {
             return self.step_failed(id, Step::Connect, m);
         }
+        if look.desktop {
+            return self.step_failed(id, Step::Connect, probe::DESKTOP.into());
+        }
         let system = look.system();
         self.emit(SetupEvent {
             detail: Some(format!(
@@ -1037,6 +1040,12 @@ impl Fleet {
                 };
             }
         };
+        // Never over desktop Desk, installed there since.
+        if look.desktop {
+            return State::Failed {
+                message: probe::DESKTOP.into(),
+            };
+        }
         let system = look.system();
         if self.rows().get(id).and_then(|r| r.kept.system.clone()) != Some(system.clone()) {
             self.update_kept(id, |k| k.system = Some(system));

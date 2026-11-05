@@ -59,6 +59,10 @@ pub struct Look {
     pub linger: Option<bool>,
     /// Whether Desk's service there is enabled.
     pub service: bool,
+    /// The account already runs Desk as a desktop app (its folder isn't a
+    /// machine's, its secrets are in a keyring, or its service isn't
+    /// machine mode's): installing would take them over.
+    pub desktop: bool,
 }
 
 impl Look {
@@ -88,8 +92,18 @@ pub fn look_script() -> String {
          printf 'installed=%s\\n' \"$(readlink \"$HOME/{MACHINE_ROOT}/bin/current\" 2>/dev/null)\"\n\
          printf 'systemd=%s\\n' \"$(systemctl --user show-environment >/dev/null 2>&1 && echo yes || echo no)\"\n\
          printf 'linger=%s\\n' \"$(loginctl show-user \"$(id -un)\" -p Linger --value 2>/dev/null)\"\n\
-         printf 'service=%s\\n' \"$(systemctl --user is-enabled {unit} 2>/dev/null)\"\n",
+         printf 'service=%s\\n' \"$(systemctl --user is-enabled {unit} 2>/dev/null)\"\n\
+         d=\"$HOME/{root}\"\n\
+         printf 'desk_root=%s\\n' \"$([ -d \"$d\" ] && echo yes)\"\n\
+         printf 'desk_marker=%s\\n' \"$([ -e \"$d/{marker}\" ] && echo yes)\"\n\
+         printf 'desk_bin=%s\\n' \"$([ -e \"$d/bin/current\" ] && echo yes)\"\n\
+         printf 'desk_keys=%s\\n' \"$(sed -n 's/^store *= *\"\\(.*\\)\"/\\1/p' \"$d/keys.toml\" 2>/dev/null | head -n 1)\"\n\
+         u=\"${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user/{unit}\"\n\
+         printf 'desk_unit=%s\\n' \"$(if [ -f \"$u\" ]; then if grep -q -- '{flag}' \"$u\"; then echo machine; else echo desktop; fi; fi)\"\n",
         unit = desk_core::systemd::UNIT,
+        root = MACHINE_ROOT,
+        marker = desk_core::MACHINE_MARKER,
+        flag = desk_core::backend_install::MACHINE_FLAG,
     )
 }
 
@@ -97,6 +111,8 @@ impl Look {
     pub fn parse(said: &str) -> Result<Look, String> {
         let mut look = Look::default();
         let mut uid = None;
+        let (mut root, mut marker, mut machine_bin, mut keyring, mut desktop_unit) =
+            (false, false, false, false, false);
         for line in said.lines() {
             let Some((k, v)) = line.split_once('=') else {
                 continue;
@@ -125,10 +141,18 @@ impl Look {
                     }
                 }
                 "service" => look.service = v == "enabled",
+                "desk_root" => root = v == "yes",
+                "desk_marker" => marker = v == "yes",
+                "desk_bin" => machine_bin = v == "yes",
+                "desk_keys" => keyring = v == "system",
+                "desk_unit" => desktop_unit = v == "desktop",
                 _ => {}
             }
         }
         look.root = uid == Some(0);
+        // A folder with installed versions and no marker is a machine's
+        // from before the marker.
+        look.desktop = (root && !marker && !machine_bin) || keyring || desktop_unit;
         if look.user.is_empty() || look.arch.is_empty() {
             return Err("The machine didn't say what it is.".into());
         }
@@ -175,6 +199,9 @@ pub fn look(ssh: &SshExe, machine: &Machine) -> Result<Look, Missed> {
     }
     Err(Missed::Unreachable(ssh::problem(machine, &out.stderr)))
 }
+
+/// Why Desk won't install on an account that runs desktop Desk.
+pub const DESKTOP: &str = "This account already runs Desk as a desktop app; use another account for a machine. Desk won't change anything there.";
 
 /// What the page is told of the machine's host key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -240,6 +267,12 @@ pub fn probe(ssh: &SshExe, machine: &Machine, user: Option<String>, files: &File
         access,
     };
     match look(ssh, machine) {
+        Ok(look) if look.desktop => answer(
+            ProbeKey::Known,
+            Some(Access::Unreachable {
+                message: DESKTOP.into(),
+            }),
+        ),
         Ok(look) => answer(
             ProbeKey::Known,
             Some(Access::Ok {
@@ -424,6 +457,22 @@ mod tests {
         assert_eq!(odd.installed, None);
         assert!(Look::parse("user=dev\nhome=/home/a b\narch=x86_64\n").is_err());
         assert!(Look::parse("home=/home/dev\n").is_err());
+        // An account that runs desktop Desk; a machine's, before and after
+        // the marker.
+        let base = "user=dev\nhome=/home/dev\nkernel=Linux\narch=x86_64\n";
+        let desktop = |more: &str| Look::parse(&format!("{base}{more}")).unwrap().desktop;
+        assert!(desktop("desk_root=yes\ndesk_marker=\ndesk_bin=\n"));
+        assert!(desktop(
+            "desk_root=yes\ndesk_marker=yes\ndesk_keys=system\n"
+        ));
+        assert!(desktop("desk_unit=desktop\n"));
+        assert!(!desktop(
+            "desk_root=yes\ndesk_marker=yes\ndesk_keys=file\ndesk_unit=machine\n"
+        ));
+        assert!(!desktop(
+            "desk_root=yes\ndesk_marker=\ndesk_bin=yes\ndesk_keys=file\n"
+        ));
+        assert!(!desktop(""));
     }
 
     #[test]

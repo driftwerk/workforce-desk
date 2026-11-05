@@ -20,7 +20,7 @@ use minisign_verify::{PublicKey, Signature};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::{LINUX_HELPER_EXECUTABLE, LINUX_HUB_EXECUTABLE, LINUX_MEMORY_EXECUTABLE};
+use crate::LINUX_HELPER_EXECUTABLE;
 
 /// Names an unpacked backend folder to install on machines instead of the
 /// release's; read only by builds that aren't release builds.
@@ -29,13 +29,9 @@ pub const DEV_OVERRIDE_ENV: &str = "DESK_MACHINE_BACKEND";
 /// Whether this is a release build, which never reads [`DEV_OVERRIDE_ENV`].
 pub const RELEASE_BUILD: bool = !cfg!(debug_assertions);
 
-/// What a backend holds at its top.
-const PROGRAMS: [&str; 3] = [
-    LINUX_HELPER_EXECUTABLE,
-    LINUX_HUB_EXECUTABLE,
-    LINUX_MEMORY_EXECUTABLE,
-];
-const PLUGIN: &str = "claude-plugin";
+/// What a backend holds at its top: the programs and the plugin, as the
+/// install scripts name them.
+use crate::backend_install::{PLUGIN, PROGRAMS};
 
 /// A machine's processor, as the release builds a backend for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -94,16 +90,9 @@ pub fn release_url(updater_endpoint: &str, version: &str, asset: &str) -> Result
     ))
 }
 
-/// Letters, digits and `.+-`, never `..`: safe in a path and a URL.
-fn plain(version: &str) -> bool {
-    !version.is_empty()
-        && version.len() <= 64
-        && version
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
-        && !version.starts_with(['.', '-'])
-        && !version.contains("..")
-}
+/// Letters, digits and `.+-`, never `..`: safe in a path and a URL (as
+/// a version names its folder under `bin`).
+use crate::backend_install::valid_version as plain;
 
 fn base64_text(what: &str, b64: &str) -> Result<String> {
     let bytes = base64::engine::general_purpose::STANDARD
@@ -246,7 +235,12 @@ pub fn release(
         data,
         signed: true,
     };
-    if let (Ok(data), Ok(sig)) = (std::fs::read(&tarball), std::fs::read_to_string(&sig_path)) {
+    // What is kept is read only if it is no larger than a backend can be.
+    let small = |p: &Path, max: u64| std::fs::metadata(p).is_ok_and(|m| m.len() <= max);
+    if small(&tarball, MAX_TARBALL_BYTES)
+        && small(&sig_path, MAX_SIG_BYTES)
+        && let (Ok(data), Ok(sig)) = (std::fs::read(&tarball), std::fs::read_to_string(&sig_path))
+    {
         match verify(pubkey, &asset, &data, &sig) {
             Ok(()) => return Ok(backend(data)),
             Err(e) => {
@@ -539,6 +533,32 @@ mod tests {
             "a kept file that fails is fetched again"
         );
         assert_eq!(std::fs::read(&kept).unwrap(), data(SIGNED));
+    }
+
+    #[test]
+    fn a_kept_file_larger_than_a_backend_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = text("test.key.pub");
+        let server = Server::new(data(SIGNED));
+        release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+            server.fetch(u)
+        })
+        .unwrap();
+        // The kept tarball grows past what a backend can be (sparse: no
+        // gigabyte is written): it is fetched again, not read.
+        let kept = dir.path().join("0.3.0").join(SIGNED);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&kept)
+            .unwrap()
+            .set_len(MAX_TARBALL_BYTES + 1)
+            .unwrap();
+        let got = release(dir.path(), "0.3.0", Arch::X86_64, &key, ENDPOINT, |u| {
+            server.fetch(u)
+        })
+        .unwrap();
+        assert_eq!(server.asked.borrow().len(), 4, "fetched again");
+        assert_eq!(got.data, data(SIGNED));
     }
 
     #[test]

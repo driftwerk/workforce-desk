@@ -466,6 +466,8 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     // Installed as the install scripts lay it out, and its service has an
     // absolute ExecStart in machine mode, told who its owner is.
     assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+    // Desk's folder there is marked a machine's (its secrets in a file).
+    assert!(b.home().join(".local/share/Desk/machine").is_file());
     let unit =
         std::fs::read_to_string(b.home().join(".config/systemd/user/desk-helper.service")).unwrap();
     let exec = unit.lines().find(|l| l.starts_with("ExecStart=")).unwrap();
@@ -869,4 +871,40 @@ fn a_config_with_forwards_is_never_connected_to_to_trust_its_key() {
         b.calls()
     );
     assert!(!b.known_hosts().exists());
+}
+
+#[test]
+fn an_account_that_runs_desktop_desk_is_never_taken_over() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    // Desktop Desk there: its folder, its keyring store, its own service.
+    let root = b.home().join(".local/share/Desk");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("keys.toml"), "store = \"system\"\n").unwrap();
+    let unit = b.home().join(".config/systemd/user/desk-helper.service");
+    std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    std::fs::write(&unit, "[Service]\nExecStart=/usr/bin/desk-helper\n").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(
+        matches!(&p.access, Some(Access::Unreachable { message }) if message.contains("desktop app")),
+        "{p:?}"
+    );
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("refused", || {
+        step(&r, "connect", StepState::Failed).is_some()
+    });
+    assert!(matches!(r.fleet.state(&id), Some(State::Failed { .. })));
+    // Nothing there changed.
+    assert_eq!(b.installed(), None);
+    assert!(!root.join("machine").exists());
+    assert_eq!(
+        std::fs::read_to_string(&unit).unwrap(),
+        "[Service]\nExecStart=/usr/bin/desk-helper\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("keys.toml")).unwrap(),
+        "store = \"system\"\n"
+    );
 }

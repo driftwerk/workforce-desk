@@ -78,13 +78,17 @@ impl Host for AppHost {
                 let endpoint = self
                     .updater("endpoint")
                     .ok_or("This Desk doesn't know where its releases are.")?;
+                // https only, as the updater's own download, and no more
+                // redirects than a release's asset needs.
                 let client = reqwest::blocking::Client::builder()
+                    .https_only(true)
+                    .redirect(machine_backend::redirect_policy())
                     .timeout(std::time::Duration::from_secs(600))
                     .build()
                     .map_err(|e| e.to_string())?;
                 let fetch = |url: &str| -> eyre::Result<Vec<u8>> {
                     let r = client.get(url).send()?.error_for_status()?;
-                    Ok(r.bytes()?.to_vec())
+                    read_capped(r, machine_backend::MAX_TARBALL_BYTES)
                 };
                 machine_backend::release(
                     &self.cache,
@@ -102,6 +106,18 @@ impl Host for AppHost {
     fn person(&self) -> Person {
         person(&self.home)
     }
+}
+
+/// What `from` gives, up to `max` bytes: refused as soon as it gives more,
+/// without reading the rest (a download larger than a backend can be).
+pub fn read_capped(from: impl std::io::Read, max: u64) -> eyre::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut got = Vec::new();
+    from.take(max + 1).read_to_end(&mut got)?;
+    if got.len() as u64 > max {
+        eyre::bail!("the download is larger than a backend can be ({max} bytes)");
+    }
+    Ok(got)
 }
 
 /// The person's name and email, from their git settings (`[user]` in
@@ -258,6 +274,23 @@ mod tests {
         assert_eq!(p.name.as_deref(), Some("Ada Lovelace"));
         assert_eq!(p.email.as_deref(), Some("ada@example.com"));
         assert_eq!(person(&dir.path().join("none")), Person::default());
+    }
+
+    #[test]
+    fn a_download_is_stopped_once_it_is_larger_than_a_backend() {
+        /// Endless bytes, counting how many were read.
+        struct Endless(u64);
+        impl std::io::Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.0 += buf.len() as u64;
+                Ok(buf.len())
+            }
+        }
+        let mut endless = Endless(0);
+        let e = read_capped(&mut endless, 1000).unwrap_err();
+        assert!(e.to_string().contains("larger than a backend"), "{e}");
+        assert!(endless.0 <= 1001, "stopped reading: {}", endless.0);
+        assert_eq!(read_capped(&b"abc"[..], 3).unwrap(), b"abc");
     }
 
     #[test]
