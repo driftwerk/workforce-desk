@@ -178,11 +178,14 @@ impl Broker {
         );
         // Through the forward's socket and nothing else, whatever host its
         // address names.
+        let socket = machine.socket();
         #[cfg(unix)]
-        if let Some(socket) = machine.socket() {
+        if let Some(socket) = socket {
             broker.client = desk_core::net::machine(&socket);
             broker.unix = Some(socket);
         }
+        #[cfg(not(unix))]
+        let _ = socket;
         broker.machine = Some(machine);
         broker.place = Place {
             hub: name.into(),
