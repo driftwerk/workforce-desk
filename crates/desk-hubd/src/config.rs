@@ -419,6 +419,12 @@ pub fn render(paths: &Paths, ports: &HubPorts, memories: Memories, keys: KeyStor
         "subscription".into(),
         table(&[("chatgpt_direct", Value::Boolean(true))]),
     );
+    // The Floor's lines are written on another signed-in plan of the person's
+    // when the agent's own has no usable login.
+    doc.insert(
+        "floor".into(),
+        table(&[("fallback_providers", Value::Boolean(true))]),
+    );
     let agent = table(&[
         ("id", s("desk")),
         ("name", s("Desk")),
@@ -563,6 +569,7 @@ mod tests {
         );
         assert_eq!(doc["approvals"]["enabled"].as_bool(), Some(true));
         assert_eq!(doc["approvals"]["backend"].as_str(), Some("postgres"));
+        assert_eq!(doc["floor"]["fallback_providers"].as_bool(), Some(true));
         assert!(
             doc.get("permissions")
                 .and_then(|p| p.get("enabled"))
