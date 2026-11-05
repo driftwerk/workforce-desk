@@ -852,7 +852,7 @@ impl Fleet {
         if look.installed.is_some() && !look.service {
             let _ = setup::stop(&self.ssh, machine, &bin);
         }
-        setup::copy(&self.ssh, machine, &bin, &backend.version, &backend.tarball)?;
+        setup::copy(&self.ssh, machine, &bin, &backend.version, &backend.data)?;
         setup::flip(&self.ssh, machine, &bin, &backend.version)?;
         if let Some(l) = self.machines.get(machine.id.as_str()) {
             l.forget();

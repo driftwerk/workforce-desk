@@ -329,6 +329,7 @@ impl Host for TestHost {
             version: self.wanted.clone(),
             arch,
             tarball: self.tarball.clone(),
+            data: std::fs::read(&self.tarball).map_err(|e| e.to_string())?,
             signed: false,
         })
     }

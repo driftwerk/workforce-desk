@@ -15,7 +15,6 @@
 //! - **engines**: Claude Code's and Codex's own installers, for the account
 //!   (`~/.local/bin`), never with sudo.
 
-use std::io::Read as _;
 use std::process::Stdio;
 
 use desk_core::backend_install as install;
@@ -47,19 +46,12 @@ pub fn run(ssh: &SshExe, machine: &Machine, script: &str, what: &str) -> Result<
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The SHA-256 of `file`, in hex.
-fn sha256(file: &std::path::Path) -> Result<String, String> {
-    let mut f = std::fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
-    let mut h = sha2::Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-    }
-    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+/// The SHA-256 of `data`, in hex.
+fn sha256(data: &[u8]) -> String {
+    sha2::Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The script that takes the tarball on its input into `bin/<version>`,
@@ -86,16 +78,16 @@ pub fn copy_script(bin: &str, version: &str, sha: &str) -> Result<String, String
     ))
 }
 
-/// Copies `tarball` there as `version`, checks it, unpacks it and asks it
-/// `--check`. Blocking.
+/// Copies `data` (the tarball's bytes, as they were checked here) there as
+/// `version`, checks it, unpacks it and asks it `--check`. Blocking.
 pub fn copy(
     ssh: &SshExe,
     machine: &Machine,
     bin: &str,
     version: &str,
-    tarball: &std::path::Path,
+    data: &[u8],
 ) -> Result<(), String> {
-    let script = copy_script(bin, version, &sha256(tarball)?)?;
+    let script = copy_script(bin, version, &sha256(data))?;
     let mut command = ssh.command(&machine.command(&["sh".into(), "-c".into(), script]));
     let mut child = command
         .stdin(Stdio::piped())
@@ -104,10 +96,10 @@ pub fn copy(
         .spawn()
         .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
     let mut stdin = child.stdin.take().expect("piped");
-    let mut file =
-        std::fs::File::open(tarball).map_err(|e| format!("{}: {e}", tarball.display()))?;
+    let data = data.to_vec();
     let feed = std::thread::spawn(move || {
-        let _ = std::io::copy(&mut file, &mut stdin);
+        use std::io::Write as _;
+        let _ = stdin.write_all(&data);
     });
     let out = child
         .wait_with_output()
