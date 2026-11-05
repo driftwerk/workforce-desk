@@ -113,6 +113,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         tabbed={!actions}
       >
         {need.ask}
+        {need.chose && <span className="faint"> It chose: {need.chose}</span>}
         {where && <span className="faint"> · {where}</span>}
         {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
         {need.why && <span className="floor-need-why faint small">{need.why}</span>}
