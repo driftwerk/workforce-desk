@@ -137,26 +137,11 @@ pub fn person(home: &Path) -> Person {
     person
 }
 
-/// The question before trusting a machine's host key, natively, Cancel
-/// first: the default, what Return and Escape choose.
+/// The question before trusting a machine's host key, as pairing's native
+/// question asks: Cancel first, the default, what Return and Escape choose.
 impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
     fn trust_key(&self, question: &TrustQuestion) -> bool {
-        use tauri_plugin_dialog::{
-            DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
-        };
-        const YES: &str = "Trust Key";
-        let answer = self
-            .0
-            .dialog()
-            .message(question.text())
-            .title("Trust a machine")
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Cancel".into(),
-                YES.into(),
-            ))
-            .blocking_show_with_result();
-        matches!(answer, MessageDialogResult::Custom(s) if s == YES)
+        self.ask("Trust a machine", question.text(), "Trust Key")
     }
 }
 
@@ -213,7 +198,7 @@ pub async fn machine_add(
 
 #[tauri::command]
 pub fn machine_reconnect(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
-    fleet.reconnect(&id)
+    fleet.inner().reconnect(&id)
 }
 
 #[tauri::command]

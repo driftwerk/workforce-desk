@@ -63,7 +63,7 @@ impl<R: tauri::Runtime> NativeConfirm<R> {
     /// Asks `message`, with Cancel first (the default, what Return and
     /// Escape choose) and `yes` second: true only when `yes` itself was
     /// clicked. Any other answer, or none, is a Cancel.
-    fn ask(&self, title: &str, message: String, yes: &str) -> bool {
+    pub(crate) fn ask(&self, title: &str, message: String, yes: &str) -> bool {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
         let answer = self
             .0

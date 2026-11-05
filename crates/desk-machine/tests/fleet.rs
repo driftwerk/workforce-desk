@@ -784,6 +784,24 @@ fn a_copy_that_fails_its_check_is_never_flipped_to() {
     assert!(matches!(r.fleet.state(&id), Some(State::Failed { .. })));
     // Not kept: it was never added.
     assert!(!b.dir.path().join("mac/machines.json").exists());
+    // An unsigned development build is said where it is added.
+    let running = step(&r, "install", StepState::Running).unwrap();
+    assert!(
+        running.message.unwrap().contains("isn't checked"),
+        "the development build is said"
+    );
+
+    // "Try again" once the machine can: added from the start.
+    std::fs::remove_file(b.fake("check-fails")).unwrap();
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    r.fleet.reconnect(&id).unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept[0]["id"], "devbox");
 }
 
 #[test]

@@ -255,6 +255,11 @@ fn answers(_: &Link, _: &str) -> bool {
     true
 }
 
+/// Where a development backend comes from.
+fn machine_backend_env() -> &'static str {
+    desk_core::machine_backend::DEV_OVERRIDE_ENV
+}
+
 /// Waits a little for the forwards of `links`, stopped, to end: each one's
 /// ssh is ended on a thread of its own, and none should outlive the app.
 fn ended(links: &[Arc<Link>]) {
@@ -830,6 +835,15 @@ impl Fleet {
         let backend = self.host.backend(arch)?;
         if !backend.signed {
             tracing::warn!(machine = %machine.id, version = %backend.version, "installing a development backend; its signature isn't checked");
+            // Said where the machine is added too, not only in the log.
+            self.emit(SetupEvent {
+                detail: Some(format!("Installing Desk {}…", backend.version)),
+                message: Some(format!(
+                    "This is a development build of Desk's engine ({}), whose signature isn't checked.",
+                    machine_backend_env()
+                )),
+                ..self.say(machine.id.as_str(), Step::Install, StepState::Running)
+            });
         }
         let bin = look.bin();
         // A helper Desk started itself goes before the flip, so the one
@@ -995,13 +1009,32 @@ impl Fleet {
     }
 
     /// "Try again": connects to machine `id` now, rather than at the next
-    /// back-off.
-    pub fn reconnect(&self, id: &str) -> Result<(), String> {
-        if self.machine(id).is_none() {
-            return Err("That machine isn't in Desk any more.".into());
+    /// back-off; one whose adding failed is set up again from the start.
+    pub fn reconnect(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        let again = {
+            let mut rows = self.rows();
+            let Some(r) = rows.get_mut(id) else {
+                return Err("That machine isn't in Desk any more.".into());
+            };
+            let again = !r.saved && !r.busy && matches!(r.state, State::Failed { .. });
+            if again {
+                r.busy = true;
+                r.state = State::Adding;
+            }
+            again
+        };
+        if !again {
+            self.kick(id);
+            return Ok(());
         }
-        self.kick(id);
-        Ok(())
+        self.host.changed();
+        let fleet = Arc::clone(self);
+        let id = id.to_string();
+        std::thread::Builder::new()
+            .name(format!("adding {id} again"))
+            .spawn(move || fleet.set_up(&id))
+            .map(drop)
+            .map_err(|e| e.to_string())
     }
 
     fn kick(&self, id: &str) {
