@@ -18,6 +18,7 @@ import { agentNamer, eventTarget, lineOf, needStates, toneOf, type NeedState } f
 import { useDesk } from "../hub/store";
 import { placeLabel } from "../floor/target";
 import { openTarget } from "../shell/navigate";
+import { EventTicketChip } from "../board/TicketChip";
 import { useOverview } from "./store";
 
 /** "allowed by you 16:31", "no longer waiting". */
@@ -64,6 +65,7 @@ export function ActivityRow({ event, need }: { event: ActivityEvent; need?: Need
         {event.reason && <span className="ev-reason">{event.reason}</span>}
         {need && <span className="ev-reason">{need.open ? "Still waiting on you" : `Resolved · ${resolvedText(need)}`}</span>}
       </Text>
+      {event.ticket && <EventTicketChip id={event.ticket} />}
     </li>
   );
 }

@@ -1,6 +1,7 @@
 import { useDesk } from "../hub/store";
 import { openUrl } from "../platform";
 import { openTarget } from "./navigate";
+import { useBoard } from "../board/store";
 
 // Links to a room message, within Desk: `desk://room/<room>/msg/<message>`.
 // Copy link writes one; a click on one, in your messages or an agent's,
@@ -8,6 +9,13 @@ import { openTarget } from "./navigate";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const DESK_LINK = new RegExp(`^desk://room/(${UUID})/msg/(${UUID})$`, "i");
+const TICKET_LINK = new RegExp(`^desk://ticket/(${UUID})$`, "i");
+
+/** A link to a board's ticket, within Desk: `desk://ticket/<ticket>`. */
+export const ticketLink = (id: string): string => `desk://ticket/${id}`;
+
+/** The ticket a `desk:` link names; null for anything else. */
+export const parseTicketLink = (url: string): string | null => TICKET_LINK.exec(url.trim())?.[1]?.toLowerCase() ?? null;
 
 export const deskLink = (at: { room: string; message: string }): string => `desk://room/${at.room}/msg/${at.message}`;
 
@@ -20,6 +28,8 @@ export const parseDeskLink = (url: string): { room: string; message: string } | 
 /** Opens a link: a `desk:` one in Desk, anything else as the system does. */
 export const openLink = (url: string): void => {
   if (!/^desk:/i.test(url)) return openUrl(url);
+  const ticket = parseTicketLink(url);
+  if (ticket) return useBoard.getState().openTicket(ticket);
   const at = parseDeskLink(url);
   if (!at || !useDesk.getState().rooms[at.room]) {
     useDesk.getState().fail("That message isn’t in any of your rooms.");

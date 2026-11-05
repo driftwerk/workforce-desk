@@ -4,6 +4,7 @@ import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
 import { Mark } from "../ui/Mark";
+import { SessionTicketChip } from "../board/TicketChip";
 import { plain } from "../ui/plain";
 
 const LABEL: Record<Session["state"], string> = {
@@ -58,7 +59,10 @@ export function Tile({ session }: { session: Session }) {
           </span>
         </span>
       </button>
-      <span className="tile-task">{task(session)}</span>
+      <span className="tile-task">
+        <SessionTicketChip session={session.id} className="tile-ticket" />
+        {task(session)}
+      </span>
       {text && <pre className="tile-log">{text}</pre>}
       {session.pending && <Approval session={session} compact />}
     </article>

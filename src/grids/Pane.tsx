@@ -18,6 +18,7 @@ import { LinePanel } from "../line/LinePanel";
 import { useLinePanel } from "../line/panel";
 import { BreakerBanner } from "../spend/BreakerBanner";
 import { ChargeBadge, useChargeActions } from "../crew/ChargeBadge";
+import { SessionTicketChip } from "../board/TicketChip";
 import { useCharge } from "../crew/chargeStore";
 import { Terminal } from "../session/Terminal";
 import { useSettings } from "../settings/store";
@@ -315,6 +316,7 @@ export function GridPane({
             </span>
           )}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
+          {pane.content?.kind === "session" && <SessionTicketChip session={pane.content.sessionId} className="gpane-ticket" />}
           <ChargeBadge charge={charge} className="gpane-badge" />
           <span className="gpane-fill" />
           {label.cwd && (

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { SubjectHistory } from "../board/History";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { PutInGrid } from "../grids/PutInGrid";
@@ -56,6 +58,7 @@ export function AgentPanel({ agent }: { agent: Agent }) {
   const grids = useGrids((s) => s.grids);
   const places = placesOf({ order, grids }, sessions, `agent:${key}`);
   const close = () => useChat.getState().setPanelAgent(null);
+  const [history, setHistory] = useState(false);
   return (
     <SidePanel
       className="dm-panel"
@@ -76,6 +79,11 @@ export function AgentPanel({ agent }: { agent: Agent }) {
           <button type="button" className="link" onClick={() => openAgentSettings(key)}>
             Settings
           </button>
+          {hub?.local && (
+            <button type="button" className="link" aria-expanded={history} onClick={() => setHistory((h) => !h)}>
+              {history ? "Hide history" : "History"}
+            </button>
+          )}
           <button
             type="button"
             className="link"
@@ -91,6 +99,7 @@ export function AgentPanel({ agent }: { agent: Agent }) {
       }
     >
       {places.length > 0 && <ShownIn places={places} loose={null} onShown={close} />}
+      {history && hub?.local && <SubjectHistory subject={agent.id} label={`What ${agent.name} did`} />}
       <DirectMessage key={key} agent={key} />
     </SidePanel>
   );

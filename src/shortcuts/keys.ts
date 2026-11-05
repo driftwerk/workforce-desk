@@ -92,6 +92,7 @@ export const SHORTCUTS = [
   { id: "searchRoom", name: "Search this room", about: "Searches the room you’re in; Esc closes it.", keys: "Primary+F", scope: "app", terminal: false },
   { id: "searchRooms", name: "Search all rooms", about: "Searches every room.", keys: "Shift+Primary+F", scope: "app", terminal: false },
   { id: "unread", name: "Unread", about: "Opens the Unread page: everything new for you, everywhere.", keys: "Shift+Primary+U", scope: "app", terminal: false },
+  { id: "board", name: "Board", about: "Opens the board: the tickets sessions and agents work on.", keys: "Primary+B", scope: "app", terminal: false },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];

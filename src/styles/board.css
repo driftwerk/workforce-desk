@@ -1,0 +1,398 @@
+/* The board, its ticket cards and the ticket's panel. The columns are the
+   Floor's cards, the cards its items, the filters Search's chips; what's
+   here is only what those don't draw, from the theme's tokens. */
+
+.board {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* As the Floor's header. */
+.board-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 30px 28px 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.board-head h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.board-head-gap {
+  flex: 1;
+}
+.board-search {
+  width: 210px;
+  min-height: 38px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.board-search:focus {
+  border-color: var(--signal);
+}
+.board > .empty,
+.board-empty {
+  margin: 20px 28px;
+}
+.board-empty {
+  max-width: 560px;
+}
+
+/* Five columns sharing the width; a narrow window scrolls them sideways
+   inside the board, never the page. */
+.board-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 14px;
+  padding: 18px 28px 20px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.board-col {
+  padding: 16px 14px;
+  gap: 8px;
+  min-height: 0;
+}
+.board-col-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.board-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  flex: 1;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.board-cards > .ghost {
+  opacity: 0.35;
+}
+.board-cards > .drop-line {
+  margin: 0 6px;
+}
+
+/* A card: the Floor's item, raised. */
+.board-card {
+  border-color: var(--border);
+  background: var(--raised);
+}
+.board-card:hover {
+  border-color: var(--muted);
+}
+.board-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.board-key {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.board-pinned {
+  font-size: 12px;
+  color: var(--signal-soft-text);
+}
+.board-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.board-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  margin-top: 3px;
+  font-size: 12.5px;
+}
+.board-who {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.board-who-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-who-name.mono {
+  font-size: 12px;
+}
+/* Waiting on you: the Floor's needs-you colours. */
+.board-card-waiting,
+.board-card-waiting:hover {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
+}
+/* A session's or an agent's own, not yet taken up. */
+.board-card-theirs {
+  border-style: dashed;
+  background: none;
+}
+.board-card-theirs .board-key {
+  color: var(--faint);
+}
+.board-card-theirs .board-title {
+  color: var(--muted);
+}
+.board-card-settled {
+  border-color: transparent;
+  background: none;
+}
+.board-card-settled .board-key,
+.board-card-settled .board-title {
+  color: var(--faint);
+}
+.board-shelf {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--signal-soft-text);
+  text-align: left;
+}
+.board-shelf:hover {
+  color: var(--signal);
+}
+
+/* A ticket's key, anywhere: the mono chip, opening the ticket. */
+.ticket-chip {
+  flex: none;
+  background: none;
+  line-height: inherit;
+  white-space: nowrap;
+}
+button.ticket-chip:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.gi-ticket,
+.gpane-ticket {
+  padding: 1px 7px;
+  font-size: 11px;
+}
+.tile-ticket,
+.msg-ticket {
+  margin-right: 6px;
+  padding: 0 7px;
+}
+.msg-ticket {
+  margin: 0 2px;
+}
+.ev .ev-ticket {
+  grid-column: 3;
+  justify-self: start;
+  margin-top: -4px;
+}
+
+/* ── The ticket's panel ─────────────────────────────────────────────────── */
+
+.ticket-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 20px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.ticket-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.ticket-edit {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+.ticket-title-edit {
+  font-size: 22px;
+  font-weight: 700;
+}
+.ticket-title-edit,
+.board-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.board-textarea {
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.ticket-title-edit:focus,
+.board-textarea:focus {
+  border-color: var(--signal);
+}
+.ticket-text {
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ticket-row,
+.ticket-actions,
+.ticket-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.ticket-foot {
+  gap: 16px;
+}
+.board-select {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ticket-needs,
+.ticket-links,
+.ticket-need-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ticket-needed-by {
+  padding-top: 6px;
+}
+.ticket-need {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ticket-need-open,
+.ticket-need-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.ticket-need-open:hover,
+.ticket-need-pick:hover {
+  background: var(--raised);
+}
+.ticket-need-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-need-more {
+  align-self: flex-start;
+}
+.ticket-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ticket-link > .link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--signal-soft-text);
+}
+.ticket-link > .link:hover {
+  color: var(--signal);
+}
+.ticket-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ticket-history-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ticket-history-head h3 {
+  flex: 1;
+}
+.ticket-history-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ticket-history-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.ticket-history-row .mono {
+  font-size: 12px;
+}
+
+/* A session's or an agent's history, under its goal or above its DM. */
+.subject-history {
+  flex: none;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 4px 16px 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}

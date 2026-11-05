@@ -36,6 +36,15 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
+  it("has the board's row under the views, with its shortcut, opening the board", () => {
+    sidebar();
+    const row = screen.getByRole("button", { name: "Board" });
+    expect(row.title).toMatch(/^Board \(.*B\)$/);
+    fireEvent.click(row);
+    expect(useDesk.getState().view).toBe("board");
+    expect(row.getAttribute("aria-current")).toBe("page");
+  });
+
   it("shows each shortcut's configured keys", () => {
     sidebar();
     expect(screen.getByRole("button", { name: /Ask anyone/ }).textContent).toBe("Ask anyone ⌃⇧K");

@@ -46,11 +46,12 @@ describe("shortcut keys on macOS", () => {
       searchRoom: "Primary+F",
       searchRooms: "Primary+Shift+F",
       unread: "Primary+Shift+U",
+      board: "Primary+B",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "board"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -195,13 +196,14 @@ describe("shortcut keys on Windows and Linux", () => {
       searchRoom: "Primary+F",
       searchRooms: "Primary+Shift+F",
       unread: "Primary+Shift+U",
+      board: "Primary+B",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
     for (const platform of ["windows", "linux"] as const) {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread"] as const)
+      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "board"] as const)
         expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }

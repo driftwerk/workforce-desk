@@ -353,7 +353,13 @@ export type DeskEvent =
   | { type: "line"; message: LineMessage; removed?: boolean }
   /** A boss took a session on or let it go (`releasedAt` set), or its
    *  wheel changed hands. */
-  | { type: "charge"; charge: ChargeView };
+  | { type: "charge"; charge: ChargeView }
+  /** A board's ticket was made or changed. */
+  | { type: "ticket"; ticket: Ticket }
+  | { type: "ticketRemoved"; id: string }
+  /** A board was made or changed. */
+  | { type: "board"; board: Board }
+  | { type: "boardRemoved"; id: string };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 
@@ -579,6 +585,8 @@ export interface LedgerRow {
   priced: "priced" | "reported" | "none";
   billing: Billing;
   account: string | null;
+  /** The board's ticket the session worked on when it made the call. */
+  ticket?: string | null;
 }
 
 export interface LedgerPage {
@@ -714,7 +722,15 @@ export type ActivityKind =
   /** The person took the wheel of a session a boss runs. */
   | "driving"
   /** The wheel went back to the boss. */
-  | "handed_back";
+  | "handed_back"
+  /** A board's ticket was made, moved, given to someone, changed,
+   *  commented on or deleted. */
+  | "ticket_created"
+  | "ticket_moved"
+  | "ticket_assigned"
+  | "ticket_edited"
+  | "ticket_commented"
+  | "ticket_deleted";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -734,6 +750,10 @@ export interface ActivityEvent {
   place?: Place | null;
   /** The room message it's about. */
   message?: string | null;
+  /** The board's ticket it's about: the ticket's history. */
+  ticket?: string | null;
+  /** What the hub kept beside the text: a comment's own words. */
+  detail?: { comment?: string } | null;
 }
 
 export type ActivityFilter = "all" | "needs_you" | "manager";
@@ -1055,3 +1075,85 @@ export interface UsageView {
   logins: { kind: PlanKind; where: PlanWhere; signedIn: boolean }[];
   readings: PlanReading[];
 }
+
+// ── The board: the person's tickets, worked on by sessions and agents ────
+
+export type TicketState = "backlog" | "todo" | "doing" | "review" | "done" | "dropped";
+
+/** A board of tickets; `prefix` starts its keys (`ACM` for `ACM-12`). */
+export interface Board {
+  id: string;
+  name: string;
+  /** Its sidebar group; null is ungrouped. */
+  group: string | null;
+  prefix: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What a ticket points at. */
+export type TicketLink =
+  | { kind: "session"; session: string }
+  | { kind: "room"; room: string; thread?: string }
+  | { kind: "message"; message: string }
+  | { kind: "pr"; number: number; url: string };
+
+/** A ticket as the hub shows it, with what the board computes of it. */
+export interface Ticket {
+  id: string;
+  board: string;
+  number: number;
+  title: string;
+  body: string;
+  state: TicketState;
+  rank: number;
+  /** Who works on it: a session, an agent, or you. */
+  assignee: ActivityParty | null;
+  /** The tickets it needs done first. */
+  needs: string[];
+  links: TicketLink[];
+  createdBy: ActivityParty;
+  pinned: boolean;
+  /** Hidden from the board until then, unless it changes. */
+  snoozedUntil: string | null;
+  /** When it came into its state. */
+  stateAt: string;
+  createdAt: string;
+  updatedAt: string;
+  /** `ACM-12`; null while a synced ticket waits for its remote key. */
+  key: string | null;
+  /** To do with every need done: it may be handed out. */
+  ready: boolean;
+  /** Its needs not yet done. */
+  blockers: string[];
+  /** Done for 3 days, or Dropped: on the settled shelf. */
+  settled: boolean;
+  snoozed: boolean;
+}
+
+export interface NewTicket {
+  board: string;
+  title: string;
+  body?: string;
+  state?: TicketState;
+  needs?: string[];
+}
+
+export interface TicketPatch {
+  title?: string;
+  body?: string;
+  pinned?: boolean;
+  /** null wakes it. */
+  snoozedUntil?: string | null;
+}
+
+/** A drop in a column: `before` is the card above where it lands, `after`
+ *  the one below; neither puts it at the end. */
+export interface TicketMove {
+  state: TicketState;
+  before?: string;
+  after?: string;
+}
+
+/** Whom a ticket goes to; null takes it off whoever has it. */
+export type AssignTo = { session: string } | { agent: string } | { newSession: { path: string; engine: Engine } } | null;

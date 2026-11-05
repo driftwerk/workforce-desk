@@ -38,6 +38,7 @@ import { Marks, useBadgeData } from "../unread/Marks";
 import { levelOf, NOTIFY_LEVELS, setLevel } from "../unread/prefs";
 import { useSessionNames } from "./names";
 import { ChargeBadge } from "../crew/ChargeBadge";
+import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
@@ -730,6 +731,7 @@ function ItemRow({
       onRemove={onRemove}
       onHover={onHover}
     >
+      {session && <SessionTicketChip session={session.id} still className="gi-ticket" />}
       <ChargeBadge charge={charge} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />
