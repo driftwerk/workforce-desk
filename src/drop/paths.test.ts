@@ -29,8 +29,17 @@ describe("a dropped path, as a terminal is given it", () => {
   it("refuses a name holding a control character, which would act as a key", () => {
     for (const bad of ["/tmp/a\nb", "/tmp/a\rb", "/tmp/esc\u001b[201~ls\r", "/tmp/tab\there", "/tmp/del\u007f", "/tmp/c1\u009b"]) {
       expect(hasControl(bad), JSON.stringify(bad)).toBe(true);
-      expect(() => pathsLine(["/ok", bad])).toThrow(/control character/);
+      expect(() => pathsLine(["/ok", bad])).toThrow(/control or invisible character/);
     }
     expect(hasControl("/Users/me/café ☕.png")).toBe(false);
+    expect(hasControl("/Users/me/cafe\u0301 日本語.png")).toBe(false);
+  });
+
+  it("refuses invisible formatting too, which shows a name as other than it is", () => {
+    for (const bad of ["/tmp/invoice\u202efdp.exe", "/tmp/zero\u200bwidth", "/tmp/bom\ufeff", "/tmp/iso\u2066x\u2069", "/tmp/tag\u{e0041}"]) {
+      expect(hasControl(bad), JSON.stringify(bad)).toBe(true);
+      expect(() => pathsLine([bad])).toThrow(/invisible/);
+    }
+    expect(() => pathsLine(["/tmp/invoice\u202efdp.exe"])).toThrow("“/tmp/invoice?fdp.exe”");
   });
 });

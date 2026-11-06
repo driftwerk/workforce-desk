@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type DragEvent } from "react";
-import { droppedFiles, readDropped } from "../drop/native";
+import { droppedFiles, readDropped, type DroppedFile } from "../drop/native";
 import { nativeDrops, registerZone, useDropOver, ZONE_ATTR } from "../drop/route";
 import { describe, formatSize, kindOf } from "./kinds";
 import { MAX_FILE_BYTES, MAX_FILES, tooBig } from "./upload";
@@ -108,11 +108,15 @@ export const filesOfDrop = async (paths: string[]): Promise<{ files: File[]; pro
   const found = await droppedFiles(paths);
   const problems: string[] = [];
   const files: File[] = [];
+  const take: DroppedFile[] = [];
   for (const f of found) {
     const why = f.folder ? `${f.name} is a folder: drop the files in it.` : tooBig(f);
     if (why) problems.push(why);
-    else files.push(await readDropped(f));
+    else take.push(f);
   }
+  // No more are read than a message carries.
+  if (take.length > MAX_FILES) problems.push(`A message can carry up to ${MAX_FILES} files.`);
+  for (const f of take.slice(0, MAX_FILES)) files.push(await readDropped(f));
   return { files, problem: problems.join(" ") || null };
 };
 

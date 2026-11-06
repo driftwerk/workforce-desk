@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import { PointerSensor } from "@dnd-kit/dom";
 import mainConf from "../../src-tauri/tauri.conf.json";
 import macConf from "../../src-tauri/tauri.macos.conf.json";
+import linuxConf from "../../src-tauri/tauri.linux.conf.json";
+import windowsConf from "../../src-tauri/tauri.windows.conf.json";
 import gridWindows from "../../src-tauri/src/grid_windows.rs?raw";
 import { SENSORS } from "../groups/rows";
 
@@ -39,5 +41,12 @@ describe("the system's drag and drop", () => {
     expect(mainConf.app.windows[0]!.dragDropEnabled).toBe(true);
     expect(macConf.app.windows[0]!.dragDropEnabled).toBe(true);
     expect(gridWindows).not.toMatch(/disable_drag_drop_handler/);
+  });
+
+  it("gives the page no fs access to what's dropped: drops.rs alone decides what of a drop is read", () => {
+    // tauri-plugin-fs otherwise adds every dropped file, and every dropped
+    // folder recursively, to its scope for the page's fs permissions.
+    expect(mainConf.plugins.fs.scopeDroppedPaths).toBe(false);
+    for (const conf of [macConf, linuxConf, windowsConf] as { plugins?: { fs?: unknown } }[]) expect(conf.plugins?.fs).toBeUndefined();
   });
 });

@@ -42,6 +42,34 @@ pub const MAX_READ_BYTES: u64 = 100 * 1024 * 1024;
 /// The largest image pasted into a terminal.
 pub const MAX_PASTE_BYTES: usize = 50 * 1024 * 1024;
 
+/// The most the pastes folder holds: the oldest go to make room.
+pub const MAX_PASTES_BYTES: u64 = 256 * 1024 * 1024;
+
+/// The most images pasted within [`PASTE_WINDOW`].
+pub const MAX_PASTES: usize = 10;
+const PASTE_WINDOW: Duration = Duration::from_secs(10);
+
+/// When images were last pasted: at most [`MAX_PASTES`] in any
+/// [`PASTE_WINDOW`], so a page can't fill the disk with them.
+#[derive(Default)]
+pub struct Pastes {
+    at: Mutex<VecDeque<Instant>>,
+}
+
+impl Pastes {
+    pub fn allow(&self) -> CommandResult<()> {
+        let mut at = self.at.lock().unwrap_or_else(|e| e.into_inner());
+        while at.front().is_some_and(|t| t.elapsed() >= PASTE_WINDOW) {
+            at.pop_front();
+        }
+        if at.len() >= MAX_PASTES {
+            return Err("That's a lot of images at once: wait a moment and paste again.".into());
+        }
+        at.push_back(Instant::now());
+        Ok(())
+    }
+}
+
 /// How long pasted images are kept.
 const PASTES_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -83,6 +111,19 @@ impl Drops {
         })
     }
 
+    /// `paths`, each checked to have been dropped on `window`, and let go:
+    /// a drop is used once (given to one terminal, or read for one
+    /// message), and asked of again is refused.
+    fn take(&self, window: &str, paths: &[String]) -> CommandResult<Vec<PathBuf>> {
+        let checked = self.check(window, paths)?;
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        for s in seen.iter_mut().filter(|s| s.window == window) {
+            s.paths.retain(|p| !checked.contains(p));
+        }
+        seen.retain(|s| !s.paths.is_empty());
+        Ok(checked)
+    }
+
     /// `paths`, each checked to have been dropped on `window`.
     fn check(&self, window: &str, paths: &[String]) -> CommandResult<Vec<PathBuf>> {
         paths
@@ -101,15 +142,13 @@ impl Drops {
 
 /// Why `path` can't be typed into a terminal, if it can't: a control
 /// character in it would act as a key (Return, Escape) rather than be
-/// read as text, whatever quoting the page gives it.
+/// read as text, whatever quoting the page gives it, and invisible
+/// formatting (a bidi override) would show it as other than it is.
 pub fn typeable(path: &str) -> CommandResult<()> {
-    if path.chars().any(char::is_control) {
-        let shown: String = path
-            .chars()
-            .map(|c| if c.is_control() { '?' } else { c })
-            .collect();
+    if !desk_core::machine::plain(path) {
         return Err(format!(
-            "“{shown}” has a control character in its name, which Desk won't type into a terminal."
+            "“{}” has a control or invisible character in its name, which Desk won't type into a terminal.",
+            upload::printable(path)
         ));
     }
     Ok(())
@@ -181,7 +220,7 @@ pub async fn dropped_file_read(
     path: String,
 ) -> CommandResult<tauri::ipc::Response> {
     let path = drops
-        .check(webview.label(), std::slice::from_ref(&path))?
+        .take(webview.label(), std::slice::from_ref(&path))?
         .remove(0);
     tauri::async_runtime::spawn_blocking(move || {
         let meta = std::fs::metadata(&path)
@@ -211,6 +250,46 @@ pub struct Progress {
     pub total: u64,
 }
 
+/// The copies to machines under way, by the page's token for each: what
+/// its Cancel stops.
+#[derive(Default)]
+pub struct Copies {
+    stops: Mutex<std::collections::HashMap<String, upload::Stop>>,
+}
+
+impl Copies {
+    fn begin(&self, token: &str, stop: &upload::Stop) {
+        self.stops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(token.into(), stop.clone());
+    }
+
+    fn end(&self, token: &str) {
+        self.stops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(token);
+    }
+
+    /// Stops copy `token`; whether one was under way.
+    pub fn cancel(&self, token: &str) -> bool {
+        let stop = self
+            .stops
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(token)
+            .cloned();
+        stop.inspect(upload::Stop::cancel).is_some()
+    }
+}
+
+/// Stops the copy to a machine the page started as `token`.
+#[tauri::command]
+pub fn terminal_drop_cancel(copies: tauri::State<'_, Copies>, token: String) -> bool {
+    copies.cancel(&token)
+}
+
 /// A name for a drop's own folder: unique within this run, and ordered.
 fn batch() -> String {
     static N: AtomicU64 = AtomicU64::new(0);
@@ -224,6 +303,8 @@ fn batch() -> String {
 /// answers their paths there. Folders aren't copied. Blocking.
 fn copy_to_machine(
     machines: &MachineIo,
+    copies: &Copies,
+    token: Option<&str>,
     id: &str,
     scope: &str,
     paths: &[PathBuf],
@@ -247,38 +328,52 @@ fn copy_to_machine(
     }
     let total = files.iter().map(|f| f.2).sum();
     upload::check_total(total)?;
-    let home = link.home()?;
-    let batch = batch();
-    let mut before = 0;
-    let mut out = Vec::new();
-    progress(Progress { sent: 0, total });
-    for (path, name, len) in files {
-        let bytes =
-            std::fs::File::open(path).map_err(|e| format!("Desk couldn't read {name}: {e}"))?;
-        let file = upload::File { name, len, bytes };
-        out.push(upload::copy(
-            link.ssh(),
-            link.machine(),
-            &home,
-            scope,
-            &batch,
-            file,
-            |n| {
-                progress(Progress {
-                    sent: before + n,
-                    total,
-                })
-            },
-        )?);
-        before += len;
+    // Two files of one name (from two folders) both arrive.
+    let names = upload::unique(&files.iter().map(|f| f.1.clone()).collect::<Vec<_>>());
+    let stop = upload::Stop::new(Instant::now() + upload::time_limit(total));
+    if let Some(token) = token {
+        copies.begin(token, &stop);
     }
-    Ok(out)
+    let copied = (|| {
+        let home = link.home()?;
+        let batch = batch();
+        let mut before = 0;
+        let mut out = Vec::new();
+        progress(Progress { sent: 0, total });
+        for ((path, _, len), name) in files.into_iter().zip(names) {
+            let bytes =
+                std::fs::File::open(path).map_err(|e| format!("Desk couldn't read {name}: {e}"))?;
+            let file = upload::File { name, len, bytes };
+            out.push(upload::copy(
+                link.ssh(),
+                link.machine(),
+                &home,
+                scope,
+                &batch,
+                file,
+                &stop,
+                |n| {
+                    progress(Progress {
+                        sent: before + n,
+                        total,
+                    })
+                },
+            )?);
+            before += len;
+        }
+        Ok(out)
+    })();
+    if let Some(token) = token {
+        copies.end(token);
+    }
+    copied
 }
 
 /// The files at `paths`, dropped on this window, as the shell of terminal
 /// `scope` names them: on this computer (or inside WSL), or on machine
 /// `machine`, where they are copied first, `progress` hearing how far.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn terminal_drop(
     webview: tauri::Webview,
     app: tauri::State<'_, crate::App>,
@@ -286,9 +381,10 @@ pub async fn terminal_drop(
     machine: Option<String>,
     scope: String,
     paths: Vec<String>,
+    token: String,
     progress: Channel<Progress>,
 ) -> CommandResult<Vec<String>> {
-    let paths = drops.check(webview.label(), &paths)?;
+    let paths = drops.take(webview.label(), &paths)?;
     match machine {
         None => {
             let host = app.backend()?.host;
@@ -298,7 +394,8 @@ pub async fn terminal_drop(
             let handle = webview.app_handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 let machines = handle.state::<MachineIo>();
-                copy_to_machine(&machines, &id, &scope, &paths, |p| {
+                let copies = handle.state::<Copies>();
+                copy_to_machine(&machines, &copies, Some(&token), &id, &scope, &paths, |p| {
                     let _ = progress.send(p);
                 })
             })
@@ -336,7 +433,7 @@ pub fn save_paste(pastes: &Path, scope: &str, mime: &str, bytes: &[u8]) -> Comma
             MAX_PASTE_BYTES / (1024 * 1024)
         ));
     }
-    prune(pastes);
+    prune(pastes, bytes.len() as u64);
     let dir = pastes.join(scope);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Desk couldn't save the image: {e}"))?;
     let path = dir.join(format!("pasted-{}.{ext}", batch()));
@@ -344,27 +441,46 @@ pub fn save_paste(pastes: &Path, scope: &str, mime: &str, bytes: &[u8]) -> Comma
     Ok(path)
 }
 
-/// Removes pastes older than a week, and the folders they leave empty.
-fn prune(pastes: &Path) {
+/// Removes pastes older than a week, then the oldest until `room` more
+/// fits within [`MAX_PASTES_BYTES`], and the folders they leave empty.
+fn prune(pastes: &Path, room: u64) {
+    prune_within(pastes, room, MAX_PASTES_BYTES);
+}
+
+fn prune_within(pastes: &Path, room: u64, cap: u64) {
     let Ok(scopes) = std::fs::read_dir(pastes) else {
         return;
     };
+    let mut kept = Vec::new();
     for scope in scopes.flatten() {
         let Ok(files) = std::fs::read_dir(scope.path()) else {
             continue;
         };
         for file in files.flatten() {
-            let old = file
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.elapsed().ok())
-                .is_some_and(|age| age > PASTES_FOR);
+            let Ok(meta) = file.metadata() else { continue };
+            let when = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            let old = when.elapsed().is_ok_and(|age| age > PASTES_FOR);
             if old {
                 let _ = std::fs::remove_file(file.path());
+            } else {
+                kept.push((when, meta.len(), file.path()));
             }
         }
-        let _ = std::fs::remove_dir(scope.path());
+    }
+    kept.sort();
+    let mut total: u64 = kept.iter().map(|k| k.1).sum();
+    for (_, len, path) in kept {
+        if total + room <= cap {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total -= len;
+        }
+    }
+    if let Ok(scopes) = std::fs::read_dir(pastes) {
+        for scope in scopes.flatten() {
+            let _ = std::fs::remove_dir(scope.path());
+        }
     }
 }
 
@@ -385,22 +501,33 @@ fn header(request: &tauri::ipc::Request<'_>, name: &str) -> Option<String> {
 pub async fn terminal_paste_image(
     handle: tauri::AppHandle,
     app: tauri::State<'_, crate::App>,
+    pasted: tauri::State<'_, Pastes>,
     request: tauri::ipc::Request<'_>,
 ) -> CommandResult<String> {
+    pasted.allow()?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("The paste carried no image.".into());
     };
     let scope = header(&request, "x-desk-scope").ok_or("The paste didn't say its terminal.")?;
     let mime = header(&request, "x-desk-type").unwrap_or_default();
     let machine = header(&request, "x-desk-machine");
+    let token = header(&request, "x-desk-token");
     let pastes = app.paths.root.join("pastes");
     let saved = save_paste(&pastes, &scope, &mime, bytes)?;
     match machine {
         None => local_path(&app.backend()?.host, &saved),
         Some(id) => tauri::async_runtime::spawn_blocking(move || {
             let machines = handle.state::<MachineIo>();
-            let copied =
-                copy_to_machine(&machines, &id, &scope, std::slice::from_ref(&saved), |_| {});
+            let copies = handle.state::<Copies>();
+            let copied = copy_to_machine(
+                &machines,
+                &copies,
+                token.as_deref(),
+                &id,
+                &scope,
+                std::slice::from_ref(&saved),
+                |_| {},
+            );
             // The machine's copy is the one its terminal reads.
             let _ = std::fs::remove_file(&saved);
             copied.map(|mut paths| paths.remove(0))
@@ -429,6 +556,10 @@ mod tests {
         assert!(drops.dropped("main", Path::new("/Users/a/two b.png")));
         assert!(!drops.dropped("main", Path::new("/Users/a/three.png")));
         assert!(!drops.dropped("main", Path::new("/Users/a/.ssh/id_ed25519")));
+        // Used once: given to a terminal, it can't be given again.
+        assert!(drops.take("main", &["/Users/a/two b.png".into()]).is_ok());
+        assert!(drops.take("main", &["/Users/a/two b.png".into()]).is_err());
+        assert!(drops.dropped("main", Path::new("/Users/a/one.png")));
         assert!(drops.check("main", &["/Users/a/one.png".into()]).is_ok());
         assert!(
             drops
@@ -452,6 +583,8 @@ mod tests {
         assert_eq!(local_path(&Host::Native, p).unwrap(), p.to_string_lossy());
         assert!(local_path(&Host::Native, Path::new("/tmp/a\nb")).is_err());
         assert!(local_path(&Host::Native, Path::new("/tmp/a\x1b[201~b")).is_err());
+        assert!(local_path(&Host::Native, Path::new("/tmp/invoice\u{202e}fdp.exe")).is_err());
+        assert!(local_path(&Host::Native, Path::new("/tmp/zero\u{200b}width")).is_err());
         let wsl = Host::Wsl(Wsl {
             distro: "Ubuntu".into(),
             user: "sarah".into(),
@@ -485,5 +618,36 @@ mod tests {
         assert!(save_paste(dir.path(), "../s", "image/png", png).is_err());
         assert!(save_paste(dir.path(), "s", "image/png", b"").is_err());
         assert!(save_paste(dir.path(), "s", "image/png", &vec![0; MAX_PASTE_BYTES + 1]).is_err());
+    }
+
+    #[test]
+    fn pastes_are_limited_in_pace_and_in_room() {
+        let p = Pastes::default();
+        for _ in 0..MAX_PASTES {
+            p.allow().unwrap();
+        }
+        assert!(p.allow().is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut saved = Vec::new();
+        for _ in 0..6 {
+            saved.push(save_paste(dir.path(), "s", "image/png", &[1u8; 100]).unwrap());
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        // Room for 150 more within 400: the oldest four go.
+        prune_within(dir.path(), 150, 400);
+        let kept: Vec<bool> = saved.iter().map(|p| p.exists()).collect();
+        assert_eq!(kept, [false, false, false, false, true, true]);
+    }
+
+    #[test]
+    fn a_copy_under_way_can_be_cancelled_by_its_token() {
+        let copies = Copies::default();
+        let stop = upload::Stop::new(Instant::now() + Duration::from_secs(60));
+        assert!(!copies.cancel("t1"));
+        copies.begin("t1", &stop);
+        assert!(copies.cancel("t1"));
+        copies.end("t1");
+        assert!(!copies.cancel("t1"));
     }
 }

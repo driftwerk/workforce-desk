@@ -108,6 +108,7 @@
     "allow-dropped-files",
     "allow-dropped-file-read",
     "allow-terminal-drop",
+    "allow-terminal-drop-cancel",
     "allow-terminal-paste-image",
     "allow-voice-enable",
     "allow-voice-disable",

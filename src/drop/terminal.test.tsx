@@ -5,7 +5,7 @@ import { useDesk } from "../hub/store";
 import { machine, noEngines, withEngine } from "../machines/testing";
 import { Terminal } from "../session/Terminal";
 import { DropRouter, ZONE_ATTR } from "./route";
-import { clipboardImage, copyingText, giveDropped, givePasted, type DropNote } from "./terminal";
+import { clipboardImage, copyingText, giveDropped, givePasted, notRunning, type DropNote } from "./terminal";
 
 const terms: { pasted: string[]; field?: HTMLTextAreaElement }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -126,6 +126,37 @@ describe("files dropped on a session's terminal", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("whose session isn't running: says so in place, copying nothing", async () => {
+    const s = { ...socket(), readyState: 3 };
+    withEngine("devbox", { ptySocket: () => s } as never);
+    render(<Terminal sessionId="s9" machine="devbox" />);
+    act(() => router({ "5,5": frame() }).handle({ type: "drop", paths: ["/a.png"], position: { x: 5, y: 5 } }));
+    expect((await screen.findByRole("alert")).textContent).toContain("isn’t running");
+    expect(invoke).not.toHaveBeenCalledWith("terminal_drop", expect.anything());
+  });
+
+  it("on a machine, can be cancelled from its note", async () => {
+    withEngine("devbox", { ptySocket: () => socket() } as never);
+    let fail!: (e: unknown) => void;
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "terminal_drop") return new Promise((_r, rej) => (fail = rej));
+      if (cmd === "terminal_drop_cancel") {
+        fail("The copy was cancelled.");
+        return Promise.resolve(true);
+      }
+      return Promise.resolve();
+    });
+    render(<Terminal sessionId="s9" machine="devbox" />);
+    act(() => router({ "5,5": frame() }).handle({ type: "drop", paths: ["/a.png"], position: { x: 5, y: 5 } }));
+    await screen.findByRole("status");
+    const token = (invoke.mock.calls.find(([c]) => c === "terminal_drop")![1] as { token: string }).token;
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(invoke).toHaveBeenCalledWith("terminal_drop_cancel", { token });
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(terms[0]!.pasted).toEqual([]);
+  });
+
   it("dropped beside it (the sidebar, a page with no terminal) gives it nothing", () => {
     useDesk.setState({ hub: { ptySocket: () => socket() } as never });
     render(
@@ -168,7 +199,7 @@ describe("an image pasted into a terminal", () => {
     const [cmd, body, opts] = invoke.mock.calls.find(([c]) => c === "terminal_paste_image")!;
     expect(cmd).toBe("terminal_paste_image");
     expect(Array.from(body as Uint8Array)).toEqual([0x89, 0x50, 0x4e, 0x47]);
-    expect(opts).toEqual({ headers: { "x-desk-scope": "s1", "x-desk-type": "image%2Fpng" } });
+    expect(opts).toEqual({ headers: { "x-desk-scope": "s1", "x-desk-type": "image%2Fpng", "x-desk-token": expect.any(String) } });
   });
 
   it("on a machine, goes there", async () => {
@@ -195,7 +226,15 @@ describe("a drop's steps", () => {
   const target = () => {
     const notes: (DropNote | null)[] = [];
     const written: string[] = [];
-    return { notes, written, t: { machine: "devbox", machineName: "devbox", scope: "s", write: (x: string) => written.push(x), note: (n: DropNote | null) => notes.push(n) } };
+    return { notes, written, t: {
+        machine: "devbox",
+        machineName: "devbox",
+        scope: "s",
+        running: () => true,
+        write: (x: string) => written.push(x),
+        note: (n: DropNote | null) => notes.push(n),
+      },
+    };
   };
 
   it("say how far a copy to a machine has got", () => {
@@ -207,7 +246,7 @@ describe("a drop's steps", () => {
     const { t, notes, written } = target();
     await giveDropped(t, ["/x"], async () => ["/home/dev/a\nrm -rf ~"]);
     expect(written).toEqual([]);
-    expect(notes.at(-1)).toEqual({ kind: "error", text: expect.stringMatching(/control character/) });
+    expect(notes.at(-1)).toEqual({ kind: "error", text: expect.stringMatching(/control or invisible character/) });
   });
 
   it("say why a pasted image couldn't be saved", async () => {
@@ -216,8 +255,41 @@ describe("a drop's steps", () => {
       throw new Error("devbox turned your SSH key away, or it needs unlocking first (ssh-add).");
     });
     expect(written).toEqual([]);
-    expect(notes[0]).toEqual({ kind: "copying", text: "Copying the image to devbox…" });
+    expect(notes[0]).toEqual({ kind: "copying", text: "Copying the image to devbox…", cancel: expect.any(Function) });
     expect(notes.at(-1)).toEqual({ kind: "error", text: expect.stringContaining("ssh-add") });
+  });
+
+  it("give nothing to a terminal that isn't running, and copy nothing for it", async () => {
+    const { t, notes, written } = target();
+    const drop = vi.fn();
+    await giveDropped({ ...t, running: () => false }, ["/a.png"], drop);
+    expect(drop).not.toHaveBeenCalled();
+    expect(written).toEqual([]);
+    expect(notes).toEqual([{ kind: "error", text: notRunning }]);
+    const save = vi.fn();
+    await givePasted({ ...t, running: () => false }, new Blob(["x"], { type: "image/png" }), save);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("let a copy to a machine be cancelled: its token is stopped, and the note just goes", async () => {
+    const { t, notes, written } = target();
+    let fail!: (e: unknown) => void;
+    let token = "";
+    const drop = vi.fn((_m: string, _s: string, _p: string[], tok: string) => {
+      token = tok;
+      return new Promise<string[]>((_res, rej) => (fail = rej));
+    });
+    const cancel = vi.fn(async () => true);
+    const going = giveDropped(t, ["/a.png"], drop, cancel);
+    const note = notes[0] as Extract<DropNote, { kind: "copying" }>;
+    expect(note.kind).toBe("copying");
+    note.cancel!();
+    expect(cancel).toHaveBeenCalledWith(token);
+    expect(token).toMatch(/^[0-9a-f-]{36}$/);
+    fail("The copy was cancelled.");
+    await going;
+    expect(notes.at(-1)).toBeNull();
+    expect(written).toEqual([]);
   });
 
   it("find no image on a clipboard of text and one, or of nothing", () => {

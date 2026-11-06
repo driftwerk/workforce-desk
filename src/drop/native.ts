@@ -70,22 +70,30 @@ const machineArg = (machine: MachineId): string | null => (machine === LOCAL ? n
 
 /** The dropped `paths` as the shell of terminal `scope` (a session's id, or
  *  a grid terminal's) on `machine` names them: copied there first when it
- *  is a machine, `onProgress` hearing how far. */
-export const terminalDrop = (machine: MachineId, scope: string, paths: string[], onProgress: (p: Progress) => void): Promise<string[]> => {
+ *  is a machine, `onProgress` hearing how far, and stopped by
+ *  `cancelDrop(token)`. */
+export const terminalDrop = (machine: MachineId, scope: string, paths: string[], token: string, onProgress: (p: Progress) => void): Promise<string[]> => {
   const progress = new Channel<Progress>();
   progress.onmessage = onProgress;
-  return invoke<string[]>("terminal_drop", { machine: machineArg(machine), scope, paths, progress });
+  return invoke<string[]>("terminal_drop", { machine: machineArg(machine), scope, paths, token, progress });
 };
+
+/** Stops the copy to a machine started as `token`. */
+export const cancelDrop = (token: string): Promise<boolean> => invoke<boolean>("terminal_drop_cancel", { token });
+
+/** What a copy stopped by its Cancel answers (desk-machine's `CANCELLED`). */
+export const CANCELLED = "The copy was cancelled.";
 
 /** An image pasted into terminal `scope` on `machine`, saved (and copied
  *  there for a machine), as its shell names it. */
-export const terminalPasteImage = async (machine: MachineId, scope: string, image: Blob): Promise<string> => {
+export const terminalPasteImage = async (machine: MachineId, scope: string, image: Blob, token: string): Promise<string> => {
   if (!inApp) throw new Error("Pasting an image into a terminal needs the app.");
   const m = machineArg(machine);
   return tauriInvoke<string>("terminal_paste_image", new Uint8Array(await image.arrayBuffer()), {
     headers: {
       "x-desk-scope": encodeURIComponent(scope),
       "x-desk-type": encodeURIComponent(image.type),
+      "x-desk-token": encodeURIComponent(token),
       ...(m ? { "x-desk-machine": encodeURIComponent(m) } : {}),
     },
   });

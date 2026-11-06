@@ -720,6 +720,8 @@ pub fn run() {
         .manage(logins::install::Installs::default())
         .manage(Frames::default())
         .manage(drops::Drops::default())
+        .manage(drops::Copies::default())
+        .manage(drops::Pastes::default())
         .register_asynchronous_uri_scheme_protocol(attachments::SCHEME, attachments::protocol)
         .setup(|app| {
             let paths = Paths::new()?;
@@ -908,6 +910,7 @@ pub fn run() {
             drops::dropped_files,
             drops::dropped_file_read,
             drops::terminal_drop,
+            drops::terminal_drop_cancel,
             drops::terminal_paste_image,
             remote_images::remote_image_fetch,
             voice::voice_enable,

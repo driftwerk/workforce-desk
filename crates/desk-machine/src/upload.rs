@@ -15,8 +15,11 @@
 
 use std::io::{Read, Write};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use desk_core::machine::{MACHINE_ROOT, Machine};
+use desk_core::machine::{MACHINE_ROOT, Machine, is_format, plain};
 
 use crate::ssh::{self, SSH_FAILED, SshExe};
 
@@ -35,7 +38,11 @@ const CHUNK: usize = 256 * 1024;
 
 /// What the machine runs for each file: `$1` the terminal's folder, `$2`
 /// the drop's, `$3` the name, `$4` how many bytes are coming. It says the
-/// path it wrote. Exits 3 when fewer bytes came than were sent.
+/// path it wrote. Exits 3 when fewer bytes came than were sent (the copy
+/// stopped here, ssh's input ending early). The partial is removed however
+/// it ends: `cat` runs in the background so that a hang-up or a signal
+/// is acted on at once (a shell defers its traps while a command in the
+/// foreground runs), ending it and exiting, and leaving runs the EXIT trap.
 const SCRIPT: &str = r#"set -e
 umask 077
 up="$HOME/.local/share/Desk/uploads"
@@ -44,7 +51,12 @@ d="$up/$1/$2"
 mkdir -p -- "$d"
 part="$d/.$3.part"
 trap 'rm -f -- "$part"' EXIT
-cat > "$part"
+exec 3<&0
+cat <&3 > "$part" &
+c=$!
+exec 3<&-
+trap 'kill "$c" 2>/dev/null; exit 129' HUP INT TERM
+wait "$c"
 n=$(wc -c < "$part" | tr -d ' ')
 if [ "$n" != "$4" ]; then echo "only $n of $4 bytes arrived" >&2; exit 3; fi
 mv -f -- "$part" "$d/$3"
@@ -53,8 +65,9 @@ printf '%s\n' "$d/$3""#;
 
 /// Why `name` can't be a copied file's name on a machine, if it can't: it
 /// must be one plain name (no `/`, not `.` or `..`), short enough, and
-/// hold no control character. Spaces, quotes and any other Unicode are
-/// fine: the name is only ever an argument.
+/// hold no control character nor invisible formatting (a bidi override
+/// that shows `gpj.exe` as `exe.jpg`). Spaces, quotes and any other
+/// Unicode are fine: the name is only ever an argument.
 pub fn check_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name == "." || name == ".." {
         return Err("A file needs a name to be copied.".into());
@@ -62,9 +75,9 @@ pub fn check_name(name: &str) -> Result<(), String> {
     if name.contains('/') || name.contains('\0') {
         return Err(format!("“{}” isn't one file's name.", printable(name)));
     }
-    if name.chars().any(char::is_control) {
+    if !plain(name) {
         return Err(format!(
-            "“{}” has a control character in its name, which Desk won't type into a terminal.",
+            "“{}” has a control or invisible character in its name, which Desk won't type into a terminal.",
             printable(name)
         ));
     }
@@ -104,12 +117,87 @@ pub fn check_total(total: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// `name` with its control characters shown as `?`, for a message.
-fn printable(name: &str) -> String {
+/// `name` with its control and format characters shown as `?`, for a
+/// message.
+pub fn printable(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_control() { '?' } else { c })
+        .map(|c| {
+            if c.is_control() || is_format(c) {
+                '?'
+            } else {
+                c
+            }
+        })
         .take(80)
         .collect()
+}
+
+/// `names`, each as it is unless an earlier one has it: then with ` (2)`,
+/// ` (3)`… before its extension, so files of one name in one drop don't
+/// overwrite each other.
+pub fn unique(names: &[String]) -> Vec<String> {
+    let mut taken = std::collections::BTreeSet::new();
+    names
+        .iter()
+        .map(|name| {
+            let (stem, ext) = match name.rfind('.') {
+                Some(i) if i > 0 => name.split_at(i),
+                _ => (name.as_str(), ""),
+            };
+            let mut n = 1;
+            let mut candidate = name.clone();
+            while !taken.insert(candidate.clone()) {
+                n += 1;
+                candidate = format!("{stem} ({n}){ext}");
+            }
+            candidate
+        })
+        .collect()
+}
+
+/// The longest any one drop is given to copy.
+pub const MAX_COPY_TIME: Duration = Duration::from_secs(60 * 60);
+
+/// How long a drop of `bytes` may take: a minute, and a second for each
+/// 256 KB (a slow link's pace), at most [`MAX_COPY_TIME`].
+pub fn time_limit(bytes: u64) -> Duration {
+    (Duration::from_secs(60) + Duration::from_secs(bytes / (256 * 1024))).min(MAX_COPY_TIME)
+}
+
+/// What a copy stopped by its [`Stop`] answers.
+pub const CANCELLED: &str = "The copy was cancelled.";
+
+/// What stops a drop's copy before it is done: the person cancelling it,
+/// or its time running out. Stopped, its `ssh` is ended, the machine's
+/// input ends early, and the partial there is removed.
+#[derive(Clone)]
+pub struct Stop {
+    cancelled: Arc<AtomicBool>,
+    deadline: Instant,
+}
+
+impl Stop {
+    pub fn new(deadline: Instant) -> Self {
+        Self {
+            cancelled: Arc::default(),
+            deadline,
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    /// Why it stopped, once it has.
+    fn fired(&self) -> Option<&'static str> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            Some(CANCELLED)
+        } else if Instant::now() >= self.deadline {
+            Some("took too long, and was stopped")
+        } else {
+            None
+        }
+    }
 }
 
 /// Where a file copied for terminal `scope` in drop `batch` lands, as the
@@ -130,14 +218,17 @@ pub struct File<R> {
 
 /// Copies `file` to `machine` (whose home is `home`) for terminal `scope`,
 /// in drop `batch`; `sent` is told how many of its bytes have gone so far.
-/// Answers the path it has there. Blocking.
+/// Only `file.len` bytes are sent, however many more its reader has.
+/// Answers the path it has there. Blocking; `stop` ends it early.
+#[allow(clippy::too_many_arguments)]
 pub fn copy<R: Read>(
     ssh: &SshExe,
     machine: &Machine,
     home: &str,
     scope: &str,
     batch: &str,
-    mut file: File<R>,
+    file: File<R>,
+    stop: &Stop,
     mut sent: impl FnMut(u64),
 ) -> Result<String, String> {
     check_id(scope)?;
@@ -153,6 +244,9 @@ pub fn copy<R: Read>(
         file.name.clone(),
         file.len.to_string(),
     ]);
+    if let Some(why) = stop.fired() {
+        return Err(stopped(&file.name, machine, why));
+    }
     let mut child = ssh
         .command(&invocation)
         .stdin(Stdio::piped())
@@ -175,11 +269,31 @@ pub fn copy<R: Read>(
         b
     });
     let mut input = child.stdin.take().expect("piped");
+    let child = Arc::new(Mutex::new(child));
+    // Ends ssh once `stop` fires, even while a write to it is stuck on a
+    // stalled link.
+    let finished = Arc::new(AtomicBool::new(false));
+    let watchdog = {
+        let (child, finished, stop) = (Arc::clone(&child), Arc::clone(&finished), stop.clone());
+        std::thread::spawn(move || {
+            while !finished.load(Ordering::SeqCst) {
+                if stop.fired().is_some() {
+                    let _ = child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        })
+    };
+    let mut bytes = file.bytes.take(file.len);
     let mut buf = vec![0; CHUNK];
     let mut done = 0u64;
     let mut local: Option<String> = None;
     loop {
-        let n = match file.bytes.read(&mut buf) {
+        if stop.fired().is_some() {
+            break;
+        }
+        let n = match bytes.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
             Err(e) => {
@@ -194,13 +308,27 @@ pub fn copy<R: Read>(
         done += n as u64;
         sent(done);
     }
-    // The end of the file.
+    // The end of the file (early, when it was stopped: the machine then
+    // removes what arrived).
     drop(input);
-    let status = child
-        .wait()
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+    let status = loop {
+        let exited = child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_wait()
+            .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+        if let Some(status) = exited {
+            break status;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    finished.store(true, Ordering::SeqCst);
+    let _ = watchdog.join();
     let out = out.join().unwrap_or_default();
     let err = err.join().unwrap_or_default();
+    if let Some(why) = stop.fired() {
+        return Err(stopped(&file.name, machine, why));
+    }
     if let Some(why) = local {
         return Err(why);
     }
@@ -237,6 +365,15 @@ pub fn copy<R: Read>(
     Ok(wanted)
 }
 
+/// What a copy stopped for `why` answers.
+fn stopped(name: &str, machine: &Machine, why: &str) -> String {
+    if why == CANCELLED {
+        CANCELLED.into()
+    } else {
+        format!("The copy of {name} to {} {why}.", machine.name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,11 +405,49 @@ mod tests {
             "nul\0",
             "c1\u{9b}",
             "del\x7f",
+            "rtl\u{202e}gnp.exe",
+            "zero\u{200b}width",
+            "bom\u{feff}",
         ] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
         assert!(check_name(&"x".repeat(MAX_NAME_BYTES + 1)).is_err());
         assert!(check_name(&"é".repeat(MAX_NAME_BYTES / 2)).is_ok());
+    }
+
+    #[test]
+    fn files_of_one_name_in_a_drop_are_kept_apart() {
+        let names = [
+            "a.png",
+            "a.png",
+            "b",
+            "b",
+            "a.png",
+            ".env",
+            ".env",
+            "a (2).png",
+        ]
+        .map(String::from);
+        assert_eq!(
+            unique(&names),
+            [
+                "a.png",
+                "a (2).png",
+                "b",
+                "b (2)",
+                "a (3).png",
+                ".env",
+                ".env (2)",
+                "a (2) (2).png"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_copy_has_time_for_its_size() {
+        assert_eq!(time_limit(0), Duration::from_secs(60));
+        assert_eq!(time_limit(256 * 1024 * 600), Duration::from_secs(660));
+        assert_eq!(time_limit(u64::MAX), MAX_COPY_TIME);
     }
 
     #[test]

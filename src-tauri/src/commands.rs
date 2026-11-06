@@ -77,6 +77,7 @@ pub const COMMANDS: &[&str] = &[
     "dropped_files",
     "dropped_file_read",
     "terminal_drop",
+    "terminal_drop_cancel",
     "terminal_paste_image",
     "remote_image_fetch",
     "voice_enable",

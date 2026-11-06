@@ -6,11 +6,11 @@
 import { formatSize } from "../attachments/kinds";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { pathsLine } from "./paths";
-import { terminalDrop, terminalPasteImage, type Progress } from "./native";
+import { CANCELLED, cancelDrop, terminalDrop, terminalPasteImage, type Progress } from "./native";
 
 /** What a terminal's pane says of a drop, under its terminal: a copy to a
  *  machine on its way, or why one couldn't be given. */
-export type DropNote = { kind: "copying"; text: string } | { kind: "error"; text: string };
+export type DropNote = { kind: "copying"; text: string; cancel?: () => void } | { kind: "error"; text: string };
 
 /** The note while `count` files go to machine `name`. */
 export const copyingText = (name: string, count: number, p?: Progress): string => {
@@ -29,21 +29,50 @@ export interface Target {
   scope: string;
   /** Types `text` into the terminal, as a paste. */
   write: (text: string) => void;
+  /** Whether the terminal is there to be typed into (its socket open). */
+  running: () => boolean;
   note: (n: DropNote | null) => void;
 }
 
+/** Why nothing was given: the terminal isn't running, so a drop would be
+ *  copied for nothing and lost. */
+export const notRunning = "This terminal isn’t running, so nothing was given to it.";
+
+/** A copy's Cancel, and how its end is told: cancelled, the note just goes. */
+const cancellable = (cancel: (token: string) => Promise<unknown>) => {
+  const token = crypto.randomUUID();
+  let cancelled = false;
+  return {
+    token,
+    cancel: () => {
+      cancelled = true;
+      void cancel(token).catch(() => undefined);
+    },
+    failed: (t: Target, e: unknown) => t.note(cancelled || message(e) === CANCELLED ? null : { kind: "error", text: message(e) }),
+  };
+};
+
 /** Gives the terminal the dropped `paths`, as its shell names them. */
-export const giveDropped = async (t: Target, paths: string[], drop: typeof terminalDrop = terminalDrop): Promise<void> => {
+export const giveDropped = async (
+  t: Target,
+  paths: string[],
+  drop: typeof terminalDrop = terminalDrop,
+  cancel: (token: string) => Promise<unknown> = cancelDrop,
+): Promise<void> => {
+  if (!t.running()) return t.note({ kind: "error", text: notRunning });
   const remote = t.machine !== LOCAL;
-  if (remote) t.note({ kind: "copying", text: copyingText(t.machineName, paths.length) });
+  const c = cancellable(cancel);
+  const copying = (p?: Progress) => t.note({ kind: "copying", text: copyingText(t.machineName, paths.length, p), cancel: c.cancel });
+  if (remote) copying();
   try {
-    const named = await drop(t.machine, t.scope, paths, (p) => {
-      if (remote) t.note({ kind: "copying", text: copyingText(t.machineName, paths.length, p) });
+    const named = await drop(t.machine, t.scope, paths, c.token, (p) => {
+      if (remote) copying(p);
     });
+    if (!t.running()) return t.note({ kind: "error", text: notRunning });
     t.write(pathsLine(named));
     t.note(null);
   } catch (e) {
-    t.note({ kind: "error", text: message(e) });
+    c.failed(t, e);
   }
 };
 
@@ -62,14 +91,22 @@ export const clipboardImage = (data: DataTransfer | null): File | null => {
 };
 
 /** Saves a pasted `image` and gives the terminal its path. */
-export const givePasted = async (t: Target, image: Blob, save: typeof terminalPasteImage = terminalPasteImage): Promise<void> => {
+export const givePasted = async (
+  t: Target,
+  image: Blob,
+  save: typeof terminalPasteImage = terminalPasteImage,
+  cancel: (token: string) => Promise<unknown> = cancelDrop,
+): Promise<void> => {
+  if (!t.running()) return t.note({ kind: "error", text: notRunning });
   const remote = t.machine !== LOCAL;
-  if (remote) t.note({ kind: "copying", text: `Copying the image to ${t.machineName}…` });
+  const c = cancellable(cancel);
+  if (remote) t.note({ kind: "copying", text: `Copying the image to ${t.machineName}…`, cancel: c.cancel });
   try {
-    const path = await save(t.machine, t.scope, image);
+    const path = await save(t.machine, t.scope, image, c.token);
+    if (!t.running()) return t.note({ kind: "error", text: notRunning });
     t.write(pathsLine([path]));
     t.note(null);
   } catch (e) {
-    t.note({ kind: "error", text: message(e) });
+    c.failed(t, e);
   }
 };

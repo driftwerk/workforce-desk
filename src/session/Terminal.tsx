@@ -211,6 +211,7 @@ export function Terminal({
         x.focus();
         x.paste(text);
       },
+      running: isOpen,
       note: setNote,
     });
     const unzone = registerZone(zoneId, {
@@ -270,6 +271,11 @@ export function Terminal({
       {note && (
         <div className={`terminal-note${note.kind === "error" ? " terminal-note-error" : ""}`} role={note.kind === "error" ? "alert" : "status"}>
           <span>{note.text}</span>
+          {note.kind === "copying" && note.cancel && (
+            <button type="button" className="link small" onClick={note.cancel}>
+              Cancel
+            </button>
+          )}
           {note.kind === "error" && (
             <button type="button" className="icon-btn-sm" aria-label="Dismiss" onClick={() => setNote(null)}>
               <svg width="11" height="11" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">

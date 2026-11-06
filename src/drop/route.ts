@@ -49,15 +49,13 @@ export const useDropOver = create<{ over: string | null }>(() => ({ over: null }
 /** The attribute a zone's element carries. */
 export const ZONE_ATTR = "data-drop-zone";
 
-/** The id of the innermost zone at `(x, y)` (CSS pixels in the page). */
+/** The id of the zone the topmost element at `(x, y)` (CSS pixels in the
+ *  page) is in, if any: a dialog or menu over a pane takes the drop itself
+ *  (and, being no zone, gives it to nothing), never the pane beneath. */
 export const zoneAt = (x: number, y: number, doc: Document = document): string | null => {
   const els = typeof doc.elementsFromPoint === "function" ? doc.elementsFromPoint(x, y) : [];
-  for (const el of els) {
-    const zone = el.closest<HTMLElement>(`[${ZONE_ATTR}]`);
-    const id = zone?.getAttribute(ZONE_ATTR);
-    if (id && zones.has(id)) return id;
-  }
-  return null;
+  const id = els[0]?.closest<HTMLElement>(`[${ZONE_ATTR}]`)?.getAttribute(ZONE_ATTR);
+  return id && zones.has(id) ? id : null;
 };
 
 /** A drop's position as the system gives it, in CSS pixels: macOS (in

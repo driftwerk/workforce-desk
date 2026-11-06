@@ -8,8 +8,9 @@ use std::path::Path;
 
 use desk_core::machine::{Machine, MachineId, Target};
 use desk_machine::SshExe;
-use desk_machine::upload::{self, File};
+use desk_machine::upload::{self, File, Stop};
 use serde_json::{Value, json};
+use std::time::{Duration, Instant};
 
 struct Fake {
     dir: tempfile::TempDir,
@@ -54,6 +55,46 @@ fn devbox() -> Machine {
     }
 }
 
+/// Time enough, and never cancelled.
+fn go() -> Stop {
+    Stop::new(Instant::now() + Duration::from_secs(60))
+}
+
+/// Waits (a little) for `dir` on the machine to hold nothing: the machine
+/// removes a stopped copy's partial once its input ends.
+fn emptied(dir: &Path) -> bool {
+    for _ in 0..100 {
+        if std::fs::read_dir(dir)
+            .map(|d| d.count() == 0)
+            .unwrap_or(true)
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    false
+}
+
+/// A reader of `chunks` chunks of 64 KB, calling `each` before each.
+struct Slow<F: FnMut(usize)> {
+    chunks: usize,
+    at: usize,
+    each: F,
+}
+
+impl<F: FnMut(usize)> std::io::Read for Slow<F> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.at == self.chunks {
+            return Ok(0);
+        }
+        (self.each)(self.at);
+        self.at += 1;
+        let n = buf.len().min(64 * 1024);
+        buf[..n].fill(b'x');
+        Ok(n)
+    }
+}
+
 fn file(name: &str, bytes: &[u8]) -> File<std::io::Cursor<Vec<u8>>> {
     File {
         name: name.into(),
@@ -75,6 +116,7 @@ fn a_dropped_file_arrives_whole_under_the_backends_folder() {
         "s-1",
         "d1",
         file(name, &bytes),
+        &go(),
         |n| progress.push(n),
     )
     .unwrap();
@@ -116,6 +158,7 @@ fn two_drops_of_the_same_name_keep_both() {
         "s",
         "d1",
         file("a.png", b"one"),
+        &go(),
         |_| {},
     )
     .unwrap();
@@ -126,6 +169,7 @@ fn two_drops_of_the_same_name_keep_both() {
         "s",
         "d2",
         file("a.png", b"two"),
+        &go(),
         |_| {},
     )
     .unwrap();
@@ -145,6 +189,7 @@ fn a_machine_that_turns_ssh_away_says_so_and_nothing_is_written() {
         "s",
         "d",
         file("a.png", b"x"),
+        &go(),
         |_| {},
     )
     .unwrap_err();
@@ -162,7 +207,8 @@ fn a_copy_that_breaks_off_leaves_no_partial() {
     // Says more bytes are coming than are sent: as a read cut short.
     let mut short = file("a.png", b"abc");
     short.len = 10;
-    let err = upload::copy(&f.ssh, &devbox(), &f.home(), "s", "d", short, |_| {}).unwrap_err();
+    let err =
+        upload::copy(&f.ssh, &devbox(), &f.home(), "s", "d", short, &go(), |_| {}).unwrap_err();
     assert!(err.contains("broke off"), "{err}");
     let dir = Path::new(&f.home()).join(".local/share/Desk/uploads/s/d");
     assert_eq!(std::fs::read_dir(dir).unwrap().count(), 0);
@@ -179,6 +225,7 @@ fn a_machine_without_room_says_what_it_said() {
         "s",
         "d",
         file("a.png", b"x"),
+        &go(),
         |_| {},
     )
     .unwrap_err();
@@ -201,6 +248,7 @@ fn bad_names_and_too_much_are_refused_before_ssh_runs() {
                 "s",
                 "d",
                 file(bad, b"x"),
+                &go(),
                 |_| {}
             )
             .is_err()
@@ -214,6 +262,7 @@ fn bad_names_and_too_much_are_refused_before_ssh_runs() {
             "../s",
             "d",
             file("a", b"x"),
+            &go(),
             |_| {}
         )
         .is_err()
@@ -222,4 +271,93 @@ fn bad_names_and_too_much_are_refused_before_ssh_runs() {
     assert!(upload::check_total(upload::MAX_DROP_BYTES).is_ok());
     let err = upload::check_total(upload::MAX_DROP_BYTES + 1).unwrap_err();
     assert!(err.contains("1024 MB"), "{err}");
+}
+
+#[test]
+fn only_the_length_said_is_sent() {
+    let f = Fake::new();
+    let mut longer = file("a.txt", b"abcdef");
+    longer.len = 3;
+    let at = upload::copy(
+        &f.ssh,
+        &devbox(),
+        &f.home(),
+        "s",
+        "d",
+        longer,
+        &go(),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(at).unwrap(), b"abc");
+}
+
+#[test]
+fn a_cancelled_copy_stops_and_leaves_nothing_on_the_machine() {
+    let f = Fake::new();
+    let stop = go();
+    let s2 = stop.clone();
+    let bytes = Slow {
+        chunks: 50,
+        at: 0,
+        each: move |i| {
+            if i == 3 {
+                s2.cancel();
+            }
+        },
+    };
+    let file = File {
+        name: "big.bin".into(),
+        len: 50 * 64 * 1024,
+        bytes,
+    };
+    let err =
+        upload::copy(&f.ssh, &devbox(), &f.home(), "s", "d", file, &stop, |_| {}).unwrap_err();
+    assert_eq!(err, upload::CANCELLED);
+    let dir = Path::new(&f.home()).join(".local/share/Desk/uploads/s/d");
+    assert!(emptied(&dir), "a partial was left");
+}
+
+#[test]
+fn a_copy_out_of_time_is_stopped_and_says_so() {
+    let f = Fake::new();
+    let stop = Stop::new(Instant::now() + Duration::from_millis(300));
+    let bytes = Slow {
+        chunks: 100,
+        at: 0,
+        each: |_| std::thread::sleep(Duration::from_millis(50)),
+    };
+    let file = File {
+        name: "big.bin".into(),
+        len: 100 * 64 * 1024,
+        bytes,
+    };
+    let err =
+        upload::copy(&f.ssh, &devbox(), &f.home(), "s", "d", file, &stop, |_| {}).unwrap_err();
+    assert_eq!(
+        err,
+        "The copy of big.bin to devbox took too long, and was stopped."
+    );
+    assert!(emptied(
+        &Path::new(&f.home()).join(".local/share/Desk/uploads/s/d")
+    ));
+    // One already out of time doesn't start.
+    let late = Stop::new(Instant::now());
+    assert!(
+        upload::copy(
+            &f.ssh,
+            &devbox(),
+            &f.home(),
+            "s",
+            "e",
+            file_named("x"),
+            &late,
+            |_| {}
+        )
+        .is_err()
+    );
+}
+
+fn file_named(name: &str) -> File<std::io::Cursor<Vec<u8>>> {
+    file(name, b"x")
 }

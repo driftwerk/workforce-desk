@@ -73,6 +73,15 @@ describe("a composer, with the system's drag and drop", () => {
     expect(invoke.mock.calls.filter(([c]) => c === "dropped_file_read")).toEqual([["dropped_file_read", { path: "/Users/me/ok.txt" }]]);
   });
 
+  it("reads no more files than a message carries", async () => {
+    render(<Box sent={[]} />);
+    const box = screen.getByTestId("box");
+    const paths = Array.from({ length: 25 }, (_, i) => `/Users/me/f${i}.txt`);
+    act(() => new DropRouter(() => zoneOf(box)).handle({ type: "drop", paths, position: { x: 1, y: 1 } }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("up to 20 files"));
+    expect(invoke.mock.calls.filter(([c]) => c === "dropped_file_read")).toHaveLength(20);
+  });
+
   it("takes nothing dropped on a terminal beside it", () => {
     const sent: File[][] = [];
     render(<Box sent={sent} />);
