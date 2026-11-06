@@ -148,16 +148,15 @@ function UseMine({
     void useAccounts.getState().load();
   }, []);
   const missing = mine.filter((a) => a.engine === "claude" && a.signedIn && !theirs.some((t) => t.engine === "claude" && t.name.toLowerCase() === a.name.toLowerCase()));
-  // Logged out there with no default (as an earlier copy left it): the
-  // account its sessions start on, offered to be made the default, in this
-  // computer's order (the default, then the oldest).
-  const theirsSignedIn = theirs.filter((t) => t.engine === "claude" && t.signedIn);
+  // Logged out there with no default it can sign in by (as an earlier copy
+  // left it): the account its hub starts sessions on, offered to be made
+  // the default, in the machine's order (the default, then the oldest).
+  const theirsSignedIn = theirs
+    .filter((t) => t.engine === "claude" && t.signedIn)
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt.localeCompare(b.createdAt) || a.name.localeCompare(b.name));
+  const brokenDefault = theirs.find((t) => t.engine === "claude" && t.isDefault && !t.signedIn) ?? null;
   const toDefault =
-    !ownWorks && missing.length === 0 && theirsSignedIn.length > 0 && !theirs.some((t) => t.engine === "claude" && t.isDefault)
-      ? (accountsOf(mine, "claude")
-          .map((m) => theirsSignedIn.find((t) => t.name.toLowerCase() === m.name.toLowerCase()))
-          .find((t) => t) ?? theirsSignedIn[0]!)
-      : null;
+    !ownWorks && missing.length === 0 && theirsSignedIn.length > 0 && !theirsSignedIn[0]!.isDefault ? theirsSignedIn[0]! : null;
   if (missing.length === 0 && !toDefault && !said) return null;
   const makeDefault = async (account: EngineAccount) => {
     const hub = hubOfMachine;
@@ -194,8 +193,10 @@ function UseMine({
       {toDefault && (
         <span className="account-share-row">
           <span className="small">
-            Claude Code isn’t signed in on {name}, and none of its accounts is the default.{" "}
-            <span className="faint">New sessions there start on {toDefault.name} until one is.</span>
+            {brokenDefault
+              ? `Claude Code isn’t signed in on ${name}, and its default, ${brokenDefault.name}, can’t sign in.`
+              : `Claude Code isn’t signed in on ${name}, and none of its accounts is the default.`}{" "}
+            {!brokenDefault && <span className="faint">New sessions there start on {toDefault.name} until one is.</span>}
           </span>
           <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void makeDefault(toDefault)}>
             {`Make ${toDefault.name} the default`}
