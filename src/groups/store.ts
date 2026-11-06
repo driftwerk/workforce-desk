@@ -5,7 +5,7 @@
 // it hands over what it kept itself. Against a hub that can't keep them,
 // Desk's settings hold them, as before.
 
-import type { DeskHub } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import { deskListeners, hubOf, useDesk } from "../hub/store";
 import { LOCAL, splitKey } from "../hub/machines";
 import type { DeskEvent, Session } from "../hub/types";
@@ -69,14 +69,18 @@ const adopt = (layout: Layout) => {
   else useHubLayout.setState({ layout });
 };
 
-/** Sends one change to the hub, in order after the others. */
-const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>) => {
+/** Sends one change to the hub, in order after the others; whether the hub
+ *  took it. `quiet`: a failure is only logged (one Desk retries itself). */
+const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet = false): Promise<boolean> => {
   inFlight++;
+  let took = false;
   sending = sending.then(async () => {
     try {
       heard = await call(hub);
+      took = true;
     } catch (e) {
-      useDesk.getState().fail(e);
+      if (quiet) console.warn("couldn't change the groups on the hub:", e);
+      else useDesk.getState().fail(e);
       // Show what the hub really has.
       heard = await hub.layout().catch(() => heard);
     } finally {
@@ -87,23 +91,30 @@ const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>) => {
       }
     }
   });
+  return sending.then(() => took);
 };
 
 /** Applies `change` to the groups; on a hub that keeps them, also sends it
- *  through `call` (its group routes), given the layout as changed. */
-export const changeLayout = (change: (layout: Layout) => Layout | null, call: (hub: DeskHub, next: Layout) => Promise<Layout>): void => {
+ *  through `call` (its group routes), given the layout as changed. Settles
+ *  with whether it was kept (at once in Desk's settings; once the hub took
+ *  it on a hub). */
+export const changeLayout = (
+  change: (layout: Layout) => Layout | null,
+  call: (hub: DeskHub, next: Layout) => Promise<Layout>,
+  quiet = false,
+): Promise<boolean> => {
   const hubLayout = useHubLayout.getState().layout;
   const hub = useDesk.getState().hub;
   if (hubLayout && hub) {
     const next = change(hubLayout);
-    if (!next || next === hubLayout) return;
+    if (!next || next === hubLayout) return Promise.resolve(true);
     useHubLayout.setState({ layout: next });
-    send(hub, (h) => call(h, next));
-    return;
+    return send(hub, (h) => call(h, next), quiet);
   }
   const s = useSettings.getState();
   const next = change(layoutOf(s));
   if (next) s.set({ groups: next.groups, ungrouped: next.ungrouped });
+  return Promise.resolve(true);
 };
 
 // Each change, as `model` makes it and as the hub's routes do. Ungrouped's
@@ -111,32 +122,32 @@ export const changeLayout = (change: (layout: Layout) => Layout | null, call: (h
 // Desk knows), so changes that place things in it send that order.
 
 export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): void =>
-  changeLayout(
+  void changeLayout(
     (l) => created(l, id, name, items),
     (h) => h.createGroup({ id, name, items: [...items] }),
   );
 
 export const renameGroup = (id: string, name: string): void =>
-  changeLayout(
+  void changeLayout(
     (l) => renamed(l, id, name),
     (h) => h.updateGroup(id, { name: name.trim() }),
   );
 
 export const collapseGroup = (id: string, to: boolean): void =>
-  changeLayout(
+  void changeLayout(
     (l) => collapsed(l, id, to),
     (h) => h.updateGroup(id, { collapsed: to }),
   );
 
 /** Its members go to the end of Ungrouped. */
 export const deleteGroup = (present: readonly ItemKey[], id: string): void =>
-  changeLayout(
+  void changeLayout(
     (l) => deleted(l, present, id),
     (h, next) => h.deleteGroup(id).then(() => h.orderUngrouped(next.ungrouped.items)),
   );
 
 export const moveGroup = (id: string, before: string | null): void =>
-  changeLayout(
+  void changeLayout(
     (l) => movedGroup(l, id, before),
     (h) => h.moveGroup(id, before),
   );
@@ -144,13 +155,13 @@ export const moveGroup = (id: string, before: string | null): void =>
 /** Any session, this computer's or a machine's (`session:<machine>/<id>`),
  *  and any agent can be in any group. */
 export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
-  changeLayout(
+  void changeLayout(
     (l) => moved(l, present, key, to, before),
     (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
   );
 
 export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
-  changeLayout(
+  void changeLayout(
     (l) => removed(l, present, key),
     (h, next) => h.orderUngrouped(next.ungrouped.items),
   );
@@ -158,16 +169,33 @@ export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void
 export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Drop): void =>
   drop.kind === "item" ? moveItem(present, dragged, drop.group, drop.before) : moveGroup(dragged, drop.before);
 
+/** How many times a whole-layout change is made again to what the hub
+ *  has, when the hub changed it meanwhile. */
+export const REPLACE_TRIES = 3;
+
 /** A change no one route says (a machine's sessions forgotten, its groups
  *  merged in): the whole layout as changed, in turn with the rest. The hub
- *  may have changed it itself meanwhile (a session of its own forgotten), so
- *  the change is made again to what it has now, not to Desk's copy. */
-export const replaceLayout = (change: (layout: Layout) => Layout | null): void =>
-  changeLayout(change, (h) =>
-    h.layout().then((fresh) => {
-      const next = change(fresh);
-      return next ? h.replaceLayout(next) : fresh;
-    }),
+ *  may change it itself meanwhile (an agent groups something, a session of
+ *  its own is placed or forgotten), so the change is made to what it has
+ *  now and sent saying so; if it changed again before the write (409), it's
+ *  read and made again, a few times. Settles with whether the hub took it.
+ *  Failures are only logged: what calls this tries again itself. */
+export const replaceLayout = (change: (layout: Layout) => Layout | null): Promise<boolean> =>
+  changeLayout(
+    change,
+    async (h) => {
+      for (let tries = 1; ; tries++) {
+        const fresh = await h.layout();
+        const next = change(fresh);
+        if (!next) return fresh;
+        try {
+          return await h.replaceLayout(next, fresh);
+        } catch (e) {
+          if (!(e instanceof HubError && e.status === 409) || tries >= REPLACE_TRIES) throw e;
+        }
+      }
+    },
+    true,
   );
 
 // ── Names ─────────────────────────────────────────────────────────────────

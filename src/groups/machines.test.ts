@@ -10,7 +10,8 @@ const { useMachines } = await import("../hub/engines");
 const { useSettings } = await import("../settings/store");
 const { forgetGone, nameSession, useHubLayout, moveItem } = await import("./store");
 const { dropAt, dropItems, dropOn, machineOfItem, mergeMachineLayout, moveItem: moved, resolve, sessionItem, UNGROUPED, EMPTY_LAYOUT } = await import("./model");
-const { followMachineSessions, goneOn, machineSessions, useMachineSessions } = await import("./machines");
+const { followMachineSessions, forgetMachine, goneOn, machineSessions, MERGE_RETRY_MS, useMachineSessions } = await import("./machines");
+const { HubError } = await import("../hub/client");
 
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const session = (id: string, more: Record<string, unknown> = {}) => ({ id, name: `hub-${id}`, engine: "claude", state: "idle", updatedAt: "2026-11-06T00:00:00Z", ...more }) as never;
@@ -105,6 +106,11 @@ describe("a machine's own groups, merged in once", () => {
     expect(l.ungrouped.items).toEqual([]);
   });
 
+  it("makes no group for one whose sessions are all grouped here already, nor for a blank name", () => {
+    const l = mergeMachineLayout(mine, "devbox", { groups: [{ id: "x", name: "Old", collapsed: false, items: [`session:${U(9)}`] }, { id: "y", name: "   ", collapsed: false, items: [`session:${U(6)}`] }], ungrouped: { collapsed: false, items: [] } }, () => "new");
+    expect(l.groups.map((g) => g.name)).toEqual(["Acme"]);
+  });
+
   it("this computer's own layout, or a machine with no groups, changes nothing", () => {
     expect(mergeMachineLayout(mine, "local", theirs, () => "x")).toBe(mine);
     expect(mergeMachineLayout(mine, "devbox", EMPTY_LAYOUT, () => "x")).toBe(mine);
@@ -160,7 +166,7 @@ describe("following the machines' sessions", () => {
     expect(useMachineSessions.getState()).toEqual({ seen: {}, merged: [] });
   });
 
-  it("merges a machine's groups once, when the groups here are settled", () => {
+  it("merges a machine's groups once, when the groups here are settled", async () => {
     useHubLayout.setState({ kept: null });
     const theirs: Layout = { groups: [{ id: "x", name: "Atlas", collapsed: false, items: [`session:${U(3)}`] }], ungrouped: { collapsed: false, items: [] } };
     say({ type: "snapshot", sessions: [session(U(1)), session(U(2)), session(U(3))], restore: [], rooms: [], layout: theirs });
@@ -170,26 +176,97 @@ describe("following the machines' sessions", () => {
       ["Acme", [`session:devbox/${U(1)}`, `session:devbox/${U(2)}`, `session:${U(7)}`]],
       ["Atlas", [`session:devbox/${U(3)}`]],
     ]);
-    expect(useMachineSessions.getState().merged).toEqual(["devbox"]);
+    await vi.waitFor(() => expect(useMachineSessions.getState().merged).toEqual(["devbox"]));
     // Moved out by the person, it isn't merged back.
     moveItem([], `session:devbox/${U(3)}`, UNGROUPED, null);
     say({ type: "snapshot", sessions: [session(U(1)), session(U(2)), session(U(3))], restore: [], rooms: [], layout: theirs });
+    await Promise.resolve();
     expect(layoutOf().groups[1]!.items).toEqual([]);
   });
 
-  it("on a hub that keeps the groups, sends the whole layout as changed", async () => {
+  it("an empty first list, before Desk's machines file is read, loses nothing and merges nothing again", async () => {
+    stop();
+    useMachineSessions.setState({ seen: { [`devbox/${U(1)}`]: { name: "web", engine: "claude" } }, merged: ["devbox"] });
+    useMachines.setState({ machines: [], listed: true });
+    stop = followMachineSessions();
+    useMachines.setState({ machines: [devbox()] });
+    useMachines.setState({ machines: [devbox("unreachable")] });
+    await Promise.resolve();
+    expect(layoutOf().groups[0]!.items).toEqual([`session:devbox/${U(1)}`, `session:devbox/${U(2)}`, `session:${U(7)}`]);
+    expect(useMachineSessions.getState()).toEqual({ seen: { [`devbox/${U(1)}`]: { name: "web", engine: "claude" } }, merged: ["devbox"] });
+    // Nor does a later snapshot's layout merge again.
+    say({ type: "snapshot", sessions: [session(U(1)), session(U(2))], restore: [], rooms: [], layout: { groups: [{ id: "x", name: "Acme", collapsed: false, items: [`session:${U(5)}`] }], ungrouped: { collapsed: false, items: [] } } });
+    await Promise.resolve();
+    expect(layoutOf().groups).toHaveLength(1);
+    expect(layoutOf().groups[0]!.items).not.toContain(`session:devbox/${U(5)}`);
+  });
+
+  it("removed in Settings, a machine's sessions leave at once, though it's still listed", () => {
+    forgetMachine("devbox", true);
+    expect(layoutOf().groups[0]!.items).toEqual([`session:${U(7)}`]);
+  });
+
+  describe("on a hub that keeps the groups", () => {
     const hubLayout: Layout = { groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:devbox/${U(1)}`] }], ungrouped: { collapsed: false, items: [] } };
     // What the hub has now: it forgot one of its own sessions meanwhile.
     const fresh: Layout = { groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:devbox/${U(1)}`, `session:${U(7)}`] }], ungrouped: { collapsed: false, items: [] } };
-    const replaceLayout = vi.fn(async (l: Layout) => l);
-    useDesk.setState({ hub: { replaceLayout, layout: vi.fn(async () => fresh) } as never });
-    useHubLayout.setState({ layout: hubLayout, kept: true });
-    say({ type: "removed", id: U(1) });
-    // At once here; on the hub, made again to what it has.
-    expect(useHubLayout.getState().layout!.groups[0]!.items).toEqual([]);
-    await vi.waitFor(() =>
-      expect(replaceLayout).toHaveBeenCalledWith({ groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:${U(7)}`] }], ungrouped: { collapsed: false, items: [] } }),
-    );
+
+    it("sends the whole layout as changed to what the hub has, saying what it was made from", async () => {
+      const replaceLayout = vi.fn(async (l: Layout) => l);
+      useDesk.setState({ hub: { replaceLayout, layout: vi.fn(async () => fresh) } as never });
+      useHubLayout.setState({ layout: hubLayout, kept: true });
+      say({ type: "removed", id: U(1) });
+      // At once here; on the hub, made again to what it has.
+      expect(useHubLayout.getState().layout!.groups[0]!.items).toEqual([]);
+      await vi.waitFor(() =>
+        expect(replaceLayout).toHaveBeenCalledWith({ groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:${U(7)}`] }], ungrouped: { collapsed: false, items: [] } }, fresh),
+      );
+    });
+
+    it("the hub changed it before the write (409): read and made again", async () => {
+      const later: Layout = { ...fresh, ungrouped: { collapsed: false, items: [`session:${U(8)}`] } };
+      const layout = vi.fn().mockResolvedValueOnce(fresh).mockResolvedValue(later);
+      const replaceLayout = vi.fn().mockRejectedValueOnce(new HubError(409, "changed")).mockImplementation(async (l: Layout) => l);
+      useDesk.setState({ hub: { replaceLayout, layout } as never });
+      useHubLayout.setState({ layout: hubLayout, kept: true });
+      say({ type: "removed", id: U(1) });
+      await vi.waitFor(() => expect(replaceLayout).toHaveBeenCalledTimes(2));
+      expect(replaceLayout.mock.calls[1]).toEqual([{ ...later, groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:${U(7)}`] }] }, later]);
+    });
+
+    it("a merge the hub doesn't take is kept and tried again later, and lands once", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      try {
+        const theirs: Layout = { groups: [{ id: "x", name: "Atlas", collapsed: false, items: [`session:${U(3)}`] }], ungrouped: { collapsed: false, items: [] } };
+        let kept = hubLayout;
+        const replaceLayout = vi
+          .fn()
+          .mockRejectedValueOnce(new HubError(503, "restarting"))
+          .mockImplementation(async (l: Layout) => (kept = l));
+        useDesk.setState({ hub: { replaceLayout, layout: vi.fn(async () => kept) } as never });
+        useHubLayout.setState({ layout: hubLayout, kept: true });
+        say({ type: "snapshot", sessions: [session(U(1)), session(U(3))], restore: [], rooms: [], layout: theirs });
+        await vi.waitFor(() => expect(replaceLayout).toHaveBeenCalledTimes(1));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(useMachineSessions.getState().merged).toEqual([]);
+        // Not before it's due, however often things change.
+        useHubLayout.setState({ layout: hubLayout });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(replaceLayout).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(MERGE_RETRY_MS);
+        await vi.waitFor(() => expect(useMachineSessions.getState().merged).toEqual(["devbox"]));
+        expect(replaceLayout).toHaveBeenCalledTimes(2);
+        expect(kept.groups.map((g) => [g.name, g.items])).toEqual([
+          ["Acme", [`session:devbox/${U(1)}`]],
+          ["Atlas", [`session:devbox/${U(3)}`]],
+        ]);
+        useHubLayout.setState({ layout: kept });
+        await vi.advanceTimersByTimeAsync(MERGE_RETRY_MS);
+        expect(replaceLayout).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("a snapshot's restore list counts as still there", () => {

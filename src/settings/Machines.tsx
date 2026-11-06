@@ -1,5 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
+import { forgetMachine } from "../groups/machines";
 import { useDesk } from "../hub/store";
 import { AddMachine } from "../machines/AddMachine";
 import { LOCAL, sessionsOn, useMachines, type Machine } from "../machines/engines";
@@ -110,7 +111,7 @@ export function Machines({ native = realNative }: { native?: MachineNative }) {
       </ul>
       {adding && <AddMachine native={native} onClose={() => setAdding(false)} />}
       {removing && (
-        <Confirm title={`Remove ${removing.name}?`} action="Remove" onConfirm={() => native.remove(removing.id)} onClose={() => setRemoving(null)}>
+        <Confirm title={`Remove ${removing.name}?`} action="Remove" onConfirm={() => native.remove(removing.id).then(() => forgetMachine(removing.id, true))} onClose={() => setRemoving(null)}>
           <p>
             Desk on {thisComputerLower(platform)} forgets {removing.name}. Desk keeps running there, with its sessions, until you stop it. To take it off{" "}
             {removing.name} too, run these there:

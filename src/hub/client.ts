@@ -693,8 +693,10 @@ export class DeskHub {
 
   layout = (): Promise<Layout> => this.call("GET", "/api/desk/layout");
   /** Replaces the whole layout: for what no one route says, a machine's
-   *  sessions forgotten or its groups merged in. */
-  replaceLayout = (l: Layout): Promise<Layout> => this.call("PUT", "/api/desk/layout", l);
+   *  sessions forgotten or its groups merged in. With `expected`, the layout
+   *  it was made from: one that changed since is refused with a 409. */
+  replaceLayout = (l: Layout, expected?: Layout): Promise<Layout> =>
+    this.call("PUT", "/api/desk/layout", expected ? { ...l, expected } : l);
   /** Desk's first push of the groups and names it kept itself; a hub that
    *  already has some keeps its own (unless `force`). */
   importLayout = (i: { layout: Layout; sessionNames: Record<string, string>; force?: boolean }): Promise<LayoutImport> =>

@@ -80,7 +80,7 @@ let following = false;
 
 const changeWhenSettled = (change: (l: Layout) => Layout | null): void => {
   if (!following || useDesk.getState().detached) return;
-  if (layoutSettled()) replaceLayout(change);
+  if (layoutSettled()) void replaceLayout(change);
   else waiting.push(change);
 };
 
@@ -111,29 +111,60 @@ export const goneOn = (machine: MachineId, e: EngineEvent): ((key: string) => bo
   }
 };
 
-/** Machines removed from Desk (listed, and no longer there) take their
- *  sessions out of the groups; one added again merges its groups again. */
+/** The machines a list in this run has shown. A list can come back empty
+ *  before Desk's machines file has been read (or when it can't be), so a
+ *  machine counts as removed only when a list showed it and a later one
+ *  doesn't; never on the first. */
+const listedOnce = new Set<MachineId>();
+
+/** Machine `machine` was removed from Desk: its sessions leave the groups,
+ *  and added again, it merges its groups again. Seen missing from a list,
+ *  that's checked again when the change is made (it may be back by then);
+ *  removed in Settings (`removed`), it's so. */
+export const forgetMachine = (machine: MachineId, removed = false): void => {
+  if (machine === LOCAL) return;
+  const back = () => !removed && useMachines.getState().machines.some((m) => m.id === machine);
+  changeWhenSettled((l) => (back() ? null : dropItems(l, (k) => machineOfItem(k) === machine)));
+  heard.delete(machine);
+  const { seen, merged } = useMachineSessions.getState();
+  useMachineSessions.setState({
+    seen: Object.fromEntries(Object.entries(seen).filter(([k]) => splitKey(k).machine !== machine)),
+    merged: merged.filter((m) => m !== machine),
+  });
+};
+
+/** Machines a list in this run showed that this one doesn't were removed. */
 const forgetRemoved = (): void => {
   const { machines, listed } = useMachines.getState();
   if (!listed) return;
   const ids = new Set(machines.map((m) => m.id));
-  const removed = (key: string) => {
-    const m = splitKey(key).machine;
-    return m !== LOCAL && !ids.has(m);
-  };
-  forgetMachineSessions(removed);
-  const { merged } = useMachineSessions.getState();
-  if (merged.some((m) => !ids.has(m))) useMachineSessions.setState({ merged: merged.filter((m) => ids.has(m)) });
+  for (const m of [...listedOnce]) {
+    if (ids.has(m)) continue;
+    listedOnce.delete(m);
+    forgetMachine(m);
+  }
+  for (const id of ids) listedOnce.add(id);
 };
 
 /** Each machine's own groups as its engine last said them, until merged. */
 const heard = new Map<MachineId, Layout>();
+/** Machines whose groups are being merged in now. */
+const merging = new Set<MachineId>();
+/** When a machine whose merge the hub didn't take may be tried again. */
+const retryAt = new Map<MachineId, number>();
+const timers = new Set<ReturnType<typeof setTimeout>>();
+
+/** How long a merge the hub didn't take (it was restarting, or refused it)
+ *  waits before it's tried again. */
+export const MERGE_RETRY_MS = 30_000;
 
 const newId = (): string =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 /** Merges in the groups of each machine heard from that hasn't been, once
- *  the groups here are settled. */
+ *  the groups here are settled. A machine counts as merged only once the
+ *  hub (or Desk's settings) has its groups; until then they're kept, and
+ *  tried again a little later. */
 const mergeHeard = (): void => {
   if (!following || useDesk.getState().detached || !layoutSettled()) return;
   const ids = new Set(useMachines.getState().machines.map((m) => m.id));
@@ -142,16 +173,30 @@ const mergeHeard = (): void => {
       heard.delete(machine);
       continue;
     }
-    if (!ids.has(machine)) continue;
-    heard.delete(machine);
+    if (!ids.has(machine) || merging.has(machine) || (retryAt.get(machine) ?? 0) > Date.now()) continue;
+    merging.add(machine);
     // The same new groups' ids here and on the hub, which makes it again.
     const made: string[] = [];
-    replaceLayout((l) => {
+    void replaceLayout((l) => {
       let i = 0;
       const next = mergeMachineLayout(l, machine, theirs, () => (made[i++] ??= newId()));
       return next === l ? null : next;
+    }).then((took) => {
+      merging.delete(machine);
+      if (!following) return;
+      if (took) {
+        retryAt.delete(machine);
+        if (heard.get(machine) === theirs) heard.delete(machine);
+        useMachineSessions.setState((s) => (s.merged.includes(machine) ? s : { merged: [...s.merged, machine] }));
+        return;
+      }
+      retryAt.set(machine, Date.now() + MERGE_RETRY_MS);
+      const t = setTimeout(() => {
+        timers.delete(t);
+        mergeHeard();
+      }, MERGE_RETRY_MS);
+      timers.add(t);
     });
-    useMachineSessions.setState((s) => ({ merged: [...s.merged, machine] }));
   }
 };
 
@@ -160,8 +205,7 @@ const settle = (): void => {
   if (!following || useDesk.getState().detached || !layoutSettled()) return;
   const changes = waiting;
   waiting = [];
-  for (const change of changes) replaceLayout(change);
-  forgetRemoved();
+  for (const change of changes) void replaceLayout(change);
   mergeHeard();
 };
 
@@ -185,17 +229,23 @@ export function followMachineSessions(): () => void {
     useDesk.subscribe((s, before) => s.sessions !== before.sessions && noteSessions(s.sessions)),
     useMachines.subscribe((s, before) => {
       if (s.machines === before.machines && s.listed === before.listed) return;
-      if (layoutSettled()) forgetRemoved();
+      forgetRemoved();
       mergeHeard();
     }),
     useHubLayout.subscribe(settle),
     useSettings.subscribe((s, before) => s.loaded !== before.loaded && settle()),
   ];
+  forgetRemoved();
   settle();
   return () => {
     following = false;
     waiting = [];
     heard.clear();
+    merging.clear();
+    retryAt.clear();
+    listedOnce.clear();
+    for (const t of timers) clearTimeout(t);
+    timers.clear();
     engineListeners.delete(onEngine);
     for (const stop of stops) stop();
   };

@@ -303,6 +303,8 @@ export const mergeMachineLayout = (layout: Layout, machine: MachineId, theirs: L
   const grouped = new Set(layout.groups.flatMap((g) => g.items));
   let out = layout;
   for (const g of theirs.groups) {
+    // A name that's only spaces names nothing here.
+    if (!g.name.trim()) continue;
     const items = [
       ...new Set(
         g.items.flatMap((k) => {
@@ -316,9 +318,11 @@ export const mergeMachineLayout = (layout: Layout, machine: MachineId, theirs: L
     const taken = new Set(items);
     const ungrouped = { ...out.ungrouped, items: out.ungrouped.items.filter((k) => !taken.has(k)) };
     const same = out.groups.find((x) => sameName(x.name, g.name));
+    // Everything it held is already in a group here: nothing to make.
+    if (!same && !items.length && g.items.length) continue;
     out = same
       ? { groups: out.groups.map((x) => (x === same ? { ...x, items: [...x.items, ...items] } : x)), ungrouped }
-      : { groups: [...out.groups, { id: newId(), name: g.name.trim() || g.name, collapsed: false, items }], ungrouped };
+      : { groups: [...out.groups, { id: newId(), name: g.name.trim(), collapsed: false, items }], ungrouped };
   }
   return out;
 };
