@@ -97,6 +97,20 @@ pub const MAX_CLAUDE_CODE_AT_ONCE: i64 = 3;
 /// machine's has none ([`remove_machine_agent`]).
 pub const DESK_AGENT: &str = "desk";
 
+/// A machine runs no memory store: what an earlier Desk Helper kept for it
+/// there is removed, the store's data, cache, embedding model and the notes
+/// beside them (`hub/memory`), and nothing else. A link there is removed,
+/// never what it points to. Whether there was any.
+pub fn remove_machine_memory(paths: &Paths) -> std::io::Result<bool> {
+    let memory = paths.memory();
+    match std::fs::symlink_metadata(&memory) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(&memory).map(|()| true),
+        Ok(_) => std::fs::remove_file(&memory).map(|()| true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// A machine's hub serves no agents: the Desk agent an earlier Desk Helper
 /// made there is removed, its folder with its `config.toml` and all it
 /// kept. Its sessions the hub forgets itself, starting with `[desk] agents
@@ -472,7 +486,11 @@ pub fn render(
             ("name", s("Desk")),
             (
                 "workspace",
-                s(&paths.hub_data().join("agents").join(DESK_AGENT).to_string_lossy()),
+                s(&paths
+                    .hub_data()
+                    .join("agents")
+                    .join(DESK_AGENT)
+                    .to_string_lossy()),
             ),
             ("default", Value::Boolean(true)),
         ]);
@@ -601,7 +619,10 @@ mod tests {
             desktop["desk"].get("restore").is_none(),
             "the hub's own default"
         );
-        assert!(desktop["desk"].get("agents").is_none(), "the hub's own default: on");
+        assert!(
+            desktop["desk"].get("agents").is_none(),
+            "the hub's own default: on"
+        );
         let agents = desktop["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["id"].as_str(), Some(DESK_AGENT));
@@ -620,6 +641,35 @@ mod tests {
         .unwrap();
         assert!(desktop_on_the_same_paths.remove("agents").is_some());
         assert_eq!(without, desktop_on_the_same_paths, "nothing else differs");
+    }
+
+    /// An upgraded machine's memory store's data and model are removed,
+    /// and nothing else of Desk's: not the hub's data, not its Postgres,
+    /// not the SQLite memories kept aside when they moved into the store.
+    #[test]
+    fn a_machines_memory_store_data_is_removed_once_and_nothing_else() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths::at(root.path());
+        for dir in [
+            paths.memory_store(),
+            paths.memory_cache(),
+            paths.memory_models(),
+        ] {
+            std::fs::create_dir_all(dir.join("x")).unwrap();
+        }
+        std::fs::write(paths.memory_model_state(), "{}").unwrap();
+        std::fs::write(paths.memory_moved(), "{}").unwrap();
+        std::fs::create_dir_all(paths.postgres_data()).unwrap();
+        std::fs::create_dir_all(paths.hub_data()).unwrap();
+        let aside = paths.hub_data().join(crate::moving::BACKUP);
+        std::fs::write(&aside, "").unwrap();
+        assert!(remove_machine_memory(&paths).unwrap());
+        assert!(!paths.memory().exists());
+        assert!(
+            paths.postgres_data().exists() && aside.exists(),
+            "nothing else"
+        );
+        assert!(!remove_machine_memory(&paths).unwrap(), "once");
     }
 
     /// An upgraded machine's Desk agent is removed, its config and all it
@@ -652,7 +702,10 @@ mod tests {
         #[cfg(unix)]
         assert!(remove_machine_agent(&paths).unwrap());
         assert!(std::fs::symlink_metadata(&agent).is_err());
-        assert!(target.join("keep.md").exists(), "never what a link points to");
+        assert!(
+            target.join("keep.md").exists(),
+            "never what a link points to"
+        );
         assert!(other.exists(), "not the agents folder while it holds more");
     }
 

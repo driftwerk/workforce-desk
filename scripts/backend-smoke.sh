@@ -23,6 +23,10 @@
 # stand-in `claude` first on PATH. It also checks that:
 #   - its hub serves no agents: the Desk agent an earlier version left is
 #     removed, none is listed, and none oversees its sessions;
+#   - it runs no memory store and fetches no model, and what an earlier
+#     version kept for the store is removed;
+#   - on its next start the hub forgets the chat sessions an agent of an
+#     earlier version left in Postgres, and never Desk's own sessions;
 #   - connection --json says the version installed, and the owner is the
 #     person named;
 #   - the hub resumes sessions by itself (restore = "auto");
@@ -63,6 +67,9 @@ if [ -n "$machine" ]; then
   # finds it.
   mkdir -p "$DESK_HOME/hub/data/agents/desk/memory"
   printf '[oversight]\nenabled = true\nlevel = "watch"\n' >"$DESK_HOME/hub/data/agents/desk/config.toml"
+  # And what it kept for the memory store.
+  mkdir -p "$DESK_HOME/hub/memory/models/bge" "$DESK_HOME/hub/memory/store"
+  echo '{"state":"ready"}' >"$DESK_HOME/hub/memory/model.json"
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
   # A stand-in for Claude Code: says a version when asked, and otherwise
   # logs how it was started and with which plugins, then waits as a session.
@@ -131,7 +138,12 @@ say "the hub settles on its memories"
 # The memory store's model arrives in the background, and once it does the
 # hub restarts on the store: waited for here, so nothing below races that
 # restart. A model that can't be fetched in time leaves the hub on SQLite.
-if until_ok 180 jq -e '.state == "ready"' "$DESK_HOME/hub/memory/model.json"; then
+# A machine runs no store, so there is nothing to wait for.
+if [ -n "$machine" ]; then
+  [ ! -e "$DESK_HOME/hub/memory" ] || fail "a machine kept memory store data: $(ls -R "$DESK_HOME/hub/memory")"
+  ! pgrep -f "$DESK_HOME/bin/.*/desk-memory" >/dev/null || fail "a machine runs the memory store"
+  ! grep -q '^\[vellev\]' "$DESK_HOME/hub/workforce.toml" || fail "a machine's hub is given a memory store"
+elif until_ok 180 jq -e '.state == "ready"' "$DESK_HOME/hub/memory/model.json"; then
   until_ok 120 test -s "$DESK_HOME/hub/memory/moved.json" || fail "memories never moved into the memory store"
   until_ok 60 api "$device" /api/me || fail "the hub didn't come back on the memory store"
 fi
@@ -188,6 +200,22 @@ if [ -n "$machine" ]; then
   started() { grep -q -- "--session-id $sid plugins=.*$plugin" "$sessions"; }
   until_ok 30 started || fail "the session didn't start with Desk's plugin: $(cat "$sessions" 2>/dev/null)"
 
+  say "an earlier agent's chat sessions are planted in Postgres"
+  psql=$(ls "$DESK_HOME"/hub/postgres-install/*/bin/psql | head -n 1)
+  pgpw=$(sed -n 's/^hub-postgres-password = "\(.*\)"$/\1/p' "$DESK_HOME/secrets.toml")
+  pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
+  sql() { PGPASSWORD="$pgpw" "$psql" -h 127.0.0.1 -p "$pgport" -U postgres -d workforce -tAX -c "$1"; }
+  old=$(cat /proc/sys/kernel/random/uuid)
+  sql "INSERT INTO sessions.sessions (id, agent_id, channel, owner, kind, created_at, updated_at)
+       VALUES ('$old', 'desk', 'desk', 'smoke', 'main', now(), now())" >/dev/null ||
+    fail "couldn't plant an old agent's session"
+  sql "INSERT INTO sessions.session_archive (session_id, message_id, role, content, ts)
+       VALUES ('$old', 'm1', 'user', 'what is running?', now())" >/dev/null
+  sql "INSERT INTO sessions.desk_reads (owner, agent_id, channel, at, updated_at)
+       VALUES ('smoke', 'desk', 'desk', now(), now())" >/dev/null
+  [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
+    fail "Desk doesn't keep its session $sid in its own table"
+
   say "after the box restarts, the session is resumed"
   holder=$(cat "$DESK_HOME/hub/run/pty.pid")
   "$helper" --stop
@@ -203,6 +231,18 @@ if [ -n "$machine" ]; then
   until_ok 120 paired || fail "Desk Helper didn't pair again"
   conn=$("$helper" connection --json)
   gateway=$(jq -r .gateway_url <<<"$conn")
+
+  say "the hub forgot the earlier agent's chat sessions, and kept Desk's own"
+  pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
+  forgot() { [ "$(sql "SELECT count(*) FROM sessions.sessions WHERE agent_id = 'desk'")" = 0 ]; }
+  until_ok 60 forgot || fail "the earlier agent's sessions are still there"
+  [ "$(sql "SELECT count(*) FROM sessions.session_archive WHERE session_id = '$old'")" = 0 ] ||
+    fail "the earlier agent's archive is still there"
+  [ "$(sql "SELECT count(*) FROM sessions.desk_reads WHERE agent_id = 'desk'")" = 0 ] ||
+    fail "the earlier agent's read points are still there"
+  [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
+    fail "Desk's own session record went with them"
+  [ ! -e "$DESK_HOME/hub/memory" ] || fail "the restart made memory store data"
 fi
 
 if [ -z "$machine" ]; then
