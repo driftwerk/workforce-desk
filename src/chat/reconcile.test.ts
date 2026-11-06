@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dropped, emptyConversation, reduce, toShow, type ConversationState, type Turn } from "./conversation";
 import { fromHub, type HubMessage } from "./history";
+import { withHistory } from "./legacy";
 import { keptOf, onceEach, shownWith } from "./reconcile";
 import { FEATURES, type ChatMessage, type ServerMessage } from "./types";
 
@@ -127,6 +128,13 @@ describe("a DM on a hub with client ids", () => {
     const shown = shownWith(repeated, [answer, { ...answer }]);
     expect(shown.map((m) => m.id)).toEqual(["h-q", "h-w", "A"]);
     expect(onceEach([asked, asked, steered]).map((m) => m.id)).toEqual(["h-q", "h-w"]);
+  });
+
+  it("gives every message one key on an older hub too, whose page repeats one", () => {
+    const answer = row({ id: "A", from: "agent", text: "Next" });
+    const page = [row({ id: "h-q", from: "user", text: Q }), answer, answer];
+    const shown = onceEach(withHistory(page, [{ ...answer, tools: [] }], null));
+    expect(shown.map((m) => m.id)).toEqual(["h-q", "A"]);
   });
 
   it("shows a turn's tools under it until its answer, which keeps them, is read", () => {
