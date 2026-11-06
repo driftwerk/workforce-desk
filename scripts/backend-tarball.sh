@@ -33,6 +33,9 @@ for name in desk-helper desk-agents desk-memory; do
   chmod 755 "$dir/$name"
 done
 [ -d "$dir/claude-plugin" ] || die "$dir has no claude-plugin"
+# Claude Code loads no plugin without its manifest.
+[ -f "$dir/claude-plugin/.claude-plugin/plugin.json" ] ||
+  die "$dir/claude-plugin has no .claude-plugin/plugin.json"
 
 mkdir -p "$out"
 tarball="$out/desk-backend-linux-$arch-$version.tar.gz"

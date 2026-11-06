@@ -225,10 +225,13 @@ jobs:
           done
           ls -la "$dir"
 
+      # With hidden files: the plugin's manifest is claude-plugin/.claude-plugin/,
+      # which the upload leaves out otherwise.
       - uses: actions/upload-artifact@v7
         with:
           name: backend-linux-${{ matrix.arch }}
           path: desk/backend-linux-${{ matrix.arch }}/
+          include-hidden-files: true
           if-no-files-found: error
 
   smoke:
