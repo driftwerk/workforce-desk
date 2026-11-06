@@ -203,8 +203,7 @@ pub fn open<R: Runtime>(
     .visible(false)
     .position(rect.x, rect.y)
     .inner_size(rect.width, rect.height)
-    .min_inner_size(MIN.0, MIN.1)
-    .disable_drag_drop_handler();
+    .min_inner_size(MIN.0, MIN.1);
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)

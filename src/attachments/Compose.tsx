@@ -1,4 +1,6 @@
-import { useCallback, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type DragEvent } from "react";
+import { droppedFiles, readDropped, type DroppedFile } from "../drop/native";
+import { nativeDrops, registerZone, useDropOver, ZONE_ATTR } from "../drop/route";
 import { describe, formatSize, kindOf } from "./kinds";
 import { MAX_FILE_BYTES, MAX_FILES, tooBig } from "./upload";
 
@@ -100,11 +102,54 @@ export function PendingFiles({ pending, problem, onRemove }: { pending: Pending[
 
 const carriesFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
 
+/** Files dropped from the system, as a message attaches them: each read
+ *  whole, those it can't carry (a folder, one too big) said instead. */
+export const filesOfDrop = async (paths: string[]): Promise<{ files: File[]; problem: string | null }> => {
+  const found = await droppedFiles(paths);
+  const problems: string[] = [];
+  const files: File[] = [];
+  const take: DroppedFile[] = [];
+  for (const f of found) {
+    const why = f.folder ? `${f.name} is a folder: drop the files in it.` : tooBig(f);
+    if (why) problems.push(why);
+    else take.push(f);
+  }
+  // No more are read than a message carries.
+  if (take.length > MAX_FILES) problems.push(`A message can carry up to ${MAX_FILES} files.`);
+  for (const f of take.slice(0, MAX_FILES)) files.push(await readDropped(f));
+  return { files, problem: problems.join(" ") || null };
+};
+
 /** Dropping files anywhere on an element: whether some are being dragged
- *  over it, and the handlers to spread on it. */
-export function useFileDrop(onFiles: (files: File[]) => void) {
+ *  over it, and what to spread on it. In the app the system's own drag and
+ *  drop brings them (see drop/route.ts); in the browser preview, the
+ *  page's. `onProblem` hears of a drop it couldn't take. */
+export function useFileDrop(onFiles: (files: File[]) => void, onProblem?: (problem: string | null) => void) {
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
+  const id = useId();
+  const over = useDropOver((s) => s.over === id);
+  const latest = useRef({ onFiles, onProblem });
+  latest.current = { onFiles, onProblem };
+  const native = nativeDrops();
+  useEffect(
+    () =>
+      native
+        ? registerZone(id, {
+            label: "conversation",
+            drop: (paths) =>
+              void filesOfDrop(paths).then(
+                ({ files, problem }) => {
+                  if (files.length) latest.current.onFiles(files);
+                  if (problem) latest.current.onProblem?.(problem);
+                },
+                (e: unknown) => latest.current.onProblem?.(e instanceof Error ? e.message : String(e)),
+              ),
+          })
+        : undefined,
+    [id, native],
+  );
+  if (native) return { dragging: over, handlers: { [ZONE_ATTR]: id } };
   const handlers = {
     onDragEnter: (e: DragEvent) => {
       if (!carriesFiles(e)) return;

@@ -1184,6 +1184,38 @@ button {
 .terminal-viewing:hover {
   color: var(--text);
 }
+/* Files dragged over a terminal: its paths go in where they're dropped, the
+   conversation's drop outline. */
+.terminal-frame.drop-over::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  z-index: 6;
+  border: 2px dashed var(--signal);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--signal) 6%, transparent);
+  pointer-events: none;
+}
+/* A drop on its way to a machine, or why it couldn't be given. */
+.terminal-note {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  max-width: calc(100% - 24px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12px;
+}
+.terminal-note-error {
+  color: var(--blocked);
+  border-color: var(--blocked);
+}
 .terminal .xterm {
   height: 100%;
 }

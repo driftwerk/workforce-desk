@@ -4,6 +4,7 @@ import "@fontsource-variable/geist-mono";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { deskReady } from "./platform";
+import { followDrops } from "./drop/native";
 import { GridWindow } from "./grids/GridWindow";
 import { GRID_PREFIX } from "./grids/storage";
 import { DRAIN_PREFIX } from "./hubs/drain";
@@ -56,6 +57,8 @@ void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder, machineSes
     followRooms();
     followMachineSessions();
   }
+  // Files dropped on this window, from the system's own drag and drop.
+  followDrops();
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <DeskRichHost>{grid ? <GridWindow gridId={grid} /> : <App />}</DeskRichHost>
