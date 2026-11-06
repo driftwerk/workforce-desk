@@ -33,6 +33,11 @@
 #   - the hub resumes sessions by itself (restore = "auto");
 #   - a session the hub starts has Desk's plugin, through `current`, in its
 #     environment;
+#   - with Claude Code never set up there (a fresh HOME), a session it
+#     starts finds Claude Code's first run settled and its folder trusted
+#     (the stand-in refuses to start otherwise, as Claude Code's onboarding
+#     and trust dialog would stop it), and reaches its prompt (idle), what
+#     was there kept, and so does it when resumed;
 #   - with Claude Code never logged in there, after this Mac's accounts are
 #     copied to it (as "Use this Mac's accounts" posts them), a Claude
 #     session it starts is signed in by the first of them, never left at a
@@ -76,21 +81,51 @@ if [ -n "$machine" ]; then
   mkdir -p "$DESK_HOME/hub/memory/models/bge" "$DESK_HOME/hub/memory/store"
   echo '{"state":"ready"}' >"$DESK_HOME/hub/memory/model.json"
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
+  # A machine where Claude Code never ran: a HOME of its own, whose
+  # ~/.claude.json has only what Claude Code's first start writes.
+  export HOME="$work/home"
+  mkdir -p "$HOME"
+  echo '{"firstStartTime":"2026-01-01T00:00:00.000Z","userID":"smoke"}' >"$HOME/.claude.json"
+  chmod 600 "$HOME/.claude.json"
   # A stand-in for Claude Code, never logged in here: says a version when
   # asked; signed in only by a smoke account's token on descriptor 3 (as
-  # the hub hands an account's sign-in over); and otherwise logs how it
-  # was started, with which plugins and on which account (the token's name
-  # part, never more), then waits as a session.
+  # the hub hands an account's sign-in over). As a session it won't start,
+  # as Claude Code's onboarding and folder-trust dialog would hold it,
+  # unless ~/.claude.json has its onboarding done and the folder (as the
+  # system resolves it) trusted; it logs how it was started, with which
+  # plugins and on which account (the token's name part, never more), says
+  # it started through its SessionStart hook, then waits as a session.
   sessions="$work/sessions.log"
   mkdir -p "$work/fake-bin"
   cat >"$work/fake-bin/claude" <<EOF
 #!/bin/sh
 case "\$1" in
   --session-id | --resume)
+    here=\$(pwd -P)
+    if ! jq -e --arg d "\$here" '.hasCompletedOnboarding == true and .projects[\$d].hasTrustDialogAccepted == true' \\
+      "\$HOME/.claude.json" >/dev/null 2>&1; then
+      echo "\$1 \$2 refused: Claude Code's first run isn't set up for \$here" >>'$sessions'
+      echo "Welcome to Claude Code. Let's get started."
+      exit 1
+    fi
     t=
     [ -n "\$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ] && read -r t <&3
     on=\$(printf '%s' "\$t" | sed -n 's/^sk-ant-oat01-smoke-\([a-z]*\)-.*/\1/p')
     echo "\$1 \$2 plugins=\$CLAUDE_CODE_PLUGIN_DIRS account=\${on:-none}" >>'$sessions'
+    settings= prev=
+    for a in "\$@"; do
+      [ "\$prev" = --settings ] && settings=\$a
+      prev=\$a
+    done
+    # Where its hooks post (SessionStart's command posts there too), tried
+    # until the hub has the session.
+    url=\$(printf '%s' "\$settings" | jq -r '.hooks.Stop[0].hooks[0].url')
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      printf '{"hook_event_name":"SessionStart","session_id":"%s"}' "\$2" |
+        curl -fsS --max-time 5 -X POST -H 'Content-Type: application/json' --data-binary @- "\$url" \\
+          >/dev/null 2>&1 && break
+      sleep 1
+    done
     exec sleep 100000 ;;
   auth)
     t=\$({ cat <&3; } 2>/dev/null)
@@ -219,6 +254,20 @@ if [ -n "$machine" ]; then
   started() { grep -q -- "--session-id $sid plugins=.*$plugin" "$sessions"; }
   until_ok 30 started || fail "the session didn't start with Desk's plugin: $(cat "$sessions" 2>/dev/null)"
 
+  say "Claude Code never set up there, the session finds its first run settled and reaches its prompt"
+  # state ID: the session's state, as the hub lists it.
+  state() { api "$admin" /api/desk/sessions | jq -r --arg id "$1" '.[] | select(.id == $id) | .state'; }
+  idle() { [ "$(state "$sid")" = idle ]; }
+  until_ok 30 idle || fail "the session is $(state "$sid"), not at its prompt: $(cat "$sessions")"
+  cfg="$HOME/.claude.json"
+  jq -e --arg d "$(cd "$work/acme-api" && pwd -P)" \
+    '.hasCompletedOnboarding == true and .projects[$d].hasTrustDialogAccepted == true' "$cfg" >/dev/null ||
+    fail "~/.claude.json isn't settled: $(cat "$cfg")"
+  jq -e '.userID == "smoke" and .firstStartTime == "2026-01-01T00:00:00.000Z" and .theme == "dark"' "$cfg" >/dev/null ||
+    fail "~/.claude.json lost what was there, or has no theme: $(cat "$cfg")"
+  [ "$(stat -c %a "$cfg")" = 600 ] || fail "~/.claude.json is $(stat -c %a "$cfg"), not 600"
+  [ ! -e "$cfg.lock" ] || fail "Claude Code's config lock was left behind"
+
   say "after this Mac's accounts are copied, a Claude session there is signed in"
   json() { api "$admin" "$1" -X "$2" -H 'Content-Type: application/json' -d "$3"; }
   signed_out() {
@@ -307,6 +356,8 @@ if [ -n "$machine" ]; then
   until_ok 120 paired || fail "Desk Helper didn't pair again"
   conn=$("$helper" connection --json)
   gateway=$(jq -r .gateway_url <<<"$conn")
+  admin=$(jq -r .admin_token <<<"$conn")
+  until_ok 60 idle || fail "the resumed session is $(state "$sid"), not at its prompt: $(cat "$sessions")"
 
   say "the hub forgot the earlier agent's chat sessions, and kept Desk's own"
   pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
