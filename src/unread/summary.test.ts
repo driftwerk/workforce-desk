@@ -38,6 +38,12 @@ describe("DM counts", () => {
     const { workspaces } = await import("../chat/types");
     const devbox = { id: "devbox-hub", label: "devbox", url: "", local: false, machine: "devbox", revision: "t" };
     useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [] });
+    // What an older machine's boss left cached is never shown, not even at
+    // launch before the hub is read.
+    state.set("unread.cache.devbox-hub", { at: 1, dms: { "devbox-hub/desk": { count: 2 } } });
+    const { cachedDms: fromCache } = await import("./summary");
+    fromCache(devbox);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["local/scout"]);
     // What an older machine's boss left unread, counted and cached.
     useUnread.setState((s) => ({ dms: { ...s.dms, "devbox-hub/desk": { count: 2, for_you: 2, first: null, last: null, capped: false } } }));
     state.set("unread.cache.devbox-hub", { at: 1, dms: { "devbox-hub/desk": { count: 2 } } });

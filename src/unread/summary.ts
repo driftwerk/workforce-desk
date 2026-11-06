@@ -288,6 +288,8 @@ function watchNeedsSeen(): () => void {
 
 /** DM counts kept from before, for a hub not heard from yet. */
 export function cachedDms(hub: HubAccount): void {
+  // A machine's hub has no DMs (see `dmsFrom`): none is shown from its cache.
+  if (hub.machine) return;
   const kept = cached(hub.id);
   if (!kept?.dms || hub.id in useUnread.getState().dmsAt) return;
   useUnread.setState((s) => ({ dms: { ...s.dms, ...kept.dms }, dmsAt: { ...s.dmsAt, [hub.id]: kept.at } }));
