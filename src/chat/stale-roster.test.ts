@@ -37,17 +37,13 @@ describe("A machine's agents", () => {
   const devbox: HubAccount = { id: "devbox-hub", label: "devbox", url: "http://127.0.0.1:2", local: false, machine: "devbox", revision: "t" };
   afterEach(() => useDesk.setState({ engines: {} }));
 
-  it("are only its boss, as its engine names its overseer, and none while it isn't reached", async () => {
+  it("are never listed: a machine's own Desk agent isn't a second one in the sidebar", async () => {
     useChat.setState({ hubs: [local, devbox], roster: [] });
     fetches.fetch.mockResolvedValue({ ok: true, json: async () => ({ agents: [{ id: "desk", name: "Desk" }, { id: "scout" }] }) });
-    await useChat.getState().refreshRoster();
-    expect(useChat.getState().roster.map((a) => `${a.hubId}/${a.id}`)).toEqual(["local/desk", "local/scout"]);
     const manager = vi.fn(async () => ({ agentId: "desk", level: "act" }));
     useDesk.setState({ engines: { devbox: { hub: { manager } as never, connected: true, loaded: true, error: null } } });
     await useChat.getState().refreshRoster();
-    expect(useChat.getState().roster.map((a) => `${a.hubId}/${a.id}`)).toEqual(["local/desk", "local/scout", "devbox-hub/desk"]);
-    manager.mockResolvedValue({ agentId: null, level: null } as never);
-    await useChat.getState().refreshRoster();
     expect(useChat.getState().roster.map((a) => `${a.hubId}/${a.id}`)).toEqual(["local/desk", "local/scout"]);
+    expect(manager).not.toHaveBeenCalled();
   });
 });

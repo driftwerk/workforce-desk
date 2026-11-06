@@ -16,7 +16,6 @@ import {
   type PermissionChoice,
 } from "./types";
 import { pairedHub } from "../hub/net";
-import { hubOf as hubOfMachine } from "../hub/store";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
@@ -270,15 +269,10 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   }));
 };
 
-/** Of a machine's agents, only its boss: the one its engine's overseer is
- *  (its other agents aren't shown in v1); none while its engine isn't
- *  reached or has no overseer. */
-const bossOf = async (hub: HubAccount): Promise<Agent[]> => {
-  const engine = hubOfMachine(hub.machine);
-  if (!engine) return [];
-  const [agents, manager] = await Promise.all([fetchAgents(hub), engine.manager()]);
-  return manager.agentId ? agents.filter((a) => a.id === manager.agentId) : [];
-};
+/** A machine's own agents aren't listed: its hub only runs the sessions
+ *  placed there, and the Desk agent every install has is this computer's
+ *  business, not a second one in the sidebar. */
+const machineAgents = async (): Promise<Agent[]> => [];
 
 /** You on `hub`: null when it doesn't know you, undefined when it
  *  couldn't say (unreachable, or failing). */
@@ -456,7 +450,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     for (const hub of hubs.filter((h) => !(h.id in get().me))) void get().refreshMe(hub.id);
   },
   refreshRoster: async () => {
-    const results = await Promise.allSettled(get().hubs.map((h) => (h.machine ? bossOf(h) : fetchAgents(h))));
+    const results = await Promise.allSettled(get().hubs.map((h) => (h.machine ? machineAgents() : fetchAgents(h))));
     const roster: Agent[] = [];
     const rosterErrors: Record<string, string> = {};
     const read = new Set<string>();
