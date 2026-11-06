@@ -3,6 +3,7 @@ mod badge;
 mod broker;
 #[cfg(test)]
 mod commands;
+mod drops;
 mod files;
 mod fonts;
 mod frame;
@@ -718,6 +719,7 @@ pub fn run() {
         .manage(logins::Logins::default())
         .manage(logins::install::Installs::default())
         .manage(Frames::default())
+        .manage(drops::Drops::default())
         .register_asynchronous_uri_scheme_protocol(attachments::SCHEME, attachments::protocol)
         .setup(|app| {
             let paths = Paths::new()?;
@@ -818,6 +820,13 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // Files dropped on a window: the page may ask about these
+            // paths, and only these (see drops.rs).
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event
+                && let Some(drops) = window.try_state::<drops::Drops>()
+            {
+                drops.saw(window.label(), paths);
+            }
             if let tauri::WindowEvent::Destroyed = event
                 && let Some(sockets) = window.try_state::<Arc<broker::socket::Sockets>>()
             {
@@ -896,6 +905,10 @@ pub fn run() {
             attachments::attachment_open,
             attachments::attachment_save,
             attachments::attachment_upload,
+            drops::dropped_files,
+            drops::dropped_file_read,
+            drops::terminal_drop,
+            drops::terminal_paste_image,
             remote_images::remote_image_fetch,
             voice::voice_enable,
             voice::voice_disable,

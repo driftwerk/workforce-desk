@@ -120,7 +120,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const rosterErrors = useChat((s) => s.rosterErrors);
   const [leaving, setLeaving] = useState<Tab | null>(null);
   const files = usePendingFiles();
-  const drop = useFileDrop(files.add);
+  const drop = useFileDrop(files.add, files.setProblem);
   // Held here, not in the composer, so a message still uploading while
   // another tab is open is still sending when you come back.
   const sending = useState(false);

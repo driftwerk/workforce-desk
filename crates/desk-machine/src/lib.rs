@@ -14,6 +14,7 @@
 //!   ([`probe`], [`hostkey`], [`setup`]), and connects to each, upgrading
 //!   one on an older Desk.
 //! - [`callback`] forwards one sign-in's callback port, while it runs.
+//! - [`upload`] copies files dropped on a machine's terminal there.
 //! - [`link`] reads the machine's hub tokens over SSH, holds them only in
 //!   memory, and hands them on to go only through the forward's socket.
 //!
@@ -30,6 +31,7 @@ pub mod setup;
 pub mod ssh;
 pub mod suggest;
 pub mod tunnel;
+pub mod upload;
 
 pub use link::{Link, Machines};
 pub use ssh::SshExe;

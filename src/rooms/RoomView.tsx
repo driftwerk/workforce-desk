@@ -202,7 +202,7 @@ const NO_MESSAGES: RoomMessage[] = [];
 export function ThreadPanel({ room, thread }: { room: Room; thread: string }) {
   const setRoomThread = useUi((u) => u.setRoomThread);
   const files = usePendingFiles();
-  const drop = useFileDrop(files.add);
+  const drop = useFileDrop(files.add, files.setProblem);
   const parent = useDesk((s) => s.timelines[room.id]?.find((m) => m.id === thread));
   const all = useDesk((s) => s.timelines[room.id]) ?? NO_MESSAGES;
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
@@ -252,7 +252,7 @@ export function RoomView({ room }: { room: Room }) {
   const openThread = useDesk((s) => s.openThread);
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const files = usePendingFiles();
-  const drop = useFileDrop(files.add);
+  const drop = useFileDrop(files.add, files.setProblem);
   // The open thread, per room (and across launches): shown beside, as a
   // column of its own.
   const thread = useUi((u) => u.roomThreads[room.id] ?? null);

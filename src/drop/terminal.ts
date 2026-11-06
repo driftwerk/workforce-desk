@@ -1,0 +1,75 @@
+// Files dropped on a terminal's pane, and an image pasted into one: the
+// terminal is given their paths, as Ghostty gives a dropped file's (see
+// paths.ts), and nothing else: the person presses Enter. On a machine the
+// files are copied there first, and the pane says so while they go.
+
+import { formatSize } from "../attachments/kinds";
+import { LOCAL, type MachineId } from "../hub/machines";
+import { pathsLine } from "./paths";
+import { terminalDrop, terminalPasteImage, type Progress } from "./native";
+
+/** What a terminal's pane says of a drop, under its terminal: a copy to a
+ *  machine on its way, or why one couldn't be given. */
+export type DropNote = { kind: "copying"; text: string } | { kind: "error"; text: string };
+
+/** The note while `count` files go to machine `name`. */
+export const copyingText = (name: string, count: number, p?: Progress): string => {
+  const what = count === 1 ? "the file" : `${count} files`;
+  const far = p && p.total > 0 ? ` · ${formatSize(p.sent)} of ${formatSize(p.total)}` : "";
+  return `Copying ${what} to ${name}…${far}`;
+};
+
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+export interface Target {
+  machine: MachineId;
+  /** The machine's name, for the note. */
+  machineName: string;
+  /** The terminal's id: a session's, or a grid terminal's. */
+  scope: string;
+  /** Types `text` into the terminal, as a paste. */
+  write: (text: string) => void;
+  note: (n: DropNote | null) => void;
+}
+
+/** Gives the terminal the dropped `paths`, as its shell names them. */
+export const giveDropped = async (t: Target, paths: string[], drop: typeof terminalDrop = terminalDrop): Promise<void> => {
+  const remote = t.machine !== LOCAL;
+  if (remote) t.note({ kind: "copying", text: copyingText(t.machineName, paths.length) });
+  try {
+    const named = await drop(t.machine, t.scope, paths, (p) => {
+      if (remote) t.note({ kind: "copying", text: copyingText(t.machineName, paths.length, p) });
+    });
+    t.write(pathsLine(named));
+    t.note(null);
+  } catch (e) {
+    t.note({ kind: "error", text: message(e) });
+  }
+};
+
+/** The image on the clipboard of a paste, when it carries one and no text:
+ *  a paste with text stays the terminal's own. */
+export const clipboardImage = (data: DataTransfer | null): File | null => {
+  if (!data) return null;
+  if ([...data.types].includes("text/plain")) return null;
+  for (const item of [...(data.items ?? [])]) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  return [...(data.files ?? [])].find((f) => f.type.startsWith("image/")) ?? null;
+};
+
+/** Saves a pasted `image` and gives the terminal its path. */
+export const givePasted = async (t: Target, image: Blob, save: typeof terminalPasteImage = terminalPasteImage): Promise<void> => {
+  const remote = t.machine !== LOCAL;
+  if (remote) t.note({ kind: "copying", text: `Copying the image to ${t.machineName}…` });
+  try {
+    const path = await save(t.machine, t.scope, image);
+    t.write(pathsLine([path]));
+    t.note(null);
+  } catch (e) {
+    t.note({ kind: "error", text: message(e) });
+  }
+};

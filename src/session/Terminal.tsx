@@ -1,7 +1,11 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { registerZone, useDropOver, ZONE_ATTR } from "../drop/route";
+import { clipboardImage, giveDropped, givePasted, type DropNote, type Target } from "../drop/terminal";
+import { useMachines } from "../hub/engines";
+import { nameOfMachine } from "../machines/words";
 import { trackedIn } from "../grids/terminals";
 import { keyOf, LOCAL, sessionKey, type MachineId } from "../hub/machines";
 import { hubOf, useDesk, useHubOf } from "../hub/store";
@@ -68,6 +72,11 @@ export function Terminal({
   const theme = useTheme();
   /** Shown while another viewer is the one typing into this terminal. */
   const [viewing, setViewing] = useState(false);
+  /** Files dropped here, or an image pasted, on their way to a machine; or
+   *  why they couldn't be given. */
+  const [note, setNote] = useState<DropNote | null>(null);
+  const zoneId = useId();
+  const dropOver = useDropOver((s) => s.over === zoneId);
 
   useEffect(() => {
     if (!host.current || !hub || !(sessionId || terminalId)) return;
@@ -190,6 +199,36 @@ export function Terminal({
       if (!desks && e.type === "keydown") viewer.claim();
       return !desks;
     });
+    // Files dropped on the pane, and an image pasted into it: their paths
+    // are typed in as a paste, as the person who dropped them is the one
+    // typing here now. A paste with text in it stays xterm's.
+    const target = (): Target => ({
+      machine,
+      machineName: nameOfMachine(machine, useMachines.getState().machines),
+      scope: terminalId ?? sessionId!,
+      write: (text) => {
+        viewer.claim();
+        x.focus();
+        x.paste(text);
+      },
+      note: setNote,
+    });
+    const unzone = registerZone(zoneId, {
+      label: terminalId ? "terminal" : "session",
+      drop: (paths) => {
+        viewer.claim();
+        x.focus();
+        void giveDropped(target(), paths);
+      },
+    });
+    const onPaste = (e: ClipboardEvent) => {
+      const image = clipboardImage(e.clipboardData);
+      if (!image) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void givePasted(target(), image);
+    };
+    el.addEventListener("paste", onPaste, true);
     const observer = new ResizeObserver(() => viewer.boxChanged());
     observer.observe(el);
     if (autoFocus) x.focus();
@@ -199,6 +238,8 @@ export function Terminal({
       clearTimeout(steady);
       observer.disconnect();
       for (const t of turns) el.removeEventListener(t, turnedHere, true);
+      el.removeEventListener("paste", onPaste, true);
+      unzone();
       input.dispose();
       ws?.close();
       x.dispose();
@@ -224,8 +265,20 @@ export function Terminal({
   }, [fontFamily, fontSize]);
 
   return (
-    <div className="terminal-frame">
+    <div className={dropOver ? "terminal-frame drop-over" : "terminal-frame"} {...{ [ZONE_ATTR]: zoneId }}>
       <div className="terminal" data-terminal ref={host} />
+      {note && (
+        <div className={`terminal-note${note.kind === "error" ? " terminal-note-error" : ""}`} role={note.kind === "error" ? "alert" : "status"}>
+          <span>{note.text}</span>
+          {note.kind === "error" && (
+            <button type="button" className="icon-btn-sm" aria-label="Dismiss" onClick={() => setNote(null)}>
+              <svg width="11" height="11" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M3 3l8 8M11 3l-8 8" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
       {viewing && (
         <button type="button" className="terminal-viewing" onClick={() => term.current?.focus()}>
           Viewing · click to type here
