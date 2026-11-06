@@ -166,8 +166,8 @@ fn said_in(status: u16, body: &str) -> String {
 }
 
 /// Whether Claude Code on the machine is signed in by itself, as its hub
-/// last read it: `Some(false)` when it says it isn't (or can't say),
-/// `None` when the machine's hub couldn't be asked.
+/// last read it; `None` when it can't say yet, or its hub couldn't be
+/// asked.
 async fn signed_in_there(hub: &impl Hub) -> Option<bool> {
     let a = hub.fetch("GET", "/api/desk/engines", None).await.ok()?;
     if a.status != 200 {
@@ -175,7 +175,12 @@ async fn signed_in_there(hub: &impl Hub) -> Option<bool> {
     }
     let engines: Vec<serde_json::Value> = serde_json::from_str(&a.body).ok()?;
     let claude = engines.iter().find(|e| e["engine"] == "claude")?;
-    Some(claude["signIn"]["state"] == "in")
+    match claude["signIn"]["state"].as_str() {
+        Some("in") => Some(true),
+        Some("out") => Some(false),
+        // Not read yet (a hub just started), or unreadable: don't guess.
+        _ => None,
+    }
 }
 
 /// Makes the machine's account that comes first in `order` (names, this
@@ -837,6 +842,21 @@ mod tests {
         .unwrap();
         assert_eq!(shared.made_default, None);
         assert!(defaults(&signed_in).is_empty());
+
+        // Not read yet there: left to the machine's hub.
+        let unknown = Fake {
+            claude_sign_in: Some("unknown"),
+            ..devbox()
+        };
+        let shared = block(share(
+            &mac_without_default(),
+            &unknown,
+            &place(),
+            |_| async { true },
+        ))
+        .unwrap();
+        assert_eq!(shared.made_default, None);
+        assert!(defaults(&unknown).is_empty());
 
         // An older hub that doesn't say: left to the machine's hub.
         let older = devbox();
