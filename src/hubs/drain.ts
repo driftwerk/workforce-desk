@@ -44,6 +44,9 @@ export const placements = (messages: readonly HubMessage[], at: Where): Placemen
   messages.map((message): Placement => {
     if (message.from === "user") return { kind: "skip", message };
     if (at.channel === DESK_DM) return { kind: "dm", message };
+    // A turn's failure is kept for the DM to show; in a room it would read as
+    // the agent's reply, and reach the other agents there.
+    if (message.mark?.failed) return { kind: "skip", message };
     const id = message.mark?.room;
     const room = id ? at.rooms[id] : undefined;
     if (room && roomChannel(room) === at.channel)

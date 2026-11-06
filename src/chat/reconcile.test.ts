@@ -130,6 +130,19 @@ describe("a DM on a hub with client ids", () => {
     expect(onceEach([asked, asked, steered]).map((m) => m.id)).toEqual(["h-q", "h-w"]);
   });
 
+  it("folds a failure away only once a later turn answers, not for a reminder", () => {
+    const reminder = row({ id: "h-rm", from: "agent", text: "Standup in 5", seq: 6, mark: { delivery: "reminder" } });
+    expect(shownWith([asked, failure, reminder], []).find((m) => m.id === "h-e")?.superseded).toBeUndefined();
+    const answer = row({ id: "h-a", from: "agent", text: "NCM", seq: 7, mark: { in_reply_to: "w2" } });
+    expect(shownWith([asked, failure, reminder, answer], []).find((m) => m.id === "h-e")?.superseded).toBe(true);
+  });
+
+  it("keeps a file that is a message of its own beside the message the hub put it after", () => {
+    const file = row({ id: "file:art1", from: "agent", text: "", attachments: [{ artifact_id: "art1", media_type: "image/png", filename: "a.png", size: 1 }] });
+    const shown = shownWith([steered, file, asked], []);
+    expect(shown.map((m) => m.id)).toEqual(["h-q", "h-w", "file:art1"]);
+  });
+
   it("gives every message one key on an older hub too, whose page repeats one", () => {
     const answer = row({ id: "A", from: "agent", text: "Next" });
     const page = [row({ id: "h-q", from: "user", text: Q }), answer, answer];

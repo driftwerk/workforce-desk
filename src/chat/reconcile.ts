@@ -28,17 +28,31 @@ export const onceEach = (messages: readonly ChatMessage[]): ChatMessage[] => {
   return messages.filter((m) => !seen.has(m.id) && !!seen.add(m.id));
 };
 
-/** `kept` in the hub's archive order: by its numbering when every row has
- *  one, else as the hub gave them (a file that is a message of its own has
- *  none, and the hub placed it). */
-const inOrder = (kept: readonly ChatMessage[]): ChatMessage[] =>
-  kept.every((m) => m.seq !== undefined) ? [...kept].sort((a, b) => a.seq! - b.seq!) : [...kept];
+/** `kept` in the hub's archive order, by its numbering. A file that is a
+ *  message of its own has none: it takes the number of the row the hub put
+ *  it after (its message), or before when it leads, and keeps its place
+ *  beside it. */
+const inOrder = (kept: readonly ChatMessage[]): ChatMessage[] => {
+  const numbered = kept.map((m, i) => {
+    if (m.seq !== undefined) return { m, seq: m.seq, i };
+    const before = kept.slice(0, i).reverse().find((k) => k.seq !== undefined);
+    const after = kept.slice(i + 1).find((k) => k.seq !== undefined);
+    return { m, seq: before?.seq ?? after?.seq ?? 0, i };
+  });
+  return numbered.sort((a, b) => a.seq - b.seq || a.i - b.i).map(({ m }) => m);
+};
+
+/** Whether `m` is an answer to a turn of the conversation: what a reminder,
+ *  a job or another delivery says doesn't answer what failed. */
+const answers = (m: ChatMessage): boolean =>
+  m.role === "assistant" && m.status === "complete" && !!m.content.trim() && !!m.replyTo && !m.delivery;
 
 /** The conversation as shown: what the hub kept, in its order, then what is
  *  live and not yet kept, in the order it was said. Each message once, by its
  *  id, so no two are ever the same one; a live one the hub kept (by either
  *  id) shows as kept. A turn's failure that a later answer replaced is
- *  marked superseded, to fold away; it is never moved. */
+ *  marked superseded, to fold away, once a later turn of the conversation
+ *  answers; it is never moved. */
 export const shownWith = (kept: readonly ChatMessage[], live: readonly ChatMessage[]): ChatMessage[] => {
   const gone = keptOf(kept, live);
   const all = onceEach([...inOrder(kept), ...live.filter((m) => !gone.has(m.id))]);
@@ -48,7 +62,7 @@ export const shownWith = (kept: readonly ChatMessage[], live: readonly ChatMessa
     const m = all[i]!;
     if (m.status === "error") out[i] = answeredLater && !m.superseded ? { ...m, superseded: true } : m;
     else {
-      if (m.role === "assistant" && m.status === "complete" && m.content.trim()) answeredLater = true;
+      if (answers(m)) answeredLater = true;
       out[i] = m;
     }
   }

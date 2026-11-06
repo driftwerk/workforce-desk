@@ -52,6 +52,10 @@ describe("where a drained message goes", () => {
     expect(placements([said("a1", { room: MINE })], { ...where, channel: "desk:release" })[0]).toMatchObject({ kind: "skip" });
   });
 
+  it("never posts a turn's failure into a room as the agent's reply", () => {
+    expect(placements([said("e1", { room: MINE, failed: true, in_reply_to: "q1" })], where)[0]).toMatchObject({ kind: "skip" });
+  });
+
   it("keys a source as the hub's own posts do", () => {
     expect(sourceKey("local", "scout", "m-1")).toBe("local/scout/m-1");
   });

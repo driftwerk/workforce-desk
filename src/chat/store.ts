@@ -364,6 +364,8 @@ const ensure = (key: string): boolean => {
       );
   });
   convo.onQueued = (ticket, outcome) => settleQueued(key, ticket, outcome);
+  // Sent now but taken in too late for the turn to read: it goes next.
+  convo.onRequeued = (text) => useChat.getState().enqueue(key, text);
   live.set(key, convo);
   return true;
 };

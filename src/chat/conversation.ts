@@ -296,6 +296,10 @@ const ofTurn = (messages: ChatMessage[], ref: string, msg: ServerMessage): ChatM
  *  overseer's nudge or task, or a suggestion of its you said yes to. */
 export const USER_MESSAGE = "user_message";
 
+/** The frame a hub sends for a follow-up it took in too late for its turn
+ *  to read: Desk asks it again, from the queue, once the turn ends. */
+export const REQUEUED = "requeued";
+
 /** What the hub refuses a turn with when one is running elsewhere in Desk. */
 export const BUSY = "busy";
 
@@ -402,6 +406,10 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
       return { ...s, sessionId, features: new Set(msg.features ?? []) };
     case "injected":
       return { ...s, absorbed: s.absorbed + 1 };
+    case REQUEUED:
+      // Taken in too late for its turn to read: it isn't said yet, but
+      // queued to be asked again.
+      return msg.id ? { ...s, messages: s.messages.filter((m) => m.clientId !== msg.id) } : s;
     case "typing":
       return { ...s, typing: true, working: step(s, msg, now) };
     case "compact_start":
@@ -656,6 +664,8 @@ export class Conversation {
   /** Told what became of each queued send, by its ticket. One that didn't
    *  get there is no longer shown as said. */
   onQueued?: (ticket: string, outcome: QueuedOutcome) => void;
+  /** Told the words of a message the hub sent back to be asked again. */
+  onRequeued?: (text: string) => void;
 
   constructor(
     readonly hub: HubAccount,
@@ -695,7 +705,9 @@ export class Conversation {
       try {
         const msg = JSON.parse(e.data as string) as ServerMessage;
         if (this.settleQueued(msg)) return;
+        const back = msg.type === REQUEUED ? this.state.messages.find((m) => !!msg.id && m.clientId === msg.id) : undefined;
         this.set(reduce(this.state, msg));
+        if (back) this.onRequeued?.(back.content);
       } catch {
         /* not a message Desk renders */
       }
