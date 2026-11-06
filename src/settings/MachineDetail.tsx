@@ -234,13 +234,37 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
       </div>
     );
   }
-  const busy = s === "connecting" ? "Connecting… Desk gives up after 15 s and says why." : s === "adding" ? "Being set up…" : s === "updating" ? "Updating Desk there… its sessions carry on." : `It runs a newer Desk (${machine.version}). Update Desk here to drive it; its sessions keep running.`;
+  const busy =
+    s === "connecting"
+      ? "Connecting… Desk gives up after 15 s and says why."
+      : s === "adding"
+        ? "Being set up… Each step stops after 3 minutes and says why; its log is below."
+        : s === "updating"
+          ? "Updating Desk there… its sessions carry on."
+          : `It runs a newer Desk (${machine.version}). Update Desk here to drive it; its sessions keep running.`;
   return (
     <div className="setting-card machine-status" role="status">
       <span className="prov-text">
         <b>{s === "newer" ? "On a newer Desk" : s === "connecting" ? "Connecting" : s === "adding" ? "Being set up" : "Updating"}</b>
         <span>{busy}</span>
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
+          </span>
+        )}
       </span>
+      {s === "adding" && (
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setProblem(null);
+            native.cancelAdd(machine.id).catch((e: unknown) => setProblem(plainError(e)));
+          }}
+        >
+          Cancel adding
+        </button>
+      )}
     </div>
   );
 }
@@ -271,9 +295,9 @@ export function MachineDetail({
   const [addingNew, setAddingNew] = useState<string | null>(null);
   const top = useRef<HTMLElement>(null);
   const ready = machine.state.kind === "ready";
-  const toLog = () => document.getElementById("machine-log")?.scrollIntoView({ block: "start" });
+  const toLog = () => document.getElementById("machine-log")?.scrollIntoView?.({ block: "start" });
   useEffect(() => {
-    if (at) document.getElementById(at === "log" ? "machine-log" : "machine-engines")?.scrollIntoView({ block: "start" });
+    if (at) document.getElementById(at === "log" ? "machine-log" : "machine-engines")?.scrollIntoView?.({ block: "start" });
   }, [at]);
   const r = machine.reach;
   const how = r?.via ? `through ${r.via}` : "directly";

@@ -87,6 +87,24 @@ function RowActions({
           View log
         </button>
       )}
+      {/* Being set up after "Do this later": its progress, and stopping it. */}
+      {s === "adding" && (
+        <>
+          <button type="button" className="btn btn-sm" onClick={() => onOpen("log")}>
+            Show progress
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setProblem(null);
+              native.cancelAdd(machine.id).catch((e: unknown) => setProblem(e instanceof Error ? e.message : String(e)));
+            }}
+          >
+            Cancel adding
+          </button>
+        </>
+      )}
     </span>
   );
 }

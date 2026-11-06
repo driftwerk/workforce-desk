@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useReducer, useRef, useState } from "rea
 import { EngineBlocks } from "../settings/EngineBlocks";
 import { useHost } from "../shell/host";
 import { plainError } from "../ui/plainError";
-import { setUp, setupFailed, START, step, type Item } from "./addFlow";
+import { CANCELLED, setUp, START, step, type Item } from "./addFlow";
 import { useMachines } from "./engines";
 import { native as realNative, type HostEntry, type LogLine, type MachineNative } from "./native";
 import { clock, sameHostAs, suggestedName, thisComputerLower, userOf } from "./words";
@@ -75,6 +75,9 @@ const checkText = {
           : "Install Claude Code and Codex",
 };
 
+/** How long "Stopping…" waits for Cancel adding to take effect. */
+export const STOP_WITHIN_MS = 15_000;
+
 /** What to do about a failed step, beside Retry. */
 const failedHint = (i: Item): string =>
   /free|space|No space/i.test(i.message ?? "") ? "Free some space there, then Retry." : /3 minutes/.test(i.message ?? "") ? "Retry once it can go faster." : "Fix that there, then Retry.";
@@ -129,6 +132,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
   const addr = useId();
   const nameId = useId();
   const added = useRef(false);
+  const addrInput = useRef<HTMLInputElement>(null);
 
   // The SSH config's entries, read once (its text only).
   useEffect(() => {
@@ -141,6 +145,13 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
       live = false;
     };
   }, [native]);
+
+  // An SSH config entry picked: the address field isn't the one in use, so
+  // it shows no focus.
+  const picked = flow.at === "address" ? flow.picked : null;
+  useEffect(() => {
+    if (picked && document.activeElement === addrInput.current) addrInput.current?.blur();
+  }, [picked]);
 
   // The name follows the address until the person types one.
   const entryUser = flow.at === "address" && flow.picked ? (hosts?.find((h) => h.host === flow.picked)?.user ?? null) : null;
@@ -183,6 +194,8 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
       .then((machine) => dispatch({ type: "added", machine }))
       .catch((e: unknown) => {
         added.current = false;
+        // Cancelled before it was added (while its question was open): gone.
+        if (plainError(e) === CANCELLED) return onClose();
         dispatch({ type: "failed", message: plainError(e) });
       });
   }, [flow, native]);
@@ -197,7 +210,6 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
 
   const signedIn = useCallback((engine: "claude" | "codex") => dispatch({ type: "signedIn", engine }), []);
   const editing = flow.at === "address";
-  const failed = setupFailed(flow);
   const ready = setUp(flow);
   const here = thisComputerLower(platform);
   const taken = machines.map((m) => m.name);
@@ -207,21 +219,46 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
   const twin = asking && target.trim() ? sameHostAs(target.trim(), machines) : null;
   const root = asking && user === "root";
 
+  /** Cancel adding: by its id once known, else by its address while its
+   *  question is open, so it stops once the person answers. A refusal is
+   *  said, and Cancel adding works again. */
   const cancelAdding = () => {
-    if (flow.at !== "setup" || !flow.machine) return onClose();
+    if (flow.at !== "setup") return onClose();
     dispatch({ type: "cancelling" });
-    native.cancelAdd(flow.machine).catch((e: unknown) => dispatch({ type: "failed", message: plainError(e) }));
+    native.cancelAdd(flow.machine ?? flow.target).catch((e: unknown) => dispatch({ type: "cancelFailed", message: plainError(e) }));
   };
+  // "Stopping…" has a limit too.
+  const stopping = flow.at === "setup" && !!flow.cancelling;
+  useEffect(() => {
+    if (!stopping) return;
+    const t = setTimeout(
+      () => dispatch({ type: "cancelFailed", message: `Desk couldn’t stop it within ${STOP_WITHIN_MS / 1000} s. It may still be set up: Cancel adding again, or remove it from Settings → Machines.` }),
+      STOP_WITHIN_MS,
+    );
+    return () => clearTimeout(t);
+  }, [stopping]);
+  // A machine on a newer Desk than this one: kept, and nothing to retry.
+  const newer = flow.at === "setup" && !!flow.machine && machines.some((m) => m.id === flow.machine && m.state.kind === "newer");
   const retry = () => {
     if (flow.at !== "setup" || !flow.machine) return;
     setShowLog(false);
+    // Engines fail after the machine is added: only that step runs again.
+    if (flow.steps.engines.state === "failed") {
+      dispatch({ type: "retryingEngines" });
+      native.retryEngines(flow.machine).catch((e: unknown) => dispatch({ type: "setup", event: { machine: flow.machine!, step: "engines", state: "failed", message: plainError(e) } }));
+      return;
+    }
     dispatch({ type: "retrying" });
     native.reconnect(flow.machine).catch((e: unknown) => dispatch({ type: "failed", message: plainError(e) }));
   };
 
   /** A failed step's way out, in place. */
   const wayOut = (i: Item) =>
-    i.state === "failed" && flow.at === "setup" && flow.machine ? (
+    i.state === "failed" && newer ? (
+      <span className="small muted">
+        It runs a newer Desk than {here}. Update Desk on {here}: {flow.at === "setup" ? flow.name : "it"} stays in Settings → Machines and connects once they match.
+      </span>
+    ) : i.state === "failed" && flow.at === "setup" && flow.machine ? (
       <span className="machine-actions">
         <button type="button" className="btn btn-sm" onClick={retry}>
           Retry
@@ -292,6 +329,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
           </label>
           <input
             id={addr}
+            ref={addrInput}
             className="field-text mono"
             value={editing && flow.picked ? "" : target}
             readOnly={!editing}
@@ -401,7 +439,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
               {flow.name} shows a different key from the one this computer knows ({flow.fingerprint}). Desk won’t connect to it. If the machine was reinstalled, remove
               its old key and add it again:
             </span>
-            <Line text={`ssh-keygen -R ${nameFromTargetOf(flow.target)}`} />
+            <Line text={flow.forgetKey ?? `ssh-keygen -R ${nameFromTargetOf(flow.target)}`} />
             <div className="machine-actions">
               <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: "back" })}>
                 Back
@@ -466,12 +504,12 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
               />
             </ul>
             {showLog && flow.machine && <SetupLog machine={flow.machine} native={native} />}
-            {failed && (
-              <p className="small muted">
-                {flow.name} stays in Settings → Machines until it’s set up: Retry picks up once that’s fixed, or Cancel adding takes it off {here}.
+            {flow.cancelling && <p className="small muted">Stopping… whatever runs there now is ended. Desk gives up after {STOP_WITHIN_MS / 1000} s and says why.</p>}
+            {flow.cancelProblem && (
+              <p className="small state-blocked" role="alert">
+                {flow.cancelProblem}
               </p>
             )}
-            {flow.cancelling && <p className="small muted">Stopping… whatever runs there now is ended.</p>}
           </div>
         )}
 
@@ -485,7 +523,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         <footer className="sheet-foot">
           {flow.at === "setup" ? (
             <>
-              {!ready && (
+              {!ready && !newer && (
                 <button type="button" className="btn machine-cancel-add" disabled={flow.cancelling} onClick={cancelAdding}>
                   Cancel adding
                 </button>

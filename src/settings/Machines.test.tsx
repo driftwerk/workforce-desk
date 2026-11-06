@@ -305,3 +305,17 @@ it("shows the linger line as the native side made it, never one built here", asy
   const desk = screen.getByRole("region", { name: "Desk on devbox (root)" });
   expect(within(desk).getByText("sudo loginctl enable-linger root").tagName).toBe("CODE");
 });
+
+it("shows a machine still being set up with its progress and Cancel adding", async () => {
+  useMachines.setState({ machines: [machine({ id: "devbox-gpu", target: "devbox-gpu", state: { kind: "adding" } })] });
+  const { native, fake } = fakeNative();
+  render(<Machines native={native} />);
+  await act(async () => {});
+  const gpu = row("devbox-gpu");
+  await act(async () => fireEvent.click(within(gpu).getByRole("button", { name: "Cancel adding" })));
+  expect(fake.cancelAdd).toHaveBeenCalledWith("devbox-gpu");
+  fireEvent.click(within(gpu).getByRole("button", { name: "Show progress" }));
+  const status = within(screen.getByRole("region", { name: "devbox-gpu" })).getByRole("status");
+  expect(status.textContent).toContain("Being set up… Each step stops after 3 minutes and says why; its log is below.");
+  expect(within(status).getByRole("button", { name: "Cancel adding" })).toBeTruthy();
+});

@@ -304,6 +304,10 @@ pub struct Probe {
     pub host_key: ProbeKey,
     /// None while the host key isn't known: nothing is sent before then.
     pub access: Option<Access>,
+    /// When its key changed: the line that removes the old one from the
+    /// person's known_hosts (by the name and port ssh looks it up by).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forget_key: Option<String>,
 }
 
 /// The name a target gives a machine: its host (`devbox` of `dev@devbox`).
@@ -323,6 +327,7 @@ pub fn probe(ssh: &SshExe, machine: &Machine, user: Option<String>, files: &File
         name: machine.name.clone(),
         host_key,
         access,
+        forget_key: None,
     };
     match look(ssh, machine) {
         Ok(look) if look.desktop => answer(

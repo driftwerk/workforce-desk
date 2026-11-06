@@ -237,6 +237,12 @@ pub fn machine_cancel_add(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Co
     fleet.cancel_add(&id)
 }
 
+/// "Retry" when a machine's engines couldn't be installed as it was added.
+#[tauri::command]
+pub fn machine_retry_engines(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.retry_engines(&id)
+}
+
 /// How long reading Desk's log on a machine may take.
 const REMOTE_LOG_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 

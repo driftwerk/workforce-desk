@@ -43,6 +43,9 @@ export interface Probe {
   hostKey: HostKey;
   /** Null while the host key isn't known: nothing is sent before then. */
   access: Access | null;
+  /** When its key changed: the line that removes the old one from
+   *  known_hosts, by the name and port ssh looks it up by. */
+  forgetKey?: string;
 }
 
 /** One step of setting a machine up, after it's been added. */
@@ -167,6 +170,9 @@ export interface MachineNative {
   /** "Cancel adding": stops setting it up at once (whatever runs there is
    *  ended) and forgets it. */
   cancelAdd(id: MachineId): Promise<void>;
+  /** Installs Claude Code and Codex again on a machine added already whose
+   *  engines step failed, saying the step on `setup` as adding did. */
+  retryEngines(id: MachineId): Promise<void>;
 }
 
 export const native: MachineNative = {
@@ -192,4 +198,5 @@ export const native: MachineNative = {
   checkReach: (id, target) => invoke<Checked>("machine_check_reach", { id, target }),
   revealLog: () => invoke<void>("machine_reveal_log"),
   cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
+  retryEngines: (id) => invoke<void>("machine_retry_engines", { id }),
 };

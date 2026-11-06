@@ -895,6 +895,44 @@ fn engines_installed_there_restart_desk_so_its_hub_finds_them() {
 }
 
 #[test]
+fn engines_that_failed_while_adding_are_installed_again_by_retry() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    for e in ["claude", "codex"] {
+        std::fs::remove_file(b.dir.path().join("fakebin").join(e)).unwrap();
+    }
+    // Their installers can't be fetched at first.
+    script(
+        &b.dir.path().join("fakebin/curl"),
+        "#!/bin/sh
+echo 'curl: (6) Could not resolve host' >&2
+exit 6
+",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("engines failed", || {
+        step(&r, "engines", StepState::Failed).is_some()
+    });
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // Added all the same: Retry installs them again, saying so as adding did.
+    script(&b.dir.path().join("fakebin/curl"), CURL);
+    r.fleet.retry_engines(&id).unwrap();
+    until("engines done", || {
+        step(&r, "engines", StepState::Done).is_some()
+    });
+    let engines = step(&r, "engines", StepState::Done).unwrap();
+    assert_eq!(
+        engines.detail.as_deref(),
+        Some("Claude Code 1.0.0 and Codex 1.0.0 installed")
+    );
+    assert!(b.home().join(".local/bin/claude").exists());
+    // Not for a machine still being added.
+    assert!(r.fleet.retry_engines("nope").is_err());
+}
+
+#[test]
 fn a_config_with_forwards_is_never_connected_to_to_trust_its_key() {
     let b = Box_::new();
     b.say_with(
@@ -1447,6 +1485,54 @@ fn slow_engines(b: &Box_, secs: u32) {
         &b.dir.path().join("fakebin/claude"),
         &format!("#!/bin/sh\nsleep {secs}\necho \"9.9.9 (fake)\"\n"),
     );
+}
+
+/// A yes to adding that, while it is asked, the person cancels from the page.
+struct CancelWhileAsked(std::sync::OnceLock<std::sync::Weak<Fleet>>, &'static str);
+
+impl Confirm for CancelWhileAsked {
+    fn run_on(&self, _: &Question) -> bool {
+        if let Some(f) = self.0.get().and_then(std::sync::Weak::upgrade) {
+            f.cancel_add(self.1).unwrap();
+        }
+        true
+    }
+}
+
+impl TrustConfirm for CancelWhileAsked {
+    fn trust_key(&self, _: &TrustQuestion) -> bool {
+        true
+    }
+}
+
+#[test]
+fn adding_cancelled_while_its_question_is_open_adds_nothing() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    let confirm = Arc::new(CancelWhileAsked(std::sync::OnceLock::new(), "devbox"));
+    let fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::new(Machines::new(b.ssh.clone(), &b.dir.path().join("socks"))),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::new(Said::default()),
+            wanted: "0.2.0".into(),
+            tarball: b.backend("0.2.0"),
+        }),
+        confirm.clone(),
+        confirm.clone(),
+        timing(),
+    );
+    confirm.0.set(Arc::downgrade(&fleet)).ok().unwrap();
+    let e = fleet.add("devbox", "devbox").unwrap_err();
+    assert_eq!(e, desk_machine::ssh::CANCELLED);
+    assert!(fleet.list().is_empty());
+    assert!(!b.dir.path().join("mac/machines.json").exists() || fleet.list().is_empty());
+    // Nothing is left pending: Cancel by that address now says so.
+    assert!(fleet.cancel_add("devbox").is_err());
 }
 
 #[test]

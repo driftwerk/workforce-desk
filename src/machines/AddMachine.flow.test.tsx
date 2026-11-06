@@ -122,4 +122,95 @@ it("says why cancelling failed, and keeps the card", async () => {
   await act(async () => {});
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel adding" })));
   expect(onClose).not.toHaveBeenCalled();
+  // Said, and Cancel adding works again.
+  expect(screen.getByRole("alert").textContent).toBe("devbox-gpu is added already: remove it instead.");
+  expect((screen.getByRole("button", { name: "Cancel adding" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/^Stopping…/)).toBeNull();
+});
+
+it("gives up on Stopping… after 15 s, says so, and lets Cancel adding be tried again", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const { fake } = await open();
+    fake.cancelAdd.mockImplementationOnce(() => new Promise(() => {}));
+    fireEvent.click(screen.getAllByRole("radio")[0]!);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+    await act(async () => {});
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel adding" })));
+    expect(screen.getByText(/Stopping… whatever runs there now is ended\. Desk gives up after 15 s/)).toBeTruthy();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(15_000)));
+    expect(screen.getByRole("alert").textContent).toContain("Desk couldn’t stop it within 15 s.");
+    expect((screen.getByRole("button", { name: "Cancel adding" }) as HTMLButtonElement).disabled).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("cancels adding while its question is still open, by its address, and adds nothing", async () => {
+  const { fake, onClose } = await open();
+  let answer: (v: unknown) => void = () => {};
+  fake.add.mockImplementationOnce(() => new Promise((_, no) => (answer = no)) as never);
+  fireEvent.click(screen.getAllByRole("radio")[0]!);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+  await act(async () => {});
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel adding" })));
+  expect(fake.cancelAdd).toHaveBeenCalledWith("devbox-gpu");
+  expect(onClose).not.toHaveBeenCalled();
+  // The person answers the native question; the native side stops it.
+  await act(async () => answer(new Error("Adding it was cancelled.")));
+  expect(onClose).toHaveBeenCalled();
+});
+
+it("says a machine on a newer Desk is kept, without Retry or Cancel adding", async () => {
+  const { emit } = await open();
+  fireEvent.click(screen.getAllByRole("radio")[0]!);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+  await act(async () => {});
+  act(() => {
+    useMachines.setState({ machines: [...useMachines.getState().machines, machine({ id: "devbox-gpu", target: "devbox-gpu", state: { kind: "newer" }, version: "0.3.0" })] });
+    emit({ machine: "devbox-gpu", step: "install", state: "failed", message: "devbox-gpu has a newer Desk (0.3.0) than this one (0.2.1). Update Desk on this Mac, then try again." });
+  });
+  const list = screen.getByRole("group", { name: "Setting it up" });
+  expect(list.textContent).toContain("It runs a newer Desk than this Mac. Update Desk on this Mac: devbox-gpu stays in Settings → Machines and connects once they match.");
+  expect(within(list).queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Cancel adding" })).toBeNull();
+});
+
+it("gives the line that removes a changed key by the name and port ssh looks it up by", async () => {
+  const { fake } = await open();
+  fake.probe.mockResolvedValueOnce(
+    probeOf({ hostKey: { kind: "changed", fingerprint: "SHA256:Zp4w", keyType: "ED25519" }, access: null, forgetKey: "ssh-keygen -R '[2.29.244.77]:2222'" }),
+  );
+  fireEvent.click(screen.getAllByRole("radio")[0]!);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+  await act(async () => {});
+  expect(screen.getByText("ssh-keygen -R '[2.29.244.77]:2222'")).toBeTruthy();
+});
+
+it("retries a failed engines step on its own, as the machine is added already, and says it as it goes", async () => {
+  const { fake, emit } = await open();
+  fireEvent.click(screen.getAllByRole("radio")[0]!);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Continue" })));
+  await act(async () => {});
+  act(() => {
+    emit({ machine: "devbox-gpu", step: "install", state: "done", detail: "Desk 0.2.1 installed, and set to start when it boots" });
+    emit({ machine: "devbox-gpu", step: "engines", state: "failed", message: "Claude Code could not be installed" });
+  });
+  const list = screen.getByRole("group", { name: "Setting it up" });
+  await act(async () => fireEvent.click(within(list).getByRole("button", { name: "Retry" })));
+  expect(fake.retryEngines).toHaveBeenCalledWith("devbox-gpu");
+  expect(fake.reconnect).not.toHaveBeenCalled();
+  expect(list.textContent).toContain("Installing Claude Code and Codex…");
+  expect(list.textContent).toContain("Desk 0.2.1 installed, and set to start when it boots");
+  act(() => emit({ machine: "devbox-gpu", step: "engines", state: "done", detail: "Claude Code 2.1.0 and Codex 0.170.0 installed" }));
+  expect(list.textContent).toContain("Claude Code 2.1.0 and Codex 0.170.0 installed");
+});
+
+it("shows no focus on the address field once an SSH config entry is picked", async () => {
+  await open();
+  const field = screen.getByLabelText("Or type an address") as HTMLInputElement;
+  field.focus();
+  expect(document.activeElement).toBe(field);
+  fireEvent.click(screen.getAllByRole("radio")[0]!);
+  expect(document.activeElement).not.toBe(field);
 });

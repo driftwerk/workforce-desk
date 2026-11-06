@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::admit::{self, Confirm, Gate, Question};
 use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm};
 use crate::link::{Link, Machines};
-use crate::probe::{self, Access, Missed, Probe, System};
+use crate::probe::{self, Access, Missed, Probe, ProbeKey, System};
 use crate::setup::{self, Person};
 use crate::ssh::{self, SshExe};
 use crate::suggest;
@@ -446,6 +446,9 @@ pub struct Fleet {
     /// Set when `machines.json` was there but didn't read: it is never
     /// written over, and nothing is added until it is fixed or moved.
     unreadable: std::sync::atomic::AtomicBool,
+    /// Addresses being added whose id isn't known yet (the person's yes is
+    /// awaited), and whether the person cancelled adding them meanwhile.
+    pending: Mutex<HashMap<String, bool>>,
     /// How long a save waits between its snapshot and its write: tests
     /// only, to hold one there.
     #[cfg(test)]
@@ -600,6 +603,7 @@ impl Fleet {
             rows: Mutex::default(),
             saving: Mutex::default(),
             unreadable: Default::default(),
+            pending: Mutex::default(),
             #[cfg(test)]
             save_pause: Mutex::default(),
             files: Mutex::default(),
@@ -840,6 +844,9 @@ impl Fleet {
         let files = Files::parse(&said, &self.home);
         *self.files.lock().unwrap_or_else(|e| e.into_inner()) = Some(files.clone());
         let mut probe = probe::probe(&self.ssh, &machine, settings.user, &files);
+        if matches!(probe.host_key, ProbeKey::Changed { .. }) {
+            probe.forget_key = hostkey::forget_line(&files, &self.home);
+        }
         // A name that didn't resolve may be spelled differently in the
         // person's SSH config; the config's text is read, nothing is run.
         if let Some(Access::Unreachable { message, suggest }) = &mut probe.access
@@ -938,7 +945,19 @@ impl Fleet {
             let rows = self.rows();
             id_for(name, &|id| rows.contains_key(id))
         };
-        let (machine, _) = admit::admit(&self.gate, &self.ssh, id.clone(), name, target)?;
+        // Cancellable by its address until it has an id: while the
+        // person's yes is awaited, a Cancel stops it once they answer.
+        self.pending_adds().insert(target.to_string(), false);
+        let admitted = admit::admit(&self.gate, &self.ssh, id.clone(), name, target);
+        let cancelled = self.pending_adds().remove(target).unwrap_or(false);
+        if cancelled {
+            if let Ok((machine, _)) = &admitted {
+                self.admitted.forget(machine.target.as_str());
+            }
+            tracing::info!(target, "adding a machine was cancelled before it began");
+            return Err(ssh::CANCELLED.into());
+        }
+        let (machine, _) = admitted?;
         // The yes is used up: adding it again, or another address, asks.
         self.admitted.forget(machine.target.as_str());
         let id = id.to_string();
@@ -1020,6 +1039,36 @@ impl Fleet {
         ssh::Step::new(cancel, self.timing.step_within)
     }
 
+    fn pending_adds(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Saves machine `id` as added, unless the person cancelled adding it:
+    /// both under one lock with Cancel adding (which refuses one saved), so
+    /// neither can slip between the other's look and change. True when
+    /// saved; a cancelled one is forgotten.
+    fn save_added(&self, id: &str, step: Step, change: impl FnOnce(&mut Row)) -> bool {
+        let cancelled = {
+            let mut rows = self.rows();
+            match rows.get_mut(id) {
+                None => return false,
+                Some(r) if r.cancel.load(std::sync::atomic::Ordering::SeqCst) => true,
+                Some(r) => {
+                    change(r);
+                    r.saved = true;
+                    r.busy = false;
+                    false
+                }
+            }
+        };
+        if cancelled {
+            self.forget_cancelled(id, step);
+            return false;
+        }
+        self.save();
+        true
+    }
+
     /// Whether the person cancelled adding machine `id`.
     fn cancelled(&self, id: &str) -> bool {
         self.rows()
@@ -1053,6 +1102,14 @@ impl Fleet {
         let running = {
             let rows = self.rows();
             let Some(r) = rows.get(id) else {
+                drop(rows);
+                // Not a machine's id: an address being added whose id isn't
+                // known yet (the person's yes awaited); adding it stops once
+                // they answer.
+                if let Some(cancelled) = self.pending_adds().get_mut(id) {
+                    *cancelled = true;
+                    return Ok(());
+                }
                 return Err("That machine isn't in Desk any more.".into());
             };
             if r.saved {
@@ -1068,6 +1125,88 @@ impl Fleet {
             // Its setup had stopped already (a step failed): gone now.
             self.forget_cancelled(id, Step::Connect);
         }
+        Ok(())
+    }
+
+    /// "Retry" on a machine whose engines couldn't be installed while it was
+    /// added (`machine_retry_engines`): it is added already, so this installs
+    /// Claude Code and Codex there again, saying the step on `machine-setup`
+    /// as adding did, within the step's limit, and restarts Desk there once
+    /// they are, so its hub finds them.
+    pub fn retry_engines(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        let machine = {
+            let mut rows = self.rows();
+            let r = rows
+                .get_mut(id)
+                .ok_or("That machine isn't in Desk any more.")?;
+            if !r.saved {
+                return Err(format!("{} isn't added yet.", r.kept.machine.name));
+            }
+            if r.busy {
+                return Err(format!(
+                    "{} is busy connecting: try again in a moment.",
+                    r.kept.machine.name
+                ));
+            }
+            r.busy = true;
+            r.kept.machine.clone()
+        };
+        let fleet = Arc::clone(self);
+        let id = id.to_string();
+        let spawn_id = id.clone();
+        std::thread::Builder::new()
+            .name(format!("engines for {}", machine.name))
+            .spawn(move || {
+                fleet.emit(fleet.say(&id, Step::Engines, StepState::Running));
+                let engines = fleet.step(&id).run(|| {
+                    let look = probe::look(&fleet.ssh, &machine)
+                        .map_err(|m| Self::missed(&machine, m))?;
+                    let engines = setup::engines(&fleet.ssh, &machine)?;
+                    if engines.installed {
+                        if let Err(m) = setup::restart(
+                            &fleet.ssh,
+                            &machine,
+                            &look.bin(),
+                            &fleet.host.person(),
+                            look.service,
+                        ) {
+                            tracing::warn!(machine = %machine.id, problem = %m, "Desk didn't restart after its engines were installed");
+                        }
+                        if let Some(l) = fleet.machines.get(machine.id.as_str()) {
+                            l.forget();
+                        }
+                    }
+                    Ok::<_, String>(engines)
+                });
+                if let Some(r) = fleet.rows().get_mut(&id) {
+                    r.busy = false;
+                }
+                match engines {
+                    Ok(engines) => {
+                        fleet.note(&id, LogKind::Ok, engines.detail.clone());
+                        fleet.emit(SetupEvent {
+                            detail: Some(engines.detail),
+                            ..fleet.say(&id, Step::Engines, StepState::Done)
+                        });
+                    }
+                    Err(m) => {
+                        fleet.note(&id, LogKind::Error, m.clone());
+                        fleet.emit(SetupEvent {
+                            message: Some(m),
+                            ..fleet.say(&id, Step::Engines, StepState::Failed)
+                        });
+                    }
+                }
+                fleet.kick(&id);
+            })
+            .map_err(|e| {
+                // No thread to clear it: cleared here, or the machine would
+                // stay busy for good.
+                if let Some(r) = self.rows().get_mut(&spawn_id) {
+                    r.busy = false;
+                }
+                e.to_string()
+            })?;
         Ok(())
     }
 
@@ -1158,16 +1297,13 @@ impl Fleet {
                 let message = format!(
                     "{name} has a newer Desk ({from}) than this one ({wanted}). Update Desk on this Mac, then try again."
                 );
+                if !self.save_added(id, Step::Install, |r| r.kept.version = Some(from)) {
+                    return;
+                }
                 self.emit(SetupEvent {
                     message: Some(message),
                     ..self.say(id, Step::Install, StepState::Failed)
                 });
-                if let Some(r) = self.rows().get_mut(id) {
-                    r.kept.version = Some(from);
-                    r.saved = true;
-                    r.busy = false;
-                }
-                self.save();
                 self.drop_link(id);
                 self.set_state(id, State::Newer);
                 self.supervise(id);
@@ -1237,8 +1373,8 @@ impl Fleet {
             }
             Ok::<_, String>(engines)
         });
-        if self.cancelled(id) {
-            return self.forget_cancelled(id, Step::Engines);
+        if !self.save_added(id, Step::Engines, |_| {}) {
+            return;
         }
         match engines {
             Ok(engines) => self.emit(SetupEvent {
@@ -1253,11 +1389,6 @@ impl Fleet {
                 })
             }
         }
-        if let Some(r) = self.rows().get_mut(id) {
-            r.saved = true;
-            r.busy = false;
-        }
-        self.save();
         let at = now_ms();
         let reach = self.reach_of(&machine);
         self.set_now(id, |n| {

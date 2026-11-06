@@ -44,8 +44,9 @@ export type Flow =
   | { at: "trust"; target: string; name: string; fingerprint: string; keyType: string }
   /** Trusting it, then looking again. */
   | { at: "trusting"; target: string; name: string; fingerprint: string }
-  /** Its host key isn't the one this computer knows: refused. */
-  | { at: "changed"; target: string; name: string; fingerprint: string; keyType: string }
+  /** Its host key isn't the one this computer knows: refused, with the
+   *  line that removes the old one (`forgetKey`, made natively). */
+  | { at: "changed"; target: string; name: string; fingerprint: string; keyType: string; forgetKey?: string }
   /** It doesn't take this computer's key, or the key is locked. */
   | { at: "key"; target: string; name: string; user: string | null; why: "refused" | "locked" }
   /** Added (once `machine` is known) and being set up; `cancelling` once
@@ -58,6 +59,8 @@ export type Flow =
       steps: Steps;
       signedIn: { claude: boolean; codex: boolean };
       cancelling?: boolean;
+      /** Why Cancel adding didn't stop it (refused, or no answer in time). */
+      cancelProblem?: string;
       /** The person cancelled it and it is gone. */
       cancelled?: boolean;
     };
@@ -72,8 +75,13 @@ export type FlowEvent =
   | { type: "submit"; taken?: readonly string[] }
   /** "Cancel adding", asked of the native side. */
   | { type: "cancelling" }
+  /** Cancel adding was refused, or didn't stop it in time: said, and
+   *  Cancel adding works again. */
+  | { type: "cancelFailed"; message: string }
   /** "Retry" a failed step: set up again from the start. */
   | { type: "retrying" }
+  /** "Retry" the engines step of a machine added already. */
+  | { type: "retryingEngines" }
   | { type: "probed"; probe: Probe }
   | { type: "trust" }
   | { type: "trusted" }
@@ -97,7 +105,7 @@ const WAITING: Steps = { connect: { state: "waiting" }, install: { state: "waiti
 const afterProbe = (target: string, given: string, probe: Probe): Flow => {
   const name = given || probe.name || nameFromTarget(target);
   const { hostKey, access } = probe;
-  if (hostKey.kind === "changed") return { at: "changed", target, name, fingerprint: hostKey.fingerprint, keyType: hostKey.keyType };
+  if (hostKey.kind === "changed") return { at: "changed", target, name, fingerprint: hostKey.fingerprint, keyType: hostKey.keyType, ...(probe.forgetKey ? { forgetKey: probe.forgetKey } : {}) };
   if (hostKey.kind === "new") return { at: "trust", target, name, fingerprint: hostKey.fingerprint, keyType: hostKey.keyType };
   if (!access) return { at: "address", target, name, named: true, problem: "Desk couldn’t look at that machine. Try again.", refused: true };
   switch (access.kind) {
@@ -149,9 +157,13 @@ export const step = (f: Flow, e: FlowEvent): Flow => {
     case "retry":
       return f.at === "key" ? { at: "checking", target: f.target, name: f.name } : f;
     case "cancelling":
-      return f.at === "setup" ? { ...f, cancelling: true } : f;
+      return f.at === "setup" ? { ...f, cancelling: true, cancelProblem: undefined } : f;
+    case "cancelFailed":
+      return f.at === "setup" && f.cancelling ? { ...f, cancelling: false, cancelProblem: e.message } : f;
     case "retrying":
       return f.at === "setup" ? { ...f, steps: { ...WAITING, connect: { state: "running" } } } : f;
+    case "retryingEngines":
+      return f.at === "setup" ? { ...f, steps: { ...f.steps, engines: { state: "running" } } } : f;
     case "added":
       return f.at === "setup" && !f.machine ? { ...f, machine: e.machine } : f;
     case "setup": {

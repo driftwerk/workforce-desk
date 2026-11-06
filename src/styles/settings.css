@@ -1290,12 +1290,38 @@ legend.set-label {
   color: var(--text);
   text-align: left;
 }
-.pick-row + .pick-row {
-  box-shadow: 0 -1px 0 var(--border);
+.pick-row {
+  position: relative;
+}
+/* Hairlines between the rows, inset, none beside the one picked. */
+.pick-row + .pick-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border);
+}
+.pick-row[aria-checked="true"]::before,
+.pick-row[aria-checked="true"] + .pick-row::before {
+  display: none;
 }
 .pick-row[aria-checked="true"] {
   background: var(--signal-soft);
+}
+/* A field that can't be typed in shows no focus ring. */
+.machine-add .field-text[readonly],
+.machine-add .field-text[readonly]:focus {
+  border-color: var(--border);
   box-shadow: none;
+  outline: none;
+}
+/* Link buttons read as links there. */
+.machine-add .link,
+.account-add .link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .pick-row:disabled {
   opacity: 0.55;
