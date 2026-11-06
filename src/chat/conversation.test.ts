@@ -227,6 +227,8 @@ describe("a Desk connection's turns", () => {
     const failover = run([declared, stamp("typing"), stamp("slow_model_failover", { content: "gpt-x produced nothing for 45s — switching model" })]);
     expect(failover.turns.t1!.working!.step).toBe("Switching model (gpt-x was silent)");
     expect(failover.working!.step).toBe("Switching model (gpt-x was silent)");
+    const retry = run([declared, stamp("typing"), stamp("slow_model_retry", { content: "gpt-6.1-sol is slow to answer, trying again" })]);
+    expect(retry.working!.step).toBe("Trying again (gpt-6.1-sol is slow to answer)");
   });
 
   it("picks a turn up again from its snapshot after a reconnect, without repeating what streamed", () => {

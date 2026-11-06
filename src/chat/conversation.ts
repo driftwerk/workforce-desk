@@ -124,6 +124,9 @@ const waitOf = (line: string): number | undefined => {
   return s === undefined ? undefined : Number(s);
 };
 
+/** `gpt-x is slow to answer, trying again` → `gpt-x`. */
+const slowModel = (line: string): string => line.split(" is slow")[0]?.trim() || "the model";
+
 /** `gpt-x produced nothing for 45s — switching model` → `gpt-x`. */
 const silentModel = (line: string): string => line.split(" produced nothing")[0]?.trim() || "the model";
 
@@ -145,6 +148,8 @@ const doing = (msg: ServerMessage): Pick<Working, "phase" | "step" | "wait"> | n
       return { phase: "waiting", step: "Retrying (rate limited)", wait: waitOf(msg.content ?? "") };
     case "slow_model_failover":
       return { phase: "waiting", step: `Switching model (${silentModel(msg.content ?? "")} was silent)` };
+    case "slow_model_retry":
+      return { phase: "waiting", step: `Trying again (${slowModel(msg.content ?? "")} is slow to answer)` };
     default:
       return null;
   }
@@ -416,6 +421,7 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     case "compact_end":
     case "rate_limited":
     case "slow_model_failover":
+    case "slow_model_retry":
       return { ...s, working: s.working && step(s, msg, now) };
     case "stream_start": {
       const last = s.messages.at(-1);
