@@ -401,6 +401,7 @@ fn timing() -> Timing {
         linger_poll: Duration::from_millis(200),
         linger_for: Duration::from_secs(20),
         admitted_for: Duration::from_secs(60),
+        edit_within: Duration::from_secs(2),
     }
 }
 
@@ -409,6 +410,12 @@ struct Run {
     machines: Arc<Machines>,
     said: Arc<Said>,
     asked: Arc<Yes>,
+}
+
+impl Run {
+    fn list_target(&self) -> String {
+        self.fleet.list()[0].target.clone()
+    }
 }
 
 fn fleet(b: &Box_, wanted: &str, answer: bool) -> Run {
@@ -999,7 +1006,12 @@ const OTHER_KEY: &str =
 
 /// devbox added, its key known, and kept by Desk.
 fn added_with_key(b: &Box_, r: &Run) -> String {
-    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    // Known as ssh looks it up: by its HostName.
+    std::fs::write(
+        b.known_hosts(),
+        format!("devbox {KEY}\n203.0.113.7 {KEY}\n"),
+    )
+    .unwrap();
     b.say(Some(KEY));
     std::fs::write(b.fake("linger-allowed"), "").unwrap();
     let id = r.fleet.add("devbox", "devbox").unwrap();
@@ -1081,6 +1093,28 @@ fn a_machine_is_reached_at_another_address_only_when_it_shows_the_same_key() {
 }
 
 #[test]
+fn an_address_is_checked_first_and_then_switched_to_without_asking_again() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let checked = serde_json::to_value(r.fleet.check_reach(&id, "devbox-new").unwrap()).unwrap();
+    assert_eq!(checked["kind"], "same");
+    assert_eq!(checked["key"]["fingerprint"], FINGERPRINT);
+    assert!(checked["tookMs"].is_u64());
+    assert_eq!(r.list_target(), "devbox", "a check moves nothing");
+    r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(r.list_target(), "devbox-new");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked once, for the check"
+    );
+}
+
+#[test]
 fn a_no_to_reaching_it_elsewhere_runs_nothing_there() {
     let b = Box_::new();
     let _hub = serve(&b);
@@ -1129,6 +1163,128 @@ fn fleet_answering(b: &Box_, r: &Run, yes: bool) -> Arc<Fleet> {
 }
 
 #[test]
+fn a_key_not_in_known_hosts_is_never_kept_and_nothing_moves_without_one() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    // devbox is known only by its alias: ssh looks its key up by its
+    // HostName, which known_hosts has nothing for.
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("said why it isn't kept", || {
+        r.fleet.log(&id).unwrap().iter().any(|l| {
+            l.text
+                .contains("isn't in your known_hosts for it: not kept")
+        })
+    });
+    assert!(r.fleet.list()[0].host_key.is_none());
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let refused = r.fleet.edit(&id, Some("devbox-new"), None).unwrap_err();
+    assert!(
+        refused.contains("no host key for devbox checked against your known_hosts"),
+        "{refused}"
+    );
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), asked, "nothing asked");
+    assert_eq!(r.fleet.list()[0].target, "devbox");
+}
+
+#[test]
+fn a_changed_key_shows_both_and_a_trust_again_is_the_one_kept() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    // devbox is reinstalled: it shows another key now.
+    b.say(Some(OTHER_KEY));
+    r.fleet.reconnect(&id).unwrap();
+    until("its key said to have changed", || {
+        matches!(r.fleet.state(&id), Some(State::Failed { .. }))
+            && r.fleet.list()[0].shown_key.is_some()
+    });
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], FINGERPRINT);
+    assert_ne!(row["shownKey"]["fingerprint"], FINGERPRINT);
+    assert_eq!(row["reach"]["forgetKey"], "ssh-keygen -R 203.0.113.7");
+    let shown = row["shownKey"]["fingerprint"].as_str().unwrap().to_string();
+
+    // The person removes the old key, and trusts the new one as shown.
+    std::fs::write(b.known_hosts(), "").unwrap();
+    r.fleet.probe("devbox").unwrap();
+    r.fleet.trust("devbox", &shown).unwrap();
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], shown.as_str());
+    assert!(row.get("shownKey").is_none(), "{row}");
+}
+
+#[test]
+fn reading_its_key_before_asking_anything_gives_up_in_time() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    // Added with no key kept (known only by its alias).
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // Now devbox doesn't answer at all.
+    let scenario: Value =
+        serde_json::from_str(&std::fs::read_to_string(b.dir.path().join("scenario.json")).unwrap())
+            .unwrap();
+    let mut hosts = scenario["hosts"].as_array().unwrap().clone();
+    hosts[0]["hang"] = json!(true);
+    std::fs::write(
+        b.dir.path().join("scenario.json"),
+        json!({"log": scenario["log"], "hosts": hosts}).to_string(),
+    )
+    .unwrap();
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let started = Instant::now();
+    let e = r.fleet.check_reach(&id, "devbox-new").unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(e.contains("no host key for devbox"), "{e}");
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), asked, "nothing asked");
+}
+
+#[test]
+fn reaching_it_elsewhere_gives_up_in_time_and_changes_nothing() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let scenario: Value =
+        serde_json::from_str(&std::fs::read_to_string(b.dir.path().join("scenario.json")).unwrap())
+            .unwrap();
+    let mut hosts = scenario["hosts"].as_array().unwrap().clone();
+    let mut slow = hosts[0].clone();
+    slow["target"] = json!("devbox-slow");
+    slow["hang"] = json!(true);
+    hosts.push(slow);
+    std::fs::write(
+        b.dir.path().join("scenario.json"),
+        json!({"log": scenario["log"], "hosts": hosts}).to_string(),
+    )
+    .unwrap();
+    let started = Instant::now();
+    let e = r.fleet.edit(&id, Some("devbox-slow"), None).unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(e.contains("didn't answer"), "{e}");
+    assert_eq!(r.fleet.list()[0].target, "devbox");
+}
+
+#[test]
 fn a_machine_is_renamed_but_never_to_another_machines_name() {
     let b = Box_::new();
     let _hub = serve(&b);
@@ -1143,6 +1299,16 @@ fn a_machine_is_renamed_but_never_to_another_machines_name() {
         "a name asks nothing"
     );
     assert!(r.fleet.edit(&id, None, Some("  ")).is_err());
+    // Nothing that would make it read as something else.
+    for odd in ["devbox\u{202e}xob", "dev\u{200b}box"] {
+        assert!(
+            r.fleet
+                .edit(&id, None, Some(odd))
+                .unwrap_err()
+                .contains("letters, numbers, spaces and punctuation"),
+            "{odd:?}"
+        );
+    }
     assert!(
         r.fleet
             .edit(&id, Some("-oProxyCommand=x"), None)

@@ -105,6 +105,50 @@ export const clock = (at: number, now: number = Date.now()): string => {
   return new Date(now).toDateString() === d.toDateString() ? hm : `${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ${hm}`;
 };
 
+/** A log line's time, to the second: "09:41:27", or "5 Nov 09:41:27". */
+export const clockSeconds = (at: number, now: number = Date.now()): string => {
+  const d = new Date(at);
+  const hms = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(now).toDateString() === d.toDateString() ? hms : `${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ${hms}`;
+};
+
+/** When it was last reached, as a sentence says it: "today at 08:55",
+ *  "yesterday at 08:55", "5 Nov at 08:55". */
+export const whenText = (at: number, now: number = Date.now()): string => {
+  const d = new Date(at);
+  const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const day = new Date(now);
+  if (day.toDateString() === d.toDateString()) return `today at ${hm}`;
+  day.setDate(day.getDate() - 1);
+  if (day.toDateString() === d.toDateString()) return `yesterday at ${hm}`;
+  return `${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} at ${hm}`;
+};
+
+/** The account a machine is reached as: `root` from `root@devbox`, else its SSH config's. */
+export const accountOf = (m: Machine): string | null => (m.target.includes("@") ? m.target.slice(0, m.target.lastIndexOf("@")) : (m.reach?.user ?? null));
+
+/** Another machine in Desk that is the same computer (the same host key,
+ *  or the same address and port) reached as another account: "same machine
+ *  as devbox, as root". Said of the one listed after it, not of both. */
+export const twinNote = (m: Machine, all: readonly Machine[]): string | null => {
+  const same = (o: Machine) =>
+    o.id !== m.id &&
+    ((!!m.hostKey && o.hostKey?.fingerprint === m.hostKey.fingerprint) || (!!m.reach?.hostname && o.reach?.hostname === m.reach.hostname && (o.reach?.port ?? "22") === (m.reach.port ?? "22")));
+  const before = all.findIndex((o) => o.id === m.id);
+  const twin = all.slice(0, before < 0 ? all.length : before).find(same);
+  if (!twin) return null;
+  const as = accountOf(m);
+  return `same machine as ${twin.name}${as && as !== accountOf(twin) ? `, as ${as}` : ""}`;
+};
+
+/** The line that removes a machine's old host key from known_hosts: the
+ *  native side's (by the name and port ssh looks it up by), else by its
+ *  address. */
+export const forgetKeyLine = (m: Machine): string => m.reach?.forgetKey ?? `ssh-keygen -R ${m.reach?.hostname ?? m.target.split("@").pop()}`;
+
+/** "Show in Finder", as this computer calls it. */
+export const revealWords = (platform: string): string => (platform === "macos" ? "Show in Finder" : platform === "windows" ? "Show in File Explorer" : "Show in folder");
+
 /** How long until `at`: "in 40 s", "in 3 min", "now". */
 export const inTime = (at: number, now: number = Date.now()): string => {
   const s = Math.round((at - now) / 1000);
@@ -156,7 +200,7 @@ export const offlineWhy = (m: Machine): string => {
  *  is worth a glance. `engines`: who it's signed in as, once read. */
 export const rowLines = (
   m: Machine,
-  o: { desk: string | null; sessions: number; now?: number; claudeIn?: boolean | null; signedIn?: string | null },
+  o: { desk: string | null; sessions: number; now?: number; claudeIn?: boolean | null; signedIn?: string | null; twin?: string | null },
 ): { first: string; tone: "muted" | "blocked"; second: string | null } => {
   const now = o.now ?? Date.now();
   const keep = o.sessions > 0 ? `${o.sessions === 1 ? "its 1 session keeps" : `${o.sessions} sessions keep`} running there` : null;
@@ -166,12 +210,12 @@ export const rowLines = (
         return {
           first: "Needs sign-in: Claude isn’t signed in there yet, so sessions can’t start.",
           tone: "blocked",
-          second: ["Connected", m.version && `Desk ${m.version}`].filter(Boolean).join(" · "),
+          second: ["Connected", m.version && `Desk ${m.version}`, o.twin].filter(Boolean).join(" · "),
         };
       return {
         first: ["Connected", sessionsCount(o.sessions), m.version && `Desk ${m.version}`, m.system && `Linux ${m.system.arch}`].filter(Boolean).join(" · "),
         tone: "muted",
-        second: o.signedIn ?? null,
+        second: [o.signedIn, o.twin].filter(Boolean).join(" · ") || null,
       };
     case "connecting":
       return { first: "Connecting… Desk gives up after 15 s and says why.", tone: "muted", second: null };

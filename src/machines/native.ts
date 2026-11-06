@@ -101,6 +101,14 @@ export type Edited =
   /** The new address shows another machine's key: refused. */
   | { kind: "differentKey"; shown: { kind: string; fingerprint: string }; known: { kind: string; fingerprint: string } };
 
+/** What checking another address for a machine found. */
+export type Checked =
+  /** It shows the machine's own key, checked in `tookMs`: switching is a click. */
+  | { kind: "same"; key: { kind: string; fingerprint: string }; tookMs: number }
+  /** The person said no to the native question: nothing ran there. */
+  | { kind: "cancelled" }
+  | { kind: "differentKey"; shown: { kind: string; fingerprint: string }; known: { kind: string; fingerprint: string } };
+
 /** The native side, as the machines' UI uses it. */
 export interface MachineNative {
   list(): Promise<Machine[]>;
@@ -151,6 +159,9 @@ export interface MachineNative {
   /** A new name, a new address (only once the person says yes natively
    *  and it shows the machine's own host key), or both. */
   edit(id: MachineId, change: { target?: string; name?: string }): Promise<Edited>;
+  /** Checks `target` reaches machine `id` (its own host key), after the
+   *  person's yes natively; a switch to it right after asks nothing more. */
+  checkReach(id: MachineId, target: string): Promise<Checked>;
   /** Shows Desk's log on this computer in Finder. */
   revealLog(): Promise<void>;
 }
@@ -175,5 +186,6 @@ export const native: MachineNative = {
   remoteLog: (id) => invoke<string>("machine_remote_log", { id }),
   sshHosts: () => invoke<HostEntry[]>("machine_ssh_hosts"),
   edit: (id, change) => invoke<Edited>("machine_edit", { id, target: change.target ?? null, name: change.name ?? null }),
+  checkReach: (id, target) => invoke<Checked>("machine_check_reach", { id, target }),
   revealLog: () => invoke<void>("machine_reveal_log"),
 };

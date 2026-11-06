@@ -51,6 +51,7 @@
     "allow-machine-remote-log",
     "allow-machine-ssh-hosts",
     "allow-machine-edit",
+    "allow-machine-check-reach",
     "allow-machine-reveal-log",
     "allow-machine-sign-in-forward",
     "allow-machine-sign-in-forward-stop",

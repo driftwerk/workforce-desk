@@ -88,10 +88,24 @@ beforeEach(() => {
         system: { os: "Ubuntu 24.04", arch: "x86_64", glibc: "2.39" },
         details: { freeKb: 1_700_000_000, linger: true, service: true, systemd: true, user: "dev" },
       }),
-      machine({ id: "devbox-root", name: "devbox (root)", target: "root@devbox", version: "0.2.1" }),
+      machine({
+        id: "devbox-root",
+        name: "devbox (root)",
+        target: "root@devbox",
+        version: "0.2.1",
+        hostKey: { kind: "ED25519", fingerprint: "SHA256:k3VqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9fXc", trustedAt: null },
+        details: { freeKb: null, linger: false, service: true, systemd: true, user: "root", lingerLine: "sudo loginctl enable-linger root" },
+      }),
       machine({ id: "buildbox", target: "ubuntu@buildbox", ...offline }),
       machine({ id: "scratch", target: "dev@scratch", state: { kind: "failed", message: "scratch turned your SSH key away, or it needs unlocking first (ssh-add)." } }),
-      machine({ id: "old-ci", target: "ci@old-ci", state: { kind: "failed", message: "old-ci's host key isn't the one your Mac knows. Desk won't connect until you've checked why and fixed known_hosts." } }),
+      machine({
+        id: "old-ci",
+        target: "ci@old-ci",
+        state: { kind: "failed", message: "old-ci's host key isn't the one your Mac knows. Desk won't connect until you've checked why and fixed known_hosts." },
+        reach: { user: "ci", hostname: "10.0.9.9", port: "2222", via: null, entry: "old-ci", file: "~/.ssh/config", forgetKey: "ssh-keygen -R '[10.0.9.9]:2222'" },
+        hostKey: { kind: "ED25519", fingerprint: "SHA256:k3VqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9fXc", trustedAt: null },
+        shownKey: { kind: "ED25519", fingerprint: "SHA256:Zp4wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa1Qe", trustedAt: null },
+      }),
       machine({ id: "shared", target: "dev@shared-box", state: { kind: "newer" }, version: "0.2.2" }),
       machine({ id: "gpu", target: "dev@gpu-1", state: { kind: "connecting" } }),
     ],
@@ -123,6 +137,10 @@ it("says where each machine stands and why, its way out on its row", async () =>
   const root = row("devbox (root)");
   expect(root.textContent).toContain("Needs sign-in: Claude isn’t signed in there yet, so sessions can’t start.");
   expect(root.querySelector(".dot-blocked")).toBeTruthy();
+  // The same computer as devbox (its host key), reached as another account.
+  expect(root.textContent).toContain("Connected · Desk 0.2.1 · same machine as devbox, as root");
+  // Said of the one listed after it only.
+  expect(devbox.textContent).not.toContain("same machine as");
   expect(within(root).getByRole("button", { name: "Sign in…" })).toBeTruthy();
 
   // Offline: ssh's own words, its sessions, when it was last reached and tries next.
@@ -137,7 +155,9 @@ it("says where each machine stands and why, its way out on its row", async () =>
   // A changed key: the line that removes the old one, with Copy.
   const ci = row("old-ci");
   expect(ci.textContent).toContain("old-ci shows a different host key from the one this computer knows");
-  expect(within(ci).getByText("ssh-keygen -R old-ci")).toBeTruthy();
+  // By the name and port ssh looks its key up by, with both keys.
+  expect(within(ci).getByText("ssh-keygen -R '[10.0.9.9]:2222'")).toBeTruthy();
+  expect(ci.textContent).toContain("shows SHA256:Zp4w…a1Qe · Desk knew SHA256:k3Vq…9fXc");
   expect(within(ci).getByRole("button", { name: "Copy" })).toBeTruthy();
   expect(row("shared").textContent).toContain("It runs a newer Desk (0.2.2). Update Desk here to drive it; its sessions keep running.");
   expect(row("gpu").textContent).toContain("Connecting… Desk gives up after 15 s and says why.");
@@ -181,7 +201,10 @@ it("opens a machine's page: how Desk reaches it, Desk there, its engines and its
   expect(within(page).getByRole("region", { name: "Engines on devbox" }).textContent).toContain("Signed in as kings@starmoire.dev, on max plan");
 
   const log = within(page).getByRole("log");
-  expect(log.textContent).toContain("08:12connected · Desk 0.2.1");
+  // Newest first, to the second.
+  expect(log.textContent).toMatch(/08:12:\d\dconnected · Desk 0\.2\.1$/);
+  const times = [...log.querySelectorAll(".machine-log-line > .faint")].map((t) => t.textContent!);
+  expect([...times].sort().reverse()).toEqual(times);
   expect(log.querySelector(".machine-log-ok")).toBeTruthy();
   await act(async () => fireEvent.click(within(page).getByRole("radio", { name: "Desk on devbox" })));
   expect(fake.remoteLog).toHaveBeenCalledWith("devbox");
@@ -203,7 +226,7 @@ it("shows an offline machine's status in ssh's own words, and Reconnect now", as
   expect(status.textContent).toContain("Offline");
   expect(status.textContent).toContain("SSH couldn’t reach buildbox through bastion:");
   expect(within(status).getByText("ssh: connect to host 10.0.3.14 port 22: Connection timed out").tagName).toBe("CODE");
-  expect(status.textContent).toContain("Last connected 08:55 · tried at 09:41 and gave up after 15 s · next try in 40 s, then less often, up to every 5 minutes");
+  expect(status.textContent).toContain("Last connected today at 08:55 · tried at 09:41 and gave up after 15 s · next try in 40 s, then less often, up to every 5 minutes");
   expect(status.textContent).toContain("Its 2 sessions keep running on buildbox.");
   expect(status.textContent).toContain("If ssh buildbox works in a terminal on this Mac, Reconnect now.");
   fireEvent.click(within(status).getByRole("button", { name: "Reconnect now" }));
@@ -214,8 +237,25 @@ it("shows an offline machine's status in ssh's own words, and Reconnect now", as
   await act(async () => fireEvent.click(within(page).getByRole("radio", { name: "Desk on buildbox" })));
   expect(fake.remoteLog).not.toHaveBeenCalled();
   expect(within(page).getByRole("log").textContent).toContain("shows here once Desk reaches it");
-  // No engines block for a machine Desk can't reach.
-  expect(within(page).queryByRole("region", { name: "Engines on buildbox" })).toBeNull();
+  // Its engines stay on the page while it is away (a sign-in under way
+  // there carries on), saying they wait for it.
+  expect(within(page).getByRole("region", { name: "Engines on buildbox" }).textContent).toContain("Waiting for buildbox to connect…");
+  // Its jump host has a row of its own: not said again under Connects as.
+  expect(reach.textContent).toContain("Connects asubuntu@10.0.3.14, port 22");
+  expect(reach.textContent).not.toContain("port 22, through bastion");
+});
+
+it("says this Mac's log of a machine couldn't be read, as an error with Try again", async () => {
+  const { native, fake } = fakeNative();
+  fake.log.mockRejectedValueOnce(new Error("Desk couldn't read its log."));
+  render(<Machines native={native} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Open devbox" }));
+  await act(async () => {});
+  const alert = within(screen.getByRole("log")).getByRole("alert");
+  expect(alert.textContent).toContain("Couldn’t read this Mac’s log of devbox: Desk couldn't read its log.");
+  await act(async () => fireEvent.click(within(alert).getByRole("button", { name: "Try again" })));
+  expect(within(screen.getByRole("log")).queryByRole("alert")).toBeNull();
 });
 
 it("says why Desk's log there couldn't be read, with Try again", async () => {
@@ -256,4 +296,12 @@ it("opens the add card", () => {
   render(<Machines native={fakeNative().native} />);
   fireEvent.click(screen.getByRole("button", { name: "Add machine" }));
   expect(screen.getByRole("form", { name: "Add a machine" })).toBeTruthy();
+});
+
+it("shows the linger line as the native side made it, never one built here", async () => {
+  await shows();
+  fireEvent.click(screen.getByRole("button", { name: "Open devbox (root)" }));
+  await act(async () => {});
+  const desk = screen.getByRole("region", { name: "Desk on devbox (root)" });
+  expect(within(desk).getByText("sudo loginctl enable-linger root").tagName).toBe("CODE");
 });

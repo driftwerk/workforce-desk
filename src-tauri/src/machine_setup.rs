@@ -165,7 +165,7 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
         self.ask(
             "Change how Desk reaches a machine",
             question.text(),
-            "Switch",
+            "Check",
         )
     }
 }
@@ -270,6 +270,17 @@ pub async fn machine_edit(
 ) -> CommandResult<Edited> {
     let fleet = Arc::clone(&fleet);
     blocking(move || fleet.edit(&id, target.as_deref(), name.as_deref())).await
+}
+
+/// Checks another address reaches machine `id` (`Fleet::check_reach`).
+#[tauri::command]
+pub async fn machine_check_reach(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+    target: String,
+) -> CommandResult<desk_machine::fleet::Checked> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.check_reach(&id, &target)).await
 }
 
 /// Signing in to ChatGPT on a machine: not yet.

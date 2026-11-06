@@ -13,6 +13,8 @@ use desk_core::machine::{Machine, SSH};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshExe {
     program: PathBuf,
+    /// When everything it runs gives up: none, each runs as long as it takes.
+    until: Option<std::time::Instant>,
 }
 
 /// What `ssh` exits with when it failed itself, rather than the command it
@@ -30,6 +32,16 @@ impl SshExe {
     pub fn at(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            until: None,
+        }
+    }
+
+    /// This `ssh`, with every command it runs ended at `at` (said to have
+    /// run out of time): one deadline over several commands.
+    pub fn until(&self, at: std::time::Instant) -> Self {
+        Self {
+            program: self.program.clone(),
+            until: Some(at),
         }
     }
 
@@ -47,7 +59,13 @@ impl SshExe {
     }
 
     pub fn output(&self, invocation: &Invocation) -> std::io::Result<Output> {
-        self.command(invocation).output()
+        match self.until {
+            Some(at) => self.output_within(
+                invocation,
+                at.saturating_duration_since(std::time::Instant::now()),
+            ),
+            None => self.command(invocation).output(),
+        }
     }
 
     /// As [`SshExe::output`], ended (and said to have run out of time) once

@@ -37,7 +37,14 @@ const open = async (over: Parameters<typeof fakeNative>[0] = {}) => {
   return { ...n, onClose, onAddNew };
 };
 
-it("lists the SSH config's entries, the one in use marked, and switches to another once its key is checked", async () => {
+const SAME = { kind: "same", key: { kind: "ED25519", fingerprint: "SHA256:k3VqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9fXc" }, tookMs: 1800 } as const;
+const DIFFERENT = {
+  kind: "differentKey",
+  shown: { kind: "ED25519", fingerprint: "SHA256:Zp4wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa1Qe" },
+  known: { kind: "ED25519", fingerprint: "SHA256:k3VqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9fXc" },
+} as const;
+
+it("lists the SSH config's entries, the one in use marked, checks another, says it's the same machine, then switches", async () => {
   const { fake, onClose } = await open();
   const list = screen.getByRole("radiogroup", { name: "SSH config entries" });
   expect(within(list).getAllByRole("radio").map((r) => r.textContent)).toEqual([
@@ -50,45 +57,65 @@ it("lists the SSH config's entries, the one in use marked, and switches to anoth
   fireEvent.click(within(list).getByRole("radio", { name: /devbox-new/ }));
   const grid = screen.getByRole("group", { name: "From your SSH config" });
   expect(grid.textContent).toContain("HostName2.29.244.190UserdevPort22Jump hostnone");
-  expect(screen.getByText(/Switching asks you once, in a macOS dialog/)).toBeTruthy();
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check and switch to devbox-new" })));
+  expect(screen.getByText(/Checking asks you once, in a macOS dialog/)).toBeTruthy();
+  fake.checkReach.mockResolvedValueOnce(SAME);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check devbox-new" })));
+  expect(fake.checkReach).toHaveBeenCalledWith("devbox", "devbox-new");
+  expect(fake.edit).not.toHaveBeenCalled();
+  expect(screen.getByRole("status").textContent).toBe("Same machine: its host key matches devbox’s (SHA256:k3Vq…9fXc).Checked in 2 s. Desk gives up after 45 s and says why.");
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Switch to devbox-new" })));
   expect(fake.edit).toHaveBeenCalledWith("devbox", { target: "devbox-new" });
   expect(onClose).toHaveBeenCalled();
 });
 
-it("refuses an address that shows another key, with both keys, and offers it as a new machine", async () => {
+it("refuses an address that shows another key, with both keys and the bare address, and won't check it again", async () => {
   const { fake, onAddNew, onClose } = await open();
-  fake.edit.mockResolvedValueOnce({
-    kind: "differentKey",
-    shown: { kind: "ED25519", fingerprint: "SHA256:Zp4wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa1Qe" },
-    known: { kind: "ED25519", fingerprint: "SHA256:k3VqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA9fXc" },
-  });
+  fake.checkReach.mockResolvedValueOnce(DIFFERENT);
   fireEvent.click(screen.getByRole("radio", { name: "An address" }));
   fireEvent.change(screen.getByLabelText("Address"), { target: { value: "2.29.244.201" } });
   fireEvent.change(screen.getByLabelText("User"), { target: { value: "dev" } });
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check and switch" })));
-  expect(fake.edit).toHaveBeenCalledWith("devbox", { target: "dev@2.29.244.201" });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check this address" })));
+  expect(fake.checkReach).toHaveBeenCalledWith("devbox", "dev@2.29.244.201");
   const refused = screen.getByRole("alert", { name: "Not the same machine" });
-  expect(refused.textContent).toContain("dev@2.29.244.201 shows a different host key from devbox’s.");
+  expect(refused.textContent).toContain("2.29.244.201 shows a different host key from devbox’s.");
+  expect(refused.textContent).not.toContain("dev@2.29.244.201 shows");
   expect(refused.textContent).toContain("This addressED25519 SHA256:Zp4w…a1Qe");
   expect(refused.textContent).toContain("devboxED25519 SHA256:k3Vq…9fXc");
+  expect((screen.getByRole("button", { name: "Check this address" }) as HTMLButtonElement).disabled).toBe(true);
   expect(onClose).not.toHaveBeenCalled();
-  fireEvent.click(within(refused).getByRole("button", { name: "Add dev@2.29.244.201 as a new machine…" }));
+  fireEvent.click(within(refused).getByRole("button", { name: "Add 2.29.244.201 as a new machine…" }));
   expect(onAddNew).toHaveBeenCalledWith("dev@2.29.244.201");
   fireEvent.click(within(refused).getByRole("button", { name: "Back" }));
   expect(screen.queryByRole("alert")).toBeNull();
+  expect(fake.edit).not.toHaveBeenCalled();
 });
 
 it("changes nothing when the person says no, and says a failure in place", async () => {
   const { fake, onClose } = await open();
-  fake.edit.mockResolvedValueOnce({ kind: "cancelled" });
+  fake.checkReach.mockResolvedValueOnce({ kind: "cancelled" });
   fireEvent.click(screen.getByRole("radio", { name: /devbox-new/ }));
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check and switch to devbox-new" })));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check devbox-new" })));
   expect(onClose).not.toHaveBeenCalled();
   expect(screen.queryByRole("alert")).toBeNull();
-  fake.edit.mockRejectedValueOnce(new Error("Your known_hosts has another key for devbox-new. Desk won't change it."));
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check and switch to devbox-new" })));
-  expect(screen.getByRole("alert").textContent).toContain("Your known_hosts has another key for devbox-new");
+  fake.checkReach.mockRejectedValueOnce(new Error("devbox-new didn't answer within 45 s. Nothing changed."));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check devbox-new" })));
+  expect(screen.getByRole("alert").textContent).toContain("devbox-new didn't answer within 45 s");
+});
+
+it("keeps Cancel working while a check runs, and lets a late answer go", async () => {
+  let answer: (c: unknown) => void = () => {};
+  const { fake, onClose } = await open();
+  fake.checkReach.mockImplementationOnce(() => new Promise((r) => (answer = r)) as never);
+  fireEvent.click(screen.getByRole("radio", { name: /devbox-new/ }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check devbox-new" })));
+  expect(screen.getByText(/Checking devbox-new shows devbox’s host key… Desk gives up after 45 s/)).toBeTruthy();
+  const cancel = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+  expect(cancel.disabled).toBe(false);
+  fireEvent.click(cancel);
+  expect(onClose).toHaveBeenCalled();
+  await act(async () => answer(SAME));
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(fake.edit).not.toHaveBeenCalled();
 });
 
 it("asks for a Host entry for a port other than 22, and renames alone without checking anything", async () => {
@@ -97,7 +124,7 @@ it("asks for a Host entry for a port other than 22, and renames alone without ch
   fireEvent.change(screen.getByLabelText("Address"), { target: { value: "2.29.244.189" } });
   fireEvent.change(screen.getByLabelText("Port"), { target: { value: "2222" } });
   expect(screen.getByText(/A port other than 22 needs a Host entry in your SSH config/)).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Check and switch" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Check this address" }) as HTMLButtonElement).disabled).toBe(true);
 
   fireEvent.click(screen.getByRole("radio", { name: "From your SSH config" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "devbox (dev)" } });

@@ -5,12 +5,12 @@ import { useDesk } from "../hub/store";
 import { sessionsOn, type Machine } from "../machines/engines";
 import type { LogLine, MachineNative } from "../machines/native";
 import { openTerminalOn } from "../machines/watch";
-import { clock, dotOf, freeText, inTime, keyChanged, offlineWhy, sessionsCount, thisComputer, thisComputerLower } from "../machines/words";
+import { clock, clockSeconds, dotOf, forgetKeyLine, freeText, inTime, keyChanged, offlineWhy, revealWords, sessionsCount, thisComputer, thisComputerLower, whenText } from "../machines/words";
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
 import { CopyButton, EngineBlocks } from "./EngineBlocks";
-import { EditReach } from "./EditReach";
+import { EditReach, shortPrint } from "./EditReach";
 import { useNow } from "./Machines";
 
 /** How often Desk looks at a ready machine's link (fleet `check_every`). */
@@ -43,15 +43,16 @@ function Row({ title, children, tone }: { title: string; children?: React.ReactN
 
 /** The machine's log: this computer's of it, or Desk's own there. */
 export function MachineLog({ machine, native, here }: { machine: Machine; native: MachineNative; here: string }) {
+  const platform = useHost((h) => h.platform);
   const [which, setWhich] = useState<"here" | "there">("here");
-  const [lines, setLines] = useState<LogLine[] | null>(null);
+  const [lines, setLines] = useState<LogLine[] | { problem: string } | null>(null);
   const [there, setThere] = useState<{ text: string } | { problem: string } | "reading" | null>(null);
   const ready = machine.state.kind === "ready";
   const readHere = useCallback(() => {
     native
       .log(machine.id)
       .then(setLines)
-      .catch(() => setLines([]));
+      .catch((e: unknown) => setLines({ problem: plainError(e) }));
   }, [native, machine.id]);
   // Read again whenever it changes state or tries again.
   useEffect(readHere, [readHere, machine.state.kind, machine.lastTry, machine.nextTry]);
@@ -65,45 +66,46 @@ export function MachineLog({ machine, native, here }: { machine: Machine; native
   useEffect(() => {
     if (which === "there" && ready) readThere();
   }, [which, ready, readThere]);
-  const text =
-    which === "here"
-      ? (lines ?? []).map((l) => `${clock(l.at)}  ${l.text}`).join("\n")
-      : there && typeof there === "object" && "text" in there
-        ? there.text
-        : "";
+  // Newest first, to the second.
+  const shown = Array.isArray(lines) ? [...lines].reverse() : [];
+  const text = which === "here" ? shown.map((l) => `${clockSeconds(l.at)}  ${l.text}`).join("\n") : there && typeof there === "object" && "text" in there ? there.text : "";
   return (
-    <Section
-      title="Recent log"
-      id="machine-log"
-      right={
+    <Section title="Recent log" id="machine-log">
+      <div className="machine-log-bar">
+        <div className="seg machine-log-seg" role="radiogroup" aria-label="Which log">
+          <button type="button" role="radio" aria-checked={which === "here"} onClick={() => setWhich("here")}>
+            {here[0]!.toUpperCase() + here.slice(1)}’s connection log
+          </button>
+          <button type="button" role="radio" aria-checked={which === "there"} onClick={() => setWhich("there")}>
+            Desk on {machine.name}
+          </button>
+        </div>
         <span className="machine-log-tools">
           <button type="button" className="btn btn-sm" disabled={!text} onClick={() => void navigator.clipboard?.writeText(text)}>
             Copy
           </button>
           <button type="button" className="btn btn-sm" onClick={() => void native.revealLog().catch(() => undefined)}>
-            Show in Finder
+            {revealWords(platform)}
           </button>
         </span>
-      }
-    >
-      <div className="seg machine-log-seg" role="radiogroup" aria-label="Which log">
-        <button type="button" role="radio" aria-checked={which === "here"} onClick={() => setWhich("here")}>
-          {here[0]!.toUpperCase() + here.slice(1)}’s connection log
-        </button>
-        <button type="button" role="radio" aria-checked={which === "there"} onClick={() => setWhich("there")}>
-          Desk on {machine.name}
-        </button>
       </div>
       <div className="machine-log" role="log" aria-label={which === "here" ? `${here}’s connection log` : `Desk’s log on ${machine.name}`}>
         {which === "here" &&
           (lines === null ? (
             <span className="faint">Reading…</span>
-          ) : lines.length === 0 ? (
+          ) : !Array.isArray(lines) ? (
+            <span className="state-blocked" role="alert">
+              Couldn’t read {here}’s log of {machine.name}: {lines.problem}{" "}
+              <button type="button" className="link small" onClick={readHere}>
+                Try again
+              </button>
+            </span>
+          ) : shown.length === 0 ? (
             <span className="faint">Nothing yet.</span>
           ) : (
-            lines.map((l, i) => (
+            shown.map((l, i) => (
               <div key={i} className="machine-log-line">
-                <span className="faint">{clock(l.at)}</span>
+                <span className="faint">{clockSeconds(l.at)}</span>
                 <span className={`machine-log-${l.kind}`}>{l.text}</span>
               </div>
             ))
@@ -124,7 +126,11 @@ export function MachineLog({ machine, native, here }: { machine: Machine; native
             <pre className="machine-log-pre">{there.text}</pre>
           ))}
       </div>
-      {which === "here" && <span className="small faint">Desk on {machine.name}’s own log (its service, last 200 lines) is under Desk on {machine.name}.</span>}
+      {which === "here" && (
+        <span className="small faint">
+          Desk on {machine.name}’s own log (its service, last 200 lines) {ready ? `is under Desk on ${machine.name}` : "shows here once Desk reaches it"}.
+        </span>
+      )}
     </Section>
   );
 }
@@ -158,16 +164,46 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
       </div>
     );
   if (s === "unreachable" || s === "failed") {
-    const title = s === "unreachable" ? "Offline" : keyChanged(machine) ? "Its host key has changed" : "Not working";
+    const changed = keyChanged(machine);
+    const title = s === "unreachable" ? "Offline" : changed ? "Its host key has changed" : "Not working";
     const why = s === "unreachable" ? offlineWhy(machine).split(". ")[0]!.replace(/\.$/, "") : machine.state.kind === "failed" ? machine.state.message : "";
     return (
       <div className="setting-card machine-status machine-status-problem" role="status">
         <b className="state-blocked">{title}</b>
         <span>{machine.said ? `${why}:` : why}</span>
         {machine.said && <code className="machine-said mono small">{machine.said}</code>}
+        {changed && (
+          <>
+            <dl className="config-grid">
+              {machine.shownKey && (
+                <>
+                  <dt>It shows now</dt>
+                  <dd>
+                    {machine.shownKey.kind} {shortPrint(machine.shownKey.fingerprint)}
+                  </dd>
+                </>
+              )}
+              {machine.hostKey && (
+                <>
+                  <dt>Desk knew</dt>
+                  <dd>
+                    {machine.hostKey.kind} {shortPrint(machine.hostKey.fingerprint)}
+                  </dd>
+                </>
+              )}
+            </dl>
+            <span className="small">
+              If {machine.name} was reinstalled, remove its old key on {here}, then Reconnect:
+            </span>
+            <span className="machine-line">
+              <code className="mono small">{forgetKeyLine(machine)}</code>
+              <CopyButton text={forgetKeyLine(machine)} />
+            </span>
+          </>
+        )}
         <span className="small faint">
           {[
-            machine.lastConnected && `Last connected ${clock(machine.lastConnected, now)}`,
+            machine.lastConnected && `Last connected ${whenText(machine.lastConnected, now)}`,
             machine.lastTry && `tried at ${clock(machine.lastTry, now)} and gave up after 15 s`,
             machine.nextTry && `next try ${inTime(machine.nextTry, now)}, then less often, up to every 5 minutes`,
           ]
@@ -277,7 +313,7 @@ export function MachineDetail({
         <div className="prov-list">
           {r?.entry ? (
             <Row title="SSH config entry">
-              <span className="mono">{r.entry}</span> from {r.file ?? "~/.ssh/config"}
+              <b className="mono">{r.entry}</b> from {r.file ?? "~/.ssh/config"}
             </Row>
           ) : (
             <Row title="Address">
@@ -286,7 +322,8 @@ export function MachineDetail({
           )}
           {r && (
             <Row title="Connects as">
-              {[`${r.user ?? "you"}@${r.hostname ?? machine.target}`, r.port && `port ${r.port}`, how].filter(Boolean).join(", ")}
+              {/* Its jump host has a row of its own. */}
+              {[`${r.user ?? "you"}@${r.hostname ?? machine.target}`, r.port && `port ${r.port}`, !r.via && how].filter(Boolean).join(", ")}
             </Row>
           )}
           {r?.via && (
@@ -323,19 +360,18 @@ export function MachineDetail({
             </Row>
           )}
         </div>
-        {d && !(d.service && d.linger) && d.systemd && (
+        {d && !(d.service && d.linger) && d.systemd && d.lingerLine && (
           <span className="machine-line">
-            <code className="mono small">sudo loginctl enable-linger {d.user ?? r?.user ?? ""}</code>
-            <CopyButton text={`sudo loginctl enable-linger ${d.user ?? r?.user ?? ""}`} />
+            <code className="mono small">{d.lingerLine}</code>
+            <CopyButton text={d.lingerLine} />
           </span>
         )}
       </Section>
 
-      {ready && (
-        <Section title={`Engines on ${machine.name}`} id="machine-engines" right={<span className="small faint">Also in Settings → Engines, with {machine.name} chosen</span>}>
-          <EngineBlocks machine={machine.id} name={machine.name} native={native} />
-        </Section>
-      )}
+      {/* Kept through a reconnect: a sign-in under way there carries on. */}
+      <Section title={`Engines on ${machine.name}`} id="machine-engines" right={<span className="small faint">Also in Settings → Engines, with {machine.name} chosen</span>}>
+        <EngineBlocks machine={machine.id} name={machine.name} native={native} />
+      </Section>
 
       <MachineLog machine={machine} native={native} here={here} />
 

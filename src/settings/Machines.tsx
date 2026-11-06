@@ -6,16 +6,18 @@ import { LOCAL, sessionsOn, useMachines, type Machine, type MachineId } from "..
 import { native as realNative, type MachineNative } from "../machines/native";
 import { useEngineSummary } from "../machines/summary";
 import { openTerminalOn } from "../machines/watch";
-import { dotOf, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower } from "../machines/words";
+import { dotOf, forgetKeyLine, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower, twinNote } from "../machines/words";
+import { shortPrint } from "./EditReach";
 import { inApp } from "../platform";
 import { NewSession } from "../session/NewSession";
 import { useHost } from "../shell/host";
 import { CopyButton } from "./EngineBlocks";
 import { MachineDetail } from "./MachineDetail";
 
-/** This Desk's version; null outside the app or until it's read. */
-export const useDeskVersion = (): string | null => {
-  const [version, setVersion] = useState<string | null>(null);
+/** This Desk's version; null outside the app or until it's read (`given`
+ *  stands in for it in a preview). */
+export const useDeskVersion = (given: string | null = null): string | null => {
+  const [version, setVersion] = useState<string | null>(given);
   useEffect(() => {
     if (inApp) void getVersion().then(setVersion).catch(() => undefined);
   }, []);
@@ -105,10 +107,11 @@ function MachineRow({
   onNewSession: () => void;
 }) {
   const count = useDesk((s) => sessionsOn(s.sessions, machine.id).length);
+  const all = useMachines((s) => s.machines);
   const ready = machine.state.kind === "ready";
   const summary = useEngineSummary(machine.id, ready);
   const now = useNow(!!machine.nextTry);
-  const lines = rowLines(machine, { desk: version, sessions: count, now, claudeIn: summary.claudeIn, signedIn: summary.line });
+  const lines = rowLines(machine, { desk: version, sessions: count, now, claudeIn: summary.claudeIn, signedIn: summary.line, twin: twinNote(machine, all) });
   const blocked = lines.tone === "blocked";
   const look = ready && summary.claudeIn === false ? "blocked" : dotOf(machine.state);
   const changed = keyChanged(machine);
@@ -127,10 +130,17 @@ function MachineRow({
             : lines.first}
         </span>
         {changed && (
-          <span className="machine-line">
-            <code className="mono small">ssh-keygen -R {machine.reach?.entry ?? machine.target.split("@").pop()}</code>
-            <CopyButton text={`ssh-keygen -R ${machine.reach?.entry ?? machine.target.split("@").pop()}`} />
-          </span>
+          <>
+            {(machine.shownKey || machine.hostKey) && (
+              <span className="small faint mono">
+                {[machine.shownKey && `shows ${shortPrint(machine.shownKey.fingerprint)}`, machine.hostKey && `Desk knew ${shortPrint(machine.hostKey.fingerprint)}`].filter(Boolean).join(" · ")}
+              </span>
+            )}
+            <span className="machine-line">
+              <code className="mono small">{forgetKeyLine(machine)}</code>
+              <CopyButton text={forgetKeyLine(machine)} />
+            </span>
+          </>
         )}
         {lines.second && <span className="small faint">{lines.second}</span>}
       </span>
@@ -144,11 +154,11 @@ function MachineRow({
 
 /** Settings → Machines: this computer and the person's own Linux machines,
  *  where each stands and why, adding one, and each one's own page. */
-export function Machines({ native = realNative }: { native?: MachineNative }) {
+export function Machines({ native = realNative, deskVersion = null }: { native?: MachineNative; deskVersion?: string | null }) {
   const machines = useMachines((s) => s.machines);
   const local = useDesk((s) => sessionsOn(s.sessions, LOCAL).length);
   const platform = useHost((h) => h.platform);
-  const version = useDeskVersion();
+  const version = useDeskVersion(deskVersion);
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<{ id: MachineId; at?: "engines" | "log" } | null>(null);
   const [starting, setStarting] = useState<MachineId | null>(null);

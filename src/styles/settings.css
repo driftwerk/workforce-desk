@@ -1007,7 +1007,9 @@ legend.set-label {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  /* Inset: the dividers run between the rows' contents, not the list's edges. */
+  margin: 0 14px;
+  padding: 12px 0;
   flex-wrap: wrap;
 }
 .machine-row + .machine-row {
@@ -1197,7 +1199,23 @@ legend.set-label {
   align-items: stretch;
   gap: 8px;
   background: var(--blocked-soft);
-  border-color: color-mix(in srgb, var(--blocked) 35%, var(--border));
+  border-color: transparent;
+}
+.machine-log-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.machine-checked {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.machine-checked .dot {
+  flex: none;
+  transform: translateY(1px);
 }
 .machine-said {
   display: block;

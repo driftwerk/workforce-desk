@@ -174,6 +174,11 @@ impl Look {
         if look.user.is_empty() || look.arch.is_empty() {
             return Err("The machine didn't say what it is.".into());
         }
+        // The account's name goes into lines the person runs (`sudo
+        // loginctl enable-linger …`): only ever a POSIX user name.
+        if !valid_user(&look.user) {
+            return Err("The machine's account has a name Desk can't use.".into());
+        }
         if !look.home.starts_with('/')
             || look.home.len() > 255
             || !look
@@ -185,6 +190,18 @@ impl Look {
         }
         Ok(look)
     }
+}
+
+/// A POSIX user name (as `useradd` takes one): letters, digits, `.`, `_`,
+/// `-` (never first), at most 32, perhaps ending in `$`.
+pub fn valid_user(user: &str) -> bool {
+    let body = user.strip_suffix('$').unwrap_or(user);
+    !body.is_empty()
+        && user.len() <= 32
+        && !body.starts_with('-')
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
 /// How a look ended without one.
@@ -510,6 +527,14 @@ mod tests {
         assert_eq!(odd.installed, None);
         assert!(Look::parse("user=dev\nhome=/home/a b\narch=x86_64\n").is_err());
         assert!(Look::parse("home=/home/dev\n").is_err());
+        // An account name that could be read as more than a name.
+        for odd in ["dev; rm -rf ~", "-dev", "dé v", "$(id)", "a`b`"] {
+            assert!(
+                Look::parse(&format!("user={odd}\nhome=/home/dev\narch=x86_64\n")).is_err(),
+                "{odd}"
+            );
+        }
+        assert!(valid_user("dev") && valid_user("build.bot-2") && valid_user("host$"));
         // An account that runs desktop Desk; a machine's, before and after
         // the marker.
         let base = "user=dev\nhome=/home/dev\nkernel=Linux\narch=x86_64\n";

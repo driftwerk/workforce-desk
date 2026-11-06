@@ -115,6 +115,9 @@ pub struct Reach {
     /// The `Host` entry its address is, and the file it is in.
     pub entry: Option<String>,
     pub file: Option<String>,
+    /// The line that removes its old key from the person's known_hosts
+    /// (`ssh-keygen -R`, by the name and port ssh looks it up by).
+    pub forget_key: Option<String>,
 }
 
 /// What the last look there found, besides its system.
@@ -127,7 +130,34 @@ pub struct Details {
     pub service: bool,
     pub systemd: bool,
     pub user: Option<String>,
+    /// The line that turns linger on there, made here with the account's
+    /// name checked and quoted.
+    pub linger_line: Option<String>,
 }
+
+/// What checking another address for a machine found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Checked {
+    /// It shows the machine's own key: switching to it is a click.
+    #[serde(rename_all = "camelCase")]
+    Same { key: KeptKey, took_ms: u64 },
+    /// The person said no: nothing ran there.
+    Cancelled,
+    /// It shows another key: never switched to.
+    DifferentKey { shown: KeptKey, known: KeptKey },
+}
+
+/// An address checked for a machine, and what its switch needs.
+struct CheckedAt {
+    target: Target,
+    line: String,
+    files: Files,
+    at: Instant,
+}
+
+/// How long a check stands for the switch that follows it.
+const CHECK_STANDS: Duration = Duration::from_secs(5 * 60);
 
 /// What changing how a machine is reached did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -139,6 +169,19 @@ pub enum Edited {
     Cancelled,
     /// The new address shows another key than the machine's: refused.
     DifferentKey { shown: KeptKey, known: KeptKey },
+}
+
+/// An ssh that couldn't run, or ran out of time, in plain words.
+fn ssh_ran_out(machine: &Machine, e: &std::io::Error, within: Duration) -> String {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        format!(
+            "{} didn't answer within {} s. Nothing changed.",
+            machine.target,
+            within.as_secs()
+        )
+    } else {
+        format!("Desk couldn't run ssh: {e}")
+    }
 }
 
 /// Now, in Unix ms.
@@ -181,6 +224,9 @@ pub struct Listed {
     pub details: Option<Details>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_key: Option<KeptKey>,
+    /// The key it shows now, when its host key changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown_key: Option<KeptKey>,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -246,6 +292,9 @@ pub struct Timing {
     pub linger_for: Duration,
     /// How long a yes to an address stands.
     pub admitted_for: Duration,
+    /// How long changing how a machine is reached may wait on ssh, after
+    /// the person's yes: reading its settings, its key, and checking it.
+    pub edit_within: Duration,
 }
 
 impl Default for Timing {
@@ -259,6 +308,7 @@ impl Default for Timing {
             linger_poll: Duration::from_secs(5),
             linger_for: Duration::from_secs(30 * 60),
             admitted_for: Duration::from_secs(15 * 60),
+            edit_within: Duration::from_secs(45),
         }
     }
 }
@@ -346,6 +396,8 @@ struct Now {
     connected_since: Option<i64>,
     reach: Option<Reach>,
     details: Option<Details>,
+    /// The key it shows now, when that isn't the one this computer knows.
+    shown_key: Option<KeptKey>,
     log: VecDeque<LogLine>,
 }
 
@@ -393,6 +445,9 @@ pub struct Fleet {
     /// Keys the person trusted from Desk, by address, until the machine at
     /// that address is added.
     trusted: Mutex<HashMap<String, KeptKey>>,
+    /// Addresses checked to show a machine's own key, by machine: what a
+    /// switch to them needs, for [`CHECK_STANDS`].
+    checked: Mutex<HashMap<String, CheckedAt>>,
 }
 
 /// Whether the machine's hub answers through the forward: its engines, as
@@ -538,6 +593,7 @@ impl Fleet {
             save_pause: Mutex::default(),
             files: Mutex::default(),
             trusted: Mutex::default(),
+            checked: Mutex::default(),
         })
     }
 
@@ -623,6 +679,7 @@ impl Fleet {
                 reach: r.now.reach.clone(),
                 details: r.now.details.clone(),
                 host_key: r.kept.host_key.clone(),
+                shown_key: r.now.shown_key.clone(),
             })
             .collect()
     }
@@ -798,17 +855,27 @@ impl Fleet {
             confirm: self.trust.as_ref(),
         };
         if let Some(key) = hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)? {
+            let kept = KeptKey {
+                kind: key.kind(),
+                fingerprint: key.fingerprint,
+                trusted_at: Some(now_ms()),
+            };
             self.trusted
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(
-                    machine.target.to_string(),
-                    KeptKey {
-                        kind: key.kind(),
-                        fingerprint: key.fingerprint,
-                        trusted_at: Some(now_ms()),
-                    },
-                );
+                .insert(machine.target.to_string(), kept.clone());
+            // A machine of Desk's at that address now has this key: the
+            // one another address must show to be the same machine.
+            let same: Vec<String> = self
+                .rows()
+                .iter()
+                .filter(|(_, r)| r.kept.machine.target == machine.target)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in same {
+                self.update_kept(&id, |k| k.host_key = Some(kept.clone()));
+                self.set_now(&id, |n| n.shown_key = None);
+            }
         }
         Ok(())
     }
@@ -1298,20 +1365,46 @@ impl Fleet {
         {
             return;
         }
-        if let Ok((key, _)) = hostkey::capture(&self.ssh, machine) {
-            self.update_kept(id, |k| {
-                k.host_key.get_or_insert(KeptKey {
-                    kind: key.kind(),
-                    fingerprint: key.fingerprint,
-                    trusted_at: None,
-                });
-            });
+        // All of it within one limit: it can run before the person is asked
+        // anything (checking another address), and never waits for good.
+        let ssh = self.ssh.until(Instant::now() + self.timing.edit_within);
+        let Ok((key, _)) = hostkey::capture(&ssh, machine) else {
+            return;
+        };
+        // Kept only once it is one the person's known_hosts already has for
+        // it: what answered a capture (which trusts nothing) isn't proof
+        // of anything by itself.
+        let files = match ssh.output(&machine.settings()) {
+            Ok(out) if out.status.success() => {
+                Files::parse(&String::from_utf8_lossy(&out.stdout), &self.home)
+            }
+            _ => return,
+        };
+        if !hostkey::known_fingerprints(&files).contains(&key.fingerprint) {
+            self.note(
+                id,
+                LogKind::Warn,
+                format!(
+                    "the host key it showed ({}) isn't in your known_hosts for it: not kept",
+                    key.fingerprint
+                ),
+            );
+            return;
         }
+        self.update_kept(id, |k| {
+            k.host_key.get_or_insert(KeptKey {
+                kind: key.kind(),
+                fingerprint: key.fingerprint,
+                trusted_at: None,
+            });
+        });
     }
 
     /// How Desk reaches `machine` now, as the person's ssh config says.
     fn reach_of(&self, machine: &Machine) -> Option<Reach> {
-        let settings = ssh::settings(&self.ssh, machine).ok()?;
+        let said = self.settings_said(machine).ok()?;
+        let settings = ssh::Settings::parse(&said);
+        let files = Files::parse(&said, &self.home);
         let entry = suggest::hosts(&self.home)
             .into_iter()
             .find(|e| e.host == machine.target.as_str());
@@ -1328,6 +1421,7 @@ impl Fleet {
             }),
             file: entry.as_ref().map(|e| e.file.clone()),
             entry: entry.map(|e| e.host),
+            forget_key: hostkey::forget_line(&files, &self.home),
         })
     }
 
@@ -1371,16 +1465,29 @@ impl Fleet {
                 return State::Unreachable;
             }
             Err(m) => {
+                // Its key changed: the key it shows now, beside the one kept.
+                let shown = matches!(m, Missed::Key(hostkey::KeyTrouble::Changed))
+                    .then(|| hostkey::capture(&self.ssh, machine).ok())
+                    .flatten()
+                    .map(|(k, _)| KeptKey {
+                        kind: k.kind(),
+                        fingerprint: k.fingerprint,
+                        trusted_at: None,
+                    });
                 let message = Self::missed(machine, m);
                 self.note(
                     id,
                     LogKind::Error,
                     said.clone().unwrap_or_else(|| message.clone()),
                 );
-                self.set_now(id, |n| n.said = said);
+                self.set_now(id, |n| {
+                    n.said = said;
+                    n.shown_key = shown;
+                });
                 return State::Failed { message };
             }
         };
+        self.set_now(id, |n| n.shown_key = None);
         self.set_now(id, |n| {
             n.details = Some(Details {
                 free_kb: look.free_kb,
@@ -1388,6 +1495,7 @@ impl Fleet {
                 service: look.service,
                 systemd: look.systemd,
                 user: Some(look.user.clone()),
+                linger_line: Some(install::linger_by_hand(&look.user)),
             })
         });
         // Never over desktop Desk, installed there since.
@@ -1665,6 +1773,113 @@ impl Fleet {
         Ok(lines.join("\n"))
     }
 
+    /// Checks that `target` reaches machine `id` (`machine_check_reach`):
+    /// the person is asked natively first (nothing runs for the address
+    /// before), then the key it shows is read, within one limit, and
+    /// compared with the machine's own, checked against the person's
+    /// known_hosts. The same key stands for a switch for a few minutes.
+    /// Blocking.
+    pub fn check_reach(self: &Arc<Self>, id: &str, target: &str) -> Result<Checked, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let t = Target::new(target.trim()).map_err(|e| e.to_string())?;
+        if t == machine.target {
+            return Err(format!("{t} is how Desk reaches {} now.", machine.name));
+        }
+        if let Some((_, other)) = self
+            .rows()
+            .iter()
+            .find(|(other, r)| *other != id && r.kept.machine.target == t)
+        {
+            return Err(format!(
+                "{t} is how Desk reaches {} already.",
+                other.kept.machine.name
+            ));
+        }
+        // Only a key checked against the person's known_hosts says what
+        // the machine is: none on record, nothing moves.
+        if self
+            .rows()
+            .get(id)
+            .is_some_and(|r| r.kept.host_key.is_none())
+        {
+            self.know_key(id, &machine);
+        }
+        let known = self
+            .rows()
+            .get(id)
+            .and_then(|r| r.kept.host_key.clone())
+            .ok_or_else(|| {
+                format!(
+                    "Desk has no host key for {name} checked against your known_hosts yet, so it can't tell another address is the same machine. Reconnect {name}, then try again.",
+                    name = machine.name
+                )
+            })?;
+        let question = SwitchQuestion {
+            name: machine.name.clone(),
+            from: machine.target.to_string(),
+            to: t.to_string(),
+            kind: known.kind.clone(),
+            fingerprint: known.fingerprint.clone(),
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.switch_to(&question))? {
+            return Ok(Checked::Cancelled);
+        }
+        let moved = Machine {
+            target: t.clone(),
+            ..machine.clone()
+        };
+        // Only now does anything run for the new address, all of it within
+        // one limit.
+        let started = Instant::now();
+        let within = self.timing.edit_within;
+        let ssh = self.ssh.until(started + within);
+        let out = ssh
+            .output(&moved.settings())
+            .map_err(|e| ssh_ran_out(&moved, &e, within))?;
+        if !out.status.success() {
+            return Err(ssh::problem(&moved, &out.stderr));
+        }
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        ssh::no_forwards(&moved, &ssh::Settings::parse(&said))?;
+        let files = Files::parse(&said, &self.home);
+        let (shown, line) = hostkey::capture(&ssh, &moved)?;
+        let shown = KeptKey {
+            kind: shown.kind(),
+            fingerprint: shown.fingerprint,
+            trusted_at: None,
+        };
+        if shown.fingerprint != known.fingerprint {
+            self.note(
+                id,
+                LogKind::Warn,
+                format!(
+                    "{t} shows another host key ({}): not moved there",
+                    shown.fingerprint
+                ),
+            );
+            return Ok(Checked::DifferentKey { shown, known });
+        }
+        self.checked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                id.to_string(),
+                CheckedAt {
+                    target: t,
+                    line,
+                    files,
+                    at: Instant::now(),
+                },
+            );
+        Ok(Checked::Same {
+            key: known,
+            took_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
     /// Changes machine `id`'s name, how it is reached (`target`), or both
     /// (`machine_edit`). A new address must show the machine's own host
     /// key: the person is asked natively first (nothing runs there before),
@@ -1681,8 +1896,16 @@ impl Fleet {
             .ok_or("That machine isn't in Desk any more.")?;
         let name = name.map(str::trim).filter(|n| *n != machine.name);
         if let Some(n) = name {
-            if n.is_empty() || n.chars().count() > 60 || n.chars().any(char::is_control) {
+            if n.is_empty() || n.chars().count() > 60 {
                 return Err("Give it a name of up to 60 letters.".into());
+            }
+            // Shown as it says, as adding's names are: nothing that could
+            // make it read as something else (no zero-width or bidi marks).
+            if !desk_core::machine::plain(n) {
+                return Err(
+                    "A machine's name can only have letters, numbers, spaces and punctuation."
+                        .into(),
+                );
             }
             if self
                 .rows()
@@ -1717,59 +1940,34 @@ impl Fleet {
                 target: t.clone(),
                 ..machine.clone()
             };
-            let known = match self.rows().get(id).and_then(|r| r.kept.host_key.clone()) {
-                Some(k) => k,
-                None => {
-                    let (k, _) = hostkey::capture(&self.ssh, &machine).map_err(|_| {
-                        format!(
-                            "Desk doesn't know {}'s host key yet, and can't read it now. Reconnect to {} first.",
-                            machine.name, machine.name
-                        )
-                    })?;
-                    KeptKey {
-                        kind: k.kind(),
-                        fingerprint: k.fingerprint,
-                        trusted_at: None,
-                    }
+            // Checked a moment ago (`check_reach`), or checked now.
+            let fresh = {
+                let mut checked = self.checked.lock().unwrap_or_else(|e| e.into_inner());
+                match checked.remove(id) {
+                    Some(c) if c.target == t && c.at.elapsed() < CHECK_STANDS => Some(c),
+                    _ => None,
                 }
             };
-            let question = SwitchQuestion {
-                name: machine.name.clone(),
-                from: machine.target.to_string(),
-                to: t.to_string(),
-                kind: known.kind.clone(),
-                fingerprint: known.fingerprint.clone(),
+            let at = match fresh {
+                Some(c) => c,
+                None => match self.check_reach(id, t.as_str())? {
+                    Checked::Same { .. } => self
+                        .checked
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(id)
+                        .ok_or("Desk lost track of that check. Try again.")?,
+                    Checked::Cancelled => return Ok(Edited::Cancelled),
+                    Checked::DifferentKey { shown, known } => {
+                        return Ok(Edited::DifferentKey { shown, known });
+                    }
+                },
             };
-            let confirm = &self.trust;
-            if !self.trust_gate.ask(|| confirm.switch_to(&question))? {
-                return Ok(Edited::Cancelled);
-            }
-            // Only now does anything run for the new address.
-            let said = self.settings_said(&moved)?;
-            ssh::no_forwards(&moved, &ssh::Settings::parse(&said))?;
-            let files = Files::parse(&said, &self.home);
-            let (shown, line) = hostkey::capture(&self.ssh, &moved)?;
-            if shown.fingerprint != known.fingerprint {
-                self.note(
-                    id,
-                    LogKind::Warn,
-                    format!(
-                        "{t} shows another host key ({}): not moved there",
-                        shown.fingerprint
-                    ),
-                );
-                return Ok(Edited::DifferentKey {
-                    shown: KeptKey {
-                        kind: shown.kind(),
-                        fingerprint: shown.fingerprint,
-                        trusted_at: None,
-                    },
-                    known,
-                });
-            }
-            match hostkey::trouble(&self.ssh, &moved)? {
+            let within = self.timing.edit_within;
+            let ssh = self.ssh.until(Instant::now() + within);
+            match hostkey::trouble(&ssh, &moved)? {
                 None => {}
-                Some(hostkey::KeyTrouble::Unknown) => hostkey::learn(&files, &line)?,
+                Some(hostkey::KeyTrouble::Unknown) => hostkey::learn(&at.files, &at.line)?,
                 Some(hostkey::KeyTrouble::Changed) => {
                     return Err(format!(
                         "Your known_hosts has another key for {t}. Desk won't change it: remove that line (ssh-keygen -R), then try again."
@@ -2031,12 +2229,18 @@ mod tests {
                 via: Some("bastion".into()),
                 entry: Some("devbox".into()),
                 file: Some("~/.ssh/config".into()),
+                forget_key: Some("ssh-keygen -R 10.0.3.14".into()),
             }),
             details: None,
             host_key: Some(KeptKey {
                 kind: "ED25519".into(),
                 fingerprint: "SHA256:k3Vq".into(),
                 trusted_at: Some(4),
+            }),
+            shown_key: Some(KeptKey {
+                kind: "ED25519".into(),
+                fingerprint: "SHA256:x9Zp".into(),
+                trusted_at: None,
             }),
         };
         assert_eq!(
@@ -2046,8 +2250,9 @@ mod tests {
                 "system": {"os": "Ubuntu 24.04", "arch": "x86_64", "glibc": "2.39"}, "state": "unreachable",
                 "reason": "SSH couldn't reach devbox.", "said": "ssh: connect to host 10.0.3.14 port 22: Connection timed out",
                 "lastConnected": 1, "lastTry": 2, "nextTry": 3,
-                "reach": {"user": "dev", "hostname": "10.0.3.14", "port": "22", "via": "bastion", "entry": "devbox", "file": "~/.ssh/config"},
-                "hostKey": {"kind": "ED25519", "fingerprint": "SHA256:k3Vq", "trustedAt": 4}
+                "reach": {"user": "dev", "hostname": "10.0.3.14", "port": "22", "via": "bastion", "entry": "devbox", "file": "~/.ssh/config", "forgetKey": "ssh-keygen -R 10.0.3.14"},
+                "hostKey": {"kind": "ED25519", "fingerprint": "SHA256:k3Vq", "trustedAt": 4},
+                "shownKey": {"kind": "ED25519", "fingerprint": "SHA256:x9Zp"}
             })
         );
         let event = SetupEvent {

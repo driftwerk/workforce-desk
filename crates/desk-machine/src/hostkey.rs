@@ -55,6 +55,65 @@ pub struct Files {
     pub known_hosts: Option<PathBuf>,
     /// Whether the person's ssh hashes the host names it writes there.
     pub hash: bool,
+    /// Every file ssh checks a host's key against: all of
+    /// `UserKnownHostsFile`, then `GlobalKnownHostsFile`.
+    pub all_known: Vec<PathBuf>,
+    /// The name ssh looks the machine's key up by: its `HostKeyAlias`,
+    /// else its `HostName`, as `[name]:port` off port 22.
+    pub known_as: Option<String>,
+}
+
+/// `ssh-keygen`, beside the system's `ssh`.
+const KEYGEN: &str = if cfg!(windows) {
+    "ssh-keygen"
+} else {
+    "/usr/bin/ssh-keygen"
+};
+
+/// The fingerprints the person's known_hosts files hold for the machine
+/// (`files.known_as`), read with `ssh-keygen -F` (hashed names too): no
+/// network. A key Desk read from the machine is the machine's own only
+/// when it is one of these.
+pub fn known_fingerprints(files: &Files) -> Vec<String> {
+    let Some(name) = &files.known_as else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for file in files.all_known.iter().filter(|f| f.is_file()) {
+        let Ok(out) = std::process::Command::new(KEYGEN)
+            .arg("-F")
+            .arg(name)
+            .arg("-f")
+            .arg(file)
+            .stdin(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            if let Some(k) = HostKey::of_line(line)
+                && !found.contains(&k.fingerprint)
+            {
+                found.push(k.fingerprint);
+            }
+        }
+    }
+    found
+}
+
+/// The line that removes the machine's old key from the person's
+/// known_hosts: by the name ssh looks it up by, from the file ssh writes
+/// (named when it isn't ssh's own default). None when Desk can't say it.
+pub fn forget_line(files: &Files, home: &Path) -> Option<String> {
+    let name = files.known_as.as_deref()?;
+    let quote = desk_core::machine::quote;
+    let mut line = format!("ssh-keygen -R {}", quote(name));
+    if let Some(file) = &files.known_hosts
+        && *file != home.join(".ssh").join("known_hosts")
+    {
+        line.push_str(&format!(" -f {}", quote(&file.to_string_lossy())));
+    }
+    Some(line)
 }
 
 /// `~/x` as ssh means it, under `home`; none for a path with ssh's `%`
@@ -74,6 +133,8 @@ impl Files {
     /// From what `ssh -G` printed, with `home` this computer's home.
     pub fn parse(said: &str, home: &Path) -> Files {
         let mut files = Files::default();
+        let (mut alias, mut hostname, mut port) = (None, None, None);
+        let mut global = Vec::new();
         for line in said.lines() {
             let Some((key, value)) = line.split_once(' ') else {
                 continue;
@@ -88,10 +149,35 @@ impl Files {
                         .and_then(|p| expand(p, home));
                 }
                 "hashknownhosts" => files.hash = value.eq_ignore_ascii_case("yes"),
+                "hostkeyalias" if value != "none" => alias = Some(value.to_string()),
+                "hostname" => hostname = Some(value.to_string()),
+                "port" => port = Some(value.to_string()),
+                "globalknownhostsfile" => {
+                    global.extend(value.split_whitespace().filter_map(|p| expand(p, home)))
+                }
                 _ => {}
             }
+            if key.eq_ignore_ascii_case("userknownhostsfile") {
+                files
+                    .all_known
+                    .extend(value.split_whitespace().filter_map(|p| expand(p, home)));
+            }
         }
+        files.all_known.extend(global);
+        files.known_as = alias.or(hostname).map(|name| match port.as_deref() {
+            Some(p) if p != "22" => format!("[{name}]:{p}"),
+            _ => name,
+        });
         files
+    }
+}
+
+/// An ssh that couldn't run, or ran out of time.
+fn ran(machine: &Machine, e: &std::io::Error) -> String {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        format!("{} didn't answer in time. Nothing changed.", machine.target)
+    } else {
+        format!("Desk couldn't run ssh: {e}")
     }
 }
 
@@ -102,7 +188,7 @@ pub fn capture(ssh: &SshExe, machine: &Machine) -> Result<(HostKey, String), Str
     let known = dir.path().join("known_hosts");
     let out = ssh
         .output(&machine.capture_host_key(&known))
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+        .map_err(|e| ran(machine, &e))?;
     let written = std::fs::read_to_string(&known).unwrap_or_default();
     written
         .lines()
@@ -116,7 +202,7 @@ pub fn capture(ssh: &SshExe, machine: &Machine) -> Result<(HostKey, String), Str
 pub fn trouble(ssh: &SshExe, machine: &Machine) -> Result<Option<KeyTrouble>, String> {
     let out = ssh
         .output(&machine.reachable())
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+        .map_err(|e| ran(machine, &e))?;
     if out.status.success() {
         return Ok(None);
     }
@@ -158,7 +244,7 @@ impl SwitchQuestion {
     /// one machine.
     pub fn text(&self) -> String {
         format!(
-            "Reach {} at another address?\n\nFrom {}\nTo {}\n\nIt shows {}'s own SSH host key ({} {}). Its sessions, sign-ins and settings stay. Desk adds the key for the new address to your known_hosts.",
+            "Reach {} at another address?\n\nFrom {}\nTo {}\n\nDesk checks it shows {}'s own SSH host key ({} {}) before anything changes. Its sessions, sign-ins and settings stay. Desk adds the key for the new address to your known_hosts when you switch.",
             self.name, self.from, self.to, self.name, self.kind, self.fingerprint
         )
     }
@@ -456,6 +542,74 @@ mod tests {
         assert!(f.hash);
         let none = Files::parse("userknownhostsfile none\n", home);
         assert_eq!(none.known_hosts, None);
+    }
+
+    #[test]
+    fn a_key_is_looked_up_by_the_name_and_port_ssh_uses() {
+        let home = Path::new("/Users/k");
+        let f = Files::parse(
+            "hostname 10.0.3.14\nport 2222\nhostkeyalias none\nuserknownhostsfile ~/.ssh/known_hosts ~/.ssh/known_hosts2\nglobalknownhostsfile /etc/ssh/ssh_known_hosts\n",
+            home,
+        );
+        assert_eq!(f.known_as.as_deref(), Some("[10.0.3.14]:2222"));
+        assert_eq!(
+            f.all_known,
+            [
+                PathBuf::from("/Users/k/.ssh/known_hosts"),
+                PathBuf::from("/Users/k/.ssh/known_hosts2"),
+                PathBuf::from("/etc/ssh/ssh_known_hosts")
+            ]
+        );
+        assert_eq!(
+            forget_line(&f, home).as_deref(),
+            Some("ssh-keygen -R '[10.0.3.14]:2222'")
+        );
+        let aliased = Files::parse(
+            "hostname 10.0.3.14\nport 22\nhostkeyalias atlas\nuserknownhostsfile /keys/hosts\n",
+            home,
+        );
+        assert_eq!(aliased.known_as.as_deref(), Some("atlas"));
+        assert_eq!(
+            forget_line(&aliased, home).as_deref(),
+            Some("ssh-keygen -R atlas -f /keys/hosts")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_key_the_person_already_trusts_is_known() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("known_hosts");
+        let atlas_pub = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+        let acme_pub = "AAAAC3NzaC1lZDI1NTE5AAAAIB+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        std::fs::write(
+            &file,
+            format!("[atlas]:2222 ssh-ed25519 {atlas_pub}\natlas ssh-ed25519 {acme_pub}\n"),
+        )
+        .unwrap();
+        let files = |name: &str| Files {
+            all_known: vec![file.clone()],
+            known_as: Some(name.into()),
+            ..Files::default()
+        };
+        let mine = HostKey::of_line(&format!("x ssh-ed25519 {atlas_pub}")).unwrap();
+        assert_eq!(
+            known_fingerprints(&files("[atlas]:2222")),
+            std::slice::from_ref(&mine.fingerprint)
+        );
+        assert!(!known_fingerprints(&files("atlas")).contains(&mine.fingerprint));
+        assert!(known_fingerprints(&files("acme")).is_empty());
+        // Hashed names are found too.
+        std::process::Command::new(KEYGEN)
+            .arg("-H")
+            .arg("-f")
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert_eq!(
+            known_fingerprints(&files("[atlas]:2222")),
+            [mine.fingerprint]
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DeskTransport } from "../hub/transport";
 import type { Machine } from "./engines";
-import type { Edited, HostEntry, LogLine, MachineNative, Probe, SetupEvent, Shared } from "./native";
+import type { Checked, Edited, HostEntry, LogLine, MachineNative, Probe, SetupEvent, Shared } from "./native";
 
 export const machine = (m: Partial<Machine> & Pick<Machine, "id">): Machine => ({
   name: m.id,
@@ -66,6 +66,7 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     sshHosts: vi.fn(async (): Promise<HostEntry[]> => []),
     edit: vi.fn(async (_id: string, _change: { target?: string; name?: string }): Promise<Edited> => ({ kind: "done" })),
     revealLog: vi.fn(async () => undefined),
+    checkReach: vi.fn(async (): Promise<Checked> => ({ kind: "cancelled" })),
   };
   Object.assign(fake, over);
   /** Sends a setup event, as the native side would. */

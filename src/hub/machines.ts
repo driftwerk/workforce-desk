@@ -42,6 +42,9 @@ export interface Reach {
   /** The SSH config `Host` entry its address is, and the file it's in. */
   entry: string | null;
   file: string | null;
+  /** The line that removes its old key from known_hosts (`ssh-keygen -R
+   *  '[10.0.3.14]:2222'`), as the native side makes it. */
+  forgetKey?: string | null;
 }
 
 /** What Desk's last look there found, besides its system. */
@@ -52,6 +55,8 @@ export interface Details {
   service: boolean;
   systemd: boolean;
   user: string | null;
+  /** The line that turns linger on there, made (and quoted) natively. */
+  lingerLine?: string | null;
 }
 
 /** The host key Desk knows a machine by. */
@@ -84,6 +89,8 @@ export interface Machine {
   reach?: Reach | null;
   details?: Details | null;
   hostKey?: HostKeyInfo | null;
+  /** The key it shows now, when that isn't the one Desk knows. */
+  shownKey?: HostKeyInfo | null;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -122,6 +129,7 @@ const readMore = (o: Record<string, unknown>): Partial<Machine> => {
   const reach = obj(o.reach);
   const details = obj(o.details);
   const key = obj(o.hostKey);
+  const shown = obj(o.shownKey);
   const more: Partial<Machine> = {
     reason: str(o.reason),
     said: str(o.said),
@@ -130,7 +138,7 @@ const readMore = (o: Record<string, unknown>): Partial<Machine> => {
     nextTry: num(o.nextTry),
     connectedSince: num(o.connectedSince),
     reach: reach
-      ? { user: str(reach.user), hostname: str(reach.hostname), port: str(reach.port), via: str(reach.via), entry: str(reach.entry), file: str(reach.file) }
+      ? { user: str(reach.user), hostname: str(reach.hostname), port: str(reach.port), via: str(reach.via), entry: str(reach.entry), file: str(reach.file), forgetKey: str(reach.forgetKey) }
       : null,
     details: details
       ? {
@@ -139,9 +147,11 @@ const readMore = (o: Record<string, unknown>): Partial<Machine> => {
           service: details.service === true,
           systemd: details.systemd === true,
           user: str(details.user),
+          lingerLine: str(details.lingerLine),
         }
       : null,
     hostKey: key && str(key.fingerprint) ? { kind: str(key.kind) ?? "", fingerprint: str(key.fingerprint)!, trustedAt: num(key.trustedAt) } : null,
+    shownKey: shown && str(shown.fingerprint) ? { kind: str(shown.kind) ?? "", fingerprint: str(shown.fingerprint)!, trustedAt: null } : null,
   };
   // Only what it said: a machine listed without them reads as before.
   return Object.fromEntries(Object.entries(more).filter(([, v]) => v !== null)) as Partial<Machine>;
