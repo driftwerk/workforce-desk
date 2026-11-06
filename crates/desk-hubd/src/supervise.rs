@@ -797,30 +797,70 @@ async fn run_helper(
     // update replaces changes under it, and launchd, systemd or Desk Helper
     // on Windows starts the new one.
     let exe = std::env::current_exe()?;
+    let machine = mode == config::Mode::Machine;
     let mut programs = vec![exe.clone(), workforce.clone()];
-    programs.extend(store.clone());
+    // A machine runs no memory store (below): an update of it is none of
+    // its business.
+    if !machine {
+        programs.extend(store.clone());
+    }
     let install = Install::of(&exe, &process_env, &paths);
     let updated = replaced(install.watched(&programs), Duration::from_secs(10));
     tokio::pin!(updated);
+    // A machine's folder says so, so what is asked over SSH later
+    // (`connection --json`, `--remove-everything`) finds its secrets where
+    // this helper keeps them: Desk's private file.
+    if machine && !paths.machine_marker().exists() {
+        desk_core::write_private(&paths.machine_marker(), "")?;
+    }
+    // A machine's hub serves no agents, so nothing there remembers: it runs
+    // no memory store and fetches no model, and the hub keeps its (unused)
+    // memories in its SQLite file. What an earlier version kept for the
+    // store there is removed; the store itself was stopped with the
+    // leftovers above.
+    if machine && paths.machine_marker().exists() {
+        match config::remove_machine_memory(&paths) {
+            Ok(true) => tracing::info!(
+                "running as a machine: its memory store's data and model are removed"
+            ),
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "running as a machine: its memory store's data could not be removed; tried again on the next start")
+            }
+        }
+    }
     // Once memories have moved into the store the hub always opens them
-    // there: SQLite no longer holds them.
-    let mut memories = if moving::moved(&paths).is_some() {
+    // there: SQLite no longer holds them. Never on a machine.
+    let mut memories = if !machine && moving::moved(&paths).is_some() {
         config::Memories::Store
     } else {
         config::Memories::Sqlite
     };
-    // A machine's folder says so, so what is asked over SSH later
-    // (`connection --json`, `--remove-everything`) finds its secrets where
-    // this helper keeps them: Desk's private file.
-    if mode == config::Mode::Machine && !paths.machine_marker().exists() {
-        desk_core::write_private(&paths.machine_marker(), "")?;
-    }
     let keys = Secrets::for_host(&paths, &Host::running_here(&process_env))?;
     let key_store = keys.store();
     write_config(&paths, &ports, memories, key_store, mode)?;
-    let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
-    config::ensure_rich(&desk_agent)?;
-    config::ensure_oversight(&desk_agent)?;
+    // This computer's Desk agent renders every rich block and oversees the
+    // crew. A machine's hub serves no agents: the one an earlier version
+    // made there is removed before the hub starts.
+    if mode == config::Mode::Desktop {
+        let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
+        config::ensure_rich(&desk_agent)?;
+        config::ensure_oversight(&desk_agent)?;
+    } else if paths.machine_marker().exists() {
+        match config::remove_machine_agent(&paths) {
+            Ok(config::Removed::Deleted) => {
+                tracing::info!("running as a machine: its Desk agent is removed")
+            }
+            Ok(config::Removed::MovedAside(to)) => tracing::warn!(
+                kept = %to.display(),
+                "running as a machine: its Desk agent is removed; what it held is kept aside"
+            ),
+            Ok(config::Removed::Nothing) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "running as a machine: its Desk agent could not be removed; tried again on the next start")
+            }
+        }
+    }
     let login = desk_core::shell::login_env();
     let mut env = hub_env(&login);
     if mode == config::Mode::Machine {
@@ -838,6 +878,7 @@ async fn run_helper(
     .await?;
 
     let node = match &store {
+        _ if machine => None,
         Some(binary) => Some(memory::Node::supervise(
             binary.clone(),
             paths.clone(),

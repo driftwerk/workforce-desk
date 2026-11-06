@@ -35,6 +35,12 @@ impl Command {
             _ if has("--stop") => Command::Stop,
             _ if has("--remove-everything") => Command::RemoveEverything,
             _ if has("--check") => Command::Check,
+            // A machine is a Linux box Desk on another computer drives over
+            // SSH: anywhere else `--machine` would strip a person's own
+            // computer of its Desk agent and memories.
+            _ if has(desk_core::backend_install::MACHINE_FLAG) && !cfg!(target_os = "linux") => {
+                eyre::bail!("--machine is only for a Linux machine Desk drives over SSH")
+            }
             _ => Command::Run {
                 machine: has(desk_core::backend_install::MACHINE_FLAG),
             },
@@ -206,10 +212,13 @@ mod tests {
             Command::parse(&args(&["--workforce", "/x/workforce"])).unwrap(),
             desktop
         );
-        assert_eq!(
-            Command::parse(&args(&["--machine"])).unwrap(),
-            Command::Run { machine: true }
-        );
+        let machine = Command::parse(&args(&["--machine"]));
+        if cfg!(target_os = "linux") {
+            assert_eq!(machine.unwrap(), Command::Run { machine: true });
+        } else {
+            let refused = machine.unwrap_err().to_string();
+            assert!(refused.contains("only for a Linux machine"), "{refused}");
+        }
         assert_eq!(Command::parse(&args(&["--stop"])).unwrap(), Command::Stop);
         assert_eq!(
             Command::parse(&args(&["connection", "--json"])).unwrap(),

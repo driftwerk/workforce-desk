@@ -103,15 +103,29 @@ export const refreshLocalSoon = (): void => {
   soon = setTimeout(() => void refreshLocal(), SUMMARY_DEBOUNCE_MS);
 };
 
+/** Drops every DM count of hub `hubId`'s, and its cached ones. */
+function forgetDms(hubId: string): void {
+  const prefix = `${hubId}/`;
+  useUnread.setState((s) => {
+    const dms = Object.fromEntries(Object.entries(s.dms).filter(([key]) => !key.startsWith(prefix)));
+    deskState.set(cacheKey(hubId), { ...cached(hubId), at: Date.now(), dms: {} } satisfies Cached);
+    return { dms };
+  });
+}
+
 /** A listing of `hub`'s conversations says which DMs have something unread
  *  (one with nothing unread isn't listed, or says zero) and how far each
  *  was read. A hub that keeps no read points (it doesn't say `desk.reads`)
  *  says nothing. */
 export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
-  // On a machine's engine only its boss's DM counts: it is the one agent of
-  // the machine's that Desk shows (see the roster).
-  const shown = (agent: string) => !hub.machine || useChat.getState().roster.some((a) => a.hubId === hub.id && a.id === agent);
-  const dmRows = rows.filter((r) => r.channel === DESK_DM && shown(r.agent_id));
+  // A machine's hub serves no agents and Desk lists none of a machine's
+  // (see the roster): no DM there counts, and none an older one's boss left
+  // counts or is restored from the cache again.
+  if (hub.machine) {
+    forgetDms(hub.id);
+    return;
+  }
+  const dmRows = rows.filter((r) => r.channel === DESK_DM);
   const keeps = useChat.getState().hubFeatures[hub.id]?.has(FEATURE_READS) || dmRows.some((r) => r.unread !== undefined || r.read !== undefined);
   if (!keeps) return;
   const at = Date.now();
@@ -274,6 +288,8 @@ function watchNeedsSeen(): () => void {
 
 /** DM counts kept from before, for a hub not heard from yet. */
 export function cachedDms(hub: HubAccount): void {
+  // A machine's hub has no DMs (see `dmsFrom`): none is shown from its cache.
+  if (hub.machine) return;
   const kept = cached(hub.id);
   if (!kept?.dms || hub.id in useUnread.getState().dmsAt) return;
   useUnread.setState((s) => ({ dms: { ...s.dms, ...kept.dms }, dmsAt: { ...s.dmsAt, [hub.id]: kept.at } }));

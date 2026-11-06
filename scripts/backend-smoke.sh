@@ -13,13 +13,21 @@
 #   - a terminal opens in a folder and runs a shell, and closes;
 #   - --stop stops the hub and Postgres but leaves the holder (its
 #     terminals outlive the helper);
-#   - --remove-everything ends the holder and deletes the folder.
+#   - --remove-everything ends the holder and deletes the folder;
+#   - this computer's hub has its Desk agent, the overseer.
 #
 # With --machine it runs the backend as a machine runs it (a Linux box Desk
 # drives over SSH): installed as a version under DESK_HOME/bin with
 # `current` pointing at it, started as `bin/current/desk-helper --machine`
 # with its owner named in DESK_PERSON_NAME and DESK_PERSON_EMAIL, and a
 # stand-in `claude` first on PATH. It also checks that:
+#   - its hub serves no agents: the Desk agent an earlier version left is
+#     removed, none is listed, and none oversees its sessions;
+#   - it runs no memory store and fetches no model, and what an earlier
+#     version kept for the store is removed;
+#   - on its next start the hub forgets the chat sessions and Floor rows
+#     the earlier Desk agent left in Postgres, never another agent's or
+#     Desk's own sessions, and lets go every session that boss ran;
 #   - connection --json says the version installed, and the owner is the
 #     person named;
 #   - the hub resumes sessions by itself (restore = "auto");
@@ -56,6 +64,13 @@ start=("$helper")
 if [ -n "$machine" ]; then
   cp -R "$bin/claude-plugin" "$DESK_HOME/bin/$version/claude-plugin"
   start=("$helper" --machine)
+  # The Desk agent an earlier version made on a machine, as an upgrade
+  # finds it.
+  mkdir -p "$DESK_HOME/hub/data/agents/desk/memory"
+  printf '[oversight]\nenabled = true\nlevel = "watch"\n' >"$DESK_HOME/hub/data/agents/desk/config.toml"
+  # And what it kept for the memory store.
+  mkdir -p "$DESK_HOME/hub/memory/models/bge" "$DESK_HOME/hub/memory/store"
+  echo '{"state":"ready"}' >"$DESK_HOME/hub/memory/model.json"
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
   # A stand-in for Claude Code: says a version when asked, and otherwise
   # logs how it was started and with which plugins, then waits as a session.
@@ -124,7 +139,12 @@ say "the hub settles on its memories"
 # The memory store's model arrives in the background, and once it does the
 # hub restarts on the store: waited for here, so nothing below races that
 # restart. A model that can't be fetched in time leaves the hub on SQLite.
-if until_ok 180 jq -e '.state == "ready"' "$DESK_HOME/hub/memory/model.json"; then
+# A machine runs no store, so there is nothing to wait for.
+if [ -n "$machine" ]; then
+  [ ! -e "$DESK_HOME/hub/memory" ] || fail "a machine kept memory store data: $(ls -R "$DESK_HOME/hub/memory")"
+  ! pgrep -f "$DESK_HOME/bin/.*/desk-memory" >/dev/null || fail "a machine runs the memory store"
+  ! grep -q '^\[vellev\]' "$DESK_HOME/hub/workforce.toml" || fail "a machine's hub is given a memory store"
+elif until_ok 180 jq -e '.state == "ready"' "$DESK_HOME/hub/memory/model.json"; then
   until_ok 120 test -s "$DESK_HOME/hub/memory/moved.json" || fail "memories never moved into the memory store"
   until_ok 60 api "$device" /api/me || fail "the hub didn't come back on the memory store"
 fi
@@ -144,6 +164,18 @@ gone() { ! kill -0 "$shell_pid" 2>/dev/null; }
 until_ok 20 gone || fail "the terminal's shell kept running after it closed"
 
 if [ -n "$machine" ]; then
+  say "a machine's hub serves no agents, and the Desk agent left from before is removed"
+  [ ! -e "$DESK_HOME/hub/data/agents/desk" ] || fail "the Desk agent's folder is still there"
+  grep -qx 'agents = false' "$DESK_HOME/hub/workforce.toml" || fail "workforce.toml doesn't say agents = false"
+  ! grep -q '^\[\[agents\]\]' "$DESK_HOME/hub/workforce.toml" || fail "workforce.toml names an agent"
+  agents=$(api "$admin" /api/agents)
+  [ "$(jq '.agents | length' <<<"$agents")" = 0 ] || fail "the hub lists agents: $agents"
+  manager=$(api "$admin" /api/desk/manager)
+  [ "$(jq -r '.agentId' <<<"$manager")" = null ] || fail "a machine's sessions have an overseer: $manager"
+  added=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $admin" -X POST \
+    -H 'Content-Type: application/json' -d '{"id":"scout"}' "$gateway/api/agents")
+  [ "$added" = 409 ] || fail "adding an agent answered $added, not 409"
+
   say "a machine says its version, and its owner is the person named"
   [ "$(jq -r .version <<<"$conn")" = "$version" ] ||
     fail "connection --json says version $(jq -r .version <<<"$conn")"
@@ -169,6 +201,36 @@ if [ -n "$machine" ]; then
   started() { grep -q -- "--session-id $sid plugins=.*$plugin" "$sessions"; }
   until_ok 30 started || fail "the session didn't start with Desk's plugin: $(cat "$sessions" 2>/dev/null)"
 
+  say "an earlier agent's chat sessions are planted in Postgres"
+  psql=$(ls "$DESK_HOME"/hub/postgres-install/*/bin/psql | head -n 1)
+  pgpw=$(sed -n 's/^hub-postgres-password = "\(.*\)"$/\1/p' "$DESK_HOME/secrets.toml")
+  pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
+  sql() { PGPASSWORD="$pgpw" "$psql" -h 127.0.0.1 -p "$pgport" -U postgres -d workforce -tAX -c "$1"; }
+  old=$(cat /proc/sys/kernel/random/uuid)
+  sql "INSERT INTO sessions.sessions (id, agent_id, channel, owner, kind, created_at, updated_at)
+       VALUES ('$old', 'desk', 'desk', 'smoke', 'main', now(), now())" >/dev/null ||
+    fail "couldn't plant an old agent's session"
+  sql "INSERT INTO sessions.session_archive (session_id, message_id, role, content, ts)
+       VALUES ('$old', 'm1', 'user', 'what is running?', now())" >/dev/null
+  sql "INSERT INTO sessions.desk_reads (owner, agent_id, channel, at, updated_at)
+       VALUES ('smoke', 'desk', 'desk', now(), now())" >/dev/null
+  [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
+    fail "Desk doesn't keep its session $sid in its own table"
+  other=$(cat /proc/sys/kernel/random/uuid)
+  sql "INSERT INTO sessions.sessions (id, agent_id, channel, owner, kind, created_at, updated_at)
+       VALUES ('$other', 'scout', 'desk', 'smoke', 'main', now(), now())" >/dev/null
+  sql "INSERT INTO floor.gists (owner, subject, now_text, now_at, turn, by_model)
+       VALUES (NULL, 'agent:desk', 'watching', now(), gen_random_uuid(), false)" >/dev/null ||
+    fail "couldn't plant the earlier agent's Floor gist"
+  # The first start forgot the Desk agent once (nothing of it was there) and
+  # noted so; as an upgrade from an earlier version finds things, no note.
+  [ -e "$DESK_HOME/hub/data/host/forgotten-agent-desk" ] || fail "the hub didn't note it forgot the Desk agent"
+  rm "$DESK_HOME/hub/data/host/forgotten-agent-desk"
+  # The earlier boss ran Desk's session.
+  sql "INSERT INTO desk.charges (session, boss, how, since, updated_at)
+       VALUES ('$sid', 'desk', 'handed', now(), now())" >/dev/null ||
+    fail "couldn't plant the earlier boss's charge"
+
   say "after the box restarts, the session is resumed"
   holder=$(cat "$DESK_HOME/hub/run/pty.pid")
   "$helper" --stop
@@ -184,6 +246,34 @@ if [ -n "$machine" ]; then
   until_ok 120 paired || fail "Desk Helper didn't pair again"
   conn=$("$helper" connection --json)
   gateway=$(jq -r .gateway_url <<<"$conn")
+
+  say "the hub forgot the earlier agent's chat sessions, and kept Desk's own"
+  pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
+  forgot() { [ "$(sql "SELECT count(*) FROM sessions.sessions WHERE agent_id = 'desk'")" = 0 ]; }
+  until_ok 60 forgot || fail "the earlier agent's sessions are still there"
+  [ "$(sql "SELECT count(*) FROM sessions.session_archive WHERE session_id = '$old'")" = 0 ] ||
+    fail "the earlier agent's archive is still there"
+  [ "$(sql "SELECT count(*) FROM sessions.desk_reads WHERE agent_id = 'desk'")" = 0 ] ||
+    fail "the earlier agent's read points are still there"
+  [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
+    fail "Desk's own session record went with them"
+  [ "$(sql "SELECT count(*) FROM sessions.sessions WHERE id = '$other'")" = 1 ] ||
+    fail "another agent's session went with them"
+  [ "$(sql "SELECT count(*) FROM floor.gists WHERE subject = 'agent:desk'")" = 0 ] ||
+    fail "the earlier agent's Floor gist is still there"
+  released() { [ "$(sql "SELECT count(*) FROM desk.charges WHERE session = '$sid' AND released_at IS NOT NULL")" = 1 ]; }
+  until_ok 60 released || fail "the earlier boss still runs session $sid"
+  [ -e "$DESK_HOME/hub/data/host/forgotten-agent-desk" ] || fail "the hub didn't note it forgot the Desk agent again"
+  [ ! -e "$DESK_HOME/hub/memory" ] || fail "the restart made memory store data"
+fi
+
+if [ -z "$machine" ]; then
+  say "this computer's hub has its Desk agent, the overseer"
+  agents=$(api "$admin" /api/agents)
+  jq -e 'any(.agents[]; .id == "desk")' >/dev/null <<<"$agents" || fail "the Desk agent isn't listed: $agents"
+  [ -d "$DESK_HOME/hub/data/agents/desk" ] || fail "the Desk agent has no folder"
+  manager=$(api "$admin" /api/desk/manager)
+  [ "$(jq -r '.agentId' <<<"$manager")" = desk ] || fail "the Desk agent doesn't oversee: $manager"
 fi
 
 say "--stop stops the hub and Postgres, and leaves the holder"

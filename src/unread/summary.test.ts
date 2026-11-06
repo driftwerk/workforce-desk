@@ -34,12 +34,25 @@ beforeEach(() => {
 });
 
 describe("DM counts", () => {
-  it("on a machine's engine count only its boss's DM, and the machine is no workspace", async () => {
+  it("on a machine's engine count none, as it has no agents, and the machine is no workspace", async () => {
     const { workspaces } = await import("../chat/types");
     const devbox = { id: "devbox-hub", label: "devbox", url: "", local: false, machine: "devbox", revision: "t" };
-    useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [{ hubId: "devbox-hub", id: "desk", name: "Desk", model: null, provider: null, isDefault: false }] });
+    useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [] });
+    // What an older machine's boss left cached is never shown, not even at
+    // launch before the hub is read.
+    state.set("unread.cache.devbox-hub", { at: 1, dms: { "devbox-hub/desk": { count: 2 } } });
+    const { cachedDms: fromCache } = await import("./summary");
+    fromCache(devbox);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["local/scout"]);
+    // What an older machine's boss left unread, counted and cached.
+    useUnread.setState((s) => ({ dms: { ...s.dms, "devbox-hub/desk": { count: 2, for_you: 2, first: null, last: null, capped: false } } }));
+    state.set("unread.cache.devbox-hub", { at: 1, dms: { "devbox-hub/desk": { count: 2 } } });
     dmsFrom(devbox, [row("desk", 1), row("scout", 3)]);
-    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["devbox-hub/desk", "local/scout"]);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["local/scout"]);
+    expect(state.get("unread.cache.devbox-hub")).toMatchObject({ dms: {} });
+    const { cachedDms } = await import("./summary");
+    cachedDms(devbox);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["local/scout"]);
     const hubs = useChat.getState().hubs;
     expect(workspaces(hubs).map((h) => h.id)).toEqual(["local", "dw"]);
     expect(workspaces(hubs)).toBe(workspaces(hubs));
