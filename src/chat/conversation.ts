@@ -51,6 +51,8 @@ export interface Turn {
   acked: boolean;
   /** When its last frame came. */
   heardAt?: number;
+  /** The client id of the message it was asked with. */
+  clientId?: string;
 }
 
 /** A tool call waiting for you to allow or deny it. */
@@ -122,6 +124,9 @@ const waitOf = (line: string): number | undefined => {
   return s === undefined ? undefined : Number(s);
 };
 
+/** `gpt-x is slow to answer, trying again` → `gpt-x`. */
+const slowModel = (line: string): string => line.split(" is slow")[0]?.trim() || "the model";
+
 /** `gpt-x produced nothing for 45s — switching model` → `gpt-x`. */
 const silentModel = (line: string): string => line.split(" produced nothing")[0]?.trim() || "the model";
 
@@ -143,6 +148,8 @@ const doing = (msg: ServerMessage): Pick<Working, "phase" | "step" | "wait"> | n
       return { phase: "waiting", step: "Retrying (rate limited)", wait: waitOf(msg.content ?? "") };
     case "slow_model_failover":
       return { phase: "waiting", step: `Switching model (${silentModel(msg.content ?? "")} was silent)` };
+    case "slow_model_retry":
+      return { phase: "waiting", step: `Trying again (${slowModel(msg.content ?? "")} is slow to answer)` };
     default:
       return null;
   }
@@ -237,7 +244,7 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
   const folded = fold(s, msg, now);
   const next = {
     ...folded,
-    messages: msg.turn_ref ? ofTurn(folded.messages, msg.turn_ref, msg) : folded.messages,
+    messages: msg.turn_ref ? ofTurn(asked(s.messages, folded.messages, s.turns[msg.turn_ref]?.clientId), msg.turn_ref, msg) : folded.messages,
     turns: msg.turn_ref ? foldTurn(folded.turns, msg.turn_ref, msg, now) : folded.turns,
     prompts: foldPrompts(folded.prompts, msg),
   };
@@ -245,6 +252,16 @@ export const reduce = (s: ConversationState, msg: ServerMessage): ConversationSt
   // prompt is only kept, unless the hub sends it on live.
   const unprompted = !next.working || msg.type === USER_MESSAGE ? false : s.working ? s.unprompted : true;
   return next.unprompted === unprompted ? next : { ...next, unprompted };
+};
+
+/** `after`'s messages with the ones a turn's frame made (an answer, a
+ *  tool's bubble, an error) said to be in reply to the message the turn was
+ *  asked with, `clientId`: what the hub keeps of the turn names it, and
+ *  they give way to that. */
+const asked = (before: ChatMessage[], after: ChatMessage[], clientId: string | undefined): ChatMessage[] => {
+  if (!clientId || after === before) return after;
+  const had = new Set(before.map((m) => m.id));
+  return after.map((m) => (m.role !== "user" && !m.replyTo && !had.has(m.id) ? { ...m, replyTo: clientId } : m));
 };
 
 /** The frames that write into an answer. */
@@ -396,6 +413,7 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
     case "compact_end":
     case "rate_limited":
     case "slow_model_failover":
+    case "slow_model_retry":
       return { ...s, working: s.working && step(s, msg, now) };
     case "stream_start": {
       const last = s.messages.at(-1);
@@ -707,6 +725,9 @@ export class Conversation {
     if (!this.ws || this.ws.readyState !== OPEN || !features || (!content.trim() && !files.length)) return false;
     const structured = !!ask.turn && features.has(FEATURES.place);
     const turnRef = structured ? (ask.queued ?? crypto.randomUUID()) : null;
+    // The id the hub keeps the message under, Send now included: a room's
+    // turn names its room message, and anything else gets one of its own.
+    const clientId = structured ? (ask.turn?.message ?? crypto.randomUUID()) : undefined;
     const queued = !!ask.queued && structured && features.has(FEATURES.queue);
     this.ws.send(
       JSON.stringify({
@@ -715,7 +736,7 @@ export class Conversation {
         session_id: this.state.sessionId,
         channel: this.channel,
         agent_id: this.agentId,
-        ...(structured ? { desk: ask.turn, turn_ref: turnRef, answers_approvals: true } : {}),
+        ...(structured ? { desk: { ...ask.turn, message: clientId }, turn_ref: turnRef, answers_approvals: true } : {}),
         ...(queued ? { mode: "queue" } : {}),
         ...(files.length
           ? { attachments: files.map((f) => ({ filename: f.filename, mime_type: f.media_type, artifact_id: f.artifact_id })) }
@@ -723,13 +744,17 @@ export class Conversation {
       }),
     );
     const now = Date.now();
-    const said = { ...message("user", content), ...(files.length ? { attachments: files } : {}) };
+    const said = {
+      ...message("user", content),
+      ...(files.length ? { attachments: files } : {}),
+      ...(clientId ? { clientId } : {}),
+    };
     if (ask.queued) this.waiting.set(ask.queued, { ref: turnRef, shown: said.id });
     this.set({
       ...this.state,
       messages: [...this.state.messages, said],
       working: { since: now, at: now, phase: "sending", step: "Sending" },
-      turns: turnRef ? { ...this.state.turns, [turnRef]: newTurn(turnRef, now) } : this.state.turns,
+      turns: turnRef ? { ...this.state.turns, [turnRef]: { ...newTurn(turnRef, now), ...(clientId ? { clientId } : {}) } } : this.state.turns,
     });
     return { turnRef };
   }

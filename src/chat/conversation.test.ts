@@ -227,6 +227,8 @@ describe("a Desk connection's turns", () => {
     const failover = run([declared, stamp("typing"), stamp("slow_model_failover", { content: "gpt-x produced nothing for 45s — switching model" })]);
     expect(failover.turns.t1!.working!.step).toBe("Switching model (gpt-x was silent)");
     expect(failover.working!.step).toBe("Switching model (gpt-x was silent)");
+    const retry = run([declared, stamp("typing"), stamp("slow_model_retry", { content: "gpt-6.1-sol is slow to answer, trying again" })]);
+    expect(retry.working!.step).toBe("Trying again (gpt-6.1-sol is slow to answer)");
   });
 
   it("picks a turn up again from its snapshot after a reconnect, without repeating what streamed", () => {
@@ -314,6 +316,27 @@ describe("sending on a Desk connection", () => {
       attachments: [{ filename: "q3.pdf", mime_type: "application/pdf", artifact_id: "art_1" }],
     });
     expect(c.current.messages.at(-1)).toMatchObject({ role: "user", attachments: [file] });
+  });
+
+  it("sends every message under an id of its own, Send now included, and keeps a room's", async () => {
+    const { c, socket } = await open(declared);
+    c.send("what was it called?", { turn });
+    c.send("we talked about it", { turn });
+    const [first, now] = socket.chats as { desk: { message: string } }[];
+    expect(first!.desk.message).toMatch(/^[0-9a-f-]{36}$/);
+    expect(now!.desk.message).toMatch(/^[0-9a-f-]{36}$/);
+    expect(now!.desk.message).not.toBe(first!.desk.message);
+    const said = c.current.messages.filter((m) => m.role === "user");
+    expect(said.map((m) => m.clientId)).toEqual([first!.desk.message, now!.desk.message]);
+    const ref = Object.values(c.current.turns)[0]!;
+    expect(ref.clientId).toBe(first!.desk.message);
+    // What a turn says is in reply to the message it was asked with.
+    socket.receive(stamp("error", { turn_ref: ref.ref, content: "Agent error: boom" }));
+    expect(c.current.messages.at(-1)).toMatchObject({ status: "error", replyTo: first!.desk.message });
+
+    const room = { ...turn, place: { kind: "room" as const, room: "r1", name: "Atlas" }, message: "6f1c0000-0000-4000-8000-000000000001" };
+    c.send("in the room", { turn: room });
+    expect((socket.chats.at(-1) as { desk: { message: string } }).desk.message).toBe(room.message);
   });
 
   it("sends an older hub today's frame, in the words it understands", async () => {
