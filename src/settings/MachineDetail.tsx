@@ -4,7 +4,6 @@ import { AddMachine } from "../machines/AddMachine";
 import { useDesk } from "../hub/store";
 import { sessionsOn, type Machine } from "../machines/engines";
 import type { LogLine, MachineNative } from "../machines/native";
-import { openTerminalOn } from "../machines/watch";
 import { clock, clockSeconds, dotOf, forgetKeyLine, freeText, inTime, keyChanged, offlineWhy, revealWords, sessionsCount, thisComputer, thisComputerLower, whenText } from "../machines/words";
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
@@ -279,6 +278,7 @@ export function MachineDetail({
   at,
   onBack,
   onNewSession,
+  onTerminal,
 }: {
   machine: Machine;
   version: string | null;
@@ -286,6 +286,7 @@ export function MachineDetail({
   at?: "engines" | "log";
   onBack: () => void;
   onNewSession: () => void;
+  onTerminal: () => void;
 }) {
   const platform = useHost((h) => h.platform);
   const here = thisComputerLower(platform);
@@ -315,7 +316,7 @@ export function MachineDetail({
         <span className="chip">{machine.target}</span>
         {r?.via && <span className="chip">via {r.via}</span>}
         <span className="machine-head-actions">
-          <button type="button" className="btn" disabled={!ready} onClick={() => openTerminalOn(machine.id)}>
+          <button type="button" className="btn" disabled={!ready} onClick={onTerminal}>
             Open a terminal…
           </button>
           <button type="button" className="btn btn-signal" disabled={!ready} onClick={onNewSession}>

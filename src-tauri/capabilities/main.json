@@ -101,6 +101,7 @@
     "allow-desk-state-flush",
     "allow-desk-ready",
     "allow-claude-plugin-dir",
+    "allow-machine-home",
     "allow-backend-home",
     "allow-pick-folder",
     "allow-programs-under",

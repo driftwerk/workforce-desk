@@ -18,7 +18,7 @@ import { HubError, type DeskHub } from "../hub/client";
 import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
 import { engineListeners, hubOf, useDesk, useHubOf, type EngineEvent } from "../hub/store";
 import type { Session, TerminalInfo } from "../hub/types";
-import { backendHome, claudePluginDir, inApp, machinePluginDir, programsUnder } from "../platform";
+import { backendHome, claudePluginDir, inApp, machineHome as sshHome, machinePluginDir, programsUnder } from "../platform";
 import { baseName } from "../ui/paths";
 import { sessionKeyIn, terminalKeyIn, type Pane, type PaneContent } from "./engine";
 import { newId } from "./model";
@@ -132,6 +132,9 @@ export const pluginEnv = async (machine: MachineId = LOCAL): Promise<Record<stri
  *  asked for no folder, lists the home folder, and says which (`path`;
  *  `home` where a hub names it too). Tests set their own. */
 let machineHome = async (machine: MachineId): Promise<string | null> => {
+  // Over SSH first: it answers whether or not the machine's hub does.
+  const said = await sshHome(machine).catch(() => null);
+  if (said) return said;
   const res = await machineTransport(machine).fetch("GET", "/api/desk/folders");
   if (!res.ok) return null;
   return homeOfListing(await res.json().catch(() => null));

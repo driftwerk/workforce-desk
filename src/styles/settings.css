@@ -1403,3 +1403,68 @@ legend.set-label {
 .sheet-foot .machine-cancel-add {
   margin-right: auto;
 }
+
+/* A folder on a machine (FolderPicker board): home first, then its folders. */
+.folder-picker .field-row .btn {
+  flex: none;
+}
+.folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.folder-list li {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.folder-list li:has(.folder-row.on) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.folder-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  font-size: 12.5px;
+}
+.folder-row.on {
+  color: var(--text);
+  font-weight: 600;
+}
+.folder-row .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-home {
+  color: var(--signal);
+  font-size: 12px;
+}
+.folder-open {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  padding: 0 8px;
+  min-height: 24px;
+}
+.folder-open:hover {
+  color: var(--text);
+}
+.folder-meant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

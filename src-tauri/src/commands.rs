@@ -71,6 +71,7 @@ pub const COMMANDS: &[&str] = &[
     "desk_state_flush",
     "desk_ready",
     "claude_plugin_dir",
+    "machine_home",
     "backend_home",
     "pick_folder",
     "programs_under",

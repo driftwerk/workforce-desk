@@ -9,9 +9,11 @@ import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo } from "../hub/types";
 import { keyOf, LOCAL, useHubOf, useMachines, type MachineId } from "../machines/engines";
 import { native as machineNative, type MachineNative } from "../machines/native";
-import { MachineFolder, RunOn } from "../machines/RunOn";
+import { RunOn } from "../machines/RunOn";
+import { FolderPicker } from "../machines/FolderPicker";
+import { onMachine } from "../machines/folders";
 import { nameOfMachine } from "../machines/words";
-import { pickFolder } from "../platform";
+import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
@@ -114,13 +116,15 @@ export function NewSession({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hub || !cwd) return;
+    if (!hub || (!cwd && !remote)) return;
     setBusy(true);
     try {
+      // On a machine, its own path: `~` (and nothing typed) is its home.
+      const where = remote ? onMachine(cwd || "~", await machineHome(runOn)) : cwd;
       const s = await hub.start({
         engine,
-        cwd,
-        name: name || nameFrom(cwd),
+        cwd: where,
+        name: name || nameFrom(where),
         goal,
         approvals: inDesk ? approvals : undefined,
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
@@ -167,13 +171,7 @@ export function NewSession({
           </p>
         )}
         {remote ? (
-          <MachineFolder
-            machine={runOn}
-            name={where}
-            native={native}
-            value={cwd}
-            onChange={setCwd}
-          />
+          <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always />
         ) : (
           <label className="field">
             <span>Folder</span>
@@ -273,8 +271,8 @@ export function NewSession({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || !cwd || !hub}>
-            {remote ? `Start on ${where}` : "Start"}
+          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub}>
+            {remote ? `Start in ${cwd.trim().replace(/\/+$/, "") || "~"}` : "Start"}
           </button>
         </footer>
       </form>

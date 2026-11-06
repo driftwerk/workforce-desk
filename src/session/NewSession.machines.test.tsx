@@ -4,7 +4,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
 import { useMachines } from "../machines/engines";
-import { FOLDERS_DEBOUNCE_MS } from "../machines/RunOn";
+import { FOLDERS_DEBOUNCE_MS } from "../machines/FolderPicker";
 import { fakeNative, foldersTransport, machine, noEngines, withEngine } from "../machines/testing";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import { EMPTY_LAYOUT } from "../groups/model";
@@ -17,6 +17,7 @@ vi.mock("../platform", () => ({
   machinesList: vi.fn(async () => []),
   onMachinesChanged: vi.fn(async () => () => {}),
   machinePluginDir: vi.fn(async () => null),
+  machineHome: vi.fn(async () => "/home/dev"),
   inApp: false,
   pickFolder: vi.fn(async () => null),
   claudePluginDir: vi.fn(async () => "/Applications/Desk.app/Contents/Resources/claude-plugin"),
@@ -96,16 +97,18 @@ it("starts a session on a machine: its folder typed with suggestions from there,
   expect(fake.transport).toHaveBeenCalledWith("devbox");
   expect(seen.at(-1)).toBe("/api/desk/folders?path=%7E%2Fsrc");
   const list = screen.getByRole("list", { name: "Folders on devbox" });
-  expect(list.textContent).toBe("~/src/workforce git");
-  fireEvent.click(within(list).getAllByRole("button")[0]!);
+  // Home first, always; then what's there that starts as typed.
+  expect(within(list).getAllByRole("listitem").map((l) => l.textContent)).toEqual(["⌂~· home folder, /home/dev, always there›", "~/src/workforcegit›"]);
+  fireEvent.click(within(list).getByRole("button", { name: /^~\/src\/workforce/ }));
   expect((folder as HTMLInputElement).value).toBe("~/src/workforce");
 
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start on devbox" })));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start in ~/src/workforce" })));
   expect(localStart).not.toHaveBeenCalled();
+  // The machine's own path: its home in place of ~.
   expect(machineStart).toHaveBeenCalledWith(
     expect.objectContaining({
       engine: "claude",
-      cwd: "~/src/workforce",
+      cwd: "/home/dev/src/workforce",
       name: "workforce",
       env: { CLAUDE_CODE_PLUGIN_DIRS: "/home/dev/.local/share/Desk/bin/current/claude-plugin" },
     }),
@@ -155,7 +158,7 @@ describe("its group", () => {
     fireEvent.click(within(group()).getByRole("radio", { name: "Atlas" }));
     expect(screen.getByText("It shows in Atlas with a devbox tag.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Folder on devbox"), { target: { value: "~/src/atlas" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start on devbox" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start in ~/src/atlas" })));
     expect(useSettings.getState().groups[1]!.items).toEqual(["session:devbox/s-9"]);
   });
 

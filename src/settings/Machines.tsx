@@ -4,8 +4,8 @@ import { useDesk } from "../hub/store";
 import { AddMachine } from "../machines/AddMachine";
 import { LOCAL, sessionsOn, useMachines, type Machine, type MachineId } from "../machines/engines";
 import { native as realNative, type MachineNative } from "../machines/native";
+import { OpenTerminal } from "../machines/OpenTerminal";
 import { useEngineSummary } from "../machines/summary";
-import { openTerminalOn } from "../machines/watch";
 import { dotOf, forgetKeyLine, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower, twinNote } from "../machines/words";
 import { shortPrint } from "./EditReach";
 import { inApp } from "../platform";
@@ -42,12 +42,14 @@ function RowActions({
   claudeIn,
   onOpen,
   onNewSession,
+  onTerminal,
 }: {
   machine: Machine;
   native: MachineNative;
   claudeIn: boolean | null;
   onOpen: (at?: "engines" | "log") => void;
   onNewSession: () => void;
+  onTerminal: () => void;
 }) {
   const [problem, setProblem] = useState<string | null>(null);
   const s = machine.state.kind;
@@ -69,7 +71,7 @@ function RowActions({
       )}
       {s === "ready" && claudeIn !== false && (
         <>
-          <button type="button" className="btn btn-sm" onClick={() => openTerminalOn(machine.id)}>
+          <button type="button" className="btn btn-sm" onClick={onTerminal}>
             Open a terminal…
           </button>
           <button type="button" className="btn btn-sm" onClick={onNewSession}>
@@ -117,12 +119,14 @@ function MachineRow({
   native,
   onOpen,
   onNewSession,
+  onTerminal,
 }: {
   machine: Machine;
   version: string | null;
   native: MachineNative;
   onOpen: (at?: "engines" | "log") => void;
   onNewSession: () => void;
+  onTerminal: () => void;
 }) {
   const count = useDesk((s) => sessionsOn(s.sessions, machine.id).length);
   const all = useMachines((s) => s.machines);
@@ -162,7 +166,7 @@ function MachineRow({
         )}
         {lines.second && <span className="small faint">{lines.second}</span>}
       </span>
-      <RowActions machine={machine} native={native} claudeIn={summary.claudeIn} onOpen={onOpen} onNewSession={onNewSession} />
+      <RowActions machine={machine} native={native} claudeIn={summary.claudeIn} onOpen={onOpen} onNewSession={onNewSession} onTerminal={onTerminal} />
       <button type="button" className="machine-row-open" aria-label={`Open ${machine.name}`} onClick={() => onOpen()}>
         ›
       </button>
@@ -180,12 +184,23 @@ export function Machines({ native = realNative, deskVersion = null }: { native?:
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<{ id: MachineId; at?: "engines" | "log" } | null>(null);
   const [starting, setStarting] = useState<MachineId | null>(null);
+  const [terminal, setTerminal] = useState<Machine | null>(null);
   const shown = open && machines.find((m) => m.id === open.id);
+  const terminalDialog = terminal && <OpenTerminal machine={terminal.id} name={terminal.name} native={native} onClose={() => setTerminal(null)} />;
   if (shown)
     return (
       <>
-        <MachineDetail machine={shown} version={version} native={native} at={open.at} onBack={() => setOpen(null)} onNewSession={() => setStarting(shown.id)} />
+        <MachineDetail
+          machine={shown}
+          version={version}
+          native={native}
+          at={open.at}
+          onBack={() => setOpen(null)}
+          onNewSession={() => setStarting(shown.id)}
+          onTerminal={() => setTerminal(shown)}
+        />
         {starting && <NewSession on={starting} onClose={() => setStarting(null)} />}
+        {terminalDialog}
       </>
     );
   return (
@@ -208,7 +223,15 @@ export function Machines({ native = realNative, deskVersion = null }: { native?:
           </span>
         </li>
         {machines.map((m) => (
-          <MachineRow key={m.id} machine={m} version={version} native={native} onOpen={(at) => setOpen({ id: m.id, at })} onNewSession={() => setStarting(m.id)} />
+          <MachineRow
+            key={m.id}
+            machine={m}
+            version={version}
+            native={native}
+            onOpen={(at) => setOpen({ id: m.id, at })}
+            onNewSession={() => setStarting(m.id)}
+            onTerminal={() => setTerminal(m)}
+          />
         ))}
       </ul>
       {machines.length > 0 && (
@@ -219,6 +242,7 @@ export function Machines({ native = realNative, deskVersion = null }: { native?:
       )}
       {adding && <AddMachine native={native} onClose={() => setAdding(false)} />}
       {starting && <NewSession on={starting} onClose={() => setStarting(null)} />}
+      {terminalDialog}
     </section>
   );
 }

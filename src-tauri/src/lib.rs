@@ -619,6 +619,19 @@ async fn claude_plugin_dir(
     }
 }
 
+/// A machine's home folder, as it says it over SSH (read once): where `~`
+/// is there, whether or not its hub answers.
+#[tauri::command]
+async fn machine_home(
+    machines: State<'_, machines::MachineIo>,
+    machine: String,
+) -> CommandResult<String> {
+    let link = machines.link(&machine)?;
+    tauri::async_runtime::spawn_blocking(move || link.home())
+        .await
+        .map_err(text)?
+}
+
 /// What's running in a terminal whose shell is `pid`, shell first.
 #[tauri::command]
 async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<String>> {
@@ -916,6 +929,7 @@ pub fn run() {
             desk_state_flush,
             desk_ready,
             claude_plugin_dir,
+            machine_home,
             backend_home,
             pick_folder,
             programs_under,

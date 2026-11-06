@@ -519,10 +519,15 @@ export const dragSplitter = (gridId: string, s: Splitter, to: { at: number } | {
  *  none): in the focused pane if it's empty, else the first empty pane,
  *  else beside the focused pane. Its pane opens it on that machine's engine
  *  (terminals.ts `useTerminalPane`). */
-export const newTerminal = (gridId: string, machine: MachineId = LOCAL): void => {
+export const newTerminal = (gridId: string, machine: MachineId = LOCAL, cwd?: string): void => {
   const g = get().grids[gridId];
   if (!g) return;
-  const content: PaneContent = machine === LOCAL ? { kind: "terminal", terminalId: null } : { kind: "terminal", terminalId: null, machine };
+  const content: PaneContent = {
+    kind: "terminal",
+    terminalId: null,
+    ...(machine === LOCAL ? {} : { machine }),
+    ...(cwd ? { cwd } : {}),
+  };
   const shown = reading(laidOut(g.panes));
   const focused = shown.find((p) => p.id === get().focus[gridId]);
   const target = focused && !focused.content ? focused : shown.find((p) => !p.content);
@@ -543,7 +548,7 @@ export const newTerminal = (gridId: string, machine: MachineId = LOCAL): void =>
 
 /** New terminal's shortcut in the main window: a new terminal in the grid the Grids view shows,
  *  or in a new grid when it shows none. */
-export const newTerminalHere = (machine: MachineId = LOCAL): void => newTerminal(shownGrid(get())?.id ?? createGrid(), machine);
+export const newTerminalHere = (machine: MachineId = LOCAL, cwd?: string): void => newTerminal(shownGrid(get())?.id ?? createGrid(), machine, cwd);
 
 /** A terminal pane's hub id, once the hub has opened it (or opened it again). */
 export const setTerminal = (gridId: string, pane: string, terminalId: string, cwd?: string | null): void =>

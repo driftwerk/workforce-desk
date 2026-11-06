@@ -23,6 +23,7 @@ vi.mock("../platform", () => ({
   machinesList: vi.fn(async () => []),
   onMachinesChanged: vi.fn(async () => () => {}),
   machinePluginDir: vi.fn(async () => null),
+  machineHome: vi.fn(async () => "/home/dev"),
   inApp: true,
   openUrl: vi.fn(),
 }));
@@ -281,10 +282,12 @@ it("removes a machine from its page only once asked", async () => {
   expect(fake.remove).toHaveBeenCalledWith("devbox");
 });
 
-it("opens a terminal on a machine in a grid, and shows it", () => {
+it("opens a terminal on a machine in the folder picked there, in a grid, and shows it", async () => {
   useUi.getState().openSettings("machines");
   render(<Machines native={fakeNative().native} />);
   fireEvent.click(within(row("devbox")).getByRole("button", { name: "Open a terminal…" }));
+  expect(screen.getByRole("heading", { name: "Open a terminal on devbox" })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open in ~" })));
   const panes = Object.values(useGrids.getState().grids).flatMap((g) => g.panes);
   expect(panes.some((p) => p.content?.kind === "terminal" && (p.content as { machine?: string }).machine === "devbox")).toBe(true);
   expect(useUi.getState().settings).toBeNull();
