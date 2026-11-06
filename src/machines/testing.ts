@@ -6,7 +6,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DeskTransport } from "../hub/transport";
 import type { Machine } from "./engines";
-import type { MachineNative, Probe, SetupEvent } from "./native";
+import type { MachineNative, Probe, SetupEvent, Shared } from "./native";
 
 export const machine = (m: Partial<Machine> & Pick<Machine, "id">): Machine => ({
   name: m.id,
@@ -55,7 +55,7 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     }),
     remove: vi.fn(async (_id: string) => undefined),
     reconnect: vi.fn(async (_id: string) => undefined),
-    shareSignIn: vi.fn(async (_id: string, _engine: "claude") => undefined),
+    shareAccounts: vi.fn(async (_id: string): Promise<Shared> => ({ cancelled: false, copied: [], already: [], failed: [], autoSwitch: false })),
     signInForward: vi.fn(async (_id: string, _signIn: string) => undefined),
     signInForwardStop: vi.fn(async (_id: string, _signIn: string) => undefined),
     openSignInPage: vi.fn(async (_engine: "claude" | "codex", _url: string) => undefined),

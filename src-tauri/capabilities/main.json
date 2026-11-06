@@ -45,7 +45,7 @@
     "allow-machine-add",
     "allow-machine-reconnect",
     "allow-machine-remove",
-    "allow-machine-share-sign-in",
+    "allow-machine-share-accounts",
     "allow-machine-sign-in-forward",
     "allow-machine-sign-in-forward-stop",
     "allow-machine-open-sign-in-page",

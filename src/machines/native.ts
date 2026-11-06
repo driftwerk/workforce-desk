@@ -60,6 +60,19 @@ export interface SetupEvent {
   line?: string;
 }
 
+/** What copying this computer's accounts to a machine did: names only,
+ *  never a sign-in. */
+export interface Shared {
+  /** The person said no to the native question: nothing was copied. */
+  cancelled: boolean;
+  copied: string[];
+  /** On the machine already, by name: left as they are. */
+  already: string[];
+  failed: { name: string; why: string }[];
+  /** The machine moves sessions to another account at a limit by itself. */
+  autoSwitch: boolean;
+}
+
 /** The native side, as the machines' UI uses it. */
 export interface MachineNative {
   list(): Promise<Machine[]>;
@@ -80,8 +93,11 @@ export interface MachineNative {
   remove(id: MachineId): Promise<void>;
   /** "Try again": connects now rather than at the next back-off. */
   reconnect(id: MachineId): Promise<void>;
-  /** Signs the machine's Claude Code in with this computer's account. */
-  shareSignIn(id: MachineId, engine: "claude"): Promise<void>;
+  /** "Use this computer's accounts": copies this computer's Claude accounts the
+   *  machine hasn't got there, after the native question naming them. The
+   *  sign-ins go from this computer's hub to the machine's over SSH, in the
+   *  native side alone; the page never sees one. */
+  shareAccounts(id: MachineId): Promise<Shared>;
   /** For machine `id`'s Claude sign-in `signIn`: listens on the one port
    *  its page comes back to, on this computer's loopback, carrying it to the
    *  machine's, for as long as the sign-in runs, and opens that page. The
@@ -109,7 +125,7 @@ export const native: MachineNative = {
   setup: (f) => subscribe(listen<SetupEvent>("machine-setup", (e) => f(e.payload))),
   remove: (id) => invoke<void>("machine_remove", { id }),
   reconnect: (id) => invoke<void>("machine_reconnect", { id }),
-  shareSignIn: (id, engine) => invoke<void>("machine_share_sign_in", { id, engine }),
+  shareAccounts: (id) => invoke<Shared>("machine_share_accounts", { id }),
   signInForward: (id, signIn) => invoke<void>("machine_sign_in_forward", { machine: id, signIn }),
   signInForwardStop: (id, signIn) => invoke<void>("machine_sign_in_forward_stop", { machine: id, signIn }),
   openSignInPage: (engine, url) => invoke<void>("machine_open_sign_in_page", { engine, url }),

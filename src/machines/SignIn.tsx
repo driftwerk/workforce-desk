@@ -3,9 +3,13 @@ import { HubError, transportCall, type DeskHub } from "../hub/client";
 import type { DeskTransport } from "../hub/transport";
 import type { AccountSignIn, AccountsInfo, EngineInfo, EngineSignIn } from "../hub/types";
 import { plainError } from "../ui/plainError";
-import { useHubOf, type MachineId } from "./engines";
+import { defaultCaps } from "../engines/engines";
+import { hasAccounts } from "../engines/accounts";
+import { Accounts } from "../settings/Accounts";
+import { hubOf, LOCAL, useHubOf, type MachineId } from "./engines";
 import { native as realNative, type MachineNative } from "./native";
 import { openTerminalOn } from "./watch";
+import { useLive } from "../ui/useLive";
 
 /** Codex's sign-in for a computer with no browser of its own, for a hub
  *  too old to run it itself. */
@@ -39,6 +43,7 @@ export const signedInOf = (accounts: AccountsInfo | null, engines: EngineInfo[] 
 export function useMachineSignIns(hub: DeskHub | null) {
   const [said, setSaid] = useState<Record<MachineEngine, SignedIn>>({ claude: null, codex: null });
   const [accounts, setAccounts] = useState<AccountsInfo | null>(null);
+  const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   const reload = useCallback(async () => {
     if (!hub) return;
     const quietly = async <T,>(f: () => Promise<T>): Promise<T | null> => {
@@ -50,6 +55,7 @@ export function useMachineSignIns(hub: DeskHub | null) {
     };
     const [a, e] = await Promise.all([quietly(() => hub.accounts()), quietly(() => hub.engines())]);
     setAccounts(a);
+    if (e) setEngines(e);
     setSaid((now) => {
       const next = signedInOf(a, e);
       // What a sign-in just finished stays said until the hub says it too.
@@ -60,8 +66,16 @@ export function useMachineSignIns(hub: DeskHub | null) {
     void reload();
   }, [reload]);
   const signedIn = (engine: MachineEngine, who: string | null = null) => setSaid((now) => ({ ...now, [engine]: { in: true, who } }));
-  return { said, accounts, reload, signedIn };
+  return { said, accounts, engines, reload, signedIn };
 }
+
+/** Whether this computer's own Codex is signed in to ChatGPT. */
+const codexSignedInHere = async (): Promise<boolean> => {
+  const engines = await hubOf(LOCAL)
+    ?.engines()
+    .catch(() => null);
+  return engines?.find((e) => e.engine === "codex")?.signIn.state === "in";
+};
 
 /** "Claude", else the first of "Claude 2", "Claude 3"… no account or sign-in
  *  under way there is called. */
@@ -111,13 +125,7 @@ function useClaudeSignIn(machine: MachineId, hub: DeskHub | null, native: Machin
   const seenRef = useRef<Seen | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
-  const live = useRef(true);
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
+  const live = useLive();
 
   const stopForward = useCallback(
     (signIn: string | undefined = seenRef.current?.id) => {
@@ -303,13 +311,7 @@ function useCodexSignIn(machine: MachineId, hub: DeskHub | null, native: Machine
   const opened = useRef<string | null>(null);
   const done = useRef(onDone);
   done.current = onDone;
-  const live = useRef(true);
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
+  const live = useLive();
 
   /** The device page the machine gave, opened only once the native side has checked it. */
   const openPage = useCallback(
@@ -459,7 +461,8 @@ export function SignInOn({
   boxed?: boolean;
 }) {
   const hub = useHubOf(machine);
-  const { said, reload, signedIn } = useMachineSignIns(hub);
+  const { said, engines, reload, signedIn } = useMachineSignIns(hub);
+  const claudeInfo = engines?.find((e) => e.engine === "claude" && e.installed) ?? null;
   const told = useRef(onSignedIn);
   told.current = onSignedIn;
   const claude = useClaudeSignIn(machine, hub, native, () => {
@@ -555,6 +558,24 @@ export function SignInOn({
           </>
         )}
       </EngineLine>
+      {hub && claudeInfo && hasAccounts(defaultCaps(claudeInfo)) && (
+        <Accounts
+          engine={claudeInfo}
+          machine={machine}
+          name={name}
+          native={native}
+          canAdd={false}
+          onShared={() => {
+            void reload();
+            // ChatGPT comes along: never by copying this computer's sign-in,
+            // which two computers can't share, but by the machine's own.
+            if (!said.codex?.in && codex.run.at === "idle")
+              void codexSignedInHere().then((yes) => {
+                if (yes) void codex.begin();
+              });
+          }}
+        />
+      )}
       {x.at !== "idle" && x.at !== "done" && (
         <div className="machine-signing" aria-live="polite" aria-label="Signing in to ChatGPT">
           {(x.at === "starting" || x.at === "waiting") && <p className="small">Opening ChatGPT’s sign-in page…</p>}

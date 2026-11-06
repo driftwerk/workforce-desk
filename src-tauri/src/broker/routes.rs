@@ -240,6 +240,17 @@ pub fn native_only(method: &str, target: &str) -> bool {
     allowed(NATIVE_ONLY, method, target).is_ok()
 }
 
+/// What only the native side asks of this computer's hub, never the page
+/// (they are on no list the page's requests are checked against): an
+/// account's sign-in, to copy it to one of the person's machines.
+const NATIVE_LOCAL: &[Route] = &[route("POST", "/api/desk/accounts/{}/hand-over")];
+
+/// `method target` as one of the native side's own requests to this
+/// computer's hub, or why it isn't one.
+pub fn native_local(method: &str, target: &str) -> Result<Allowed, Refused> {
+    allowed(NATIVE_LOCAL, method, target)
+}
+
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
     route("GET", "/api/desk/events"),
@@ -589,6 +600,33 @@ mod tests {
             e.to_string(),
             "Desk doesn't send GET /api/admin/x to this computer's hub."
         );
+    }
+
+    /// An account's sign-in leaves this computer's hub only for the native
+    /// side: the page can't ask it of this computer's hub or a machine's.
+    #[test]
+    fn an_accounts_sign_in_is_asked_by_the_native_side_alone() {
+        let id = "0f8e5a4c-1d2b-4c3a-9e8f-7a6b5c4d3e2f";
+        let path = format!("/api/desk/accounts/{id}/hand-over");
+        assert!(native_local("POST", &path).is_ok());
+        assert!(http("POST", &path).is_err());
+        assert!(machine_http("POST", &path).is_err());
+        assert!(
+            !native_only("POST", &path),
+            "never through a machine either"
+        );
+        assert!(native_local("GET", &path).is_err());
+        for odd in [
+            "/api/desk/accounts/../sessions/hand-over",
+            "/api/desk/accounts/x/hand-over?token=t",
+            "/api/desk/accounts/x/hand-over/more",
+            "/api/desk/accounts/hand-over",
+        ] {
+            assert!(native_local("POST", odd).is_err(), "{odd}");
+        }
+        // Nothing else of this computer's hub through this list.
+        assert!(native_local("GET", "/api/desk/accounts").is_err());
+        assert!(native_local("POST", "/api/desk/accounts").is_err());
     }
 
     /// A machine's hub takes what this computer's does, and its folders

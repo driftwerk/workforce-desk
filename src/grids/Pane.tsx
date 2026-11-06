@@ -37,7 +37,7 @@ import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalP
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
 import { baseName, homeShort } from "../ui/paths";
-import { OWN_SIGN_IN_LABEL, accountsOf, hasAccounts, useAccounts, withAccount } from "../engines/accounts";
+import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 
 const ENGINE = ENGINE_TITLE;
@@ -637,7 +637,9 @@ function usePaneMenu(
   // A pane of its own in another grid: one here would be a second.
   const terminalElsewhere = useGrids((s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], terminalContent(ranIn))));
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
-  const allAccounts = useAccounts((s) => s.accounts);
+  // The accounts of the engine the session runs on: a machine's are its own.
+  const accountStore = accountsOn(session ? machineOf(session) : undefined);
+  const allAccounts = accountStore((s) => s.accounts);
   const fail = useDesk((s) => s.fail);
   // Another account for a session Desk started (one in a terminal of its
   // own is moved there).

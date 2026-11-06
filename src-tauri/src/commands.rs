@@ -15,7 +15,7 @@ pub const COMMANDS: &[&str] = &[
     "machine_add",
     "machine_reconnect",
     "machine_remove",
-    "machine_share_sign_in",
+    "machine_share_accounts",
     "machine_sign_in_forward",
     "machine_sign_in_forward_stop",
     "machine_open_sign_in_page",

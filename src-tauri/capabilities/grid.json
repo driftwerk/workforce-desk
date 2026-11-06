@@ -37,7 +37,7 @@
     "allow-machines-list",
     "allow-machine-public-key",
     "allow-machine-reconnect",
-    "allow-machine-share-sign-in",
+    "allow-machine-share-accounts",
     "allow-socket-send",
     "allow-socket-ack",
     "allow-socket-close",

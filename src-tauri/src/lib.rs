@@ -12,6 +12,7 @@ mod helper;
 mod hub_io;
 mod hubs;
 mod logins;
+mod machine_accounts;
 mod machine_setup;
 mod machines;
 mod navigation;
@@ -851,7 +852,7 @@ pub fn run() {
             machine_setup::machine_add,
             machine_setup::machine_reconnect,
             machine_setup::machine_remove,
-            machine_setup::machine_share_sign_in,
+            machine_accounts::machine_share_accounts,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,

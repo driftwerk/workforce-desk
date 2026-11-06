@@ -12,6 +12,7 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { homeOfListing } from "../machines/folders";
 import { machineTransport } from "../hub/broker";
 import { HubError, type DeskHub } from "../hub/client";
 import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
@@ -128,12 +129,12 @@ export const pluginEnv = async (machine: MachineId = LOCAL): Promise<Record<stri
 };
 
 /** How a machine is asked for its home folder: its folders route (MH1),
- *  which names it. Tests set their own. */
+ *  asked for no folder, lists the home folder, and says which (`path`;
+ *  `home` where a hub names it too). Tests set their own. */
 let machineHome = async (machine: MachineId): Promise<string | null> => {
   const res = await machineTransport(machine).fetch("GET", "/api/desk/folders");
   if (!res.ok) return null;
-  const body = (await res.json().catch(() => null)) as { home?: unknown } | null;
-  return typeof body?.home === "string" && body.home ? body.home : null;
+  return homeOfListing(await res.json().catch(() => null));
 };
 export const setMachineHome = (f: typeof machineHome): void => {
   machineHome = f;

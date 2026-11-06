@@ -155,7 +155,7 @@ const MACHINE_COMMANDS: ReadonlySet<string> = new Set([
   "machine_add",
   "machine_reconnect",
   "machine_remove",
-  "machine_share_sign_in",
+  "machine_share_accounts",
 ]);
 
 describe("each window's capabilities", () => {

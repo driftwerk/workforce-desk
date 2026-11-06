@@ -224,35 +224,6 @@ pub fn machine_remove(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Comman
     fleet.remove(&id)
 }
 
-/// "Use this Mac's account" on a machine: not yet. Copying this computer's
-/// Claude token to a machine needs a security design of its own.
-#[tauri::command]
-pub fn machine_share_sign_in(
-    fleet: tauri::State<'_, Arc<Fleet>>,
-    id: String,
-    engine: String,
-) -> CommandResult<()> {
-    Err(share_refusal(&machine_name(&fleet, &id), &engine))
-}
-
-fn machine_name(fleet: &Fleet, id: &str) -> String {
-    fleet
-        .list()
-        .into_iter()
-        .find(|m| m.id == id)
-        .map(|m| m.name)
-        .unwrap_or_else(|| "the machine".into())
-}
-
-pub fn share_refusal(name: &str, engine: &str) -> String {
-    match engine {
-        "codex" => chatgpt_refusal(name),
-        _ => format!(
-            "Using this Mac's Claude account on {name} isn't in Desk yet. Open a terminal on {name} and run claude to sign in there."
-        ),
-    }
-}
-
 /// Signing in to ChatGPT on a machine: not yet.
 pub fn chatgpt_refusal(name: &str) -> String {
     format!(
@@ -293,11 +264,5 @@ mod tests {
         assert!(e.to_string().contains("larger than a backend"), "{e}");
         assert!(endless.0 <= 1001, "stopped reading: {}", endless.0);
         assert_eq!(read_capped(&b"abc"[..], 3).unwrap(), b"abc");
-    }
-
-    #[test]
-    fn signing_in_from_this_mac_is_refused_plainly_for_now() {
-        assert!(share_refusal("devbox", "claude").contains("run claude"));
-        assert!(share_refusal("devbox", "codex").contains("codex login"));
     }
 }

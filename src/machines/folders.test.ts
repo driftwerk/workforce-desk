@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { listFolders, readFolders, splitTyped, suggest, tilde } from "./folders";
+import { homeOfListing, listFolders, readFolders, splitTyped, suggest, tilde } from "./folders";
 import { foldersTransport } from "./testing";
 
 it("splits what's typed into the folder to list and what the next part starts with", () => {
@@ -46,4 +46,31 @@ it("suggests what starts as the last part typed", () => {
   expect(suggest(folders, "~/src/wo").map((f) => f.path)).toEqual(["~/src/workforce", "~/src/workforce-desk"]);
   expect(suggest(folders, "~/src/workforce").map((f) => f.path)).toEqual(["~/src/workforce-desk"]);
   expect(suggest(folders, "~/src/", 2)).toHaveLength(2);
+});
+
+// The hub's own answer (crates/desk/src/folders.rs `Listing`): it names the
+// folder listed, never `home`. Read for `home`, a machine with no session
+// yet had no folder to open a terminal in ("Desk doesn't know a folder on
+// this machine…") however often it was asked.
+const HUB_LISTING = {
+  path: "/home/dev",
+  parent: null,
+  truncated: false,
+  folders: [
+    { name: "src", path: "/home/dev/src", git: false, hidden: false },
+    { name: "acme-api", path: "/home/dev/acme-api", git: true, hidden: false },
+  ],
+};
+
+it("takes a listing asked for no folder as the home folder, as the hub answers it", async () => {
+  expect(homeOfListing(HUB_LISTING)).toBe("/home/dev");
+  expect(homeOfListing({ home: "/root", path: "/root/src" })).toBe("/root");
+  expect(homeOfListing({ folders: [] })).toBeNull();
+  expect(homeOfListing({ path: "relative" })).toBeNull();
+  expect(homeOfListing(null)).toBeNull();
+  // Listed from home, its folders read under ~.
+  expect(await listFolders(foldersTransport(HUB_LISTING), null)).toEqual([
+    { path: "~/acme-api", git: true },
+    { path: "~/src", git: false },
+  ]);
 });
