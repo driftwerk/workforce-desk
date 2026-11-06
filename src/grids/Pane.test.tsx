@@ -13,6 +13,7 @@ import { dropPane } from "./drag";
 import { createGrid, deliver, layOut, replacePane, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
 import { servePictures } from "../pictures/testing";
+import { useAccounts } from "../engines/accounts";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -335,6 +336,24 @@ describe("a session's pane", () => {
     expect(pane.className).toContain("gpane-asking");
     expect(within(pane).getByText("Stopped: Bash was not allowed")).toBeTruthy();
     expect(within(pane).getByText(/needs you · asked/)).toBeTruthy();
+  });
+
+  it("offers this computer's sign-in as an account only where Claude Code is signed in by itself", () => {
+    const work = { id: "a-w", engine: "claude" as const, name: "Work", isDefault: false, signedIn: true, sessions: ["s0"], createdAt: "2026-11-06T09:00:00Z" };
+    const personal = { ...work, id: "a-p", name: "Personal", sessions: [] };
+    useAccounts.setState({ accounts: [work, personal], claudeSignIn: { state: "out" } });
+    shown({ caps: { accounts: "token" } as never, account: { id: "a-w", name: "Work" } });
+    const accountMenu = () => {
+      fireEvent.click(within(screen.getByRole("region", { name: "task-0" })).getByRole("button", { name: "Pane options" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Account" }));
+      return [...screen.getByRole("menu", { name: "Account" }).querySelectorAll('[role^="menuitem"]')].map((m) => m.textContent);
+    };
+    expect(accountMenu()).toEqual(["Work✓", "Personal"]);
+    cleanup();
+    useAccounts.setState({ claudeSignIn: { state: "in", via: "plan", who: null, plan: null } });
+    canvas();
+    expect(accountMenu()).toEqual(["Work✓", "Personal", "This computer’s sign-in"]);
+    useAccounts.setState({ accounts: [], claudeSignIn: null });
   });
 
   it("offers ending and removing it from its options", () => {

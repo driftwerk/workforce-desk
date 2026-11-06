@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useClaudeSignIn } from "../engines/signIn";
-import { accountsOf, accountsOn, freeName, problemText, sessionsText, useAccounts, type AccountsStore } from "../engines/accounts";
+import { accountsOf, accountsOn, freeName, ownSignInWorks, problemText, sessionsText, useAccounts, type AccountsStore } from "../engines/accounts";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { useDesk, useHubOf } from "../hub/store";
 import type { EngineAccount, EngineInfo } from "../hub/types";
@@ -72,7 +72,7 @@ export function Accounts({
         </ul>
       )}
       {accounts.length > 0 && <AutoSwitch machine={machine} store={store} />}
-      {machine !== LOCAL && engine.engine === "claude" && where && <UseMine machine={machine} name={name ?? machine} native={native} store={store} onShared={onShared} />}
+      {machine !== LOCAL && engine.engine === "claude" && where && <UseMine machine={machine} name={name ?? machine} native={native} store={store} onShared={onShared} ownWorks={ownSignInWorks(engine.signIn)} />}
       {where === null && supported ? (
         <span className="faint small">This Desk keeps no accounts yet: update Desk to add them.</span>
       ) : !canAdd ? null : adding ? (
@@ -128,23 +128,52 @@ function UseMine({
   native,
   store,
   onShared,
+  ownWorks,
 }: {
   machine: MachineId;
   name: string;
   native: MachineNative;
   store: AccountsStore;
   onShared?: () => void;
+  /** Claude Code there may be signed in by itself (it doesn't say it isn't). */
+  ownWorks: boolean;
 }) {
   const here = hereOf(useHost((h) => h.platform));
   const mine = useAccounts((s) => s.accounts);
   const theirs = store((s) => s.accounts);
+  const hubOfMachine = useHubOf(machine);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ lines: string[]; failed: boolean } | null>(null);
   useEffect(() => {
     void useAccounts.getState().load();
   }, []);
   const missing = mine.filter((a) => a.engine === "claude" && a.signedIn && !theirs.some((t) => t.engine === "claude" && t.name.toLowerCase() === a.name.toLowerCase()));
-  if (missing.length === 0 && !said) return null;
+  // Logged out there with no default (as an earlier copy left it): the
+  // account its sessions start on, offered to be made the default, in this
+  // computer's order (the default, then the oldest).
+  const theirsSignedIn = theirs.filter((t) => t.engine === "claude" && t.signedIn);
+  const toDefault =
+    !ownWorks && missing.length === 0 && theirsSignedIn.length > 0 && !theirs.some((t) => t.engine === "claude" && t.isDefault)
+      ? (accountsOf(mine, "claude")
+          .map((m) => theirsSignedIn.find((t) => t.name.toLowerCase() === m.name.toLowerCase()))
+          .find((t) => t) ?? theirsSignedIn[0]!)
+      : null;
+  if (missing.length === 0 && !toDefault && !said) return null;
+  const makeDefault = async (account: EngineAccount) => {
+    const hub = hubOfMachine;
+    if (!hub) return;
+    setBusy(true);
+    setSaid(null);
+    try {
+      await hub.updateAccount(account.id, { isDefault: true });
+      setSaid({ lines: [`New sessions on ${name} start on ${account.name}.`], failed: false });
+      await store.getState().load();
+    } catch (e) {
+      setSaid({ lines: [plainError(e)], failed: true });
+    } finally {
+      setBusy(false);
+    }
+  };
   const copy = async () => {
     setBusy(true);
     setSaid(null);
@@ -162,6 +191,17 @@ function UseMine({
   const names = missing.map((a) => a.name);
   return (
     <div className="account-share" role="group" aria-label={`Use ${here}’s accounts`}>
+      {toDefault && (
+        <span className="account-share-row">
+          <span className="small">
+            Claude Code isn’t signed in on {name}, and none of its accounts is the default.{" "}
+            <span className="faint">New sessions there start on {toDefault.name} until one is.</span>
+          </span>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void makeDefault(toDefault)}>
+            {`Make ${toDefault.name} the default`}
+          </button>
+        </span>
+      )}
       {missing.length > 0 && (
         <span className="account-share-row">
           <span className="small">

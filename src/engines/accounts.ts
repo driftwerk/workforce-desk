@@ -130,6 +130,9 @@ export interface AccountsState {
   signIns: Record<string, AccountSignIn>;
   /** The hub has accounts: false once it said it hasn't. */
   supported: boolean | null;
+  /** What its Claude Code says of its own sign-in, as last read: whether
+   *  "this computer's sign-in" is a choice there. */
+  claudeSignIn: SignIn | null;
   load: () => Promise<void>;
 }
 
@@ -143,9 +146,15 @@ const makeStore = (machine: MachineId) =>
     store: null,
     signIns: {},
     supported: null,
+    claudeSignIn: null,
     load: async () => {
       const hub = hubOf(machine);
       if (!hub) return;
+      // Beside the accounts, never in their way.
+      void Promise.resolve()
+        .then(() => hub.engines())
+        .then((engines) => set({ claudeSignIn: engines?.find((e) => e.engine === "claude")?.signIn ?? null }))
+        .catch(() => {});
       try {
         const info = await hub.accounts();
         if (!info) {

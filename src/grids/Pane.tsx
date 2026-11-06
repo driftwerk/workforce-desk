@@ -37,7 +37,7 @@ import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalP
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
 import { baseName, homeShort } from "../ui/paths";
-import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, withAccount } from "../engines/accounts";
+import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, ownSignInWorks, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 
 const ENGINE = ENGINE_TITLE;
@@ -640,6 +640,8 @@ function usePaneMenu(
   // The accounts of the engine the session runs on: a machine's are its own.
   const accountStore = accountsOn(session ? machineOf(session) : undefined);
   const allAccounts = accountStore((s) => s.accounts);
+  // Where Claude Code says it isn't logged in, its own sign-in is no choice.
+  const ownWorks = accountStore((s) => ownSignInWorks(s.claudeSignIn));
   const fail = useDesk((s) => s.fail);
   // Another account for a session Desk started (one in a terminal of its
   // own is moved there).
@@ -653,7 +655,9 @@ function usePaneMenu(
         ...accounts
           .filter((a) => a.signedIn || session.account?.id === a.id)
           .map((a): MenuEntry => ({ kind: "item", label: a.name, checked: session.account?.id === a.id, onSelect: () => onAccount(a.id) })),
-        { kind: "item", label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) },
+        ...(ownWorks || session.engine !== "claude"
+          ? [{ kind: "item" as const, label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) }]
+          : []),
       ]
     : [];
   const swap: MenuEntry[] = tracked
