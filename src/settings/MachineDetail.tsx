@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { UpdateSteps } from "../machines/UpdateSteps";
 import { CopyButton, EngineBlocks } from "./EngineBlocks";
 import { EditReach, shortPrint } from "./EditReach";
-import { useNow } from "./Machines";
+import { CheckForUpdates, useNow } from "./Machines";
 
 /** How often Desk looks at a ready machine's link (fleet `check_every`). */
 const CHECKS_EVERY_S = 5;
@@ -293,6 +293,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
         </button>
       )}
       {s === "updating" && <UpdateSteps machine={machine} native={native} />}
+      {s === "newer" && <CheckForUpdates />}
     </div>
   );
 }

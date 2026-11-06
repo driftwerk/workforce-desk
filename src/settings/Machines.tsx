@@ -40,7 +40,7 @@ export const useNow = (ticking: boolean): number => {
 
 /** "Check for updates": a machine on a newer Desk is driven again once
  *  this Desk updates to it. */
-function CheckForUpdates() {
+export function CheckForUpdates() {
   const phase = useUpdates((s) => s.state.phase);
   const [said, setSaid] = useState<string | null>(null);
   const check = async () => {
@@ -225,7 +225,8 @@ function MachineRow({
   const changed = keyChanged(machine);
   return (
     <li className="machine-row" aria-label={machine.name}>
-      <span className={`dot dot-${look}`} aria-hidden="true" />
+      {/* Beside its name, not the middle of its steps, while it updates. */}
+      <span className={`dot dot-${look}${machine.state.kind === "updating" ? " dot-top" : ""}`} aria-hidden="true" />
       <span className="machine-row-text">
         <span className="machine-row-name">
           <b>{machine.name}</b>

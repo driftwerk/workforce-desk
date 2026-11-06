@@ -1812,3 +1812,32 @@ fn an_update_is_cancelled_before_it_switches_over_and_stays_on_its_version() {
             .contains("isn't updating now")
     );
 }
+
+#[test]
+fn a_cancel_once_the_switch_over_began_is_refused_and_the_update_finishes() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    // The switch-over there takes a moment.
+    script(
+        &b.dir.path().join("fakebin/mv"),
+        "#!/bin/sh\ncase \"$*\" in *current.next*) sleep 3 ;; esac\nexec /bin/mv \"$@\"\n",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("switching over", || {
+        r.fleet
+            .list()
+            .first()
+            .and_then(|m| m.update.clone())
+            .is_some_and(|u| serde_json::to_value(&u).unwrap()["steps"][2]["state"] == "running")
+    });
+    assert!(
+        r.fleet
+            .cancel_update(&id)
+            .unwrap_err()
+            .contains("switching over now")
+    );
+    until("updated", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+}

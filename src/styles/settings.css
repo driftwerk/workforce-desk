@@ -1478,3 +1478,13 @@ legend.set-label {
 .machines-banner {
   align-self: stretch;
 }
+
+/* A row with its update's steps: its dot beside its name. */
+.machine-row > .dot-top {
+  align-self: flex-start;
+  margin-top: 5px;
+}
+.update-steps .link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

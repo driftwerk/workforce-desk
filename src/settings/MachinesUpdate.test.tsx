@@ -106,7 +106,8 @@ it("shows an update step by step with its progress, and cancels it before the sw
     "Switch over: Desk restarts there in seconds; sessions stay open",
     "Reconnect",
   ]);
-  expect(devbox.textContent).toContain("Works until the switch-over. Each step stops after 3 minutes and says why.");
+  expect(devbox.textContent).toContain("Works until the switch-over. Getting Desk stops after 10 minutes, each other step after 3, and says why.");
+  expect(devbox.querySelector(".dot-top")).toBeTruthy();
   await act(async () => fireEvent.click(within(devbox).getByRole("button", { name: "Cancel update" })));
   expect(fake.cancelUpdate).toHaveBeenCalledWith("devbox");
 
@@ -146,6 +147,10 @@ it("checks for a newer Desk for a machine on one, and says when there's none", a
   expect(bb.textContent).toContain("It runs a newer Desk (0.2.2). Update Desk here to drive it; its sessions keep running.");
   await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Check for updates" })));
   expect(bb.textContent).toContain("This Desk is up to date for now.");
+  // Its own page has the same way out, on its status card.
+  fireEvent.click(within(bb).getByRole("button", { name: "Open buildbox" }));
+  const status = within(screen.getByRole("region", { name: "buildbox" })).getByRole("status");
+  expect(within(status).getByRole("button", { name: "Check for updates" })).toBeTruthy();
 });
 
 it("says once that Desk updated and what its machines do about it", async () => {

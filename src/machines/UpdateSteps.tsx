@@ -55,7 +55,7 @@ export function UpdateSteps({ machine, native }: { machine: Machine; native: Mac
               </button>{" "}
             </>
           )}
-          Works until the switch-over. Each step stops after 3 minutes and says why.
+          Works until the switch-over. Getting Desk stops after 10 minutes, each other step after 3, and says why.
         </span>
       )}
       {problem && (

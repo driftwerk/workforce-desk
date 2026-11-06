@@ -798,11 +798,19 @@ impl Fleet {
     /// before it switches over (whatever runs there is ended); it stays on
     /// the version it had, driven no further until it matches.
     pub fn cancel_update(&self, id: &str) -> Result<(), String> {
-        let name = self
-            .machine(id)
-            .map(|m| m.name)
-            .ok_or("That machine isn't in Desk any more.")?;
-        match self.update_running(id) {
+        // Looked at and set under the one lock the switch-over is begun
+        // under (`begin_switch`): a Cancel either lands before it, or is
+        // refused.
+        let rows = self.rows();
+        let r = rows.get(id).ok_or("That machine isn't in Desk any more.")?;
+        let name = &r.kept.machine.name;
+        let running = r.now.update.as_ref().and_then(|u| {
+            u.steps
+                .iter()
+                .find(|s| s.state == StepState::Running)
+                .map(|s| s.key)
+        });
+        match running {
             Some(UpdateKey::Download | UpdateKey::Copy) => {}
             Some(_) => {
                 return Err(format!(
@@ -811,10 +819,33 @@ impl Fleet {
             }
             None => return Err(format!("{name} isn't updating now.")),
         }
-        if let Some(r) = self.rows().get(id) {
-            r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
+        r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Begins machine `id`'s switch-over, unless its update was cancelled:
+    /// both under one lock with Cancel update, so a Cancel never lands
+    /// after the switch-over has begun. True when it begins.
+    fn begin_switch(&self, id: &str) -> bool {
+        let mut rows = self.rows();
+        let Some(r) = rows.get_mut(id) else {
+            return false;
+        };
+        if r.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        if let Some(run) = r.now.update.as_mut()
+            && let Some(step) = run.steps.iter_mut().find(|s| s.key == UpdateKey::Switch)
+        {
+            step.state = StepState::Running;
+        }
+        true
+    }
+
+    /// A step that can't be cancelled (the switch-over, reconnecting after
+    /// it): its own cancel flag, which nothing sets, and the step's limit.
+    fn step_uncancellable(&self) -> ssh::Step {
+        ssh::Step::new(Arc::default(), self.timing.step_within)
     }
 
     /// This computer's log of machine `id`, oldest first.
@@ -1660,13 +1691,13 @@ impl Fleet {
             StepState::Done,
             Some(format!("Copied to {}", machine.name)),
         );
-        if self.cancelled(id) {
+        // From here it can't be cancelled: Desk there restarts in seconds.
+        if !self.begin_switch(id) {
             return Err(UPDATE_CANCELLED.into());
         }
-        // From here it can't be cancelled: Desk there restarts in seconds.
-        self.update_step(id, UpdateKey::Switch, StepState::Running, None);
+        self.host.changed();
         if let Err(m) = self
-            .step(id)
+            .step_uncancellable()
             .run(|| setup::flip(&self.ssh, machine, &bin, &backend.version))
         {
             self.update_step(id, UpdateKey::Switch, StepState::Failed, Some(m.clone()));
@@ -2013,7 +2044,12 @@ impl Fleet {
             return State::Failed { message };
         }
         let updating = self.update_running(id) == Some(UpdateKey::Reconnect);
-        match self.step(id).run(|| self.wait_ready(&link, &wanted)) {
+        let step = if updating {
+            self.step_uncancellable()
+        } else {
+            self.step(id)
+        };
+        match step.run(|| self.wait_ready(&link, &wanted)) {
             Ok(version) => {
                 if updating {
                     self.note(id, LogKind::Ok, format!("updated to Desk {version}"));
