@@ -67,6 +67,7 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     edit: vi.fn(async (_id: string, _change: { target?: string; name?: string }): Promise<Edited> => ({ kind: "done" })),
     revealLog: vi.fn(async () => undefined),
     checkReach: vi.fn(async (): Promise<Checked> => ({ kind: "cancelled" })),
+    cancelAdd: vi.fn(async (_id: string) => undefined),
   };
   Object.assign(fake, over);
   /** Sends a setup event, as the native side would. */

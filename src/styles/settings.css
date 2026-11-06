@@ -1370,3 +1370,10 @@ legend.set-label {
     margin-left: 0;
   }
 }
+.pick-sub {
+  flex-basis: 100%;
+  font-family: var(--font-body, inherit);
+}
+.sheet-foot .machine-cancel-add {
+  margin-right: auto;
+}

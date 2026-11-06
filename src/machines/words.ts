@@ -237,3 +237,32 @@ export const rowLines = (
       return { first: m.state.message || m.reason || "Desk couldn’t set it up.", tone: "blocked", second: keep };
   }
 };
+
+/** The user an address names (`root` in `root@devbox`), or the SSH config
+ *  entry's, when it says. */
+export const userOf = (target: string, entryUser?: string | null): string | null => {
+  const at = target.lastIndexOf("@");
+  return at > 0 ? target.slice(0, at) : (entryUser ?? null);
+};
+
+/** A name for the machine at `target`: its host; a machine already added
+ *  on the same host as another user is named apart ("devbox (root)"); and
+ *  never a name another machine has ("devbox 2"). */
+export const suggestedName = (target: string, machines: readonly Machine[], entryUser?: string | null): string => {
+  const host = nameFromTarget(target);
+  if (!host) return "";
+  const user = userOf(target, entryUser);
+  const sameHost = machines.filter((m) => nameFromTarget(m.target) === host || m.reach?.entry === host || m.reach?.hostname === host);
+  const otherUser = sameHost.some((m) => (userOf(m.target, m.reach?.user) ?? m.details?.user ?? null) !== user);
+  let name = sameHost.length > 0 && otherUser && user ? `${host} (${user})` : host;
+  const taken = (n: string) => machines.some((m) => m.name.toLowerCase() === n.toLowerCase());
+  for (let i = 2; taken(name); i++) name = `${sameHost.length > 0 && user ? `${host} (${user})` : host} ${i}`;
+  return name;
+};
+
+/** The machine already added on the same host as `target`, as another user. */
+export const sameHostAs = (target: string, machines: readonly Machine[]): Machine | null => {
+  const host = nameFromTarget(target);
+  const user = userOf(target);
+  return machines.find((m) => (nameFromTarget(m.target) === host || m.reach?.entry === host) && userOf(m.target, m.reach?.user) !== user) ?? null;
+};

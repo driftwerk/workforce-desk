@@ -231,6 +231,12 @@ pub fn machine_remove(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Comman
     fleet.remove(&id)
 }
 
+/// "Cancel adding": stops setting machine `id` up at once, and forgets it.
+#[tauri::command]
+pub fn machine_cancel_add(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.cancel_add(&id)
+}
+
 /// How long reading Desk's log on a machine may take.
 const REMOTE_LOG_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 

@@ -59,6 +59,16 @@ impl SshExe {
     }
 
     pub fn output(&self, invocation: &Invocation) -> std::io::Result<Output> {
+        // A setup step's own limit and Cancel (`Step`), else this ssh's
+        // deadline, else as long as it takes.
+        if Step::current().is_some() {
+            let child = self
+                .command(invocation)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            return wait(child);
+        }
         match self.until {
             Some(at) => self.output_within(
                 invocation,
@@ -115,6 +125,116 @@ impl SshExe {
             stderr: err_t.join().unwrap_or_default(),
         })
     }
+}
+
+/// The step of setting a machine up that this thread is running: every
+/// `ssh` it runs ends when the person cancels adding, or when the step has
+/// run [`Step::LIMIT`]. Desk never waits on a machine for good.
+#[derive(Clone)]
+pub struct Step {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    until: std::time::Instant,
+}
+
+thread_local! {
+    static STEP: std::cell::RefCell<Option<Step>> = const { std::cell::RefCell::new(None) };
+}
+
+impl Step {
+    /// How long one step may take.
+    pub const LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
+
+    pub fn new(
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        within: std::time::Duration,
+    ) -> Step {
+        Step {
+            cancel,
+            until: std::time::Instant::now() + within,
+        }
+    }
+
+    /// Runs `f` as this step: every `ssh` it runs is ended with it.
+    pub fn run<T>(self, f: impl FnOnce() -> T) -> T {
+        let before = STEP.with(|s| s.replace(Some(self)));
+        struct Restore(Option<Step>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let was = self.0.take();
+                STEP.with(|s| *s.borrow_mut() = was);
+            }
+        }
+        let _restore = Restore(before);
+        f()
+    }
+
+    /// The step this thread runs, if any.
+    pub fn current() -> Option<Step> {
+        STEP.with(|s| s.borrow().clone())
+    }
+
+    /// Why it must end now: cancelled, or out of time.
+    pub fn ended(&self) -> Option<std::io::Error> {
+        if self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return Some(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                CANCELLED,
+            ));
+        }
+        if std::time::Instant::now() >= self.until {
+            return Some(std::io::Error::new(std::io::ErrorKind::TimedOut, TOO_LONG));
+        }
+        None
+    }
+}
+
+/// Said when the person cancelled adding.
+pub const CANCELLED: &str = "Adding it was cancelled.";
+/// Said when a step ran out of time.
+pub const TOO_LONG: &str = "That step took longer than 3 minutes, so Desk stopped it.";
+
+/// Why running ssh failed, in the person's words.
+pub fn io_problem(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut => e.to_string(),
+        _ => format!("Desk couldn't run ssh: {e}"),
+    }
+}
+
+/// Waits for `child` (its output piped) as [`std::process::Child::wait_with_output`]
+/// does, ended (and said so) when this thread's [`Step`] is cancelled or
+/// runs out of time.
+pub fn wait(mut child: std::process::Child) -> std::io::Result<Output> {
+    fn drain(
+        pipe: Option<impl std::io::Read + Send + 'static>,
+    ) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = pipe {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let step = Step::current();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if let Some(why) = step.as_ref().and_then(Step::ended) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(why);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    };
+    Ok(Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
 }
 
 /// ssh's own last line on its error output (`ssh: connect to host … port

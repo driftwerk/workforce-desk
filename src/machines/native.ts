@@ -164,6 +164,9 @@ export interface MachineNative {
   checkReach(id: MachineId, target: string): Promise<Checked>;
   /** Shows Desk's log on this computer in Finder. */
   revealLog(): Promise<void>;
+  /** "Cancel adding": stops setting it up at once (whatever runs there is
+   *  ended) and forgets it. */
+  cancelAdd(id: MachineId): Promise<void>;
 }
 
 export const native: MachineNative = {
@@ -188,4 +191,5 @@ export const native: MachineNative = {
   edit: (id, change) => invoke<Edited>("machine_edit", { id, target: change.target ?? null, name: change.name ?? null }),
   checkReach: (id, target) => invoke<Checked>("machine_check_reach", { id, target }),
   revealLog: () => invoke<void>("machine_reveal_log"),
+  cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
 };

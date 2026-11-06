@@ -227,6 +227,9 @@ pub struct Listed {
     /// The key it shows now, when its host key changed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown_key: Option<KeptKey>,
+    /// What an install or update there is doing now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -282,6 +285,8 @@ pub trait Host: Send + Sync + 'static {
 pub struct Timing {
     /// How long Desk waits for a machine's helper to say where its hub is.
     pub ready_within: Duration,
+    /// The longest one step of setting a machine up may take.
+    pub step_within: Duration,
     pub poll: Duration,
     /// How often a ready machine's forward is looked at.
     pub check_every: Duration,
@@ -301,6 +306,7 @@ impl Default for Timing {
     fn default() -> Self {
         Self {
             ready_within: Duration::from_secs(180),
+            step_within: ssh::Step::LIMIT,
             poll: Duration::from_secs(1),
             check_every: Duration::from_secs(5),
             first_backoff: Duration::from_secs(5),
@@ -383,6 +389,8 @@ struct Row {
     kick: Arc<(Mutex<bool>, Condvar)>,
     /// What the page shows of where it stands, besides its state.
     now: Now,
+    /// Set when the person cancels adding it.
+    cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Where a machine stands, besides its state: why, when, how it is reached,
@@ -399,6 +407,8 @@ struct Now {
     /// The key it shows now, when that isn't the one this computer knows.
     shown_key: Option<KeptKey>,
     log: VecDeque<LogLine>,
+    /// What a copy there has done so far ("Copying Desk 0.2.1… 22 of 61 MB").
+    progress: Option<String>,
 }
 
 impl Row {
@@ -410,6 +420,7 @@ impl Row {
             busy,
             kick: Arc::default(),
             now: Now::default(),
+            cancel: Arc::default(),
         }
     }
 }
@@ -680,6 +691,7 @@ impl Fleet {
                 details: r.now.details.clone(),
                 host_key: r.kept.host_key.clone(),
                 shown_key: r.now.shown_key.clone(),
+                progress: r.now.progress.clone(),
             })
             .collect()
     }
@@ -909,6 +921,19 @@ impl Fleet {
         {
             return Err(format!("{target} is in Desk already."));
         }
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
+            return Err("Give it a name of up to 60 letters.".into());
+        }
+        if self
+            .rows()
+            .values()
+            .any(|r| r.kept.machine.name.eq_ignore_ascii_case(name))
+        {
+            return Err(format!(
+                "Another machine is called {name} already. Two machines can't share a name."
+            ));
+        }
         let id = {
             let rows = self.rows();
             id_for(name, &|id| rows.contains_key(id))
@@ -970,6 +995,10 @@ impl Fleet {
 
     /// A step failed: said, and the machine stands failed.
     fn step_failed(&self, id: &str, step: Step, message: String) {
+        if self.cancelled(id) {
+            return self.forget_cancelled(id, step);
+        }
+        self.note(id, LogKind::Error, message.clone());
         self.emit(SetupEvent {
             message: Some(message.clone()),
             ..self.say(id, step, StepState::Failed)
@@ -978,6 +1007,68 @@ impl Fleet {
             r.busy = false;
         }
         self.set_state(id, State::Failed { message });
+    }
+
+    /// One step of setting machine `id` up: ended when the person cancels
+    /// adding it, or when it has run [`Timing::step_within`].
+    fn step(&self, id: &str) -> ssh::Step {
+        let cancel = self
+            .rows()
+            .get(id)
+            .map(|r| Arc::clone(&r.cancel))
+            .unwrap_or_default();
+        ssh::Step::new(cancel, self.timing.step_within)
+    }
+
+    /// Whether the person cancelled adding machine `id`.
+    fn cancelled(&self, id: &str) -> bool {
+        self.rows()
+            .get(id)
+            .is_some_and(|r| r.cancel.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// Adding machine `id` was cancelled at `step`: it goes, as if it had
+    /// never been added (what was copied there stays, and adding it again
+    /// picks it up).
+    fn forget_cancelled(&self, id: &str, step: Step) {
+        // Said first, so the card hears why before the machine is gone.
+        self.emit(SetupEvent {
+            message: Some(ssh::CANCELLED.into()),
+            ..self.say(id, step, StepState::Failed)
+        });
+        let row = self.rows().remove(id);
+        if let Some(row) = &row {
+            self.admitted.forget(row.kept.machine.target.as_str());
+            row.kick.1.notify_all();
+        }
+        self.drop_link(id);
+        tracing::info!(machine = id, "adding a machine was cancelled");
+        self.host.changed();
+    }
+
+    /// "Cancel adding" (`machine_cancel_add`): stops setting machine `id` up
+    /// at once (whatever runs there is ended) and forgets it. Only for one
+    /// being added: one added is removed instead.
+    pub fn cancel_add(&self, id: &str) -> Result<(), String> {
+        let running = {
+            let rows = self.rows();
+            let Some(r) = rows.get(id) else {
+                return Err("That machine isn't in Desk any more.".into());
+            };
+            if r.saved {
+                return Err(format!(
+                    "{} is added already: remove it instead.",
+                    r.kept.machine.name
+                ));
+            }
+            r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            r.busy
+        };
+        if !running {
+            // Its setup had stopped already (a step failed): gone now.
+            self.forget_cancelled(id, Step::Connect);
+        }
+        Ok(())
     }
 
     /// Why a look found nothing, in the person's words.
@@ -1030,7 +1121,8 @@ impl Fleet {
         };
         let name = machine.name.clone();
         self.emit(self.say(id, Step::Connect, StepState::Running));
-        let look = match probe::look(&self.ssh, &machine) {
+        self.note(id, LogKind::Info, format!("connecting to {name}"));
+        let look = match self.step(id).run(|| probe::look(&self.ssh, &machine)) {
             Ok(l) => l,
             Err(m) => return self.step_failed(id, Step::Connect, Self::missed(&machine, m)),
         };
@@ -1081,19 +1173,19 @@ impl Fleet {
                 self.supervise(id);
                 return;
             }
-            Plan::Nothing => self.keep(&machine, &look),
-            Plan::Install | Plan::Upgrade { .. } => self.update(&machine, &look),
+            plan => plan,
         };
-        let keep = match keep {
-            Ok(k) => k,
-            Err(m) => return self.step_failed(id, Step::Install, m),
-        };
-        let link = match self.link(&machine) {
-            Ok(l) => l,
-            Err(m) => return self.step_failed(id, Step::Install, m),
-        };
-        let version = match self.wait_ready(&link, &wanted) {
-            Ok(v) => v,
+        let installed = self.step(id).run(|| {
+            let keep = match keep {
+                Plan::Nothing => self.keep(&machine, &look),
+                _ => self.update(&machine, &look),
+            }?;
+            let link = self.link(&machine)?;
+            let version = self.wait_ready(&link, &wanted)?;
+            Ok::<_, String>((keep, link, version))
+        });
+        let (keep, link, version) = match installed {
+            Ok(i) => i,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
         let line = install::linger_by_hand(&look.user);
@@ -1126,34 +1218,40 @@ impl Fleet {
         self.update_kept(id, |k| k.version = Some(version.clone()));
 
         self.emit(self.say(id, Step::Engines, StepState::Running));
-        match setup::engines(&self.ssh, &machine) {
-            Ok(engines) => {
-                // The hub finds its engines' programs as it starts: one
-                // installed after it started needs it started again.
-                if engines.installed {
-                    let restarted = setup::restart(
-                        &self.ssh,
-                        &machine,
-                        &look.bin(),
-                        &self.host.person(),
-                        keep == Keep::Service,
-                    );
-                    link.forget();
-                    if let Err(m) =
-                        restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop))
-                    {
-                        tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
-                    }
+        let engines = self.step(id).run(|| {
+            let engines = setup::engines(&self.ssh, &machine)?;
+            // The hub finds its engines' programs as it starts: one
+            // installed after it started needs it started again.
+            if engines.installed {
+                let restarted = setup::restart(
+                    &self.ssh,
+                    &machine,
+                    &look.bin(),
+                    &self.host.person(),
+                    keep == Keep::Service,
+                );
+                link.forget();
+                if let Err(m) = restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop)) {
+                    tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
                 }
+            }
+            Ok::<_, String>(engines)
+        });
+        if self.cancelled(id) {
+            return self.forget_cancelled(id, Step::Engines);
+        }
+        match engines {
+            Ok(engines) => self.emit(SetupEvent {
+                detail: Some(engines.detail),
+                ..self.say(id, Step::Engines, StepState::Done)
+            }),
+            Err(m) => {
+                self.note(id, LogKind::Error, m.clone());
                 self.emit(SetupEvent {
-                    detail: Some(engines.detail),
-                    ..self.say(id, Step::Engines, StepState::Done)
+                    message: Some(m),
+                    ..self.say(id, Step::Engines, StepState::Failed)
                 })
             }
-            Err(m) => self.emit(SetupEvent {
-                message: Some(m),
-                ..self.say(id, Step::Engines, StepState::Failed)
-            }),
         }
         if let Some(r) = self.rows().get_mut(id) {
             r.saved = true;
@@ -1234,7 +1332,32 @@ impl Fleet {
         if look.installed.is_some() && !look.service {
             let _ = setup::stop(&self.ssh, machine, &bin);
         }
-        setup::copy(&self.ssh, machine, &bin, &backend.version, &backend.data)?;
+        let id = machine.id.as_str();
+        let mb = |b: u64| ((b as f64) / 1_000_000.0).round() as u64;
+        let progress = |sent: u64, total: u64| {
+            let said = format!(
+                "Copying Desk {} to {}… {} of {} MB",
+                backend.version,
+                machine.name,
+                mb(sent),
+                mb(total).max(1)
+            );
+            self.set_now(id, |n| n.progress = Some(said.clone()));
+            self.emit(SetupEvent {
+                detail: Some(said),
+                ..self.say(id, Step::Install, StepState::Running)
+            });
+        };
+        let copied = setup::copy(
+            &self.ssh,
+            machine,
+            &bin,
+            &backend.version,
+            &backend.data,
+            &progress,
+        );
+        self.set_now(id, |n| n.progress = None);
+        copied?;
         setup::flip(&self.ssh, machine, &bin, &backend.version)?;
         if let Some(l) = self.machines.get(machine.id.as_str()) {
             l.forget();
@@ -1274,6 +1397,9 @@ impl Fleet {
         let until = Instant::now() + self.timing.ready_within;
         let mut last = None;
         loop {
+            if let Some(why) = ssh::Step::current().and_then(|s| s.ended()) {
+                return Err(why.to_string());
+            }
             match link.read() {
                 Ok(Some(c)) if c.device_token.is_some() => {
                     match setup::running(&self.ssh, link.machine()) {
@@ -1566,6 +1692,7 @@ impl Fleet {
             if again {
                 r.busy = true;
                 r.state = State::Adding;
+                r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
             }
             again
         };
@@ -2242,6 +2369,7 @@ mod tests {
                 fingerprint: "SHA256:x9Zp".into(),
                 trusted_at: None,
             }),
+            progress: None,
         };
         assert_eq!(
             serde_json::to_value(row).unwrap(),

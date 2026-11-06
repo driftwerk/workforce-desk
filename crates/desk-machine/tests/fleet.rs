@@ -394,6 +394,7 @@ impl TrustConfirm for Yes {
 fn timing() -> Timing {
     Timing {
         ready_within: Duration::from_secs(20),
+        step_within: Duration::from_secs(20),
         poll: Duration::from_millis(100),
         check_every: Duration::from_millis(200),
         first_backoff: Duration::from_millis(200),
@@ -837,9 +838,17 @@ fn a_copy_that_fails_its_check_is_never_flipped_to() {
     // Not kept: it was never added.
     assert!(!b.dir.path().join("mac/machines.json").exists());
     // An unsigned development build is said where it is added.
-    let running = step(&r, "install", StepState::Running).unwrap();
+    // (Among its progress, which says no message.)
     assert!(
-        running.message.unwrap().contains("isn't checked"),
+        r.said
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e.state == StepState::Running
+                && e.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains("isn't checked"))),
         "the development build is said"
     );
 
@@ -1429,4 +1438,136 @@ fn the_ssh_configs_host_entries_are_listed() {
         ])
     );
     assert!(b.calls().is_empty(), "nothing was run to read it");
+}
+
+/// A Claude Code there that takes `secs` to say its version: the engines
+/// step runs that long.
+fn slow_engines(b: &Box_, secs: u32) {
+    script(
+        &b.dir.path().join("fakebin/claude"),
+        &format!("#!/bin/sh\nsleep {secs}\necho \"9.9.9 (fake)\"\n"),
+    );
+}
+
+#[test]
+fn adding_is_cancelled_mid_step_at_once_and_the_machine_is_forgotten() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    slow_engines(&b, 30);
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("the engines step running", || {
+        step(&r, "engines", StepState::Running).is_some()
+    });
+    let asked = Instant::now();
+    r.fleet.cancel_add(&id).unwrap();
+    until("forgotten", || r.fleet.list().is_empty());
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        asked.elapsed()
+    );
+    let said = step(&r, "engines", StepState::Failed)
+        .unwrap_or_else(|| panic!("{:#?}", r.said.events.lock().unwrap()));
+    assert_eq!(said.message.as_deref(), Some("Adding it was cancelled."));
+    assert!(r.machines.get(&id).is_none());
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json"))
+        .unwrap_or_else(|_| "[]".into());
+    assert_eq!(serde_json::from_str::<Value>(&kept).unwrap(), json!([]));
+    // Adding it again asks again.
+    let before = r.asked.0.load(Ordering::SeqCst);
+    slow_engines(&b, 0);
+    r.fleet.add("devbox", "devbox").unwrap();
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), before + 1);
+}
+
+#[test]
+fn a_step_that_runs_past_its_limit_is_stopped_and_says_so() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    slow_engines(&b, 30);
+    let mut r = fleet(&b, "0.2.0", true);
+    // The same fleet, its steps limited to 2 s.
+    let mut t = timing();
+    t.step_within = Duration::from_secs(2);
+    r.fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::clone(&r.machines),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::clone(&r.said),
+            wanted: "0.2.0".into(),
+            tarball: b.dir.path().join("backends/0.2.0.tar.gz"),
+        }),
+        r.asked.clone(),
+        r.asked.clone(),
+        t,
+    );
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    let started = Instant::now();
+    until("the engines step stopped", || {
+        step(&r, "engines", StepState::Failed).is_some()
+    });
+    let said = step(&r, "engines", StepState::Failed).unwrap();
+    assert_eq!(
+        said.message.as_deref(),
+        Some("That step took longer than 3 minutes, so Desk stopped it.")
+    );
+    assert!(started.elapsed() < Duration::from_secs(15));
+    // Installed and connected all the same: only the engines step stopped.
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    assert!(
+        r.fleet
+            .log(&id)
+            .unwrap()
+            .iter()
+            .any(|l| l.text.contains("longer than 3 minutes"))
+    );
+}
+
+#[test]
+fn copying_desk_there_says_how_far_it_got_and_names_are_never_shared() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let copying: Vec<String> = r
+        .said
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e.detail.clone())
+        .filter(|d| d.starts_with("Copying Desk 0.2.0 to devbox… "))
+        .collect();
+    assert!(!copying.is_empty(), "said while copying");
+    assert!(copying.last().unwrap().ends_with(" MB"), "{copying:?}");
+    // No progress is left once it's done.
+    assert_eq!(r.fleet.list()[0].progress, None);
+    let refused = r.fleet.add("root@devbox", "DevBox").unwrap_err();
+    assert!(
+        refused.contains("Two machines can't share a name"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_failed_add_is_cancelled_at_once() {
+    let b = Box_::new();
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    std::fs::write(b.fake("check-fails"), "").unwrap();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("failed", || {
+        matches!(r.fleet.state(&id), Some(State::Failed { .. }))
+    });
+    r.fleet.cancel_add(&id).unwrap();
+    assert!(r.fleet.list().is_empty());
+    assert!(r.fleet.cancel_add(&id).is_err());
 }

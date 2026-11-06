@@ -870,6 +870,7 @@ pub fn run() {
             machine_setup::machine_ssh_hosts,
             machine_setup::machine_edit,
             machine_setup::machine_check_reach,
+            machine_setup::machine_cancel_add,
             machine_reveal_log,
             broker::socket_send,
             broker::socket_ack,

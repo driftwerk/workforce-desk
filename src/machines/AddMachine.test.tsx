@@ -195,7 +195,7 @@ it("shows a step that waits on the person with the line to run, and one that fai
   expect(list.querySelector(".dot-blocked")).toBeTruthy();
   act(() => emit({ machine: "devbox", step: "engines", state: "failed", message: "npm isn’t on devbox" }));
   expect(list.textContent).toContain("npm isn’t on devbox");
-  expect(screen.getByRole("alert").textContent).toContain("devbox stays in Settings → Machines");
+  expect(list.textContent).toContain("devbox stays in Settings → Machines until it’s set up");
 });
 
 it("finishes while linger waits on an administrator: Desk starts itself on each connect", async () => {
