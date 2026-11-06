@@ -5,14 +5,12 @@
 // it hands over what it kept itself. Against a hub that can't keep them,
 // Desk's settings hold them, as before.
 
-import type { DeskHub } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import { deskListeners, hubOf, useDesk } from "../hub/store";
 import { LOCAL, splitKey } from "../hub/machines";
 import type { DeskEvent, Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { onHub, useHubLayout } from "./hubLayout";
-// Each machine's groups are kept beside this computer's.
-import "./machineLayouts";
 import {
   createGroup as created,
   deleteGroup as deleted,
@@ -39,6 +37,16 @@ export const layoutOf = (s: { groups: Layout["groups"]; ungrouped: Layout["ungro
 /** The groups as they are now, wherever they're kept. */
 export const currentLayout = (): Layout => useHubLayout.getState().layout ?? layoutOf(useSettings.getState());
 
+/** Whether where the groups are kept is known, and they're there to be
+ *  changed: Desk's settings are read, this computer's hub has said whether
+ *  it keeps them, and if it does, Desk has them from it. Until then a
+ *  change made unasked (a machine's sessions forgotten or merged in) waits,
+ *  so it isn't made to the copy that's about to be replaced. */
+export const layoutSettled = (): boolean => {
+  const { layout, kept } = useHubLayout.getState();
+  return useSettings.getState().loaded && kept !== null && (!kept || layout !== null);
+};
+
 /** The same, kept current in a component. */
 export const useLayout = (): Layout => {
   const hub = useHubLayout((s) => s.layout);
@@ -61,14 +69,18 @@ const adopt = (layout: Layout) => {
   else useHubLayout.setState({ layout });
 };
 
-/** Sends one change to the hub, in order after the others. */
-const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>) => {
+/** Sends one change to the hub, in order after the others; whether the hub
+ *  took it. `quiet`: a failure is only logged (one Desk retries itself). */
+const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet = false): Promise<boolean> => {
   inFlight++;
+  let took = false;
   sending = sending.then(async () => {
     try {
       heard = await call(hub);
+      took = true;
     } catch (e) {
-      useDesk.getState().fail(e);
+      if (quiet) console.warn("couldn't change the groups on the hub:", e);
+      else useDesk.getState().fail(e);
       // Show what the hub really has.
       heard = await hub.layout().catch(() => heard);
     } finally {
@@ -79,23 +91,30 @@ const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>) => {
       }
     }
   });
+  return sending.then(() => took);
 };
 
 /** Applies `change` to the groups; on a hub that keeps them, also sends it
- *  through `call` (its group routes), given the layout as changed. */
-export const changeLayout = (change: (layout: Layout) => Layout | null, call: (hub: DeskHub, next: Layout) => Promise<Layout>): void => {
+ *  through `call` (its group routes), given the layout as changed. Settles
+ *  with whether it was kept (at once in Desk's settings; once the hub took
+ *  it on a hub). */
+export const changeLayout = (
+  change: (layout: Layout) => Layout | null,
+  call: (hub: DeskHub, next: Layout) => Promise<Layout>,
+  quiet = false,
+): Promise<boolean> => {
   const hubLayout = useHubLayout.getState().layout;
   const hub = useDesk.getState().hub;
   if (hubLayout && hub) {
     const next = change(hubLayout);
-    if (!next || next === hubLayout) return;
+    if (!next || next === hubLayout) return Promise.resolve(true);
     useHubLayout.setState({ layout: next });
-    send(hub, (h) => call(h, next));
-    return;
+    return send(hub, (h) => call(h, next), quiet);
   }
   const s = useSettings.getState();
   const next = change(layoutOf(s));
   if (next) s.set({ groups: next.groups, ungrouped: next.ungrouped });
+  return Promise.resolve(true);
 };
 
 // Each change, as `model` makes it and as the hub's routes do. Ungrouped's
@@ -103,56 +122,81 @@ export const changeLayout = (change: (layout: Layout) => Layout | null, call: (h
 // Desk knows), so changes that place things in it send that order.
 
 export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): void =>
-  changeLayout(
+  void changeLayout(
     (l) => created(l, id, name, items),
     (h) => h.createGroup({ id, name, items: [...items] }),
   );
 
 export const renameGroup = (id: string, name: string): void =>
-  changeLayout(
+  void changeLayout(
     (l) => renamed(l, id, name),
     (h) => h.updateGroup(id, { name: name.trim() }),
   );
 
 export const collapseGroup = (id: string, to: boolean): void =>
-  changeLayout(
+  void changeLayout(
     (l) => collapsed(l, id, to),
     (h) => h.updateGroup(id, { collapsed: to }),
   );
 
 /** Its members go to the end of Ungrouped. */
 export const deleteGroup = (present: readonly ItemKey[], id: string): void =>
-  changeLayout(
+  void changeLayout(
     (l) => deleted(l, present, id),
     (h, next) => h.deleteGroup(id).then(() => h.orderUngrouped(next.ungrouped.items)),
   );
 
 export const moveGroup = (id: string, before: string | null): void =>
-  changeLayout(
+  void changeLayout(
     (l) => movedGroup(l, id, before),
     (h) => h.moveGroup(id, before),
   );
 
-/** Whether `key` may be in this computer's groups: anything but a session
- *  on a machine (`session:<machine>/<id>`), which is grouped on its own
- *  engine; groups don't mix machines. */
-export const groupable = (key: ItemKey): boolean => !key.startsWith("session:") || splitKey(key.slice("session:".length)).machine === LOCAL;
-
+/** Any session, this computer's or a machine's (`session:<machine>/<id>`),
+ *  and any agent can be in any group. */
 export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
-  void (groupable(key) &&
-  changeLayout(
+  void changeLayout(
     (l) => moved(l, present, key, to, before),
     (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
-  ));
+  );
 
 export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
-  changeLayout(
+  void changeLayout(
     (l) => removed(l, present, key),
     (h, next) => h.orderUngrouped(next.ungrouped.items),
   );
 
 export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Drop): void =>
   drop.kind === "item" ? moveItem(present, dragged, drop.group, drop.before) : moveGroup(dragged, drop.before);
+
+/** How many times a whole-layout change is made again to what the hub
+ *  has, when the hub changed it meanwhile. */
+export const REPLACE_TRIES = 3;
+
+/** A change no one route says (a machine's sessions forgotten, its groups
+ *  merged in): the whole layout as changed, in turn with the rest. The hub
+ *  may change it itself meanwhile (an agent groups something, a session of
+ *  its own is placed or forgotten), so the change is made to what it has
+ *  now and sent saying so; if it changed again before the write (409), it's
+ *  read and made again, a few times. Settles with whether the hub took it.
+ *  Failures are only logged: what calls this tries again itself. */
+export const replaceLayout = (change: (layout: Layout) => Layout | null): Promise<boolean> =>
+  changeLayout(
+    change,
+    async (h) => {
+      for (let tries = 1; ; tries++) {
+        const fresh = await h.layout();
+        const next = change(fresh);
+        if (!next) return fresh;
+        try {
+          return await h.replaceLayout(next, fresh);
+        } catch (e) {
+          if (!(e instanceof HubError && e.status === 409) || tries >= REPLACE_TRIES) throw e;
+        }
+      }
+    },
+    true,
+  );
 
 // ── Names ─────────────────────────────────────────────────────────────────
 
@@ -223,10 +267,11 @@ const handOver = (hubLayout: Layout): void => {
 /** Forgets sessions the hub says are gone (removed, closed, or missing from
  *  its snapshot of every session) from the groups and names in Desk's
  *  settings. Agents are never forgotten this way: their hub may just be
- *  offline. */
+ *  offline; nor are machines' sessions, which this computer's hub doesn't
+ *  know (their own engines say when they're gone: see machines.ts). */
 export const forgetGone = (gone: (id: string) => boolean): void => {
   const s = useSettings.getState();
-  const next = forgetSessions(layoutOf(s), s.sessionNames, gone);
+  const next = forgetSessions(layoutOf(s), s.sessionNames, (id) => splitKey(id).machine === LOCAL && gone(id));
   if (next) s.set({ groups: next.layout.groups, ungrouped: next.layout.ungrouped, sessionNames: next.names });
 };
 
@@ -252,6 +297,7 @@ let waiting: ((id: string) => boolean) | null = null;
 
 deskListeners.add((e) => {
   if (e.type === "snapshot") {
+    useHubLayout.setState({ kept: !!e.layout });
     if (e.layout) handOver(e.layout);
     else useHubLayout.setState({ layout: null });
   } else if (e.type === "layout") {
@@ -282,6 +328,6 @@ useSettings.subscribe((s, before) => {
 useDesk.subscribe((s, before) => {
   if (s.hub !== before.hub) {
     offered = null;
-    useHubLayout.setState({ layout: null });
+    useHubLayout.setState({ layout: null, kept: null });
   }
 });

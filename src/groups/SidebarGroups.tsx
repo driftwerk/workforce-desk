@@ -9,7 +9,7 @@ import { itemOf, placesOf } from "../grids/where";
 import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
 import { addToGrid as placeInGrid } from "../grids/windows";
 import { openAgentSettings } from "../rooms/AgentPanel";
-import { sortedSessions, useDesk, localSessions } from "../hub/store";
+import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { openTarget, targetOfItem } from "../shell/navigate";
@@ -56,8 +56,10 @@ import {
   useLayout,
 } from "./store";
 import { ENGINE_SHORT } from "../engines/engines";
-import { LOCAL } from "../machines/engines";
-import { refuseAcross } from "../machines/SidebarMachines";
+import { LOCAL, machineOf, sessionKey, splitKey, useMachines, type MachineId } from "../machines/engines";
+import { MachineTag } from "../machines/OnMachine";
+import { offlineWord } from "../machines/words";
+import { useMachineSessions, type Seen } from "./machines";
 import { lifecycleActions, sessionActions } from "../session/actions";
 import { askLifecycle } from "../session/lifecycle";
 
@@ -77,7 +79,19 @@ const STATE: Record<Session["state"], string> = {
 
 const NEW_GROUP = "New group";
 
-type Item = { key: ItemKey; kind: "agent"; agent: Agent } | { key: ItemKey; kind: "session"; session: Session };
+type Item =
+  | { key: ItemKey; kind: "agent"; agent: Agent }
+  | { key: ItemKey; kind: "session"; session: Session }
+  /** A machine's session while its engine isn't here to say (the machine
+   *  is offline, or Desk hasn't reached it yet): as last seen, in its place. */
+  | { key: ItemKey; kind: "away"; machine: MachineId; seen: Seen };
+
+/** The machine a session's row is on. */
+const machineOfRow = (item: Exclude<Item, { kind: "agent" }>): MachineId => (item.kind === "away" ? item.machine : machineOf(item.session));
+
+/** A session row's dot: how it is, or the idle ring when its machine can't
+ *  say. */
+const dotOf = (item: Exclude<Item, { kind: "agent" }>, away = false): string => (item.kind === "away" || away ? "idle" : lookOf(item.session));
 
 type Editing = { kind: "group"; id: string } | { kind: "session"; key: ItemKey } | null;
 
@@ -101,8 +115,8 @@ export const HOVER_MS = 150;
  *  One that's showing in a grid is shown there when clicked. In the Grids
  *  view, the one whose pane has focus is lit, and hovering one points out
  *  its panes. */
-export function SidebarGroups() {
-  const { sessions, openId, view, activeRoom } = useDesk();
+export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string) => void } = {}) {
+  const { sessions, openId, view, activeRoom, engines } = useDesk();
   const { roster, hubs, activeAgent, panelAgent } = useChat();
   const layout = useLayout();
   const { groups } = layout;
@@ -114,6 +128,8 @@ export function SidebarGroups() {
   const allGrids = useGrids((s) => s.grids);
   const shownId = useGrids((s) => shownGrid(s)?.id ?? null);
   const focusedPane = useGrids((s) => (shownId ? s.grids[shownId]?.panes.find((p) => p.id === s.focus[shownId]) : undefined));
+  const machines = useMachines((s) => s.machines);
+  const seen = useMachineSessions((s) => s.seen);
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
@@ -126,8 +142,19 @@ export function SidebarGroups() {
 
   const items = new Map<ItemKey, Item>();
   for (const a of roster) items.set(agentItem(a), { key: agentItem(a), kind: "agent", agent: a });
-  // This computer's alone: a machine's have their own groups, on its engine.
-  for (const s of sortedSessions(localSessions(sessions))) if (s.state !== "closed") items.set(sessionItem(s.id), { key: sessionItem(s.id), kind: "session", session: s });
+  // Every session, this computer's and each machine's, in one order.
+  for (const s of sortedSessions(sessions)) {
+    const key = sessionItem(sessionKey(s));
+    if (s.state !== "closed") items.set(key, { key, kind: "session", session: s });
+  }
+  // A machine's sessions its engine isn't here to show, as last seen, while
+  // the machine is still Desk's.
+  for (const [k, x] of Object.entries(seen)) {
+    const key = sessionItem(k);
+    const machine = splitKey(k).machine;
+    if (items.has(key) || engines[machine]?.loaded || !machines.some((m) => m.id === machine)) continue;
+    items.set(key, { key, kind: "away", machine, seen: x });
+  }
   const present = [...items.keys()];
   const shown = resolve(layout, present);
 
@@ -138,7 +165,13 @@ export function SidebarGroups() {
 
   const hubLabel = (id: string) => hubs.find((h) => h.id === id)?.label ?? id;
   const nameOf = (item: Item | undefined): string =>
-    !item ? "" : item.kind === "agent" ? item.agent.name : (names[item.session.id] ?? item.session.name);
+    !item
+      ? ""
+      : item.kind === "agent"
+        ? item.agent.name
+        : item.kind === "away"
+          ? item.seen.displayName || item.seen.name
+          : (names[sessionKey(item.session)] ?? item.session.name);
   const groupName = (id: string) => shown.find((g) => g.id === id)?.name ?? "";
 
   const register = useCallback((id: string, el: HTMLElement | null) => {
@@ -246,6 +279,7 @@ export function SidebarGroups() {
 
   /** Opens it as always; or, when it's showing in a grid, shows it there. */
   const openItem = (item: Item) => {
+    if (item.kind === "away") return;
     const target = targetOfItem(item.key);
     if (target) openTarget(target);
   };
@@ -261,22 +295,67 @@ export function SidebarGroups() {
 
   const startRename = (item: Item) => item.kind === "session" && setEditing({ kind: "session", key: item.key });
 
+  /** Why a machine's session's row can't say how it is: its machine can't
+   *  be reached (or isn't yet); null for one whose machine can be. */
+  const awayWord = (machine: MachineId): string | null => {
+    if (machine === LOCAL) return null;
+    const m = machines.find((x) => x.id === machine);
+    return (m && offlineWord(m.state)) ?? (engines[machine]?.loaded ? null : "connecting");
+  };
+
+  const metaOf = (item: Item): string => {
+    if (item.kind === "agent")
+      return item.agent.id === managerId && hubs.find((h) => h.id === item.agent.hubId)?.local ? "overseer" : hubLabel(item.agent.hubId);
+    const away = awayWord(machineOfRow(item));
+    if (away) return away;
+    if (item.kind === "away") return ENGINE[item.seen.engine];
+    return waitsOnYou(item.session) ? STATE[item.session.state] : ENGINE[item.session.engine];
+  };
+
+  const titleOf = (item: Item): string => {
+    if (item.kind === "agent") return describeAgent(item.agent, hubLabel(item.agent.hubId));
+    const on = item.kind === "away" ? item.machine : machineOf(item.session);
+    const away = awayWord(on);
+    const where = on === LOCAL ? "" : ` · on ${machines.find((m) => m.id === on)?.name ?? on}`;
+    const engine = ENGINE[item.kind === "away" ? item.seen.engine : item.session.engine];
+    return `${engine}${where} · ${away ?? (item.kind === "session" ? statusOf(item.session, STATE) : "")}`;
+  };
+
   const itemMenu = (key: ItemKey): MenuEntry[] => {
     const item = items.get(key);
     if (!item) return [];
     const from = shown.find((g) => g.items.includes(key))?.id ?? UNGROUPED;
     const targets = shown.filter((g) => g.id !== UNGROUPED && g.id !== from);
+    const removing: MenuEntry[] =
+      from !== UNGROUPED
+        ? [
+            {
+              kind: "item",
+              label: "Remove from group",
+              onSelect: () => {
+                const next = removed(currentLayout(), present, key);
+                removeFromGroup(present, key);
+                after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
+              },
+            },
+          ]
+        : [];
+    const moving: MenuEntry = {
+      kind: "item",
+      label: "Move to group",
+      submenu: [
+        ...targets.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => moveTo(key, g.id) })),
+        ...(targets.length ? [{ kind: "separator" as const }] : []),
+        { kind: "item", label: "New group…", onSelect: () => newGroup(key) },
+      ],
+    };
+    // Its machine can't be reached: it can only be moved.
+    if (item.kind === "away") return [moving, ...removing];
+    // A boss and the board are this computer's hub's: not for a machine's.
+    const here = item.kind !== "session" || machineOf(item.session) === LOCAL;
     return [
       ...(item.kind === "session" ? [{ kind: "item" as const, label: "Rename", kbd: "F2", onSelect: () => startRename(item) }] : []),
-      {
-        kind: "item",
-        label: "Move to group",
-        submenu: [
-          ...targets.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => moveTo(key, g.id) })),
-          ...(targets.length ? [{ kind: "separator" as const }] : []),
-          { kind: "item", label: "New group…", onSelect: () => newGroup(key) },
-        ],
-      },
+      moving,
       {
         kind: "item",
         label: "Add to grid",
@@ -286,25 +365,13 @@ export function SidebarGroups() {
           { kind: "item", label: "New grid", onSelect: () => addToGrid(item, null) },
         ],
       },
-      ...(from !== UNGROUPED
-        ? [
-            {
-              kind: "item" as const,
-              label: "Remove from group",
-              onSelect: () => {
-                const next = removed(currentLayout(), present, key);
-                removeFromGroup(present, key);
-                after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
-              },
-            },
-          ]
-        : []),
+      ...removing,
       { kind: "separator" },
       { kind: "item", label: "Open", onSelect: () => openItem(item) },
       ...(item.kind === "session"
         ? [
             ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
-            ...chargeChoices(item.session, useCharges.getState().bySession[item.session.id], boss).map(
+            ...(here ? chargeChoices(item.session, useCharges.getState().bySession[item.session.id], boss) : []).map(
               (c): MenuEntry => ({
                 kind: "item",
                 label: c.label,
@@ -334,10 +401,13 @@ export function SidebarGroups() {
   };
 
   const clearing: MenuEntry = { kind: "item", label: "Clear finished sessions…", onSelect: () => askLifecycle({ kind: "clear" }) };
+  /** A new session, in this group unless another is chosen. */
+  const starting = (id: string): MenuEntry[] => (onNewSession ? [{ kind: "item", label: "New session…", onSelect: () => onNewSession(id) }] : []);
   const groupMenu = (id: string): MenuEntry[] =>
     id === UNGROUPED
-      ? [clearing]
+      ? [...starting(id), ...(onNewSession ? [{ kind: "separator" as const }] : []), clearing]
       : [
+          ...starting(id),
           { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
           { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
           { kind: "separator" },
@@ -402,13 +472,11 @@ export function SidebarGroups() {
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 0);
         if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
-        // A machine's section takes none of this computer's.
-        if (!e.canceled && refuseAcross(LOCAL, e.operation.position.current)) return;
         if (!s || !d) return;
         dropItem(present, end(s).id, d);
       }}
     >
-      <div className="side-section groups" aria-label="Groups" role="region" data-machine={LOCAL}>
+      <div className="side-section groups" aria-label="Groups" role="region">
         <span className="side-label side-label-action side-head">
           Groups
           <button type="button" className="icon-btn-sm" aria-label="New group" title="New group" onClick={() => newGroup()}>
@@ -460,23 +528,18 @@ export function SidebarGroups() {
                   hint={`${hint}-${item.kind}`}
                   lineBefore={lineBefore}
                   lit={inFocus === key}
+                  away={item.kind !== "agent" && !!awayWord(machineOfRow(item))}
                   on={
-                    item.kind === "session"
-                      ? openId === item.session.id
-                      : view === "rooms"
-                        ? !activeRoom && activeAgent === agentKey(item.agent)
-                        : view === "floor" && panelAgent === agentKey(item.agent)
+                    item.kind === "away"
+                      ? false
+                      : item.kind === "session"
+                        ? openId === sessionKey(item.session)
+                        : view === "rooms"
+                          ? !activeRoom && activeAgent === agentKey(item.agent)
+                          : view === "floor" && panelAgent === agentKey(item.agent)
                   }
-                  meta={
-                    item.kind === "session"
-                      ? waitsOnYou(item.session)
-                        ? STATE[item.session.state]
-                        : ENGINE[item.session.engine]
-                      : item.agent.id === managerId && hubs.find((h) => h.id === item.agent.hubId)?.local
-                        ? "overseer"
-                        : hubLabel(item.agent.hubId)
-                  }
-                  title={item.kind === "agent" ? describeAgent(item.agent, hubLabel(item.agent.hubId)) : `${ENGINE[item.session.engine]} · ${statusOf(item.session, STATE)}`}
+                  meta={metaOf(item)}
+                  title={titleOf(item)}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
                   onOpen={() => {
@@ -486,12 +549,12 @@ export function SidebarGroups() {
                   onStartRename={() => startRename(item)}
                   onRename={(name) => {
                     setEditing(null);
-                    if (name !== null && item.kind === "session") nameSession(item.session.id, name, item.session.name);
+                    if (name !== null && item.kind === "session") nameSession(sessionKey(item.session), name, item.session.name);
                     focusNext.current = key;
                   }}
                   onNudge={(by) => nudge(key, by)}
                   onMenu={(at, from) => setMenu({ kind: "item", key, at, from })}
-                  onRemove={item.kind === "session" ? () => lifecycleActions(item.session).at(-1)!.run() : undefined}
+                  onRemove={item.kind === "session" && !awayWord(machineOf(item.session)) ? () => lifecycleActions(item.session).at(-1)!.run() : undefined}
                   onHover={(over) => hover(over ? key : null)}
                 />
               );
@@ -508,9 +571,10 @@ export function SidebarGroups() {
           if (source.type === "group") return <DragChip>{groupName(id.slice(6))}</DragChip>;
           const item = items.get(id);
           return item ? (
-            <DragChip mono={item.kind === "session"}>
-              {item.kind === "session" ? <span className={`dot dot-${lookOf(item.session)}`} /> : <AgentMark agent={agentKey(item.agent)} name={item.agent.name} size="sm" />}
+            <DragChip mono={item.kind !== "agent"}>
+              {item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={item.agent.name} size="sm" /> : <span className={`dot dot-${dotOf(item)}`} />}
               {nameOf(item)}
+              {item.kind !== "agent" && <MachineTag machine={machineOfRow(item)} />}
             </DragChip>
           ) : null;
         }}
@@ -673,6 +737,7 @@ function ItemRow({
   hint,
   lineBefore,
   lit,
+  away,
   on,
   meta,
   title,
@@ -693,6 +758,8 @@ function ItemRow({
   lineBefore: boolean;
   /** Its pane has focus in the grid shown. */
   lit: boolean;
+  /** A machine's session whose machine can't be reached: shown as last seen. */
+  away: boolean;
   on: boolean;
   meta: string;
   title: string;
@@ -708,7 +775,9 @@ function ItemRow({
   onHover: (over: boolean) => void;
 }) {
   const session = item.kind === "session" ? item.session : null;
-  const charge = useCharge(session?.id);
+  // A boss and the board are this computer's hub's.
+  const local = !!session && machineOf(session) === LOCAL;
+  const charge = useCharge(local ? session.id : undefined);
   const inGrids = useGridNames(item.key);
   const says = inGrids.length ? inGridSays(inGrids) : null;
   const markId = `${useId()}-grid`;
@@ -721,22 +790,27 @@ function ItemRow({
       on={on}
       className={lit ? "in-focus" : ""}
       editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
-      lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${lookOf(item.session)}`} aria-hidden="true" />}
+      lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${dotOf(item, away)}`} aria-hidden="true" />}
       name={name}
-      nameClass={session ? "mono" : "display"}
-      meta={<span className={`gi-meta small ${session && waitsOnYou(session) ? "state-blocked" : "faint"}`}>{meta}</span>}
+      nameClass={item.kind === "agent" ? "display" : "mono"}
+      meta={
+        <>
+          {item.kind !== "agent" && <MachineTag machine={machineOfRow(item)} />}
+          <span className={`gi-meta small ${session && !away && waitsOnYou(session) ? "state-blocked" : "faint"}`}>{meta}</span>
+        </>
+      }
       title={title}
       describedBy={says ? `${hint} ${markId}` : hint}
       data={{ "data-item": item.key }}
       register={(el) => register(item.key, el)}
       onOpen={onOpen}
-      onStartRename={session ? onStartRename : undefined}
+      onStartRename={session && !away ? onStartRename : undefined}
       onNudge={onNudge}
       onMenu={onMenu}
       onRemove={onRemove}
       onHover={onHover}
     >
-      {session && <SessionTicketChip session={session.id} still className="gi-ticket" />}
+      {local && <SessionTicketChip session={session.id} still className="gi-ticket" />}
       <ChargeBadge charge={charge} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />

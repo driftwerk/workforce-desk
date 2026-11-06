@@ -2962,35 +2962,18 @@ body.line-resizing * {
   overflow-wrap: anywhere;
 }
 
-/* ── Machines: their headings in the sidebar, "on devbox" chips ─────────── */
+/* ── Machines: a session row's machine tag, "on devbox" chips ────────────── */
 
-.side-machine-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.side-machine-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 4px;
-  color: var(--faint);
-}
-.side-machine-head .dot {
-  width: 8px;
-  height: 8px;
-}
-.side-machine-off {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 500;
-  color: var(--blocked);
-}
-.side-machine-empty {
-  padding: 4px 12px;
-}
-.side-refusal {
-  margin: 6px 10px 0;
+/* A machine's session in the sidebar: its machine after the name, as small
+   as a row's charge badge; the name gives way first. */
+.gi-machine {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  font-size: 11px;
 }
 .chip-machine {
   font-family: inherit;

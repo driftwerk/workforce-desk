@@ -158,15 +158,19 @@ const needRow = (name: string) =>
     .find((b) => b.querySelector("b")?.textContent === name)!;
 
 describe("the Floor with a machine's engine", () => {
-  it("sums what needs you over both engines, and keeps the machine's sessions out of this computer's groups", async () => {
+  it("sums what needs you over both engines, and lists the machine's sessions in the same groups, tagged", async () => {
     await shell();
     expect(counts()).toBe("1 working · 2 need you · 3 done today");
     expect(within(needsTab()).getByText("2")).toBeTruthy();
-    // The same session id on each engine is two sessions.
+    // The same session id on each engine is two sessions, and two rows.
     expect(Object.keys(useDesk.getState().sessions).sort()).toEqual(["devbox/s1", "devbox/s2", "s1"]);
-    expect(sidebarNames()).toContain("api-e7");
-    expect(sidebarNames()).not.toContain("web-d2");
-    expect(sidebarNames()).not.toContain("worker-b4");
+    expect(sidebarNames()).toEqual(expect.arrayContaining(["api-e7", "web-d2", "worker-b4"]));
+    const items = [...document.querySelectorAll<HTMLElement>("[data-item]")];
+    const web = items.find((b) => b.dataset.item === "session:devbox/s1")!;
+    expect(web.querySelector(".gi-machine")?.textContent).toBe("devbox");
+    expect(items.find((b) => b.dataset.item === "session:s1")!.querySelector(".gi-machine")).toBeNull();
+    fireEvent.click(web);
+    expect(useDesk.getState().openId).toBe("devbox/s1");
   });
 
   it("opens the machine's session, not this computer's with the same id", async () => {

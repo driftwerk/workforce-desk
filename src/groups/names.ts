@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { sessionKey } from "../hub/machines";
+import { LOCAL, sessionKey, splitKey } from "../hub/machines";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
@@ -42,5 +42,8 @@ export const useSessionNames = (): Record<string, string> => {
       ),
     [sessions, restore],
   );
-  return hub ? theirs : local;
+  // A machine's engine keeps the names given its sessions whichever this
+  // computer's hub is.
+  const machines = useMemo(() => Object.fromEntries(Object.entries(theirs).filter(([k]) => splitKey(k).machine !== LOCAL)), [theirs]);
+  return useMemo(() => (hub ? theirs : { ...machines, ...local }), [hub, theirs, machines, local]);
 };

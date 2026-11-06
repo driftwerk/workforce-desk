@@ -97,8 +97,3 @@ export const targetProblem = (target: string): string | null => {
   if (new TextEncoder().encode(t).length > 255) return "That address is too long.";
   return null;
 };
-
-/** What Desk says when a session is dragged from one machine's sidebar
- *  to another's: groups don't mix machines. */
-export const acrossMachines = (from: string, to: string, fromInSentence: string | null = null): string =>
-  `${from}’s sessions stay with ${fromInSentence ?? from}. Groups don’t mix machines, so it can’t move to ${to}.`;

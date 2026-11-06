@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, defaultChoice, hasAccounts, useAccounts } from "../engines/accounts";
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
+import { useChat } from "../chat/store";
+import { groupOf, sessionItem, UNGROUPED, type ItemKey, type Layout } from "../groups/model";
+import { moveItem, useLayout } from "../groups/store";
 import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo } from "../hub/types";
 import { keyOf, LOCAL, useHubOf, useMachines, type MachineId } from "../machines/engines";
@@ -19,8 +22,32 @@ const machineEnv = async (native: Pick<MachineNative, "pluginDir">, machine: Mac
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
 
-export function NewSession({ onClose, native = machineNative }: { onClose: () => void; native?: MachineNative }) {
+/** The group a new session starts in unless another is chosen: the one it
+ *  was started from (a group's menu), else the open session's or agent's,
+ *  else Ungrouped. */
+export const startingGroup = (layout: Layout, given: string | undefined, open: ItemKey | null): string => {
+  if (given && (given === UNGROUPED || layout.groups.some((g) => g.id === given))) return given;
+  return open ? groupOf(layout, open) : UNGROUPED;
+};
+
+/** What New session says of where the session will show. */
+export const groupSays = (group: string, startedIn: string, name: string, machine: string | null): string => {
+  const tag = machine ? ` with a ${machine} tag` : "";
+  if (group !== UNGROUPED && group === startedIn) return `${name}, where you started it.${machine ? ` It shows in ${name}${tag}.` : ""}`;
+  return `It shows in ${group === UNGROUPED ? "Ungrouped" : name}${tag}.`;
+};
+
+export function NewSession({ onClose, group: given, native = machineNative }: { onClose: () => void; group?: string; native?: MachineNative }) {
   const { fail, open } = useDesk();
+  const layout = useLayout();
+  // Where it shows: the group it was started from, unless another is chosen.
+  const [startedIn] = useState(() => {
+    const { openId, view, activeRoom } = useDesk.getState();
+    const agent = useChat.getState().activeAgent;
+    const shown = openId ? sessionItem(openId) : view === "rooms" && !activeRoom && agent ? `agent:${agent}` : null;
+    return startingGroup(layout, given, shown);
+  });
+  const [group, setGroup] = useState(startedIn);
   // Where it runs: this computer, or a machine once there's one.
   const [runOn, setRunOn] = useState<MachineId>(LOCAL);
   const remote = runOn !== LOCAL;
@@ -89,7 +116,10 @@ export function NewSession({ onClose, native = machineNative }: { onClose: () =>
         worktree: worktree.trim() || undefined,
         env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
       });
-      open(keyOf(runOn, s.id));
+      const key = keyOf(runOn, s.id);
+      // In its group whichever computer it runs on; Ungrouped takes it as it comes.
+      if (group !== UNGROUPED && layout.groups.some((g) => g.id === group)) moveItem([], sessionItem(key), group, null);
+      open(key);
       onClose();
     } catch (err) {
       fail(err);
@@ -142,6 +172,29 @@ export function NewSession({ onClose, native = machineNative }: { onClose: () =>
               </button>
             </span>
           </label>
+        )}
+        {layout.groups.length > 0 && (
+          <div className="field">
+            <span className="ov-label muted">Group</span>
+            <div className="chip-row" role="radiogroup" aria-label="Group">
+              {[...layout.groups, { id: UNGROUPED, name: "Ungrouped" }].map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="radio"
+                  className="chip-btn"
+                  aria-checked={group === g.id}
+                  aria-pressed={group === g.id}
+                  onClick={() => setGroup(g.id)}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+            <span className="muted small">
+              {groupSays(group, startedIn, layout.groups.find((g) => g.id === group)?.name ?? "Ungrouped", remote ? where : null)}
+            </span>
+          </div>
         )}
         <label className="field">
           <span>Name</span>

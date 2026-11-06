@@ -99,7 +99,8 @@ export function App() {
   const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
   const theme = useTheme();
   const { setCustom, setSystemDark } = useThemeStore();
-  const [newSession, setNewSession] = useState(false);
+  // New session's sheet, with the group it was started from, if any.
+  const [newSession, setNewSession] = useState<{ group?: string } | null>(null);
   const [asking, setAsking] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [newCrew, setNewCrew] = useState(false);
@@ -237,7 +238,7 @@ export function App() {
   }, []);
   useGridWindows(useGrids((s) => s.ready));
 
-  useAppShortcut("newSession", () => setNewSession(true));
+  useAppShortcut("newSession", () => setNewSession({}));
   useAppShortcut("newTerminal", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setView("grids");
@@ -354,7 +355,7 @@ export function App() {
           <ErrorBoundary name="sidebar">
             <Sidebar
               onAsk={() => setAsking(true)}
-              onNewSession={() => setNewSession(true)}
+              onNewSession={(group) => setNewSession({ group })}
               onNewRoom={() => setNewRoom(true)}
               onNewCrew={() => setNewCrew(true)}
               onSettings={() => openSettings()}
@@ -367,7 +368,7 @@ export function App() {
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
-                  <Floor onNewSession={() => setNewSession(true)} />
+                  <Floor onNewSession={() => setNewSession({})} />
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (
@@ -380,7 +381,7 @@ export function App() {
           />
         </>
       )}
-      {newSession && <NewSession onClose={() => setNewSession(false)} />}
+      {newSession && <NewSession group={newSession.group} onClose={() => setNewSession(null)} />}
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
       <OpenRoomDetails />

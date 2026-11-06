@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
@@ -7,7 +7,10 @@ import { useMachines } from "../machines/engines";
 import { FOLDERS_DEBOUNCE_MS } from "../machines/RunOn";
 import { fakeNative, foldersTransport, machine, noEngines, withEngine } from "../machines/testing";
 import { DEFAULT_HOST, useHost } from "../shell/host";
-import { NewSession } from "./NewSession";
+import { EMPTY_LAYOUT } from "../groups/model";
+import { useHubLayout } from "../groups/store";
+import { useSettings } from "../settings/store";
+import { groupSays, NewSession } from "./NewSession";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
@@ -18,6 +21,7 @@ vi.mock("../platform", () => ({
   pickFolder: vi.fn(async () => null),
   claudePluginDir: vi.fn(async () => "/Applications/Desk.app/Contents/Resources/claude-plugin"),
   programsUnder: vi.fn(async () => []),
+  saveSettings: vi.fn(async () => {}),
 }));
 
 const engine = (e: Partial<EngineInfo> & Pick<EngineInfo, "engine" | "title">): EngineInfo => ({
@@ -116,4 +120,56 @@ it("forgets a folder typed for another computer when Run on changes", async () =
   fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/Users/me/work" } });
   await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
   expect((screen.getByLabelText("Folder on devbox") as HTMLInputElement).value).toBe("");
+});
+
+describe("its group", () => {
+  const ACME = { id: "acme", name: "Acme", collapsed: false, items: ["session:s-1", "session:devbox/d1"] };
+  const ATLAS = { id: "atlas", name: "Atlas", collapsed: false, items: [] };
+  beforeEach(() => {
+    useHubLayout.setState({ layout: null, kept: false });
+    useSettings.setState({ loaded: true, groups: [ACME, ATLAS], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  });
+  const group = () => screen.getByRole("radiogroup", { name: "Group" });
+  const chosen = () => within(group()).getAllByRole("radio").find((r) => r.getAttribute("aria-checked") === "true")?.textContent;
+
+  it("is the group it was started from, else the open session's, else Ungrouped", () => {
+    render(<NewSession group="atlas" onClose={() => {}} native={fakeNative().native} />);
+    expect(within(group()).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Acme", "Atlas", "Ungrouped"]);
+    expect(chosen()).toBe("Atlas");
+    expect(screen.getByText("Atlas, where you started it.")).toBeTruthy();
+    cleanup();
+    useDesk.setState({ openId: "devbox/d1" });
+    render(<NewSession onClose={() => {}} native={fakeNative().native} />);
+    expect(chosen()).toBe("Acme");
+    cleanup();
+    useDesk.setState({ openId: null });
+    render(<NewSession onClose={() => {}} native={fakeNative().native} />);
+    expect(chosen()).toBe("Ungrouped");
+  });
+
+  it("a session started on a machine lands in the chosen group, with its machine's tag", async () => {
+    const { native } = fakeNative({ transport: vi.fn(() => foldersTransport({ home: "/home/dev", folders: [] }, [])) });
+    render(<NewSession group="acme" onClose={() => {}} native={native} />);
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
+    expect(screen.getByText("Acme, where you started it. It shows in Acme with a devbox tag.")).toBeTruthy();
+    fireEvent.click(within(group()).getByRole("radio", { name: "Atlas" }));
+    expect(screen.getByText("It shows in Atlas with a devbox tag.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Folder on devbox"), { target: { value: "~/src/atlas" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start on devbox" })));
+    expect(useSettings.getState().groups[1]!.items).toEqual(["session:devbox/s-9"]);
+  });
+
+  it("one on this computer lands in its group too; Ungrouped takes one as it comes", async () => {
+    render(<NewSession group="atlas" onClose={() => {}} native={fakeNative().native} />);
+    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/Users/me/atlas" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+    expect(useSettings.getState().groups[1]!.items).toEqual(["session:s-1"]);
+    expect(groupSays("ungrouped", "acme", "Ungrouped", null)).toBe("It shows in Ungrouped.");
+  });
+
+  it("isn't asked with no groups", () => {
+    useSettings.setState({ groups: [] });
+    render(<NewSession onClose={() => {}} native={fakeNative().native} />);
+    expect(screen.queryByRole("radiogroup", { name: "Group" })).toBeNull();
+  });
 });

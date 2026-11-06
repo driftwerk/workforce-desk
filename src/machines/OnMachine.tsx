@@ -23,3 +23,19 @@ export function OnMachine({ machine, className = "" }: { machine: MachineId | nu
     </span>
   );
 }
+
+/** A sidebar row's machine: its name in a small tag after the session's
+ *  name (none for this computer's), amber while it can't be reached, saying
+ *  why in its title. */
+export function MachineTag({ machine }: { machine: MachineId | null | undefined }) {
+  const remote = !!machine && machine !== LOCAL;
+  const m = useMachines((s) => (remote ? s.machines.find((x) => x.id === machine) : undefined));
+  if (!remote) return null;
+  const name = m?.name ?? machine;
+  const off = m ? offlineWord(m.state) : null;
+  return (
+    <span className={`chip gi-machine ${off ? "chip-machine-off" : ""}`} title={off ? `${name} is ${off}` : `Runs on ${name}`}>
+      {name}
+    </span>
+  );
+}

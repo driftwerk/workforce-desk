@@ -8,6 +8,7 @@ import { GridWindow } from "./grids/GridWindow";
 import { GRID_PREFIX } from "./grids/storage";
 import { DRAIN_PREFIX } from "./hubs/drain";
 import { detachedGrid } from "./grids/windows";
+import { followMachineSessions, machineSessions, SIDEBAR_PREFIX } from "./groups/machines";
 import { deskState, restoreBeforeRender } from "./restore/boot";
 import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
@@ -33,11 +34,13 @@ function Ready() {
   return null;
 }
 
-// Grids, the rooms' order and how far each conversation has been drained
-// are kept with the rest of what Desk restores.
+// Grids, the rooms' order, how far each conversation has been drained and
+// the machines' sessions in the sidebar are kept with the rest of what Desk
+// restores.
 void deskState.register(GRID_PREFIX);
 void deskState.register(ROOMS_PREFIX);
 void deskState.register(DRAIN_PREFIX);
+void deskState.register(SIDEBAR_PREFIX);
 
 // A detached grid's window shows that grid alone (see grids/GridWindow).
 const grid = detachedGrid();
@@ -46,11 +49,12 @@ const grid = detachedGrid();
 // (made hidden, where it was) is shown once it has: no default view first.
 // What this computer is (its platform, where the backend runs) is read then
 // too, so every screen words itself for it from the start.
-void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder]), loadHost().catch(() => undefined)]).then(() => {
+void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder, machineSessions]), loadHost().catch(() => undefined)]).then(() => {
   // A detached grid has no drafts of its own to keep, nor rooms.
   if (!grid) {
     keepFileDrafts();
     followRooms();
+    followMachineSessions();
   }
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

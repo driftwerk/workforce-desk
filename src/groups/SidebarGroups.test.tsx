@@ -15,6 +15,8 @@ import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { HOVER_MS, SidebarGroups } from "./SidebarGroups";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
+import { useMachines } from "../hub/engines";
+import { useMachineSessions } from "./machines";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -458,5 +460,85 @@ describe("sessions and agents in grids", () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe("a machine's sessions, in the same groups", () => {
+  const devbox = (state = "ready") => ({ id: "devbox", name: "devbox", target: "devbox", version: null, state: { kind: state } }) as never;
+  const remote = (id: string, name: string, more: Partial<Session> = {}) => ({ ...session(id, name, more), machine: "devbox" });
+  const tag = (name: string) => row(name).querySelector(".gi-machine");
+
+  beforeEach(() => {
+    useMachines.setState({ machines: [devbox()], listed: true });
+    useMachineSessions.setState({ seen: {}, merged: [] });
+    useDesk.setState({
+      sessions: { ...useDesk.getState().sessions, "devbox/d1": remote("d1", "acme-web", { state: "blocked" }), "devbox/d2": remote("d2", "cufflink") },
+      engines: { devbox: { hub: null as never, connected: true, loaded: true, error: null } },
+    });
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "session:devbox/d1"] }, BETA] });
+  });
+  afterEach(() => {
+    useMachines.setState({ machines: [], listed: false });
+    useDesk.setState({ engines: {} });
+  });
+
+  it("sit in any group, or Ungrouped, ordered as this computer's are, each with its machine's tag", () => {
+    groups();
+    expect(rows("Acme")).toEqual(["Scout", "api-e7", "acme-web"]);
+    expect(rows("Ungrouped")).toEqual(["Ada", "web-release", "cufflink"]);
+    expect(tag("acme-web")?.textContent).toBe("devbox");
+    expect(tag("acme-web")?.className).toContain("chip");
+    expect(tag("acme-web")?.className).not.toContain("chip-machine-off");
+    // The tag comes before what it's waiting on.
+    expect(row("acme-web").textContent).toMatch(/acme-web.*devbox.*needs you/);
+    expect(tag("api-e7")).toBeNull();
+    expect(screen.queryByText("This Mac")).toBeNull();
+  });
+
+  it("move between groups and back to Ungrouped, by keyboard and menu, as the layout's machine-qualified item", () => {
+    groups();
+    fireEvent.keyDown(row("acme-web"), { key: "ArrowDown", altKey: true });
+    expect(rows("Beta")).toEqual(["acme-web"]);
+    expect((lastSaved().groups as DeskGroup[])[1]!.items).toEqual(["session:devbox/d1"]);
+    fireEvent.contextMenu(row("cufflink"));
+    expect(screen.queryByRole("menuitem", { name: /Take over|boss/i })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Move to group/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Acme" }));
+    expect(rows("Acme")).toEqual(["Scout", "api-e7", "cufflink"]);
+    fireEvent.contextMenu(row("acme-web"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from group" }));
+    expect(rows("Ungrouped")).toEqual(["Ada", "web-release", "acme-web"]);
+    fireEvent.click(row("cufflink"));
+    expect(useDesk.getState().openId).toBe("devbox/d2");
+  });
+
+  it("an offline machine's sessions keep their places, as last seen, shown offline", () => {
+    useMachines.setState({ machines: [devbox("unreachable")] });
+    useMachineSessions.setState({ seen: { "devbox/d1": { name: "acme-web", engine: "claude" }, "devbox/d9": { name: "atlas-etl", engine: "codex", displayName: "ETL" } }, merged: [] });
+    // Desk started without reaching it: no engine, none of its sessions.
+    const { s1, s2 } = useDesk.getState().sessions;
+    useDesk.setState({ sessions: { s1: s1!, s2: s2! }, engines: {} });
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "session:devbox/d1"] }, { ...BETA, items: ["session:devbox/d9"] }] });
+    groups();
+    expect(rows("Acme")).toEqual(["Scout", "api-e7", "acme-web"]);
+    expect(rows("Beta")).toEqual(["ETL"]);
+    expect(tag("acme-web")?.className).toContain("chip-machine-off");
+    expect(tag("acme-web")?.getAttribute("title")).toBe("devbox is offline");
+    expect(row("acme-web").textContent).toContain("offline");
+    expect(row("acme-web").querySelector(".dot")?.className).toContain("dot-idle");
+    // Still moved as any other; nothing else is offered while it's away.
+    fireEvent.contextMenu(row("ETL"));
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Move to group▸", "Remove from group"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from group" }));
+    expect(rows("Ungrouped")).toEqual(["Ada", "web-release", "ETL"]);
+  });
+
+  it("a machine removed from Desk: its sessions leave the sidebar", () => {
+    useMachineSessions.setState({ seen: { "devbox/d1": { name: "acme-web", engine: "claude" } }, merged: [] });
+    useDesk.setState({ sessions: { s1: useDesk.getState().sessions.s1! }, engines: {} });
+    groups();
+    expect(rows("Acme")).toEqual(["Scout", "api-e7", "acme-web"]);
+    act(() => useMachines.setState({ machines: [] }));
+    expect(rows("Acme")).toEqual(["Scout", "api-e7"]);
   });
 });

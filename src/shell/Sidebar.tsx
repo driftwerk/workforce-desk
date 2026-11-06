@@ -8,7 +8,6 @@ import { DeleteRoom } from "../rooms/DeleteRoom";
 import { markRoomRead } from "../unread/reads";
 import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
-import { SidebarMachines, ThisComputerHeading } from "../machines/SidebarMachines";
 import { useDesk } from "../hub/store";
 import { logoDot } from "../theme/builtin";
 import { useTheme } from "../theme/store";
@@ -125,7 +124,8 @@ export function Sidebar({
   onSettings,
 }: {
   onAsk: () => void;
-  onNewSession: () => void;
+  /** From a group's menu, with the group it starts in. */
+  onNewSession: (group?: string) => void;
   onNewRoom: () => void;
   onNewCrew: () => void;
   onSettings: () => void;
@@ -268,11 +268,7 @@ export function Sidebar({
               {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
             </div>
           )}
-          <div className="side-machine-block">
-            <ThisComputerHeading />
-            <SidebarGroups />
-          </div>
-          <SidebarMachines />
+          <SidebarGroups onNewSession={onNewSession} />
           {view === "grids" && <p className="faint small side-hint">Drag a session or agent from here onto a pane. Hold ⇧ to drop it in the next free place.</p>}
         </div>
         <span className="side-fade side-fade-top" aria-hidden="true" />
@@ -280,7 +276,7 @@ export function Sidebar({
       </div>
       <div className="side-foot">
         <div className="side-actions">
-          <button type="button" className="btn side-btn" onClick={onNewSession} aria-label="New session">
+          <button type="button" className="btn side-btn" onClick={() => onNewSession()} aria-label="New session">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <path d="M7 2v10M2 7h10" />
             </svg>
