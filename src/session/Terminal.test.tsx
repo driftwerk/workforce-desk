@@ -8,8 +8,8 @@ import { useAppShortcut } from "../shortcuts/manager";
 import { NIGHT } from "../theme/builtin";
 import { useThemeStore } from "../theme/store";
 import { EMOJI_STACK } from "../theme/tokens";
-import { askNatively, openUrl } from "../platform";
-import { Terminal, linkAction, reattachPrefix, terminalLinks } from "./Terminal";
+import { openTerminalLink, openUrl } from "../platform";
+import { Terminal, reattachPrefix, terminalLinks } from "./Terminal";
 
 const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement; written: string[]; resets: number }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -59,7 +59,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { proposeDimensions = () => ({ cols: 80, rows: 24 }); } }));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
-vi.mock("../platform", async (real) => ({ ...(await real<typeof import("../platform")>()), openUrl: vi.fn(), askNatively: vi.fn(async () => false) }));
+vi.mock("../platform", async (real) => ({ ...(await real<typeof import("../platform")>()), openUrl: vi.fn(), openTerminalLink: vi.fn(async () => true) }));
 
 afterEach(cleanup);
 
@@ -298,7 +298,7 @@ describe("a terminal that ended", () => {
 
 
 describe("a link in a terminal", () => {
-  it("opens an http(s) page in the browser, never through the page's confirm or window.open", () => {
+  it("is decided and asked about natively, never through the page's confirm, window.open or opener", () => {
     const confirm = vi.spyOn(window, "confirm");
     const open = vi.spyOn(window, "open");
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -309,47 +309,12 @@ describe("a link in a terminal", () => {
     expect(terms.at(-1)!.options.linkHandler).toBe(terminalLinks);
     const page = "https://claude.com/cai/oauth/authorize?code=true&state=s";
     terminalLinks.activate(new MouseEvent("click"), page);
-    expect(openUrl).toHaveBeenCalledWith(page);
-    for (const other of ["file:///etc/passwd", "javascript:alert(1)", "ssh://devbox", "not a link"]) terminalLinks.activate(new MouseEvent("click"), other);
-    expect(openUrl).toHaveBeenCalledTimes(1);
+    terminalLinks.activate(new MouseEvent("click"), "http://127.0.0.1:9/");
+    expect(vi.mocked(openTerminalLink).mock.calls).toEqual([[page], ["http://127.0.0.1:9/"]]);
+    expect(openUrl).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
     expect(terminalLinks.allowNonHttpProtocols).toBe(false);
     vi.unstubAllGlobals();
-  });
-
-  it("opens only Claude's and OpenAI's sign-in pages at once, asks about others by their real address, and never opens local ones", async () => {
-    for (const page of ["https://claude.ai/oauth/authorize?x=1", "https://auth.openai.com/codex/device", "https://console.anthropic.com/x"])
-      expect(linkAction(page)).toEqual({ kind: "open", url: page });
-    expect(linkAction("https://claude.ai.evil.example/x").kind).toBe("ask");
-    expect(linkAction("http://claude.ai/x").kind).toBe("ask");
-    expect(linkAction("https://example.com/claude.ai")).toEqual({ kind: "ask", url: "https://example.com/claude.ai" });
-    for (const local of [
-      "http://localhost:3000/",
-      "http://127.0.0.1:8080/api",
-      "http://[::1]/",
-      "http://10.0.3.14/",
-      "http://192.168.1.1/",
-      "http://172.20.0.2/",
-      "http://169.254.169.254/latest/meta-data",
-      "http://devbox/",
-      "http://printer.local/",
-      "https://user:pw@claude.ai/",
-    ])
-      expect(linkAction(local), local).toEqual({ kind: "refuse" });
-
-    const ask = vi.mocked(askNatively);
-    vi.mocked(openUrl).mockClear();
-    ask.mockResolvedValueOnce(false);
-    terminalLinks.activate(new MouseEvent("click"), "https://example.com/page");
-    await vi.waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
-    expect(ask.mock.calls[0]![1]).toContain("https://example.com/page");
-    await Promise.resolve();
-    expect(openUrl).not.toHaveBeenCalled();
-    ask.mockResolvedValueOnce(true);
-    terminalLinks.activate(new MouseEvent("click"), "https://example.com/page");
-    await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://example.com/page"));
-    terminalLinks.activate(new MouseEvent("click"), "http://127.0.0.1:9/");
-    expect(ask).toHaveBeenCalledTimes(2);
   });
 });

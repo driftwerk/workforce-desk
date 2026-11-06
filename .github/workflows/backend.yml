@@ -85,6 +85,18 @@ jobs:
       - name: Build Desk Helper
         working-directory: desk
         run: cargo build --locked -p desk-hubd
+      # The programs Desk Helper starts are handed the hub's secrets: only a
+      # development build may be pointed at others, and no release enables it.
+      - name: Desk Helper refuses to be pointed at another hub
+        working-directory: desk
+        run: |
+          if said=$(target/debug/desk-hubd --workforce /nonexistent 2>&1); then
+            echo "desk-hubd took --workforce"; exit 1
+          fi
+          echo "$said" | grep -q "only for development builds" || { echo "$said"; exit 1; }
+          if grep -n "dev-overrides" .github/workflows/release.yml .github/workflows/backend-build.yml scripts/build-sidecars.sh; then
+            echo "a release build enables dev-overrides"; exit 1
+          fi
       - name: Build the hub
         working-directory: workforce-public-desk
         run: cargo build --locked -p workforce-cli --bin workforce

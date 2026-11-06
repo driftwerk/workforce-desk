@@ -248,7 +248,12 @@ the same and can delete the data.
 
 A development run (`npm run tauri dev` with `DESK_HOME` set) registers
 nothing. It talks to a `desk-hubd` you start yourself (`target/debug/desk-hubd
---workforce <hub>`). `scripts/stage-sidecars.sh` builds the development
+--workforce <hub>`), built with `cargo build -p desk-hubd --features
+dev-overrides`: only that feature lets `--workforce` and `--memory` choose the
+programs it starts (a local release-style install that needs them: `cargo
+build --release -p desk-hubd --features dev-overrides`). Release builds
+(`build-sidecars.sh`, `release.yml`, `backend-build.yml`) never enable it, and
+`build-sidecars.sh` checks the release helper refuses `--workforce`. `scripts/stage-sidecars.sh` builds the development
 sidecars under their bundle names (`Desk Helper-<triple>`,
 `Desk Agents-<triple>`, `Desk Memory-<triple>` on macOS, `desk-helper-<triple>`
 and so on on Linux). Without a `vellev` beside

@@ -10,9 +10,7 @@ use std::time::{Duration, Instant};
 use desk_core::backend_install::PLUGIN;
 use desk_core::host::Host;
 use desk_core::install::Install;
-use desk_core::{
-    HUB_EXECUTABLE, HubPorts, KeyStore, Paths, Secret, Secrets, read_ports, write_ports,
-};
+use desk_core::{HubPorts, KeyStore, Paths, Secret, Secrets, read_ports, write_ports};
 use eyre::{Context, Result};
 use postgresql_embedded::{PostgreSQL, Settings};
 use tokio::process::{Child, Command};
@@ -84,18 +82,74 @@ fn ports_where(paths: &Paths, is_free: impl Fn(u16) -> bool) -> Result<HubPorts>
 /// opens (adding Desk's), unlike the rest of `CLAUDE*`.
 const PLUGIN_DIRS: &str = "CLAUDE_CODE_PLUGIN_DIRS";
 
-/// Environment for `workforce serve`: login env, minus anything a parent
-/// Claude Code session leaked (but the person's plugin folders). Never the
-/// secrets: they go on a pipe ([`crate::handover`]), as anything in a
-/// process's environment is readable by the person's other processes and
-/// inherited by what the hub starts.
+/// The variables the hub is given from the login environment: who and
+/// where the person is, their locale, proxies, SSH agent, and where their
+/// toolchains live. Nothing else: not what whoever started Desk Helper put
+/// in its environment (a loader's `DYLD_*`/`LD_*`, a runtime's options, a
+/// `WORKFORCE_*` or `GATEWAY_TOKEN` the hub would read), since the hub holds
+/// the gateway token.
+const HUB_ENV: [&str; 41] = [
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "USERNAME",
+    "SHELL",
+    "PATH",
+    "HOSTNAME",
+    "HOST",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "TMPDIR",
+    "TERM",
+    "COLORTERM",
+    "EDITOR",
+    "VISUAL",
+    "PAGER",
+    "SSH_AUTH_SOCK",
+    "MANPATH",
+    "INFOPATH",
+    "JAVA_HOME",
+    "GOPATH",
+    "GOROOT",
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+    "NVM_DIR",
+    "PYENV_ROOT",
+    "VOLTA_HOME",
+    "BUN_INSTALL",
+    "PNPM_HOME",
+    "ANDROID_HOME",
+    "HOMEBREW_PREFIX",
+    "HOMEBREW_CELLAR",
+    "HOMEBREW_REPOSITORY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    PLUGIN_DIRS,
+];
+
+/// Whether the hub is given variable `name` (see [`HUB_ENV`]).
+fn hub_may_have(name: &str) -> bool {
+    HUB_ENV.contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_")
+}
+
+/// Environment for `workforce serve`: the allowed part of the login env
+/// ([`HUB_ENV`]), with none of a parent Claude Code session's (but the
+/// person's plugin folders). Never the secrets: they go on a pipe
+/// ([`crate::handover`]), as anything in a process's environment is
+/// readable by the person's other processes and inherited by what the hub
+/// starts.
 fn hub_env(login: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     // `~/.local/bin` too, where Claude Code's and Codex's installers put
     // them, so one installed from Desk's settings is found without a restart.
     desk_core::shell::with_local_bin(
         login
             .iter()
-            .filter(|(k, _)| !k.starts_with("CLAUDE") || k.as_str() == PLUGIN_DIRS)
+            .filter(|(k, _)| hub_may_have(k))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
@@ -292,30 +346,6 @@ pub async fn stop(child: &mut Child, grace: Duration) {
         }
     }
     let _ = child.kill().await;
-}
-
-/// The hub: `--workforce <path>`, else the one beside this binary — "Desk
-/// Agents" in the app bundle, `desk-agents` on Linux, `workforce` in a
-/// development build — else `workforce` on PATH.
-fn workforce_binary() -> PathBuf {
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--workforce"
-            && let Some(p) = args.next()
-        {
-            return p.into();
-        }
-    }
-    let dir = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf));
-    dir.and_then(|d| {
-        [HUB_EXECUTABLE, "workforce"]
-            .into_iter()
-            .map(|n| d.join(n))
-            .find(|p| p.is_file())
-    })
-    .unwrap_or_else(|| "workforce".into())
 }
 
 /// What a file is on disk: an update that replaces the programs gives them
@@ -758,8 +788,8 @@ async fn run_helper(
     for dir in [paths.hub(), paths.hub_data(), paths.logs()] {
         std::fs::create_dir_all(&dir)?;
     }
-    let workforce = workforce_binary();
-    let store = memory::binary();
+    let workforce = crate::programs::hub()?;
+    let store = crate::programs::memory();
     log_startup(&workforce, store.as_deref()).await;
     let claimed = claim(&paths, store.as_deref()).await?;
     let ports = claimed.ports;
@@ -1062,6 +1092,33 @@ mod tests {
         // The person's own plugin folders stay; the hub adds Desk's.
         assert_eq!(claude, ["CLAUDE_CODE_PLUGIN_DIRS"]);
         assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
+    }
+
+    #[test]
+    fn the_hub_gets_only_the_allowed_environment() {
+        let login: BTreeMap<String, String> = [
+            ("PATH", "/usr/bin"),
+            ("HOME", "/Users/ana"),
+            ("LC_ALL", "en_GB.UTF-8"),
+            ("XDG_CONFIG_HOME", "/Users/ana/.config"),
+            ("SSH_AUTH_SOCK", "/tmp/agent"),
+            ("DYLD_INSERT_LIBRARIES", "/tmp/evil.dylib"),
+            ("LD_PRELOAD", "/tmp/evil.so"),
+            ("NODE_OPTIONS", "--require /tmp/evil.js"),
+            ("WORKFORCE_GATEWAY_TOKEN", "chosen"),
+            ("GATEWAY_TOKEN", "chosen"),
+            ("ACME_API_KEY", "x"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let env = hub_env(&login);
+        let mut keys: Vec<_> = env.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["HOME", "LC_ALL", "PATH", "SSH_AUTH_SOCK", "XDG_CONFIG_HOME"]
+        );
     }
 
     #[test]

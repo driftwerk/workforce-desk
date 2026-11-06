@@ -46,15 +46,15 @@ export DESK_HOME
 work=$(mktemp -d)
 log="$work/desk-helper.log"
 pid=
-helper="$bin/desk-helper"
+# Installed as Desk installs it: a release helper runs only from there.
+if [ -n "$machine" ]; then version=0.0.0-smoke+dev.machine; else version=0.0.0-smoke+dev.desktop; fi
+mkdir -p "$DESK_HOME/bin/$version"
+cp "$bin/desk-helper" "$bin/desk-agents" "$bin/desk-memory" "$DESK_HOME/bin/$version/"
+ln -s "$version" "$DESK_HOME/bin/current"
+helper="$DESK_HOME/bin/current/desk-helper"
 start=("$helper")
 if [ -n "$machine" ]; then
-  version=0.0.0-smoke+dev.machine
-  mkdir -p "$DESK_HOME/bin/$version"
-  cp "$bin/desk-helper" "$bin/desk-agents" "$bin/desk-memory" "$DESK_HOME/bin/$version/"
   cp -R "$bin/claude-plugin" "$DESK_HOME/bin/$version/claude-plugin"
-  ln -s "$version" "$DESK_HOME/bin/current"
-  helper="$DESK_HOME/bin/current/desk-helper"
   start=("$helper" --machine)
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
   # A stand-in for Claude Code: says a version when asked, and otherwise
@@ -119,6 +119,15 @@ say "the hub knows Desk's device"
 until_ok 60 api "$device" /api/me || fail "the hub's gateway didn't answer at $gateway"
 me=$(api "$device" /api/me)
 [ -n "$(jq -r '.id // empty' <<<"$me")" ] || fail "/api/me answered $me"
+
+say "the hub settles on its memories"
+# The memory store's model arrives in the background, and once it does the
+# hub restarts on the store: waited for here, so nothing below races that
+# restart. A model that can't be fetched in time leaves the hub on SQLite.
+if until_ok 180 jq -e '.state == "ready"' "$DESK_HOME/hub/memory/model.json"; then
+  until_ok 120 test -s "$DESK_HOME/hub/memory/moved.json" || fail "memories never moved into the memory store"
+  until_ok 60 api "$device" /api/me || fail "the hub didn't come back on the memory store"
+fi
 
 say "a terminal opens in a folder and runs a shell"
 mkdir -p "$work/acme-web"

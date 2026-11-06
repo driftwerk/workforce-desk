@@ -25,5 +25,11 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ureq = "3.5.0"
 
+[features]
+# Development builds only: lets `--workforce <path>` and `--memory <path>`
+# (and `workforce`/`vellev` on PATH) choose the programs Desk Helper starts.
+# Never in a release: those programs are handed the hub's secrets.
+dev-overrides = []
+
 [dev-dependencies]
 tempfile = { workspace = true }

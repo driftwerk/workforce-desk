@@ -143,6 +143,14 @@ for t in $targets; do
     cargo clean --release --quiet -p postgresql_embedded --target "$t" --manifest-path "$root/Cargo.toml"
   fi
   cargo build --release --locked -p desk-hubd --target "$t" --manifest-path "$root/Cargo.toml"
+  # A release helper starts only the programs installed beside it: it must
+  # refuse to be pointed at another (checked where it can run here).
+  if [ "$t" = "$(rustc -vV | sed -n 's/^host: //p')" ]; then
+    if said=$("$desk_target/$t/release/desk-hubd" --workforce /nonexistent 2>&1); then
+      die "desk-hubd for $t took --workforce"
+    fi
+    case "$said" in *"only for development builds"*) ;; *) die "desk-hubd for $t didn't refuse --workforce: $said" ;; esac
+  fi
   if [ -n "${POSTGRES_ARCHIVE:-}" ]; then
     bundled=("$desk_target/$t/release/build"/postgresql_embedded-*/out/postgresql.tar.gz)
     [ -f "${bundled[0]}" ] || die "desk-hubd for $t bundled no Postgres"

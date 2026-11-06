@@ -84,7 +84,7 @@ const gridCommands = (): Set<string> => {
 
 /** The permission each plugin function the page imports needs. */
 const PLUGIN_PERMISSIONS: Record<string, Record<string, string>> = {
-  "@tauri-apps/plugin-dialog": { open: "dialog:allow-open", save: "dialog:allow-save", ask: "dialog:allow-message" },
+  "@tauri-apps/plugin-dialog": { open: "dialog:allow-open", save: "dialog:allow-save" },
   "@tauri-apps/plugin-fs": {
     readTextFile: "fs:allow-read-text-file",
     writeTextFile: "fs:allow-write-text-file",

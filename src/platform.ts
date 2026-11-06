@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
-import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import type { Attachment, HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
@@ -203,12 +203,10 @@ export const openUrl = (url: string): void => {
   else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
 };
 
-/** A yes-or-no question in the system's own dialog, Cancel the default;
- *  the page's confirm() in a browser preview. */
-export const askNatively = async (title: string, message: string, yes: string): Promise<boolean> => {
-  if (preview) return window.confirm(`${title}\n\n${message}`);
-  return ask(message, { title, kind: "warning", okLabel: yes, cancelLabel: "Cancel" }).catch(() => false);
-};
+/** A link clicked in a terminal, decided natively: Claude's and OpenAI's
+ *  sign-in pages open at once, any other web page after a native question
+ *  naming its real address, local ones never. True when it opened. */
+export const openTerminalLink = (url: string): Promise<boolean> => invoke<boolean>("open_terminal_link", { url });
 
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
 

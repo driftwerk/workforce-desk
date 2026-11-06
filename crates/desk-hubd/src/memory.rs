@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use desk_core::{HubPorts, MEMORY_EXECUTABLE, Paths};
+use desk_core::{HubPorts, Paths};
 use eyre::{Context, Result, bail};
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
@@ -25,38 +25,6 @@ const STOP_GRACE: Duration = Duration::from_secs(45);
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-
-/// The store: `--memory <path>`, else the one beside this binary ("Desk
-/// Memory" in the app bundle, `desk-memory` on Linux, `vellev` in a
-/// development build), else
-/// `vellev` on PATH. `None` when there is none: memories then stay in the
-/// hub's SQLite.
-pub fn binary() -> Option<PathBuf> {
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--memory"
-            && let Some(p) = args.next()
-        {
-            return Some(p.into());
-        }
-    }
-    let beside = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .and_then(|d| {
-            [MEMORY_EXECUTABLE, "vellev"]
-                .into_iter()
-                .map(|n| d.join(n))
-                .find(|p| p.is_file())
-        });
-    beside.or_else(|| {
-        std::env::var_os("PATH").and_then(|path| {
-            std::env::split_paths(&path)
-                .map(|d| d.join("vellev"))
-                .find(|p| p.is_file())
-        })
-    })
-}
 
 pub fn url(ports: &HubPorts) -> String {
     format!("http://127.0.0.1:{}", ports.memory)

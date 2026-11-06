@@ -10,7 +10,7 @@ import { trackedIn } from "../grids/terminals";
 import { keyOf, LOCAL, sessionKey, type MachineId } from "../hub/machines";
 import { hubOf, useDesk, useHubOf } from "../hub/store";
 import type { DeskSocket } from "../hub/transport";
-import { askNatively, openUrl } from "../platform";
+import { openTerminalLink } from "../platform";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
@@ -19,55 +19,14 @@ import { monoStack } from "../theme/tokens";
 import { xtermTheme } from "../theme/xterm";
 import { Viewer } from "./viewer";
 
-/** The sign-in pages Claude Code and Codex print, opened with one click. */
-const SIGN_IN_HOSTS = ["claude.ai", "claude.com", "anthropic.com", "openai.com", "chatgpt.com"];
-
-const isSignInHost = (host: string): boolean => SIGN_IN_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
-
-/** A host on this computer or its own network: never opened from a
- *  terminal, where a program could point the browser at a local service. */
-export const isPrivateHost = (host: string): boolean => {
-  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal") || !h.includes(".") && !h.includes(":")) return true;
-  const v4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
-  if (h.includes(":")) return h === "::" || h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h) || h.startsWith("::ffff:");
-  return false;
-};
-
-/** What clicking `uri` does: Claude's and OpenAI's sign-in pages open at
- *  once; any other web page is asked about first, naming the address it
- *  really goes to (an OSC 8 link's text can say anything); this computer's
- *  own and its network's addresses, and anything not http(s), never open. */
-export const linkAction = (uri: string): { kind: "open" | "ask"; url: string } | { kind: "refuse" } => {
-  let url: URL;
-  try {
-    url = new URL(uri);
-  } catch {
-    return { kind: "refuse" };
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return { kind: "refuse" };
-  if (url.username || url.password || isPrivateHost(url.hostname)) return { kind: "refuse" };
-  if (url.protocol === "https:" && isSignInHost(url.hostname)) return { kind: "open", url: url.href };
-  return { kind: "ask", url: url.href };
-};
-
 /** What a link a program prints in a terminal does when clicked (Claude
- *  Code's sign-in page, say, printed as an OSC 8 link): see
- *  [`linkAction`]. Without it, xterm asks with the page's `confirm()` and
- *  opens with `window.open()`, which the app refuses both: the click did
- *  nothing. */
+ *  Code's sign-in page, say, printed as an OSC 8 link): the native side
+ *  decides and asks (`open_terminal_link`), never the page. Without it,
+ *  xterm asks with the page's `confirm()` and opens with `window.open()`,
+ *  which the app refuses both: the click did nothing. */
 export const terminalLinks = {
   activate: (_e: MouseEvent, uri: string): void => {
-    const what = linkAction(uri);
-    if (what.kind === "open") return openUrl(what.url);
-    if (what.kind === "ask")
-      void askNatively("Open this page?", `A program in this terminal links to:\n\n${what.url}\n\nOpen it in your browser?`, "Open").then((yes) => {
-        if (yes) openUrl(what.url);
-      });
+    void openTerminalLink(uri).catch(() => false);
   },
   allowNonHttpProtocols: false,
 };

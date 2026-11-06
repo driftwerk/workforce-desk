@@ -11,6 +11,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod links;
 mod logins;
 mod machine_accounts;
 mod machine_setup;
@@ -853,6 +854,7 @@ pub fn run() {
             machine_setup::machine_reconnect,
             machine_setup::machine_remove,
             machine_accounts::machine_share_accounts,
+            links::open_terminal_link,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,

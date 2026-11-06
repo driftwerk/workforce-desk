@@ -33,6 +33,8 @@ mod model;
 #[cfg(unix)]
 mod moving;
 #[cfg(unix)]
+mod programs;
+#[cfg(unix)]
 mod supervise;
 
 #[cfg(unix)]
@@ -41,18 +43,24 @@ fn main() -> eyre::Result<()> {
     // Desk Helper writes the local hub's secrets, and migrates them.
     desk_core::vault::writes_as(desk_core::vault::KeyOwner::Helper);
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // A release starts only the programs installed beside it.
+    programs::check_args(&args)?;
     let env = std::env::vars().collect();
     let paths = desk_core::Paths::new()?;
     match Command::parse(&args)? {
-        Command::Run { machine } => supervise::run(
-            paths,
-            env,
-            if machine {
-                config::Mode::Machine
-            } else {
-                config::Mode::Desktop
-            },
-        ),
+        Command::Run { machine } => {
+            // A release runs only from where Desk installs it.
+            programs::check_place(&paths, &env)?;
+            supervise::run(
+                paths,
+                env,
+                if machine {
+                    config::Mode::Machine
+                } else {
+                    config::Mode::Desktop
+                },
+            )
+        }
         Command::Stop => commands::stop(&paths),
         Command::Connection => {
             println!("{}", commands::connection(&paths, &env)?);

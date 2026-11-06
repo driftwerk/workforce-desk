@@ -9,7 +9,6 @@
     "core:default",
     "core:window:allow-start-dragging",
     "dialog:allow-save",
-    "dialog:allow-message",
     "fs:allow-write-file",
     {
       "identifier": "opener:allow-open-url",
@@ -34,6 +33,7 @@
     "allow-local-hub-fetch",
     "allow-local-hub-socket-open",
     "allow-machine-fetch",
+    "allow-open-terminal-link",
     "allow-machine-socket-open",
     "allow-machines-list",
     "allow-machine-public-key",
