@@ -71,7 +71,8 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     cancelAdd: vi.fn(async (_id: string) => undefined),
     retryEngines: vi.fn(async (_id: string) => undefined),
     cancelUpdate: vi.fn(async (_id: string) => undefined),
-    uninstall: vi.fn(async (_id: string) => undefined),
+    uninstall: vi.fn(async (_id: string) => true),
+    cancelUninstall: vi.fn(async (_id: string) => undefined),
     removing: vi.fn((f: (e: RemoveEvent) => void) => {
       removals.add(f);
       return () => removals.delete(f);

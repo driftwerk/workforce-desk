@@ -59,6 +59,7 @@ case "$1" in
     v=$(cat "$f/linger" 2>/dev/null || echo no)
     case "$*" in *--value*) echo "$v" ;; *) echo "Linger=$v" ;; esac ;;
   enable-linger) [ -e "$f/linger-allowed" ] || exit 1; echo yes > "$f/linger" ;;
+  disable-linger) [ -e "$f/linger-allowed" ] || exit 1; echo no > "$f/linger" ;;
 esac
 "#;
 
@@ -101,10 +102,11 @@ case "$1" in
     "$here/fake-runner" 3600 </dev/null >/dev/null 2>&1 &
     echo $! > "$pidfile"
     echo "VERSION $n" > "$f/running"; exit 0 ;;
-  --stop) stop; exit 0 ;;
+  --stop) [ -e "$f/stop-slow" ] && sleep 2; stop; exit 0 ;;
   --remove-everything)
     [ -e "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null && { echo "Desk Helper is still running; stop it first" >&2; exit 1; }
     [ -e "$f/remove-fails" ] && { echo "deleting $HOME/.local/share/Desk: Permission denied (os error 13)" >&2; exit 1; }
+    [ -e "$f/remove-leaves" ] && exit 0
     rm -rf "$HOME/.local/share/Desk"; exit 0 ;;
   connection)
     [ -e "$f/running" ] || { echo null; exit 0; }
@@ -394,6 +396,10 @@ impl TrustConfirm for Yes {
         self.1
     }
     fn switch_to(&self, _: &desk_machine::hostkey::SwitchQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
+    fn uninstall(&self, _: &desk_machine::hostkey::UninstallQuestion) -> bool {
         self.0.fetch_add(1, Ordering::SeqCst);
         self.1
     }
@@ -1882,7 +1888,13 @@ fn removing_with_uninstall_stops_desk_there_removes_everything_then_forgets_it()
     let unit = b.home().join(".config/systemd/user/desk-helper.service");
     assert!(unit.is_file() && b.home().join(".local/share/Desk").is_dir());
 
-    r.fleet.uninstall(&id).unwrap();
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    assert!(r.fleet.uninstall(&id).unwrap());
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked natively once"
+    );
     assert_eq!(
         removed_said(&r),
         [
@@ -1936,13 +1948,93 @@ fn an_uninstall_that_fails_says_why_and_forgets_nothing_until_it_works() {
             "remove failed"
         ]
     );
-    // Nothing is forgotten: it's still Desk's, and connects again.
+    // Nothing is forgotten, and nothing connects to it by itself (which
+    // would install Desk there again): it waits on the person.
     assert_eq!(r.fleet.list().len(), 1);
-    until("ready again", || r.fleet.state(&id) == Some(State::Ready));
+    let starts = std::fs::read_to_string(b.fake("starts")).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    let Some(State::Failed { message }) = r.fleet.state(&id) else {
+        panic!("{:?}", r.fleet.state(&id))
+    };
+    assert!(
+        message.contains("Uninstalling stopped partway"),
+        "{message}"
+    );
+    assert_eq!(std::fs::read_to_string(b.fake("starts")).unwrap(), starts);
     // Try again once it can.
     std::fs::remove_file(b.fake("remove-fails")).unwrap();
-    r.fleet.uninstall(&id).unwrap();
+    assert!(r.fleet.uninstall(&id).unwrap());
     assert!(r.fleet.list().is_empty());
+}
+
+#[test]
+fn a_no_to_the_uninstall_question_runs_nothing_there() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let no = fleet_answering(&b, &r, false);
+    until("ready", || no.state(&id) == Some(State::Ready));
+    let before = b.calls().len();
+    assert!(!no.uninstall(&id).unwrap());
+    assert!(
+        b.calls()[before..].iter().all(|c| !c
+            .iter()
+            .any(|a| a.contains("remove-everything") || a.contains("disable --now"))),
+        "nothing ran there"
+    );
+    assert!(b.home().join(".local/share/Desk").is_dir());
+    assert_eq!(no.list().len(), 1);
+}
+
+#[test]
+fn an_uninstall_is_cancelled_between_steps_before_anything_is_removed() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("stop-slow"), "").unwrap();
+    let going = {
+        let (fleet, id) = (Arc::clone(&r.fleet), id.clone());
+        std::thread::spawn(move || fleet.uninstall(&id))
+    };
+    until("stopping", || {
+        removed_said(&r).contains(&"stop running".to_string())
+    });
+    r.fleet.cancel_uninstall(&id).unwrap();
+    assert!(!going.join().unwrap().unwrap(), "cancelled");
+    assert_eq!(removed_said(&r), ["stop running", "stop done"]);
+    assert!(
+        b.home().join(".local/share/Desk/machine").is_file(),
+        "nothing removed"
+    );
+    // Desk there starts again, as before.
+    std::fs::remove_file(b.fake("stop-slow")).unwrap();
+    until("ready again", || r.fleet.state(&id) == Some(State::Ready));
+    assert!(
+        r.fleet
+            .cancel_uninstall(&id)
+            .unwrap_err()
+            .contains("isn't being uninstalled now")
+    );
+}
+
+#[test]
+fn an_uninstall_checks_desks_folder_is_gone() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("remove-leaves"), "").unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(e.contains("still there after removing it"), "{e}");
+    assert_eq!(r.fleet.list().len(), 1, "nothing forgotten");
 }
 
 #[test]
@@ -1975,5 +2067,40 @@ fn a_desktop_desk_there_is_never_uninstalled_and_an_offline_one_only_forgotten()
     assert_eq!(
         e,
         "Desk can't reach gone right now, so it can only forget it here."
+    );
+}
+
+#[test]
+fn linger_left_on_is_said_with_the_accounts_checked_name() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // The account as Desk read it there (`id -un`).
+    let user = serde_json::to_value(&r.fleet.list()[0]).unwrap()["details"]["user"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Turning linger off needs an administrator now.
+    std::fs::remove_file(b.fake("linger-allowed")).unwrap();
+    assert!(r.fleet.uninstall(&id).unwrap());
+    let linger = r
+        .said
+        .removing
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap())
+        .find(|v| v["step"] == "linger" && v["state"] == "blocked")
+        .expect("linger blocked");
+    // Quoted as the shell needs it: a plain name stays as it is.
+    assert_eq!(
+        linger["line"],
+        format!(
+            "sudo loginctl disable-linger {}",
+            desk_core::machine::quote(&user)
+        )
     );
 }

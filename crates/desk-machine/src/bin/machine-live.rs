@@ -89,6 +89,10 @@ impl TrustConfirm for Answer {
         println!("asked: {}", q.text().replace('\n', " / "));
         self.1
     }
+    fn uninstall(&self, q: &desk_machine::hostkey::UninstallQuestion) -> bool {
+        println!("asked: {}", q.text().replace('\n', " / "));
+        self.1
+    }
 }
 
 /// `GET path` with `token` through the forward's socket: what came back.
@@ -285,7 +289,8 @@ fn main() {
     }
     if has("--uninstall") {
         match fleet.uninstall(&id) {
-            Ok(()) => println!("uninstalled; machines left: {}", fleet.list().len()),
+            Ok(true) => println!("uninstalled; machines left: {}", fleet.list().len()),
+            Ok(false) => println!("uninstall cancelled; nothing removed"),
             Err(e) => println!("uninstall refused: {e}"),
         }
         fleet.shutdown();

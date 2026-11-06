@@ -26,6 +26,7 @@ pub const COMMANDS: &[&str] = &[
     "machine_retry_engines",
     "machine_cancel_update",
     "machine_uninstall",
+    "machine_cancel_uninstall",
     "machine_reveal_log",
     "machine_sign_in_forward",
     "machine_sign_in_forward_stop",

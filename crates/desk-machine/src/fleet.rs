@@ -22,7 +22,7 @@ use desk_core::machine_backend::{Arch, Backend};
 use serde::{Deserialize, Serialize};
 
 use crate::admit::{self, Confirm, Gate, Question};
-use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm};
+use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
 use crate::link::{Link, Machines};
 use crate::probe::{self, Access, Missed, Probe, ProbeKey, System};
 use crate::setup::{self, Person};
@@ -485,8 +485,14 @@ struct Row {
     kick: Arc<(Mutex<bool>, Condvar)>,
     /// What the page shows of where it stands, besides its state.
     now: Now,
-    /// Set when the person cancels adding it.
+    /// Set when the person cancels adding it (or its update, or its
+    /// uninstall between steps).
     cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Driven no further until the person asks (Reconnect): an uninstall
+    /// that stopped partway, which a connect would install again.
+    hold: bool,
+    /// Desk is being uninstalled from it now.
+    removing: bool,
 }
 
 /// Where a machine stands, besides its state: why, when, how it is reached,
@@ -519,6 +525,8 @@ impl Row {
             kick: Arc::default(),
             now: Now::default(),
             cancel: Arc::default(),
+            hold: false,
+            removing: false,
         }
     }
 }
@@ -2202,6 +2210,17 @@ impl Fleet {
                     let Some(state) = fleet.state(&id) else {
                         return;
                     };
+                    // Held (an uninstall stopped partway): only Reconnect
+                    // drives it again.
+                    if fleet.rows().get(&id).is_some_and(|r| r.hold) {
+                        let asked = fleet.wait_kick(&id, None);
+                        if let Some(r) = fleet.rows().get_mut(&id) {
+                            r.hold = !asked;
+                        }
+                        if !asked {
+                            continue;
+                        }
+                    }
                     let connect = match state {
                         State::Ready => {
                             if fleet.wait_kick(&id, Some(fleet.timing.check_every)) {
@@ -2587,7 +2606,7 @@ impl Fleet {
     /// Each step stops after [`Timing::step_within`]. A step that fails
     /// says why and nothing is forgotten: Try again, or remove it without
     /// uninstalling. Only a machine's own install is ever touched. Blocking.
-    pub fn uninstall(&self, id: &str) -> Result<(), String> {
+    pub fn uninstall(&self, id: &str) -> Result<bool, String> {
         let machine = self
             .machine(id)
             .ok_or("That machine isn't in Desk any more.")?;
@@ -2600,6 +2619,16 @@ impl Fleet {
                 "Desk can't reach {name} right now, so it can only forget it here."
             ));
         }
+        // Asked natively first, naming the machine and its address, Cancel
+        // the default: nothing runs there before a yes.
+        let question = UninstallQuestion {
+            name: name.clone(),
+            target: machine.target.to_string(),
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.uninstall(&question))? {
+            return Ok(false);
+        }
         let say =
             |step: RemoveStep, state: StepState, message: Option<String>, line: Option<String>| {
                 self.host.removing(&RemoveEvent {
@@ -2610,10 +2639,12 @@ impl Fleet {
                     line,
                 });
             };
+        // Each step whole, within its limit: Cancel takes effect between
+        // steps, never halfway through one.
         let run = |step: RemoveStep, script: &str, what: &str| -> Result<(), String> {
             say(step, StepState::Running, None, None);
             let done = self
-                .step(id)
+                .step_uncancellable()
                 .run(|| setup::run(&self.ssh, &machine, script, what));
             match done {
                 Ok(_) => {
@@ -2639,6 +2670,8 @@ impl Fleet {
                 };
                 if !r.busy {
                     r.busy = true;
+                    r.removing = true;
+                    r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
                     break;
                 }
             }
@@ -2652,10 +2685,12 @@ impl Fleet {
             fn drop(&mut self) {
                 if let Some(r) = self.0.rows().get_mut(self.1) {
                     r.busy = false;
+                    r.removing = false;
+                    r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
-        let _held = Held(self, id);
+        let held = Held(self, id);
         self.note(id, LogKind::Info, format!("uninstalling Desk from {name}"));
         // The link goes first: nothing of Desk's talks to it while it goes.
         self.drop_link(id);
@@ -2665,24 +2700,56 @@ impl Fleet {
             &format!("Couldn't stop Desk's service on {name}"),
         );
         if let Err(m) = stopped {
-            drop(_held);
+            // Nothing was removed: connecting again starts Desk there again.
+            drop(held);
             self.kick(id);
             return Err(m);
+        }
+        if self.cancelled(id) {
+            // Cancelled before anything was removed: Desk there starts again.
+            self.note(
+                id,
+                LogKind::Info,
+                "uninstalling was cancelled; nothing was removed",
+            );
+            drop(held);
+            self.kick(id);
+            return Ok(false);
         }
         let removed = run(
             RemoveStep::Remove,
             &setup::uninstall_remove_script(),
             "Couldn't remove ~/.local/share/Desk",
-        );
+        )
+        .and_then(|()| {
+            // Checked, not assumed: the folder (and the sign-ins in it) is gone.
+            setup::run(
+                &self.ssh,
+                &machine,
+                &setup::uninstall_gone_script(),
+                "Desk couldn't check ~/.local/share/Desk is gone",
+            )
+            .map(drop)
+            .inspect_err(|m| {
+                say(RemoveStep::Remove, StepState::Failed, Some(m.clone()), None);
+            })
+        });
         if let Err(m) = removed {
-            // Desk there is stopped: it starts again at the next connect.
-            drop(_held);
-            self.kick(id);
+            // Partway: Desk there is stopped and perhaps half gone. A connect
+            // would install it again, so it is held until the person says.
+            let message = format!(
+                "Uninstalling stopped partway: Desk on {name} is stopped, and ~/.local/share/Desk may be partly gone. Try again, or remove it without uninstalling."
+            );
+            if let Some(r) = self.rows().get_mut(id) {
+                r.hold = true;
+            }
+            drop(held);
+            self.set_state(id, State::Failed { message });
             return Err(m);
         }
         // Linger turned off where the account may; else the line to run.
         say(RemoveStep::Linger, StepState::Running, None, None);
-        match self.step(id).run(|| {
+        match self.step_uncancellable().run(|| {
             setup::run(
                 &self.ssh,
                 &machine,
@@ -2692,10 +2759,13 @@ impl Fleet {
         }) {
             Ok(_) => say(RemoveStep::Linger, StepState::Done, None, None),
             Err(_) => {
+                // The account's name as checked when it was read (a POSIX
+                // name), and quoted all the same.
                 let user = self
                     .rows()
                     .get(id)
-                    .and_then(|r| r.now.details.as_ref().and_then(|d| d.user.clone()));
+                    .and_then(|r| r.now.details.as_ref().and_then(|d| d.user.clone()))
+                    .filter(|u| probe::valid_user(u));
                 say(
                     RemoveStep::Linger,
                     StepState::Blocked,
@@ -2705,18 +2775,38 @@ impl Fleet {
                     )),
                     Some(format!(
                         "sudo loginctl disable-linger {}",
-                        user.as_deref().unwrap_or("$USER")
+                        user.as_deref()
+                            .map(desk_core::machine::quote)
+                            .unwrap_or_else(|| "\"$USER\"".into())
                     )),
                 );
             }
         }
         say(RemoveStep::Forget, StepState::Running, None, None);
+        drop(held);
         self.remove(id)?;
         say(RemoveStep::Forget, StepState::Done, None, None);
         tracing::info!(
             machine = id,
             "uninstalled Desk from a machine and forgot it"
         );
+        Ok(true)
+    }
+
+    /// "Cancel" while Desk is being uninstalled from machine `id`
+    /// (`machine_cancel_uninstall`): it stops before removing anything, when
+    /// the step running now is stopping Desk's service; once it removes,
+    /// it goes on to the end.
+    pub fn cancel_uninstall(&self, id: &str) -> Result<(), String> {
+        let rows = self.rows();
+        let r = rows.get(id).ok_or("That machine isn't in Desk any more.")?;
+        if !r.removing {
+            return Err(format!(
+                "{} isn't being uninstalled now.",
+                r.kept.machine.name
+            ));
+        }
+        r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 

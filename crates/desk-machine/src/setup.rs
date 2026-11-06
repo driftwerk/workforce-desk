@@ -365,6 +365,16 @@ pub fn uninstall_remove_script() -> String {
     )
 }
 
+/// Uninstalling: checks Desk's folder there is gone, and the sign-ins and
+/// memory in it with it.
+pub fn uninstall_gone_script() -> String {
+    format!(
+        "d=\"$HOME/{root}\"\n\
+         if [ -e \"$d\" ]; then echo \"~/.local/share/Desk is still there after removing it\" >&2; exit 1; fi\n",
+        root = desk_core::machine::MACHINE_ROOT,
+    )
+}
+
 /// Uninstalling: turns linger off for the account (as itself, never sudo).
 pub const UNINSTALL_LINGER_SCRIPT: &str = "loginctl disable-linger \"$(id -un)\"";
 

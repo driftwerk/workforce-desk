@@ -47,12 +47,21 @@ const why = (message: string, said: string): string => {
 export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine: Machine; native: MachineNative; onClose: () => void; onRemoved: () => void }) {
   const here = thisComputerLower(useHost((h) => h.platform));
   const sessions = useDesk((s) => sessionsOn(s.sessions, machine.id).length);
-  const reachable = machine.state.kind === "ready" || machine.state.kind === "updateFailed" || machine.state.kind === "newer";
-  const [uninstall, setUninstall] = useState(false);
+  // An uninstall that stopped partway: Desk there is held, stopped and
+  // perhaps half gone, and uninstalling again is what finishes it.
+  const held = machine.state.kind === "failed" && machine.state.message.startsWith("Uninstalling stopped partway");
+  const reachable = held || machine.state.kind === "ready" || machine.state.kind === "updateFailed" || machine.state.kind === "newer";
+  const [uninstall, setUninstall] = useState(held);
   const [busy, setBusy] = useState(false);
   const [steps, setSteps] = useState<Partial<Record<Step, RemoveEvent>> | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /** Said when nothing was uninstalled after all (a no, or Cancel). */
+  const [kept, setKept] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const name = machine.name;
+  // "its 3 sessions", never "its 0 sessions".
+  const its = sessions > 0 ? ` and stops showing its ${sessionsCount(sessions)}` : "";
+  const ends = sessions > 0 ? `Ends its ${sessionsCount(sessions)}, stops` : "Stops";
   const group = useId();
 
   useEffect(
@@ -80,16 +89,32 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
     if (!uninstall) return forgetOnly();
     setBusy(true);
     setProblem(null);
+    setKept(false);
+    setCancelling(false);
     setSteps({});
     try {
-      await native.uninstall(machine.id);
-      onRemoved();
+      if (await native.uninstall(machine.id)) return onRemoved();
+      // A no to the question, or Cancel before anything was removed.
+      setSteps(null);
+      setKept(true);
     } catch (e) {
       // The step that failed says why; anything else is said under them.
       setProblem(plainError(e));
     } finally {
       setBusy(false);
+      setCancelling(false);
     }
+  };
+  /** Cancel while it uninstalls: only before it removes anything. */
+  const stoppable = busy && !!steps && !steps.remove;
+  const cancel = () => {
+    if (!busy) return onClose();
+    if (!stoppable) return;
+    setCancelling(true);
+    native.cancelUninstall(machine.id).catch((e: unknown) => {
+      setCancelling(false);
+      setProblem(plainError(e));
+    });
   };
 
   const checks: Step[] = ["stop", "remove", "linger", "forget"];
@@ -110,7 +135,8 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
       <div className="dialog-scroll">
         {!steps && (
           <p>
-            Desk on {here} forgets {name} and stops showing its {sessionsCount(sessions)}.
+            Desk on {here} forgets {name}
+            {its}.
           </p>
         )}
         {(
@@ -123,7 +149,9 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
                 <span className="pick-ring" aria-hidden="true" />
                 <span className="remove-choice-text">
                   <b>Leave Desk running on {name}</b>
-                  <span className="small muted">Its sessions keep running. Adding {name} again picks them up.</span>
+                  <span className="small muted">
+                    Its sessions keep running, and so do the copies of your accounts’ sign-ins there. Adding {name} again picks them up.
+                  </span>
                 </span>
               </button>
               <button type="button" role="radio" aria-checked={uninstall} className="remove-choice" disabled={!reachable || busy} onClick={() => setUninstall(true)}>
@@ -132,12 +160,17 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
                   <b>Also uninstall Desk from {name}</b>
                   <span className="small muted">
                     {reachable
-                      ? `Ends its ${sessionsCount(sessions)}, stops Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay.`
+                      ? `${ends} Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay, and so does Codex’s own sign-in (~/.codex): run codex logout there to end it.`
                       : `Desk can’t reach ${name} right now, so it can only forget it here.`}
                   </span>
                 </span>
               </button>
             </div>
+            {!steps && (
+              <p className="small muted">
+                {name} keeps copies of your accounts’ sign-ins until Desk is uninstalled there. If {name} is lost, or you no longer trust it, revoke them at claude.ai.
+              </p>
+            )}
             {!reachable && !steps && (
               <div className="remove-later">
                 <span className="small">To uninstall it later, run these on {name}:</span>
@@ -151,8 +184,14 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
             )}
           </>
         )}
+        {kept && !steps && (
+          <p className="small muted" role="status">
+            Nothing was uninstalled: Desk on {name} is as it was.
+          </p>
+        )}
         {steps && (
           <>
+            {busy && <p className="small faint">Each step stops after 3 minutes and says why. Cancel works until Desk starts removing its folder there.</p>}
             <ul className="machine-checks" aria-label={`Uninstalling Desk from ${name}`} aria-live="polite">
               {checks.map((step) => {
                 const e = steps[step];
@@ -188,8 +227,8 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
         <span className={`dialog-foot-note small ${failed ? "state-blocked" : ""}`}>
           {failed ? "Nothing is forgotten yet. Try again, or remove it without uninstalling." : ""}
         </span>
-        <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}>
-          Cancel
+        <button type="button" className="btn btn-ghost" disabled={(busy && !stoppable) || cancelling} onClick={cancel}>
+          {cancelling ? "Cancelling…" : "Cancel"}
         </button>
         {failed && (
           <button type="button" className="btn" disabled={busy} onClick={() => void forgetOnly()}>
@@ -197,7 +236,7 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
           </button>
         )}
         <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void go()}>
-          {failed ? "Try again" : `Remove ${name}`}
+          {failed || (held && uninstall) ? "Try uninstalling again" : `Remove ${name}`}
         </button>
       </footer>
     </Dialog>

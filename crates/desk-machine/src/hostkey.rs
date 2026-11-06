@@ -226,6 +226,28 @@ pub trait TrustConfirm: Send + Sync + 'static {
         let _ = question;
         false
     }
+    /// The person's yes to uninstalling Desk from a machine. No unless asked.
+    fn uninstall(&self, question: &UninstallQuestion) -> bool {
+        let _ = question;
+        false
+    }
+}
+
+/// Uninstalling Desk from a machine: its name and the exact address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UninstallQuestion {
+    pub name: String,
+    pub target: String,
+}
+
+impl UninstallQuestion {
+    pub fn text(&self) -> String {
+        format!(
+            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with the sign-ins and memory Desk keeps there; its sessions end. Your files, repos, Claude Code and Codex stay, and so does Codex's own sign-in (~/.codex).",
+            name = self.name,
+            target = self.target
+        )
+    }
 }
 
 /// Reaching a machine another way: the same machine, by its host key.

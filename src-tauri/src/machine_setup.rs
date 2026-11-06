@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use desk_core::machine_backend::{self, Arch, Backend, Source};
 use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, RemoveEvent, SetupEvent};
-use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion};
+use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion};
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
 
@@ -172,6 +172,13 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
             "Check",
         )
     }
+    fn uninstall(&self, question: &UninstallQuestion) -> bool {
+        self.ask(
+            "Uninstall Desk from a machine",
+            question.text(),
+            "Uninstall",
+        )
+    }
 }
 
 /// Runs `f` on a blocking thread.
@@ -247,20 +254,31 @@ pub fn machine_retry_engines(fleet: tauri::State<'_, Arc<Fleet>>, id: String) ->
     fleet.retry_engines(&id)
 }
 
+/// "Cancel" while uninstalling: stops before anything is removed.
+#[tauri::command]
+pub fn machine_cancel_uninstall(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<()> {
+    fleet.cancel_uninstall(&id)
+}
+
 /// "Cancel update": stops machine `id`'s update before it switches over.
 #[tauri::command]
 pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
     fleet.cancel_update(&id)
 }
 
-/// "Also uninstall Desk from devbox": stops its service there, removes
-/// everything Desk keeps there and turns linger off, then forgets it; each
-/// step said on `machine-remove`. Nothing is forgotten when a step fails.
+/// "Also uninstall Desk from devbox": once the person says yes natively,
+/// stops its service there, removes everything Desk keeps there and turns
+/// linger off, then forgets it; each step said on `machine-remove`.
+/// Nothing is forgotten when a step fails. False when the person said no,
+/// or cancelled before anything was removed.
 #[tauri::command]
 pub async fn machine_uninstall(
     fleet: tauri::State<'_, Arc<Fleet>>,
     id: String,
-) -> CommandResult<()> {
+) -> CommandResult<bool> {
     let fleet = Arc::clone(&fleet);
     blocking(move || fleet.uninstall(&id)).await
 }

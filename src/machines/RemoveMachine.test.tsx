@@ -31,10 +31,15 @@ it("uninstalls Desk there step by step, then forgets it", async () => {
   const { fake, removed, onRemoved } = open();
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByRole("heading", { name: "Remove devbox?" })).toBeTruthy();
-  expect(dialog.textContent).toContain("Ends its 3 sessions, stops Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay.");
+  expect(dialog.textContent).toContain(
+    "Ends its 3 sessions, stops Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay, and so does Codex’s own sign-in (~/.codex): run codex logout there to end it.",
+  );
+  // What staying there means for the copies of the person's sign-ins.
+  expect(dialog.textContent).toContain("Its sessions keep running, and so do the copies of your accounts’ sign-ins there.");
+  expect(dialog.textContent).toContain("If devbox is lost, or you no longer trust it, revoke them at claude.ai.");
   fireEvent.click(within(dialog).getByRole("radio", { name: /Also uninstall Desk from devbox/ }));
   let finish: () => void = () => {};
-  fake.uninstall.mockImplementationOnce(() => new Promise<undefined>((r) => (finish = () => r(undefined))));
+  fake.uninstall.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = () => r(true))));
   await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Remove devbox" })));
   expect(fake.uninstall).toHaveBeenCalledWith("devbox");
   expect(fake.remove).not.toHaveBeenCalled();
@@ -47,8 +52,10 @@ it("uninstalls Desk there step by step, then forgets it", async () => {
     "Turn linger off",
     "Forget devbox here",
   ]);
-  // Buttons wait while it runs.
+  // Buttons wait while it runs; Cancel too, once it removes; the limit is said.
   expect((within(dialog).getByRole("button", { name: "Remove devbox" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(dialog.textContent).toContain("Each step stops after 3 minutes and says why.");
   act(() => removed({ machine: "devbox", step: "remove", state: "done" }));
   act(() => removed({ machine: "devbox", step: "linger", state: "blocked", message: "Linger stays on for dev: turning it off needs an administrator there.", line: "sudo loginctl disable-linger dev" }));
   expect(checks.textContent).toContain("sudo loginctl disable-linger dev");
@@ -69,7 +76,7 @@ it("says a failed uninstall in place, forgets nothing, and tries again or remove
   expect(onRemoved).not.toHaveBeenCalled();
   expect(dialog.textContent).toContain("Couldn’t remove ~/.local/share/Desk: devbox said: “permission denied on Desk/pg/data”");
   expect(dialog.textContent).toContain("Nothing is forgotten yet. Try again, or remove it without uninstalling.");
-  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Try again" })));
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Try uninstalling again" })));
   expect(fake.uninstall).toHaveBeenCalledTimes(2);
   expect(onRemoved).toHaveBeenCalledTimes(1);
 });
@@ -108,4 +115,42 @@ it("says why forgetting failed, and keeps the dialog", async () => {
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove devbox" })));
   expect(screen.getByRole("alert").textContent).toBe("That machine isn't in Desk any more.");
   expect(onRemoved).not.toHaveBeenCalled();
+});
+
+it("cancels an uninstall while it stops Desk, before anything is removed, and says nothing changed", async () => {
+  const { fake, removed, onRemoved, onClose } = open();
+  const dialog = screen.getByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("radio", { name: /Also uninstall/ }));
+  let finish: (v: boolean) => void = () => {};
+  fake.uninstall.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = r)));
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Remove devbox" })));
+  act(() => removed({ machine: "devbox", step: "stop", state: "running" }));
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" })));
+  expect(fake.cancelUninstall).toHaveBeenCalledWith("devbox");
+  expect(onClose).not.toHaveBeenCalled();
+  act(() => removed({ machine: "devbox", step: "stop", state: "done" }));
+  await act(async () => finish(false));
+  expect(onRemoved).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole("status").textContent).toBe("Nothing was uninstalled: Desk on devbox is as it was.");
+});
+
+it("never says its 0 sessions", () => {
+  useDesk.setState({ sessions: {} });
+  open();
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).not.toContain("0 sessions");
+  expect(dialog.textContent).toContain("Desk on this Mac forgets devbox.");
+});
+
+it("offers uninstalling again for a machine held after an uninstall stopped partway", async () => {
+  const { fake, onRemoved } = open(
+    machine({ id: "devbox", state: { kind: "failed", message: "Uninstalling stopped partway: Desk on devbox is stopped, and ~/.local/share/Desk may be partly gone. Try again, or remove it without uninstalling." } }),
+  );
+  const dialog = screen.getByRole("dialog");
+  const again = within(dialog).getByRole("radio", { name: /Also uninstall Desk from devbox/ }) as HTMLButtonElement;
+  expect(again.disabled).toBe(false);
+  expect(again.getAttribute("aria-checked")).toBe("true");
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Try uninstalling again" })));
+  expect(fake.uninstall).toHaveBeenCalledWith("devbox");
+  expect(onRemoved).toHaveBeenCalled();
 });
