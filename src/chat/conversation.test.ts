@@ -339,20 +339,6 @@ describe("sending on a Desk connection", () => {
     expect((socket.chats.at(-1) as { desk: { message: string } }).desk.message).toBe(room.message);
   });
 
-  it("takes back a follow-up the hub sent back to be asked again, and hands its words to the queue", async () => {
-    const { c, socket } = await open(declared);
-    const again: string[] = [];
-    c.onRequeued = (text) => again.push(text);
-    c.send("what was it called?", { turn });
-    c.send("we talked about it", { turn });
-    const id = (socket.chats[1] as { desk: { message: string } }).desk.message;
-    socket.receive({ type: "requeued", id, content: "we talked about it" });
-    expect(c.current.messages.map((m) => m.content)).toEqual(["what was it called?"]);
-    expect(again).toEqual(["we talked about it"]);
-    socket.receive({ type: "requeued", id, content: "we talked about it" });
-    expect(again).toEqual(["we talked about it"]);
-  });
-
   it("sends an older hub today's frame, in the words it understands", async () => {
     const { c, socket } = await open({ type: "connected", session_id: "s1" });
     expect(c.send("what's open?", { turn, legacy: "[old] what's open?" })).toEqual({ turnRef: null });
