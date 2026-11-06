@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl as openExternal } from "@tauri-apps/plugin-opener";
 import type { Attachment, HubAccount } from "./chat/types";
 import type { BrainChoice } from "./crew/brain";
@@ -201,6 +201,13 @@ export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 export const openUrl = (url: string): void => {
   if (preview) window.open(url, "_blank", "noopener");
   else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
+};
+
+/** A yes-or-no question in the system's own dialog, Cancel the default;
+ *  the page's confirm() in a browser preview. */
+export const askNatively = async (title: string, message: string, yes: string): Promise<boolean> => {
+  if (preview) return window.confirm(`${title}\n\n${message}`);
+  return ask(message, { title, kind: "warning", okLabel: yes, cancelLabel: "Cancel" }).catch(() => false);
 };
 
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });

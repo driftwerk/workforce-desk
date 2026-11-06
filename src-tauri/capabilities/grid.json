@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-start-dragging",
     "dialog:allow-save",
+    "dialog:allow-message",
     "fs:allow-write-file",
     {
       "identifier": "opener:allow-open-url",
@@ -37,7 +38,6 @@
     "allow-machines-list",
     "allow-machine-public-key",
     "allow-machine-reconnect",
-    "allow-machine-share-accounts",
     "allow-socket-send",
     "allow-socket-ack",
     "allow-socket-close",

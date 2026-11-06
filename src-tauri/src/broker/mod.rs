@@ -141,6 +141,14 @@ pub struct Answer {
     pub body: String,
 }
 
+/// The hub's answer to a request only the native side makes (an account's
+/// sign-in handed over): never shown to the page, never printed (no
+/// `Debug`, no `Serialize`), and wiped from memory once dropped.
+pub struct NativeAnswer {
+    pub status: u16,
+    pub body: zeroize::Zeroizing<String>,
+}
+
 impl Broker {
     /// The broker for `backend`'s hub; none until Windows has one. Its
     /// sockets are kept with every other hub socket the page holds.
@@ -264,12 +272,16 @@ impl Broker {
 
     /// One of the native side's own requests to this computer's hub
     /// ([`routes::native_local`]): never the page's, and never a machine's.
-    pub async fn fetch_native(&self, method: &str, target: &str) -> Result<Answer, String> {
+    pub async fn fetch_native(&self, method: &str, target: &str) -> Result<NativeAnswer, String> {
         if self.machine.is_some() {
             return Err("Desk asks that of this computer's hub alone.".into());
         }
         let allowed = routes::native_local(method, target).map_err(|e| e.to_string())?;
-        self.send_allowed(allowed, None).await
+        let Answer { status, body, .. } = self.send_allowed(allowed, None).await?;
+        Ok(NativeAnswer {
+            status,
+            body: zeroize::Zeroizing::new(body),
+        })
     }
 
     async fn send_allowed(

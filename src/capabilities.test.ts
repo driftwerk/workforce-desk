@@ -84,7 +84,7 @@ const gridCommands = (): Set<string> => {
 
 /** The permission each plugin function the page imports needs. */
 const PLUGIN_PERMISSIONS: Record<string, Record<string, string>> = {
-  "@tauri-apps/plugin-dialog": { open: "dialog:allow-open", save: "dialog:allow-save" },
+  "@tauri-apps/plugin-dialog": { open: "dialog:allow-open", save: "dialog:allow-save", ask: "dialog:allow-message" },
   "@tauri-apps/plugin-fs": {
     readTextFile: "fs:allow-read-text-file",
     writeTextFile: "fs:allow-write-text-file",
@@ -173,7 +173,7 @@ describe("each window's capabilities", () => {
     expect([...pluginPermissions(reachable(["./main.tsx"]))].filter((p) => !main.has(p))).toEqual([]);
   });
 
-  it("keep pairing, setup, removal and reports to the main window", () => {
+  it("keep pairing, setup, removal, copying accounts and reports to the main window", () => {
     const grid = commandsOf(capability("grid"));
     for (const c of [
       "pair_request",
@@ -188,6 +188,7 @@ describe("each window's capabilities", () => {
       "machine_trust",
       "machine_add",
       "machine_remove",
+      "machine_share_accounts",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);

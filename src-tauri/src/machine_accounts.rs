@@ -27,7 +27,7 @@ use std::future::Future;
 use serde::{Deserialize, Serialize};
 
 use crate::CommandResult;
-use crate::broker::{Answer, Broker};
+use crate::broker::{Answer, Broker, NativeAnswer};
 use crate::machines::MachineIo;
 
 /// What this computer is called to the person.
@@ -110,7 +110,8 @@ pub trait Hub: Sync {
 
 /// This computer's hub, which also hands over an account's sign-in.
 pub trait Mine: Hub {
-    fn hand_over(&self, account: &str) -> impl Future<Output = Result<Answer, String>> + Send;
+    fn hand_over(&self, account: &str)
+    -> impl Future<Output = Result<NativeAnswer, String>> + Send;
 }
 
 /// The Claude accounts of this computer's that are signed in.
@@ -139,7 +140,7 @@ pub fn question(place: &Place, copying: &[&str]) -> String {
         format!("your Claude accounts {}", names(copying))
     };
     format!(
-        "Copy {what} to {name}?\n\n{target}\n\nTheir sign-ins go over SSH into Desk's private file on {name}. Anyone who can sign in to {name} as that user can use them. You can remove them from {name} at any time; {HERE} keeps its own.",
+        "Copy {what} to {name}?\n\n{target}\n\nTheir sign-ins go over SSH into Desk's private file on {name}. Anyone who can sign in to {name} as that user, or who controls {name}, can use them. Removing them in Desk deletes them there while Desk can reach {name}; to stop a copy working anywhere, revoke it at claude.ai. {HERE} keeps its own.",
         name = place.name,
         target = place.target,
     )
@@ -147,10 +148,14 @@ pub fn question(place: &Place, copying: &[&str]) -> String {
 
 /// The `error` a hub said, or its status.
 fn said(a: &Answer) -> String {
-    serde_json::from_str::<serde_json::Value>(&a.body)
+    said_in(a.status, &a.body)
+}
+
+fn said_in(status: u16, body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| v["error"].as_str().map(str::to_string))
-        .unwrap_or_else(|| format!("its Desk answered {}", a.status))
+        .unwrap_or_else(|| format!("its Desk answered {status}"))
 }
 
 async fn accounts_of(hub: &impl Hub, whose: &str) -> Result<Accounts, String> {
@@ -228,7 +233,7 @@ where
             Ok(h) => {
                 shared.failed.push(fail(format!(
                     "Desk on {HERE} didn't give its sign-in: {}",
-                    said(&h)
+                    said_in(h.status, &h.body)
                 )));
                 continue;
             }
@@ -243,11 +248,12 @@ where
                 .push(fail(format!("Desk on {HERE} didn't give its sign-in.")));
             continue;
         };
+        let token = zeroize::Zeroizing::new(token);
         let make_default = a.is_default && !has_default;
         let body = serde_json::json!({
             "engine": "claude",
             "name": a.name,
-            "token": token,
+            "token": token.as_str(),
             "makeDefault": make_default,
         });
         drop(token);
@@ -259,7 +265,11 @@ where
             Ok(r) => shared
                 .failed
                 .push(fail(format!("{} refused it: {}", place.name, said(&r)))),
-            Err(e) => shared.failed.push(fail(e)),
+            // Sent, with no answer: it may have got there all the same.
+            Err(e) => shared.failed.push(fail(format!(
+                "{e} It may be on {name} anyway: look at {name}'s accounts before copying it again.",
+                name = place.name
+            ))),
         }
     }
     if here.auto_switch && !there.auto_switch && !shared.copied.is_empty() {
@@ -306,7 +316,10 @@ impl Hub for Local<'_> {
 }
 
 impl Mine for Local<'_> {
-    fn hand_over(&self, account: &str) -> impl Future<Output = Result<Answer, String>> + Send {
+    fn hand_over(
+        &self,
+        account: &str,
+    ) -> impl Future<Output = Result<NativeAnswer, String>> + Send {
         let path = hand_over_path(account);
         async move { self.0.fetch_native("POST", &path?).await }
     }
@@ -343,30 +356,88 @@ impl Hub for Theirs {
     }
 }
 
-/// One question about copying accounts at a time.
-static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// How long a Cancel quietens the question, doubling with each Cancel in
+/// a row (as adding a machine's question does), so a script asking in a
+/// loop gets refusals, not a stream of dialogs.
+const QUIET_AFTER_CANCEL: std::time::Duration = std::time::Duration::from_secs(10);
+const MAX_QUIET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
-struct Asking;
+#[derive(Default)]
+struct AskState {
+    open: bool,
+    cancels: u32,
+    quiet_until: Option<std::time::Instant>,
+}
 
-impl Asking {
-    fn start() -> Result<Self, String> {
-        ASKING
-            .compare_exchange(
-                false,
-                true,
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-            )
-            .map(|_| Asking)
-            .map_err(|_| "Desk is already asking about copying accounts.".to_string())
+/// One question about copying accounts at a time, and none for a while
+/// after a Cancel.
+pub struct ShareGate {
+    state: std::sync::Mutex<AskState>,
+    quiet: std::time::Duration,
+}
+
+/// The question is open until this drops.
+pub struct Asking<'a>(&'a ShareGate);
+
+impl ShareGate {
+    pub const fn with_quiet(quiet: std::time::Duration) -> Self {
+        Self {
+            state: std::sync::Mutex::new(AskState {
+                open: false,
+                cancels: 0,
+                quiet_until: None,
+            }),
+            quiet,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, AskState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn start(&self) -> Result<Asking<'_>, String> {
+        let mut st = self.lock();
+        if st.open {
+            return Err("Desk is already asking about copying accounts.".into());
+        }
+        if let Some(left) = st
+            .quiet_until
+            .and_then(|u| u.checked_duration_since(std::time::Instant::now()))
+            .filter(|l| !l.is_zero())
+        {
+            return Err(format!(
+                "Copying accounts was cancelled. Try again in {} seconds.",
+                left.as_secs().max(1)
+            ));
+        }
+        st.open = true;
+        Ok(Asking(self))
+    }
+
+    /// The person answered: a yes clears the wait, a Cancel lengthens it.
+    pub fn answered(&self, agreed: bool) {
+        let mut st = self.lock();
+        if agreed {
+            st.cancels = 0;
+            st.quiet_until = None;
+        } else {
+            st.cancels = st.cancels.saturating_add(1);
+            let wait = self
+                .quiet
+                .saturating_mul(1 << (st.cancels - 1).min(16))
+                .min(MAX_QUIET);
+            st.quiet_until = Some(std::time::Instant::now() + wait);
+        }
     }
 }
 
-impl Drop for Asking {
+impl Drop for Asking<'_> {
     fn drop(&mut self) {
-        ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.0.lock().open = false;
     }
 }
+
+static GATE: ShareGate = ShareGate::with_quiet(QUIET_AFTER_CANCEL);
 
 /// "Use this Mac's accounts" on machine `id` (see the module).
 #[tauri::command]
@@ -382,14 +453,16 @@ pub async fn machine_share_accounts(
         target: link.machine().target.to_string(),
     };
     let theirs = Theirs(io.broker(&id)?);
-    let _asking = Asking::start()?;
+    let _asking = GATE.start()?;
     let confirm = crate::pair_gate::NativeConfirm(app.clone());
     share(&Local(&local), &theirs, &place, |question| async move {
-        tauri::async_runtime::spawn_blocking(move || {
+        let yes = tauri::async_runtime::spawn_blocking(move || {
             confirm.ask(&format!("Use {HERE}'s accounts"), question, "Copy Accounts")
         })
         .await
-        .unwrap_or(false)
+        .unwrap_or(false);
+        GATE.answered(yes);
+        yes
     })
     .await
 }
@@ -421,6 +494,8 @@ mod tests {
         accounts: Mutex<serde_json::Value>,
         asked: Mutex<Vec<(String, String, Option<serde_json::Value>)>>,
         refuse_add: bool,
+        /// The add is sent, and the connection drops before any answer.
+        drop_add: bool,
         refuse_hand_over: Option<String>,
     }
 
@@ -451,6 +526,9 @@ mod tests {
                 ("GET", "/api/desk/accounts") => {
                     Ok(answer(200, self.accounts.lock().unwrap().clone()))
                 }
+                ("POST", "/api/desk/accounts") if self.drop_add => {
+                    Err("Desk couldn't reach devbox's hub: connection closed.".into())
+                }
                 ("POST", "/api/desk/accounts") if self.refuse_add => Ok(answer(
                     400,
                     serde_json::json!({"error": "Claude Code there didn't take that sign-in"}),
@@ -480,7 +558,10 @@ mod tests {
     }
 
     impl Mine for Fake {
-        fn hand_over(&self, account: &str) -> impl Future<Output = Result<Answer, String>> + Send {
+        fn hand_over(
+            &self,
+            account: &str,
+        ) -> impl Future<Output = Result<NativeAnswer, String>> + Send {
             self.asked
                 .lock()
                 .unwrap()
@@ -494,7 +575,11 @@ mod tests {
                     200,
                     serde_json::json!({"engine": "claude", "name": account, "isDefault": false, "token": format!("{TOKEN}-{account}")}),
                 )),
-            };
+            }
+            .map(|a: Answer| NativeAnswer {
+                status: a.status,
+                body: zeroize::Zeroizing::new(a.body),
+            });
             async move { out }
         }
     }
@@ -692,6 +777,45 @@ mod tests {
             f.why
                 .starts_with("devbox refused it: Claude Code there didn't take")
         }));
+    }
+
+    #[test]
+    fn a_copy_that_drops_halfway_says_it_may_be_there_anyway() {
+        let dropping = Fake {
+            drop_add: true,
+            ..devbox()
+        };
+        let shared = block(share(&mac(), &dropping, &place(), |_| async { true })).unwrap();
+        assert!(shared.copied.is_empty());
+        assert_eq!(shared.failed.len(), 2);
+        assert!(
+            shared.failed.iter().all(|f| f
+                .why
+                .contains("It may be on devbox anyway: look at devbox's accounts")),
+            "{:?}",
+            shared.failed
+        );
+    }
+
+    #[test]
+    fn a_cancel_quietens_the_question_for_a_while_and_a_yes_clears_it() {
+        let gate = ShareGate::with_quiet(std::time::Duration::from_secs(60));
+        let open = gate.start().ok().unwrap();
+        assert!(gate.start().err().unwrap().contains("already asking"));
+        gate.answered(false);
+        drop(open);
+        let quiet = gate.start().err().expect("refused after a Cancel");
+        assert!(quiet.contains("Try again in"), "{quiet}");
+        gate.answered(true);
+        assert!(gate.start().is_ok());
+    }
+
+    #[test]
+    fn the_question_says_who_can_use_the_copies_and_how_to_revoke_them() {
+        let q = question(&place(), &["Work"]);
+        assert!(q.contains("or who controls devbox"), "{q}");
+        assert!(q.contains("revoke it at claude.ai"), "{q}");
+        assert!(!q.contains("at any time"), "{q}");
     }
 
     #[test]

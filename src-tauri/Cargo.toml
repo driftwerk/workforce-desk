@@ -49,6 +49,7 @@ rustls-platform-verifier = "0.7.1"
 hyper-util = { version = "0.1.21", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 rand = { workspace = true }
 sha2 = "0.11.1"
+zeroize = "1.9.1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
