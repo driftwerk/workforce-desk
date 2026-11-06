@@ -545,6 +545,9 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     assert_eq!(row["state"], "ready");
     assert_eq!(row["version"], "0.2.0");
     assert!(row["system"]["arch"].is_string());
+    // Its page knows the account and linger from the add’s own look.
+    assert!(row["details"]["user"].is_string(), "{row}");
+    assert!(row["details"]["linger"].is_boolean(), "{row}");
 
     // The machine's hub is reached through the forward, with its token.
     let link = r.machines.get(&id).unwrap();

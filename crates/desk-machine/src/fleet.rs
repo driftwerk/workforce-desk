@@ -1433,6 +1433,21 @@ impl Fleet {
 
     /// The §4 flow, after the person's yes: look, install, start, connect,
     /// then the engines. Blocking; its own thread.
+    /// What the machine's page says about it (free space, linger, its
+    /// service, systemd, the account), from a look there.
+    fn know_details(&self, id: &str, look: &probe::Look) {
+        self.set_now(id, |n| {
+            n.details = Some(Details {
+                free_kb: look.free_kb,
+                linger: look.linger,
+                service: look.service,
+                systemd: look.systemd,
+                user: Some(look.user.clone()),
+                linger_line: Some(install::linger_by_hand(&look.user)),
+            })
+        });
+    }
+
     fn set_up(self: &Arc<Self>, id: &str) {
         let Some(machine) = self.machine(id) else {
             return;
@@ -1444,6 +1459,7 @@ impl Fleet {
             Ok(l) => l,
             Err(m) => return self.step_failed(id, Step::Connect, Self::missed(&machine, m)),
         };
+        self.know_details(id, &look);
         if let Err(m) = Self::fits(&machine, &look) {
             return self.step_failed(id, Step::Connect, m);
         }
@@ -1995,16 +2011,7 @@ impl Fleet {
             }
         };
         self.set_now(id, |n| n.shown_key = None);
-        self.set_now(id, |n| {
-            n.details = Some(Details {
-                free_kb: look.free_kb,
-                linger: look.linger,
-                service: look.service,
-                systemd: look.systemd,
-                user: Some(look.user.clone()),
-                linger_line: Some(install::linger_by_hand(&look.user)),
-            })
-        });
+        self.know_details(id, &look);
         // Never over desktop Desk, installed there since.
         if look.desktop {
             return State::Failed {

@@ -6,7 +6,8 @@
 //! event and state is printed; a token never is.
 //!
 //! ```text
-//! machine-live <target> --root <folder> --backend <folder> [--yes] [--remove]
+//! machine-live <target> --root <folder> --backend <folder> [--yes] [--trust]
+//!     [--cancel] [--log] [--remote-log] [--edit <target>] [--uninstall] [--remove]
 //! ```
 //!
 //! `--root` holds this run's `machines.json`, backend cache and forward
@@ -14,6 +15,16 @@
 //! question before Desk runs anything there; without it, nothing runs.
 //! `--remove` forgets the machine on this computer at the end (Desk stays
 //! installed there, as Remove from Desk leaves it).
+//!
+//! The machines redesign's flows, each printed as it goes:
+//! - `--trust` says yes to trusting a new host key and to reaching the
+//!   machine at another address, as the person would in the native dialog;
+//! - `--cancel` cancels adding once the install step runs, and stops there;
+//! - `--log` prints this computer's log of it, `--remote-log` Desk's own log
+//!   there (its service's, over SSH);
+//! - `--edit <target>` reaches it at another address (the same host key
+//!   only);
+//! - `--uninstall` removes it with Desk uninstalled there, step by step.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,8 +32,8 @@ use std::time::{Duration, Instant};
 
 use desk_core::machine_backend::{self, Arch, Backend};
 use desk_machine::admit::{Confirm, Question};
-use desk_machine::fleet::{Fleet, Host, SetupEvent, State, Timing};
-use desk_machine::hostkey::{TrustConfirm, TrustQuestion};
+use desk_machine::fleet::{Fleet, Host, RemoveEvent, SetupEvent, State, Timing};
+use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion};
 use desk_machine::setup::Person;
 use desk_machine::{Machines, SshExe};
 
@@ -55,9 +66,12 @@ impl Host for Live {
     fn person(&self) -> Person {
         Person::default()
     }
+    fn removing(&self, event: &RemoveEvent) {
+        println!("remove {}", serde_json::to_string(event).expect("an event"));
+    }
 }
 
-struct Answer(bool);
+struct Answer(bool, bool);
 
 impl Confirm for Answer {
     fn run_on(&self, q: &Question) -> bool {
@@ -69,7 +83,11 @@ impl Confirm for Answer {
 impl TrustConfirm for Answer {
     fn trust_key(&self, q: &TrustQuestion) -> bool {
         println!("asked: {}", q.text().replace('\n', " / "));
-        false
+        self.1
+    }
+    fn switch_to(&self, q: &SwitchQuestion) -> bool {
+        println!("asked: {}", q.text().replace('\n', " / "));
+        self.1
     }
 }
 
@@ -120,10 +138,11 @@ fn main() {
     }
     std::fs::create_dir_all(&root).unwrap_or_else(|e| fail(&e.to_string()));
     let yes = args.iter().any(|a| a == "--yes");
+    let has = |flag: &str| args.iter().any(|a| a == flag);
     let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let ssh = SshExe::system();
     let machines = Arc::new(Machines::new(ssh.clone(), &root.join("sockets")));
-    let answer = Arc::new(Answer(yes));
+    let answer = Arc::new(Answer(yes, has("--trust")));
     let fleet = Fleet::new(
         ssh,
         Arc::clone(&machines),
@@ -140,11 +159,57 @@ fn main() {
     );
 
     let started = Instant::now();
-    let probe = fleet.probe(target).unwrap_or_else(|e| fail(&e));
+    println!(
+        "hosts {}",
+        serde_json::to_string(&fleet.ssh_hosts()).expect("hosts")
+    );
+    let mut probe = fleet.probe(target).unwrap_or_else(|e| fail(&e));
     println!("probe {}", serde_json::to_string(&probe).expect("a probe"));
+    if let desk_machine::probe::ProbeKey::New { fingerprint, .. } = &probe.host_key
+        && has("--trust")
+    {
+        fleet
+            .trust(target, fingerprint)
+            .unwrap_or_else(|e| fail(&e));
+        probe = fleet.probe(target).unwrap_or_else(|e| fail(&e));
+        println!(
+            "probe after trust {}",
+            serde_json::to_string(&probe).expect("a probe")
+        );
+    }
     println!("public key found: {}", fleet.public_key().is_some());
     let id = fleet.add(target, &probe.name).unwrap_or_else(|e| fail(&e));
     println!("added {id}");
+    if has("--cancel") {
+        let until = Instant::now() + Duration::from_secs(10 * 60);
+        while !fleet.list().iter().any(|m| m.progress.is_some()) {
+            if let Some(State::Failed { message }) = fleet.state(&id) {
+                fail(&format!("failed before the copy: {message}"));
+            }
+            if Instant::now() > until {
+                fail("never reached the copy");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let at = Instant::now();
+        fleet.cancel_add(&id).unwrap_or_else(|e| fail(&e));
+        while !fleet.list().is_empty() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        println!(
+            "cancelled in {} ms; machines left: {}",
+            at.elapsed().as_millis(),
+            fleet.list().len()
+        );
+        for line in std::fs::read_to_string(root.join("machines.json"))
+            .unwrap_or_default()
+            .lines()
+        {
+            println!("machines.json {line}");
+        }
+        fleet.shutdown();
+        return;
+    }
     let until = Instant::now() + Duration::from_secs(20 * 60);
     loop {
         match fleet.state(&id) {
@@ -184,6 +249,47 @@ fn main() {
         if path == "/api/desk/engines" {
             println!("engines: {}", body.chars().take(400).collect::<String>());
         }
+    }
+    if has("--log") {
+        for l in fleet.log(&id).unwrap_or_default() {
+            println!("log {:?} {}", l.kind, l.text);
+        }
+    }
+    if has("--remote-log") {
+        match fleet.remote_log(&id, Duration::from_secs(10)) {
+            Ok(said) => println!(
+                "remote log: {} lines; last: {}",
+                said.lines().count(),
+                said.lines().last().unwrap_or("")
+            ),
+            Err(e) => println!("remote log refused: {e}"),
+        }
+    }
+    if let Some(to) = value("--edit") {
+        let to = to.to_string_lossy().into_owned();
+        match fleet.edit(&id, Some(&to), None) {
+            Ok(done) => println!(
+                "edit to {to}: {}",
+                serde_json::to_string(&done).expect("an edit")
+            ),
+            Err(e) => println!("edit to {to} refused: {e}"),
+        }
+        let until = Instant::now() + Duration::from_secs(120);
+        while fleet.state(&id) != Some(State::Ready) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        println!(
+            "after edit: {}",
+            serde_json::to_string(&fleet.list()).expect("a list")
+        );
+    }
+    if has("--uninstall") {
+        match fleet.uninstall(&id) {
+            Ok(()) => println!("uninstalled; machines left: {}", fleet.list().len()),
+            Err(e) => println!("uninstall refused: {e}"),
+        }
+        fleet.shutdown();
+        return;
     }
     let remove = args.iter().any(|a| a == "--remove");
     if remove {
