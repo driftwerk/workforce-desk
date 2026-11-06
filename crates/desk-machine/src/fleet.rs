@@ -11,7 +11,7 @@
 //! stands for a while for that exact address, so looking at it again,
 //! trusting its key and adding it ask once.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -22,7 +22,7 @@ use desk_core::machine_backend::{Arch, Backend};
 use serde::{Deserialize, Serialize};
 
 use crate::admit::{self, Confirm, Gate, Question};
-use crate::hostkey::{self, Files, TrustConfirm};
+use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm};
 use crate::link::{Link, Machines};
 use crate::probe::{self, Access, Missed, Probe, System};
 use crate::setup::{self, Person};
@@ -56,10 +56,102 @@ pub struct Kept {
     pub version: Option<String>,
     #[serde(default)]
     pub system: Option<System>,
+    /// The host key Desk knows it by: what makes another address the same
+    /// machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<KeptKey>,
+    /// When Desk last reached it (Unix ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected: Option<i64>,
+}
+
+/// A machine's host key, as Desk keeps and shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptKey {
+    /// `ED25519`.
+    pub kind: String,
+    /// `SHA256:…`.
+    pub fingerprint: String,
+    /// When the person trusted it from Desk (Unix ms); none when it was in
+    /// their known_hosts already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_at: Option<i64>,
+}
+
+/// One line of this computer's log of a machine: what Desk did to reach
+/// it, and what ssh said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLine {
+    /// Unix ms.
+    pub at: i64,
+    pub kind: LogKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogKind {
+    Info,
+    Ok,
+    Warn,
+    Error,
+}
+
+/// The most lines kept of a machine's log.
+const LOG_LINES: usize = 200;
+
+/// How Desk reaches a machine, as the person's ssh config makes it
+/// (`ssh -G`, read at each connect).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reach {
+    pub user: Option<String>,
+    pub hostname: Option<String>,
+    pub port: Option<String>,
+    /// `ProxyJump`'s hosts, or that a `ProxyCommand` runs.
+    pub via: Option<String>,
+    /// The `Host` entry its address is, and the file it is in.
+    pub entry: Option<String>,
+    pub file: Option<String>,
+}
+
+/// What the last look there found, besides its system.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Details {
+    pub free_kb: Option<u64>,
+    pub linger: Option<bool>,
+    /// Desk's user service there is enabled.
+    pub service: bool,
+    pub systemd: bool,
+    pub user: Option<String>,
+}
+
+/// What changing how a machine is reached did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Edited {
+    /// The name, the address or both are changed.
+    Done,
+    /// The person said no: nothing changed.
+    Cancelled,
+    /// The new address shows another key than the machine's: refused.
+    DifferentKey { shown: KeptKey, known: KeptKey },
+}
+
+/// Now, in Unix ms.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 /// A row of `machines_list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Listed {
     pub id: String,
     pub name: String,
@@ -67,6 +159,28 @@ pub struct Listed {
     pub version: Option<String>,
     pub system: Option<System>,
     pub state: State,
+    /// Why it is offline or failed, in the person's words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// ssh's own last line about it, as ssh said it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
+    /// Unix ms: when it was last reached, when Desk last tried, when it
+    /// tries next, and since when it has been connected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_try: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_try: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_since: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reach: Option<Reach>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Details>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<KeptKey>,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -217,6 +331,35 @@ struct Row {
     /// A connect is running.
     busy: bool,
     kick: Arc<(Mutex<bool>, Condvar)>,
+    /// What the page shows of where it stands, besides its state.
+    now: Now,
+}
+
+/// Where a machine stands, besides its state: why, when, how it is reached,
+/// and this computer's log of it. Held in memory.
+#[derive(Default)]
+struct Now {
+    reason: Option<String>,
+    said: Option<String>,
+    last_try: Option<i64>,
+    next_try: Option<i64>,
+    connected_since: Option<i64>,
+    reach: Option<Reach>,
+    details: Option<Details>,
+    log: VecDeque<LogLine>,
+}
+
+impl Row {
+    fn new(kept: Kept, state: State, saved: bool, busy: bool) -> Row {
+        Row {
+            kept,
+            state,
+            saved,
+            busy,
+            kick: Arc::default(),
+            now: Now::default(),
+        }
+    }
 }
 
 pub struct Fleet {
@@ -247,6 +390,9 @@ pub struct Fleet {
     /// What the person's ssh settings said about the address looked at
     /// last, for the public key it would sign in with.
     files: Mutex<Option<Files>>,
+    /// Keys the person trusted from Desk, by address, until the machine at
+    /// that address is added.
+    trusted: Mutex<HashMap<String, KeptKey>>,
 }
 
 /// Whether the machine's hub answers through the forward: its engines, as
@@ -391,6 +537,7 @@ impl Fleet {
             #[cfg(test)]
             save_pause: Mutex::default(),
             files: Mutex::default(),
+            trusted: Mutex::default(),
         })
     }
 
@@ -420,13 +567,7 @@ impl Fleet {
             for k in kept {
                 rows.insert(
                     k.machine.id.to_string(),
-                    Row {
-                        kept: k,
-                        state: State::Connecting,
-                        saved: true,
-                        busy: false,
-                        kick: Arc::default(),
-                    },
+                    Row::new(k, State::Connecting, true, false),
                 );
             }
             rows.keys().cloned().collect()
@@ -473,8 +614,61 @@ impl Fleet {
                 version: r.kept.version.clone(),
                 system: r.kept.system.clone(),
                 state: r.state.clone(),
+                reason: r.now.reason.clone(),
+                said: r.now.said.clone(),
+                last_connected: r.kept.last_connected,
+                last_try: r.now.last_try,
+                next_try: r.now.next_try,
+                connected_since: r.now.connected_since,
+                reach: r.now.reach.clone(),
+                details: r.now.details.clone(),
+                host_key: r.kept.host_key.clone(),
             })
             .collect()
+    }
+
+    /// This computer's log of machine `id`, oldest first.
+    pub fn log(&self, id: &str) -> Result<Vec<LogLine>, String> {
+        self.rows()
+            .get(id)
+            .map(|r| r.now.log.iter().cloned().collect())
+            .ok_or_else(|| "That machine isn't in Desk any more.".to_string())
+    }
+
+    /// Adds a line to machine `id`'s log, and to Desk's own.
+    fn note(&self, id: &str, kind: LogKind, text: impl Into<String>) {
+        let text = text.into();
+        match kind {
+            LogKind::Error | LogKind::Warn => {
+                tracing::info!(machine = id, problem = %text, "machine log")
+            }
+            _ => tracing::info!(machine = id, said = %text, "machine log"),
+        }
+        if let Some(r) = self.rows().get_mut(id) {
+            if r.now.log.len() >= LOG_LINES {
+                r.now.log.pop_front();
+            }
+            r.now.log.push_back(LogLine {
+                at: now_ms(),
+                kind,
+                text,
+            });
+        }
+    }
+
+    /// Changes what the page shows of where machine `id` stands, and says
+    /// so.
+    fn set_now(&self, id: &str, f: impl FnOnce(&mut Now)) {
+        let found = match self.rows().get_mut(id) {
+            Some(r) => {
+                f(&mut r.now);
+                true
+            }
+            None => false,
+        };
+        if found {
+            self.host.changed();
+        }
     }
 
     pub fn state(&self, id: &str) -> Option<State> {
@@ -603,7 +797,20 @@ impl Fleet {
             gate: &self.trust_gate,
             confirm: self.trust.as_ref(),
         };
-        hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)
+        if let Some(key) = hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)? {
+            self.trusted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    machine.target.to_string(),
+                    KeptKey {
+                        kind: key.kind(),
+                        fingerprint: key.fingerprint,
+                        trusted_at: Some(now_ms()),
+                    },
+                );
+        }
+        Ok(())
     }
 
     /// This computer's public SSH key (`machine_public_key`): for the
@@ -648,19 +855,25 @@ impl Fleet {
             if rows.contains_key(&id) {
                 return Err("Another machine was added with that name meanwhile.".into());
             }
+            let trusted = self
+                .trusted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(machine.target.as_str());
             rows.insert(
                 id.clone(),
-                Row {
-                    kept: Kept {
+                Row::new(
+                    Kept {
                         machine: machine.clone(),
                         version: None,
                         system: None,
+                        host_key: trusted,
+                        last_connected: None,
                     },
-                    state: State::Adding,
-                    saved: false,
-                    busy: true,
-                    kick: Arc::default(),
-                },
+                    State::Adding,
+                    false,
+                    true,
+                ),
             );
         }
         self.host.changed();
@@ -880,6 +1093,17 @@ impl Fleet {
             r.busy = false;
         }
         self.save();
+        let at = now_ms();
+        let reach = self.reach_of(&machine);
+        self.set_now(id, |n| {
+            n.reason = None;
+            n.said = None;
+            n.connected_since = Some(at);
+            n.reach = reach;
+        });
+        self.update_kept(id, |k| k.last_connected = Some(at));
+        self.note(id, LogKind::Ok, format!("connected · Desk {version}"));
+        self.know_key(id, &machine);
         self.set_state(id, State::Ready);
         self.host.changed();
         self.supervise(id);
@@ -1023,13 +1247,88 @@ impl Fleet {
             r.busy = true;
             r.kept.machine.clone()
         };
+        let was_ready = matches!(self.state(id), Some(State::Ready));
         let state = self.connect_now(&machine);
         if let Some(r) = self.rows().get_mut(id) {
             r.busy = false;
         }
         let ok = matches!(state, State::Ready | State::Newer);
+        match &state {
+            State::Ready => {
+                let at = now_ms();
+                self.set_now(id, |n| {
+                    n.reason = None;
+                    n.said = None;
+                    n.next_try = None;
+                    if !was_ready || n.connected_since.is_none() {
+                        n.connected_since = Some(at);
+                    }
+                });
+                self.update_kept(id, |k| k.last_connected = Some(at));
+                let version = self
+                    .rows()
+                    .get(id)
+                    .and_then(|r| r.kept.version.clone())
+                    .unwrap_or_default();
+                self.note(id, LogKind::Ok, format!("connected · Desk {version}"));
+                self.know_key(id, &machine);
+            }
+            State::Newer => self.note(id, LogKind::Warn, "it runs a newer Desk: driven no further"),
+            State::Failed { message } => {
+                let message = message.clone();
+                self.set_now(id, |n| {
+                    n.reason = Some(message);
+                    n.connected_since = None;
+                });
+            }
+            State::Unreachable => self.set_now(id, |n| n.connected_since = None),
+            _ => {}
+        }
         self.set_state(id, state);
         ok
+    }
+
+    /// Keeps the host key machine `id` shows, when Desk doesn't know it
+    /// yet: what makes another address the same machine.
+    fn know_key(&self, id: &str, machine: &Machine) {
+        if self
+            .rows()
+            .get(id)
+            .is_some_and(|r| r.kept.host_key.is_some())
+        {
+            return;
+        }
+        if let Ok((key, _)) = hostkey::capture(&self.ssh, machine) {
+            self.update_kept(id, |k| {
+                k.host_key.get_or_insert(KeptKey {
+                    kind: key.kind(),
+                    fingerprint: key.fingerprint,
+                    trusted_at: None,
+                });
+            });
+        }
+    }
+
+    /// How Desk reaches `machine` now, as the person's ssh config says.
+    fn reach_of(&self, machine: &Machine) -> Option<Reach> {
+        let settings = ssh::settings(&self.ssh, machine).ok()?;
+        let entry = suggest::hosts(&self.home)
+            .into_iter()
+            .find(|e| e.host == machine.target.as_str());
+        Some(Reach {
+            user: settings.user,
+            hostname: settings.hostname,
+            port: settings.port,
+            via: settings.via.map(|v| {
+                if v.contains(' ') {
+                    "a ProxyCommand".to_string()
+                } else {
+                    v
+                }
+            }),
+            file: entry.as_ref().map(|e| e.file.clone()),
+            entry: entry.map(|e| e.host),
+        })
     }
 
     fn connect_now(&self, machine: &Machine) -> State {
@@ -1037,18 +1336,60 @@ impl Fleet {
         if !matches!(self.state(id), Some(State::Ready)) {
             self.set_state(id, State::Connecting);
         }
-        let look = match probe::look(&self.ssh, machine) {
+        let reach = self.reach_of(machine);
+        let through = reach
+            .as_ref()
+            .and_then(|r| r.via.clone())
+            .map(|v| format!(" through {v}"))
+            .unwrap_or_default();
+        self.note(
+            id,
+            LogKind::Info,
+            format!("connecting to {}{through}", machine.name),
+        );
+        self.set_now(id, |n| {
+            n.last_try = Some(now_ms());
+            n.next_try = None;
+            if reach.is_some() {
+                n.reach = reach;
+            }
+        });
+        let (look, said) = probe::look_said(&self.ssh, machine);
+        let look = match look {
             Ok(l) => l,
             Err(Missed::Unreachable(m)) => {
                 tracing::info!(machine = id, problem = %m, "machine unreachable");
+                self.note(
+                    id,
+                    LogKind::Error,
+                    said.clone().unwrap_or_else(|| m.clone()),
+                );
+                self.set_now(id, |n| {
+                    n.reason = Some(m);
+                    n.said = said;
+                });
                 return State::Unreachable;
             }
             Err(m) => {
-                return State::Failed {
-                    message: Self::missed(machine, m),
-                };
+                let message = Self::missed(machine, m);
+                self.note(
+                    id,
+                    LogKind::Error,
+                    said.clone().unwrap_or_else(|| message.clone()),
+                );
+                self.set_now(id, |n| n.said = said);
+                return State::Failed { message };
             }
         };
+        self.set_now(id, |n| {
+            n.details = Some(Details {
+                free_kb: look.free_kb,
+                linger: look.linger,
+                service: look.service,
+                systemd: look.systemd,
+                user: Some(look.user.clone()),
+            })
+        });
         // Never over desktop Desk, installed there since.
         if look.desktop {
             return State::Failed {
@@ -1198,6 +1539,21 @@ impl Fleet {
                             } else if fleet.machines.get(&id).is_some_and(|l| l.ready().is_none()) {
                                 misses += 1;
                                 if misses >= 3 {
+                                    let name =
+                                        fleet.machine(&id).map(|m| m.name).unwrap_or_default();
+                                    let secs = (fleet.timing.check_every * 3).as_secs().max(1);
+                                    fleet.note(
+                                        &id,
+                                        LogKind::Warn,
+                                        format!("link dropped: no answer for {secs} s"),
+                                    );
+                                    fleet.set_now(&id, |n| {
+                                        n.reason = Some(format!(
+                                            "Desk lost its link to {name}: no answer for {secs} s."
+                                        ));
+                                        n.said = None;
+                                        n.connected_since = None;
+                                    });
                                     fleet.set_state(&id, State::Unreachable);
                                 }
                                 misses >= 3
@@ -1223,11 +1579,222 @@ impl Fleet {
                     if fleet.connect(&id) {
                         backoff = fleet.timing.first_backoff;
                     } else {
-                        fleet.wait_kick(&id, Some(backoff));
+                        let next = now_ms() + backoff.as_millis() as i64;
+                        fleet.note(
+                            &id,
+                            LogKind::Info,
+                            format!("next try in {} s", backoff.as_secs().max(1)),
+                        );
+                        fleet.set_now(&id, |n| n.next_try = Some(next));
+                        if fleet.wait_kick(&id, Some(backoff)) {
+                            fleet.note(&id, LogKind::Info, "reconnecting now, as asked");
+                        }
                         backoff = (backoff * 2).min(fleet.timing.max_backoff);
                     }
                 }
             });
+    }
+
+    // ── Reading and changing it ─────────────────────────────────────────
+
+    /// The `Host` entries in the person's SSH config, read as text.
+    pub fn ssh_hosts(&self) -> Vec<suggest::HostEntry> {
+        suggest::hosts(&self.home)
+    }
+
+    /// The last `lines` of Desk's own log on machine `id` (its service's,
+    /// from `journalctl --user`), read over SSH with Desk's fixed options;
+    /// each line cleaned to plain text. Gives up after `within`. Blocking.
+    pub fn remote_log(&self, id: &str, within: Duration) -> Result<String, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let words: Vec<String> = [
+            "journalctl",
+            "--user",
+            "-u",
+            desk_core::systemd::UNIT,
+            "-n",
+            "200",
+            "--no-pager",
+            "-o",
+            "short-iso",
+        ]
+        .iter()
+        .map(|w| w.to_string())
+        .collect();
+        let out = self
+            .ssh
+            .output_within(&machine.command(&words), within)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::TimedOut {
+                    format!(
+                        "{} didn't answer within {} s.",
+                        machine.name,
+                        within.as_secs()
+                    )
+                } else {
+                    format!("Desk couldn't run ssh: {e}")
+                }
+            })?;
+        if out.status.code() == Some(ssh::SSH_FAILED) {
+            return Err(ssh::problem(&machine, &out.stderr));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<String> = text
+            .lines()
+            .map(|l| {
+                l.chars()
+                    .map(|c| if c == '\t' { ' ' } else { c })
+                    .filter(|c| !c.is_control() && !desk_core::machine::is_format(*c))
+                    .take(400)
+                    .collect::<String>()
+            })
+            .collect();
+        if lines.iter().all(|l| l.trim().is_empty()) {
+            return Ok(format!(
+                "{} has no log from Desk's service yet{}.",
+                machine.name,
+                if out.status.success() {
+                    ""
+                } else {
+                    " (journalctl couldn't read it)"
+                }
+            ));
+        }
+        Ok(lines.join("\n"))
+    }
+
+    /// Changes machine `id`'s name, how it is reached (`target`), or both
+    /// (`machine_edit`). A new address must show the machine's own host
+    /// key: the person is asked natively first (nothing runs there before),
+    /// then the key it shows is read and compared; another key is refused
+    /// and nothing changes. Blocking.
+    pub fn edit(
+        self: &Arc<Self>,
+        id: &str,
+        target: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Edited, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let name = name.map(str::trim).filter(|n| *n != machine.name);
+        if let Some(n) = name {
+            if n.is_empty() || n.chars().count() > 60 || n.chars().any(char::is_control) {
+                return Err("Give it a name of up to 60 letters.".into());
+            }
+            if self
+                .rows()
+                .iter()
+                .any(|(other, r)| other != id && r.kept.machine.name.eq_ignore_ascii_case(n))
+            {
+                return Err(format!(
+                    "Another machine is called {n} already. Two machines can't share a name."
+                ));
+            }
+        }
+        let target = match target
+            .map(str::trim)
+            .filter(|t| *t != machine.target.as_str())
+        {
+            Some(t) => Some(Target::new(t).map_err(|e| e.to_string())?),
+            None => None,
+        };
+        if let Some(t) = &target
+            && let Some((_, other)) = self
+                .rows()
+                .iter()
+                .find(|(other, r)| *other != id && r.kept.machine.target == *t)
+        {
+            return Err(format!(
+                "{t} is how Desk reaches {} already.",
+                other.kept.machine.name
+            ));
+        }
+        if let Some(t) = target {
+            let moved = Machine {
+                target: t.clone(),
+                ..machine.clone()
+            };
+            let known = match self.rows().get(id).and_then(|r| r.kept.host_key.clone()) {
+                Some(k) => k,
+                None => {
+                    let (k, _) = hostkey::capture(&self.ssh, &machine).map_err(|_| {
+                        format!(
+                            "Desk doesn't know {}'s host key yet, and can't read it now. Reconnect to {} first.",
+                            machine.name, machine.name
+                        )
+                    })?;
+                    KeptKey {
+                        kind: k.kind(),
+                        fingerprint: k.fingerprint,
+                        trusted_at: None,
+                    }
+                }
+            };
+            let question = SwitchQuestion {
+                name: machine.name.clone(),
+                from: machine.target.to_string(),
+                to: t.to_string(),
+                kind: known.kind.clone(),
+                fingerprint: known.fingerprint.clone(),
+            };
+            let confirm = &self.trust;
+            if !self.trust_gate.ask(|| confirm.switch_to(&question))? {
+                return Ok(Edited::Cancelled);
+            }
+            // Only now does anything run for the new address.
+            let said = self.settings_said(&moved)?;
+            ssh::no_forwards(&moved, &ssh::Settings::parse(&said))?;
+            let files = Files::parse(&said, &self.home);
+            let (shown, line) = hostkey::capture(&self.ssh, &moved)?;
+            if shown.fingerprint != known.fingerprint {
+                self.note(
+                    id,
+                    LogKind::Warn,
+                    format!(
+                        "{t} shows another host key ({}): not moved there",
+                        shown.fingerprint
+                    ),
+                );
+                return Ok(Edited::DifferentKey {
+                    shown: KeptKey {
+                        kind: shown.kind(),
+                        fingerprint: shown.fingerprint,
+                        trusted_at: None,
+                    },
+                    known,
+                });
+            }
+            match hostkey::trouble(&self.ssh, &moved)? {
+                None => {}
+                Some(hostkey::KeyTrouble::Unknown) => hostkey::learn(&files, &line)?,
+                Some(hostkey::KeyTrouble::Changed) => {
+                    return Err(format!(
+                        "Your known_hosts has another key for {t}. Desk won't change it: remove that line (ssh-keygen -R), then try again."
+                    ));
+                }
+            }
+            self.update_kept(id, |k| k.machine.target = t.clone());
+            self.note(
+                id,
+                LogKind::Info,
+                format!("now reached at {t}, the same host key"),
+            );
+            tracing::info!(machine = id, target = %t, "machine reached at another address");
+            // Its link and forward are made again, to the new address.
+            self.drop_link(id);
+            self.set_now(id, |n| n.reach = None);
+            self.set_state(id, State::Connecting);
+            self.kick(id);
+        }
+        if let Some(n) = name {
+            let n = n.to_string();
+            self.update_kept(id, |k| k.machine.name = n.clone());
+            self.note(id, LogKind::Info, format!("named {n}"));
+        }
+        Ok(Edited::Done)
     }
 
     // ── Removing ────────────────────────────────────────────────────────
@@ -1335,17 +1902,13 @@ mod tests {
             },
             version: Some("0.2.0".into()),
             system: None,
+            host_key: None,
+            last_connected: None,
         }
     }
 
     fn row(id: &str) -> Row {
-        Row {
-            kept: kept(id),
-            state: State::Ready,
-            saved: true,
-            busy: false,
-            kick: Arc::default(),
-        }
+        Row::new(kept(id), State::Ready, true, false)
     }
 
     #[test]
@@ -1452,12 +2015,40 @@ mod tests {
             system: Some(System {
                 os: "Ubuntu 24.04".into(),
                 arch: "x86_64".into(),
+                glibc: Some("2.39".into()),
             }),
-            state: State::Ready,
+            state: State::Unreachable,
+            reason: Some("SSH couldn't reach devbox.".into()),
+            said: Some("ssh: connect to host 10.0.3.14 port 22: Connection timed out".into()),
+            last_connected: Some(1),
+            last_try: Some(2),
+            next_try: Some(3),
+            connected_since: None,
+            reach: Some(Reach {
+                user: Some("dev".into()),
+                hostname: Some("10.0.3.14".into()),
+                port: Some("22".into()),
+                via: Some("bastion".into()),
+                entry: Some("devbox".into()),
+                file: Some("~/.ssh/config".into()),
+            }),
+            details: None,
+            host_key: Some(KeptKey {
+                kind: "ED25519".into(),
+                fingerprint: "SHA256:k3Vq".into(),
+                trusted_at: Some(4),
+            }),
         };
         assert_eq!(
             serde_json::to_value(row).unwrap(),
-            serde_json::json!({"id": "devbox", "name": "devbox", "target": "dev@devbox", "version": "0.3.0", "system": {"os": "Ubuntu 24.04", "arch": "x86_64"}, "state": "ready"})
+            serde_json::json!({
+                "id": "devbox", "name": "devbox", "target": "dev@devbox", "version": "0.3.0",
+                "system": {"os": "Ubuntu 24.04", "arch": "x86_64", "glibc": "2.39"}, "state": "unreachable",
+                "reason": "SSH couldn't reach devbox.", "said": "ssh: connect to host 10.0.3.14 port 22: Connection timed out",
+                "lastConnected": 1, "lastTry": 2, "nextTry": 3,
+                "reach": {"user": "dev", "hostname": "10.0.3.14", "port": "22", "via": "bastion", "entry": "devbox", "file": "~/.ssh/config"},
+                "hostKey": {"kind": "ED25519", "fingerprint": "SHA256:k3Vq", "trustedAt": 4}
+            })
         );
         let event = SetupEvent {
             machine: "devbox".into(),

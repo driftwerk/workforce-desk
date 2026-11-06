@@ -32,6 +32,37 @@ export type MachineState =
   | { kind: "newer" }
   | { kind: "failed"; message: string };
 
+/** How Desk reaches a machine, as the person's SSH config makes it. */
+export interface Reach {
+  user: string | null;
+  hostname: string | null;
+  port: string | null;
+  /** A jump host (`bastion`), or "a ProxyCommand". */
+  via: string | null;
+  /** The SSH config `Host` entry its address is, and the file it's in. */
+  entry: string | null;
+  file: string | null;
+}
+
+/** What Desk's last look there found, besides its system. */
+export interface Details {
+  freeKb: number | null;
+  linger: boolean | null;
+  /** Desk's user service is enabled there. */
+  service: boolean;
+  systemd: boolean;
+  user: string | null;
+}
+
+/** The host key Desk knows a machine by. */
+export interface HostKeyInfo {
+  /** `ED25519`. */
+  kind: string;
+  fingerprint: string;
+  /** When it was trusted from Desk (ms); none when known_hosts had it. */
+  trustedAt: number | null;
+}
+
 export interface Machine {
   id: MachineId;
   name: string;
@@ -41,7 +72,18 @@ export interface Machine {
   version: string | null;
   state: MachineState;
   /** Its system, once Desk has looked (`Ubuntu 24.04`, `x86_64`). */
-  system?: { os: string; arch: string } | null;
+  system?: { os: string; arch: string; glibc?: string | null } | null;
+  /** Why it is offline or failed, in Desk's words; and ssh's own line. */
+  reason?: string | null;
+  said?: string | null;
+  /** Times, in ms: last reached, last tried, next try, connected since. */
+  lastConnected?: number | null;
+  lastTry?: number | null;
+  nextTry?: number | null;
+  connectedSince?: number | null;
+  reach?: Reach | null;
+  details?: Details | null;
+  hostKey?: HostKeyInfo | null;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -66,7 +108,43 @@ export const readState = (raw: unknown): MachineState => {
 /** A machine's system as listed; null when it isn't known. */
 const readSystem = (raw: unknown): Machine["system"] => {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  return o && typeof o.arch === "string" ? { os: typeof o.os === "string" ? o.os : "Linux", arch: o.arch } : null;
+  return o && typeof o.arch === "string"
+    ? { os: typeof o.os === "string" ? o.os : "Linux", arch: o.arch, glibc: typeof o.glibc === "string" ? o.glibc : null }
+    : null;
+};
+
+const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+
+/** What the native side says beyond its state, read leniently. */
+const readMore = (o: Record<string, unknown>): Partial<Machine> => {
+  const reach = obj(o.reach);
+  const details = obj(o.details);
+  const key = obj(o.hostKey);
+  const more: Partial<Machine> = {
+    reason: str(o.reason),
+    said: str(o.said),
+    lastConnected: num(o.lastConnected),
+    lastTry: num(o.lastTry),
+    nextTry: num(o.nextTry),
+    connectedSince: num(o.connectedSince),
+    reach: reach
+      ? { user: str(reach.user), hostname: str(reach.hostname), port: str(reach.port), via: str(reach.via), entry: str(reach.entry), file: str(reach.file) }
+      : null,
+    details: details
+      ? {
+          freeKb: num(details.freeKb),
+          linger: typeof details.linger === "boolean" ? details.linger : null,
+          service: details.service === true,
+          systemd: details.systemd === true,
+          user: str(details.user),
+        }
+      : null,
+    hostKey: key && str(key.fingerprint) ? { kind: str(key.kind) ?? "", fingerprint: str(key.fingerprint)!, trustedAt: num(key.trustedAt) } : null,
+  };
+  // Only what it said: a machine listed without them reads as before.
+  return Object.fromEntries(Object.entries(more).filter(([, v]) => v !== null)) as Partial<Machine>;
 };
 
 /** A machine as `machines_list` lists it; null for a row without an id. */
@@ -82,6 +160,7 @@ export const readMachine = (raw: unknown): Machine | null => {
     version: typeof o.version === "string" ? o.version : null,
     state: readState(o.state),
     ...(system ? { system } : {}),
+    ...readMore(o),
   };
 };
 

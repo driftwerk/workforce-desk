@@ -73,6 +73,34 @@ export interface Shared {
   autoSwitch: boolean;
 }
 
+/** One line of this computer's log of a machine. */
+export interface LogLine {
+  /** ms */
+  at: number;
+  kind: "info" | "ok" | "warn" | "error";
+  text: string;
+}
+
+/** A `Host` entry in the person's SSH config, as its text says. */
+export interface HostEntry {
+  host: string;
+  hostname: string | null;
+  user: string | null;
+  port: string | null;
+  /** A jump host, or "a ProxyCommand". */
+  jump: string | null;
+  /** The file it's in (`~/.ssh/config`). */
+  file: string;
+}
+
+/** What changing how a machine is reached did. */
+export type Edited =
+  | { kind: "done" }
+  /** The person said no to the native question: nothing changed. */
+  | { kind: "cancelled" }
+  /** The new address shows another machine's key: refused. */
+  | { kind: "differentKey"; shown: { kind: string; fingerprint: string }; known: { kind: string; fingerprint: string } };
+
 /** The native side, as the machines' UI uses it. */
 export interface MachineNative {
   list(): Promise<Machine[]>;
@@ -113,6 +141,18 @@ export interface MachineNative {
   pluginDir(id: MachineId): Promise<string | null>;
   /** The machine's engine's admin surface, through its own broker. */
   transport(id: MachineId): DeskTransport;
+  /** This computer's log of the machine: connecting, ssh's words, when next. */
+  log(id: MachineId): Promise<LogLine[]>;
+  /** Desk's own log on the machine (its service's last 200 lines), read
+   *  over SSH; refused after 10 s. */
+  remoteLog(id: MachineId): Promise<string>;
+  /** The `Host` entries in the person's SSH config, read as text. */
+  sshHosts(): Promise<HostEntry[]>;
+  /** A new name, a new address (only once the person says yes natively
+   *  and it shows the machine's own host key), or both. */
+  edit(id: MachineId, change: { target?: string; name?: string }): Promise<Edited>;
+  /** Shows Desk's log on this computer in Finder. */
+  revealLog(): Promise<void>;
 }
 
 export const native: MachineNative = {
@@ -131,4 +171,9 @@ export const native: MachineNative = {
   openSignInPage: (engine, url) => invoke<void>("machine_open_sign_in_page", { engine, url }),
   pluginDir: (id) => machinePluginDir(id),
   transport: machineTransport,
+  log: (id) => invoke<LogLine[]>("machine_log", { id }),
+  remoteLog: (id) => invoke<string>("machine_remote_log", { id }),
+  sshHosts: () => invoke<HostEntry[]>("machine_ssh_hosts"),
+  edit: (id, change) => invoke<Edited>("machine_edit", { id, target: change.target ?? null, name: change.name ?? null }),
+  revealLog: () => invoke<void>("machine_reveal_log"),
 };

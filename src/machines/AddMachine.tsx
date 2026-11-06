@@ -74,8 +74,8 @@ const checkText = {
 /** Settings → Machines → Add machine: the address, then what that machine
  *  needs (trusting it, this computer's key there), then setting it up and
  *  signing in there. Every step but typing runs on the native side. */
-export function AddMachine({ onClose, native = realNative }: { onClose: () => void; native?: MachineNative }) {
-  const [flow, dispatch] = useReducer(step, START);
+export function AddMachine({ onClose, native = realNative, target: given }: { onClose: () => void; native?: MachineNative; target?: string }) {
+  const [flow, dispatch] = useReducer(step, START, (s) => (given ? { ...s, target: given } : s));
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const addr = useId();
   const added = useRef(false);

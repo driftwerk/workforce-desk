@@ -207,6 +207,31 @@ impl Box_ {
         .unwrap();
     }
 
+    /// Several addresses at once: each `(target, key)`, all the one home
+    /// (the same machine, or the same account on it, whatever its key).
+    fn say_hosts(&self, hosts: &[(&str, Option<&str>)]) {
+        let hosts: Vec<Value> = hosts
+            .iter()
+            .map(|(target, key)| {
+                json!({
+                    "target": target,
+                    "settings": format!(
+                        "user dev\nhostname 203.0.113.7\nport 22\nidentityfile {}\nuserknownhostsfile {}\n",
+                        self.dir.path().join("mac/.ssh/id_ed25519").display(),
+                        self.known_hosts().display(),
+                    ),
+                    "exec": {"home": self.home(), "path": self.dir.path().join("fakebin")},
+                    "host_key": key,
+                })
+            })
+            .collect();
+        std::fs::write(
+            self.dir.path().join("scenario.json"),
+            json!({"log": self.dir.path().join("calls.jsonl"), "hosts": hosts}).to_string(),
+        )
+        .unwrap();
+    }
+
     fn calls(&self) -> Vec<Vec<String>> {
         std::fs::read_to_string(self.dir.path().join("calls.jsonl"))
             .unwrap_or_default()
@@ -357,6 +382,10 @@ impl Confirm for Yes {
 
 impl TrustConfirm for Yes {
     fn trust_key(&self, _: &TrustQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
+    fn switch_to(&self, _: &desk_machine::hostkey::SwitchQuestion) -> bool {
         self.0.fetch_add(1, Ordering::SeqCst);
         self.1
     }
@@ -962,4 +991,276 @@ fn a_machine_installed_before_the_marker_is_still_a_machine() {
     until("ready", || r.fleet.state(&id) == Some(State::Ready));
     assert_eq!(b.installed().as_deref(), Some("0.2.0"));
     assert!(root.join("machine").is_file(), "marked now");
+}
+
+/// Another machine's key, which isn't devbox's.
+const OTHER_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAa7mm1xLPFHiFjUNvJ+jVhN2gEvLPoSIMWB0+6fIOGs";
+
+/// devbox added, its key known, and kept by Desk.
+fn added_with_key(b: &Box_, r: &Run) -> String {
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("its key kept", || r.fleet.list()[0].host_key.is_some());
+    id
+}
+
+#[test]
+fn a_machine_is_reached_at_another_address_only_when_it_shows_the_same_key() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], FINGERPRINT);
+    assert_eq!(row["hostKey"]["kind"], "ED25519");
+    assert!(row["connectedSince"].is_i64() && row["lastConnected"].is_i64());
+    assert_eq!(row["reach"]["user"], "dev");
+    assert_eq!(row["reach"]["hostname"], "203.0.113.7");
+
+    // The same machine by another name (another Host entry, a new address).
+    b.say_hosts(&[
+        ("devbox", Some(KEY)),
+        ("devbox-new", Some(KEY)),
+        ("imposter", Some(OTHER_KEY)),
+    ]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let done = r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done"})
+    );
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked once, natively"
+    );
+    // Its key was learnt for the new address, as ssh would.
+    let known = std::fs::read_to_string(b.known_hosts()).unwrap();
+    assert!(known.contains(&format!("devbox-new {KEY}")), "{known}");
+    assert_eq!(r.fleet.list()[0].target, "devbox-new");
+    until("ready at the new address", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && b.calls().iter().any(|c| {
+                c.iter().any(|a| a == "devbox-new")
+                    && c.iter().any(|a| a.starts_with("-L") || a == "-N")
+            })
+    });
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept[0]["target"], "devbox-new");
+    assert_eq!(
+        kept[0]["id"], "devbox",
+        "the same machine: its sessions and settings stay"
+    );
+
+    // Another machine's key: refused, with both keys, and nothing changed.
+    let different = r.fleet.edit(&id, Some("imposter"), None).unwrap();
+    let said = serde_json::to_value(&different).unwrap();
+    assert_eq!(said["kind"], "differentKey");
+    assert_eq!(said["known"]["fingerprint"], FINGERPRINT);
+    assert_ne!(said["shown"]["fingerprint"], FINGERPRINT);
+    assert_eq!(r.fleet.list()[0].target, "devbox-new");
+    assert!(
+        !std::fs::read_to_string(b.known_hosts())
+            .unwrap()
+            .contains("imposter")
+    );
+    assert!(
+        r.fleet
+            .log(&id)
+            .unwrap()
+            .iter()
+            .any(|l| l.text.contains("another host key"))
+    );
+}
+
+#[test]
+fn a_no_to_reaching_it_elsewhere_runs_nothing_there() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = Arc::clone(&r.asked);
+    // From now on, the person says no.
+    let no = fleet_answering(&b, &r, false);
+    let before = b.calls().len();
+    let done = no.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "cancelled"})
+    );
+    assert!(
+        b.calls()[before..]
+            .iter()
+            .all(|c| !c.iter().any(|a| a == "devbox-new")),
+        "nothing ran there"
+    );
+    assert_eq!(no.list()[0].target, "devbox");
+    let _ = asked;
+}
+
+/// The same machines file, its fleet answering every question with `yes`.
+fn fleet_answering(b: &Box_, r: &Run, yes: bool) -> Arc<Fleet> {
+    r.fleet.shutdown();
+    let asked = Arc::new(Yes(AtomicUsize::new(0), yes));
+    let fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::clone(&r.machines),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::clone(&r.said),
+            wanted: "0.2.0".into(),
+            tarball: b.dir.path().join("backends/0.2.0.tar.gz"),
+        }),
+        asked.clone(),
+        asked,
+        timing(),
+    );
+    fleet.load();
+    fleet
+}
+
+#[test]
+fn a_machine_is_renamed_but_never_to_another_machines_name() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    r.fleet.edit(&id, None, Some("devbox (dev)")).unwrap();
+    assert_eq!(r.fleet.list()[0].name, "devbox (dev)");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked,
+        "a name asks nothing"
+    );
+    assert!(r.fleet.edit(&id, None, Some("  ")).is_err());
+    assert!(
+        r.fleet
+            .edit(&id, Some("-oProxyCommand=x"), None)
+            .unwrap_err()
+            .contains("can't start with -")
+    );
+}
+
+#[test]
+fn an_offline_machine_says_why_in_ssh_s_words_when_it_last_and_next_tries() {
+    let b = Box_::new();
+    // Kept from before; its address no longer resolves.
+    std::fs::create_dir_all(b.dir.path().join("mac")).unwrap();
+    std::fs::write(
+        b.dir.path().join("mac/machines.json"),
+        r#"[{"id": "gone", "name": "gone", "target": "gone-box", "version": "0.2.0", "last_connected": 1700000000000}]"#,
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("offline, with when it tries next", || {
+        r.fleet
+            .list()
+            .first()
+            .is_some_and(|m| m.state == State::Unreachable && m.next_try.is_some())
+    });
+    let m = &r.fleet.list()[0];
+    assert!(
+        m.reason
+            .as_deref()
+            .unwrap()
+            .contains("SSH couldn't reach gone"),
+        "{:?}",
+        m.reason
+    );
+    assert!(
+        m.said
+            .as_deref()
+            .unwrap()
+            .contains("Could not resolve hostname gone-box"),
+        "{:?}",
+        m.said
+    );
+    assert!(!m.said.as_deref().unwrap().starts_with('“'));
+    assert_eq!(m.last_connected, Some(1_700_000_000_000));
+    assert!(m.last_try.unwrap() <= m.next_try.unwrap());
+    let log = r.fleet.log("gone").unwrap();
+    let kinds: Vec<String> = log
+        .iter()
+        .map(|l| format!("{:?} {}", l.kind, l.text))
+        .collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|k| k.starts_with("Info connecting to gone")),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds
+            .iter()
+            .any(|k| k.starts_with("Error ") && k.contains("Could not resolve hostname")),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|k| k.starts_with("Info next try in")),
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn desks_log_there_is_read_over_ssh_cleaned_and_given_up_on_in_time() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    script(
+        &b.dir.path().join("fakebin/journalctl"),
+        "#!/bin/sh\necho \"$*\" > \"$HOME/.fake/journalctl-args\"\nprintf '2026-11-06T09:41:27+0000 devbox desk-helper[12]: hub starting\\n\\033[31mred\\033[0m and a\\ttab\\n'\n",
+    );
+    let said = r.fleet.remote_log(&id, Duration::from_secs(10)).unwrap();
+    assert!(
+        said.starts_with("2026-11-06T09:41:27+0000 devbox desk-helper[12]: hub starting"),
+        "{said}"
+    );
+    assert!(!said.contains('\u{1b}'), "{said:?}");
+    assert!(said.contains("and a tab"), "{said:?}");
+    let args = std::fs::read_to_string(b.fake("journalctl-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        "--user -u desk-helper.service -n 200 --no-pager -o short-iso"
+    );
+
+    script(
+        &b.dir.path().join("fakebin/journalctl"),
+        "#!/bin/sh\nsleep 5\n",
+    );
+    let started = Instant::now();
+    let late = r.fleet.remote_log(&id, Duration::from_secs(1)).unwrap_err();
+    assert!(late.contains("didn't answer within 1 s"), "{late}");
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
+#[test]
+fn the_ssh_configs_host_entries_are_listed() {
+    let b = Box_::new();
+    std::fs::write(
+        b.dir.path().join("mac/.ssh/config"),
+        "Host devbox\n  HostName 2.29.244.189\n  User dev\nHost buildbox\n  ProxyJump bastion\nHost *\n  User me\n",
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let hosts = serde_json::to_value(r.fleet.ssh_hosts()).unwrap();
+    assert_eq!(
+        hosts,
+        json!([
+            {"host": "devbox", "hostname": "2.29.244.189", "user": "dev", "port": null, "jump": null, "file": "~/.ssh/config"},
+            {"host": "buildbox", "hostname": null, "user": "me", "port": null, "jump": "bastion", "file": "~/.ssh/config"}
+        ])
+    );
+    assert!(b.calls().is_empty(), "nothing was run to read it");
 }

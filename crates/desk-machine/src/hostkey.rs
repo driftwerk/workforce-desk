@@ -134,6 +134,34 @@ pub fn trouble(ssh: &SshExe, machine: &Machine) -> Result<Option<KeyTrouble>, St
 /// the page), Cancel the default.
 pub trait TrustConfirm: Send + Sync + 'static {
     fn trust_key(&self, question: &TrustQuestion) -> bool;
+    /// The person's yes to reaching a machine at another address, once
+    /// Desk has checked it shows the machine's own key. No unless asked.
+    fn switch_to(&self, question: &SwitchQuestion) -> bool {
+        let _ = question;
+        false
+    }
+}
+
+/// Reaching a machine another way: the same machine, by its host key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchQuestion {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    /// `ED25519`.
+    pub kind: String,
+    pub fingerprint: String,
+}
+
+impl SwitchQuestion {
+    /// Both addresses on lines of their own, and the key that makes them
+    /// one machine.
+    pub fn text(&self) -> String {
+        format!(
+            "Reach {} at another address?\n\nFrom {}\nTo {}\n\nIt shows {}'s own SSH host key ({} {}). Its sessions, sign-ins and settings stay. Desk adds the key for the new address to your known_hosts.",
+            self.name, self.from, self.to, self.name, self.kind, self.fingerprint
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,13 +293,13 @@ pub fn trust(
     files: &Files,
     seen: &str,
     confirm: &Gated<'_>,
-) -> Result<(), String> {
+) -> Result<Option<HostKey>, String> {
     let name = &machine.name;
     let known_hosts = files.known_hosts.clone().ok_or_else(|| {
         format!("Your SSH settings for {name} keep no known hosts file Desk can add to.")
     })?;
     match trouble(ssh, machine)? {
-        None => return Ok(()),
+        None => return Ok(None),
         Some(KeyTrouble::Changed) => {
             return Err(format!(
                 "{name}'s host key isn't the one your Mac knows. Desk won't trust another key for it."
@@ -309,11 +337,27 @@ pub fn trust(
     }
     append(&known_hosts, &line)?;
     match trouble(ssh, machine)? {
-        None => Ok(()),
+        None => Ok(Some(now)),
         Some(_) => Err(format!(
             "Desk added {name}'s key, but ssh still doesn't take it."
         )),
     }
+}
+
+/// Writes `line` (a known_hosts line ssh wrote for a machine's address)
+/// into the person's known hosts, hashed when their ssh hashes: for an
+/// address the person said yes to reaching a machine they trust by.
+pub fn learn(files: &Files, line: &str) -> Result<(), String> {
+    let known_hosts = files
+        .known_hosts
+        .clone()
+        .ok_or("Your SSH settings keep no known hosts file Desk can add to.")?;
+    let line = if files.hash {
+        hashed(line)?
+    } else {
+        line.to_string()
+    };
+    append(&known_hosts, &line)
 }
 
 /// `line` with its host names hashed, as ssh writes them with

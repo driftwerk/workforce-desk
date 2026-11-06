@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use desk_core::machine_backend::{self, Arch, Backend, Source};
-use desk_machine::fleet::{Fleet, Host, Listed, SetupEvent};
-use desk_machine::hostkey::{TrustConfirm, TrustQuestion};
+use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, SetupEvent};
+use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion};
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
 
@@ -161,6 +161,13 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
     fn trust_key(&self, question: &TrustQuestion) -> bool {
         self.ask("Trust a machine", question.text(), "Trust Key")
     }
+    fn switch_to(&self, question: &SwitchQuestion) -> bool {
+        self.ask(
+            "Change how Desk reaches a machine",
+            question.text(),
+            "Switch",
+        )
+    }
 }
 
 /// Runs `f` on a blocking thread.
@@ -222,6 +229,47 @@ pub fn machine_reconnect(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Com
 #[tauri::command]
 pub fn machine_remove(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
     fleet.remove(&id)
+}
+
+/// How long reading Desk's log on a machine may take.
+const REMOTE_LOG_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// This computer's log of machine `id`: connecting, ssh's words, when next.
+#[tauri::command]
+pub fn machine_log(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<Vec<LogLine>> {
+    fleet.log(&id)
+}
+
+/// Desk's own log on machine `id` (its service's last 200 lines), read
+/// over SSH; given up on after 10 s.
+#[tauri::command]
+pub async fn machine_remote_log(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<String> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.remote_log(&id, REMOTE_LOG_WITHIN)).await
+}
+
+/// The `Host` entries in the person's SSH config, read as text.
+#[tauri::command]
+pub fn machine_ssh_hosts(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+) -> Vec<desk_machine::suggest::HostEntry> {
+    fleet.ssh_hosts()
+}
+
+/// Changes machine `id`'s name, how it is reached, or both: a new address
+/// only once the person says yes and it shows the machine's own host key.
+#[tauri::command]
+pub async fn machine_edit(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+    target: Option<String>,
+    name: Option<String>,
+) -> CommandResult<Edited> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.edit(&id, target.as_deref(), name.as_deref())).await
 }
 
 /// Signing in to ChatGPT on a machine: not yet.

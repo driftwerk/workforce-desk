@@ -6,7 +6,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DeskTransport } from "../hub/transport";
 import type { Machine } from "./engines";
-import type { MachineNative, Probe, SetupEvent, Shared } from "./native";
+import type { Edited, HostEntry, LogLine, MachineNative, Probe, SetupEvent, Shared } from "./native";
 
 export const machine = (m: Partial<Machine> & Pick<Machine, "id">): Machine => ({
   name: m.id,
@@ -61,6 +61,11 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     openSignInPage: vi.fn(async (_engine: "claude" | "codex", _url: string) => undefined),
     pluginDir: vi.fn(async (_id: string) => "/home/dev/.local/share/Desk/bin/current/claude-plugin" as string | null),
     transport: vi.fn((_id: string) => foldersTransport([])),
+    log: vi.fn(async (_id: string): Promise<LogLine[]> => []),
+    remoteLog: vi.fn(async (_id: string) => ""),
+    sshHosts: vi.fn(async (): Promise<HostEntry[]> => []),
+    edit: vi.fn(async (_id: string, _change: { target?: string; name?: string }): Promise<Edited> => ({ kind: "done" })),
+    revealLog: vi.fn(async () => undefined),
   };
   Object.assign(fake, over);
   /** Sends a setup event, as the native side would. */

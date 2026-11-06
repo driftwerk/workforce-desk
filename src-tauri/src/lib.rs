@@ -185,6 +185,16 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
         .map_err(text)
 }
 
+/// Shows Desk's own log on this computer in the system's file manager.
+#[tauri::command]
+fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
+    let log = app.paths.logs().join("desk.log");
+    if !log.exists() {
+        return Err("Desk hasn't written its log on this computer yet.".into());
+    }
+    tauri_plugin_opener::reveal_item_in_dir(&log).map_err(text)
+}
+
 #[tauri::command]
 async fn hubs_list(
     app: State<'_, App>,
@@ -855,6 +865,11 @@ pub fn run() {
             machine_setup::machine_remove,
             machine_accounts::machine_share_accounts,
             links::open_terminal_link,
+            machine_setup::machine_log,
+            machine_setup::machine_remote_log,
+            machine_setup::machine_ssh_hosts,
+            machine_setup::machine_edit,
+            machine_reveal_log,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,

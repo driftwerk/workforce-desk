@@ -97,3 +97,99 @@ export const targetProblem = (target: string): string | null => {
   if (new TextEncoder().encode(t).length > 255) return "That address is too long.";
   return null;
 };
+
+/** A time of day as a row says it: "08:55" today, "5 Nov 08:55" before. */
+export const clock = (at: number, now: number = Date.now()): string => {
+  const d = new Date(at);
+  const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return new Date(now).toDateString() === d.toDateString() ? hm : `${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ${hm}`;
+};
+
+/** How long until `at`: "in 40 s", "in 3 min", "now". */
+export const inTime = (at: number, now: number = Date.now()): string => {
+  const s = Math.round((at - now) / 1000);
+  if (s <= 0) return "now";
+  return s < 90 ? `in ${s} s` : `in ${Math.round(s / 60)} min`;
+};
+
+/** Free space, as a person says it: "1.7 TB", "180 MB". */
+export const freeText = (kb: number): string => {
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = kb;
+  let u = 0;
+  while (v >= 1000 && u < units.length - 1) {
+    v /= 1000;
+    u++;
+  }
+  return `${v >= 10 || u === 0 ? Math.round(v) : v.toFixed(1)} ${units[u]}`;
+};
+
+/** "3 sessions", "1 session". */
+export const sessionsCount = (n: number): string => `${n} ${n === 1 ? "session" : "sessions"}`;
+
+/** Whether a failure is its host key having changed: `ssh-keygen -R` is the way out. */
+export const keyChanged = (m: Machine): boolean => m.state.kind === "failed" && /host key isn.t the one/.test(m.state.message);
+
+/** Whether a failure is this computer's SSH key: locked, or turned away. */
+export const keyRefused = (m: Machine): boolean => m.state.kind === "failed" && /turned your SSH key away|ssh-add/.test(m.state.message);
+
+/** What ssh said, as the end of a sentence: "Connection timed out after
+ *  15 s." from "ssh: connect to host 10.0.3.14 port 22: Connection timed
+ *  out". */
+export const sshTail = (said: string): string => {
+  const words = said.replace(/^ssh:\s*/, "").replace(/^connect to host \S+ port \d+:\s*/, "").trim();
+  const tail = /^Connection timed out$/i.test(words) ? `${words} after 15 s` : words;
+  return tail ? `${tail[0]!.toUpperCase()}${tail.slice(1).replace(/\.$/, "")}.` : "";
+};
+
+/** Why a machine is offline, in a sentence or two: Desk's words for it
+ *  (through its jump host), then ssh's. */
+export const offlineWhy = (m: Machine): string => {
+  const via = m.reach?.via ? ` through ${m.reach.via}` : "";
+  const desk = m.reason?.split(/[:“]/)[0]?.trim().replace(/\.$/, "");
+  const head = desk && /^(SSH|Desk) couldn.t reach/.test(desk) ? `SSH couldn’t reach ${m.name}${via}.` : desk ? `${desk}.` : `SSH couldn’t reach ${m.name}${via}.`;
+  return m.said ? `${head} ${sshTail(m.said)}` : head;
+};
+
+/** How the row says where a machine stands: its first line (why, in the
+ *  machine's own words where Desk has them) and its tone, then what else
+ *  is worth a glance. `engines`: who it's signed in as, once read. */
+export const rowLines = (
+  m: Machine,
+  o: { desk: string | null; sessions: number; now?: number; claudeIn?: boolean | null; signedIn?: string | null },
+): { first: string; tone: "muted" | "blocked"; second: string | null } => {
+  const now = o.now ?? Date.now();
+  const keep = o.sessions > 0 ? `${o.sessions === 1 ? "its 1 session keeps" : `${o.sessions} sessions keep`} running there` : null;
+  switch (m.state.kind) {
+    case "ready":
+      if (o.claudeIn === false)
+        return {
+          first: "Needs sign-in: Claude isn’t signed in there yet, so sessions can’t start.",
+          tone: "blocked",
+          second: ["Connected", m.version && `Desk ${m.version}`].filter(Boolean).join(" · "),
+        };
+      return {
+        first: ["Connected", sessionsCount(o.sessions), m.version && `Desk ${m.version}`, m.system && `Linux ${m.system.arch}`].filter(Boolean).join(" · "),
+        tone: "muted",
+        second: o.signedIn ?? null,
+      };
+    case "connecting":
+      return { first: "Connecting… Desk gives up after 15 s and says why.", tone: "muted", second: null };
+    case "adding":
+      return { first: "Being set up…", tone: "muted", second: null };
+    case "unreachable":
+      return {
+        first: `Offline: ${offlineWhy(m)}`,
+        tone: "blocked",
+        second: [keep, m.lastConnected && `last connected ${clock(m.lastConnected, now)}`, m.nextTry && `next try ${inTime(m.nextTry, now)}`].filter(Boolean).join(" · ") || null,
+      };
+    case "updating":
+      return { first: `Updating Desk${o.desk ? ` to ${o.desk}` : ""}… its sessions carry on`, tone: "muted", second: null };
+    case "newer":
+      return { first: `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`, tone: "blocked", second: null };
+    case "failed":
+      if (keyRefused(m))
+        return { first: `Offline: your SSH key is locked, or ${m.name} turned it away. Run ssh-add in a terminal, then Reconnect.`, tone: "blocked", second: keep };
+      return { first: m.state.message || m.reason || "Desk couldn’t set it up.", tone: "blocked", second: keep };
+  }
+};

@@ -49,6 +49,67 @@ impl SshExe {
     pub fn output(&self, invocation: &Invocation) -> std::io::Result<Output> {
         self.command(invocation).output()
     }
+
+    /// As [`SshExe::output`], ended (and said to have run out of time) once
+    /// `within` has passed: Desk never waits on a machine for good.
+    pub fn output_within(
+        &self,
+        invocation: &Invocation,
+        within: std::time::Duration,
+    ) -> std::io::Result<Output> {
+        let mut child = self
+            .command(invocation)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // Read on threads of their own, so a full pipe never holds it up.
+        fn drain(
+            pipe: Option<impl std::io::Read + Send + 'static>,
+        ) -> std::thread::JoinHandle<Vec<u8>> {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut r) = pipe {
+                    let _ = r.read_to_end(&mut buf);
+                }
+                buf
+            })
+        }
+        let out_t = drain(child.stdout.take());
+        let err_t = drain(child.stderr.take());
+        let until = std::time::Instant::now() + within;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if std::time::Instant::now() >= until {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("no answer within {} s", within.as_secs()),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        Ok(Output {
+            status,
+            stdout: out_t.join().unwrap_or_default(),
+            stderr: err_t.join().unwrap_or_default(),
+        })
+    }
+}
+
+/// ssh's own last line on its error output (`ssh: connect to host … port
+/// 22: Connection timed out`), cleaned of anything that isn't plain text
+/// and cut short: its words, for the person to read beside Desk's. None
+/// when ssh itself said nothing (a machine's banner isn't ssh's).
+pub fn said(stderr: &[u8]) -> Option<String> {
+    let (own, line) = last_line(&String::from_utf8_lossy(stderr));
+    if !own {
+        return None;
+    }
+    let q = desk_core::machine::quoted_line(&line)?;
+    Some(q.trim_start_matches('“').trim_end_matches('”').to_string())
 }
 
 /// What went wrong reaching `machine`, from what `ssh` said on its error
@@ -154,6 +215,7 @@ pub struct Settings {
     /// person's own name here.
     pub user: Option<String>,
     pub hostname: Option<String>,
+    pub port: Option<String>,
     /// How it gets there, when not directly: `ProxyJump`, `ProxyCommand`.
     pub via: Option<String>,
     /// Forwards the config sets for it, by name (`localforward`, …).
@@ -172,6 +234,7 @@ impl Settings {
         Settings {
             user: value("user"),
             hostname: value("hostname"),
+            port: value("port"),
             via: value("proxyjump").or_else(|| value("proxycommand")),
             forwards: desk_core::machine::config_forwards(said),
         }
