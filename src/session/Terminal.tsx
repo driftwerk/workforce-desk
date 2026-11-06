@@ -10,6 +10,7 @@ import { trackedIn } from "../grids/terminals";
 import { keyOf, LOCAL, sessionKey, type MachineId } from "../hub/machines";
 import { hubOf, useDesk, useHubOf } from "../hub/store";
 import type { DeskSocket } from "../hub/transport";
+import { openTerminalLink } from "../platform";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
 import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
@@ -17,6 +18,18 @@ import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
 import { xtermTheme } from "../theme/xterm";
 import { Viewer } from "./viewer";
+
+/** What a link a program prints in a terminal does when clicked (Claude
+ *  Code's sign-in page, say, printed as an OSC 8 link): the native side
+ *  decides and asks (`open_terminal_link`), never the page. Without it,
+ *  xterm asks with the page's `confirm()` and opens with `window.open()`,
+ *  which the app refuses both: the click did nothing. */
+export const terminalLinks = {
+  activate: (_e: MouseEvent, uri: string): void => {
+    void openTerminalLink(uri).catch(() => false);
+  },
+  allowNonHttpProtocols: false,
+};
 
 /** The hub closes a terminal's socket with a close frame when the terminal
  *  ends (no code: 1005), as the page does its own (1000). Any other close
@@ -87,6 +100,7 @@ export function Terminal({
       cursorBlink: true,
       allowProposedApi: false,
       scrollback: 10_000,
+      linkHandler: terminalLinks,
       theme: xtermTheme(theme),
     });
     const fit = new FitAddon();

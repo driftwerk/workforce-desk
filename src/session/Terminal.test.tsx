@@ -8,7 +8,8 @@ import { useAppShortcut } from "../shortcuts/manager";
 import { NIGHT } from "../theme/builtin";
 import { useThemeStore } from "../theme/store";
 import { EMOJI_STACK } from "../theme/tokens";
-import { Terminal, reattachPrefix } from "./Terminal";
+import { openTerminalLink, openUrl } from "../platform";
+import { Terminal, reattachPrefix, terminalLinks } from "./Terminal";
 
 const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement; written: string[]; resets: number }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -58,6 +59,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { proposeDimensions = () => ({ cols: 80, rows: 24 }); } }));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
+vi.mock("../platform", async (real) => ({ ...(await real<typeof import("../platform")>()), openUrl: vi.fn(), openTerminalLink: vi.fn(async () => true) }));
 
 afterEach(cleanup);
 
@@ -294,3 +296,25 @@ describe("a terminal that ended", () => {
   });
 });
 
+
+describe("a link in a terminal", () => {
+  it("is decided and asked about natively, never through the page's confirm, window.open or opener", () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const open = vi.spyOn(window, "open");
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const socket = { readyState: 0, send: vi.fn(), close: vi.fn() };
+    useDesk.setState({ hub: { ptySocket: () => socket } as never });
+    render(<Terminal sessionId="s1" />);
+    // xterm is given the handler: its own default would confirm() and window.open().
+    expect(terms.at(-1)!.options.linkHandler).toBe(terminalLinks);
+    const page = "https://claude.com/cai/oauth/authorize?code=true&state=s";
+    terminalLinks.activate(new MouseEvent("click"), page);
+    terminalLinks.activate(new MouseEvent("click"), "http://127.0.0.1:9/");
+    expect(vi.mocked(openTerminalLink).mock.calls).toEqual([[page], ["http://127.0.0.1:9/"]]);
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(terminalLinks.allowNonHttpProtocols).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});

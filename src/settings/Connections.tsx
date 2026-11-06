@@ -16,6 +16,7 @@ import {
 } from "../hub/connections";
 import { openUrl } from "../platform";
 import "../styles/connections.css";
+import { useLive } from "../ui/useLive";
 
 const SAVED_WHERE = "Saved in Desk’s vault on this computer. Never in a file.";
 const CANCELLED = "Sign-in was cancelled. Nothing was saved.";
@@ -524,15 +525,9 @@ export function FieldsForm({
 const useFlow = (api: ConnectionsApi, onDone: () => void | Promise<void>) => {
   const [started, setStarted] = useState<Started | null>(null);
   const [said, setSaid] = useState<string | null>(null);
-  const live = useRef(true);
+  const live = useLive();
   const done = useRef(onDone);
   done.current = onDone;
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
 
   useEffect(() => {
     if (!started) return;

@@ -25,11 +25,22 @@ export const splitTyped = (typed: string): { dir: string | null; prefix: string 
   return { dir: dir === "~" ? null : dir, prefix: typed.slice(at + 1) };
 };
 
-/** What the hub said, as folders; anything it didn't say right is left out. */
-export const readFolders = (body: unknown): { folders: Folder[]; home: string | null } => {
+/** The home folder a listing asked for no folder says: the hub lists home
+ *  then, and names it as the folder listed (`path`); `home` where a hub
+ *  names it outright. Null when it says neither. */
+export const homeOfListing = (body: unknown): string | null => {
+  const o = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (typeof o.home === "string" && o.home) return o.home;
+  return typeof o.path === "string" && o.path.startsWith("/") ? o.path : null;
+};
+
+/** What the hub said, as folders; anything it didn't say right is left out.
+ *  `home`: the home folder, where the caller knows it (a listing asked for
+ *  no folder is of home). */
+export const readFolders = (body: unknown, known: string | null = null): { folders: Folder[]; home: string | null } => {
   const o = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const rows = Array.isArray(body) ? body : Array.isArray(o.folders) ? o.folders : [];
-  const home = typeof o.home === "string" ? o.home : null;
+  const home = typeof o.home === "string" ? o.home : known;
   const folders = rows.flatMap((r): Folder[] => {
     if (!r || typeof r !== "object") return [];
     const f = r as Record<string, unknown>;
@@ -45,7 +56,8 @@ export const listFolders = async (t: DeskTransport, dir: string | null): Promise
   if (dir) q.set("path", dir);
   const res = await t.fetch("GET", `/api/desk/folders${q.size ? `?${q.toString()}` : ""}`);
   if (!res.ok) return [];
-  const { folders } = readFolders(await res.json().catch(() => null));
+  const body: unknown = await res.json().catch(() => null);
+  const { folders } = readFolders(body, dir ? null : homeOfListing(body));
   return [...folders].sort((a, b) => Number(b.git) - Number(a.git) || a.path.localeCompare(b.path));
 };
 

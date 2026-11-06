@@ -203,6 +203,11 @@ export const openUrl = (url: string): void => {
   else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
 };
 
+/** A link clicked in a terminal, decided natively: Claude's and OpenAI's
+ *  sign-in pages open at once, any other web page after a native question
+ *  naming its real address, local ones never. True when it opened. */
+export const openTerminalLink = (url: string): Promise<boolean> => invoke<boolean>("open_terminal_link", { url });
+
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
 
 // ── Files in conversations ────────────────────────────────────────────────

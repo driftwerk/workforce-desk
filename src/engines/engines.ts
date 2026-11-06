@@ -37,8 +37,8 @@ export const startable = (engines: readonly EngineInfo[] | null): Engine[] =>
 
 /** What an engine's caps are in its default view, when the hub says. */
 export const defaultCaps = (info: EngineInfo | undefined): Caps | null => {
-  const view = info?.views[0];
-  return (view && info?.caps[view]) ?? null;
+  const view = info?.views?.[0];
+  return (view && info?.caps?.[view]) ?? null;
 };
 
 /** Whether a session of `engine` can have its approvals answered in Desk:

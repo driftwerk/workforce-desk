@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { deskListeners, useDesk } from "../hub/store";
-import type { AccountNeed, AccountSignIn, Caps, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
+import { LOCAL, machineOf, type MachineId } from "../hub/machines";
+import { deskListeners, engineListeners, hubOf } from "../hub/store";
+import type { AccountNeed, AccountSignIn, Caps, DeskEvent, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -99,7 +100,7 @@ export const problemText = (p: SignInProblem, store: string | null): string => {
   }
 };
 
-interface AccountsState {
+export interface AccountsState {
   accounts: EngineAccount[];
   problems: SignInProblem[];
   needs: AccountNeed[];
@@ -115,51 +116,78 @@ interface AccountsState {
   load: () => Promise<void>;
 }
 
-export const useAccounts = create<AccountsState>((set) => ({
-  accounts: [],
-  needs: [],
-  autoSwitch: false,
-  leftInTerminals: [],
-  problems: [],
-  store: null,
-  signIns: {},
-  supported: null,
-  load: async () => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
-    try {
-      const info = await hub.accounts();
-      if (!info) {
-        set({ supported: false, accounts: [], store: null });
-        return;
+const makeStore = (machine: MachineId) =>
+  create<AccountsState>((set) => ({
+    accounts: [],
+    needs: [],
+    autoSwitch: false,
+    leftInTerminals: [],
+    problems: [],
+    store: null,
+    signIns: {},
+    supported: null,
+    load: async () => {
+      const hub = hubOf(machine);
+      if (!hub) return;
+      try {
+        const info = await hub.accounts();
+        if (!info) {
+          set({ supported: false, accounts: [], store: null });
+          return;
+        }
+        set({
+          supported: true,
+          accounts: info.accounts,
+          needs: info.needs ?? [],
+          autoSwitch: info.autoSwitch ?? false,
+          problems: info.problems ?? [],
+          store: info.store,
+          signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
+        });
+      } catch {
+        // Kept as last read; the next snapshot reads again.
       }
-      set({
-        supported: true,
-        accounts: info.accounts,
-        needs: info.needs ?? [],
-        autoSwitch: info.autoSwitch ?? false,
-        problems: info.problems ?? [],
-        store: info.store,
-        signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
-      });
-    } catch {
-      // Kept as last read; the next snapshot reads again.
-    }
-  },
-}));
+    },
+  }));
 
-deskListeners.add((e) => {
+export type AccountsStore = ReturnType<typeof makeStore>;
+
+const stores = new Map<MachineId, AccountsStore>();
+
+/** The accounts of `machine`'s engine (this computer's when none): each
+ *  engine keeps its own, and its sessions run on them. */
+export const accountsOn = (machine: MachineId = LOCAL): AccountsStore => {
+  let store = stores.get(machine);
+  if (!store) {
+    store = makeStore(machine);
+    stores.set(machine, store);
+  }
+  return store;
+};
+
+/** This computer's accounts, as before machines. */
+export const useAccounts = accountsOn(LOCAL);
+
+/** What an engine's event says of its accounts, kept in its store. */
+const heard = (store: AccountsStore, e: DeskEvent): void => {
   switch (e.type) {
     case "snapshot":
-      void useAccounts.getState().load();
+      void store.getState().load();
       return;
     case "accounts":
-      useAccounts.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
+      store.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
       return;
     case "accountSignIn":
-      useAccounts.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));
+      store.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));
       return;
     default:
       return;
   }
+};
+
+deskListeners.add((e) => heard(useAccounts, e));
+// A machine's accounts are its own: they never reach this computer's.
+engineListeners.add((e) => {
+  const machine = machineOf(e);
+  if (machine !== LOCAL) heard(accountsOn(machine), e);
 });

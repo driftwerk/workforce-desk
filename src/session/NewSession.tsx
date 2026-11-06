@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, defaultChoice, hasAccounts, useAccounts } from "../engines/accounts";
+import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn, defaultChoice, hasAccounts } from "../engines/accounts";
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useChat } from "../chat/store";
@@ -64,7 +64,8 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
   const [approveForMe, setApproveForMe] = useState(false);
   const [busy, setBusy] = useState(false);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
-  const allAccounts = useAccounts((s) => s.accounts);
+  const accountStore = accountsOn(runOn);
+  const allAccounts = accountStore((s) => s.accounts);
   // The person's pick, by engine; until they pick, the engine's default.
   const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
   useEffect(() => {
@@ -85,13 +86,13 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
   const caps = defaultCaps(engines?.find((e) => e.engine === engine));
   const inDesk = answersInDesk(engine, caps);
   const canApproveForMe = !!caps?.approveForMe;
-  // A machine's accounts are its own; its sessions run on its default sign-in.
-  const accounts = !remote && hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
+  // A machine's accounts are its own: its sessions start on one of them.
+  const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
   const missing = engines?.filter((e) => e.installed === false).map((e) => e.title) ?? [];
   const account = picked[engine] ?? defaultChoice(allAccounts, engine);
   useEffect(() => {
-    void useAccounts.getState().load();
-  }, [hub]);
+    void accountStore.getState().load();
+  }, [hub, accountStore]);
 
   const choose = async () => {
     const dir = await pickFolder();

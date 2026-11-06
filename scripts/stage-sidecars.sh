@@ -21,7 +21,9 @@ else
   helper=desk-helper agents=desk-agents memory=desk-memory
 fi
 
-cargo build $flag -p desk-hubd --manifest-path "$root/Cargo.toml"
+# A development helper may be pointed at other programs (--workforce,
+# --memory); a release one never is.
+cargo build $flag -p desk-hubd --features dev-overrides --manifest-path "$root/Cargo.toml"
 cargo build $flag -p workforce-cli --bin workforce --manifest-path "$repo/Cargo.toml"
 # From its own folder, so its rust-toolchain.toml is the toolchain.
 (cd "$vellev" && cargo build $flag -p vellev)

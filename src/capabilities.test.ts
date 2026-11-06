@@ -155,7 +155,7 @@ const MACHINE_COMMANDS: ReadonlySet<string> = new Set([
   "machine_add",
   "machine_reconnect",
   "machine_remove",
-  "machine_share_sign_in",
+  "machine_share_accounts",
 ]);
 
 describe("each window's capabilities", () => {
@@ -173,7 +173,7 @@ describe("each window's capabilities", () => {
     expect([...pluginPermissions(reachable(["./main.tsx"]))].filter((p) => !main.has(p))).toEqual([]);
   });
 
-  it("keep pairing, setup, removal and reports to the main window", () => {
+  it("keep pairing, setup, removal, copying accounts and reports to the main window", () => {
     const grid = commandsOf(capability("grid"));
     for (const c of [
       "pair_request",
@@ -188,6 +188,7 @@ describe("each window's capabilities", () => {
       "machine_trust",
       "machine_add",
       "machine_remove",
+      "machine_share_accounts",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);

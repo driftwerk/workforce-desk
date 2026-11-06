@@ -84,6 +84,7 @@ pub fn stop(paths: &Paths) -> Result<()> {
 /// here, or `null` until it is set up.
 pub fn connection(paths: &Paths, env: &BTreeMap<String, String>) -> Result<String> {
     let secrets = Secrets::for_host(paths, &Host::running_here(env))?;
+    may_tell(secrets.store())?;
     let exe = std::env::current_exe()?;
     let version = installed_version(&Install::of(&exe, env, paths), &exe);
     Ok(serde_json::to_string(
@@ -92,6 +93,21 @@ pub fn connection(paths: &Paths, env: &BTreeMap<String, String>) -> Result<Strin
             ..c
         }),
     )?)
+}
+
+/// Whether `connection --json` may print the hub's tokens. Only where Desk
+/// can't read them itself: inside WSL and on a machine, whose secrets are
+/// a private file Desk reaches through `wsl.exe` or SSH. Where they are in
+/// the keychain (or the Secret Service), printing them would hand the
+/// hub's token, and through it every account's sign-in, to any program
+/// the person runs, without the keychain ever asking.
+fn may_tell(store: desk_core::KeyStore) -> Result<()> {
+    match store {
+        desk_core::KeyStore::File => Ok(()),
+        desk_core::KeyStore::System => eyre::bail!(
+            "connection --json is only for WSL and machines: on this computer Desk reads its hub from the keychain itself"
+        ),
+    }
 }
 
 /// The version this program is: the name of its version's folder where
@@ -205,6 +221,15 @@ mod tests {
             Command::RemoveEverything
         );
         assert_eq!(Command::parse(&args(&["--check"])).unwrap(), Command::Check);
+    }
+
+    #[test]
+    fn the_hubs_tokens_are_printed_only_where_they_are_kept_in_a_file() {
+        assert!(may_tell(desk_core::KeyStore::File).is_ok());
+        let refused = may_tell(desk_core::KeyStore::System)
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("only for WSL and machines"), "{refused}");
     }
 
     #[test]

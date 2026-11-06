@@ -32,12 +32,26 @@ WORKFORCE_REPO=../workforce-public-desk ./scripts/stage-sidecars.sh
 npm run tauri dev
 ```
 
-`stage-sidecars.sh` builds `desk-hubd` and the hub and puts them where Tauri
-bundles them. To run the hub supervisor on its own against a scratch folder:
+`stage-sidecars.sh` builds `desk-hubd` (with `--features dev-overrides`) and
+the hub and puts them where Tauri bundles them. To run the hub supervisor on
+its own against a scratch folder:
 
 ```sh
+cargo build -p desk-hubd --features dev-overrides
 DESK_HOME=/tmp/desk ./target/debug/desk-hubd --workforce ../workforce-public-desk/target/debug/workforce
 ```
+
+`--workforce` and `--memory` (and finding `workforce` or `vellev` on `PATH`)
+exist only in a build with `dev-overrides`. A release Desk Helper refuses them
+and starts only the programs installed beside it, because those programs are
+handed the hub's secrets. On macOS each must pass `codesign --verify --strict`
+against the helper's own team, and a helper signed by no team starts nothing.
+It also runs only from where Desk installs it (an app bundle in /Applications
+or ~/Applications; on Linux, Desk's own `bin`, /usr, /opt or a mounted
+AppImage), and gives the hub only an allowlisted part of the login
+environment. For a local
+release-style install that needs them:
+`cargo build --release -p desk-hubd --features dev-overrides`.
 
 ### The keychain in development
 

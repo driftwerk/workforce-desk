@@ -8,7 +8,16 @@ import { Accounts } from "./Accounts";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const opened = vi.fn();
-vi.mock("../platform", () => ({ inApp: false, openUrl: (u: string) => opened(u) }));
+vi.mock("../platform", () => ({
+  inApp: false,
+  openUrl: (u: string) => opened(u),
+  machinesList: vi.fn(async () => []),
+  onMachinesChanged: vi.fn(async () => () => {}),
+  machinePluginDir: vi.fn(async () => null),
+  subscribe: (p: Promise<() => void>) => () => void p.then((f) => f()),
+  invoke: vi.fn(),
+  listen: vi.fn(async () => () => {}),
+}));
 
 beforeEach(() => useAccounts.setState({ accounts: [], store: null, signIns: {}, supported: null }));
 afterEach(cleanup);

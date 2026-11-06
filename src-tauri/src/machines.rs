@@ -189,7 +189,7 @@ impl MachineIo {
 
     /// Machine `id`'s broker: the one made for its link, or a new one when
     /// it was added again since (and so has a new link).
-    fn broker(&self, id: &str) -> Result<Arc<Broker>, String> {
+    pub(crate) fn broker(&self, id: &str) -> Result<Arc<Broker>, String> {
         let link = self.link(id)?;
         let mut brokers = self.brokers.lock().expect("brokers");
         brokers.retain(|k, _| self.machines.get(k).is_some());
