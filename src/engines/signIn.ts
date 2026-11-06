@@ -76,6 +76,11 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
   const live = useLive();
   const done = useRef(onDone);
   done.current = onDone;
+  /** Each begin and cancel starts a new run: what an older one's awaits
+   *  bring back is for nothing (and a sign-in it started is stopped). */
+  const gen = useRef(0);
+  /** "New sessions start on it", as the last begin asked: Try again keeps it. */
+  const lastDefault = useRef(false);
   /** The sign-in followed now, and what's been done for it. */
   const seen = useRef<{ id: string; forwarding: boolean; wantCode: boolean; opened: string | null; latest: AccountSignIn } | null>(null);
 
@@ -263,17 +268,28 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
 
   const begin = async (name: string, makeDefault: boolean) => {
     if (!hub) return;
+    const mine = ++gen.current;
+    lastDefault.current = makeDefault;
     stop(run.at === "opening" || run.at === "waiting" ? run.id : null);
     put({ at: "opening", name, id: null, checking: false });
+    // Cancelled (or begun again) while a read was out: nothing more is
+    // done for this run.
+    const stale = () => !live.current || gen.current !== mine;
     try {
       const accounts = await hub.accounts().catch(() => null);
+      if (stale()) return;
       const pending = accounts?.signIns.find((s) => s.engine === "claude" && !over(s) && s.name.toLowerCase() === name.toLowerCase());
       if (pending) {
         put({ at: "opening", name, id: pending.id, checking: false });
         return follow(pending);
       }
       const added = await hub.addAccount({ engine: "claude", name, makeDefault, ...(remote ? { remote: true } : {}) });
-      if (!live.current) return;
+      if (stale()) {
+        // Its sign-in started after the person cancelled: stopped on its
+        // hub at once, and nothing of it is opened.
+        if (added.kind === "signIn") void hub.cancelSignIn(added.signIn.id).catch(() => undefined);
+        return;
+      }
       if (added.kind === "account") {
         setRun({ at: "done", name });
         done.current?.(name);
@@ -283,11 +299,18 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
       put({ at: "opening", name, id: added.signIn.id, checking: false });
       follow(added.signIn);
     } catch (e) {
-      if (live.current) setRun({ at: "failed", name, why: plainError(e), kind: "other" });
+      if (!stale()) setRun({ at: "failed", name, why: plainError(e), kind: "other" });
     }
   };
 
+  /** "Try again": the same name, and the same choice of default. */
+  const again = () => {
+    const now = runNow.current;
+    if (now.at === "failed") void begin(now.name, lastDefault.current);
+  };
+
   const cancel = () => {
+    gen.current++;
     const id = run.at === "opening" || run.at === "waiting" ? run.id : null;
     runNow.current = { at: "idle" };
     setRun({ at: "idle" });
@@ -322,7 +345,7 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
 
   const reset = () => setRun({ at: "idle" });
 
-  return { run, begin, cancel, reopen, sendCode, withCode, reset, hub };
+  return { run, begin, again, cancel, reopen, sendCode, withCode, reset, hub };
 }
 
 /** What a refused code says: Claude's own words, and what to do. */
@@ -341,6 +364,7 @@ export type CodexRun =
   | { at: "opening"; id: string | null }
   /** Type `code` on the page that opened (15 minutes). */
   | { at: "device"; id: string; url: string; code: string }
+
   | { at: "done" }
   | { at: "failed"; why: string }
   /** A hub too old to run Codex's sign-in itself: a terminal there. */
@@ -360,14 +384,24 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
   const live = useLive();
   const done = useRef(onDone);
   done.current = onDone;
+  const gen = useRef(0);
 
-  /** The device page, opened only once it is checked to be Codex's own. */
+  /** The device page, opened only once it is checked to be Codex's own; a
+   *  page that won't open stops the sign-in on its hub. */
   const openPage = useCallback(
-    (url: string) =>
+    (url: string, signIn?: string) =>
       void native.openSignInPage("codex", url).catch((e: unknown) => {
-        if (live.current) setRun({ at: "failed", why: plainError(e) });
+        const now = runNow.current;
+        const id = signIn ?? (now.at === "device" ? now.id : null);
+        if (hub && id)
+          void codexRoutes(hub)
+            .cancel(id)
+            .catch(() => undefined);
+        if (!live.current) return;
+        runNow.current = { at: "failed", why: plainError(e) };
+        setRun(runNow.current);
       }),
-    [native, live],
+    [native, live, hub],
   );
 
   const follow = useCallback(
@@ -382,7 +416,7 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
         case "device":
           if (opened.current !== s.id) {
             opened.current = s.id;
-            openPage(s.url);
+            openPage(s.url, s.id);
           }
           return setRun((now) => (now.at === "device" && now.id === s.id ? now : { at: "device", id: s.id, url: s.url, code: s.code }));
         case "done":
@@ -439,19 +473,30 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
 
   const begin = async () => {
     if (!hub) return;
+    const mine = ++gen.current;
     opened.current = null;
     runNow.current = { at: "opening", id: null };
     setRun({ at: "opening", id: null });
     try {
-      follow(await codexRoutes(hub).start());
+      const s = await codexRoutes(hub).start();
+      if (!live.current || gen.current !== mine) {
+        // Cancelled before its id was known: stopped on its hub, its page
+        // never opened.
+        void codexRoutes(hub)
+          .cancel(s.id)
+          .catch(() => undefined);
+        return;
+      }
+      follow(s);
     } catch (e) {
-      if (!live.current) return;
+      if (!live.current || gen.current !== mine) return;
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) setRun({ at: "terminal" });
       else setRun({ at: "failed", why: plainError(e) });
     }
   };
 
   const cancel = () => {
+    gen.current++;
     runNow.current = { at: "idle" };
     setRun({ at: "idle" });
     if (hub && id) void codexRoutes(hub).cancel(id).catch(() => undefined);

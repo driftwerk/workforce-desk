@@ -41,7 +41,6 @@ export function Accounts({
   const hub = useHubOf(machine);
   const fail = useDesk((s) => s.fail);
   const [adding, setAdding] = useState<false | "form" | "quick">(false);
-  const signIns = store((s) => s.signIns);
   const here = hereOf(useHost((h) => h.platform));
   useEffect(() => {
     void store.getState().load();
@@ -84,7 +83,7 @@ export function Accounts({
           machine={machine}
           where={machine === LOCAL ? here : (name ?? machine)}
           native={native}
-          start={adding === "quick" ? freeName([...all, ...Object.values(signIns)]) : undefined}
+          start={adding === "quick" ? freeName(all) : undefined}
         />
       ) : (
         <span className="account-actions-start">
@@ -445,8 +444,7 @@ export function SigningIn({ claude, onDone, onPaste }: { claude: ReturnType<type
       {r.at === "waiting" &&
         (r.codeAsked ? (
           <>
-            <p className="small">{r.checking ? "Checking the sign-in…" : "If the page shows a code, paste it here."}</p>
-            {r.why && <p className="small state-blocked">{r.why}</p>}
+            {r.why ? <p className="small state-blocked">{r.why}</p> : <p className="small">{r.checking ? "Checking the sign-in…" : "If the page shows a code, paste it here."}</p>}
             <CodeField onSend={(code) => void claude.sendCode(code)} focus />
             {r.page && (
               <span>
@@ -470,7 +468,7 @@ export function SigningIn({ claude, onDone, onPaste }: { claude: ReturnType<type
                 Use a code instead
               </button>
             </span>
-            <span className="faint small">Desk carries on by itself once you approve. It waits up to 10 minutes.</span>
+            <span className="faint small">Desk carries on by itself once you approve. It waits up to 10 minutes, then stops the sign-in.</span>
           </>
         ))}
       {r.at === "done" && (
@@ -508,7 +506,7 @@ export function SigningIn({ claude, onDone, onPaste }: { claude: ReturnType<type
               Cancel
             </button>
             {r.at === "failed" && (
-              <button type="button" className="btn" onClick={() => void claude.begin(r.name, false)}>
+              <button type="button" className="btn" onClick={claude.again}>
                 Try again
               </button>
             )}

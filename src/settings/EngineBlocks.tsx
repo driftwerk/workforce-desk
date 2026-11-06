@@ -32,6 +32,27 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
   );
 }
 
+/** How long an engine list read waits for its hub. */
+export const ENGINES_WITHIN_MS = 15_000;
+/** How long Desk waits for a machine to connect before saying so. */
+export const CONNECT_WITHIN_MS = 60_000;
+
+/** `p`, or a plain failure once `ms` pass without an answer. */
+export const within = <T,>(p: Promise<T>, ms: number, why: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(why)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+
 /** Whether this computer's own Codex is signed in to ChatGPT. */
 const codexSignedInHere = async (): Promise<boolean> => {
   const engines = await hubOf(LOCAL)
@@ -63,19 +84,32 @@ export function EngineBlocks({
   const hub = useHubOf(machine);
   const platform = useHost((h) => h.platform);
   const where = machine === LOCAL ? thisComputerLower(platform) : (name ?? machine);
-  const [engines, setEngines] = useState<EngineInfo[] | null | "failed">(null);
+  const asked = machine === LOCAL ? "the hub" : where;
+  // The list stays through a reload and a reconnect: "Reading…" only
+  // before there is one.
+  const [engines, setEngines] = useState<EngineInfo[] | null | { failed: string }>(null);
   const reload = useCallback(async () => {
     if (!hub) return;
     try {
-      setEngines(await hub.engines());
-    } catch {
-      setEngines((now) => (Array.isArray(now) ? now : "failed"));
+      const list = await within(hub.engines(), ENGINES_WITHIN_MS, `${asked} didn’t answer within ${ENGINES_WITHIN_MS / 1000} s.`);
+      setEngines(list);
+    } catch (e) {
+      setEngines((now) => (Array.isArray(now) ? now : { failed: e instanceof Error ? e.message : String(e) }));
     }
-  }, [hub]);
+  }, [hub, asked]);
   useEffect(() => {
-    setEngines(null);
     void reload();
   }, [reload]);
+  // Waiting for the machine to connect: said once it takes a minute.
+  const [slowConnect, setSlowConnect] = useState(false);
+  useEffect(() => {
+    setSlowConnect(false);
+    if (hub) return;
+    const t = setTimeout(() => setSlowConnect(true), CONNECT_WITHIN_MS);
+    return () => clearTimeout(t);
+  }, [hub]);
+  // A machine's Codex signs in here; this computer's is as it always was
+  // (its own `codex login`), with no sign-in of Desk's.
   const codex = useCodexSignIn(machine, where, native, () => void reload());
 
   // Each engine signed in there, said once.
@@ -96,17 +130,45 @@ export function EngineBlocks({
     if (codexIn) signed("codex");
   });
 
-  if (!hub) return <p className="faint small">{machine === LOCAL ? "Not connected to a hub." : `Waiting for ${where} to connect…`}</p>;
-  if (engines === "failed") return <p className="state-blocked small">Couldn’t ask {machine === LOCAL ? "the hub" : where} about its engines just now.</p>;
-  if (engines === null) return <p className="faint small">Reading…</p>;
+  if (!hub && !Array.isArray(engines)) {
+    if (machine === LOCAL) return <p className="faint small">Not connected to a hub.</p>;
+    return (
+      <p className={`small ${slowConnect ? "state-blocked" : "faint"}`}>
+        {slowConnect ? `${where} hasn’t connected in a minute.` : `Waiting for ${where} to connect…`}{" "}
+        {slowConnect && (
+          <button type="button" className="btn btn-sm" onClick={() => void native.reconnect(machine).catch(() => undefined)}>
+            Try again
+          </button>
+        )}
+      </p>
+    );
+  }
+  if (engines && !Array.isArray(engines))
+    return (
+      <p className="state-blocked small">
+        Couldn’t ask {asked} about its engines just now: {engines.failed}{" "}
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setEngines(null);
+            void reload();
+          }}
+        >
+          Try again
+        </button>
+      </p>
+    );
+  if (engines === null) return <p className="faint small">Reading… Desk gives up after {ENGINES_WITHIN_MS / 1000} s and says why.</p>;
   return (
     <ul className="engine-list" aria-label={`Engines on ${where}`}>
+      {!hub && <li className="small muted">{where} is offline for the moment: Desk carries on here once it’s back.</li>}
       {list.map((e) => (
         <li key={e.engine} className="engine-row" aria-label={e.title}>
           <span className="engine-head">
             <b>{e.title}</b>
             <span className="muted small">{installedText(e)}</span>
-            {e.engine === "codex" && e.installed && e.signIn.state !== "in" && codex.run.at === "idle" && (
+            {e.engine === "codex" && machine !== LOCAL && e.installed && e.signIn.state !== "in" && codex.run.at === "idle" && (
               <button type="button" className="btn btn-sm engine-head-action" onClick={() => void codex.begin()}>
                 Sign in…
               </button>
@@ -154,8 +216,8 @@ export function CodexSigningIn({ codex, machine, where }: { codex: ReturnType<ty
   const r = codex.run;
   if (r.at === "idle") return null;
   return (
-    <div className="accounts">
-      <div className="account-add" role="group" aria-label="Signing in to ChatGPT" aria-live="polite">
+    <>
+      <div className="account-add account-add-solo" role="group" aria-label="Signing in to ChatGPT" aria-live="polite">
         <b className="small">Signing in to ChatGPT</b>
         {r.at === "opening" && (
           <>
@@ -175,7 +237,7 @@ export function CodexSigningIn({ codex, machine, where }: { codex: ReturnType<ty
                 Open the sign-in page again
               </button>
             </span>
-            <span className="faint small">The code works for 15 minutes. Desk carries on by itself once you’ve typed it.</span>
+            <span className="faint small">The code works for 15 minutes. Desk carries on by itself once you’ve typed it, then stops the sign-in when it runs out.</span>
           </>
         )}
         {r.at === "done" && (
@@ -220,6 +282,6 @@ export function CodexSigningIn({ codex, machine, where }: { codex: ReturnType<ty
           )}
         </span>
       </div>
-    </div>
+    </>
   );
 }

@@ -856,6 +856,17 @@ legend.set-label {
   background: var(--surface);
   border: 1px solid var(--border);
 }
+.account-add p {
+  margin: 0;
+}
+/* Codex's sign-in inside its engine's own frame: one frame, no rule. */
+.account-add-solo {
+  margin-top: 8px;
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .engine-head-action {
   margin-left: auto;
   align-self: center;

@@ -12,8 +12,12 @@ export function Engines({ native, on }: { native?: MachineNative; on?: MachineId
   const machines = useMachines((s) => s.machines);
   const platform = useHost((h) => h.platform);
   const [chosen, setChosen] = useState<MachineId>(on ?? LOCAL);
-  const machine = chosen === LOCAL || machines.some((m) => m.id === chosen && usable(m.state)) ? chosen : LOCAL;
-  const name = machines.find((m) => m.id === machine)?.name;
+  // The machine chosen stays chosen through a reconnect (its sign-in under
+  // way carries on); only a machine that's gone falls back to this one.
+  const machine = chosen === LOCAL || machines.some((m) => m.id === chosen) ? chosen : LOCAL;
+  const shown = machines.find((m) => m.id === machine);
+  const name = shown?.name;
+  const away = shown && !usable(shown.state) ? offlineWord(shown.state) : null;
   return (
     <section className="settings-pane" aria-label="Engines">
       <h1 className="display-lg">Engines</h1>
@@ -47,6 +51,11 @@ export function Engines({ native, on }: { native?: MachineNative; on?: MachineId
             })}
           </div>
         </div>
+      )}
+      {away && (
+        <p className="small muted" role="status">
+          {name} is {away} right now. What it said last stays here, and Desk carries on once it’s back.
+        </p>
       )}
       <EngineBlocks key={machine} machine={machine} name={name} native={native} />
     </section>
