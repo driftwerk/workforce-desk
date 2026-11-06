@@ -201,6 +201,7 @@ const HTTP: &[Route] = &[
     route("PUT", "/api/desk/state/{}"),
     route("DELETE", "/api/desk/state/{}"),
     route("GET", "/api/desk/layout"),
+    route("PUT", "/api/desk/layout"),
     route("POST", "/api/desk/layout/import"),
     route("POST", "/api/desk/groups"),
     route("PATCH", "/api/desk/groups/{}"),

@@ -5,8 +5,11 @@
 // keyboard or from a menu — goes through these functions.
 
 import { agentKey, type Agent } from "../chat/types";
+import { keyOf, LOCAL, splitKey, type MachineId } from "../hub/machines";
 
-/** `agent:<hub>/<agent>` or `session:<desk session id>`. */
+/** `agent:<hub>/<agent>`, or `session:<key>` for a session by its key on
+ *  Desk (see `keyOf`): `session:<id>` for this computer's, as always, and
+ *  `session:<machine>/<id>` for a machine's. */
 export type ItemKey = string;
 
 export interface DeskGroup {
@@ -35,8 +38,16 @@ export const UNGROUPED = "ungrouped";
 export const EMPTY_LAYOUT: Layout = { groups: [], ungrouped: { collapsed: false, items: [] } };
 
 export const agentItem = (a: Pick<Agent, "hubId" | "id">): ItemKey => `agent:${agentKey(a)}`;
-export const sessionItem = (id: string): ItemKey => `session:${id}`;
+/** A session's item, by its key on Desk (`sessionKey`). */
+export const sessionItem = (key: string): ItemKey => `session:${key}`;
+/** A session item's key on Desk; null for an agent's. */
 export const sessionOf = (key: ItemKey): string | null => (key.startsWith("session:") ? key.slice("session:".length) : null);
+
+/** The machine a session item's session runs on; null for an agent's. */
+export const machineOfItem = (key: ItemKey): MachineId | null => {
+  const session = sessionOf(key);
+  return session === null ? null : splitKey(session).machine;
+};
 
 /** A group as shown: only the items Desk can see, in order. */
 export interface Shown {
@@ -264,3 +275,50 @@ export const dropAt = (layout: Layout, shown: readonly Shown[], source: DragEnd,
 /** Applies a drop. */
 export const dropOn = (layout: Layout, present: readonly ItemKey[], dragged: string, drop: Drop): Layout =>
   drop.kind === "item" ? moveItem(layout, present, dragged, drop.group, drop.before) : moveGroup(layout, dragged, drop.before);
+
+// ── Machines' sessions ────────────────────────────────────────────────────
+
+/** The layout without the items `drop` picks out, from every group and
+ *  Ungrouped; null when it has none of them. */
+export const dropItems = (layout: Layout, drop: (key: ItemKey) => boolean): Layout | null => {
+  const touched = layout.groups.some((g) => g.items.some(drop)) || layout.ungrouped.items.some(drop);
+  if (!touched) return null;
+  return {
+    groups: layout.groups.map((g) => ({ ...g, items: g.items.filter((k) => !drop(k)) })),
+    ungrouped: { ...layout.ungrouped, items: layout.ungrouped.items.filter((k) => !drop(k)) },
+  };
+};
+
+const sameName = (a: string, b: string) => a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+
+/** Machine `machine`'s own groups (as its engine kept them, before Desk had
+ *  one sidebar) merged into `layout`, once: each group's sessions go, keyed
+ *  as Desk keys them, to the end of the group of the same name, or a new
+ *  group of that name (its id from `newId`) when there's none. What's
+ *  already in a group here stays where it is. Its agents are its engine's
+ *  own, named as on it, and its Ungrouped shows here as Ungrouped anyway:
+ *  neither is taken. */
+export const mergeMachineLayout = (layout: Layout, machine: MachineId, theirs: Layout, newId: () => string): Layout => {
+  if (machine === LOCAL) return layout;
+  const grouped = new Set(layout.groups.flatMap((g) => g.items));
+  let out = layout;
+  for (const g of theirs.groups) {
+    const items = [
+      ...new Set(
+        g.items.flatMap((k) => {
+          const id = sessionOf(k);
+          // A key with a machine in it isn't one of its own sessions.
+          return id && splitKey(id).machine === LOCAL ? [sessionItem(keyOf(machine, id))] : [];
+        }),
+      ),
+    ].filter((k) => !grouped.has(k));
+    items.forEach((k) => grouped.add(k));
+    const taken = new Set(items);
+    const ungrouped = { ...out.ungrouped, items: out.ungrouped.items.filter((k) => !taken.has(k)) };
+    const same = out.groups.find((x) => sameName(x.name, g.name));
+    out = same
+      ? { groups: out.groups.map((x) => (x === same ? { ...x, items: [...x.items, ...items] } : x)), ungrouped }
+      : { groups: [...out.groups, { id: newId(), name: g.name.trim() || g.name, collapsed: false, items }], ungrouped };
+  }
+  return out;
+};

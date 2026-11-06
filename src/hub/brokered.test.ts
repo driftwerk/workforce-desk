@@ -154,6 +154,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   events: (h) => h.events(() => {}, () => {}),
   ptySocket: (h) => h.ptySocket("s1"),
   layout: (h) => h.layout(),
+  replaceLayout: (h) => h.replaceLayout({ groups: [], ungrouped: { collapsed: false, items: [] } }),
   importLayout: (h) => h.importLayout({ layout: {} as never, sessionNames: {} }),
   createGroup: (h) => h.createGroup({ id: "g", name: "G" }),
   updateGroup: (h) => h.updateGroup("g", { collapsed: true }),

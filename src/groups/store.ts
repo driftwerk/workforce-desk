@@ -11,8 +11,6 @@ import { LOCAL, splitKey } from "../hub/machines";
 import type { DeskEvent, Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { onHub, useHubLayout } from "./hubLayout";
-// Each machine's groups are kept beside this computer's.
-import "./machineLayouts";
 import {
   createGroup as created,
   deleteGroup as deleted,
@@ -38,6 +36,16 @@ export const layoutOf = (s: { groups: Layout["groups"]; ungrouped: Layout["ungro
 
 /** The groups as they are now, wherever they're kept. */
 export const currentLayout = (): Layout => useHubLayout.getState().layout ?? layoutOf(useSettings.getState());
+
+/** Whether where the groups are kept is known, and they're there to be
+ *  changed: Desk's settings are read, this computer's hub has said whether
+ *  it keeps them, and if it does, Desk has them from it. Until then a
+ *  change made unasked (a machine's sessions forgotten or merged in) waits,
+ *  so it isn't made to the copy that's about to be replaced. */
+export const layoutSettled = (): boolean => {
+  const { layout, kept } = useHubLayout.getState();
+  return useSettings.getState().loaded && kept !== null && (!kept || layout !== null);
+};
 
 /** The same, kept current in a component. */
 export const useLayout = (): Layout => {
@@ -133,17 +141,13 @@ export const moveGroup = (id: string, before: string | null): void =>
     (h) => h.moveGroup(id, before),
   );
 
-/** Whether `key` may be in this computer's groups: anything but a session
- *  on a machine (`session:<machine>/<id>`), which is grouped on its own
- *  engine; groups don't mix machines. */
-export const groupable = (key: ItemKey): boolean => !key.startsWith("session:") || splitKey(key.slice("session:".length)).machine === LOCAL;
-
+/** Any session, this computer's or a machine's (`session:<machine>/<id>`),
+ *  and any agent can be in any group. */
 export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
-  void (groupable(key) &&
   changeLayout(
     (l) => moved(l, present, key, to, before),
     (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
-  ));
+  );
 
 export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
   changeLayout(
@@ -153,6 +157,11 @@ export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void
 
 export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Drop): void =>
   drop.kind === "item" ? moveItem(present, dragged, drop.group, drop.before) : moveGroup(dragged, drop.before);
+
+/** A change no one route says (a machine's sessions forgotten, its groups
+ *  merged in): the whole layout as changed, in turn with the rest. */
+export const replaceLayout = (change: (layout: Layout) => Layout | null): void =>
+  changeLayout(change, (h, next) => h.replaceLayout(next));
 
 // ── Names ─────────────────────────────────────────────────────────────────
 
@@ -223,10 +232,11 @@ const handOver = (hubLayout: Layout): void => {
 /** Forgets sessions the hub says are gone (removed, closed, or missing from
  *  its snapshot of every session) from the groups and names in Desk's
  *  settings. Agents are never forgotten this way: their hub may just be
- *  offline. */
+ *  offline; nor are machines' sessions, which this computer's hub doesn't
+ *  know (their own engines say when they're gone: see machines.ts). */
 export const forgetGone = (gone: (id: string) => boolean): void => {
   const s = useSettings.getState();
-  const next = forgetSessions(layoutOf(s), s.sessionNames, gone);
+  const next = forgetSessions(layoutOf(s), s.sessionNames, (id) => splitKey(id).machine === LOCAL && gone(id));
   if (next) s.set({ groups: next.layout.groups, ungrouped: next.layout.ungrouped, sessionNames: next.names });
 };
 
@@ -252,6 +262,7 @@ let waiting: ((id: string) => boolean) | null = null;
 
 deskListeners.add((e) => {
   if (e.type === "snapshot") {
+    useHubLayout.setState({ kept: !!e.layout });
     if (e.layout) handOver(e.layout);
     else useHubLayout.setState({ layout: null });
   } else if (e.type === "layout") {
@@ -282,6 +293,6 @@ useSettings.subscribe((s, before) => {
 useDesk.subscribe((s, before) => {
   if (s.hub !== before.hub) {
     offered = null;
-    useHubLayout.setState({ layout: null });
+    useHubLayout.setState({ layout: null, kept: null });
   }
 });
