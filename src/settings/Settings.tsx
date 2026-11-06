@@ -23,8 +23,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const setSection = useUi((u) => u.openSettings);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const inSheet = e.target instanceof Element && e.target.closest(".sheet-backdrop");
-      if (e.key === "Escape" && !e.defaultPrevented && !inSheet) onClose();
+      // A sheet open on Settings (adding a machine) keeps Esc for itself,
+      // wherever focus is: back from the browser, focus is on the page.
+      const sheetOpen = document.querySelector(".sheet-backdrop");
+      if (e.key === "Escape" && !e.defaultPrevented && !sheetOpen) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

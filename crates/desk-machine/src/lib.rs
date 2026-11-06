@@ -13,6 +13,7 @@
 //! - [`fleet`] keeps the person's machines (`machines.json`), adds one
 //!   ([`probe`], [`hostkey`], [`setup`]), and connects to each, upgrading
 //!   one on an older Desk.
+//! - [`callback`] forwards one sign-in's callback port, while it runs.
 //! - [`link`] reads the machine's hub tokens over SSH, holds them only in
 //!   memory, and hands them on to go only through the forward's socket.
 //!
@@ -20,6 +21,7 @@
 //! scenario and really forwards a port, as `ssh -L` does.
 
 pub mod admit;
+pub mod callback;
 pub mod fleet;
 pub mod hostkey;
 pub mod link;

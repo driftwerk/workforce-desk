@@ -1,4 +1,4 @@
-import { useEffect, useId, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 import { plainError } from "../ui/plainError";
 import { setUp, setupFailed, START, step, type Item } from "./addFlow";
 import { native as realNative, type MachineNative } from "./native";
@@ -120,13 +120,16 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
 
   useEffect(() => native.setup((event) => dispatch({ type: "setup", event })), [native]);
 
+  const signedIn = useCallback((engine: "claude" | "codex") => dispatch({ type: "signedIn", engine }), []);
   const editing = flow.at === "address";
   const target = flow.target;
   const failed = setupFailed(flow);
   const ready = setUp(flow);
 
   return (
-    <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    // Once it's being set up, only Do this later and Done close it: a click
+    // beside it or Esc (back from the browser) never ends a sign-in's card.
+    <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && flow.at !== "setup" && onClose()}>
       <form
         className="sheet machine-add"
         aria-label="Add a machine"
@@ -134,7 +137,7 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
           e.preventDefault();
           if (editing) dispatch({ type: "submit" });
         }}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
+        onKeyDown={(e) => e.key === "Escape" && flow.at !== "setup" && onClose()}
       >
         <h2 className="display-md">Add a machine</h2>
         <div className="field">
@@ -277,7 +280,7 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
         )}
 
         {flow.at === "setup" && ready && flow.machine && (
-          <SignInOn machine={flow.machine} name={flow.name} signedIn={flow.signedIn} onSignedIn={(engine) => dispatch({ type: "signedIn", engine })} />
+          <SignInOn machine={flow.machine} name={flow.name} native={native} onSignedIn={signedIn} />
         )}
 
         <footer className="sheet-foot">

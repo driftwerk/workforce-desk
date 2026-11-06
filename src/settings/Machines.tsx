@@ -2,8 +2,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
 import { AddMachine } from "../machines/AddMachine";
-import { LOCAL, sessionsOn, useHubOf, useMachines, type Machine } from "../machines/engines";
+import { LOCAL, sessionsOn, useMachines, type Machine } from "../machines/engines";
 import { native as realNative, type MachineNative } from "../machines/native";
+import { SignInOn } from "../machines/SignIn";
 import { openTerminalOn } from "../machines/watch";
 import { dotOf, stateText, thisComputer, thisComputerLower } from "../machines/words";
 import { inApp } from "../platform";
@@ -21,32 +22,8 @@ const useDeskVersion = (): string | null => {
 
 const sessionsText = (n: number): string => `${n} ${n === 1 ? "session" : "sessions"}`;
 
-/** "Claude and Codex signed in", from the machine's own engines; null until
- *  it has said. */
-const useSignedIn = (machine: Machine): string | null => {
-  const hub = useHubOf(machine.state.kind === "ready" ? machine.id : null);
-  const [said, setSaid] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    if (machine.state.kind !== "ready" || !hub) return;
-    void hub
-      .engines()
-      .then((engines) => {
-        if (!live || !engines) return;
-        const signed = engines.filter((e) => e.installed && e.signIn.state === "in").map((e) => e.title);
-        setSaid(signed.length ? `${signed.join(" and ")} signed in` : engines.some((e) => e.installed) ? "Not signed in yet" : null);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [hub, machine.id, machine.state.kind]);
-  return said;
-};
-
 function MachineRow({ machine, version, native, onRemove }: { machine: Machine; version: string | null; native: MachineNative; onRemove: () => void }) {
   const count = useDesk((s) => sessionsOn(s.sessions, machine.id).length);
-  const signedIn = useSignedIn(machine);
   const [problem, setProblem] = useState<string | null>(null);
   const s = machine.state.kind;
   const said = stateText(machine, version);
@@ -55,7 +32,6 @@ function MachineRow({ machine, version, native, onRemove }: { machine: Machine; 
     sessionsText(count),
     machine.version && `Desk ${machine.version}`,
     machine.system && `Linux ${machine.system.arch}`,
-    signedIn,
   ].filter(Boolean);
   const retry = () => {
     setProblem(null);
@@ -95,6 +71,7 @@ function MachineRow({ machine, version, native, onRemove }: { machine: Machine; 
           Remove…
         </button>
       )}
+      {s === "ready" && <SignInOn machine={machine.id} name={machine.name} native={native} boxed={false} />}
     </li>
   );
 }

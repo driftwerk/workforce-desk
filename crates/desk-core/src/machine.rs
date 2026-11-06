@@ -284,7 +284,8 @@ impl Machine {
     /// The forward from the Unix socket `socket` on this computer (in a
     /// folder only the person can open, the socket itself theirs alone) to
     /// the machine's gateway at `box_port` on its loopback. No TCP port is
-    /// opened here at all. It can't clear the person's config's forwards
+    /// opened here for it (only a sign-in's callback is, for its length:
+    /// [`Machine::stdio_forward`]). It can't clear the person's config's forwards
     /// (`ClearAllForwardings` would clear this one too), so Desk reads
     /// [`Machine::settings`] for any first.
     pub fn forward(&self, socket: &std::path::Path, box_port: u16) -> Invocation {
@@ -307,7 +308,23 @@ impl Machine {
             None,
         )
     }
+
+    /// One connection carried to TCP port `port` on the machine's loopback,
+    /// on ssh's own input and output (`-W`): for a sign-in's page coming
+    /// back, which Desk listens for here itself. `-W` forwards nothing
+    /// else, whatever the person's config sets.
+    pub fn stdio_forward(&self, port: u16) -> Invocation {
+        let to = format!("127.0.0.1:{port}");
+        self.ssh(
+            &[ALWAYS, &["-o", "ClearAllForwardings=yes", "-W", &to]],
+            None,
+        )
+    }
 }
+
+/// The longest Desk listens for a sign-in's page coming back: a little
+/// over the 10 minutes Claude Code's sign-in waits.
+pub const CALLBACK_FOR_SECS: u32 = 15 * 60;
 
 /// The most of what a machine said that Desk shows.
 pub const MAX_SAID: usize = 200;
@@ -588,6 +605,7 @@ mod tests {
             m.reachable(),
             m.settings(),
             m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226),
+            m.stdio_forward(46009),
             m.command(&["x".into()]),
         ] {
             assert_eq!(i.program, std::path::PathBuf::from("/usr/bin/ssh"));
@@ -610,6 +628,10 @@ mod tests {
             // Only the command's line comes after the target.
             assert!(i.args.len() <= dash + 3);
         }
+        let c = m.stdio_forward(46009);
+        assert!(c.args.windows(2).any(|w| w == ["-W", "127.0.0.1:46009"]));
+        assert!(c.args.contains(&"ClearAllForwardings=yes".to_string()));
+        assert!(!c.args.contains(&"-L".to_string()));
         let f = m.forward(std::path::Path::new("/run/desk/devbox.sock"), 4226);
         assert!(
             f.args

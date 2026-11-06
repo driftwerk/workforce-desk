@@ -216,12 +216,28 @@ const HTTP: &[Route] = &[
 ];
 
 /// What the page may ask of a machine's hub besides: the folders there, to
-/// type a session's folder, and what runs in one of its terminals (`ps` on
-/// this computer can't see it).
+/// type a session's folder, what runs in one of its terminals (`ps` on
+/// this computer can't see it), and signing Codex in there by its device
+/// page (this computer signs its own Codex in itself).
 const MACHINE_HTTP: &[Route] = &[
     with_query("GET", "/api/desk/folders", &["path", "hidden"]),
     route("GET", "/api/desk/terminals/{}/programs"),
+    route("POST", "/api/desk/engines/sign-ins"),
+    route("GET", "/api/desk/engines/sign-ins/{}"),
+    route("DELETE", "/api/desk/engines/sign-ins/{}"),
+    // Asked by the native side alone (see NATIVE_ONLY).
+    route("GET", "/api/desk/accounts/sign-ins/{}/direct"),
 ];
+
+/// Of [`MACHINE_HTTP`], what only the native side asks, never the page: the
+/// page that comes back by itself for a sign-in, to listen for it.
+const NATIVE_ONLY: &[Route] = &[route("GET", "/api/desk/accounts/sign-ins/{}/direct")];
+
+/// Whether `method target` is one only the native side asks of a machine's
+/// hub, matched as every route is.
+pub fn native_only(method: &str, target: &str) -> bool {
+    allowed(NATIVE_ONLY, method, target).is_ok()
+}
 
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
@@ -581,8 +597,22 @@ mod tests {
         assert!(machine_http("GET", "/api/desk/sessions").is_ok());
         assert!(machine_http("GET", "/api/desk/folders?path=%2Fhome%2Fdev&hidden=1").is_ok());
         assert!(machine_http("GET", "/api/desk/terminals/t1/programs").is_ok());
+        assert!(machine_http("POST", "/api/desk/engines/sign-ins").is_ok());
+        assert!(machine_http("GET", "/api/desk/engines/sign-ins/e1").is_ok());
+        assert!(machine_http("DELETE", "/api/desk/engines/sign-ins/e1").is_ok());
+        assert!(native_only("GET", "/api/desk/accounts/sign-ins/s1/direct"));
+        assert!(
+            native_only("GET", "/api/desk/accounts/sign-ins/s1/%64irect")
+                || machine_http("GET", "/api/desk/accounts/sign-ins/s1/%64irect").is_err()
+        );
+        assert!(!native_only("POST", "/api/desk/accounts/sign-ins/s1/code"));
+        assert!(http("GET", "/api/desk/accounts/sign-ins/s1/direct").is_err());
         assert!(
             http("GET", "/api/desk/folders").is_err(),
+            "not this computer's"
+        );
+        assert!(
+            http("POST", "/api/desk/engines/sign-ins").is_err(),
             "not this computer's"
         );
         for (m, p) in [
@@ -592,6 +622,9 @@ mod tests {
             ("GET", "/api/admin/reset-model"),
             ("GET", "/api/vault/speech/openai/api_key"),
             ("GET", "/api/desk/folders/%2e%2e"),
+            ("GET", "/api/desk/engines/sign-ins"),
+            ("PATCH", "/api/desk/engines/sign-ins/e1"),
+            ("POST", "/api/desk/engines/sign-ins/e1/code"),
         ] {
             assert!(machine_http(m, p).is_err(), "{m} {p}");
         }

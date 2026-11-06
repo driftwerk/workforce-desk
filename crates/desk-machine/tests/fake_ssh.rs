@@ -619,3 +619,170 @@ fn no_forward_outlives_desk() {
         "stopped"
     );
 }
+
+/// A port on this computer's loopback nothing holds now.
+fn free_port() -> u16 {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+/// Desk's listener for a sign-in's page, on a free port. A free port can
+/// be taken by a test running beside this one before Desk binds it (on
+/// either loopback): then another.
+fn open_callback(ssh: &SshExe, m: &Machine) -> (u16, desk_machine::callback::CallbackForward) {
+    (0..20)
+        .find_map(|_| {
+            let here = free_port();
+            desk_machine::callback::CallbackForward::open(ssh, m, here)
+                .ok()
+                .map(|fw| (here, fw))
+        })
+        .expect("a free port")
+}
+
+#[test]
+fn a_sign_ins_page_comes_back_through_desks_own_listener_while_it_runs() {
+    // The engine's sign-in on the machine, listening for its page.
+    let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
+    let there = sign_in.local_addr().unwrap().port();
+    let heard = std::thread::spawn(move || {
+        let mut got = Vec::new();
+        for _ in 0..2 {
+            let (mut c, _) = sign_in.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let n = c.read(&mut buf).unwrap();
+            c.write_all(b"HTTP/1.1 302 Found\r\nLocation: https://claude.ai/done\r\n\r\n")
+                .unwrap();
+            got.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+        }
+        got
+    });
+    let f = fake(json!([{
+        "target": "devbox",
+        "settings": "user dev\nhostname 203.0.113.7\n",
+        "forward_to": there,
+    }]));
+    let m = machine("devbox");
+    let (here, forward) = open_callback(&f.ssh, &m);
+    assert_eq!(forward.port(), here);
+    // Desk listens itself: nothing ran before a connection came.
+    assert!(f.calls().is_empty(), "{:?}", f.calls());
+
+    // The browser's visit to the page's callback reaches the sign-in there,
+    // on IPv4 and, where there is one, IPv6 loopback.
+    let visit = |to: std::net::SocketAddr| {
+        let mut browser = std::net::TcpStream::connect(to).unwrap();
+        browser
+            .write_all(b"GET /callback?code=c0de&state=s1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let mut answer = String::new();
+        browser.read_to_string(&mut answer).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 302"), "{answer}");
+    };
+    visit(([127, 0, 0, 1], here).into());
+    // (Whether this computer has an IPv6 loopback, found without touching
+    // the listener: a connection to it would be carried too.)
+    let has_ipv6 = TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, 0)).is_ok();
+    if has_ipv6 {
+        visit((std::net::Ipv6Addr::LOCALHOST, here).into());
+    } else {
+        visit(([127, 0, 0, 1], here).into());
+    }
+    let got = heard.join().unwrap();
+    assert!(got.iter().all(|g| g.starts_with("GET /callback?code=c0de")));
+    let call = f
+        .calls()
+        .into_iter()
+        .find(|c| c.contains(&"-W".to_string()))
+        .unwrap();
+    assert!(
+        call.windows(2)
+            .any(|w| w == ["-W".to_string(), format!("127.0.0.1:{here}")]),
+        "{call:?}"
+    );
+    assert!(call.contains(&"BatchMode=yes".to_string()));
+    assert!(!call.contains(&"-L".to_string()));
+
+    // Ended with the sign-in: the port is this computer's again.
+    // Ended with the sign-in: nothing listens on the port any more. (Its
+    // closed connections may hold it a moment longer, as they do when
+    // shared with no one.)
+    drop(forward);
+    assert!(soon(3000, || std::net::TcpStream::connect((
+        "127.0.0.1",
+        here
+    ))
+    .is_err()));
+    if has_ipv6 {
+        assert!(soon(3000, || std::net::TcpStream::connect((
+            std::net::Ipv6Addr::LOCALHOST,
+            here
+        ))
+        .is_err()));
+    }
+}
+
+#[test]
+fn a_sign_ins_port_another_program_holds_on_any_address_is_refused() {
+    use desk_machine::callback::CallbackForward;
+    let f = fake(json!([{"target": "devbox", "settings": "user dev\nhostname 203.0.113.7\n"}]));
+    let m = machine("devbox");
+    // On every address (a database, a dev server, a container's port).
+    let everywhere = TcpListener::bind("0.0.0.0:0").unwrap();
+    let port = everywhere.local_addr().unwrap().port();
+    let refused = CallbackForward::open(&f.ssh, &m, port).err().unwrap();
+    assert!(refused.contains(&format!("port {port}")), "{refused}");
+    // On loopback.
+    let held = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port();
+    assert!(CallbackForward::open(&f.ssh, &m, port).is_err());
+    assert!(CallbackForward::open(&f.ssh, &m, 80).is_err());
+    assert!(f.calls().is_empty());
+}
+
+#[test]
+fn a_sign_ins_listener_carries_a_few_connections_at_once_and_closes_the_rest() {
+    use desk_machine::callback::MAX_CARRIED;
+    // The machine's sign-in takes connections and never answers them.
+    let sign_in = TcpListener::bind("127.0.0.1:0").unwrap();
+    let there = sign_in.local_addr().unwrap().port();
+    let held = Arc::new(Mutex::new(Vec::new()));
+    let keep = Arc::clone(&held);
+    std::thread::spawn(move || {
+        for c in sign_in.incoming().flatten() {
+            keep.lock().unwrap().push(c);
+        }
+    });
+    let f = fake(json!([{
+        "target": "devbox",
+        "settings": "user dev\nhostname 203.0.113.7\n",
+        "forward_to": there,
+    }]));
+    let (here, forward) = open_callback(&f.ssh, &machine("devbox"));
+    let carried = || {
+        f.calls()
+            .iter()
+            .filter(|c| c.contains(&"-W".to_string()))
+            .count()
+    };
+    let mut browsers = Vec::new();
+    for _ in 0..MAX_CARRIED {
+        browsers.push(std::net::TcpStream::connect(("127.0.0.1", here)).unwrap());
+    }
+    assert!(soon(5000, || carried() == MAX_CARRIED
+        && held.lock().unwrap().len() == MAX_CARRIED));
+    // One more is closed, with no ssh for it.
+    let mut extra = std::net::TcpStream::connect(("127.0.0.1", here)).unwrap();
+    extra
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut buf = [0u8; 8];
+    assert_eq!(extra.read(&mut buf).unwrap_or(0), 0);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(carried(), MAX_CARRIED);
+    drop(forward);
+    drop(browsers);
+}

@@ -239,6 +239,12 @@ const withDevBridge = async <T>(method: string, path: string, body: unknown, cal
   }
 };
 
+/** One call through `t` to a hub's API: its JSON answer, nothing for a 204,
+ *  and a `HubError` for a refusal. For a machine's own routes, which this
+ *  computer's hub doesn't have (so aren't `DeskHub`'s). */
+export const transportCall = async <T>(t: DeskTransport, method: string, path: string, body?: unknown): Promise<T> =>
+  (await answer<T>(await t.fetch(method, path, json(body)))).body;
+
 /** One call to paired hub `hub`'s API: its status and JSON answer (none
  *  for a 204), and a `HubError` for a refusal or a route the hub doesn't
  *  have. */
@@ -341,8 +347,9 @@ export class DeskHub {
   };
   /** Adds an account: with a pasted token, checked and kept; without, the
    *  engine's own sign-in begins. */
-  addAccount = (a: { engine: Engine; name: string; token?: string; makeDefault?: boolean }): Promise<AccountAdded> =>
+  addAccount = (a: { engine: Engine; name: string; token?: string; makeDefault?: boolean; remote?: boolean }): Promise<AccountAdded> =>
     this.call("POST", "/api/desk/accounts", a);
+
   updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
     this.call("PATCH", `/api/desk/accounts/${id}`, patch);
   removeAccount = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/${id}`);

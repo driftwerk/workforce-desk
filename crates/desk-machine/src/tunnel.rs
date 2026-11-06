@@ -1,6 +1,7 @@
 //! The one forward to a machine's hub: `ssh -N -L` from a Unix socket on
 //! this computer to the gateway on the machine's loopback, kept open by a
-//! supervisor thread. No TCP port is opened here: the socket is in a folder
+//! supervisor thread. No TCP port is opened here for it (only a sign-in's
+//! callback is, for its length: see `callback`): the socket is in a folder
 //! only the person can open (`0700`, theirs), the socket itself theirs
 //! alone (`0600`), and only Desk's own native side connects to it. So the
 //! hub's tokens go only into this socket, and on from there only inside
