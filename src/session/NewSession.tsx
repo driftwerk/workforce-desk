@@ -11,7 +11,7 @@ import { keyOf, LOCAL, useHubOf, useMachines, type MachineId } from "../machines
 import { native as machineNative, type MachineNative } from "../machines/native";
 import { RunOn } from "../machines/RunOn";
 import { FolderPicker } from "../machines/FolderPicker";
-import { onMachine } from "../machines/folders";
+import { homeWithin, onMachine } from "../machines/folders";
 import { nameOfMachine } from "../machines/words";
 import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
@@ -70,6 +70,8 @@ export function NewSession({
   const where = nameOfMachine(runOn, machines, platform);
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState("");
+  /** The folder typed is one the machine says isn't there. */
+  const [noFolder, setNoFolder] = useState(false);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [worktree, setWorktree] = useState("");
@@ -120,7 +122,7 @@ export function NewSession({
     setBusy(true);
     try {
       // On a machine, its own path: `~` (and nothing typed) is its home.
-      const where = remote ? onMachine(cwd || "~", await machineHome(runOn)) : cwd;
+      const where = remote ? onMachine(cwd || "~", await homeWithin(() => machineHome(runOn), runOn)) : cwd;
       const s = await hub.start({
         engine,
         cwd: where,
@@ -158,20 +160,22 @@ export function NewSession({
             setEngines(null);
           }}
         />
-        <div className="seg" role="radiogroup" aria-label="Engine">
-          {offered.map((k) => (
-            <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
-              {ENGINE_TITLE[k]}
-            </button>
-          ))}
-        </div>
+        {!remote && (
+          <div className="seg" role="radiogroup" aria-label="Engine">
+            {offered.map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
+                {ENGINE_TITLE[k]}
+              </button>
+            ))}
+          </div>
+        )}
         {remote && missing.length > 0 && (
           <p className="muted small">
             {missing.join(" and ")} {missing.length === 1 ? "isn’t" : "aren’t"} installed on {where}.
           </p>
         )}
         {remote ? (
-          <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always />
+          <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always onMissing={setNoFolder} />
         ) : (
           <label className="field">
             <span>Folder</span>
@@ -182,6 +186,19 @@ export function NewSession({
               </button>
             </span>
           </label>
+        )}
+        {/* On a machine, as its board draws it: the engine below the folder. */}
+        {remote && (
+          <div className="field">
+            <span className="ov-label muted">Engine</span>
+            <div className="chip-row" role="radiogroup" aria-label="Engine">
+              {offered.map((k) => (
+                <button key={k} type="button" role="radio" className="chip-btn" aria-checked={engine === k} aria-pressed={engine === k} onClick={() => setEngine(k)}>
+                  {ENGINE_TITLE[k]}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {layout.groups.length > 0 && (
           <div className="field">
@@ -271,7 +288,7 @@ export function NewSession({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub}>
+          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder)}>
             {remote ? `Start in ${cwd.trim().replace(/\/+$/, "") || "~"}` : "Start"}
           </button>
         </footer>

@@ -176,3 +176,26 @@ describe("its group", () => {
     expect(screen.queryByRole("radiogroup", { name: "Group" })).toBeNull();
   });
 });
+
+it("won't start in a folder the machine says isn't there, and puts the engine below the folder", async () => {
+  const { native } = fakeNative({
+    transport: vi.fn(() => ({
+      fetch: async (_m: string, path: string) =>
+        path.includes("acme-wbe") ? Response.json({ error: "no such folder" }, { status: 404 }) : Response.json({ path: "/home/dev", folders: [{ name: "acme-web", path: "/home/dev/src/acme-web", git: true, hidden: false }] }),
+      socket: () => {
+        throw new Error("none");
+      },
+    })),
+  });
+  render(<NewSession onClose={() => {}} native={native} />);
+  await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
+  const folder = screen.getByLabelText("Folder on devbox");
+  fireEvent.change(folder, { target: { value: "~/src/acme-wbe/" } });
+  await act(async () => vi.advanceTimersByTime(FOLDERS_DEBOUNCE_MS + 10));
+  await act(async () => {});
+  expect(screen.getByText("devbox has no folder ~/src/acme-wbe.")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Start in ~/src/acme-wbe" }) as HTMLButtonElement).disabled).toBe(true);
+  // The engine, as chips, comes after the folder.
+  const engines = screen.getByRole("radiogroup", { name: "Engine" });
+  expect(folder.compareDocumentPosition(engines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});

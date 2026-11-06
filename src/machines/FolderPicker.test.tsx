@@ -11,7 +11,7 @@ import type { DeskTransport } from "../hub/transport";
 import type { Session } from "../hub/types";
 import { machineHome } from "../platform";
 import { FOLDERS_DEBOUNCE_MS, FolderPicker } from "./FolderPicker";
-import { LIST_WITHIN_MS } from "./folders";
+import { HOME_WITHIN_MS, LIST_WITHIN_MS, shownPath } from "./folders";
 import { OpenTerminal } from "./OpenTerminal";
 import { fakeNative } from "./testing";
 
@@ -185,4 +185,42 @@ it("puts the new terminal pane in the folder chosen, on the machine", async () =
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open in ~/src/acme-web" })));
   const panes = Object.values(useGrids.getState().grids).flatMap((g) => g.panes);
   expect(panes.some((p) => p.content?.kind === "terminal" && p.content.machine === "devbox" && p.content.cwd === "/home/dev/src/acme-web")).toBe(true);
+});
+
+it("shows a folder's name without the characters that would make it read as another", async () => {
+  expect(shownPath("~/src/acme\u202e\u200bbew")).toBe("~/src/acmebew");
+  expect(shownPath("~/src/a\u0007b\u2066c")).toBe("~/src/abc");
+  const t: DeskTransport = {
+    fetch: async () => Response.json({ path: "/home/dev", folders: [{ name: "x", hidden: false, git: false, path: "/home/dev/evil\u202egnp.sh" }] }),
+    socket: () => {
+      throw new Error("none");
+    },
+  };
+  render(<Picker t={t} />);
+  await settle();
+  expect(rows()[1]).toBe("~/evilgnp.sh›");
+});
+
+it("lets Cancel stop a terminal that's still asking the machine, and gives up on its home after 10 s", async () => {
+  const n = fakeNative();
+  n.fake.transport.mockReturnValue(transport([]));
+  const opened = vi.fn();
+  const waiting: ((h: string) => void)[] = [];
+  vi.mocked(machineHome).mockImplementation(() => new Promise((r) => waiting.push(r)));
+  render(<OpenTerminal machine="devbox" name="devbox" native={n.native} onClose={() => {}} onOpened={opened} />);
+  await settle();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open in ~" })));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await act(async () => waiting.forEach((r) => r("/home/dev")));
+  expect(opened).not.toHaveBeenCalled();
+  cleanup();
+
+  vi.mocked(machineHome).mockImplementation(() => new Promise(() => {}));
+  render(<OpenTerminal machine="devbox" name="devbox" native={n.native} onClose={() => {}} onOpened={opened} />);
+  await settle();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open in ~" })));
+  await act(async () => void (await vi.advanceTimersByTimeAsync(HOME_WITHIN_MS)));
+  expect(screen.getAllByRole("alert").some((a) => a.textContent === "devbox didn’t say where its home is within 10 s.")).toBe(true);
+  expect(opened).not.toHaveBeenCalled();
+  vi.mocked(machineHome).mockImplementation(async () => "/home/dev");
 });

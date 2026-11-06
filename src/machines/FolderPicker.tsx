@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import { machineHome } from "../platform";
 import type { MachineId } from "./engines";
 import { sessionsOn } from "./engines";
-import { listIn, meant, parentOf, splitTyped, tilde, type Folder, type Listed } from "./folders";
+import { homeWithin, listIn, meant, parentOf, shownPath, splitTyped, tilde, type Folder, type Listed } from "./folders";
 import type { MachineNative } from "./native";
 
 /** How long typing rests before the machine is asked for its folders. */
@@ -15,7 +15,7 @@ export function useMachineHome(machine: MachineId, listed: string | null): strin
   const [home, setHome] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    machineHome(machine)
+    homeWithin(() => machineHome(machine), machine)
       .then((h) => live && setHome(h))
       .catch(() => undefined);
     return () => {
@@ -63,6 +63,7 @@ export function FolderPicker({
   onChange,
   always = false,
   autoFocus = false,
+  onMissing,
 }: {
   machine: MachineId;
   name: string;
@@ -71,6 +72,8 @@ export function FolderPicker({
   onChange: (path: string) => void;
   /** Says of home that it is always there (New session's panel). */
   always?: boolean;
+  /** Told whether the folder typed is one the machine says isn't there. */
+  onMissing?: (missing: boolean) => void;
   autoFocus?: boolean;
 }) {
   const id = useId();
@@ -119,6 +122,9 @@ export function FolderPicker({
   const missingPath = listed?.kind === "missing" ? (dir ?? "~") : typedMissing ? typed : null;
   const suggestion = listed?.kind === "missing" ? meant(dir ?? "", parentFolders) : typedMissing ? meant(typed, folders) : null;
   const up = dir ? parentOf(dir) : null;
+  const tell = useRef(onMissing);
+  tell.current = onMissing;
+  useEffect(() => tell.current?.(!!missingPath), [missingPath]);
   const open = (path: string) => onChange(`${path.replace(/\/+$/, "")}/`);
   const retry = useCallback(() => setAgain((n) => n + 1), []);
 
@@ -154,7 +160,7 @@ export function FolderPicker({
             </span>
             <span className="mono">~</span>
             <span className="small muted">
-              · home folder{home ? `, ${home}` : ""}
+              · home folder{home ? `, ${shownPath(home)}` : ""}
               {always ? ", always there" : ""}
             </span>
           </button>
@@ -165,10 +171,10 @@ export function FolderPicker({
         {shown.map((f) => (
           <li key={f.path}>
             <button type="button" className={`folder-row ${typed.replace(/\/+$/, "") === f.path ? "on" : ""}`} onClick={() => onChange(f.path)}>
-              <span className="mono">{f.path}</span>
+              <span className="mono">{shownPath(f.path)}</span>
               {f.git && <span className="mono small faint">git</span>}
             </button>
-            <button type="button" className="folder-open" aria-label={`Open ${f.path}`} onClick={() => open(f.path)}>
+            <button type="button" className="folder-open" aria-label={`Open ${shownPath(f.path)}`} onClick={() => open(f.path)}>
               ›
             </button>
           </li>
@@ -178,11 +184,11 @@ export function FolderPicker({
       {missingPath && (
         <>
           <span className="small state-blocked" role="alert">
-            {name} has no folder {missingPath}.
+            {name} has no folder {shownPath(missingPath)}.
           </span>
           {suggestion && (
             <span className="folder-meant small">
-              Did you mean {suggestion}?{" "}
+              Did you mean {shownPath(suggestion)}?{" "}
               <button type="button" className="btn btn-sm" onClick={() => onChange(suggestion)}>
                 Use it
               </button>
@@ -193,7 +199,7 @@ export function FolderPicker({
       {listed?.kind === "slow" && (
         <>
           <span className="small state-blocked" role="alert">
-            Couldn’t list the folders in {dir ?? "~"}: {name} didn’t answer within 10 s.
+            Couldn’t list the folders in {shownPath(dir ?? "~")}: {name} didn’t answer within 10 s.
           </span>
           <span className="folder-meant small">
             <button type="button" className="btn btn-sm" onClick={retry}>
@@ -220,7 +226,7 @@ export function FolderPicker({
           <div className="chip-row">
             {recent.map((r) => (
               <button key={r.path} type="button" className="chip-btn mono" onClick={() => onChange(r.path)}>
-                {r.path} · {r.when}
+                {shownPath(r.path)} · {r.when}
               </button>
             ))}
           </div>

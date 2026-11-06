@@ -72,6 +72,32 @@ export const suggest = (folders: readonly Folder[], typed: string, max = 6): Fol
 /** How long a folder listing may take before Desk says so. */
 export const LIST_WITHIN_MS = 10_000;
 
+/** How long Desk waits for a machine to say where its home is. */
+export const HOME_WITHIN_MS = 10_000;
+
+/** `machine`'s home (`ask`, over SSH), or a plain failure once
+ *  [`HOME_WITHIN_MS`] pass without an answer. */
+export const homeWithin = (ask: () => Promise<string>, name: string, within = HOME_WITHIN_MS): Promise<string> =>
+  new Promise<string>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${name} didn’t say where its home is within ${Math.round(within / 1000)} s.`)), within);
+    ask().then(
+      (h) => {
+        clearTimeout(t);
+        resolve(h);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+
+/** A path as it is shown: without control characters, or the ones that
+ *  turn text around or hide in it (bidi overrides, zero-width marks), so a
+ *  folder's name can't make it read as another. What is opened is the path
+ *  itself. */
+export const shownPath = (path: string): string => path.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "");
+
 /** A path as typed (`~`, `~/src`, `src`, `/srv`) as the machine's own:
  *  absolute, under `home` unless it says otherwise. */
 export const onMachine = (typed: string, home: string): string => {

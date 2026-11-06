@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import type { MachineId } from "./engines";
-import { listIn, onMachine } from "./folders";
+import { homeWithin, listIn, onMachine, shownPath } from "./folders";
 import { FolderPicker } from "./FolderPicker";
 import { native as realNative, type MachineNative } from "./native";
 import { openTerminalOn } from "./watch";
@@ -29,30 +29,44 @@ export function OpenTerminal({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const shown = value.trim().replace(/\/+$/, "") || "~";
+  // Cancelled (or closed) while it asked the machine: nothing opens later.
+  const gone = useRef(false);
+  useEffect(
+    () => () => {
+      gone.current = true;
+    },
+    [],
+  );
+  const cancel = () => {
+    gone.current = true;
+    onClose();
+  };
   const go = async () => {
     setBusy(true);
     setProblem(null);
     try {
-      const home = await machineHome(machine);
+      const home = await homeWithin(() => machineHome(machine), name);
+      if (gone.current) return;
       // A folder that isn't there is said here, not in a terminal that won't start.
       if (shown !== "~") {
         const looked = await listIn(native.transport(machine), shown);
+        if (gone.current) return;
         if (looked.kind === "missing") {
-          setProblem(`${name} has no folder ${shown}.`);
+          setProblem(`${name} has no folder ${shownPath(shown)}.`);
           return;
         }
       }
       onOpened(machine, onMachine(shown, home));
       onClose();
     } catch (e) {
-      setProblem(plainError(e));
+      if (!gone.current) setProblem(plainError(e));
     } finally {
-      setBusy(false);
+      if (!gone.current) setBusy(false);
     }
   };
   return (
     <Dialog
-      onClose={onClose}
+      onClose={cancel}
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
@@ -61,7 +75,7 @@ export function OpenTerminal({
             </h2>
             <p>Pick a folder on {name}, or type one.</p>
           </span>
-          <CloseButton onClose={onClose} />
+          <CloseButton onClose={cancel} />
         </header>
       )}
     >
@@ -75,11 +89,11 @@ export function OpenTerminal({
       </div>
       <footer className="dialog-foot">
         <span className="small muted dialog-foot-note">Folders only. › opens one; any typed path works too.</span>
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
+        <button type="button" className="btn btn-ghost" onClick={cancel}>
           Cancel
         </button>
         <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void go()}>
-          Open in {shown}
+          Open in {shownPath(shown)}
         </button>
       </footer>
     </Dialog>
