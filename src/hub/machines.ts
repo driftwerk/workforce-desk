@@ -30,7 +30,17 @@ export type MachineState =
   | { kind: "unreachable" }
   | { kind: "updating" }
   | { kind: "newer" }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; message: string }
+  /** Updating it to this Desk's version stopped, or was cancelled: it runs
+   *  `from` still, and is driven no further until it matches. */
+  | { kind: "updateFailed"; message: string; from: string | null };
+
+/** An update to this Desk's version, step by step, as the native side runs it. */
+export interface UpdateRun {
+  to: string;
+  from: string | null;
+  steps: { key: "download" | "copy" | "switch" | "reconnect"; state: "waiting" | "running" | "done" | "failed"; detail?: string }[];
+}
 
 /** How Desk reaches a machine, as the person's SSH config makes it. */
 export interface Reach {
@@ -91,6 +101,10 @@ export interface Machine {
   hostKey?: HostKeyInfo | null;
   /** The key it shows now, when that isn't the one Desk knows. */
   shownKey?: HostKeyInfo | null;
+  /** What an install or update there is doing now. */
+  progress?: string | null;
+  /** An update to this Desk's version under way, or the one that stopped. */
+  update?: UpdateRun | null;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -104,6 +118,9 @@ export const readState = (raw: unknown): MachineState => {
     const o = raw as Record<string, unknown>;
     const failed = o.failed as { message?: unknown } | undefined;
     if (failed && typeof failed === "object") return { kind: "failed", message: String(failed.message ?? "") };
+    const update = o.update_failed as { message?: unknown; from?: unknown } | undefined;
+    if (update && typeof update === "object")
+      return { kind: "updateFailed", message: String(update.message ?? ""), from: typeof update.from === "string" ? update.from : null };
     const kind = typeof o.kind === "string" ? o.kind : typeof o.state === "string" ? o.state : null;
     if (kind === "failed") return { kind: "failed", message: String(o.message ?? "") };
     if (kind && KINDS.has(kind)) return { kind } as MachineState;
@@ -123,6 +140,20 @@ const readSystem = (raw: unknown): Machine["system"] => {
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+
+/** An update run as listed; null when it isn't one. */
+const readUpdate = (raw: unknown): UpdateRun | null => {
+  const o = obj(raw);
+  if (!o || !Array.isArray(o.steps) || typeof o.to !== "string") return null;
+  const KEYS = ["download", "copy", "switch", "reconnect"];
+  const STATES = ["waiting", "running", "done", "failed"];
+  const steps = o.steps.flatMap((x): UpdateRun["steps"] => {
+    const st = obj(x);
+    if (!st || typeof st.key !== "string" || !KEYS.includes(st.key) || typeof st.state !== "string" || !STATES.includes(st.state)) return [];
+    return [{ key: st.key as UpdateRun["steps"][number]["key"], state: st.state as UpdateRun["steps"][number]["state"], ...(typeof st.detail === "string" ? { detail: st.detail } : {}) }];
+  });
+  return { to: o.to, from: typeof o.from === "string" ? o.from : null, steps };
+};
 
 /** What the native side says beyond its state, read leniently. */
 const readMore = (o: Record<string, unknown>): Partial<Machine> => {
@@ -152,6 +183,8 @@ const readMore = (o: Record<string, unknown>): Partial<Machine> => {
       : null,
     hostKey: key && str(key.fingerprint) ? { kind: str(key.kind) ?? "", fingerprint: str(key.fingerprint)!, trustedAt: num(key.trustedAt) } : null,
     shownKey: shown && str(shown.fingerprint) ? { kind: str(shown.kind) ?? "", fingerprint: str(shown.fingerprint)!, trustedAt: null } : null,
+    progress: str(o.progress),
+    update: readUpdate(o.update),
   };
   // Only what it said: a machine listed without them reads as before.
   return Object.fromEntries(Object.entries(more).filter(([, v]) => v !== null)) as Partial<Machine>;

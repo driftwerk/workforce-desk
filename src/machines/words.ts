@@ -31,6 +31,7 @@ export const dotOf = (s: MachineState): Look | "failed" => {
     case "adding":
       return "working";
     case "failed":
+    case "updateFailed":
       return "failed";
     case "connecting":
     case "newer":
@@ -51,6 +52,8 @@ export const offlineWord = (s: MachineState): string | null => {
       return "on a newer Desk";
     case "failed":
       return "not working";
+    case "updateFailed":
+      return "needs update";
     case "adding":
     case "connecting":
       return "connecting";
@@ -75,6 +78,8 @@ export const stateText = (m: Machine, deskVersion: string | null): string | null
       return `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`;
     case "failed":
       return m.state.message || "Desk couldn’t set it up.";
+    case "updateFailed":
+      return `Couldn’t update${deskVersion ? ` to ${deskVersion}` : ""}: ${m.state.message}`;
   }
 };
 
@@ -227,8 +232,16 @@ export const rowLines = (
         tone: "blocked",
         second: [keep, m.lastConnected && `last connected ${clock(m.lastConnected, now)}`, m.nextTry && `next try ${inTime(m.nextTry, now)}`].filter(Boolean).join(" · ") || null,
       };
-    case "updating":
-      return { first: `Updating Desk${o.desk ? ` to ${o.desk}` : ""}… its sessions carry on`, tone: "muted", second: null };
+    case "updating": {
+      const to = m.update?.to ?? o.desk;
+      return { first: `Updating Desk${to ? ` to ${to}` : ""}… its sessions carry on`, tone: "muted", second: null };
+    }
+    case "updateFailed":
+      return {
+        first: `Couldn’t update to ${m.update?.to ?? o.desk ?? "this Desk’s version"}: ${m.state.message.replace(/\.?$/, ".")}`,
+        tone: "blocked",
+        second: [m.state.from && `Still on ${m.state.from}, driven no further until it matches`, keep].filter(Boolean).join(" · ") || null,
+      };
     case "newer":
       return { first: `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`, tone: "blocked", second: null };
     case "failed":

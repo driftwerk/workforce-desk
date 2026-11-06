@@ -5,6 +5,7 @@ import { useSessionNames } from "../groups/names";
 import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
+import { useMachines } from "../hub/engines";
 import { CHECK_EVERY_MS, isLive, isWorking, useUpdates } from "./store";
 
 /** Looks for a new version on launch and every few hours; downloads it in
@@ -33,6 +34,9 @@ export function UpdateNotice() {
   const names = useSessionNames();
   const fail = useDesk((s) => s.fail);
   const [asking, setAsking] = useState(false);
+  // The machines Desk drives follow it: each updates to match as it connects.
+  const all = useMachines((m) => m.machines);
+  const machines = all.filter((x) => x.state.kind !== "newer").map((x) => x.name);
   const live = Object.values(sessions).filter(isLive);
   const working = live.filter(isWorking);
   // The notice is read once it has shown, or acted on; a newer version is
@@ -74,6 +78,7 @@ export function UpdateNotice() {
             : waiting
               ? `Desk ${state.version} installs when your sessions finish.`
               : `Desk ${state.version} is ready.`}
+          {!installing && machines.length > 0 && ` ${list(machines)} ${machines.length === 1 ? "updates" : "update"} to match after.`}
         </span>
         {!installing && waiting && (
           <button type="button" className="link small" onClick={() => wait(false)}>
@@ -115,6 +120,9 @@ export function UpdateNotice() {
                 </li>
               ))}
             </ul>
+            {machines.length > 0 && (
+              <p className="muted">Your machines’ sessions don’t stop. Each machine updates to {state.version} when Desk reconnects to it.</p>
+            )}
           </div>
           <div className="dialog-foot">
             <span className="dialog-foot-note" />

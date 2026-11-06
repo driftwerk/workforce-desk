@@ -5,6 +5,9 @@ import { AddMachine } from "../machines/AddMachine";
 import { LOCAL, sessionsOn, useMachines, type Machine, type MachineId } from "../machines/engines";
 import { native as realNative, type MachineNative } from "../machines/native";
 import { OpenTerminal } from "../machines/OpenTerminal";
+import { UpdateSteps } from "../machines/UpdateSteps";
+import { useUpdates } from "../updates/store";
+import { plainError } from "../ui/plainError";
 import { useEngineSummary } from "../machines/summary";
 import { dotOf, forgetKeyLine, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower, twinNote } from "../machines/words";
 import { shortPrint } from "./EditReach";
@@ -34,6 +37,83 @@ export const useNow = (ticking: boolean): number => {
   }, [ticking]);
   return now;
 };
+
+/** "Check for updates": a machine on a newer Desk is driven again once
+ *  this Desk updates to it. */
+function CheckForUpdates() {
+  const phase = useUpdates((s) => s.state.phase);
+  const [said, setSaid] = useState<string | null>(null);
+  const check = async () => {
+    setSaid(null);
+    try {
+      await useUpdates.getState().check();
+      if (useUpdates.getState().state.phase === "idle") setSaid("This Desk is up to date for now.");
+    } catch (e) {
+      setSaid(plainError(e));
+    }
+  };
+  if (phase !== "idle") return <span className="small muted">Desk is updating: see the notice.</span>;
+  return (
+    <>
+      {said && <span className="small muted">{said}</span>}
+      <button type="button" className="btn btn-sm" onClick={() => void check()}>
+        Check for updates
+      </button>
+    </>
+  );
+}
+
+/** The version last told about, so "Desk is now …" says so once. */
+const SEEN_KEY = "desk.machines.version-seen";
+const seenVersion = (): string | null => {
+  try {
+    return localStorage.getItem(SEEN_KEY);
+  } catch {
+    return null;
+  }
+};
+
+/** "Desk is now 0.2.1": once after Desk updates, what its machines do
+ *  about it (they update to match when they connect). */
+function UpdatedBanner({ version, machines }: { version: string | null; machines: Machine[] }) {
+  const [seen, setSeen] = useState(seenVersion);
+  if (!version || machines.length === 0) return null;
+  if (seen === null) {
+    // The first time: nothing to say; this version is the one known.
+    try {
+      localStorage.setItem(SEEN_KEY, version);
+    } catch {
+      /* said every time, then */
+    }
+    return null;
+  }
+  if (seen === version) return null;
+  const updating = machines.filter((m) => m.state.kind === "updating").map((m) => m.name);
+  const failed = machines.filter((m) => m.state.kind === "updateFailed").map((m) => m.name);
+  const parts = [updating.length > 0 && `${updating.join(", ")} ${updating.length === 1 ? "is" : "are"} updating now`, failed.length > 0 && `${failed.join(", ")} couldn’t`].filter(Boolean);
+  return (
+    <div className="setting-card machines-banner" role="status">
+      <span className="prov-text">
+        <b>Desk is now {version}</b>
+        <span>Machines update to match when they connect{parts.length ? `: ${parts.join(", ")}` : "."}</span>
+      </span>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => {
+          try {
+            localStorage.setItem(SEEN_KEY, version);
+          } catch {
+            /* shown again next time */
+          }
+          setSeen(version);
+        }}
+      >
+        OK
+      </button>
+    </div>
+  );
+}
 
 /** What a machine's row offers for where it stands, besides opening it. */
 function RowActions({
@@ -84,11 +164,17 @@ function RowActions({
           Reconnect
         </button>
       )}
-      {(s === "unreachable" || (s === "failed" && !keyChanged(machine))) && (
+      {s === "updateFailed" && (
+        <button type="button" className="btn btn-sm btn-signal" onClick={reconnect}>
+          Update to match
+        </button>
+      )}
+      {(s === "unreachable" || s === "updateFailed" || (s === "failed" && !keyChanged(machine))) && (
         <button type="button" className="btn btn-sm" onClick={() => onOpen("log")}>
           View log
         </button>
       )}
+      {s === "newer" && <CheckForUpdates />}
       {/* Being set up after "Do this later": its progress, and stopping it. */}
       {s === "adding" && (
         <>
@@ -165,6 +251,7 @@ function MachineRow({
           </>
         )}
         {lines.second && <span className="small faint">{lines.second}</span>}
+        {machine.state.kind === "updating" && <UpdateSteps machine={machine} native={native} />}
       </span>
       <RowActions machine={machine} native={native} claudeIn={summary.claudeIn} onOpen={onOpen} onNewSession={onNewSession} onTerminal={onTerminal} />
       <button type="button" className="machine-row-open" aria-label={`Open ${machine.name}`} onClick={() => onOpen()}>
@@ -214,6 +301,7 @@ export function Machines({ native = realNative, deskVersion = null }: { native?:
       <p className="muted">
         Run sessions on your own Linux servers. Each runs Desk in the background, so its sessions keep going when {thisComputerLower(platform)} sleeps.
       </p>
+      <UpdatedBanner version={version} machines={machines} />
       <ul className="machine-list" aria-label="Machines">
         <li className="machine-row" aria-label={thisComputer(platform)}>
           <span className="dot dot-done" aria-hidden="true" />

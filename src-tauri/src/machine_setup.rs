@@ -243,6 +243,12 @@ pub fn machine_retry_engines(fleet: tauri::State<'_, Arc<Fleet>>, id: String) ->
     fleet.retry_engines(&id)
 }
 
+/// "Cancel update": stops machine `id`'s update before it switches over.
+#[tauri::command]
+pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.cancel_update(&id)
+}
+
 /// How long reading Desk's log on a machine may take.
 const REMOTE_LOG_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 

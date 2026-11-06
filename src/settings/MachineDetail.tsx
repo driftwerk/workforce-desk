@@ -8,6 +8,7 @@ import { clock, clockSeconds, dotOf, forgetKeyLine, freeText, inTime, keyChanged
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
+import { UpdateSteps } from "../machines/UpdateSteps";
 import { CopyButton, EngineBlocks } from "./EngineBlocks";
 import { EditReach, shortPrint } from "./EditReach";
 import { useNow } from "./Machines";
@@ -233,13 +234,40 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
       </div>
     );
   }
+  if (s === "updateFailed")
+    return (
+      <div className="setting-card machine-status machine-status-problem" role="status">
+        <b className="state-blocked">Needs update</b>
+        <span>
+          Couldn’t update to {machine.update?.to ?? "this Desk’s version"}: {machine.state.kind === "updateFailed" ? machine.state.message : ""}
+        </span>
+        <UpdateSteps machine={machine} native={native} />
+        <span className="small faint">
+          {machine.state.kind === "updateFailed" && machine.state.from ? `It runs Desk ${machine.state.from} still, driven no further until it matches. ` : ""}
+          Its {sessionsCount(sessions)} keep running on {machine.name}.
+        </span>
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
+          </span>
+        )}
+        <span className="machine-actions">
+          <button type="button" className="btn btn-sm btn-signal" onClick={reconnect}>
+            Update to match
+          </button>
+          <button type="button" className="btn btn-sm" onClick={onLog}>
+            View log
+          </button>
+        </span>
+      </div>
+    );
   const busy =
     s === "connecting"
       ? "Connecting… Desk gives up after 15 s and says why."
       : s === "adding"
         ? "Being set up… Each step stops after 3 minutes and says why; its log is below."
         : s === "updating"
-          ? "Updating Desk there… its sessions carry on."
+          ? `Updating Desk${machine.update ? ` to ${machine.update.to}` : ""}… its sessions carry on.`
           : `It runs a newer Desk (${machine.version}). Update Desk here to drive it; its sessions keep running.`;
   return (
     <div className="setting-card machine-status" role="status">
@@ -264,6 +292,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
           Cancel adding
         </button>
       )}
+      {s === "updating" && <UpdateSteps machine={machine} native={native} />}
     </div>
   );
 }

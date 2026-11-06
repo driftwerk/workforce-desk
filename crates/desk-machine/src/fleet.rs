@@ -44,6 +44,64 @@ pub enum State {
     Failed {
         message: String,
     },
+    /// Updating it to this Desk's version stopped (or was cancelled): it
+    /// runs `from` still, and is driven no further until it matches.
+    UpdateFailed {
+        message: String,
+        from: Option<String>,
+    },
+}
+
+/// An update under way there, step by step, as its row shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRun {
+    pub to: String,
+    pub from: Option<String>,
+    pub steps: Vec<UpdateStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UpdateStep {
+    pub key: UpdateKey,
+    pub state: StepState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateKey {
+    /// This Desk's backend for its system, signature checked.
+    Download,
+    /// Copied there.
+    Copy,
+    /// `current` flipped to it: Desk restarts there; sessions stay.
+    Switch,
+    /// Connected again, on the new version.
+    Reconnect,
+}
+
+impl UpdateRun {
+    fn new(to: &str, from: Option<String>) -> UpdateRun {
+        UpdateRun {
+            to: to.to_string(),
+            from,
+            steps: [
+                UpdateKey::Download,
+                UpdateKey::Copy,
+                UpdateKey::Switch,
+                UpdateKey::Reconnect,
+            ]
+            .into_iter()
+            .map(|key| UpdateStep {
+                key,
+                state: StepState::Waiting,
+                detail: None,
+            })
+            .collect(),
+        }
+    }
 }
 
 /// A machine as `machines.json` keeps it.
@@ -98,6 +156,9 @@ pub enum LogKind {
     Warn,
     Error,
 }
+
+/// What an update cancelled before its switch-over says.
+const UPDATE_CANCELLED: &str = "The update was cancelled.";
 
 /// The most lines kept of a machine's log.
 const LOG_LINES: usize = 200;
@@ -230,6 +291,8 @@ pub struct Listed {
     /// What an install or update there is doing now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<UpdateRun>,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -244,6 +307,8 @@ pub enum Step {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepState {
+    /// Not begun (an update's later steps).
+    Waiting,
     Running,
     Done,
     Failed,
@@ -409,6 +474,8 @@ struct Now {
     log: VecDeque<LogLine>,
     /// What a copy there has done so far ("Copying Desk 0.2.1… 22 of 61 MB").
     progress: Option<String>,
+    /// An update to this Desk's version under way, or the one that stopped.
+    update: Option<UpdateRun>,
 }
 
 impl Row {
@@ -696,8 +763,58 @@ impl Fleet {
                 host_key: r.kept.host_key.clone(),
                 shown_key: r.now.shown_key.clone(),
                 progress: r.now.progress.clone(),
+                update: r.now.update.clone(),
             })
             .collect()
+    }
+
+    /// Says where step `key` of machine `id`'s update is, when one runs.
+    fn update_step(&self, id: &str, key: UpdateKey, state: StepState, detail: Option<String>) {
+        self.set_now(id, |n| {
+            if let Some(run) = n.update.as_mut()
+                && let Some(step) = run.steps.iter_mut().find(|s| s.key == key)
+            {
+                step.state = state;
+                if detail.is_some() {
+                    step.detail = detail;
+                }
+            }
+        });
+    }
+
+    /// The step of machine `id`'s update that runs now, if any.
+    fn update_running(&self, id: &str) -> Option<UpdateKey> {
+        self.rows().get(id).and_then(|r| {
+            r.now.update.as_ref().and_then(|u| {
+                u.steps
+                    .iter()
+                    .find(|s| s.state == StepState::Running)
+                    .map(|s| s.key)
+            })
+        })
+    }
+
+    /// "Cancel update" (`machine_cancel_update`): stops machine `id`'s update
+    /// before it switches over (whatever runs there is ended); it stays on
+    /// the version it had, driven no further until it matches.
+    pub fn cancel_update(&self, id: &str) -> Result<(), String> {
+        let name = self
+            .machine(id)
+            .map(|m| m.name)
+            .ok_or("That machine isn't in Desk any more.")?;
+        match self.update_running(id) {
+            Some(UpdateKey::Download | UpdateKey::Copy) => {}
+            Some(_) => {
+                return Err(format!(
+                    "{name} is switching over now: it's done in a few seconds."
+                ));
+            }
+            None => return Err(format!("{name} isn't updating now.")),
+        }
+        if let Some(r) = self.rows().get(id) {
+            r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(())
     }
 
     /// This computer's log of machine `id`, oldest first.
@@ -1442,8 +1559,34 @@ impl Fleet {
     /// Copies this Desk's backend there and flips to it, then keeps it
     /// running. Blocking.
     fn update(&self, machine: &Machine, look: &probe::Look) -> Result<Keep, String> {
+        let id = machine.id.as_str();
         let arch = Self::fits(machine, look)?;
-        let backend = self.host.backend(arch)?;
+        self.update_step(id, UpdateKey::Download, StepState::Running, None);
+        let backend = match self.host.backend(arch) {
+            Ok(b) => b,
+            Err(m) => {
+                self.update_step(id, UpdateKey::Download, StepState::Failed, Some(m.clone()));
+                return Err(m);
+            }
+        };
+        self.update_step(
+            id,
+            UpdateKey::Download,
+            StepState::Done,
+            Some(format!(
+                "Desk {} for Linux {}, {}",
+                backend.version,
+                look.arch,
+                if backend.signed {
+                    "signature checked"
+                } else {
+                    "a development build, its signature not checked"
+                }
+            )),
+        );
+        if self.cancelled(id) {
+            return Err(UPDATE_CANCELLED.into());
+        }
         if !backend.signed {
             tracing::warn!(machine = %machine.id, version = %backend.version, "installing a development backend; its signature isn't checked");
             // Said where the machine is added too, not only in the log.
@@ -1463,8 +1606,13 @@ impl Fleet {
         if look.installed.is_some() && !look.service {
             let _ = setup::stop(&self.ssh, machine, &bin);
         }
-        let id = machine.id.as_str();
         let mb = |b: u64| ((b as f64) / 1_000_000.0).round() as u64;
+        self.update_step(
+            id,
+            UpdateKey::Copy,
+            StepState::Running,
+            Some(format!("Copying it to {}…", machine.name)),
+        );
         let progress = |sent: u64, total: u64| {
             let said = format!(
                 "Copying Desk {} to {}… {} of {} MB",
@@ -1473,23 +1621,58 @@ impl Fleet {
                 mb(sent),
                 mb(total).max(1)
             );
+            let short = format!(
+                "Copying it to {}… {} of {} MB",
+                machine.name,
+                mb(sent),
+                mb(total).max(1)
+            );
+            self.update_step(id, UpdateKey::Copy, StepState::Running, Some(short));
             self.set_now(id, |n| n.progress = Some(said.clone()));
             self.emit(SetupEvent {
                 detail: Some(said),
                 ..self.say(id, Step::Install, StepState::Running)
             });
         };
-        let copied = setup::copy(
-            &self.ssh,
-            machine,
-            &bin,
-            &backend.version,
-            &backend.data,
-            &progress,
-        );
+        let copied = self.step(id).run(|| {
+            setup::copy(
+                &self.ssh,
+                machine,
+                &bin,
+                &backend.version,
+                &backend.data,
+                &progress,
+            )
+        });
         self.set_now(id, |n| n.progress = None);
-        copied?;
-        setup::flip(&self.ssh, machine, &bin, &backend.version)?;
+        if let Err(m) = copied {
+            let m = if self.cancelled(id) {
+                UPDATE_CANCELLED.to_string()
+            } else {
+                m
+            };
+            self.update_step(id, UpdateKey::Copy, StepState::Failed, Some(m.clone()));
+            return Err(m);
+        }
+        self.update_step(
+            id,
+            UpdateKey::Copy,
+            StepState::Done,
+            Some(format!("Copied to {}", machine.name)),
+        );
+        if self.cancelled(id) {
+            return Err(UPDATE_CANCELLED.into());
+        }
+        // From here it can't be cancelled: Desk there restarts in seconds.
+        self.update_step(id, UpdateKey::Switch, StepState::Running, None);
+        if let Err(m) = self
+            .step(id)
+            .run(|| setup::flip(&self.ssh, machine, &bin, &backend.version))
+        {
+            self.update_step(id, UpdateKey::Switch, StepState::Failed, Some(m.clone()));
+            return Err(m);
+        }
+        self.update_step(id, UpdateKey::Switch, StepState::Done, None);
         if let Some(l) = self.machines.get(machine.id.as_str()) {
             l.forget();
         }
@@ -1569,6 +1752,8 @@ impl Fleet {
                 return true;
             }
             r.busy = true;
+            // A cancel was for the update it stopped, not this connect.
+            r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
             r.kept.machine.clone()
         };
         let was_ready = matches!(self.state(id), Some(State::Ready));
@@ -1576,7 +1761,10 @@ impl Fleet {
         if let Some(r) = self.rows().get_mut(id) {
             r.busy = false;
         }
-        let ok = matches!(state, State::Ready | State::Newer);
+        let ok = matches!(
+            state,
+            State::Ready | State::Newer | State::UpdateFailed { .. }
+        );
         match &state {
             State::Ready => {
                 let at = now_ms();
@@ -1781,8 +1969,33 @@ impl Fleet {
                 return State::Newer;
             }
             Plan::Install | Plan::Upgrade { .. } => {
+                let from = look.installed.clone();
+                self.set_now(id, |n| n.update = Some(UpdateRun::new(&wanted, from)));
+                self.note(
+                    id,
+                    LogKind::Info,
+                    format!("updating Desk there to {wanted}"),
+                );
                 self.set_state(id, State::Updating);
-                self.update(machine, &look)
+                match self.update(machine, &look) {
+                    Ok(k) => {
+                        self.update_step(id, UpdateKey::Reconnect, StepState::Running, None);
+                        Ok(k)
+                    }
+                    Err(message) => {
+                        self.note(id, LogKind::Error, message.clone());
+                        let from = look.installed.clone();
+                        let message = if message == UPDATE_CANCELLED {
+                            format!(
+                                "You cancelled the update: it stays on {} until it matches.",
+                                from.as_deref().unwrap_or("its version")
+                            )
+                        } else {
+                            message
+                        };
+                        return State::UpdateFailed { message, from };
+                    }
+                }
             }
             Plan::Nothing => {
                 let running = matches!(link.read(), Ok(Some(_)));
@@ -1799,13 +2012,30 @@ impl Fleet {
         if let Err(message) = kept {
             return State::Failed { message };
         }
-        match self.wait_ready(&link, &wanted) {
+        let updating = self.update_running(id) == Some(UpdateKey::Reconnect);
+        match self.step(id).run(|| self.wait_ready(&link, &wanted)) {
             Ok(version) => {
+                if updating {
+                    self.note(id, LogKind::Ok, format!("updated to Desk {version}"));
+                    self.set_now(id, |n| n.update = None);
+                }
                 if self.rows().get(id).and_then(|r| r.kept.version.clone()) != Some(version.clone())
                 {
                     self.update_kept(id, |k| k.version = Some(version));
                 }
                 State::Ready
+            }
+            Err(message) if updating => {
+                self.update_step(
+                    id,
+                    UpdateKey::Reconnect,
+                    StepState::Failed,
+                    Some(message.clone()),
+                );
+                State::UpdateFailed {
+                    message,
+                    from: self.rows().get(id).and_then(|r| r.kept.version.clone()),
+                }
             }
             Err(message) => State::Failed { message },
         }
@@ -1928,7 +2158,8 @@ impl Fleet {
                                 false
                             }
                         }
-                        State::Newer => fleet.wait_kick(&id, None),
+                        // Driven no further until asked: Update to match.
+                        State::Newer | State::UpdateFailed { .. } => fleet.wait_kick(&id, None),
                         State::Adding => {
                             fleet.wait_kick(&id, Some(fleet.timing.poll));
                             false
@@ -2291,7 +2522,10 @@ impl Fleet {
 
     /// Whether the page may drive machine `id` now: not one on a newer Desk.
     pub fn drivable(&self, id: &str) -> bool {
-        !matches!(self.state(id), Some(State::Newer))
+        !matches!(
+            self.state(id),
+            Some(State::Newer | State::UpdateFailed { .. })
+        )
     }
 
     pub fn home(&self) -> &Path {
@@ -2459,6 +2693,13 @@ mod tests {
             }),
             serde_json::json!({"failed": {"message": "no"}})
         );
+        assert_eq!(
+            as_json(State::UpdateFailed {
+                message: "no room".into(),
+                from: Some("0.2.0".into())
+            }),
+            serde_json::json!({"update_failed": {"message": "no room", "from": "0.2.0"}})
+        );
     }
 
     #[test]
@@ -2501,6 +2742,7 @@ mod tests {
                 trusted_at: None,
             }),
             progress: None,
+            update: None,
         };
         assert_eq!(
             serde_json::to_value(row).unwrap(),

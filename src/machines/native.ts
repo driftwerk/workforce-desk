@@ -173,6 +173,9 @@ export interface MachineNative {
   /** Installs Claude Code and Codex again on a machine added already whose
    *  engines step failed, saying the step on `setup` as adding did. */
   retryEngines(id: MachineId): Promise<void>;
+  /** "Cancel update": stops its update before it switches over; it stays
+   *  on its version, driven no further until it matches. */
+  cancelUpdate(id: MachineId): Promise<void>;
 }
 
 export const native: MachineNative = {
@@ -199,4 +202,5 @@ export const native: MachineNative = {
   revealLog: () => invoke<void>("machine_reveal_log"),
   cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
   retryEngines: (id) => invoke<void>("machine_retry_engines", { id }),
+  cancelUpdate: (id) => invoke<void>("machine_cancel_update", { id }),
 };

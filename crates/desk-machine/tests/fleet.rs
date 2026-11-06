@@ -1657,3 +1657,158 @@ fn a_failed_add_is_cancelled_at_once() {
     assert!(r.fleet.list().is_empty());
     assert!(r.fleet.cancel_add(&id).is_err());
 }
+
+/// devbox added on Desk 0.1.0, its fleet shut down: the next Desk is newer.
+fn on_older(b: &Box_) -> String {
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let first = fleet(b, "0.1.0", true);
+    let id = first.fleet.add("devbox", "devbox").unwrap();
+    until("ready at 0.1.0", || {
+        first.fleet.state(&id) == Some(State::Ready)
+    });
+    first.fleet.shutdown();
+    id
+}
+
+#[test]
+fn an_update_says_each_step_and_is_done_once_it_reconnects() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    // While it runs, the row says its steps.
+    let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let watch = {
+        let (fleet, seen) = (Arc::clone(&r.fleet), Arc::clone(&seen));
+        std::thread::spawn(move || {
+            for _ in 0..400 {
+                if let Some(m) = fleet.list().first()
+                    && let Some(u) = &m.update
+                {
+                    seen.lock().unwrap().push(serde_json::to_value(u).unwrap());
+                }
+                if fleet.state("devbox") == Some(State::Ready) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    };
+    until("ready at 0.2.0", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && r.fleet.list()[0].version.as_deref() == Some("0.2.0")
+    });
+    watch.join().unwrap();
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty(), "the update was said while it ran");
+    let last = seen.last().unwrap();
+    assert_eq!(last["to"], "0.2.0");
+    assert_eq!(last["from"], "0.1.0");
+    let keys: Vec<&str> = last["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["download", "copy", "switch", "reconnect"]);
+    assert!(
+        seen.iter().any(|u| u["steps"][0]["detail"]
+            .as_str()
+            .is_some_and(|d| d.starts_with("Desk 0.2.0 for Linux x86_64, "))),
+        "{seen:?}"
+    );
+    // Done: no update left on the row, and the log says so.
+    assert_eq!(r.fleet.list()[0].update, None);
+    let log: Vec<String> = r
+        .fleet
+        .log(&id)
+        .unwrap()
+        .into_iter()
+        .map(|l| l.text)
+        .collect();
+    assert!(
+        log.contains(&"updating Desk there to 0.2.0".to_string()),
+        "{log:?}"
+    );
+    assert!(
+        log.contains(&"updated to Desk 0.2.0".to_string()),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn a_failed_update_is_held_until_update_to_match_and_says_why() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    std::fs::write(b.fake("check-fails"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("the update failed", || {
+        matches!(r.fleet.state(&id), Some(State::UpdateFailed { .. }))
+    });
+    let Some(State::UpdateFailed { message, from }) = r.fleet.state(&id) else {
+        unreachable!()
+    };
+    assert!(message.contains("this machine can't run Desk"), "{message}");
+    assert_eq!(from.as_deref(), Some("0.1.0"));
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["state"]["update_failed"]["from"], "0.1.0");
+    assert_eq!(row["update"]["steps"][1]["state"], "failed");
+    assert!(!r.fleet.drivable(&id), "driven no further until it matches");
+    // Held: it doesn't try again by itself.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(matches!(
+        r.fleet.state(&id),
+        Some(State::UpdateFailed { .. })
+    ));
+    assert_eq!(b.installed().as_deref(), Some("0.1.0"));
+
+    // Update to match, once the machine can.
+    std::fs::remove_file(b.fake("check-fails")).unwrap();
+    r.fleet.reconnect(&id).unwrap();
+    until("updated", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+}
+
+#[test]
+fn an_update_is_cancelled_before_it_switches_over_and_stays_on_its_version() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    // The copy's check there takes long: the update waits in its copy step.
+    script(
+        &b.dir.path().join("fakebin/sha256sum"),
+        "#!/bin/sh\nsleep 30\n",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("copying", || {
+        r.fleet
+            .list()
+            .first()
+            .and_then(|m| m.update.clone())
+            .is_some_and(|u| serde_json::to_value(&u).unwrap()["steps"][1]["state"] == "running")
+    });
+    let asked = Instant::now();
+    r.fleet.cancel_update(&id).unwrap();
+    until("cancelled", || {
+        matches!(r.fleet.state(&id), Some(State::UpdateFailed { .. }))
+    });
+    assert!(asked.elapsed() < Duration::from_secs(5));
+    let Some(State::UpdateFailed { message, .. }) = r.fleet.state(&id) else {
+        unreachable!()
+    };
+    assert_eq!(
+        message,
+        "You cancelled the update: it stays on 0.1.0 until it matches."
+    );
+    assert_eq!(b.installed().as_deref(), Some("0.1.0"));
+    assert!(
+        r.fleet
+            .cancel_update(&id)
+            .unwrap_err()
+            .contains("isn't updating now")
+    );
+}
