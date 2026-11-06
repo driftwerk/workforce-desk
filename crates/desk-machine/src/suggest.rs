@@ -77,9 +77,16 @@ pub fn hosts(home: &Path) -> Vec<HostEntry> {
             };
             let jump = get("proxyjump")
                 .or_else(|| get("proxycommand").map(|_| "a ProxyCommand".to_string()));
+            // With `/` on every computer, as the person reads a path in ssh's config.
+            let slashed = |p: &Path| {
+                p.components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            };
             let file = b.file.strip_prefix(home).map_or_else(
                 |_| b.file.display().to_string(),
-                |rest| format!("~/{}", rest.display()),
+                |rest| format!("~/{}", slashed(rest)),
             );
             out.push(HostEntry {
                 host: alias.clone(),
