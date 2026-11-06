@@ -33,6 +33,10 @@
 #   - the hub resumes sessions by itself (restore = "auto");
 #   - a session the hub starts has Desk's plugin, through `current`, in its
 #     environment;
+#   - with Claude Code never logged in there, after this Mac's accounts are
+#     copied to it (as "Use this Mac's accounts" posts them), a Claude
+#     session it starts is signed in by the first of them, never left at a
+#     login prompt;
 #   - after the helper stops and the holder with its sessions is gone (as
 #     when the box restarts), the next helper resumes the session.
 set -euo pipefail
@@ -72,17 +76,31 @@ if [ -n "$machine" ]; then
   mkdir -p "$DESK_HOME/hub/memory/models/bge" "$DESK_HOME/hub/memory/store"
   echo '{"state":"ready"}' >"$DESK_HOME/hub/memory/model.json"
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
-  # A stand-in for Claude Code: says a version when asked, and otherwise
-  # logs how it was started and with which plugins, then waits as a session.
+  # A stand-in for Claude Code, never logged in here: says a version when
+  # asked; signed in only by a smoke account's token on descriptor 3 (as
+  # the hub hands an account's sign-in over); and otherwise logs how it
+  # was started, with which plugins and on which account (the token's name
+  # part, never more), then waits as a session.
   sessions="$work/sessions.log"
   mkdir -p "$work/fake-bin"
-  {
-    echo '#!/bin/sh'
-    echo 'case "$1" in'
-    echo "  --session-id | --resume) echo \"\$1 \$2 plugins=\$CLAUDE_CODE_PLUGIN_DIRS\" >>'$sessions'; exec sleep 100000 ;;"
-    echo '  *) echo "2.1.0 (Claude Code)" ;;'
-    echo 'esac'
-  } >"$work/fake-bin/claude"
+  cat >"$work/fake-bin/claude" <<EOF
+#!/bin/sh
+case "\$1" in
+  --session-id | --resume)
+    t=
+    [ -n "\$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" ] && read -r t <&3
+    on=\$(printf '%s' "\$t" | sed -n 's/^sk-ant-oat01-smoke-\([a-z]*\)-.*/\1/p')
+    echo "\$1 \$2 plugins=\$CLAUDE_CODE_PLUGIN_DIRS account=\${on:-none}" >>'$sessions'
+    exec sleep 100000 ;;
+  auth)
+    t=\$({ cat <&3; } 2>/dev/null)
+    case "\$t" in
+      sk-ant-oat01-smoke-*) echo '{"loggedIn":true,"authMethod":"oauth_token"}' ;;
+      *) echo '{"loggedIn":false}' ;;
+    esac ;;
+  *) echo "2.1.0 (Claude Code)" ;;
+esac
+EOF
   chmod +x "$work/fake-bin/claude"
   export PATH="$work/fake-bin:$PATH"
 fi
@@ -200,6 +218,49 @@ if [ -n "$machine" ]; then
   plugin="$DESK_HOME/bin/current/claude-plugin"
   started() { grep -q -- "--session-id $sid plugins=.*$plugin" "$sessions"; }
   until_ok 30 started || fail "the session didn't start with Desk's plugin: $(cat "$sessions" 2>/dev/null)"
+
+  say "after this Mac's accounts are copied, a Claude session there is signed in"
+  json() { api "$admin" "$1" -X "$2" -H 'Content-Type: application/json' -d "$3"; }
+  signed_out() {
+    api "$admin" /api/desk/engines | jq -e 'any(.[]; .engine == "claude" and .signIn.state == "out")'
+  }
+  until_ok 60 signed_out || fail "the hub doesn't read Claude Code as signed out: $(api "$admin" /api/desk/engines)"
+  # As copying posted them before Desk made one the default: neither is.
+  for name in work personal; do
+    json /api/desk/accounts POST "$(jq -n --arg name "$name" \
+      --arg token "sk-ant-oat01-smoke-$name-0123456789abcdefghijklmnopqrstuvwxyz" \
+      '{engine: "claude", name: $name, token: $token, makeDefault: false}')" >/dev/null ||
+      fail "the machine's hub didn't take the $name account"
+  done
+  accounts=$(api "$admin" /api/desk/accounts)
+  [ "$(jq '[.accounts[] | select(.signedIn)] | length' <<<"$accounts")" = 2 ] ||
+    fail "the copied accounts aren't signed in: $(jq -c '[.accounts[] | {name, signedIn, isDefault}]' <<<"$accounts")"
+  work_id=$(jq -r '.accounts[] | select(.name == "work") | .id' <<<"$accounts")
+  # on SESSION_BODY: starts a session, and prints the account it signed in by.
+  on() {
+    local s sid
+    s=$(json /api/desk/sessions POST "$1") || return 1
+    sid=$(jq -r '.id // empty' <<<"$s")
+    [ -n "$sid" ] || fail "the session didn't start: $s"
+    for _ in $(seq 30); do
+      if grep -q -- "--session-id $sid " "$sessions"; then
+        grep -- "--session-id $sid " "$sessions" | sed 's/.* account=//'
+        return 0
+      fi
+      sleep 1
+    done
+    fail "session $sid never started: $(cat "$sessions")"
+  }
+  body() { jq -n --arg cwd "$work/acme-api" "{engine: \"claude\", name: \"smoke\", cwd: \$cwd $1}"; }
+  # The new session dialog as it was (this computer's sign-in) and with no
+  # account named: the first account, by the hub alone.
+  [ "$(on "$(body ', account: null')")" = work ] || fail "a session on this computer's sign-in wasn't signed in by work: $(cat "$sessions")"
+  [ "$(on "$(body '')")" = work ] || fail "a session on no account wasn't signed in by work: $(cat "$sessions")"
+  # As Desk copies now: the first is the machine's default, and the dialog
+  # starts on it.
+  json "/api/desk/accounts/$work_id" PATCH '{"isDefault": true}' >/dev/null || fail "work couldn't be made the default"
+  [ "$(on "$(body ", account: \"$work_id\"")")" = work ] || fail "a session on work wasn't signed in by it: $(cat "$sessions")"
+  [ "$(on "$(body '')")" = work ] || fail "a session on the default wasn't signed in by it: $(cat "$sessions")"
 
   say "an earlier agent's chat sessions are planted in Postgres"
   psql=$(ls "$DESK_HOME"/hub/postgres-install/*/bin/psql | head -n 1)

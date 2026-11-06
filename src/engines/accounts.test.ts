@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EngineAccount } from "../hub/types";
-import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, sessionsText, signInStep, switchingText, withAccount } from "./accounts";
+import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, sessionsText, signInStep, switchingText, withAccount, ownSignInWorks } from "./accounts";
 
 const account = (id: string, isDefault = false, engine: EngineAccount["engine"] = "claude", sessions: string[] = []): EngineAccount => ({
   id,
@@ -17,6 +17,12 @@ it("lists an engine's accounts default first, and starts on the default or the C
   expect(accountsOf(all, "claude").map((a) => a.id)).toEqual(["Work", "Personal"]);
   expect(defaultChoice(all, "claude")).toBe("Work");
   expect(defaultChoice([account("Personal")], "claude")).toBe(OWN_SIGN_IN);
+  // Where Claude Code isn't signed in by itself: the first account signed in.
+  expect(defaultChoice([account("Personal")], "claude", false)).toBe("Personal");
+  expect(defaultChoice([{ ...account("Personal"), signedIn: false }], "claude", false)).toBe(OWN_SIGN_IN);
+  expect(ownSignInWorks({ state: "out" })).toBe(false);
+  expect(ownSignInWorks({ state: "unknown" })).toBe(true);
+  expect(ownSignInWorks(undefined)).toBe(true);
   expect(accountOfChoice(OWN_SIGN_IN)).toBeNull();
   expect(accountOfChoice("Work")).toBe("Work");
   expect(hasAccounts({ accounts: "token" } as never)).toBe(true);

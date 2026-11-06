@@ -178,4 +178,9 @@ it("words what copying did", () => {
     "Work is on devbox now, copied from this Mac.",
     "Personal was on devbox already.",
   ]);
+  expect(sharedText({ cancelled: false, copied: ["Work", "Personal"], already: [], failed: [], autoSwitch: true, madeDefault: "Work" }, "devbox", "this Mac")).toEqual([
+    "Work and Personal are on devbox now, copied from this Mac.",
+    "New sessions on devbox start on Work: Claude Code isn’t signed in there by itself.",
+    "devbox moves its sessions to another account at a limit by itself, as this Mac does.",
+  ]);
 });

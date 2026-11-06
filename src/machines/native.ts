@@ -74,6 +74,9 @@ export interface Shared {
   failed: { name: string; why: string }[];
   /** The machine moves sessions to another account at a limit by itself. */
   autoSwitch: boolean;
+  /** Its sessions now start on this account: its Claude Code isn't signed
+   *  in by itself, and it had no default. */
+  madeDefault?: string | null;
 }
 
 /** One line of this computer's log of a machine. */

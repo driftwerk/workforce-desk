@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { LOCAL, machineOf, type MachineId } from "../hub/machines";
 import { deskListeners, engineListeners, hubOf } from "../hub/store";
-import type { AccountNeed, AccountSignIn, Caps, DeskEvent, Engine, EngineAccount, Session, SignInProblem } from "../hub/types";
+import type { AccountNeed, AccountSignIn, Caps, DeskEvent, Engine, EngineAccount, Session, SignIn, SignInProblem } from "../hub/types";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -17,10 +17,17 @@ export const hasAccounts = (caps: Caps | null | undefined): boolean => caps?.acc
 export const accountsOf = (accounts: readonly EngineAccount[], engine: Engine): EngineAccount[] =>
   accounts.filter((a) => a.engine === engine).sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 
+/** Whether the engine's CLI is signed in by itself on the computer: only
+ *  when it says it isn't is its own sign-in no choice. */
+export const ownSignInWorks = (signIn: SignIn | null | undefined): boolean => signIn?.state !== "out";
+
 /** What a new session of `engine` starts on when the person picks nothing:
- *  the default account, else the CLI's own sign-in. */
-export const defaultChoice = (accounts: readonly EngineAccount[], engine: Engine): string =>
-  accounts.find((a) => a.engine === engine && a.isDefault)?.id ?? OWN_SIGN_IN;
+ *  the default account, else the CLI's own sign-in, or, where the CLI isn't
+ *  signed in, the first account that is (the order a switch takes them), as
+ *  the hub starts it. */
+export const defaultChoice = (accounts: readonly EngineAccount[], engine: Engine, ownWorks = true): string =>
+  accounts.find((a) => a.engine === engine && a.isDefault)?.id ??
+  (ownWorks ? OWN_SIGN_IN : (accountsOf(accounts, engine).find((a) => a.signedIn)?.id ?? OWN_SIGN_IN));
 
 /** The picker's choice as the hub takes it: an account's id, or null. */
 export const accountOfChoice = (choice: string): string | null => (choice === OWN_SIGN_IN ? null : choice);

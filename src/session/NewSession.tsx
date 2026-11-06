@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn, defaultChoice, hasAccounts } from "../engines/accounts";
+import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn, defaultChoice, hasAccounts, ownSignInWorks } from "../engines/accounts";
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useChat } from "../chat/store";
@@ -104,7 +104,11 @@ export function NewSession({
   // A machine's accounts are its own: its sessions start on one of them.
   const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
   const missing = engines?.filter((e) => e.installed === false).map((e) => e.title) ?? [];
-  const account = picked[engine] ?? defaultChoice(allAccounts, engine);
+  // Where the CLI was never signed in, its own sign-in is no choice: the
+  // session starts on an account, never at a login prompt.
+  const ownWorks = ownSignInWorks(engines?.find((e) => e.engine === engine)?.signIn);
+  const account = picked[engine] ?? defaultChoice(allAccounts, engine, ownWorks);
+  const cantSignIn = accounts.length > 0 && !ownWorks && !accounts.some((a) => a.signedIn);
   useEffect(() => {
     void accountStore.getState().load();
   }, [hub, accountStore]);
@@ -244,11 +248,18 @@ export function NewSession({
                   {a.name}
                 </button>
               ))}
-              <button type="button" role="radio" aria-checked={account === OWN_SIGN_IN} onClick={() => setPicked((p) => ({ ...p, [engine]: OWN_SIGN_IN }))}>
-                {OWN_SIGN_IN_LABEL}
-              </button>
+              {ownWorks && (
+                <button type="button" role="radio" aria-checked={account === OWN_SIGN_IN} onClick={() => setPicked((p) => ({ ...p, [engine]: OWN_SIGN_IN }))}>
+                  {OWN_SIGN_IN_LABEL}
+                </button>
+              )}
             </div>
           </div>
+        )}
+        {cantSignIn && (
+          <p className="small state-blocked" role="alert">
+            {ENGINE_TITLE[engine]} isn’t signed in on {where}, and none of its accounts there can sign in. Add an account again in Settings → Engines, then start the session.
+          </p>
         )}
         {caps?.notes.map((n) => (
           <p key={n} className="muted small">
@@ -288,7 +299,7 @@ export function NewSession({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder)}>
+          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder) || cantSignIn}>
             {remote ? `Start in ${cwd.trim().replace(/\/+$/, "") || "~"}` : "Start"}
           </button>
         </footer>

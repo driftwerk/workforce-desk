@@ -115,6 +115,7 @@ export const sharedText = (r: Shared, name: string, here: string): string[] => {
   if (r.copied.length) lines.push(`${list(r.copied)} ${r.copied.length === 1 ? "is" : "are"} on ${name} now, copied from ${here}.`);
   if (r.already.length) lines.push(`${list(r.already)} ${r.already.length === 1 ? "was" : "were"} on ${name} already.`);
   for (const f of r.failed) lines.push(`${f.name} wasn’t copied: ${f.why}`);
+  if (r.madeDefault) lines.push(`New sessions on ${name} start on ${r.madeDefault}: Claude Code isn’t signed in there by itself.`);
   if (r.copied.length && r.autoSwitch) lines.push(`${name} moves its sessions to another account at a limit by itself, as ${here} does.`);
   return lines;
 };
