@@ -34,12 +34,12 @@ beforeEach(() => {
 });
 
 describe("DM counts", () => {
-  it("on a machine's engine count only its boss's DM, and the machine is no workspace", async () => {
+  it("on a machine's engine count none, as it has no agents, and the machine is no workspace", async () => {
     const { workspaces } = await import("../chat/types");
     const devbox = { id: "devbox-hub", label: "devbox", url: "", local: false, machine: "devbox", revision: "t" };
-    useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [{ hubId: "devbox-hub", id: "desk", name: "Desk", model: null, provider: null, isDefault: false }] });
+    useChat.setState({ hubs: [...useChat.getState().hubs, devbox], roster: [] });
     dmsFrom(devbox, [row("desk", 1), row("scout", 3)]);
-    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["devbox-hub/desk", "local/scout"]);
+    expect(Object.keys(useUnread.getState().dms).sort()).toEqual(["local/scout"]);
     const hubs = useChat.getState().hubs;
     expect(workspaces(hubs).map((h) => h.id)).toEqual(["local", "dw"]);
     expect(workspaces(hubs)).toBe(workspaces(hubs));

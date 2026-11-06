@@ -37,7 +37,7 @@ describe("A machine's agents", () => {
   const devbox: HubAccount = { id: "devbox-hub", label: "devbox", url: "http://127.0.0.1:2", local: false, machine: "devbox", revision: "t" };
   afterEach(() => useDesk.setState({ engines: {} }));
 
-  it("are never listed: a machine's own Desk agent isn't a second one in the sidebar", async () => {
+  it("are never listed, even an older machine's Desk agent, and its boss is never asked for", async () => {
     useChat.setState({ hubs: [local, devbox], roster: [] });
     fetches.fetch.mockResolvedValue({ ok: true, json: async () => ({ agents: [{ id: "desk", name: "Desk" }, { id: "scout" }] }) });
     const manager = vi.fn(async () => ({ agentId: "desk", level: "act" }));

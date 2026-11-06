@@ -269,9 +269,9 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   }));
 };
 
-/** A machine's own agents aren't listed: its hub only runs the sessions
- *  placed there, and the Desk agent every install has is this computer's
- *  business, not a second one in the sidebar. */
+/** A machine's agents aren't listed: its hub runs the sessions placed
+ *  there and serves no agents (an older one's Desk agent is removed when
+ *  its Desk Helper is updated). */
 const machineAgents = async (): Promise<Agent[]> => [];
 
 /** You on `hub`: null when it doesn't know you, undefined when it

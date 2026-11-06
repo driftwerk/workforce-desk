@@ -93,8 +93,29 @@ const PROGRAM_READ_TOOLS: [&str; 14] = [
 /// coding fan-outs): enough for one panel of second opinions on one computer.
 pub const MAX_CLAUDE_CODE_AT_ONCE: i64 = 3;
 
-/// The local agent Desk's hub always has.
+/// The local agent Desk's hub has on the person's own computer. A
+/// machine's has none ([`remove_machine_agent`]).
 pub const DESK_AGENT: &str = "desk";
+
+/// A machine's hub serves no agents: the Desk agent an earlier Desk Helper
+/// made there is removed, its folder with its `config.toml` and all it
+/// kept. Its sessions the hub forgets itself, starting with `[desk] agents
+/// = false`. A link where the folder was is removed, never what it points
+/// to; the `agents` folder goes too once nothing else is in it. Whether one
+/// was removed.
+pub fn remove_machine_agent(paths: &Paths) -> std::io::Result<bool> {
+    let agents = paths.hub_data().join("agents");
+    let agent = agents.join(DESK_AGENT);
+    let removed = match std::fs::symlink_metadata(&agent) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(&agent).map(|()| true)?,
+        Ok(_) => std::fs::remove_file(&agent).map(|()| true)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(e),
+    };
+    // Not empty: something else is kept there, and stays.
+    let _ = std::fs::remove_dir(&agents);
+    Ok(removed)
+}
 
 const RICH_KINDS: [&str; 6] = ["tables", "charts", "forms", "maps", "diagrams", "images"];
 
@@ -416,9 +437,12 @@ pub fn render(
         ("accounts", accounts(paths, keys)),
     ];
     // Nobody is at a machine to be asked after it restarts: its sessions
-    // are resumed, each in its folder.
+    // are resumed, each in its folder. Its hub runs them and serves no
+    // agents: no Desk agent, so no overseer, and a session's questions go
+    // to the person.
     if mode == Mode::Machine {
         desk.push(("restore", s("auto")));
+        desk.push(("agents", Value::Boolean(false)));
     }
     doc.insert("desk".into(), table(&desk));
     // A job or workflow made in Desk that needs the person's approval asks
@@ -442,16 +466,18 @@ pub fn render(
         "floor".into(),
         table(&[("fallback_providers", Value::Boolean(true))]),
     );
-    let agent = table(&[
-        ("id", s("desk")),
-        ("name", s("Desk")),
-        (
-            "workspace",
-            s(&paths.hub_data().join("agents/desk").to_string_lossy()),
-        ),
-        ("default", Value::Boolean(true)),
-    ]);
-    doc.insert("agents".into(), Value::Array(vec![agent]));
+    if mode == Mode::Desktop {
+        let agent = table(&[
+            ("id", s(DESK_AGENT)),
+            ("name", s("Desk")),
+            (
+                "workspace",
+                s(&paths.hub_data().join("agents").join(DESK_AGENT).to_string_lossy()),
+            ),
+            ("default", Value::Boolean(true)),
+        ]);
+        doc.insert("agents".into(), Value::Array(vec![agent]));
+    }
     format!(
         "# Written by desk-hubd on every start; edit Desk's settings instead.\n{}",
         toml::to_string(&doc).expect("a TOML table always serialises")
@@ -548,8 +574,10 @@ mod tests {
         .unwrap()
     }
 
+    /// A machine resumes its sessions and serves no agents: no Desk agent,
+    /// so none oversees them. A computer asks, and has its Desk agent.
     #[test]
-    fn a_machine_resumes_its_sessions_and_a_computer_asks() {
+    fn a_machine_resumes_its_sessions_with_no_agent_and_a_computer_asks_with_its_own() {
         let paths = Paths::at("/home/ana/.local/share/Desk");
         let machine: Table = toml::from_str(&render(
             &paths,
@@ -560,6 +588,8 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(machine["desk"]["restore"].as_str(), Some("auto"));
+        assert_eq!(machine["desk"]["agents"].as_bool(), Some(false));
+        assert!(machine.get("agents").is_none(), "no Desk agent");
         // Still loopback only: the Mac reaches it through SSH.
         assert_eq!(
             machine["gateway"]["listen"].as_str(),
@@ -571,9 +601,16 @@ mod tests {
             desktop["desk"].get("restore").is_none(),
             "the hub's own default"
         );
+        assert!(desktop["desk"].get("agents").is_none(), "the hub's own default: on");
+        let agents = desktop["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["id"].as_str(), Some(DESK_AGENT));
+        assert_eq!(agents[0]["default"].as_bool(), Some(true));
         let mut without = machine.clone();
-        without["desk"].as_table_mut().unwrap().remove("restore");
-        let desktop_on_the_same_paths: Table = toml::from_str(&render(
+        let desk = without["desk"].as_table_mut().unwrap();
+        desk.remove("restore");
+        desk.remove("agents");
+        let mut desktop_on_the_same_paths: Table = toml::from_str(&render(
             &paths,
             &ports(),
             Memories::Store,
@@ -581,7 +618,42 @@ mod tests {
             Mode::Desktop,
         ))
         .unwrap();
+        assert!(desktop_on_the_same_paths.remove("agents").is_some());
         assert_eq!(without, desktop_on_the_same_paths, "nothing else differs");
+    }
+
+    /// An upgraded machine's Desk agent is removed, its config and all it
+    /// kept, and the `agents` folder with it; anything else kept there
+    /// stays, a link is removed and never what it points to, and a second
+    /// start finds nothing to remove.
+    #[test]
+    fn a_machines_desk_agent_is_removed_once_and_nothing_beside_it() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths::at(root.path());
+        let agent = paths.hub_data().join("agents").join(DESK_AGENT);
+        std::fs::create_dir_all(agent.join("memory/users")).unwrap();
+        std::fs::write(agent.join("config.toml"), "[oversight]\nenabled = true\n").unwrap();
+        std::fs::write(agent.join("SOUL.md"), "").unwrap();
+        let elsewhere = paths.hub_data().join("artifacts");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert!(remove_machine_agent(&paths).unwrap());
+        assert!(!agent.exists());
+        assert!(!paths.hub_data().join("agents").exists());
+        assert!(elsewhere.exists(), "the hub's other data stays");
+        assert!(!remove_machine_agent(&paths).unwrap(), "once");
+
+        let other = paths.hub_data().join("agents").join("kept");
+        std::fs::create_dir_all(&other).unwrap();
+        let target = root.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("keep.md"), "").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &agent).unwrap();
+        #[cfg(unix)]
+        assert!(remove_machine_agent(&paths).unwrap());
+        assert!(std::fs::symlink_metadata(&agent).is_err());
+        assert!(target.join("keep.md").exists(), "never what a link points to");
+        assert!(other.exists(), "not the agents folder while it holds more");
     }
 
     #[test]

@@ -13,13 +13,16 @@
 #   - a terminal opens in a folder and runs a shell, and closes;
 #   - --stop stops the hub and Postgres but leaves the holder (its
 #     terminals outlive the helper);
-#   - --remove-everything ends the holder and deletes the folder.
+#   - --remove-everything ends the holder and deletes the folder;
+#   - this computer's hub has its Desk agent, the overseer.
 #
 # With --machine it runs the backend as a machine runs it (a Linux box Desk
 # drives over SSH): installed as a version under DESK_HOME/bin with
 # `current` pointing at it, started as `bin/current/desk-helper --machine`
 # with its owner named in DESK_PERSON_NAME and DESK_PERSON_EMAIL, and a
 # stand-in `claude` first on PATH. It also checks that:
+#   - its hub serves no agents: the Desk agent an earlier version left is
+#     removed, none is listed, and none oversees its sessions;
 #   - connection --json says the version installed, and the owner is the
 #     person named;
 #   - the hub resumes sessions by itself (restore = "auto");
@@ -56,6 +59,10 @@ start=("$helper")
 if [ -n "$machine" ]; then
   cp -R "$bin/claude-plugin" "$DESK_HOME/bin/$version/claude-plugin"
   start=("$helper" --machine)
+  # The Desk agent an earlier version made on a machine, as an upgrade
+  # finds it.
+  mkdir -p "$DESK_HOME/hub/data/agents/desk/memory"
+  printf '[oversight]\nenabled = true\nlevel = "watch"\n' >"$DESK_HOME/hub/data/agents/desk/config.toml"
   export DESK_PERSON_NAME="Smoke Tester" DESK_PERSON_EMAIL=smoke@example.com
   # A stand-in for Claude Code: says a version when asked, and otherwise
   # logs how it was started and with which plugins, then waits as a session.
@@ -144,6 +151,18 @@ gone() { ! kill -0 "$shell_pid" 2>/dev/null; }
 until_ok 20 gone || fail "the terminal's shell kept running after it closed"
 
 if [ -n "$machine" ]; then
+  say "a machine's hub serves no agents, and the Desk agent left from before is removed"
+  [ ! -e "$DESK_HOME/hub/data/agents/desk" ] || fail "the Desk agent's folder is still there"
+  grep -qx 'agents = false' "$DESK_HOME/hub/workforce.toml" || fail "workforce.toml doesn't say agents = false"
+  ! grep -q '^\[\[agents\]\]' "$DESK_HOME/hub/workforce.toml" || fail "workforce.toml names an agent"
+  agents=$(api "$admin" /api/agents)
+  [ "$(jq '.agents | length' <<<"$agents")" = 0 ] || fail "the hub lists agents: $agents"
+  manager=$(api "$admin" /api/desk/manager)
+  [ "$(jq -r '.agentId' <<<"$manager")" = null ] || fail "a machine's sessions have an overseer: $manager"
+  added=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $admin" -X POST \
+    -H 'Content-Type: application/json' -d '{"id":"scout"}' "$gateway/api/agents")
+  [ "$added" = 409 ] || fail "adding an agent answered $added, not 409"
+
   say "a machine says its version, and its owner is the person named"
   [ "$(jq -r .version <<<"$conn")" = "$version" ] ||
     fail "connection --json says version $(jq -r .version <<<"$conn")"
@@ -184,6 +203,15 @@ if [ -n "$machine" ]; then
   until_ok 120 paired || fail "Desk Helper didn't pair again"
   conn=$("$helper" connection --json)
   gateway=$(jq -r .gateway_url <<<"$conn")
+fi
+
+if [ -z "$machine" ]; then
+  say "this computer's hub has its Desk agent, the overseer"
+  agents=$(api "$admin" /api/agents)
+  jq -e 'any(.agents[]; .id == "desk")' >/dev/null <<<"$agents" || fail "the Desk agent isn't listed: $agents"
+  [ -d "$DESK_HOME/hub/data/agents/desk" ] || fail "the Desk agent has no folder"
+  manager=$(api "$admin" /api/desk/manager)
+  [ "$(jq -r '.agentId' <<<"$manager")" = desk ] || fail "the Desk agent doesn't oversee: $manager"
 fi
 
 say "--stop stops the hub and Postgres, and leaves the holder"

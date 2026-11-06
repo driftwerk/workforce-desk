@@ -108,10 +108,10 @@ export const refreshLocalSoon = (): void => {
  *  was read. A hub that keeps no read points (it doesn't say `desk.reads`)
  *  says nothing. */
 export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
-  // On a machine's engine only its boss's DM counts: it is the one agent of
-  // the machine's that Desk shows (see the roster).
-  const shown = (agent: string) => !hub.machine || useChat.getState().roster.some((a) => a.hubId === hub.id && a.id === agent);
-  const dmRows = rows.filter((r) => r.channel === DESK_DM && shown(r.agent_id));
+  // A machine's hub serves no agents and Desk lists none of a machine's
+  // (see the roster): no DM there counts.
+  if (hub.machine) return;
+  const dmRows = rows.filter((r) => r.channel === DESK_DM);
   const keeps = useChat.getState().hubFeatures[hub.id]?.has(FEATURE_READS) || dmRows.some((r) => r.unread !== undefined || r.read !== undefined);
   if (!keeps) return;
   const at = Date.now();

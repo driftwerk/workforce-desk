@@ -818,9 +818,20 @@ async fn run_helper(
     let keys = Secrets::for_host(&paths, &Host::running_here(&process_env))?;
     let key_store = keys.store();
     write_config(&paths, &ports, memories, key_store, mode)?;
-    let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
-    config::ensure_rich(&desk_agent)?;
-    config::ensure_oversight(&desk_agent)?;
+    // This computer's Desk agent renders every rich block and oversees the
+    // crew. A machine's hub serves no agents: the one an earlier version
+    // made there is removed before the hub starts.
+    if mode == config::Mode::Desktop {
+        let desk_agent = paths.hub_data().join("agents").join(config::DESK_AGENT);
+        config::ensure_rich(&desk_agent)?;
+        config::ensure_oversight(&desk_agent)?;
+    } else if paths.machine_marker().exists() {
+        match config::remove_machine_agent(&paths) {
+            Ok(true) => tracing::info!("running as a machine: its Desk agent is removed"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(error = %e, "running as a machine: its Desk agent could not be removed; tried again on the next start"),
+        }
+    }
     let login = desk_core::shell::login_env();
     let mut env = hub_env(&login);
     if mode == config::Mode::Machine {
