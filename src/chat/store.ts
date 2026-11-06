@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { Conversation, emptyConversation, type ConversationState, type QueuedOutcome } from "./conversation";
-import { cursorIn, fetchHistory, prepend, settle, type Reading } from "./history";
+import { cursorIn, fetchHistory, prepend } from "./history";
+import { settle, type Reading } from "./legacy";
+import { keptOf } from "./reconcile";
 import {
   agentKey,
   FEATURES,
@@ -371,6 +373,12 @@ const ensure = (key: string): boolean => {
 const settleLive = (key: string, kept: ChatMessage[], read: Reading) => {
   const convo = useChat.getState().conversations[key];
   if (!convo?.messages.length) return;
+  // A hub with client ids says which live message each kept row is.
+  if (convo.features?.has(FEATURES.clientIds)) {
+    live.get(key)?.drop(keptOf(kept, convo.messages));
+    return;
+  }
+  // An older hub's copies are matched by what they say and when.
   const now = new Date().toISOString();
   const { ids, anchors, twins } = settle(kept, convo.messages, now, !!convo.features?.has(FEATURES.stream), read);
   live.get(key)?.place(anchors, twins);

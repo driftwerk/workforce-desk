@@ -128,6 +128,18 @@ export interface ChatMessage {
    *  streamed with: its kept copy is known by what it says, as on a hub
    *  that doesn't stream by id. */
   byWords?: boolean;
+  /** Desk's own id for a message you sent, which the hub keeps it under: on
+   *  a hub with client ids, the kept copy is known by it alone. */
+  clientId?: string;
+  /** Where a kept message is in the hub's archive: higher was kept later. */
+  seq?: number;
+  /** The client id of the message whose turn said this: an answer, the
+   *  tools it ran, or what it failed with. */
+  replyTo?: string;
+  /** The tools the turn that said it ran, as the hub kept them. */
+  steps?: Step[];
+  /** A turn's failure that a later answer has replaced: shown folded away. */
+  superseded?: boolean;
 }
 
 // ── Desk as a surface of the hub (mirrors the hub's `workforce_core::desk`) ──
@@ -150,6 +162,10 @@ export const FEATURES = {
   /** A message may be sent to wait for the running turn: refused as busy
    *  while it works, rather than steering it. */
   queue: "desk.queue",
+  /** The DM's read names Desk's own id for each message sent under one, and
+   *  each kept row's place in the archive: a live message is known by its
+   *  id alone. A hub without it is matched by words (./legacy.ts). */
+  clientIds: "desk.client_ids",
 } as const;
 
 export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "other";
@@ -201,6 +217,9 @@ export interface DeskMark {
   in_reply_to?: string;
   /** The tools the turn ran. */
   steps?: Step[];
+  /** What the turn asked with `in_reply_to` failed with, said instead of an
+   *  answer. */
+  failed?: boolean;
 }
 
 /** What a live turn is doing, as a snapshot says. */

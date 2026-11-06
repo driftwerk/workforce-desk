@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dropped, emptyConversation, reduce, toShow, type ConversationState } from "./conversation";
-import { settle, withHistory } from "./history";
+import { settle, withHistory } from "./legacy";
 import { FEATURES, type ChatMessage, type ServerMessage } from "./types";
 
 // A DM on a hub that streams turns by ref and id, as Desk shows it: the live

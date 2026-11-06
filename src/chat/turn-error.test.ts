@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dropped, emptyConversation, reduce, toShow, type ConversationState } from "./conversation";
 import { readableError } from "./agentError";
 import { dayClock } from "../floor/time";
-import { settle, withHistory } from "./history";
+import { settle, withHistory } from "./legacy";
 import { FEATURES, type ChatMessage, type ServerMessage } from "./types";
 
 // An error a turn ended with, in a DM on a hub that streams turns by ref and

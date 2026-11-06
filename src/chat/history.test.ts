@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyConversation, type ConversationState } from "./conversation";
-import { covered, cursorIn, fetchHistory, prepend, readConversation, settle, withHistory } from "./history";
+import { cursorIn, fetchHistory, prepend, readConversation } from "./history";
+import { covered, settle, withHistory } from "./legacy";
 import { useChat } from "./store";
 import type { Attachment, ChatMessage, HubAccount } from "./types";
 import { setDevToken } from "../hub/devTokens";

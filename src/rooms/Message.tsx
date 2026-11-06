@@ -166,7 +166,12 @@ export const Message = memo(function Message({
             ))}
           </span>
         )}
-        {!message.content.trim() ? null : message.status === "error" ? (
+        {!message.content.trim() ? null : message.status === "error" && message.superseded ? (
+          <details className="msg-steps">
+            <summary className="small">Didn’t finish · answered below</summary>
+            <TurnError raw={message.content} />
+          </details>
+        ) : message.status === "error" ? (
           <TurnError raw={message.content} />
         ) : message.role !== "assistant" ? (
           <p className="msg-text">

@@ -6,12 +6,13 @@ import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles }
 import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
 import { AgentAccess } from "../computer/AgentAccess";
-import { withHistory } from "../chat/history";
+import { withHistory } from "../chat/legacy";
+import { onceEach, shownWith } from "../chat/reconcile";
 import { isRunning, useChat } from "../chat/store";
 import { useDesk, localSessions } from "../hub/store";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
-import { agentKey, describeAgent, DESK_DM } from "../chat/types";
+import { agentKey, describeAgent, DESK_DM, FEATURES } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentConnectors } from "../crew/AgentConnectors";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
@@ -249,7 +250,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const pending = last?.role === "assistant" && last.status === "streaming" && !last.content ? last : undefined;
   const answering = last?.role === "assistant" && last.status === "streaming" && !!last.content;
   const liveShown = toShow(pending ? convo.messages.slice(0, -1) : convo.messages);
-  const shown = withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null);
+  // A hub with client ids says which kept row each live message became;
+  // an older hub's are matched by words and times.
+  const shown = convo.features?.has(FEATURES.clientIds)
+    ? shownWith(history?.messages ?? [], liveShown)
+    : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
   const settled = !history || history.state === "ready" || history.state === "absent";
 
   const chat = tab !== "settings" && !((tab === "files" || tab === "access" || tab === "connectors") && local);
@@ -414,7 +419,7 @@ const DmMessage = memo(function DmMessage({
   ...shown
 }: Omit<ComponentProps<typeof Message>, "relayed"> & { message: ChatMessage; sentOn: Parameters<typeof relayedOf>[1] }) {
   const relayed = useMemo(() => relayedOf(message, sentOn), [message, sentOn]);
-  return <Message message={message} relayed={relayed} {...shown} />;
+  return <Message message={message} relayed={relayed} steps={message.steps} {...shown} />;
 });
 
 /** Files dropped anywhere on the conversation go with its next message. */
