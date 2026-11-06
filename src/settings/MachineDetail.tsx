@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { forgetMachine } from "../groups/machines";
 import { AddMachine } from "../machines/AddMachine";
+import { RemoveMachine } from "../machines/RemoveMachine";
 import { useDesk } from "../hub/store";
 import { sessionsOn, type Machine } from "../machines/engines";
 import type { LogLine, MachineNative } from "../machines/native";
 import { clock, clockSeconds, dotOf, forgetKeyLine, freeText, inTime, keyChanged, offlineWhy, revealWords, sessionsCount, thisComputer, thisComputerLower, whenText } from "../machines/words";
 import { useHost } from "../shell/host";
-import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
 import { UpdateSteps } from "../machines/UpdateSteps";
 import { CopyButton, EngineBlocks } from "./EngineBlocks";
@@ -434,7 +434,7 @@ export function MachineDetail({
         <div className="setting-card">
           <span className="prov-text">
             <b>Remove {machine.name} from Desk</b>
-            <span>Desk on {here} forgets it. Desk keeps running there, with its sessions, until you stop it.</span>
+            <span>Desk on {here} forgets it. You choose whether to uninstall Desk there too.</span>
           </span>
           <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(true)}>
             Remove…
@@ -455,23 +455,15 @@ export function MachineDetail({
       )}
       {addingNew && <AddMachine native={native} target={addingNew} onClose={() => setAddingNew(null)} />}
       {removing && (
-        <Confirm
-          title={`Remove ${machine.name}?`}
-          action="Remove"
-          onConfirm={() =>
-            native.remove(machine.id).then(() => {
-              forgetMachine(machine.id, true);
-              onBack();
-            })
-          }
+        <RemoveMachine
+          machine={machine}
+          native={native}
           onClose={() => setRemoving(false)}
-        >
-          <p>
-            Desk on {here} forgets {machine.name}. Desk keeps running there, with its sessions, until you stop it. To take it off {machine.name} too, run these there:
-          </p>
-          <code className="mono small machine-key">systemctl --user disable --now desk-helper</code>
-          <code className="mono small machine-key">~/.local/share/Desk/bin/current/desk-helper --remove-everything</code>
-        </Confirm>
+          onRemoved={() => {
+            forgetMachine(machine.id, true);
+            onBack();
+          }}
+        />
       )}
     </section>
   );

@@ -55,6 +55,7 @@
     "allow-machine-cancel-add",
     "allow-machine-retry-engines",
     "allow-machine-cancel-update",
+    "allow-machine-uninstall",
     "allow-machine-reveal-log",
     "allow-machine-sign-in-forward",
     "allow-machine-sign-in-forward-stop",

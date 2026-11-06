@@ -1488,3 +1488,48 @@ legend.set-label {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* Remove devbox? (Remove board): the two choices, and the lines for later. */
+.remove-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.remove-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.remove-choice .pick-ring {
+  margin-top: 2px;
+}
+.remove-choice[aria-checked="true"] .pick-ring {
+  border-color: var(--signal);
+}
+.remove-choice[aria-checked="true"] .pick-ring::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.remove-choice:disabled {
+  opacity: 0.55;
+}
+.remove-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.remove-later {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dialog-foot-note.state-blocked {
+  color: var(--blocked);
+}

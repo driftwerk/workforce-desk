@@ -326,6 +326,48 @@ pub fn restart(
     start(ssh, machine, bin, person)
 }
 
+/// Uninstalling: stops Desk's service there and takes its unit away (a
+/// helper Desk started itself is stopped too), and says if it still runs.
+/// Only a machine's install: never a desktop Desk's (no marker, no go).
+pub fn uninstall_stop_script() -> String {
+    format!(
+        "set -u\n\
+         d=\"$HOME/{root}\"\n\
+         if [ -d \"$d\" ] && [ ! -e \"$d/{marker}\" ]; then echo \"Desk there isn't one installed as a machine, so Desk leaves it as it is\" >&2; exit 3; fi\n\
+         if systemctl --user show-environment >/dev/null 2>&1; then systemctl --user disable --now {unit} >/dev/null 2>&1 || true; fi\n\
+         h=\"$d/bin/current/{helper}\"\n\
+         if [ -x \"$h\" ]; then \"$h\" --stop >/dev/null 2>&1 || true; fi\n\
+         rm -f \"${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user/{unit}\"\n\
+         systemctl --user daemon-reload >/dev/null 2>&1 || true\n\
+         p=$(cat \"$d/hub/run/desk-hubd.pid\" 2>/dev/null) && kill -0 \"$p\" 2>/dev/null && {{ echo \"Desk Helper (process $p) is still running there\" >&2; exit 1; }}\n\
+         exit 0\n",
+        root = desk_core::machine::MACHINE_ROOT,
+        marker = desk_core::MACHINE_MARKER,
+        unit = desk_core::systemd::UNIT,
+        helper = desk_core::LINUX_HELPER_EXECUTABLE,
+    )
+}
+
+/// Uninstalling: removes everything Desk keeps there (`--remove-everything`:
+/// its PTY holder, secrets and folder, sign-ins and memory with it), or the
+/// folder itself when its helper isn't there to do it.
+pub fn uninstall_remove_script() -> String {
+    format!(
+        "set -u\n\
+         d=\"$HOME/{root}\"\n\
+         [ -d \"$d\" ] || exit 0\n\
+         [ -e \"$d/{marker}\" ] || {{ echo \"Desk there isn't one installed as a machine, so Desk leaves it as it is\" >&2; exit 3; }}\n\
+         h=\"$d/bin/current/{helper}\"\n\
+         if [ -x \"$h\" ]; then \"$h\" --remove-everything; else rm -rf -- \"$d\"; fi\n",
+        root = desk_core::machine::MACHINE_ROOT,
+        marker = desk_core::MACHINE_MARKER,
+        helper = desk_core::LINUX_HELPER_EXECUTABLE,
+    )
+}
+
+/// Uninstalling: turns linger off for the account (as itself, never sudo).
+pub const UNINSTALL_LINGER_SCRIPT: &str = "loginctl disable-linger \"$(id -un)\"";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +383,18 @@ mod tests {
         assert!(s.contains(&sha));
         assert!(copy_script("/b", "../x", &sha).is_err());
         assert!(copy_script("/b", "0.3.0", "$(id)").is_err());
+    }
+
+    #[test]
+    fn uninstalling_touches_only_a_machines_install_and_never_sudo() {
+        for script in [uninstall_stop_script(), uninstall_remove_script()] {
+            assert!(script.contains("$d/machine"), "{script}");
+            assert!(!script.contains("sudo"), "{script}");
+        }
+        assert!(uninstall_remove_script().contains("--remove-everything"));
+        assert!(uninstall_remove_script().contains("rm -rf -- \"$d\""));
+        assert!(uninstall_stop_script().contains("disable --now desk-helper.service"));
+        assert!(!UNINSTALL_LINGER_SCRIPT.contains("sudo"));
     }
 
     #[test]

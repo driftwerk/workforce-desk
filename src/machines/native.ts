@@ -111,6 +111,15 @@ export type Checked =
   /** The person said no to the native question: nothing ran there. */
   | { kind: "cancelled" }
   | { kind: "differentKey"; shown: { kind: string; fingerprint: string }; known: { kind: string; fingerprint: string } };
+/** A step of removing a machine with Desk uninstalled from it. */
+export interface RemoveEvent {
+  machine: MachineId;
+  step: "stop" | "remove" | "linger" | "forget";
+  state: "running" | "done" | "failed" | "blocked";
+  message?: string;
+  /** What to run there by hand, when Desk couldn't. */
+  line?: string;
+}
 
 /** The native side, as the machines' UI uses it. */
 export interface MachineNative {
@@ -176,6 +185,11 @@ export interface MachineNative {
   /** "Cancel update": stops its update before it switches over; it stays
    *  on its version, driven no further until it matches. */
   cancelUpdate(id: MachineId): Promise<void>;
+  /** Removes it after uninstalling Desk from it (its service, everything
+   *  Desk keeps there, linger), saying each step on `removing`; nothing is
+   *  forgotten when a step fails. */
+  uninstall(id: MachineId): Promise<void>;
+  removing(f: (e: RemoveEvent) => void): () => void;
 }
 
 export const native: MachineNative = {
@@ -203,4 +217,6 @@ export const native: MachineNative = {
   cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
   retryEngines: (id) => invoke<void>("machine_retry_engines", { id }),
   cancelUpdate: (id) => invoke<void>("machine_cancel_update", { id }),
+  uninstall: (id) => invoke<void>("machine_uninstall", { id }),
+  removing: (f) => subscribe(listen<RemoveEvent>("machine-remove", (e) => f(e.payload))),
 };

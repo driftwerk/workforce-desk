@@ -886,6 +886,7 @@ pub fn run() {
             machine_setup::machine_cancel_add,
             machine_setup::machine_retry_engines,
             machine_setup::machine_cancel_update,
+            machine_setup::machine_uninstall,
             machine_reveal_log,
             broker::socket_send,
             broker::socket_ack,

@@ -6,7 +6,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DeskTransport } from "../hub/transport";
 import type { Machine } from "./engines";
-import type { Checked, Edited, HostEntry, LogLine, MachineNative, Probe, SetupEvent, Shared } from "./native";
+import type { Checked, Edited, HostEntry, LogLine, MachineNative, Probe, RemoveEvent, SetupEvent, Shared } from "./native";
 
 export const machine = (m: Partial<Machine> & Pick<Machine, "id">): Machine => ({
   name: m.id,
@@ -38,6 +38,7 @@ export const foldersTransport = (folders: unknown, seen: string[] = []): DeskTra
 
 export function fakeNative(over: Partial<MachineNative> = {}) {
   const heard = new Set<(e: SetupEvent) => void>();
+  const removals = new Set<(e: RemoveEvent) => void>();
   const changed = new Set<() => void>();
   const fake = {
     list: vi.fn(async () => [] as Machine[]),
@@ -70,12 +71,19 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     cancelAdd: vi.fn(async (_id: string) => undefined),
     retryEngines: vi.fn(async (_id: string) => undefined),
     cancelUpdate: vi.fn(async (_id: string) => undefined),
+    uninstall: vi.fn(async (_id: string) => undefined),
+    removing: vi.fn((f: (e: RemoveEvent) => void) => {
+      removals.add(f);
+      return () => removals.delete(f);
+    }),
   };
   Object.assign(fake, over);
   /** Sends a setup event, as the native side would. */
   const emit = (e: SetupEvent) => heard.forEach((f) => f(e));
   const change = () => changed.forEach((f) => f());
-  return { native: fake as MachineNative, fake, emit, change };
+  /** Says a step of removing, as the native side would. */
+  const removed = (e: RemoveEvent) => removals.forEach((f) => f(e));
+  return { native: fake as MachineNative, fake, emit, change, removed };
 }
 
 /** The page talking to `machine`'s engine `hub`, as MD4's `connectMachine` leaves it. */

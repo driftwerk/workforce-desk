@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use desk_core::machine_backend::{self, Arch, Backend, Source};
-use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, SetupEvent};
+use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, RemoveEvent, SetupEvent};
 use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion};
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
@@ -48,6 +48,10 @@ impl Host for AppHost {
 
     fn setup(&self, event: &SetupEvent) {
         let _ = self.app.emit("machine-setup", event);
+    }
+
+    fn removing(&self, event: &RemoveEvent) {
+        let _ = self.app.emit("machine-remove", event);
     }
 
     fn dropped(&self, id: &str) {
@@ -247,6 +251,18 @@ pub fn machine_retry_engines(fleet: tauri::State<'_, Arc<Fleet>>, id: String) ->
 #[tauri::command]
 pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
     fleet.cancel_update(&id)
+}
+
+/// "Also uninstall Desk from devbox": stops its service there, removes
+/// everything Desk keeps there and turns linger off, then forgets it; each
+/// step said on `machine-remove`. Nothing is forgotten when a step fails.
+#[tauri::command]
+pub async fn machine_uninstall(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<()> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.uninstall(&id)).await
 }
 
 /// How long reading Desk's log on a machine may take.

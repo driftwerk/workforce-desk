@@ -343,6 +343,37 @@ pub trait Host: Send + Sync + 'static {
     fn backend(&self, arch: Arch) -> Result<Backend, String>;
     /// Who owns the machines, for their services.
     fn person(&self) -> Person;
+    /// A step of uninstalling Desk from a machine moved.
+    fn removing(&self, event: &RemoveEvent) {
+        let _ = event;
+    }
+}
+
+/// A step of removing a machine with Desk uninstalled from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveStep {
+    /// Desk's service stopped there, and its unit taken away.
+    Stop,
+    /// Everything Desk keeps there removed.
+    Remove,
+    /// Linger turned off for the account.
+    Linger,
+    /// Forgotten on this computer.
+    Forget,
+}
+
+/// The `machine-remove` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoveEvent {
+    pub machine: String,
+    pub step: RemoveStep,
+    pub state: StepState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// What to run there by hand, when Desk couldn't do it itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// How long things take.
@@ -2168,7 +2199,9 @@ impl Fleet {
                         State::Ready => {
                             if fleet.wait_kick(&id, Some(fleet.timing.check_every)) {
                                 true
-                            } else if fleet.machines.get(&id).is_some_and(|l| l.ready().is_none()) {
+                            } else if !fleet.rows().get(&id).is_some_and(|r| r.busy)
+                                && fleet.machines.get(&id).is_some_and(|l| l.ready().is_none())
+                            {
                                 misses += 1;
                                 if misses >= 3 {
                                     let name =
@@ -2537,6 +2570,146 @@ impl Fleet {
         }
         self.drop_link(id);
         self.host.changed();
+        Ok(())
+    }
+
+    /// Removes machine `id` and uninstalls Desk from it first
+    /// (`machine_uninstall`), saying each step on `machine-remove`: its
+    /// service stopped and its unit gone, everything Desk keeps there
+    /// removed (`--remove-everything`), linger off, then forgotten here.
+    /// Each step stops after [`Timing::step_within`]. A step that fails
+    /// says why and nothing is forgotten: Try again, or remove it without
+    /// uninstalling. Only a machine's own install is ever touched. Blocking.
+    pub fn uninstall(&self, id: &str) -> Result<(), String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let name = machine.name.clone();
+        if !matches!(
+            self.state(id),
+            Some(State::Ready | State::UpdateFailed { .. } | State::Newer | State::Failed { .. })
+        ) {
+            return Err(format!(
+                "Desk can't reach {name} right now, so it can only forget it here."
+            ));
+        }
+        let say =
+            |step: RemoveStep, state: StepState, message: Option<String>, line: Option<String>| {
+                self.host.removing(&RemoveEvent {
+                    machine: id.to_string(),
+                    step,
+                    state,
+                    message,
+                    line,
+                });
+            };
+        let run = |step: RemoveStep, script: &str, what: &str| -> Result<(), String> {
+            say(step, StepState::Running, None, None);
+            let done = self
+                .step(id)
+                .run(|| setup::run(&self.ssh, &machine, script, what));
+            match done {
+                Ok(_) => {
+                    say(step, StepState::Done, None, None);
+                    Ok(())
+                }
+                Err(m) => {
+                    say(step, StepState::Failed, Some(m.clone()), None);
+                    self.note(id, LogKind::Error, m.clone());
+                    Err(m)
+                }
+            }
+        };
+        // Nothing connects to it (and so starts Desk there again) while it
+        // goes: its supervisor waits on `busy` until this is done.
+        // A connect under way finishes first (it can take a step's length).
+        let until = Instant::now() + self.timing.step_within;
+        loop {
+            {
+                let mut rows = self.rows();
+                let Some(r) = rows.get_mut(id) else {
+                    return Err("That machine isn't in Desk any more.".into());
+                };
+                if !r.busy {
+                    r.busy = true;
+                    break;
+                }
+            }
+            if Instant::now() >= until {
+                return Err(format!("{name} is busy connecting: try again in a moment."));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        struct Held<'a>(&'a Fleet, &'a str);
+        impl Drop for Held<'_> {
+            fn drop(&mut self) {
+                if let Some(r) = self.0.rows().get_mut(self.1) {
+                    r.busy = false;
+                }
+            }
+        }
+        let _held = Held(self, id);
+        self.note(id, LogKind::Info, format!("uninstalling Desk from {name}"));
+        // The link goes first: nothing of Desk's talks to it while it goes.
+        self.drop_link(id);
+        let stopped = run(
+            RemoveStep::Stop,
+            &setup::uninstall_stop_script(),
+            &format!("Couldn't stop Desk's service on {name}"),
+        );
+        if let Err(m) = stopped {
+            drop(_held);
+            self.kick(id);
+            return Err(m);
+        }
+        let removed = run(
+            RemoveStep::Remove,
+            &setup::uninstall_remove_script(),
+            "Couldn't remove ~/.local/share/Desk",
+        );
+        if let Err(m) = removed {
+            // Desk there is stopped: it starts again at the next connect.
+            drop(_held);
+            self.kick(id);
+            return Err(m);
+        }
+        // Linger turned off where the account may; else the line to run.
+        say(RemoveStep::Linger, StepState::Running, None, None);
+        match self.step(id).run(|| {
+            setup::run(
+                &self.ssh,
+                &machine,
+                setup::UNINSTALL_LINGER_SCRIPT,
+                "linger",
+            )
+        }) {
+            Ok(_) => say(RemoveStep::Linger, StepState::Done, None, None),
+            Err(_) => {
+                let user = self
+                    .rows()
+                    .get(id)
+                    .and_then(|r| r.now.details.as_ref().and_then(|d| d.user.clone()));
+                say(
+                    RemoveStep::Linger,
+                    StepState::Blocked,
+                    Some(format!(
+                        "Linger stays on for {}: turning it off needs an administrator there.",
+                        user.as_deref().unwrap_or("that account")
+                    )),
+                    Some(format!(
+                        "sudo loginctl disable-linger {}",
+                        user.as_deref().unwrap_or("$USER")
+                    )),
+                );
+            }
+        }
+        say(RemoveStep::Forget, StepState::Running, None, None);
+        self.remove(id)?;
+        say(RemoveStep::Forget, StepState::Done, None, None);
+        tracing::info!(
+            machine = id,
+            "uninstalled Desk from a machine and forgot it"
+        );
         Ok(())
     }
 

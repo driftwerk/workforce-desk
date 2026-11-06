@@ -102,6 +102,10 @@ case "$1" in
     echo $! > "$pidfile"
     echo "VERSION $n" > "$f/running"; exit 0 ;;
   --stop) stop; exit 0 ;;
+  --remove-everything)
+    [ -e "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null && { echo "Desk Helper is still running; stop it first" >&2; exit 1; }
+    [ -e "$f/remove-fails" ] && { echo "deleting $HOME/.local/share/Desk: Permission denied (os error 13)" >&2; exit 1; }
+    rm -rf "$HOME/.local/share/Desk"; exit 0 ;;
   connection)
     [ -e "$f/running" ] || { echo null; exit 0; }
     read v n < "$f/running"
@@ -333,6 +337,7 @@ struct Said {
     changes: AtomicUsize,
     events: Mutex<Vec<SetupEvent>>,
     dropped: Mutex<Vec<String>>,
+    removing: Mutex<Vec<desk_machine::fleet::RemoveEvent>>,
 }
 
 struct TestHost {
@@ -368,6 +373,9 @@ impl Host for TestHost {
             name: Some("Ada Lovelace".into()),
             email: Some("ada@example.com".into()),
         }
+    }
+    fn removing(&self, event: &desk_machine::fleet::RemoveEvent) {
+        self.said.removing.lock().unwrap().push(event.clone());
     }
 }
 
@@ -1840,4 +1848,129 @@ fn a_cancel_once_the_switch_over_began_is_refused_and_the_update_finishes() {
     );
     until("updated", || r.fleet.state(&id) == Some(State::Ready));
     assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+}
+
+/// What was said of removing machine `id`, as `step state` words.
+fn removed_said(r: &Run) -> Vec<String> {
+    r.said
+        .removing
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            let v = serde_json::to_value(e).unwrap();
+            format!(
+                "{} {}",
+                v["step"].as_str().unwrap(),
+                v["state"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn removing_with_uninstall_stops_desk_there_removes_everything_then_forgets_it() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let unit = b.home().join(".config/systemd/user/desk-helper.service");
+    assert!(unit.is_file() && b.home().join(".local/share/Desk").is_dir());
+
+    r.fleet.uninstall(&id).unwrap();
+    assert_eq!(
+        removed_said(&r),
+        [
+            "stop running",
+            "stop done",
+            "remove running",
+            "remove done",
+            "linger running",
+            "linger done",
+            "forget running",
+            "forget done"
+        ]
+    );
+    assert!(
+        !b.home().join(".local/share/Desk").exists(),
+        "everything Desk kept there is gone"
+    );
+    assert!(!unit.exists(), "its unit is gone");
+    assert!(!b.fake("running").exists(), "its helper stopped");
+    assert!(r.fleet.list().is_empty());
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept, json!([]));
+    // The person's own things there stay.
+    assert!(b.home().join(".fake").is_dir());
+}
+
+#[test]
+fn an_uninstall_that_fails_says_why_and_forgets_nothing_until_it_works() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("remove-fails"), "").unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(
+        e.contains("Couldn't remove ~/.local/share/Desk") && e.contains("Permission denied"),
+        "{e}"
+    );
+    let said = removed_said(&r);
+    assert_eq!(
+        said,
+        [
+            "stop running",
+            "stop done",
+            "remove running",
+            "remove failed"
+        ]
+    );
+    // Nothing is forgotten: it's still Desk's, and connects again.
+    assert_eq!(r.fleet.list().len(), 1);
+    until("ready again", || r.fleet.state(&id) == Some(State::Ready));
+    // Try again once it can.
+    std::fs::remove_file(b.fake("remove-fails")).unwrap();
+    r.fleet.uninstall(&id).unwrap();
+    assert!(r.fleet.list().is_empty());
+}
+
+#[test]
+fn a_desktop_desk_there_is_never_uninstalled_and_an_offline_one_only_forgotten() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // The folder there isn't a machine's (its marker gone): left as it is.
+    std::fs::remove_file(b.home().join(".local/share/Desk/machine")).unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(e.contains("isn't one installed as a machine"), "{e}");
+    assert!(b.home().join(".local/share/Desk/bin").is_dir());
+    assert_eq!(r.fleet.list().len(), 1);
+
+    // Offline: refused before anything runs.
+    let off = fleet(&b, "0.2.0", true);
+    std::fs::write(
+        b.dir.path().join("mac/machines.json"),
+        r#"[{"id": "gone", "name": "gone", "target": "gone-box", "version": "0.2.0"}]"#,
+    )
+    .unwrap();
+    off.fleet.load();
+    until("offline", || {
+        off.fleet.state("gone") == Some(State::Unreachable)
+    });
+    let e = off.fleet.uninstall("gone").unwrap_err();
+    assert_eq!(
+        e,
+        "Desk can't reach gone right now, so it can only forget it here."
+    );
 }

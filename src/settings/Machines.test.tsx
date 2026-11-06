@@ -271,15 +271,19 @@ it("says why Desk's log there couldn't be read, with Try again", async () => {
   expect(screen.getByRole("log").textContent).toContain("ok now");
 });
 
-it("removes a machine from its page only once asked", async () => {
+it("removes a machine from its page only once asked, leaving Desk running there unless asked", async () => {
   const { native, fake } = fakeNative();
   render(<Machines native={native} />);
   fireEvent.click(screen.getByRole("button", { name: "Open devbox" }));
   fireEvent.click(screen.getByRole("button", { name: "Remove…" }));
-  expect(screen.getByRole("dialog").textContent).toContain("Desk keeps running there, with its sessions");
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toContain("Desk on this Mac forgets devbox and stops showing its 2 sessions.");
+  expect(within(dialog).getByRole("radio", { name: /Leave Desk running on devbox/ }).getAttribute("aria-checked")).toBe("true");
   expect(fake.remove).not.toHaveBeenCalled();
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove" })));
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Remove devbox" })));
   expect(fake.remove).toHaveBeenCalledWith("devbox");
+  expect(fake.uninstall).not.toHaveBeenCalled();
+  expect(screen.getByRole("region", { name: "Machines" })).toBeTruthy();
 });
 
 it("opens a terminal on a machine in the folder picked there, in a grid, and shows it", async () => {
