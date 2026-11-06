@@ -25,8 +25,9 @@
 #     removed, none is listed, and none oversees its sessions;
 #   - it runs no memory store and fetches no model, and what an earlier
 #     version kept for the store is removed;
-#   - on its next start the hub forgets the chat sessions an agent of an
-#     earlier version left in Postgres, and never Desk's own sessions;
+#   - on its next start the hub forgets the chat sessions and Floor rows
+#     the earlier Desk agent left in Postgres, never another agent's or
+#     Desk's own sessions, and lets go every session that boss ran;
 #   - connection --json says the version installed, and the owner is the
 #     person named;
 #   - the hub resumes sessions by itself (restore = "auto");
@@ -215,6 +216,20 @@ if [ -n "$machine" ]; then
        VALUES ('smoke', 'desk', 'desk', now(), now())" >/dev/null
   [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
     fail "Desk doesn't keep its session $sid in its own table"
+  other=$(cat /proc/sys/kernel/random/uuid)
+  sql "INSERT INTO sessions.sessions (id, agent_id, channel, owner, kind, created_at, updated_at)
+       VALUES ('$other', 'scout', 'desk', 'smoke', 'main', now(), now())" >/dev/null
+  sql "INSERT INTO floor.gists (owner, subject, now_text, now_at, turn, by_model)
+       VALUES (NULL, 'agent:desk', 'watching', now(), gen_random_uuid(), false)" >/dev/null ||
+    fail "couldn't plant the earlier agent's Floor gist"
+  # The first start forgot the Desk agent once (nothing of it was there) and
+  # noted so; as an upgrade from an earlier version finds things, no note.
+  [ -e "$DESK_HOME/hub/data/host/forgotten-agent-desk" ] || fail "the hub didn't note it forgot the Desk agent"
+  rm "$DESK_HOME/hub/data/host/forgotten-agent-desk"
+  # The earlier boss ran Desk's session.
+  sql "INSERT INTO desk.charges (session, boss, how, since, updated_at)
+       VALUES ('$sid', 'desk', 'handed', now(), now())" >/dev/null ||
+    fail "couldn't plant the earlier boss's charge"
 
   say "after the box restarts, the session is resumed"
   holder=$(cat "$DESK_HOME/hub/run/pty.pid")
@@ -242,6 +257,13 @@ if [ -n "$machine" ]; then
     fail "the earlier agent's read points are still there"
   [ "$(sql "SELECT count(*) FROM desk.sessions WHERE id = '$sid'")" = 1 ] ||
     fail "Desk's own session record went with them"
+  [ "$(sql "SELECT count(*) FROM sessions.sessions WHERE id = '$other'")" = 1 ] ||
+    fail "another agent's session went with them"
+  [ "$(sql "SELECT count(*) FROM floor.gists WHERE subject = 'agent:desk'")" = 0 ] ||
+    fail "the earlier agent's Floor gist is still there"
+  released() { [ "$(sql "SELECT count(*) FROM desk.charges WHERE session = '$sid' AND released_at IS NOT NULL")" = 1 ]; }
+  until_ok 60 released || fail "the earlier boss still runs session $sid"
+  [ -e "$DESK_HOME/hub/data/host/forgotten-agent-desk" ] || fail "the hub didn't note it forgot the Desk agent again"
   [ ! -e "$DESK_HOME/hub/memory" ] || fail "the restart made memory store data"
 fi
 

@@ -94,7 +94,8 @@ const PROGRAM_READ_TOOLS: [&str; 14] = [
 pub const MAX_CLAUDE_CODE_AT_ONCE: i64 = 3;
 
 /// The local agent Desk's hub has on the person's own computer. A
-/// machine's has none ([`remove_machine_agent`]).
+/// machine's has none ([`remove_machine_agent`]): its hub is told to forget
+/// this one's sessions.
 pub const DESK_AGENT: &str = "desk";
 
 /// A machine runs no memory store: what an earlier Desk Helper kept for it
@@ -111,19 +112,87 @@ pub fn remove_machine_memory(paths: &Paths) -> std::io::Result<bool> {
     }
 }
 
-/// A machine's hub serves no agents: the Desk agent an earlier Desk Helper
-/// made there is removed, its folder with its `config.toml` and all it
-/// kept. Its sessions the hub forgets itself, starting with `[desk] agents
-/// = false`. A link where the folder was is removed, never what it points
-/// to; the `agents` folder goes too once nothing else is in it. Whether one
-/// was removed.
-pub fn remove_machine_agent(paths: &Paths) -> std::io::Result<bool> {
+/// What became of a machine's old Desk agent ([`remove_machine_agent`]).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Removed {
+    /// There was none.
+    Nothing,
+    /// It held only its config and the files the hub writes for every
+    /// agent, and is gone.
+    Deleted,
+    /// It held more (its checkouts, a coding session's work, its memories),
+    /// so it is kept aside here, out of the hub's sight, for the person.
+    MovedAside(std::path::PathBuf),
+}
+
+/// The files the hub writes into every agent's folder, beside its
+/// `config.toml`: nothing the person could lose.
+const BOOTSTRAP_FILES: [&str; 7] = [
+    "config.toml",
+    "AGENTS.md",
+    "SOUL.md",
+    "IDENTITY.md",
+    "TOOLS.md",
+    "HEARTBEAT.md",
+    "WELCOME.md",
+];
+
+/// Whether `dir` holds anything but its bootstrap files and empty folders.
+/// A link anywhere is something (it is never followed).
+fn holds_work(dir: &std::path::Path, top: bool) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            if holds_work(&entry.path(), false)? {
+                return Ok(true);
+            }
+        } else if !(top
+            && kind.is_file()
+            && BOOTSTRAP_FILES.iter().any(|f| entry.file_name() == *f))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// A machine's hub serves no agents, so the Desk agent an earlier Desk
+/// Helper made there goes. Holding only its config and the hub's bootstrap
+/// files, it is deleted; holding anything more (its `projects/*/work`
+/// checkouts and bases, coding sessions, memories, artifacts), it is moved
+/// aside whole to `hub/data/agents.removed/desk-<seconds>`, so nothing
+/// unpushed is lost. A link where the folder was is removed, never what it
+/// points to; the `agents` folder goes too once nothing else is in it. Its
+/// chat sessions the hub forgets itself (`[desk] forget_agents`).
+pub fn remove_machine_agent(paths: &Paths) -> std::io::Result<Removed> {
     let agents = paths.hub_data().join("agents");
     let agent = agents.join(DESK_AGENT);
     let removed = match std::fs::symlink_metadata(&agent) {
-        Ok(m) if m.is_dir() => std::fs::remove_dir_all(&agent).map(|()| true)?,
-        Ok(_) => std::fs::remove_file(&agent).map(|()| true)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Ok(m) if m.is_dir() && holds_work(&agent, true)? => {
+            let aside = paths.hub_data().join("agents.removed");
+            std::fs::create_dir_all(&aside)?;
+            let at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let mut to = aside.join(format!("{DESK_AGENT}-{at}"));
+            let mut n = 1;
+            while to.exists() {
+                to = aside.join(format!("{DESK_AGENT}-{at}-{n}"));
+                n += 1;
+            }
+            std::fs::rename(&agent, &to)?;
+            Removed::MovedAside(to)
+        }
+        Ok(m) if m.is_dir() => {
+            std::fs::remove_dir_all(&agent)?;
+            Removed::Deleted
+        }
+        Ok(_) => {
+            std::fs::remove_file(&agent)?;
+            Removed::Deleted
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Removed::Nothing,
         Err(e) => return Err(e),
     };
     // Not empty: something else is kept there, and stays.
@@ -457,6 +526,7 @@ pub fn render(
     if mode == Mode::Machine {
         desk.push(("restore", s("auto")));
         desk.push(("agents", Value::Boolean(false)));
+        desk.push(("forget_agents", Value::Array(vec![s(DESK_AGENT)])));
     }
     doc.insert("desk".into(), table(&desk));
     // A job or workflow made in Desk that needs the person's approval asks
@@ -607,6 +677,10 @@ mod tests {
         .unwrap();
         assert_eq!(machine["desk"]["restore"].as_str(), Some("auto"));
         assert_eq!(machine["desk"]["agents"].as_bool(), Some(false));
+        assert_eq!(
+            machine["desk"]["forget_agents"].as_array().unwrap(),
+            &vec![Value::String(DESK_AGENT.into())]
+        );
         assert!(machine.get("agents").is_none(), "no Desk agent");
         // Still loopback only: the Mac reaches it through SSH.
         assert_eq!(
@@ -631,6 +705,7 @@ mod tests {
         let desk = without["desk"].as_table_mut().unwrap();
         desk.remove("restore");
         desk.remove("agents");
+        desk.remove("forget_agents");
         let mut desktop_on_the_same_paths: Table = toml::from_str(&render(
             &paths,
             &ports(),
@@ -672,25 +747,31 @@ mod tests {
         assert!(!remove_machine_memory(&paths).unwrap(), "once");
     }
 
-    /// An upgraded machine's Desk agent is removed, its config and all it
-    /// kept, and the `agents` folder with it; anything else kept there
-    /// stays, a link is removed and never what it points to, and a second
-    /// start finds nothing to remove.
+    /// An upgraded machine's Desk agent holding only its config, the hub's
+    /// bootstrap files and empty folders is deleted, and the `agents` folder
+    /// with it; anything else kept there stays, a link is removed and never
+    /// what it points to, and a second start finds nothing to remove.
     #[test]
-    fn a_machines_desk_agent_is_removed_once_and_nothing_beside_it() {
+    fn a_machines_bare_desk_agent_is_deleted_once_and_nothing_beside_it() {
         let root = tempfile::tempdir().unwrap();
         let paths = Paths::at(root.path());
         let agent = paths.hub_data().join("agents").join(DESK_AGENT);
         std::fs::create_dir_all(agent.join("memory/users")).unwrap();
+        std::fs::create_dir_all(agent.join("projects/web/work/clones")).unwrap();
         std::fs::write(agent.join("config.toml"), "[oversight]\nenabled = true\n").unwrap();
         std::fs::write(agent.join("SOUL.md"), "").unwrap();
         let elsewhere = paths.hub_data().join("artifacts");
         std::fs::create_dir_all(&elsewhere).unwrap();
-        assert!(remove_machine_agent(&paths).unwrap());
+        assert_eq!(remove_machine_agent(&paths).unwrap(), Removed::Deleted);
         assert!(!agent.exists());
         assert!(!paths.hub_data().join("agents").exists());
+        assert!(!paths.hub_data().join("agents.removed").exists());
         assert!(elsewhere.exists(), "the hub's other data stays");
-        assert!(!remove_machine_agent(&paths).unwrap(), "once");
+        assert_eq!(
+            remove_machine_agent(&paths).unwrap(),
+            Removed::Nothing,
+            "once"
+        );
 
         let other = paths.hub_data().join("agents").join("kept");
         std::fs::create_dir_all(&other).unwrap();
@@ -698,15 +779,53 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("keep.md"), "").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &agent).unwrap();
-        #[cfg(unix)]
-        assert!(remove_machine_agent(&paths).unwrap());
+        {
+            std::os::unix::fs::symlink(&target, &agent).unwrap();
+            assert_eq!(remove_machine_agent(&paths).unwrap(), Removed::Deleted);
+        }
         assert!(std::fs::symlink_metadata(&agent).is_err());
         assert!(
             target.join("keep.md").exists(),
             "never what a link points to"
         );
         assert!(other.exists(), "not the agents folder while it holds more");
+    }
+
+    /// An upgraded machine's Desk agent holding work (a checkout under its
+    /// projects, memories) is moved aside whole, every byte of it, and the
+    /// hub sees no agent; a second start finds nothing to move.
+    #[test]
+    fn a_machines_desk_agent_with_work_is_moved_aside_not_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths::at(root.path());
+        let agent = paths.hub_data().join("agents").join(DESK_AGENT);
+        let clone = agent.join("projects/web/work/clones/main");
+        std::fs::create_dir_all(&clone).unwrap();
+        std::fs::write(clone.join("unpushed.rs"), "fn wip() {}").unwrap();
+        std::fs::write(agent.join("config.toml"), "").unwrap();
+        let Removed::MovedAside(to) = remove_machine_agent(&paths).unwrap() else {
+            panic!("work was not moved aside");
+        };
+        assert!(to.starts_with(paths.hub_data().join("agents.removed")));
+        assert_eq!(
+            std::fs::read_to_string(to.join("projects/web/work/clones/main/unpushed.rs")).unwrap(),
+            "fn wip() {}"
+        );
+        assert!(to.join("config.toml").exists());
+        assert!(!agent.exists());
+        assert!(!paths.hub_data().join("agents").exists());
+        assert_eq!(remove_machine_agent(&paths).unwrap(), Removed::Nothing);
+
+        // A memory, or a file the hub never writes at the top, is work too.
+        for kept in ["memory/users/u.md", "notes.txt"] {
+            let at = agent.join(kept);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(&at, "x").unwrap();
+            assert!(matches!(
+                remove_machine_agent(&paths).unwrap(),
+                Removed::MovedAside(_)
+            ));
+        }
     }
 
     #[test]

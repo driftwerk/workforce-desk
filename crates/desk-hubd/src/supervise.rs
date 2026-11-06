@@ -848,8 +848,14 @@ async fn run_helper(
         config::ensure_oversight(&desk_agent)?;
     } else if paths.machine_marker().exists() {
         match config::remove_machine_agent(&paths) {
-            Ok(true) => tracing::info!("running as a machine: its Desk agent is removed"),
-            Ok(false) => {}
+            Ok(config::Removed::Deleted) => {
+                tracing::info!("running as a machine: its Desk agent is removed")
+            }
+            Ok(config::Removed::MovedAside(to)) => tracing::warn!(
+                kept = %to.display(),
+                "running as a machine: its Desk agent is removed; what it held is kept aside"
+            ),
+            Ok(config::Removed::Nothing) => {}
             Err(e) => {
                 tracing::warn!(error = %e, "running as a machine: its Desk agent could not be removed; tried again on the next start")
             }

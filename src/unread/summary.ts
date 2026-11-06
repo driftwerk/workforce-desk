@@ -103,14 +103,28 @@ export const refreshLocalSoon = (): void => {
   soon = setTimeout(() => void refreshLocal(), SUMMARY_DEBOUNCE_MS);
 };
 
+/** Drops every DM count of hub `hubId`'s, and its cached ones. */
+function forgetDms(hubId: string): void {
+  const prefix = `${hubId}/`;
+  useUnread.setState((s) => {
+    const dms = Object.fromEntries(Object.entries(s.dms).filter(([key]) => !key.startsWith(prefix)));
+    deskState.set(cacheKey(hubId), { ...cached(hubId), at: Date.now(), dms: {} } satisfies Cached);
+    return { dms };
+  });
+}
+
 /** A listing of `hub`'s conversations says which DMs have something unread
  *  (one with nothing unread isn't listed, or says zero) and how far each
  *  was read. A hub that keeps no read points (it doesn't say `desk.reads`)
  *  says nothing. */
 export function dmsFrom(hub: HubAccount, rows: readonly Active[]): void {
   // A machine's hub serves no agents and Desk lists none of a machine's
-  // (see the roster): no DM there counts.
-  if (hub.machine) return;
+  // (see the roster): no DM there counts, and none an older one's boss left
+  // counts or is restored from the cache again.
+  if (hub.machine) {
+    forgetDms(hub.id);
+    return;
+  }
   const dmRows = rows.filter((r) => r.channel === DESK_DM);
   const keeps = useChat.getState().hubFeatures[hub.id]?.has(FEATURE_READS) || dmRows.some((r) => r.unread !== undefined || r.read !== undefined);
   if (!keeps) return;
