@@ -144,8 +144,11 @@ const mergeHeard = (): void => {
     }
     if (!ids.has(machine)) continue;
     heard.delete(machine);
+    // The same new groups' ids here and on the hub, which makes it again.
+    const made: string[] = [];
     replaceLayout((l) => {
-      const next = mergeMachineLayout(l, machine, theirs, newId);
+      let i = 0;
+      const next = mergeMachineLayout(l, machine, theirs, () => (made[i++] ??= newId()));
       return next === l ? null : next;
     });
     useMachineSessions.setState((s) => ({ merged: [...s.merged, machine] }));

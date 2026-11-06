@@ -9,7 +9,7 @@ const { useDesk, announce: deliver } = await import("../hub/store");
 const { useMachines } = await import("../hub/engines");
 const { useSettings } = await import("../settings/store");
 const { forgetGone, nameSession, useHubLayout, moveItem } = await import("./store");
-const { dropItems, machineOfItem, mergeMachineLayout, moveItem: moved, resolve, sessionItem, UNGROUPED, EMPTY_LAYOUT } = await import("./model");
+const { dropAt, dropItems, dropOn, machineOfItem, mergeMachineLayout, moveItem: moved, resolve, sessionItem, UNGROUPED, EMPTY_LAYOUT } = await import("./model");
 const { followMachineSessions, goneOn, machineSessions, useMachineSessions } = await import("./machines");
 
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -45,6 +45,25 @@ describe("a session's layout item", () => {
     expect(inAtlas.groups.map((g) => g.items)).toEqual([[`session:${U(2)}`], [remote]]);
     const back = moved(inAtlas, present, remote, UNGROUPED, null);
     expect(resolve(back, present).at(-1)!.items).toEqual([remote]);
+  });
+
+  it("a machine's session dragged from Ungrouped onto another group's row, then onto a group's header, lands there", () => {
+    const remote = `session:devbox/${U(1)}`;
+    const present = [`session:${U(2)}`, "agent:local/allan", remote];
+    const l: Layout = {
+      groups: [
+        { id: "acme", name: "Acme", collapsed: false, items: [`session:${U(2)}`] },
+        { id: "atlas", name: "Atlas", collapsed: false, items: ["agent:local/allan"] },
+      ],
+      ungrouped: { collapsed: false, items: [] },
+    };
+    const onAllan = dropAt(l, resolve(l, present), { type: "item", id: remote }, { type: "item", id: "agent:local/allan" }, true)!;
+    expect(onAllan).toEqual({ kind: "item", group: "atlas", before: "agent:local/allan" });
+    const inAtlas = dropOn(l, present, remote, onAllan);
+    expect(resolve(inAtlas, present).map((g) => g.items)).toEqual([[`session:${U(2)}`], [remote, "agent:local/allan"], []]);
+    const onAcme = dropAt(inAtlas, resolve(inAtlas, present), { type: "item", id: remote }, { type: "group", id: "acme" }, true)!;
+    const inAcme = dropOn(inAtlas, present, remote, onAcme);
+    expect(resolve(inAcme, present).map((g) => g.items)).toEqual([[`session:${U(2)}`, remote], ["agent:local/allan"], []]);
   });
 
   it("dropping items takes them out of every group and Ungrouped; none: null", () => {
@@ -160,11 +179,17 @@ describe("following the machines' sessions", () => {
 
   it("on a hub that keeps the groups, sends the whole layout as changed", async () => {
     const hubLayout: Layout = { groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:devbox/${U(1)}`] }], ungrouped: { collapsed: false, items: [] } };
+    // What the hub has now: it forgot one of its own sessions meanwhile.
+    const fresh: Layout = { groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:devbox/${U(1)}`, `session:${U(7)}`] }], ungrouped: { collapsed: false, items: [] } };
     const replaceLayout = vi.fn(async (l: Layout) => l);
-    useDesk.setState({ hub: { replaceLayout } as never });
+    useDesk.setState({ hub: { replaceLayout, layout: vi.fn(async () => fresh) } as never });
     useHubLayout.setState({ layout: hubLayout, kept: true });
     say({ type: "removed", id: U(1) });
-    await vi.waitFor(() => expect(replaceLayout).toHaveBeenCalledWith({ groups: [{ id: "acme", name: "Acme", collapsed: false, items: [] }], ungrouped: { collapsed: false, items: [] } }));
+    // At once here; on the hub, made again to what it has.
+    expect(useHubLayout.getState().layout!.groups[0]!.items).toEqual([]);
+    await vi.waitFor(() =>
+      expect(replaceLayout).toHaveBeenCalledWith({ groups: [{ id: "acme", name: "Acme", collapsed: false, items: [`session:${U(7)}`] }], ungrouped: { collapsed: false, items: [] } }),
+    );
   });
 
   it("a snapshot's restore list counts as still there", () => {

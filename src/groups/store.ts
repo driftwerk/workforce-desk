@@ -159,9 +159,16 @@ export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Dro
   drop.kind === "item" ? moveItem(present, dragged, drop.group, drop.before) : moveGroup(dragged, drop.before);
 
 /** A change no one route says (a machine's sessions forgotten, its groups
- *  merged in): the whole layout as changed, in turn with the rest. */
+ *  merged in): the whole layout as changed, in turn with the rest. The hub
+ *  may have changed it itself meanwhile (a session of its own forgotten), so
+ *  the change is made again to what it has now, not to Desk's copy. */
 export const replaceLayout = (change: (layout: Layout) => Layout | null): void =>
-  changeLayout(change, (h, next) => h.replaceLayout(next));
+  changeLayout(change, (h) =>
+    h.layout().then((fresh) => {
+      const next = change(fresh);
+      return next ? h.replaceLayout(next) : fresh;
+    }),
+  );
 
 // ── Names ─────────────────────────────────────────────────────────────────
 
