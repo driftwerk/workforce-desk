@@ -118,6 +118,47 @@ it("starts a session on a machine: its folder typed with suggestions from there,
   expect(onClose).toHaveBeenCalled();
 });
 
+describe("on a machine whose Claude Code was never signed in", () => {
+  const claude = engine({ engine: "claude", title: "Claude Code", signIn: { state: "out" }, caps: { terminal: { accounts: "token", notes: [] } as never } });
+  // As "Use this Mac's accounts" left them before: neither the default.
+  const copied = (signedIn: boolean) => [
+    { id: "m-w", engine: "claude", name: "Work", isDefault: false, signedIn, sessions: [], createdAt: "2026-11-06T09:00:00Z" },
+    { id: "m-p", engine: "claude", name: "Personal", isDefault: false, signedIn, sessions: [], createdAt: "2026-11-06T09:00:01Z" },
+  ];
+  const onDevbox = async (signedIn: boolean) => {
+    withEngine("devbox", {
+      start: machineStart,
+      engines: vi.fn(async () => [claude]),
+      accounts: vi.fn(async () => ({ accounts: copied(signedIn), store: "Desk's private file", signIns: [], autoSwitch: true })),
+    } as unknown as DeskHub);
+    const { native } = fakeNative({ transport: vi.fn(() => foldersTransport({ home: "/home/dev", folders: [] }, [])) });
+    render(<NewSession onClose={() => {}} native={native} />);
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
+    await act(async () => {});
+  };
+
+  it("starts on its first account, and doesn't offer the sign-in it hasn't got", async () => {
+    await onDevbox(true);
+    const picker = screen.getByRole("radiogroup", { name: "Account" });
+    expect([...picker.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Work", "Personal"]);
+    expect(screen.getByRole("radio", { name: "Work" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^Start/ })));
+    expect(machineStart).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude", account: "m-w" }));
+  });
+
+  it("says so plainly, and starts nothing, when none of its accounts can sign in", async () => {
+    await onDevbox(false);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Claude Code isn’t signed in on devbox, and none of its accounts there can sign in. Add an account again in Settings → Engines, then start the session.",
+    );
+    const start = screen.getByRole("button", { name: /^Start/ }) as HTMLButtonElement;
+    expect(start.disabled).toBe(true);
+    await act(async () => fireEvent.click(start));
+    expect(machineStart).not.toHaveBeenCalled();
+  });
+});
+
 it("forgets a folder typed for another computer when Run on changes", async () => {
   render(<NewSession onClose={() => {}} native={fakeNative().native} />);
   fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/Users/me/work" } });

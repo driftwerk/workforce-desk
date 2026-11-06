@@ -178,4 +178,54 @@ it("words what copying did", () => {
     "Work is on devbox now, copied from this Mac.",
     "Personal was on devbox already.",
   ]);
+  expect(sharedText({ cancelled: false, copied: ["Work", "Personal"], already: [], failed: [], autoSwitch: true, madeDefault: "Work" }, "devbox", "this Mac")).toEqual([
+    "Work and Personal are on devbox now, copied from this Mac.",
+    "New sessions on devbox start on Work: Claude Code isn’t signed in there by itself.",
+    "devbox moves its sessions to another account at a limit by itself, as this Mac does.",
+  ]);
+});
+
+it("offers to make its first account the default on a machine an earlier copy left without one", async () => {
+  // Both copied already, neither the default, and Claude Code logged out there.
+  let there: { accounts: EngineAccount[] } | null = null;
+  const updateAccount = vi.fn(async () => {
+    there!.accounts = [account("d-p", "Personal"), account("d-w", "Work", { isDefault: true, createdAt: "2026-11-02T09:00:00Z" })];
+    return {};
+  });
+  // Work copied first.
+  const { devbox, state } = setUp([account("d-p", "Personal"), account("d-w", "Work", { createdAt: "2026-11-02T09:00:00Z" })], { updateAccount });
+  there = state;
+  render(<Accounts engine={claude} machine="devbox" name="devbox" native={fakeNative().native} canAdd={false} />);
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: "Use this Mac’s accounts…" })).toBeNull();
+  expect(screen.getByText(/Claude Code isn’t signed in on devbox, and none of its accounts is the default\./)).toBeTruthy();
+  expect(screen.getByText("New sessions there start on Work until one is.")).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Make Work the default" })));
+  expect(updateAccount).toHaveBeenCalledWith("d-w", { isDefault: true });
+  expect(devbox.accounts).toHaveBeenCalled();
+  expect(screen.getByText("New sessions on devbox start on Work.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Make Work the default" })).toBeNull();
+});
+
+it("names the account the machine's hub starts sessions on, its oldest, and counts only a default that signs in", async () => {
+  // devbox has Personal first; this Mac's default, Work, came later.
+  setUp([account("d-w", "Work", { createdAt: "2026-11-05T09:00:00Z" }), account("d-p", "Personal", { createdAt: "2026-11-04T09:00:00Z" })]);
+  render(<Accounts engine={claude} machine="devbox" name="devbox" native={fakeNative().native} canAdd={false} />);
+  await act(async () => {});
+  expect(screen.getByText("New sessions there start on Personal until one is.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Make Personal the default" })).toBeTruthy();
+  cleanup();
+
+  setUp([account("d-w", "Work", { isDefault: true, signedIn: false }), account("d-p", "Personal")]);
+  render(<Accounts engine={claude} machine="devbox" name="devbox" native={fakeNative().native} canAdd={false} />);
+  await act(async () => {});
+  expect(screen.getByText(/its default, Work, can’t sign in\./)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Make Personal the default" })).toBeTruthy();
+});
+
+it("offers no default where Claude Code is signed in by itself", async () => {
+  setUp([account("d-p", "Personal"), account("d-w", "Work")]);
+  render(<Accounts engine={{ ...claude, signIn: { state: "in", via: "plan", who: null, plan: null } }} machine="devbox" name="devbox" native={fakeNative().native} canAdd={false} />);
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: /the default$/ })).toBeNull();
 });

@@ -15,6 +15,10 @@
 //!   with its Claude Code, then keeps it in its private file store (0600).
 //! - **Removed per machine** from the machine's own accounts, which never
 //!   touches this computer's.
+//! - **Signed in from the first session.** A machine whose Claude Code was
+//!   never logged in, with no default account, takes this computer's first
+//!   account (the order a switch takes them: the default, then the oldest)
+//!   as its default, so its sessions start signed in, never at a login.
 //! - **Never synced back.** A setup-token token is not refreshed: it works
 //!   for a year wherever it is set, so the copy and this computer's are the
 //!   same token, and neither makes the other stale. ChatGPT's sign-in is
@@ -89,6 +93,9 @@ pub struct Shared {
     /// The machine now moves sessions to another account at a limit, as
     /// this computer does.
     pub auto_switch: bool,
+    /// The account the machine's sessions now start on by default: its
+    /// Claude Code isn't signed in by itself, and it had none.
+    pub made_default: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -158,6 +165,45 @@ fn said_in(status: u16, body: &str) -> String {
         .unwrap_or_else(|| format!("its Desk answered {status}"))
 }
 
+/// Whether Claude Code on the machine is signed in by itself, as its hub
+/// last read it; `None` when it can't say yet, or its hub couldn't be
+/// asked.
+async fn signed_in_there(hub: &impl Hub) -> Option<bool> {
+    let a = hub.fetch("GET", "/api/desk/engines", None).await.ok()?;
+    if a.status != 200 {
+        return None;
+    }
+    let engines: Vec<serde_json::Value> = serde_json::from_str(&a.body).ok()?;
+    let claude = engines.iter().find(|e| e["engine"] == "claude")?;
+    match claude["signIn"]["state"].as_str() {
+        Some("in") => Some(true),
+        Some("out") => Some(false),
+        // Not read yet (a hub just started), or unreadable: don't guess.
+        _ => None,
+    }
+}
+
+/// Makes the machine's account that comes first in `order` (names, this
+/// computer's switch order), else its first, its default: what a session
+/// there starts on. Nothing secret is sent, so it isn't asked about.
+async fn make_default_there(theirs: &impl Hub, order: &[&str]) -> Option<String> {
+    let there = accounts_of(theirs, "the machine's").await.ok()?;
+    let signed_in: Vec<&Listed> = claude_accounts(&there.accounts);
+    if signed_in.iter().any(|a| a.is_default) {
+        return None;
+    }
+    let first = order
+        .iter()
+        .find_map(|n| signed_in.iter().find(|a| a.name.eq_ignore_ascii_case(n)))
+        .or_else(|| signed_in.first())?;
+    let path = account_path(&first.id).ok()?;
+    let r = theirs
+        .fetch("PATCH", &path, Some(serde_json::json!({"isDefault": true})))
+        .await
+        .ok()?;
+    (r.status < 300).then(|| first.name.clone())
+}
+
 async fn accounts_of(hub: &impl Hub, whose: &str) -> Result<Accounts, String> {
     let a = hub.fetch("GET", "/api/desk/accounts", None).await?;
     if a.status == 404 {
@@ -185,7 +231,10 @@ where
     F: Future<Output = bool>,
 {
     let here = accounts_of(mine, &format!("{HERE}'s")).await?;
-    let wanted = claude_accounts(&here.accounts);
+    let mut wanted = claude_accounts(&here.accounts);
+    // In the order a switch takes them: the default, then the oldest.
+    wanted.sort_by_key(|a| !a.is_default);
+    let order: Vec<&str> = wanted.iter().map(|a| a.name.as_str()).collect();
     if wanted.is_empty() {
         return Err(format!(
             "{} has no Claude accounts to copy. Add one in Settings → Engines first.",
@@ -211,7 +260,16 @@ where
         already: already.iter().map(|a| a.name.clone()).collect(),
         ..Shared::default()
     };
+    let mut has_default = there
+        .accounts
+        .iter()
+        .any(|a| a.engine == "claude" && a.is_default && a.signed_in);
+    // No sign-in of its own there: a session starts on the default.
+    let needs_default = !has_default && signed_in_there(theirs).await == Some(false);
     if copying.is_empty() {
+        if needs_default {
+            shared.made_default = make_default_there(theirs, &order).await;
+        }
         return Ok(shared);
     }
     let named: Vec<&str> = copying.iter().map(|a| a.name.as_str()).collect();
@@ -219,10 +277,6 @@ where
         shared.cancelled = true;
         return Ok(shared);
     }
-    let mut has_default = there
-        .accounts
-        .iter()
-        .any(|a| a.engine == "claude" && a.is_default && a.signed_in);
     for a in copying {
         let fail = |why: String| Failed {
             name: a.name.clone(),
@@ -249,7 +303,7 @@ where
             continue;
         };
         let token = zeroize::Zeroizing::new(token);
-        let make_default = a.is_default && !has_default;
+        let make_default = !has_default && (a.is_default || needs_default);
         let body = serde_json::json!({
             "engine": "claude",
             "name": a.name,
@@ -260,6 +314,9 @@ where
         match theirs.fetch("POST", "/api/desk/accounts", Some(body)).await {
             Ok(r) if r.status == 200 || r.status == 201 => {
                 has_default |= make_default;
+                if make_default {
+                    shared.made_default = Some(a.name.clone());
+                }
                 shared.copied.push(a.name.clone());
             }
             Ok(r) => shared
@@ -271,6 +328,10 @@ where
                 name = place.name
             ))),
         }
+    }
+    // One that was already there, when none copied could be.
+    if needs_default && !has_default {
+        shared.made_default = make_default_there(theirs, &order).await;
     }
     if here.auto_switch && !there.auto_switch && !shared.copied.is_empty() {
         let on = theirs
@@ -287,6 +348,7 @@ where
     tracing::info!(
         machine = %place.name,
         copied = shared.copied.len(),
+        made_default = shared.made_default.is_some(),
         already = shared.already.len(),
         failed = shared.failed.len(),
         "copied this computer's accounts to a machine"
@@ -340,6 +402,19 @@ fn hand_over_path(account: &str) -> Result<String, String> {
         return Err("That isn't one of this computer's accounts.".into());
     }
     Ok(format!("/api/desk/accounts/{account}/hand-over"))
+}
+
+/// Where a machine's account `account` is changed: only ever an account's
+/// id as its hub listed it.
+fn account_path(account: &str) -> Result<String, String> {
+    let ok = !account.is_empty()
+        && account
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !ok {
+        return Err("That isn't one of the machine's accounts.".into());
+    }
+    Ok(format!("/api/desk/accounts/{account}"))
 }
 
 /// A machine's hub, through its broker (and so its forward).
@@ -497,6 +572,9 @@ mod tests {
         /// The add is sent, and the connection drops before any answer.
         drop_add: bool,
         refuse_hand_over: Option<String>,
+        /// What its engines say of Claude Code's own sign-in (`in`, `out`);
+        /// none: its hub doesn't say (as an older one).
+        claude_sign_in: Option<&'static str>,
     }
 
     impl Fake {
@@ -551,6 +629,27 @@ mod tests {
                 ("PUT", "/api/desk/accounts/auto-switch") => {
                     Ok(answer(204, serde_json::Value::Null))
                 }
+                ("GET", "/api/desk/engines") => match self.claude_sign_in {
+                    Some(state) => Ok(answer(
+                        200,
+                        serde_json::json!([
+                            {"engine": "codex", "signIn": {"state": "out"}},
+                            {"engine": "claude", "signIn": {"state": state}},
+                        ]),
+                    )),
+                    None => Ok(answer(404, serde_json::Value::Null)),
+                },
+                ("PATCH", t) if t.starts_with("/api/desk/accounts/") => {
+                    let id = t.trim_start_matches("/api/desk/accounts/");
+                    let make = body.as_ref().unwrap()["isDefault"] == true;
+                    let mut all = self.accounts.lock().unwrap();
+                    for a in all["accounts"].as_array_mut().unwrap() {
+                        if make {
+                            a["isDefault"] = serde_json::json!(a["id"] == id);
+                        }
+                    }
+                    Ok(answer(200, serde_json::json!({})))
+                }
                 _ => Ok(answer(404, serde_json::Value::Null)),
             };
             async move { out }
@@ -601,6 +700,38 @@ mod tests {
         Fake::with(
             serde_json::json!({"store": "Desk's private file", "autoSwitch": false, "accounts": [], "signIns": []}),
         )
+    }
+
+    /// This Mac as it really is: its sessions on its own sign-in, so no
+    /// account is the default.
+    fn mac_without_default() -> Fake {
+        Fake::with(serde_json::json!({
+            "store": "the keychain",
+            "autoSwitch": true,
+            "accounts": [
+                {"id": "work", "engine": "claude", "name": "Work", "isDefault": false, "signedIn": true},
+                {"id": "personal", "engine": "claude", "name": "Personal", "isDefault": false, "signedIn": true},
+            ],
+            "signIns": [],
+        }))
+    }
+
+    /// A machine Claude Code was never logged in on.
+    fn never_logged_in() -> Fake {
+        Fake {
+            claude_sign_in: Some("out"),
+            ..devbox()
+        }
+    }
+
+    fn defaults(hub: &Fake) -> Vec<String> {
+        hub.accounts.lock().unwrap()["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| a["isDefault"] == true)
+            .map(|a| a["name"].as_str().unwrap().to_string())
+            .collect()
     }
 
     fn place() -> Place {
@@ -673,6 +804,113 @@ mod tests {
         );
         // What the page is told never holds a token.
         assert!(!serde_json::to_string(&shared).unwrap().contains("sk-ant"));
+    }
+
+    #[test]
+    fn a_machine_never_logged_in_takes_the_first_account_as_its_default() {
+        let (mine, theirs) = (mac_without_default(), never_logged_in());
+        let shared = block(share(&mine, &theirs, &place(), |_| async { true })).unwrap();
+        assert_eq!(shared.copied, ["Work", "Personal"]);
+        assert_eq!(shared.made_default.as_deref(), Some("Work"));
+        let posted: Vec<serde_json::Value> = theirs
+            .asked()
+            .into_iter()
+            .filter(|(m, t, _)| m == "POST" && t == "/api/desk/accounts")
+            .map(|(_, _, b)| b.unwrap())
+            .collect();
+        assert_eq!(
+            (
+                posted[0]["name"].as_str(),
+                posted[0]["makeDefault"].as_bool()
+            ),
+            (Some("Work"), Some(true))
+        );
+        assert_eq!(posted[1]["makeDefault"], false);
+        assert_eq!(defaults(&theirs), ["Work"]);
+
+        // Signed in there by itself: its sessions stay on its own sign-in.
+        let signed_in = Fake {
+            claude_sign_in: Some("in"),
+            ..devbox()
+        };
+        let shared = block(share(
+            &mac_without_default(),
+            &signed_in,
+            &place(),
+            |_| async { true },
+        ))
+        .unwrap();
+        assert_eq!(shared.made_default, None);
+        assert!(defaults(&signed_in).is_empty());
+
+        // Not read yet there: left to the machine's hub.
+        let unknown = Fake {
+            claude_sign_in: Some("unknown"),
+            ..devbox()
+        };
+        let shared = block(share(
+            &mac_without_default(),
+            &unknown,
+            &place(),
+            |_| async { true },
+        ))
+        .unwrap();
+        assert_eq!(shared.made_default, None);
+        assert!(defaults(&unknown).is_empty());
+
+        // An older hub that doesn't say: left to the machine's hub.
+        let older = devbox();
+        let shared = block(share(&mac_without_default(), &older, &place(), |_| async {
+            true
+        }))
+        .unwrap();
+        assert_eq!(shared.made_default, None);
+    }
+
+    #[test]
+    fn copying_again_to_a_machine_left_without_a_default_makes_one_without_asking() {
+        // As the first copy left the machine: both there, neither the default.
+        let theirs = Fake {
+            claude_sign_in: Some("out"),
+            ..Fake::with(serde_json::json!({
+                "store": "Desk's private file",
+                "autoSwitch": true,
+                "accounts": [
+                    {"id": "m-personal", "engine": "claude", "name": "Personal", "isDefault": false, "signedIn": true},
+                    {"id": "m-work", "engine": "claude", "name": "Work", "isDefault": false, "signedIn": true},
+                ],
+            }))
+        };
+        let shared = block(share(
+            &mac_without_default(),
+            &theirs,
+            &place(),
+            |_| async { panic!("nothing secret is sent: nothing to ask") },
+        ))
+        .unwrap();
+        assert_eq!(shared.already, ["Work", "Personal"]);
+        assert_eq!(
+            shared.made_default.as_deref(),
+            Some("Work"),
+            "this Mac's first, not the machine's"
+        );
+        assert_eq!(defaults(&theirs), ["Work"]);
+        assert!(theirs.asked().iter().any(|(m, t, b)| m == "PATCH"
+            && t == "/api/desk/accounts/m-work"
+            && b.as_ref().unwrap()["isDefault"] == true));
+    }
+
+    #[test]
+    fn when_the_first_cant_be_copied_the_next_is_the_default() {
+        let mine = Fake {
+            refuse_hand_over: Some("work".into()),
+            ..mac_without_default()
+        };
+        let theirs = never_logged_in();
+        let shared = block(share(&mine, &theirs, &place(), |_| async { true })).unwrap();
+        assert_eq!(shared.copied, ["Personal"]);
+        assert_eq!(shared.made_default.as_deref(), Some("Personal"));
+        assert_eq!(defaults(&theirs), ["Personal"]);
     }
 
     #[test]
