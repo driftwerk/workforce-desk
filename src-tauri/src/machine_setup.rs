@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use desk_core::machine_backend::{self, Arch, Backend, Source};
-use desk_machine::fleet::{Fleet, Host, Listed, SetupEvent};
-use desk_machine::hostkey::{TrustConfirm, TrustQuestion};
+use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, RemoveEvent, SetupEvent};
+use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion};
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
 
@@ -48,6 +48,10 @@ impl Host for AppHost {
 
     fn setup(&self, event: &SetupEvent) {
         let _ = self.app.emit("machine-setup", event);
+    }
+
+    fn removing(&self, event: &RemoveEvent) {
+        let _ = self.app.emit("machine-remove", event);
     }
 
     fn dropped(&self, id: &str) {
@@ -161,6 +165,20 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
     fn trust_key(&self, question: &TrustQuestion) -> bool {
         self.ask("Trust a machine", question.text(), "Trust Key")
     }
+    fn switch_to(&self, question: &SwitchQuestion) -> bool {
+        self.ask(
+            "Change how Desk reaches a machine",
+            question.text(),
+            "Check",
+        )
+    }
+    fn uninstall(&self, question: &UninstallQuestion) -> bool {
+        self.ask(
+            "Uninstall Desk from a machine",
+            question.text(),
+            "Uninstall",
+        )
+    }
 }
 
 /// Runs `f` on a blocking thread.
@@ -222,6 +240,99 @@ pub fn machine_reconnect(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Com
 #[tauri::command]
 pub fn machine_remove(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
     fleet.remove(&id)
+}
+
+/// "Cancel adding": stops setting machine `id` up at once, and forgets it.
+#[tauri::command]
+pub fn machine_cancel_add(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.cancel_add(&id)
+}
+
+/// "Retry" when a machine's engines couldn't be installed as it was added.
+#[tauri::command]
+pub fn machine_retry_engines(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.retry_engines(&id)
+}
+
+/// "Cancel" while uninstalling: stops before anything is removed.
+#[tauri::command]
+pub fn machine_cancel_uninstall(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<()> {
+    fleet.cancel_uninstall(&id)
+}
+
+/// "Cancel update": stops machine `id`'s update before it switches over.
+#[tauri::command]
+pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
+    fleet.cancel_update(&id)
+}
+
+/// "Also uninstall Desk from devbox": once the person says yes natively,
+/// stops its service there, removes everything Desk keeps there and turns
+/// linger off, then forgets it; each step said on `machine-remove`.
+/// Nothing is forgotten when a step fails. False when the person said no,
+/// or cancelled before anything was removed.
+#[tauri::command]
+pub async fn machine_uninstall(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<bool> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.uninstall(&id)).await
+}
+
+/// How long reading Desk's log on a machine may take.
+const REMOTE_LOG_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// This computer's log of machine `id`: connecting, ssh's words, when next.
+#[tauri::command]
+pub fn machine_log(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<Vec<LogLine>> {
+    fleet.log(&id)
+}
+
+/// Desk's own log on machine `id` (its service's last 200 lines), read
+/// over SSH; given up on after 10 s.
+#[tauri::command]
+pub async fn machine_remote_log(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<String> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.remote_log(&id, REMOTE_LOG_WITHIN)).await
+}
+
+/// The `Host` entries in the person's SSH config, read as text.
+#[tauri::command]
+pub fn machine_ssh_hosts(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+) -> Vec<desk_machine::suggest::HostEntry> {
+    fleet.ssh_hosts()
+}
+
+/// Changes machine `id`'s name, how it is reached, or both: a new address
+/// only once the person says yes and it shows the machine's own host key.
+#[tauri::command]
+pub async fn machine_edit(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+    target: Option<String>,
+    name: Option<String>,
+) -> CommandResult<Edited> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.edit(&id, target.as_deref(), name.as_deref())).await
+}
+
+/// Checks another address reaches machine `id` (`Fleet::check_reach`).
+#[tauri::command]
+pub async fn machine_check_reach(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+    target: String,
+) -> CommandResult<desk_machine::fleet::Checked> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.check_reach(&id, &target)).await
 }
 
 /// Signing in to ChatGPT on a machine: not yet.

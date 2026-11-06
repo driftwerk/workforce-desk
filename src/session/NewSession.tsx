@@ -9,9 +9,11 @@ import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo } from "../hub/types";
 import { keyOf, LOCAL, useHubOf, useMachines, type MachineId } from "../machines/engines";
 import { native as machineNative, type MachineNative } from "../machines/native";
-import { MachineFolder, RunOn } from "../machines/RunOn";
+import { RunOn } from "../machines/RunOn";
+import { FolderPicker } from "../machines/FolderPicker";
+import { homeWithin, onMachine } from "../machines/folders";
 import { nameOfMachine } from "../machines/words";
-import { pickFolder } from "../platform";
+import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
@@ -37,7 +39,18 @@ export const groupSays = (group: string, startedIn: string, name: string, machin
   return `It shows in ${group === UNGROUPED ? "Ungrouped" : name}${tag}.`;
 };
 
-export function NewSession({ onClose, group: given, native = machineNative }: { onClose: () => void; group?: string; native?: MachineNative }) {
+export function NewSession({
+  onClose,
+  group: given,
+  native = machineNative,
+  on = LOCAL,
+}: {
+  onClose: () => void;
+  group?: string;
+  native?: MachineNative;
+  /** The computer it runs on, until another is chosen. */
+  on?: MachineId;
+}) {
   const { fail, open } = useDesk();
   const layout = useLayout();
   // Where it shows: the group it was started from, unless another is chosen.
@@ -49,7 +62,7 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
   });
   const [group, setGroup] = useState(startedIn);
   // Where it runs: this computer, or a machine once there's one.
-  const [runOn, setRunOn] = useState<MachineId>(LOCAL);
+  const [runOn, setRunOn] = useState<MachineId>(on);
   const remote = runOn !== LOCAL;
   const hub = useHubOf(runOn);
   const machines = useMachines((s) => s.machines);
@@ -57,6 +70,8 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
   const where = nameOfMachine(runOn, machines, platform);
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState("");
+  /** The folder typed is one the machine says isn't there. */
+  const [noFolder, setNoFolder] = useState(false);
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [worktree, setWorktree] = useState("");
@@ -103,13 +118,15 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hub || !cwd) return;
+    if (!hub || (!cwd && !remote)) return;
     setBusy(true);
     try {
+      // On a machine, its own path: `~` (and nothing typed) is its home.
+      const where = remote ? onMachine(cwd || "~", await homeWithin(() => machineHome(runOn), runOn)) : cwd;
       const s = await hub.start({
         engine,
-        cwd,
-        name: name || nameFrom(cwd),
+        cwd: where,
+        name: name || nameFrom(where),
         goal,
         approvals: inDesk ? approvals : undefined,
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
@@ -143,26 +160,22 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
             setEngines(null);
           }}
         />
-        <div className="seg" role="radiogroup" aria-label="Engine">
-          {offered.map((k) => (
-            <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
-              {ENGINE_TITLE[k]}
-            </button>
-          ))}
-        </div>
+        {!remote && (
+          <div className="seg" role="radiogroup" aria-label="Engine">
+            {offered.map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
+                {ENGINE_TITLE[k]}
+              </button>
+            ))}
+          </div>
+        )}
         {remote && missing.length > 0 && (
           <p className="muted small">
             {missing.join(" and ")} {missing.length === 1 ? "isn’t" : "aren’t"} installed on {where}.
           </p>
         )}
         {remote ? (
-          <MachineFolder
-            machine={runOn}
-            name={where}
-            native={native}
-            value={cwd}
-            onChange={setCwd}
-          />
+          <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always onMissing={setNoFolder} />
         ) : (
           <label className="field">
             <span>Folder</span>
@@ -173,6 +186,19 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
               </button>
             </span>
           </label>
+        )}
+        {/* On a machine, as its board draws it: the engine below the folder. */}
+        {remote && (
+          <div className="field">
+            <span className="ov-label muted">Engine</span>
+            <div className="chip-row" role="radiogroup" aria-label="Engine">
+              {offered.map((k) => (
+                <button key={k} type="button" role="radio" className="chip-btn" aria-checked={engine === k} aria-pressed={engine === k} onClick={() => setEngine(k)}>
+                  {ENGINE_TITLE[k]}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {layout.groups.length > 0 && (
           <div className="field">
@@ -262,8 +288,8 @@ export function NewSession({ onClose, group: given, native = machineNative }: { 
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || !cwd || !hub}>
-            {remote ? `Start on ${where}` : "Start"}
+          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder)}>
+            {remote ? `Start in ${cwd.trim().replace(/\/+$/, "") || "~"}` : "Start"}
           </button>
         </footer>
       </form>

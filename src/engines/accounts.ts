@@ -36,6 +36,16 @@ export const switchingText = (s: Pick<Session, "switchingTo">): string | null =>
 export const sessionsText = (a: EngineAccount): string =>
   a.sessions.length === 0 ? "No sessions on it now" : a.sessions.length === 1 ? "1 session on it" : `${a.sessions.length} sessions on it`;
 
+/** "Claude", else the first of "Claude 2", "Claude 3"… that no account or
+ *  sign-in under way there is called. */
+export const freeName = (taken: readonly { name: string }[]): string => {
+  const names = new Set(taken.map((a) => a.name.toLowerCase()));
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? "Claude" : `Claude ${n}`;
+    if (!names.has(name.toLowerCase())) return name;
+  }
+};
+
 /** What a sign-in under way says. */
 export const signInStep = (s: AccountSignIn): string => {
   switch (s.state) {

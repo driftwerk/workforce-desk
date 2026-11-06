@@ -59,6 +59,7 @@ case "$1" in
     v=$(cat "$f/linger" 2>/dev/null || echo no)
     case "$*" in *--value*) echo "$v" ;; *) echo "Linger=$v" ;; esac ;;
   enable-linger) [ -e "$f/linger-allowed" ] || exit 1; echo yes > "$f/linger" ;;
+  disable-linger) [ -e "$f/linger-allowed" ] || exit 1; echo no > "$f/linger" ;;
 esac
 "#;
 
@@ -101,7 +102,12 @@ case "$1" in
     "$here/fake-runner" 3600 </dev/null >/dev/null 2>&1 &
     echo $! > "$pidfile"
     echo "VERSION $n" > "$f/running"; exit 0 ;;
-  --stop) stop; exit 0 ;;
+  --stop) [ -e "$f/stop-slow" ] && sleep 2; stop; exit 0 ;;
+  --remove-everything)
+    [ -e "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null && { echo "Desk Helper is still running; stop it first" >&2; exit 1; }
+    [ -e "$f/remove-fails" ] && { echo "deleting $HOME/.local/share/Desk: Permission denied (os error 13)" >&2; exit 1; }
+    [ -e "$f/remove-leaves" ] && exit 0
+    rm -rf "$HOME/.local/share/Desk"; exit 0 ;;
   connection)
     [ -e "$f/running" ] || { echo null; exit 0; }
     read v n < "$f/running"
@@ -207,6 +213,31 @@ impl Box_ {
         .unwrap();
     }
 
+    /// Several addresses at once: each `(target, key)`, all the one home
+    /// (the same machine, or the same account on it, whatever its key).
+    fn say_hosts(&self, hosts: &[(&str, Option<&str>)]) {
+        let hosts: Vec<Value> = hosts
+            .iter()
+            .map(|(target, key)| {
+                json!({
+                    "target": target,
+                    "settings": format!(
+                        "user dev\nhostname 203.0.113.7\nport 22\nidentityfile {}\nuserknownhostsfile {}\n",
+                        self.dir.path().join("mac/.ssh/id_ed25519").display(),
+                        self.known_hosts().display(),
+                    ),
+                    "exec": {"home": self.home(), "path": self.dir.path().join("fakebin")},
+                    "host_key": key,
+                })
+            })
+            .collect();
+        std::fs::write(
+            self.dir.path().join("scenario.json"),
+            json!({"log": self.dir.path().join("calls.jsonl"), "hosts": hosts}).to_string(),
+        )
+        .unwrap();
+    }
+
     fn calls(&self) -> Vec<Vec<String>> {
         std::fs::read_to_string(self.dir.path().join("calls.jsonl"))
             .unwrap_or_default()
@@ -308,6 +339,7 @@ struct Said {
     changes: AtomicUsize,
     events: Mutex<Vec<SetupEvent>>,
     dropped: Mutex<Vec<String>>,
+    removing: Mutex<Vec<desk_machine::fleet::RemoveEvent>>,
 }
 
 struct TestHost {
@@ -344,6 +376,9 @@ impl Host for TestHost {
             email: Some("ada@example.com".into()),
         }
     }
+    fn removing(&self, event: &desk_machine::fleet::RemoveEvent) {
+        self.said.removing.lock().unwrap().push(event.clone());
+    }
 }
 
 struct Yes(AtomicUsize, bool);
@@ -360,11 +395,20 @@ impl TrustConfirm for Yes {
         self.0.fetch_add(1, Ordering::SeqCst);
         self.1
     }
+    fn switch_to(&self, _: &desk_machine::hostkey::SwitchQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
+    fn uninstall(&self, _: &desk_machine::hostkey::UninstallQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
 }
 
 fn timing() -> Timing {
     Timing {
         ready_within: Duration::from_secs(20),
+        step_within: Duration::from_secs(20),
         poll: Duration::from_millis(100),
         check_every: Duration::from_millis(200),
         first_backoff: Duration::from_millis(200),
@@ -372,6 +416,7 @@ fn timing() -> Timing {
         linger_poll: Duration::from_millis(200),
         linger_for: Duration::from_secs(20),
         admitted_for: Duration::from_secs(60),
+        edit_within: Duration::from_secs(2),
     }
 }
 
@@ -380,6 +425,12 @@ struct Run {
     machines: Arc<Machines>,
     said: Arc<Said>,
     asked: Arc<Yes>,
+}
+
+impl Run {
+    fn list_target(&self) -> String {
+        self.fleet.list()[0].target.clone()
+    }
 }
 
 fn fleet(b: &Box_, wanted: &str, answer: bool) -> Run {
@@ -500,6 +551,9 @@ fn adding_a_machine_installs_starts_and_connects_it() {
     assert_eq!(row["state"], "ready");
     assert_eq!(row["version"], "0.2.0");
     assert!(row["system"]["arch"].is_string());
+    // Its page knows the account and linger from the add’s own look.
+    assert!(row["details"]["user"].is_string(), "{row}");
+    assert!(row["details"]["linger"].is_boolean(), "{row}");
 
     // The machine's hub is reached through the forward, with its token.
     let link = r.machines.get(&id).unwrap();
@@ -801,9 +855,17 @@ fn a_copy_that_fails_its_check_is_never_flipped_to() {
     // Not kept: it was never added.
     assert!(!b.dir.path().join("mac/machines.json").exists());
     // An unsigned development build is said where it is added.
-    let running = step(&r, "install", StepState::Running).unwrap();
+    // (Among its progress, which says no message.)
     assert!(
-        running.message.unwrap().contains("isn't checked"),
+        r.said
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e.state == StepState::Running
+                && e.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains("isn't checked"))),
         "the development build is said"
     );
 
@@ -847,6 +909,44 @@ fn engines_installed_there_restart_desk_so_its_hub_finds_them() {
     assert!(starts >= 2, "{starts}");
     let c = r.machines.get(&id).unwrap().connection().unwrap().unwrap();
     assert_eq!(c.device_token, Some(format!("DEVICE-{starts}")));
+}
+
+#[test]
+fn engines_that_failed_while_adding_are_installed_again_by_retry() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    for e in ["claude", "codex"] {
+        std::fs::remove_file(b.dir.path().join("fakebin").join(e)).unwrap();
+    }
+    // Their installers can't be fetched at first.
+    script(
+        &b.dir.path().join("fakebin/curl"),
+        "#!/bin/sh
+echo 'curl: (6) Could not resolve host' >&2
+exit 6
+",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("engines failed", || {
+        step(&r, "engines", StepState::Failed).is_some()
+    });
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // Added all the same: Retry installs them again, saying so as adding did.
+    script(&b.dir.path().join("fakebin/curl"), CURL);
+    r.fleet.retry_engines(&id).unwrap();
+    until("engines done", || {
+        step(&r, "engines", StepState::Done).is_some()
+    });
+    let engines = step(&r, "engines", StepState::Done).unwrap();
+    assert_eq!(
+        engines.detail.as_deref(),
+        Some("Claude Code 1.0.0 and Codex 1.0.0 installed")
+    );
+    assert!(b.home().join(".local/bin/claude").exists());
+    // Not for a machine still being added.
+    assert!(r.fleet.retry_engines("nope").is_err());
 }
 
 #[test]
@@ -962,4 +1062,1045 @@ fn a_machine_installed_before_the_marker_is_still_a_machine() {
     until("ready", || r.fleet.state(&id) == Some(State::Ready));
     assert_eq!(b.installed().as_deref(), Some("0.2.0"));
     assert!(root.join("machine").is_file(), "marked now");
+}
+
+/// Another machine's key, which isn't devbox's.
+const OTHER_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAa7mm1xLPFHiFjUNvJ+jVhN2gEvLPoSIMWB0+6fIOGs";
+
+/// devbox added, its key known, and kept by Desk.
+fn added_with_key(b: &Box_, r: &Run) -> String {
+    // Known as ssh looks it up: by its HostName.
+    std::fs::write(
+        b.known_hosts(),
+        format!("devbox {KEY}\n203.0.113.7 {KEY}\n"),
+    )
+    .unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("its key kept", || r.fleet.list()[0].host_key.is_some());
+    id
+}
+
+#[test]
+fn a_machine_is_reached_at_another_address_only_when_it_shows_the_same_key() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], FINGERPRINT);
+    assert_eq!(row["hostKey"]["kind"], "ED25519");
+    assert!(row["connectedSince"].is_i64() && row["lastConnected"].is_i64());
+    assert_eq!(row["reach"]["user"], "dev");
+    assert_eq!(row["reach"]["hostname"], "203.0.113.7");
+
+    // The same machine by another name (another Host entry, a new address).
+    b.say_hosts(&[
+        ("devbox", Some(KEY)),
+        ("devbox-new", Some(KEY)),
+        ("imposter", Some(OTHER_KEY)),
+    ]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let done = r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done"})
+    );
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked once, natively"
+    );
+    // Its key was learnt for the new address, as ssh would.
+    let known = std::fs::read_to_string(b.known_hosts()).unwrap();
+    assert!(known.contains(&format!("devbox-new {KEY}")), "{known}");
+    assert_eq!(r.fleet.list()[0].target, "devbox-new");
+    until("ready at the new address", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && b.calls().iter().any(|c| {
+                c.iter().any(|a| a == "devbox-new")
+                    && c.iter().any(|a| a.starts_with("-L") || a == "-N")
+            })
+    });
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept[0]["target"], "devbox-new");
+    assert_eq!(
+        kept[0]["id"], "devbox",
+        "the same machine: its sessions and settings stay"
+    );
+
+    // Another machine's key: refused, with both keys, and nothing changed.
+    let different = r.fleet.edit(&id, Some("imposter"), None).unwrap();
+    let said = serde_json::to_value(&different).unwrap();
+    assert_eq!(said["kind"], "differentKey");
+    assert_eq!(said["known"]["fingerprint"], FINGERPRINT);
+    assert_ne!(said["shown"]["fingerprint"], FINGERPRINT);
+    assert_eq!(r.fleet.list()[0].target, "devbox-new");
+    assert!(
+        !std::fs::read_to_string(b.known_hosts())
+            .unwrap()
+            .contains("imposter")
+    );
+    assert!(
+        r.fleet
+            .log(&id)
+            .unwrap()
+            .iter()
+            .any(|l| l.text.contains("another host key"))
+    );
+}
+
+#[test]
+fn an_address_is_checked_first_and_then_switched_to_without_asking_again() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let checked = serde_json::to_value(r.fleet.check_reach(&id, "devbox-new").unwrap()).unwrap();
+    assert_eq!(checked["kind"], "same");
+    assert_eq!(checked["key"]["fingerprint"], FINGERPRINT);
+    assert!(checked["tookMs"].is_u64());
+    assert_eq!(r.list_target(), "devbox", "a check moves nothing");
+    r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(r.list_target(), "devbox-new");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked once, for the check"
+    );
+}
+
+#[test]
+fn a_no_to_reaching_it_elsewhere_runs_nothing_there() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = Arc::clone(&r.asked);
+    // From now on, the person says no.
+    let no = fleet_answering(&b, &r, false);
+    let before = b.calls().len();
+    let done = no.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "cancelled"})
+    );
+    assert!(
+        b.calls()[before..]
+            .iter()
+            .all(|c| !c.iter().any(|a| a == "devbox-new")),
+        "nothing ran there"
+    );
+    assert_eq!(no.list()[0].target, "devbox");
+    let _ = asked;
+}
+
+/// The same machines file, its fleet answering every question with `yes`.
+fn fleet_answering(b: &Box_, r: &Run, yes: bool) -> Arc<Fleet> {
+    r.fleet.shutdown();
+    let asked = Arc::new(Yes(AtomicUsize::new(0), yes));
+    let fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::clone(&r.machines),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::clone(&r.said),
+            wanted: "0.2.0".into(),
+            tarball: b.dir.path().join("backends/0.2.0.tar.gz"),
+        }),
+        asked.clone(),
+        asked,
+        timing(),
+    );
+    fleet.load();
+    fleet
+}
+
+#[test]
+fn a_key_not_in_known_hosts_is_never_kept_and_nothing_moves_without_one() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    // devbox is known only by its alias: ssh looks its key up by its
+    // HostName, which known_hosts has nothing for.
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("said why it isn't kept", || {
+        r.fleet.log(&id).unwrap().iter().any(|l| {
+            l.text
+                .contains("isn't in your known_hosts for it: not kept")
+        })
+    });
+    assert!(r.fleet.list()[0].host_key.is_none());
+    b.say_hosts(&[("devbox", Some(KEY)), ("devbox-new", Some(KEY))]);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let refused = r.fleet.edit(&id, Some("devbox-new"), None).unwrap_err();
+    assert!(
+        refused.contains("no host key for devbox checked against your known_hosts"),
+        "{refused}"
+    );
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), asked, "nothing asked");
+    assert_eq!(r.fleet.list()[0].target, "devbox");
+}
+
+#[test]
+fn a_changed_key_shows_both_and_a_trust_again_is_the_one_kept() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    // devbox is reinstalled: it shows another key now.
+    b.say(Some(OTHER_KEY));
+    r.fleet.reconnect(&id).unwrap();
+    until("its key said to have changed", || {
+        matches!(r.fleet.state(&id), Some(State::Failed { .. }))
+            && r.fleet.list()[0].shown_key.is_some()
+    });
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], FINGERPRINT);
+    assert_ne!(row["shownKey"]["fingerprint"], FINGERPRINT);
+    assert_eq!(row["reach"]["forgetKey"], "ssh-keygen -R 203.0.113.7");
+    let shown = row["shownKey"]["fingerprint"].as_str().unwrap().to_string();
+
+    // The person removes the old key, and trusts the new one as shown.
+    std::fs::write(b.known_hosts(), "").unwrap();
+    r.fleet.probe("devbox").unwrap();
+    r.fleet.trust("devbox", &shown).unwrap();
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["hostKey"]["fingerprint"], shown.as_str());
+    assert!(row.get("shownKey").is_none(), "{row}");
+}
+
+#[test]
+fn reading_its_key_before_asking_anything_gives_up_in_time() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    // Added with no key kept (known only by its alias).
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // Now devbox doesn't answer at all.
+    let scenario: Value =
+        serde_json::from_str(&std::fs::read_to_string(b.dir.path().join("scenario.json")).unwrap())
+            .unwrap();
+    let mut hosts = scenario["hosts"].as_array().unwrap().clone();
+    hosts[0]["hang"] = json!(true);
+    std::fs::write(
+        b.dir.path().join("scenario.json"),
+        json!({"log": scenario["log"], "hosts": hosts}).to_string(),
+    )
+    .unwrap();
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    let started = Instant::now();
+    let e = r.fleet.check_reach(&id, "devbox-new").unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(e.contains("no host key for devbox"), "{e}");
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), asked, "nothing asked");
+}
+
+#[test]
+fn reaching_it_elsewhere_gives_up_in_time_and_changes_nothing() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let scenario: Value =
+        serde_json::from_str(&std::fs::read_to_string(b.dir.path().join("scenario.json")).unwrap())
+            .unwrap();
+    let mut hosts = scenario["hosts"].as_array().unwrap().clone();
+    let mut slow = hosts[0].clone();
+    slow["target"] = json!("devbox-slow");
+    slow["hang"] = json!(true);
+    hosts.push(slow);
+    std::fs::write(
+        b.dir.path().join("scenario.json"),
+        json!({"log": scenario["log"], "hosts": hosts}).to_string(),
+    )
+    .unwrap();
+    let started = Instant::now();
+    let e = r.fleet.edit(&id, Some("devbox-slow"), None).unwrap_err();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(e.contains("didn't answer"), "{e}");
+    assert_eq!(r.fleet.list()[0].target, "devbox");
+}
+
+#[test]
+fn a_machine_is_renamed_but_never_to_another_machines_name() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    r.fleet.edit(&id, None, Some("devbox (dev)")).unwrap();
+    assert_eq!(r.fleet.list()[0].name, "devbox (dev)");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked,
+        "a name asks nothing"
+    );
+    assert!(r.fleet.edit(&id, None, Some("  ")).is_err());
+    // Nothing that would make it read as something else.
+    for odd in ["devbox\u{202e}xob", "dev\u{200b}box"] {
+        assert!(
+            r.fleet
+                .edit(&id, None, Some(odd))
+                .unwrap_err()
+                .contains("letters, numbers, spaces and punctuation"),
+            "{odd:?}"
+        );
+    }
+    assert!(
+        r.fleet
+            .edit(&id, Some("-oProxyCommand=x"), None)
+            .unwrap_err()
+            .contains("can't start with -")
+    );
+}
+
+#[test]
+fn an_offline_machine_says_why_in_ssh_s_words_when_it_last_and_next_tries() {
+    let b = Box_::new();
+    // Kept from before; its address no longer resolves.
+    std::fs::create_dir_all(b.dir.path().join("mac")).unwrap();
+    std::fs::write(
+        b.dir.path().join("mac/machines.json"),
+        r#"[{"id": "gone", "name": "gone", "target": "gone-box", "version": "0.2.0", "last_connected": 1700000000000}]"#,
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("offline, with when it tries next", || {
+        r.fleet
+            .list()
+            .first()
+            .is_some_and(|m| m.state == State::Unreachable && m.next_try.is_some())
+    });
+    let m = &r.fleet.list()[0];
+    assert!(
+        m.reason
+            .as_deref()
+            .unwrap()
+            .contains("SSH couldn't reach gone"),
+        "{:?}",
+        m.reason
+    );
+    assert!(
+        m.said
+            .as_deref()
+            .unwrap()
+            .contains("Could not resolve hostname gone-box"),
+        "{:?}",
+        m.said
+    );
+    assert!(!m.said.as_deref().unwrap().starts_with('“'));
+    assert_eq!(m.last_connected, Some(1_700_000_000_000));
+    assert!(m.last_try.unwrap() <= m.next_try.unwrap());
+    let log = r.fleet.log("gone").unwrap();
+    let kinds: Vec<String> = log
+        .iter()
+        .map(|l| format!("{:?} {}", l.kind, l.text))
+        .collect();
+    assert!(
+        kinds
+            .iter()
+            .any(|k| k.starts_with("Info connecting to gone")),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds
+            .iter()
+            .any(|k| k.starts_with("Error ") && k.contains("Could not resolve hostname")),
+        "{kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|k| k.starts_with("Info next try in")),
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn desks_log_there_is_read_over_ssh_cleaned_and_given_up_on_in_time() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = added_with_key(&b, &r);
+    script(
+        &b.dir.path().join("fakebin/journalctl"),
+        "#!/bin/sh\necho \"$*\" > \"$HOME/.fake/journalctl-args\"\nprintf '2026-11-06T09:41:27+0000 devbox desk-helper[12]: hub starting\\n\\033[31mred\\033[0m and a\\ttab\\n'\n",
+    );
+    let said = r.fleet.remote_log(&id, Duration::from_secs(10)).unwrap();
+    assert!(
+        said.starts_with("2026-11-06T09:41:27+0000 devbox desk-helper[12]: hub starting"),
+        "{said}"
+    );
+    assert!(!said.contains('\u{1b}'), "{said:?}");
+    assert!(said.contains("and a tab"), "{said:?}");
+    let args = std::fs::read_to_string(b.fake("journalctl-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        "--user -u desk-helper.service -n 200 --no-pager -o short-iso"
+    );
+
+    script(
+        &b.dir.path().join("fakebin/journalctl"),
+        "#!/bin/sh\nsleep 5\n",
+    );
+    let started = Instant::now();
+    let late = r.fleet.remote_log(&id, Duration::from_secs(1)).unwrap_err();
+    assert!(late.contains("didn't answer within 1 s"), "{late}");
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
+#[test]
+fn the_ssh_configs_host_entries_are_listed() {
+    let b = Box_::new();
+    std::fs::write(
+        b.dir.path().join("mac/.ssh/config"),
+        "Host devbox\n  HostName 2.29.244.189\n  User dev\nHost buildbox\n  ProxyJump bastion\nHost *\n  User me\n",
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let hosts = serde_json::to_value(r.fleet.ssh_hosts()).unwrap();
+    assert_eq!(
+        hosts,
+        json!([
+            {"host": "devbox", "hostname": "2.29.244.189", "user": "dev", "port": null, "jump": null, "file": "~/.ssh/config"},
+            {"host": "buildbox", "hostname": null, "user": "me", "port": null, "jump": "bastion", "file": "~/.ssh/config"}
+        ])
+    );
+    assert!(b.calls().is_empty(), "nothing was run to read it");
+}
+
+/// A Claude Code there that takes `secs` to say its version: the engines
+/// step runs that long.
+fn slow_engines(b: &Box_, secs: u32) {
+    script(
+        &b.dir.path().join("fakebin/claude"),
+        &format!("#!/bin/sh\nsleep {secs}\necho \"9.9.9 (fake)\"\n"),
+    );
+}
+
+/// A yes to adding that, while it is asked, the person cancels from the page.
+struct CancelWhileAsked(std::sync::OnceLock<std::sync::Weak<Fleet>>, &'static str);
+
+impl Confirm for CancelWhileAsked {
+    fn run_on(&self, _: &Question) -> bool {
+        if let Some(f) = self.0.get().and_then(std::sync::Weak::upgrade) {
+            f.cancel_add(self.1).unwrap();
+        }
+        true
+    }
+}
+
+impl TrustConfirm for CancelWhileAsked {
+    fn trust_key(&self, _: &TrustQuestion) -> bool {
+        true
+    }
+}
+
+#[test]
+fn adding_cancelled_while_its_question_is_open_adds_nothing() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.known_hosts(), format!("devbox {KEY}\n")).unwrap();
+    b.say(Some(KEY));
+    let confirm = Arc::new(CancelWhileAsked(std::sync::OnceLock::new(), "devbox"));
+    let fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::new(Machines::new(b.ssh.clone(), &b.dir.path().join("socks"))),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::new(Said::default()),
+            wanted: "0.2.0".into(),
+            tarball: b.backend("0.2.0"),
+        }),
+        confirm.clone(),
+        confirm.clone(),
+        timing(),
+    );
+    confirm.0.set(Arc::downgrade(&fleet)).ok().unwrap();
+    let e = fleet.add("devbox", "devbox").unwrap_err();
+    assert_eq!(e, desk_machine::ssh::CANCELLED);
+    assert!(fleet.list().is_empty());
+    assert!(!b.dir.path().join("mac/machines.json").exists() || fleet.list().is_empty());
+    // Nothing is left pending: Cancel by that address now says so.
+    assert!(fleet.cancel_add("devbox").is_err());
+}
+
+#[test]
+fn adding_is_cancelled_mid_step_at_once_and_the_machine_is_forgotten() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    slow_engines(&b, 30);
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("the engines step running", || {
+        step(&r, "engines", StepState::Running).is_some()
+    });
+    let asked = Instant::now();
+    r.fleet.cancel_add(&id).unwrap();
+    until("forgotten", || r.fleet.list().is_empty());
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        asked.elapsed()
+    );
+    let said = step(&r, "engines", StepState::Failed)
+        .unwrap_or_else(|| panic!("{:#?}", r.said.events.lock().unwrap()));
+    assert_eq!(said.message.as_deref(), Some("Adding it was cancelled."));
+    assert!(r.machines.get(&id).is_none());
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json"))
+        .unwrap_or_else(|_| "[]".into());
+    assert_eq!(serde_json::from_str::<Value>(&kept).unwrap(), json!([]));
+    // Adding it again asks again.
+    let before = r.asked.0.load(Ordering::SeqCst);
+    slow_engines(&b, 0);
+    r.fleet.add("devbox", "devbox").unwrap();
+    assert_eq!(r.asked.0.load(Ordering::SeqCst), before + 1);
+}
+
+#[test]
+fn a_step_that_runs_past_its_limit_is_stopped_and_says_so() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    slow_engines(&b, 30);
+    let mut r = fleet(&b, "0.2.0", true);
+    // The same fleet, its steps limited to 2 s.
+    let mut t = timing();
+    t.step_within = Duration::from_secs(2);
+    r.fleet = Fleet::new(
+        b.ssh.clone(),
+        Arc::clone(&r.machines),
+        b.dir.path().join("mac/machines.json"),
+        b.dir.path().join("mac"),
+        Arc::new(TestHost {
+            said: Arc::clone(&r.said),
+            wanted: "0.2.0".into(),
+            tarball: b.dir.path().join("backends/0.2.0.tar.gz"),
+        }),
+        r.asked.clone(),
+        r.asked.clone(),
+        t,
+    );
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    let started = Instant::now();
+    until("the engines step stopped", || {
+        step(&r, "engines", StepState::Failed).is_some()
+    });
+    let said = step(&r, "engines", StepState::Failed).unwrap();
+    assert_eq!(
+        said.message.as_deref(),
+        Some("That step took longer than 3 minutes, so Desk stopped it.")
+    );
+    assert!(started.elapsed() < Duration::from_secs(15));
+    // Installed and connected all the same: only the engines step stopped.
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    assert!(
+        r.fleet
+            .log(&id)
+            .unwrap()
+            .iter()
+            .any(|l| l.text.contains("longer than 3 minutes"))
+    );
+}
+
+#[test]
+fn copying_desk_there_says_how_far_it_got_and_names_are_never_shared() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let copying: Vec<String> = r
+        .said
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e.detail.clone())
+        .filter(|d| d.starts_with("Copying Desk 0.2.0 to devbox… "))
+        .collect();
+    assert!(!copying.is_empty(), "said while copying");
+    assert!(copying.last().unwrap().ends_with(" MB"), "{copying:?}");
+    // No progress is left once it's done.
+    assert_eq!(r.fleet.list()[0].progress, None);
+    let refused = r.fleet.add("root@devbox", "DevBox").unwrap_err();
+    assert!(
+        refused.contains("Two machines can't share a name"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_failed_add_is_cancelled_at_once() {
+    let b = Box_::new();
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    std::fs::write(b.fake("check-fails"), "").unwrap();
+    let _hub = serve(&b);
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("failed", || {
+        matches!(r.fleet.state(&id), Some(State::Failed { .. }))
+    });
+    r.fleet.cancel_add(&id).unwrap();
+    assert!(r.fleet.list().is_empty());
+    assert!(r.fleet.cancel_add(&id).is_err());
+}
+
+/// devbox added on Desk 0.1.0, its fleet shut down: the next Desk is newer.
+fn on_older(b: &Box_) -> String {
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let first = fleet(b, "0.1.0", true);
+    let id = first.fleet.add("devbox", "devbox").unwrap();
+    until("ready at 0.1.0", || {
+        first.fleet.state(&id) == Some(State::Ready)
+    });
+    first.fleet.shutdown();
+    id
+}
+
+#[test]
+fn an_update_says_each_step_and_is_done_once_it_reconnects() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    // While it runs, the row says its steps.
+    let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let watch = {
+        let (fleet, seen) = (Arc::clone(&r.fleet), Arc::clone(&seen));
+        std::thread::spawn(move || {
+            for _ in 0..400 {
+                if let Some(m) = fleet.list().first()
+                    && let Some(u) = &m.update
+                {
+                    seen.lock().unwrap().push(serde_json::to_value(u).unwrap());
+                }
+                if fleet.state("devbox") == Some(State::Ready) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    };
+    until("ready at 0.2.0", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && r.fleet.list()[0].version.as_deref() == Some("0.2.0")
+    });
+    watch.join().unwrap();
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty(), "the update was said while it ran");
+    let last = seen.last().unwrap();
+    assert_eq!(last["to"], "0.2.0");
+    assert_eq!(last["from"], "0.1.0");
+    let keys: Vec<&str> = last["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["download", "copy", "switch", "reconnect"]);
+    assert!(
+        seen.iter().any(|u| u["steps"][0]["detail"]
+            .as_str()
+            .is_some_and(|d| d.starts_with("Desk 0.2.0 for Linux x86_64, "))),
+        "{seen:?}"
+    );
+    // Done: no update left on the row, and the log says so.
+    assert_eq!(r.fleet.list()[0].update, None);
+    let log: Vec<String> = r
+        .fleet
+        .log(&id)
+        .unwrap()
+        .into_iter()
+        .map(|l| l.text)
+        .collect();
+    assert!(
+        log.contains(&"updating Desk there to 0.2.0".to_string()),
+        "{log:?}"
+    );
+    assert!(
+        log.contains(&"updated to Desk 0.2.0".to_string()),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn a_failed_update_is_held_until_update_to_match_and_says_why() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    std::fs::write(b.fake("check-fails"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("the update failed", || {
+        matches!(r.fleet.state(&id), Some(State::UpdateFailed { .. }))
+    });
+    let Some(State::UpdateFailed { message, from }) = r.fleet.state(&id) else {
+        unreachable!()
+    };
+    assert!(message.contains("this machine can't run Desk"), "{message}");
+    assert_eq!(from.as_deref(), Some("0.1.0"));
+    let row = serde_json::to_value(&r.fleet.list()[0]).unwrap();
+    assert_eq!(row["state"]["update_failed"]["from"], "0.1.0");
+    assert_eq!(row["update"]["steps"][1]["state"], "failed");
+    assert!(!r.fleet.drivable(&id), "driven no further until it matches");
+    // Held: it doesn't try again by itself.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(matches!(
+        r.fleet.state(&id),
+        Some(State::UpdateFailed { .. })
+    ));
+    assert_eq!(b.installed().as_deref(), Some("0.1.0"));
+
+    // Update to match, once the machine can.
+    std::fs::remove_file(b.fake("check-fails")).unwrap();
+    r.fleet.reconnect(&id).unwrap();
+    until("updated", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+}
+
+#[test]
+fn an_update_is_cancelled_before_it_switches_over_and_stays_on_its_version() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    // The copy's check there takes long: the update waits in its copy step.
+    script(
+        &b.dir.path().join("fakebin/sha256sum"),
+        "#!/bin/sh\nsleep 30\n",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("copying", || {
+        r.fleet
+            .list()
+            .first()
+            .and_then(|m| m.update.clone())
+            .is_some_and(|u| serde_json::to_value(&u).unwrap()["steps"][1]["state"] == "running")
+    });
+    let asked = Instant::now();
+    r.fleet.cancel_update(&id).unwrap();
+    until("cancelled", || {
+        matches!(r.fleet.state(&id), Some(State::UpdateFailed { .. }))
+    });
+    assert!(asked.elapsed() < Duration::from_secs(5));
+    let Some(State::UpdateFailed { message, .. }) = r.fleet.state(&id) else {
+        unreachable!()
+    };
+    assert_eq!(
+        message,
+        "You cancelled the update: it stays on 0.1.0 until it matches."
+    );
+    assert_eq!(b.installed().as_deref(), Some("0.1.0"));
+    assert!(
+        r.fleet
+            .cancel_update(&id)
+            .unwrap_err()
+            .contains("isn't updating now")
+    );
+}
+
+#[test]
+fn a_cancel_once_the_switch_over_began_is_refused_and_the_update_finishes() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    let id = on_older(&b);
+    // The switch-over there takes a moment.
+    script(
+        &b.dir.path().join("fakebin/mv"),
+        "#!/bin/sh\ncase \"$*\" in *current.next*) sleep 3 ;; esac\nexec /bin/mv \"$@\"\n",
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.load();
+    until("switching over", || {
+        r.fleet
+            .list()
+            .first()
+            .and_then(|m| m.update.clone())
+            .is_some_and(|u| serde_json::to_value(&u).unwrap()["steps"][2]["state"] == "running")
+    });
+    assert!(
+        r.fleet
+            .cancel_update(&id)
+            .unwrap_err()
+            .contains("switching over now")
+    );
+    until("updated", || r.fleet.state(&id) == Some(State::Ready));
+    assert_eq!(b.installed().as_deref(), Some("0.2.0"));
+}
+
+/// What was said of removing machine `id`, as `step state` words.
+fn removed_said(r: &Run) -> Vec<String> {
+    r.said
+        .removing
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            let v = serde_json::to_value(e).unwrap();
+            format!(
+                "{} {}",
+                v["step"].as_str().unwrap(),
+                v["state"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn removing_with_uninstall_stops_desk_there_removes_everything_then_forgets_it() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let unit = b.home().join(".config/systemd/user/desk-helper.service");
+    assert!(unit.is_file() && b.home().join(".local/share/Desk").is_dir());
+
+    let asked = r.asked.0.load(Ordering::SeqCst);
+    assert!(r.fleet.uninstall(&id).unwrap());
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked + 1,
+        "asked natively once"
+    );
+    assert_eq!(
+        removed_said(&r),
+        [
+            "stop running",
+            "stop done",
+            "remove running",
+            "remove done",
+            "linger running",
+            "linger done",
+            "forget running",
+            "forget done"
+        ]
+    );
+    assert!(
+        !b.home().join(".local/share/Desk").exists(),
+        "everything Desk kept there is gone"
+    );
+    assert!(!unit.exists(), "its unit is gone");
+    assert!(!b.fake("running").exists(), "its helper stopped");
+    assert!(r.fleet.list().is_empty());
+    let kept: Value = serde_json::from_str(
+        &std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept, json!([]));
+    // The person's own things there stay.
+    assert!(b.home().join(".fake").is_dir());
+}
+
+#[test]
+fn an_uninstall_that_fails_says_why_and_forgets_nothing_until_it_works() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("remove-fails"), "").unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(
+        e.contains("Couldn't remove ~/.local/share/Desk") && e.contains("Permission denied"),
+        "{e}"
+    );
+    let said = removed_said(&r);
+    assert_eq!(
+        said,
+        [
+            "stop running",
+            "stop done",
+            "remove running",
+            "remove failed"
+        ]
+    );
+    // Nothing is forgotten, and nothing connects to it by itself (which
+    // would install Desk there again): it waits on the person.
+    assert_eq!(r.fleet.list().len(), 1);
+    let starts = std::fs::read_to_string(b.fake("starts")).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    let Some(State::Failed { message }) = r.fleet.state(&id) else {
+        panic!("{:?}", r.fleet.state(&id))
+    };
+    assert!(
+        message.contains("Uninstalling stopped partway"),
+        "{message}"
+    );
+    assert_eq!(std::fs::read_to_string(b.fake("starts")).unwrap(), starts);
+    // Try again once it can.
+    std::fs::remove_file(b.fake("remove-fails")).unwrap();
+    assert!(r.fleet.uninstall(&id).unwrap());
+    assert!(r.fleet.list().is_empty());
+}
+
+#[test]
+fn a_no_to_the_uninstall_question_runs_nothing_there() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let no = fleet_answering(&b, &r, false);
+    until("ready", || no.state(&id) == Some(State::Ready));
+    let before = b.calls().len();
+    assert!(!no.uninstall(&id).unwrap());
+    assert!(
+        b.calls()[before..].iter().all(|c| !c
+            .iter()
+            .any(|a| a.contains("remove-everything") || a.contains("disable --now"))),
+        "nothing ran there"
+    );
+    assert!(b.home().join(".local/share/Desk").is_dir());
+    assert_eq!(no.list().len(), 1);
+}
+
+#[test]
+fn an_uninstall_is_cancelled_between_steps_before_anything_is_removed() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("stop-slow"), "").unwrap();
+    let going = {
+        let (fleet, id) = (Arc::clone(&r.fleet), id.clone());
+        std::thread::spawn(move || fleet.uninstall(&id))
+    };
+    until("stopping", || {
+        removed_said(&r).contains(&"stop running".to_string())
+    });
+    r.fleet.cancel_uninstall(&id).unwrap();
+    assert!(!going.join().unwrap().unwrap(), "cancelled");
+    assert_eq!(removed_said(&r), ["stop running", "stop done"]);
+    assert!(
+        b.home().join(".local/share/Desk/machine").is_file(),
+        "nothing removed"
+    );
+    // Desk there starts again, as before.
+    std::fs::remove_file(b.fake("stop-slow")).unwrap();
+    until("ready again", || r.fleet.state(&id) == Some(State::Ready));
+    assert!(
+        r.fleet
+            .cancel_uninstall(&id)
+            .unwrap_err()
+            .contains("isn't being uninstalled now")
+    );
+}
+
+#[test]
+fn an_uninstall_checks_desks_folder_is_gone() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    std::fs::write(b.fake("remove-leaves"), "").unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(e.contains("still there after removing it"), "{e}");
+    assert_eq!(r.fleet.list().len(), 1, "nothing forgotten");
+}
+
+#[test]
+fn a_desktop_desk_there_is_never_uninstalled_and_an_offline_one_only_forgotten() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // The folder there isn't a machine's (its marker gone): left as it is.
+    std::fs::remove_file(b.home().join(".local/share/Desk/machine")).unwrap();
+    let e = r.fleet.uninstall(&id).unwrap_err();
+    assert!(e.contains("isn't one installed as a machine"), "{e}");
+    assert!(b.home().join(".local/share/Desk/bin").is_dir());
+    assert_eq!(r.fleet.list().len(), 1);
+
+    // Offline: refused before anything runs.
+    let off = fleet(&b, "0.2.0", true);
+    std::fs::write(
+        b.dir.path().join("mac/machines.json"),
+        r#"[{"id": "gone", "name": "gone", "target": "gone-box", "version": "0.2.0"}]"#,
+    )
+    .unwrap();
+    off.fleet.load();
+    until("offline", || {
+        off.fleet.state("gone") == Some(State::Unreachable)
+    });
+    let e = off.fleet.uninstall("gone").unwrap_err();
+    assert_eq!(
+        e,
+        "Desk can't reach gone right now, so it can only forget it here."
+    );
+}
+
+#[test]
+fn linger_left_on_is_said_with_the_accounts_checked_name() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // The account as Desk read it there (`id -un`).
+    let user = serde_json::to_value(&r.fleet.list()[0]).unwrap()["details"]["user"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Turning linger off needs an administrator now.
+    std::fs::remove_file(b.fake("linger-allowed")).unwrap();
+    assert!(r.fleet.uninstall(&id).unwrap());
+    let linger = r
+        .said
+        .removing
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap())
+        .find(|v| v["step"] == "linger" && v["state"] == "blocked")
+        .expect("linger blocked");
+    // Quoted as the shell needs it: a plain name stays as it is.
+    assert_eq!(
+        linger["line"],
+        format!(
+            "sudo loginctl disable-linger {}",
+            desk_core::machine::quote(&user)
+        )
+    );
 }

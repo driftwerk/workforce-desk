@@ -30,7 +30,53 @@ export type MachineState =
   | { kind: "unreachable" }
   | { kind: "updating" }
   | { kind: "newer" }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; message: string }
+  /** Updating it to this Desk's version stopped, or was cancelled: it runs
+   *  `from` still, and is driven no further until it matches. */
+  | { kind: "updateFailed"; message: string; from: string | null };
+
+/** An update to this Desk's version, step by step, as the native side runs it. */
+export interface UpdateRun {
+  to: string;
+  from: string | null;
+  steps: { key: "download" | "copy" | "switch" | "reconnect"; state: "waiting" | "running" | "done" | "failed"; detail?: string }[];
+}
+
+/** How Desk reaches a machine, as the person's SSH config makes it. */
+export interface Reach {
+  user: string | null;
+  hostname: string | null;
+  port: string | null;
+  /** A jump host (`bastion`), or "a ProxyCommand". */
+  via: string | null;
+  /** The SSH config `Host` entry its address is, and the file it's in. */
+  entry: string | null;
+  file: string | null;
+  /** The line that removes its old key from known_hosts (`ssh-keygen -R
+   *  '[10.0.3.14]:2222'`), as the native side makes it. */
+  forgetKey?: string | null;
+}
+
+/** What Desk's last look there found, besides its system. */
+export interface Details {
+  freeKb: number | null;
+  linger: boolean | null;
+  /** Desk's user service is enabled there. */
+  service: boolean;
+  systemd: boolean;
+  user: string | null;
+  /** The line that turns linger on there, made (and quoted) natively. */
+  lingerLine?: string | null;
+}
+
+/** The host key Desk knows a machine by. */
+export interface HostKeyInfo {
+  /** `ED25519`. */
+  kind: string;
+  fingerprint: string;
+  /** When it was trusted from Desk (ms); none when known_hosts had it. */
+  trustedAt: number | null;
+}
 
 export interface Machine {
   id: MachineId;
@@ -41,7 +87,24 @@ export interface Machine {
   version: string | null;
   state: MachineState;
   /** Its system, once Desk has looked (`Ubuntu 24.04`, `x86_64`). */
-  system?: { os: string; arch: string } | null;
+  system?: { os: string; arch: string; glibc?: string | null } | null;
+  /** Why it is offline or failed, in Desk's words; and ssh's own line. */
+  reason?: string | null;
+  said?: string | null;
+  /** Times, in ms: last reached, last tried, next try, connected since. */
+  lastConnected?: number | null;
+  lastTry?: number | null;
+  nextTry?: number | null;
+  connectedSince?: number | null;
+  reach?: Reach | null;
+  details?: Details | null;
+  hostKey?: HostKeyInfo | null;
+  /** The key it shows now, when that isn't the one Desk knows. */
+  shownKey?: HostKeyInfo | null;
+  /** What an install or update there is doing now. */
+  progress?: string | null;
+  /** An update to this Desk's version under way, or the one that stopped. */
+  update?: UpdateRun | null;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -55,6 +118,9 @@ export const readState = (raw: unknown): MachineState => {
     const o = raw as Record<string, unknown>;
     const failed = o.failed as { message?: unknown } | undefined;
     if (failed && typeof failed === "object") return { kind: "failed", message: String(failed.message ?? "") };
+    const update = o.update_failed as { message?: unknown; from?: unknown } | undefined;
+    if (update && typeof update === "object")
+      return { kind: "updateFailed", message: String(update.message ?? ""), from: typeof update.from === "string" ? update.from : null };
     const kind = typeof o.kind === "string" ? o.kind : typeof o.state === "string" ? o.state : null;
     if (kind === "failed") return { kind: "failed", message: String(o.message ?? "") };
     if (kind && KINDS.has(kind)) return { kind } as MachineState;
@@ -66,7 +132,62 @@ export const readState = (raw: unknown): MachineState => {
 /** A machine's system as listed; null when it isn't known. */
 const readSystem = (raw: unknown): Machine["system"] => {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-  return o && typeof o.arch === "string" ? { os: typeof o.os === "string" ? o.os : "Linux", arch: o.arch } : null;
+  return o && typeof o.arch === "string"
+    ? { os: typeof o.os === "string" ? o.os : "Linux", arch: o.arch, glibc: typeof o.glibc === "string" ? o.glibc : null }
+    : null;
+};
+
+const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+
+/** An update run as listed; null when it isn't one. */
+const readUpdate = (raw: unknown): UpdateRun | null => {
+  const o = obj(raw);
+  if (!o || !Array.isArray(o.steps) || typeof o.to !== "string") return null;
+  const KEYS = ["download", "copy", "switch", "reconnect"];
+  const STATES = ["waiting", "running", "done", "failed"];
+  const steps = o.steps.flatMap((x): UpdateRun["steps"] => {
+    const st = obj(x);
+    if (!st || typeof st.key !== "string" || !KEYS.includes(st.key) || typeof st.state !== "string" || !STATES.includes(st.state)) return [];
+    return [{ key: st.key as UpdateRun["steps"][number]["key"], state: st.state as UpdateRun["steps"][number]["state"], ...(typeof st.detail === "string" ? { detail: st.detail } : {}) }];
+  });
+  return { to: o.to, from: typeof o.from === "string" ? o.from : null, steps };
+};
+
+/** What the native side says beyond its state, read leniently. */
+const readMore = (o: Record<string, unknown>): Partial<Machine> => {
+  const reach = obj(o.reach);
+  const details = obj(o.details);
+  const key = obj(o.hostKey);
+  const shown = obj(o.shownKey);
+  const more: Partial<Machine> = {
+    reason: str(o.reason),
+    said: str(o.said),
+    lastConnected: num(o.lastConnected),
+    lastTry: num(o.lastTry),
+    nextTry: num(o.nextTry),
+    connectedSince: num(o.connectedSince),
+    reach: reach
+      ? { user: str(reach.user), hostname: str(reach.hostname), port: str(reach.port), via: str(reach.via), entry: str(reach.entry), file: str(reach.file), forgetKey: str(reach.forgetKey) }
+      : null,
+    details: details
+      ? {
+          freeKb: num(details.freeKb),
+          linger: typeof details.linger === "boolean" ? details.linger : null,
+          service: details.service === true,
+          systemd: details.systemd === true,
+          user: str(details.user),
+          lingerLine: str(details.lingerLine),
+        }
+      : null,
+    hostKey: key && str(key.fingerprint) ? { kind: str(key.kind) ?? "", fingerprint: str(key.fingerprint)!, trustedAt: num(key.trustedAt) } : null,
+    shownKey: shown && str(shown.fingerprint) ? { kind: str(shown.kind) ?? "", fingerprint: str(shown.fingerprint)!, trustedAt: null } : null,
+    progress: str(o.progress),
+    update: readUpdate(o.update),
+  };
+  // Only what it said: a machine listed without them reads as before.
+  return Object.fromEntries(Object.entries(more).filter(([, v]) => v !== null)) as Partial<Machine>;
 };
 
 /** A machine as `machines_list` lists it; null for a row without an id. */
@@ -82,6 +203,7 @@ export const readMachine = (raw: unknown): Machine | null => {
     version: typeof o.version === "string" ? o.version : null,
     state: readState(o.state),
     ...(system ? { system } : {}),
+    ...readMore(o),
   };
 };
 

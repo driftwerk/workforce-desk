@@ -26,6 +26,8 @@
 //! - `banner`: printed on its error output first, as a machine's banner is
 //!   (one may claim anything);
 //! - `listen: false`: a forward that never binds, only says things;
+//! - `hang: true`: every connection to it (not `-G`) waits for good, as one
+//!   to an address that drops its packets does;
 //! - `exec`: `{home, path}`, to run each command for real instead, with
 //!   `sh -c` in that home (as sshd runs it through the account's shell),
 //!   only `HOME` and `PATH` (`path` first) set, and its input passed on;
@@ -59,6 +61,7 @@ struct Host {
     exec: Option<Exec>,
     host_key: Option<String>,
     forward_to: Option<u16>,
+    hang: bool,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +121,11 @@ fn main() {
     if options.iter().any(|o| o == "-G") {
         print!("{}", host.settings);
         std::process::exit(0);
+    }
+    if host.hang {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
     }
     eprint!("{}", host.banner);
     if let Some(key) = &host.host_key {

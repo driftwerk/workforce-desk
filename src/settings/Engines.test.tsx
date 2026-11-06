@@ -68,5 +68,6 @@ it("says when the hub couldn't be asked", async () => {
   });
   render(<Engines />);
   await act(async () => {});
-  expect(screen.getByText("Couldn’t ask the hub about its engines just now.")).toBeTruthy();
+  expect(screen.getByText(/^Couldn’t ask the hub about its engines just now: down/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });

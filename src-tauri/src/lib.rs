@@ -185,6 +185,16 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
         .map_err(text)
 }
 
+/// Shows Desk's own log on this computer in the system's file manager.
+#[tauri::command]
+fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
+    let log = app.paths.logs().join("desk.log");
+    if !log.exists() {
+        return Err("Desk hasn't written its log on this computer yet.".into());
+    }
+    tauri_plugin_opener::reveal_item_in_dir(&log).map_err(text)
+}
+
 #[tauri::command]
 async fn hubs_list(
     app: State<'_, App>,
@@ -609,6 +619,19 @@ async fn claude_plugin_dir(
     }
 }
 
+/// A machine's home folder, as it says it over SSH (read once): where `~`
+/// is there, whether or not its hub answers.
+#[tauri::command]
+async fn machine_home(
+    machines: State<'_, machines::MachineIo>,
+    machine: String,
+) -> CommandResult<String> {
+    let link = machines.link(&machine)?;
+    tauri::async_runtime::spawn_blocking(move || link.home())
+        .await
+        .map_err(text)?
+}
+
 /// What's running in a terminal whose shell is `pid`, shell first.
 #[tauri::command]
 async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<String>> {
@@ -855,6 +878,17 @@ pub fn run() {
             machine_setup::machine_remove,
             machine_accounts::machine_share_accounts,
             links::open_terminal_link,
+            machine_setup::machine_log,
+            machine_setup::machine_remote_log,
+            machine_setup::machine_ssh_hosts,
+            machine_setup::machine_edit,
+            machine_setup::machine_check_reach,
+            machine_setup::machine_cancel_add,
+            machine_setup::machine_retry_engines,
+            machine_setup::machine_cancel_update,
+            machine_setup::machine_uninstall,
+            machine_setup::machine_cancel_uninstall,
+            machine_reveal_log,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,
@@ -898,6 +932,7 @@ pub fn run() {
             desk_state_flush,
             desk_ready,
             claude_plugin_dir,
+            machine_home,
             backend_home,
             pick_folder,
             programs_under,

@@ -39,6 +39,9 @@ pub struct System {
     pub os: String,
     /// `x86_64`.
     pub arch: String,
+    /// `2.39`, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glibc: Option<String>,
 }
 
 /// What the look found there.
@@ -52,6 +55,8 @@ pub struct Look {
     pub arch: String,
     pub os: Option<String>,
     pub glibc: Option<String>,
+    /// Free space in its home, in KiB.
+    pub free_kb: Option<u64>,
     /// The backend version `bin/current` points at.
     pub installed: Option<String>,
     /// Whether the account has a systemd user manager.
@@ -70,6 +75,7 @@ impl Look {
         System {
             os: self.os.clone().unwrap_or_else(|| self.kernel.clone()),
             arch: self.arch.clone(),
+            glibc: self.glibc.clone(),
         }
     }
 
@@ -89,6 +95,7 @@ pub fn look_script() -> String {
          printf 'arch=%s\\n' \"$(uname -m)\"\n\
          if [ -r /etc/os-release ]; then ( . /etc/os-release; printf 'os=%s %s\\n' \"${{NAME:-}}\" \"${{VERSION_ID:-}}\" ); fi\n\
          printf 'glibc=%s\\n' \"$(getconf GNU_LIBC_VERSION 2>/dev/null | cut -d' ' -f2)\"\n\
+         printf 'free_kb=%s\\n' \"$(df -Pk \"$HOME\" 2>/dev/null | awk 'NR==2 {{print $4}}')\"\n\
          printf 'installed=%s\\n' \"$(readlink \"$HOME/{MACHINE_ROOT}/bin/current\" 2>/dev/null)\"\n\
          printf 'systemd=%s\\n' \"$(systemctl --user show-environment >/dev/null 2>&1 && echo yes || echo no)\"\n\
          printf 'linger=%s\\n' \"$(loginctl show-user \"$(id -un)\" -p Linger --value 2>/dev/null)\"\n\
@@ -130,6 +137,7 @@ impl Look {
                 "arch" => look.arch = some().unwrap_or_default(),
                 "os" => look.os = some(),
                 "glibc" => look.glibc = some(),
+                "free_kb" => look.free_kb = v.parse().ok(),
                 "installed" => {
                     look.installed = Some(v)
                         .filter(|v| desk_core::backend_install::valid_version(v))
@@ -166,6 +174,11 @@ impl Look {
         if look.user.is_empty() || look.arch.is_empty() {
             return Err("The machine didn't say what it is.".into());
         }
+        // The account's name goes into lines the person runs (`sudo
+        // loginctl enable-linger …`): only ever a POSIX user name.
+        if !valid_user(&look.user) {
+            return Err("The machine's account has a name Desk can't use.".into());
+        }
         if !look.home.starts_with('/')
             || look.home.len() > 255
             || !look
@@ -177,6 +190,18 @@ impl Look {
         }
         Ok(look)
     }
+}
+
+/// A POSIX user name (as `useradd` takes one): letters, digits, `.`, `_`,
+/// `-` (never first), at most 32, perhaps ending in `$`.
+pub fn valid_user(user: &str) -> bool {
+    let body = user.strip_suffix('$').unwrap_or(user);
+    !body.is_empty()
+        && user.len() <= 32
+        && !body.starts_with('-')
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
 }
 
 /// How a look ended without one.
@@ -192,22 +217,41 @@ pub enum Missed {
 
 /// Looks at `machine`. Blocking.
 pub fn look(ssh: &SshExe, machine: &Machine) -> Result<Look, Missed> {
-    let out = ssh
-        .output(&machine.command(&["sh".into(), "-c".into(), look_script()]))
-        .map_err(|e| Missed::Unreachable(format!("Desk couldn't run ssh: {e}")))?;
+    look_said(ssh, machine).0
+}
+
+/// As [`look`], with ssh's own words when it couldn't ([`ssh::said`]), to
+/// show beside Desk's.
+pub fn look_said(ssh: &SshExe, machine: &Machine) -> (Result<Look, Missed>, Option<String>) {
+    let out = match ssh.output(&machine.command(&["sh".into(), "-c".into(), look_script()])) {
+        Ok(o) => o,
+        Err(e) => {
+            return (
+                Err(Missed::Unreachable(format!("Desk couldn't run ssh: {e}"))),
+                None,
+            );
+        }
+    };
     if out.status.success() {
-        return Look::parse(&String::from_utf8_lossy(&out.stdout)).map_err(Missed::Unreachable);
+        return (
+            Look::parse(&String::from_utf8_lossy(&out.stdout)).map_err(Missed::Unreachable),
+            None,
+        );
     }
+    let said_by_ssh = ssh::said(&out.stderr);
     if let Some(t) = KeyTrouble::of(&out.stderr) {
-        return Err(Missed::Key(t));
+        return (Err(Missed::Key(t)), said_by_ssh);
     }
     let said = String::from_utf8_lossy(&out.stderr);
     if out.status.code() == Some(SSH_FAILED)
         && (said.contains("Permission denied") || said.contains("Too many authentication failures"))
     {
-        return Err(Missed::Refused);
+        return (Err(Missed::Refused), said_by_ssh);
     }
-    Err(Missed::Unreachable(ssh::problem(machine, &out.stderr)))
+    (
+        Err(Missed::Unreachable(ssh::problem(machine, &out.stderr))),
+        said_by_ssh,
+    )
 }
 
 /// Why Desk won't install on an account that runs desktop Desk.
@@ -260,6 +304,10 @@ pub struct Probe {
     pub host_key: ProbeKey,
     /// None while the host key isn't known: nothing is sent before then.
     pub access: Option<Access>,
+    /// When its key changed: the line that removes the old one from the
+    /// person's known_hosts (by the name and port ssh looks it up by).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forget_key: Option<String>,
 }
 
 /// The name a target gives a machine: its host (`devbox` of `dev@devbox`).
@@ -279,6 +327,7 @@ pub fn probe(ssh: &SshExe, machine: &Machine, user: Option<String>, files: &File
         name: machine.name.clone(),
         host_key,
         access,
+        forget_key: None,
     };
     match look(ssh, machine) {
         Ok(look) if look.desktop => answer(
@@ -466,7 +515,8 @@ mod tests {
             look.system(),
             System {
                 os: "Ubuntu 24.04".into(),
-                arch: "x86_64".into()
+                arch: "x86_64".into(),
+                glibc: Some("2.39".into()),
             }
         );
         let fresh = Look::parse(
@@ -482,6 +532,14 @@ mod tests {
         assert_eq!(odd.installed, None);
         assert!(Look::parse("user=dev\nhome=/home/a b\narch=x86_64\n").is_err());
         assert!(Look::parse("home=/home/dev\n").is_err());
+        // An account name that could be read as more than a name.
+        for odd in ["dev; rm -rf ~", "-dev", "dé v", "$(id)", "a`b`"] {
+            assert!(
+                Look::parse(&format!("user={odd}\nhome=/home/dev\narch=x86_64\n")).is_err(),
+                "{odd}"
+            );
+        }
+        assert!(valid_user("dev") && valid_user("build.bot-2") && valid_user("host$"));
         // An account that runs desktop Desk; a machine's, before and after
         // the marker.
         let base = "user=dev\nhome=/home/dev\nkernel=Linux\narch=x86_64\n";

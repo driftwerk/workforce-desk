@@ -856,6 +856,45 @@ legend.set-label {
   background: var(--surface);
   border: 1px solid var(--border);
 }
+.account-add p {
+  margin: 0;
+}
+/* Codex's sign-in inside its engine's own frame: one frame, no rule. */
+.account-add-solo {
+  margin-top: 8px;
+  padding: 4px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.engine-head-action {
+  margin-left: auto;
+  align-self: center;
+}
+.signin-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.signin-code {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+.account-actions-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.account-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
 @media (max-width: 520px) {
   .account-row {
     grid-template-columns: minmax(0, 1fr);
@@ -968,7 +1007,9 @@ legend.set-label {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
+  /* Inset: the dividers run between the rows' contents, not the list's edges. */
+  margin: 0 14px;
+  padding: 12px 0;
   flex-wrap: wrap;
 }
 .machine-row + .machine-row {
@@ -1086,4 +1127,409 @@ legend.set-label {
   flex-direction: column;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* ── A machine's row, and its own page (Main, MachineDetail, Problem) ───── */
+
+.machine-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.machine-row-open {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  color: var(--faint);
+  font-size: 16px;
+  min-height: 28px;
+}
+.machine-row-open:hover {
+  color: var(--text);
+}
+.machine-row-text .chip {
+  align-self: center;
+}
+.machine-page {
+  gap: 16px;
+}
+.machine-back {
+  align-self: flex-start;
+}
+.machine-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-self: stretch;
+}
+.machine-head h1 {
+  margin: 0;
+}
+.machine-head-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.machine-section {
+  align-self: stretch;
+  gap: 8px;
+}
+.machine-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.machine-section-head > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+.machine-status {
+  align-self: stretch;
+  flex-wrap: wrap;
+}
+.machine-status .prov-text span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.machine-status-problem {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  background: var(--blocked-soft);
+  border-color: transparent;
+}
+.machine-log-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.machine-checked {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.machine-checked .dot {
+  flex: none;
+  transform: translateY(1px);
+}
+.machine-said {
+  display: block;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.machine-log-tools {
+  display: flex;
+  gap: 8px;
+}
+.machine-log-seg {
+  align-self: flex-start;
+}
+.machine-log-seg button {
+  flex: none;
+  padding: 6px 12px;
+}
+.machine-log {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 320px;
+  overflow: auto;
+}
+.machine-log-line {
+  display: flex;
+  gap: 14px;
+}
+.machine-log-line > :first-child {
+  flex: none;
+}
+.machine-log-error {
+  color: var(--ansi-red);
+}
+.machine-log-warn {
+  color: var(--blocked);
+}
+.machine-log-ok {
+  color: var(--done);
+}
+.machine-log-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+/* Picking an SSH config entry: one radio row each. */
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.pick-row {
+  position: relative;
+}
+/* Hairlines between the rows, inset, none beside the one picked. */
+.pick-row + .pick-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: var(--border);
+}
+.pick-row[aria-checked="true"]::before,
+.pick-row[aria-checked="true"] + .pick-row::before {
+  display: none;
+}
+.pick-row[aria-checked="true"] {
+  background: var(--signal-soft);
+}
+/* A field that can't be typed in shows no focus ring. */
+.machine-add .field-text[readonly],
+.machine-add .field-text[readonly]:focus {
+  border-color: var(--border);
+  box-shadow: none;
+  outline: none;
+}
+/* Link buttons read as links there. */
+.machine-add .link,
+.account-add .link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pick-row:disabled {
+  opacity: 0.55;
+}
+.pick-ring {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--idle);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.pick-row[aria-checked="true"] .pick-ring {
+  border-color: var(--signal);
+}
+.pick-row[aria-checked="true"] .pick-ring::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.pick-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 1px 10px;
+}
+.pick-text b {
+  font-weight: 500;
+  font-size: 13px;
+}
+.pick-text .muted {
+  font-size: 12px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 12px;
+}
+.config-grid dt {
+  color: var(--faint);
+}
+.config-grid dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.reach-fields {
+  display: grid;
+  grid-template-columns: 1fr 2fr 80px;
+  gap: 10px;
+}
+.seg-on-raised {
+  background: var(--bg);
+}
+.seg-on-raised button[aria-checked="true"] {
+  background: var(--raised);
+}
+@media (max-width: 520px) {
+  .reach-fields {
+    grid-template-columns: 1fr;
+  }
+  .machine-head-actions {
+    margin-left: 0;
+  }
+}
+.pick-sub {
+  flex-basis: 100%;
+  font-family: var(--font-body, inherit);
+}
+.sheet-foot .machine-cancel-add {
+  margin-right: auto;
+}
+
+/* A folder on a machine (FolderPicker board): home first, then its folders. */
+.folder-picker .field-row .btn {
+  flex: none;
+}
+.folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.folder-list li {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.folder-list li:has(.folder-row.on) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.folder-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  font-size: 12.5px;
+}
+.folder-row.on {
+  color: var(--text);
+  font-weight: 600;
+}
+.folder-row .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-home {
+  color: var(--signal);
+  font-size: 12px;
+}
+.folder-open {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  padding: 0 8px;
+  min-height: 24px;
+}
+.folder-open:hover {
+  color: var(--text);
+}
+.folder-meant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-steps {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 22px;
+}
+.machines-banner {
+  align-self: stretch;
+}
+
+/* A row with its update's steps: its dot beside its name. */
+.machine-row > .dot-top {
+  align-self: flex-start;
+  margin-top: 5px;
+}
+.update-steps .link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* Remove devbox? (Remove board): the two choices, and the lines for later. */
+.remove-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.remove-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.remove-choice .pick-ring {
+  margin-top: 2px;
+}
+.remove-choice[aria-checked="true"] .pick-ring {
+  border-color: var(--signal);
+}
+.remove-choice[aria-checked="true"] .pick-ring::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.remove-choice:disabled {
+  opacity: 0.55;
+}
+.remove-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.remove-later {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dialog-foot-note.state-blocked {
+  color: var(--blocked);
 }

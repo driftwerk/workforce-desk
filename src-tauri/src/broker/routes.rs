@@ -444,6 +444,16 @@ mod tests {
         for r in recorded {
             let got = match r.kind.as_str() {
                 "http" => http(&r.method, &r.path),
+                // Asked of a machine's hub alone: refused for this computer's.
+                "machine_http" => {
+                    assert!(
+                        http(&r.method, &r.path).is_err(),
+                        "{} {} is a machine's alone",
+                        r.method,
+                        r.path
+                    );
+                    machine_http(&r.method, &r.path)
+                }
                 "socket" => socket(&r.path),
                 k => panic!("unknown kind {k}"),
             };

@@ -11,7 +11,7 @@
 //! stands for a while for that exact address, so looking at it again,
 //! trusting its key and adding it ask once.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -22,9 +22,9 @@ use desk_core::machine_backend::{Arch, Backend};
 use serde::{Deserialize, Serialize};
 
 use crate::admit::{self, Confirm, Gate, Question};
-use crate::hostkey::{self, Files, TrustConfirm};
+use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
 use crate::link::{Link, Machines};
-use crate::probe::{self, Access, Missed, Probe, System};
+use crate::probe::{self, Access, Missed, Probe, ProbeKey, System};
 use crate::setup::{self, Person};
 use crate::ssh::{self, SshExe};
 use crate::suggest;
@@ -44,6 +44,64 @@ pub enum State {
     Failed {
         message: String,
     },
+    /// Updating it to this Desk's version stopped (or was cancelled): it
+    /// runs `from` still, and is driven no further until it matches.
+    UpdateFailed {
+        message: String,
+        from: Option<String>,
+    },
+}
+
+/// An update under way there, step by step, as its row shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRun {
+    pub to: String,
+    pub from: Option<String>,
+    pub steps: Vec<UpdateStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UpdateStep {
+    pub key: UpdateKey,
+    pub state: StepState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateKey {
+    /// This Desk's backend for its system, signature checked.
+    Download,
+    /// Copied there.
+    Copy,
+    /// `current` flipped to it: Desk restarts there; sessions stay.
+    Switch,
+    /// Connected again, on the new version.
+    Reconnect,
+}
+
+impl UpdateRun {
+    fn new(to: &str, from: Option<String>) -> UpdateRun {
+        UpdateRun {
+            to: to.to_string(),
+            from,
+            steps: [
+                UpdateKey::Download,
+                UpdateKey::Copy,
+                UpdateKey::Switch,
+                UpdateKey::Reconnect,
+            ]
+            .into_iter()
+            .map(|key| UpdateStep {
+                key,
+                state: StepState::Waiting,
+                detail: None,
+            })
+            .collect(),
+        }
+    }
 }
 
 /// A machine as `machines.json` keeps it.
@@ -56,10 +114,148 @@ pub struct Kept {
     pub version: Option<String>,
     #[serde(default)]
     pub system: Option<System>,
+    /// The host key Desk knows it by: what makes another address the same
+    /// machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<KeptKey>,
+    /// When Desk last reached it (Unix ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_connected: Option<i64>,
+}
+
+/// A machine's host key, as Desk keeps and shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptKey {
+    /// `ED25519`.
+    pub kind: String,
+    /// `SHA256:…`.
+    pub fingerprint: String,
+    /// When the person trusted it from Desk (Unix ms); none when it was in
+    /// their known_hosts already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_at: Option<i64>,
+}
+
+/// One line of this computer's log of a machine: what Desk did to reach
+/// it, and what ssh said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLine {
+    /// Unix ms.
+    pub at: i64,
+    pub kind: LogKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogKind {
+    Info,
+    Ok,
+    Warn,
+    Error,
+}
+
+/// What an update cancelled before its switch-over says.
+const UPDATE_CANCELLED: &str = "The update was cancelled.";
+
+/// The most lines kept of a machine's log.
+const LOG_LINES: usize = 200;
+
+/// How Desk reaches a machine, as the person's ssh config makes it
+/// (`ssh -G`, read at each connect).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reach {
+    pub user: Option<String>,
+    pub hostname: Option<String>,
+    pub port: Option<String>,
+    /// `ProxyJump`'s hosts, or that a `ProxyCommand` runs.
+    pub via: Option<String>,
+    /// The `Host` entry its address is, and the file it is in.
+    pub entry: Option<String>,
+    pub file: Option<String>,
+    /// The line that removes its old key from the person's known_hosts
+    /// (`ssh-keygen -R`, by the name and port ssh looks it up by).
+    pub forget_key: Option<String>,
+}
+
+/// What the last look there found, besides its system.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Details {
+    pub free_kb: Option<u64>,
+    pub linger: Option<bool>,
+    /// Desk's user service there is enabled.
+    pub service: bool,
+    pub systemd: bool,
+    pub user: Option<String>,
+    /// The line that turns linger on there, made here with the account's
+    /// name checked and quoted.
+    pub linger_line: Option<String>,
+}
+
+/// What checking another address for a machine found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Checked {
+    /// It shows the machine's own key: switching to it is a click.
+    #[serde(rename_all = "camelCase")]
+    Same { key: KeptKey, took_ms: u64 },
+    /// The person said no: nothing ran there.
+    Cancelled,
+    /// It shows another key: never switched to.
+    DifferentKey { shown: KeptKey, known: KeptKey },
+}
+
+/// An address checked for a machine, and what its switch needs.
+struct CheckedAt {
+    target: Target,
+    line: String,
+    files: Files,
+    at: Instant,
+}
+
+/// How long a check stands for the switch that follows it.
+const CHECK_STANDS: Duration = Duration::from_secs(5 * 60);
+
+/// What changing how a machine is reached did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Edited {
+    /// The name, the address or both are changed.
+    Done,
+    /// The person said no: nothing changed.
+    Cancelled,
+    /// The new address shows another key than the machine's: refused.
+    DifferentKey { shown: KeptKey, known: KeptKey },
+}
+
+/// An ssh that couldn't run, or ran out of time, in plain words.
+fn ssh_ran_out(machine: &Machine, e: &std::io::Error, within: Duration) -> String {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        format!(
+            "{} didn't answer within {} s. Nothing changed.",
+            machine.target,
+            within.as_secs()
+        )
+    } else {
+        format!("Desk couldn't run ssh: {e}")
+    }
+}
+
+/// Now, in Unix ms.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 /// A row of `machines_list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Listed {
     pub id: String,
     pub name: String,
@@ -67,6 +263,36 @@ pub struct Listed {
     pub version: Option<String>,
     pub system: Option<System>,
     pub state: State,
+    /// Why it is offline or failed, in the person's words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// ssh's own last line about it, as ssh said it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
+    /// Unix ms: when it was last reached, when Desk last tried, when it
+    /// tries next, and since when it has been connected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_try: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_try: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_since: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reach: Option<Reach>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Details>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<KeptKey>,
+    /// The key it shows now, when its host key changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown_key: Option<KeptKey>,
+    /// What an install or update there is doing now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<UpdateRun>,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -81,6 +307,8 @@ pub enum Step {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepState {
+    /// Not begun (an update's later steps).
+    Waiting,
     Running,
     Done,
     Failed,
@@ -115,6 +343,37 @@ pub trait Host: Send + Sync + 'static {
     fn backend(&self, arch: Arch) -> Result<Backend, String>;
     /// Who owns the machines, for their services.
     fn person(&self) -> Person;
+    /// A step of uninstalling Desk from a machine moved.
+    fn removing(&self, event: &RemoveEvent) {
+        let _ = event;
+    }
+}
+
+/// A step of removing a machine with Desk uninstalled from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoveStep {
+    /// Desk's service stopped there, and its unit taken away.
+    Stop,
+    /// Everything Desk keeps there removed.
+    Remove,
+    /// Linger turned off for the account.
+    Linger,
+    /// Forgotten on this computer.
+    Forget,
+}
+
+/// The `machine-remove` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemoveEvent {
+    pub machine: String,
+    pub step: RemoveStep,
+    pub state: StepState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// What to run there by hand, when Desk couldn't do it itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// How long things take.
@@ -122,6 +381,8 @@ pub trait Host: Send + Sync + 'static {
 pub struct Timing {
     /// How long Desk waits for a machine's helper to say where its hub is.
     pub ready_within: Duration,
+    /// The longest one step of setting a machine up may take.
+    pub step_within: Duration,
     pub poll: Duration,
     /// How often a ready machine's forward is looked at.
     pub check_every: Duration,
@@ -132,12 +393,16 @@ pub struct Timing {
     pub linger_for: Duration,
     /// How long a yes to an address stands.
     pub admitted_for: Duration,
+    /// How long changing how a machine is reached may wait on ssh, after
+    /// the person's yes: reading its settings, its key, and checking it.
+    pub edit_within: Duration,
 }
 
 impl Default for Timing {
     fn default() -> Self {
         Self {
             ready_within: Duration::from_secs(180),
+            step_within: ssh::Step::LIMIT,
             poll: Duration::from_secs(1),
             check_every: Duration::from_secs(5),
             first_backoff: Duration::from_secs(5),
@@ -145,6 +410,7 @@ impl Default for Timing {
             linger_poll: Duration::from_secs(5),
             linger_for: Duration::from_secs(30 * 60),
             admitted_for: Duration::from_secs(15 * 60),
+            edit_within: Duration::from_secs(45),
         }
     }
 }
@@ -217,6 +483,52 @@ struct Row {
     /// A connect is running.
     busy: bool,
     kick: Arc<(Mutex<bool>, Condvar)>,
+    /// What the page shows of where it stands, besides its state.
+    now: Now,
+    /// Set when the person cancels adding it (or its update, or its
+    /// uninstall between steps).
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Driven no further until the person asks (Reconnect): an uninstall
+    /// that stopped partway, which a connect would install again.
+    hold: bool,
+    /// Desk is being uninstalled from it now.
+    removing: bool,
+}
+
+/// Where a machine stands, besides its state: why, when, how it is reached,
+/// and this computer's log of it. Held in memory.
+#[derive(Default)]
+struct Now {
+    reason: Option<String>,
+    said: Option<String>,
+    last_try: Option<i64>,
+    next_try: Option<i64>,
+    connected_since: Option<i64>,
+    reach: Option<Reach>,
+    details: Option<Details>,
+    /// The key it shows now, when that isn't the one this computer knows.
+    shown_key: Option<KeptKey>,
+    log: VecDeque<LogLine>,
+    /// What a copy there has done so far ("Copying Desk 0.2.1… 22 of 61 MB").
+    progress: Option<String>,
+    /// An update to this Desk's version under way, or the one that stopped.
+    update: Option<UpdateRun>,
+}
+
+impl Row {
+    fn new(kept: Kept, state: State, saved: bool, busy: bool) -> Row {
+        Row {
+            kept,
+            state,
+            saved,
+            busy,
+            kick: Arc::default(),
+            now: Now::default(),
+            cancel: Arc::default(),
+            hold: false,
+            removing: false,
+        }
+    }
 }
 
 pub struct Fleet {
@@ -240,6 +552,9 @@ pub struct Fleet {
     /// Set when `machines.json` was there but didn't read: it is never
     /// written over, and nothing is added until it is fixed or moved.
     unreadable: std::sync::atomic::AtomicBool,
+    /// Addresses being added whose id isn't known yet (the person's yes is
+    /// awaited), and whether the person cancelled adding them meanwhile.
+    pending: Mutex<HashMap<String, bool>>,
     /// How long a save waits between its snapshot and its write: tests
     /// only, to hold one there.
     #[cfg(test)]
@@ -247,6 +562,12 @@ pub struct Fleet {
     /// What the person's ssh settings said about the address looked at
     /// last, for the public key it would sign in with.
     files: Mutex<Option<Files>>,
+    /// Keys the person trusted from Desk, by address, until the machine at
+    /// that address is added.
+    trusted: Mutex<HashMap<String, KeptKey>>,
+    /// Addresses checked to show a machine's own key, by machine: what a
+    /// switch to them needs, for [`CHECK_STANDS`].
+    checked: Mutex<HashMap<String, CheckedAt>>,
 }
 
 /// Whether the machine's hub answers through the forward: its engines, as
@@ -388,9 +709,12 @@ impl Fleet {
             rows: Mutex::default(),
             saving: Mutex::default(),
             unreadable: Default::default(),
+            pending: Mutex::default(),
             #[cfg(test)]
             save_pause: Mutex::default(),
             files: Mutex::default(),
+            trusted: Mutex::default(),
+            checked: Mutex::default(),
         })
     }
 
@@ -420,13 +744,7 @@ impl Fleet {
             for k in kept {
                 rows.insert(
                     k.machine.id.to_string(),
-                    Row {
-                        kept: k,
-                        state: State::Connecting,
-                        saved: true,
-                        busy: false,
-                        kick: Arc::default(),
-                    },
+                    Row::new(k, State::Connecting, true, false),
                 );
             }
             rows.keys().cloned().collect()
@@ -473,8 +791,144 @@ impl Fleet {
                 version: r.kept.version.clone(),
                 system: r.kept.system.clone(),
                 state: r.state.clone(),
+                reason: r.now.reason.clone(),
+                said: r.now.said.clone(),
+                last_connected: r.kept.last_connected,
+                last_try: r.now.last_try,
+                next_try: r.now.next_try,
+                connected_since: r.now.connected_since,
+                reach: r.now.reach.clone(),
+                details: r.now.details.clone(),
+                host_key: r.kept.host_key.clone(),
+                shown_key: r.now.shown_key.clone(),
+                progress: r.now.progress.clone(),
+                update: r.now.update.clone(),
             })
             .collect()
+    }
+
+    /// Says where step `key` of machine `id`'s update is, when one runs.
+    fn update_step(&self, id: &str, key: UpdateKey, state: StepState, detail: Option<String>) {
+        self.set_now(id, |n| {
+            if let Some(run) = n.update.as_mut()
+                && let Some(step) = run.steps.iter_mut().find(|s| s.key == key)
+            {
+                step.state = state;
+                if detail.is_some() {
+                    step.detail = detail;
+                }
+            }
+        });
+    }
+
+    /// The step of machine `id`'s update that runs now, if any.
+    fn update_running(&self, id: &str) -> Option<UpdateKey> {
+        self.rows().get(id).and_then(|r| {
+            r.now.update.as_ref().and_then(|u| {
+                u.steps
+                    .iter()
+                    .find(|s| s.state == StepState::Running)
+                    .map(|s| s.key)
+            })
+        })
+    }
+
+    /// "Cancel update" (`machine_cancel_update`): stops machine `id`'s update
+    /// before it switches over (whatever runs there is ended); it stays on
+    /// the version it had, driven no further until it matches.
+    pub fn cancel_update(&self, id: &str) -> Result<(), String> {
+        // Looked at and set under the one lock the switch-over is begun
+        // under (`begin_switch`): a Cancel either lands before it, or is
+        // refused.
+        let rows = self.rows();
+        let r = rows.get(id).ok_or("That machine isn't in Desk any more.")?;
+        let name = &r.kept.machine.name;
+        let running = r.now.update.as_ref().and_then(|u| {
+            u.steps
+                .iter()
+                .find(|s| s.state == StepState::Running)
+                .map(|s| s.key)
+        });
+        match running {
+            Some(UpdateKey::Download | UpdateKey::Copy) => {}
+            Some(_) => {
+                return Err(format!(
+                    "{name} is switching over now: it's done in a few seconds."
+                ));
+            }
+            None => return Err(format!("{name} isn't updating now.")),
+        }
+        r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Begins machine `id`'s switch-over, unless its update was cancelled:
+    /// both under one lock with Cancel update, so a Cancel never lands
+    /// after the switch-over has begun. True when it begins.
+    fn begin_switch(&self, id: &str) -> bool {
+        let mut rows = self.rows();
+        let Some(r) = rows.get_mut(id) else {
+            return false;
+        };
+        if r.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        if let Some(run) = r.now.update.as_mut()
+            && let Some(step) = run.steps.iter_mut().find(|s| s.key == UpdateKey::Switch)
+        {
+            step.state = StepState::Running;
+        }
+        true
+    }
+
+    /// A step that can't be cancelled (the switch-over, reconnecting after
+    /// it): its own cancel flag, which nothing sets, and the step's limit.
+    fn step_uncancellable(&self) -> ssh::Step {
+        ssh::Step::new(Arc::default(), self.timing.step_within)
+    }
+
+    /// This computer's log of machine `id`, oldest first.
+    pub fn log(&self, id: &str) -> Result<Vec<LogLine>, String> {
+        self.rows()
+            .get(id)
+            .map(|r| r.now.log.iter().cloned().collect())
+            .ok_or_else(|| "That machine isn't in Desk any more.".to_string())
+    }
+
+    /// Adds a line to machine `id`'s log, and to Desk's own.
+    fn note(&self, id: &str, kind: LogKind, text: impl Into<String>) {
+        let text = text.into();
+        match kind {
+            LogKind::Error | LogKind::Warn => {
+                tracing::info!(machine = id, problem = %text, "machine log")
+            }
+            _ => tracing::info!(machine = id, said = %text, "machine log"),
+        }
+        if let Some(r) = self.rows().get_mut(id) {
+            if r.now.log.len() >= LOG_LINES {
+                r.now.log.pop_front();
+            }
+            r.now.log.push_back(LogLine {
+                at: now_ms(),
+                kind,
+                text,
+            });
+        }
+    }
+
+    /// Changes what the page shows of where machine `id` stands, and says
+    /// so.
+    fn set_now(&self, id: &str, f: impl FnOnce(&mut Now)) {
+        let found = match self.rows().get_mut(id) {
+            Some(r) => {
+                f(&mut r.now);
+                true
+            }
+            None => false,
+        };
+        if found {
+            self.host.changed();
+        }
     }
 
     pub fn state(&self, id: &str) -> Option<State> {
@@ -577,6 +1031,9 @@ impl Fleet {
         let files = Files::parse(&said, &self.home);
         *self.files.lock().unwrap_or_else(|e| e.into_inner()) = Some(files.clone());
         let mut probe = probe::probe(&self.ssh, &machine, settings.user, &files);
+        if matches!(probe.host_key, ProbeKey::Changed { .. }) {
+            probe.forget_key = hostkey::forget_line(&files, &self.home);
+        }
         // A name that didn't resolve may be spelled differently in the
         // person's SSH config; the config's text is read, nothing is run.
         if let Some(Access::Unreachable { message, suggest }) = &mut probe.access
@@ -603,7 +1060,30 @@ impl Fleet {
             gate: &self.trust_gate,
             confirm: self.trust.as_ref(),
         };
-        hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)
+        if let Some(key) = hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)? {
+            let kept = KeptKey {
+                kind: key.kind(),
+                fingerprint: key.fingerprint,
+                trusted_at: Some(now_ms()),
+            };
+            self.trusted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(machine.target.to_string(), kept.clone());
+            // A machine of Desk's at that address now has this key: the
+            // one another address must show to be the same machine.
+            let same: Vec<String> = self
+                .rows()
+                .iter()
+                .filter(|(_, r)| r.kept.machine.target == machine.target)
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in same {
+                self.update_kept(&id, |k| k.host_key = Some(kept.clone()));
+                self.set_now(&id, |n| n.shown_key = None);
+            }
+        }
+        Ok(())
     }
 
     /// This computer's public SSH key (`machine_public_key`): for the
@@ -635,11 +1115,36 @@ impl Fleet {
         {
             return Err(format!("{target} is in Desk already."));
         }
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
+            return Err("Give it a name of up to 60 letters.".into());
+        }
+        if self
+            .rows()
+            .values()
+            .any(|r| r.kept.machine.name.eq_ignore_ascii_case(name))
+        {
+            return Err(format!(
+                "Another machine is called {name} already. Two machines can't share a name."
+            ));
+        }
         let id = {
             let rows = self.rows();
             id_for(name, &|id| rows.contains_key(id))
         };
-        let (machine, _) = admit::admit(&self.gate, &self.ssh, id.clone(), name, target)?;
+        // Cancellable by its address until it has an id: while the
+        // person's yes is awaited, a Cancel stops it once they answer.
+        self.pending_adds().insert(target.to_string(), false);
+        let admitted = admit::admit(&self.gate, &self.ssh, id.clone(), name, target);
+        let cancelled = self.pending_adds().remove(target).unwrap_or(false);
+        if cancelled {
+            if let Ok((machine, _)) = &admitted {
+                self.admitted.forget(machine.target.as_str());
+            }
+            tracing::info!(target, "adding a machine was cancelled before it began");
+            return Err(ssh::CANCELLED.into());
+        }
+        let (machine, _) = admitted?;
         // The yes is used up: adding it again, or another address, asks.
         self.admitted.forget(machine.target.as_str());
         let id = id.to_string();
@@ -648,19 +1153,25 @@ impl Fleet {
             if rows.contains_key(&id) {
                 return Err("Another machine was added with that name meanwhile.".into());
             }
+            let trusted = self
+                .trusted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(machine.target.as_str());
             rows.insert(
                 id.clone(),
-                Row {
-                    kept: Kept {
+                Row::new(
+                    Kept {
                         machine: machine.clone(),
                         version: None,
                         system: None,
+                        host_key: trusted,
+                        last_connected: None,
                     },
-                    state: State::Adding,
-                    saved: false,
-                    busy: true,
-                    kick: Arc::default(),
-                },
+                    State::Adding,
+                    false,
+                    true,
+                ),
             );
         }
         self.host.changed();
@@ -690,6 +1201,10 @@ impl Fleet {
 
     /// A step failed: said, and the machine stands failed.
     fn step_failed(&self, id: &str, step: Step, message: String) {
+        if self.cancelled(id) {
+            return self.forget_cancelled(id, step);
+        }
+        self.note(id, LogKind::Error, message.clone());
         self.emit(SetupEvent {
             message: Some(message.clone()),
             ..self.say(id, step, StepState::Failed)
@@ -698,6 +1213,188 @@ impl Fleet {
             r.busy = false;
         }
         self.set_state(id, State::Failed { message });
+    }
+
+    /// One step of setting machine `id` up: ended when the person cancels
+    /// adding it, or when it has run [`Timing::step_within`].
+    fn step(&self, id: &str) -> ssh::Step {
+        let cancel = self
+            .rows()
+            .get(id)
+            .map(|r| Arc::clone(&r.cancel))
+            .unwrap_or_default();
+        ssh::Step::new(cancel, self.timing.step_within)
+    }
+
+    fn pending_adds(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Saves machine `id` as added, unless the person cancelled adding it:
+    /// both under one lock with Cancel adding (which refuses one saved), so
+    /// neither can slip between the other's look and change. True when
+    /// saved; a cancelled one is forgotten.
+    fn save_added(&self, id: &str, step: Step, change: impl FnOnce(&mut Row)) -> bool {
+        let cancelled = {
+            let mut rows = self.rows();
+            match rows.get_mut(id) {
+                None => return false,
+                Some(r) if r.cancel.load(std::sync::atomic::Ordering::SeqCst) => true,
+                Some(r) => {
+                    change(r);
+                    r.saved = true;
+                    r.busy = false;
+                    false
+                }
+            }
+        };
+        if cancelled {
+            self.forget_cancelled(id, step);
+            return false;
+        }
+        self.save();
+        true
+    }
+
+    /// Whether the person cancelled adding machine `id`.
+    fn cancelled(&self, id: &str) -> bool {
+        self.rows()
+            .get(id)
+            .is_some_and(|r| r.cancel.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// Adding machine `id` was cancelled at `step`: it goes, as if it had
+    /// never been added (what was copied there stays, and adding it again
+    /// picks it up).
+    fn forget_cancelled(&self, id: &str, step: Step) {
+        // Said first, so the card hears why before the machine is gone.
+        self.emit(SetupEvent {
+            message: Some(ssh::CANCELLED.into()),
+            ..self.say(id, step, StepState::Failed)
+        });
+        let row = self.rows().remove(id);
+        if let Some(row) = &row {
+            self.admitted.forget(row.kept.machine.target.as_str());
+            row.kick.1.notify_all();
+        }
+        self.drop_link(id);
+        tracing::info!(machine = id, "adding a machine was cancelled");
+        self.host.changed();
+    }
+
+    /// "Cancel adding" (`machine_cancel_add`): stops setting machine `id` up
+    /// at once (whatever runs there is ended) and forgets it. Only for one
+    /// being added: one added is removed instead.
+    pub fn cancel_add(&self, id: &str) -> Result<(), String> {
+        let running = {
+            let rows = self.rows();
+            let Some(r) = rows.get(id) else {
+                drop(rows);
+                // Not a machine's id: an address being added whose id isn't
+                // known yet (the person's yes awaited); adding it stops once
+                // they answer.
+                if let Some(cancelled) = self.pending_adds().get_mut(id) {
+                    *cancelled = true;
+                    return Ok(());
+                }
+                return Err("That machine isn't in Desk any more.".into());
+            };
+            if r.saved {
+                return Err(format!(
+                    "{} is added already: remove it instead.",
+                    r.kept.machine.name
+                ));
+            }
+            r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            r.busy
+        };
+        if !running {
+            // Its setup had stopped already (a step failed): gone now.
+            self.forget_cancelled(id, Step::Connect);
+        }
+        Ok(())
+    }
+
+    /// "Retry" on a machine whose engines couldn't be installed while it was
+    /// added (`machine_retry_engines`): it is added already, so this installs
+    /// Claude Code and Codex there again, saying the step on `machine-setup`
+    /// as adding did, within the step's limit, and restarts Desk there once
+    /// they are, so its hub finds them.
+    pub fn retry_engines(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        let machine = {
+            let mut rows = self.rows();
+            let r = rows
+                .get_mut(id)
+                .ok_or("That machine isn't in Desk any more.")?;
+            if !r.saved {
+                return Err(format!("{} isn't added yet.", r.kept.machine.name));
+            }
+            if r.busy {
+                return Err(format!(
+                    "{} is busy connecting: try again in a moment.",
+                    r.kept.machine.name
+                ));
+            }
+            r.busy = true;
+            r.kept.machine.clone()
+        };
+        let fleet = Arc::clone(self);
+        let id = id.to_string();
+        let spawn_id = id.clone();
+        std::thread::Builder::new()
+            .name(format!("engines for {}", machine.name))
+            .spawn(move || {
+                fleet.emit(fleet.say(&id, Step::Engines, StepState::Running));
+                let engines = fleet.step(&id).run(|| {
+                    let look = probe::look(&fleet.ssh, &machine)
+                        .map_err(|m| Self::missed(&machine, m))?;
+                    let engines = setup::engines(&fleet.ssh, &machine)?;
+                    if engines.installed {
+                        if let Err(m) = setup::restart(
+                            &fleet.ssh,
+                            &machine,
+                            &look.bin(),
+                            &fleet.host.person(),
+                            look.service,
+                        ) {
+                            tracing::warn!(machine = %machine.id, problem = %m, "Desk didn't restart after its engines were installed");
+                        }
+                        if let Some(l) = fleet.machines.get(machine.id.as_str()) {
+                            l.forget();
+                        }
+                    }
+                    Ok::<_, String>(engines)
+                });
+                if let Some(r) = fleet.rows().get_mut(&id) {
+                    r.busy = false;
+                }
+                match engines {
+                    Ok(engines) => {
+                        fleet.note(&id, LogKind::Ok, engines.detail.clone());
+                        fleet.emit(SetupEvent {
+                            detail: Some(engines.detail),
+                            ..fleet.say(&id, Step::Engines, StepState::Done)
+                        });
+                    }
+                    Err(m) => {
+                        fleet.note(&id, LogKind::Error, m.clone());
+                        fleet.emit(SetupEvent {
+                            message: Some(m),
+                            ..fleet.say(&id, Step::Engines, StepState::Failed)
+                        });
+                    }
+                }
+                fleet.kick(&id);
+            })
+            .map_err(|e| {
+                // No thread to clear it: cleared here, or the machine would
+                // stay busy for good.
+                if let Some(r) = self.rows().get_mut(&spawn_id) {
+                    r.busy = false;
+                }
+                e.to_string()
+            })?;
+        Ok(())
     }
 
     /// Why a look found nothing, in the person's words.
@@ -744,16 +1441,33 @@ impl Fleet {
 
     /// The §4 flow, after the person's yes: look, install, start, connect,
     /// then the engines. Blocking; its own thread.
+    /// What the machine's page says about it (free space, linger, its
+    /// service, systemd, the account), from a look there.
+    fn know_details(&self, id: &str, look: &probe::Look) {
+        self.set_now(id, |n| {
+            n.details = Some(Details {
+                free_kb: look.free_kb,
+                linger: look.linger,
+                service: look.service,
+                systemd: look.systemd,
+                user: Some(look.user.clone()),
+                linger_line: Some(install::linger_by_hand(&look.user)),
+            })
+        });
+    }
+
     fn set_up(self: &Arc<Self>, id: &str) {
         let Some(machine) = self.machine(id) else {
             return;
         };
         let name = machine.name.clone();
         self.emit(self.say(id, Step::Connect, StepState::Running));
-        let look = match probe::look(&self.ssh, &machine) {
+        self.note(id, LogKind::Info, format!("connecting to {name}"));
+        let look = match self.step(id).run(|| probe::look(&self.ssh, &machine)) {
             Ok(l) => l,
             Err(m) => return self.step_failed(id, Step::Connect, Self::missed(&machine, m)),
         };
+        self.know_details(id, &look);
         if let Err(m) = Self::fits(&machine, &look) {
             return self.step_failed(id, Step::Connect, m);
         }
@@ -786,34 +1500,31 @@ impl Fleet {
                 let message = format!(
                     "{name} has a newer Desk ({from}) than this one ({wanted}). Update Desk on this Mac, then try again."
                 );
+                if !self.save_added(id, Step::Install, |r| r.kept.version = Some(from)) {
+                    return;
+                }
                 self.emit(SetupEvent {
                     message: Some(message),
                     ..self.say(id, Step::Install, StepState::Failed)
                 });
-                if let Some(r) = self.rows().get_mut(id) {
-                    r.kept.version = Some(from);
-                    r.saved = true;
-                    r.busy = false;
-                }
-                self.save();
                 self.drop_link(id);
                 self.set_state(id, State::Newer);
                 self.supervise(id);
                 return;
             }
-            Plan::Nothing => self.keep(&machine, &look),
-            Plan::Install | Plan::Upgrade { .. } => self.update(&machine, &look),
+            plan => plan,
         };
-        let keep = match keep {
-            Ok(k) => k,
-            Err(m) => return self.step_failed(id, Step::Install, m),
-        };
-        let link = match self.link(&machine) {
-            Ok(l) => l,
-            Err(m) => return self.step_failed(id, Step::Install, m),
-        };
-        let version = match self.wait_ready(&link, &wanted) {
-            Ok(v) => v,
+        let installed = self.step(id).run(|| {
+            let keep = match keep {
+                Plan::Nothing => self.keep(&machine, &look),
+                _ => self.update(&machine, &look),
+            }?;
+            let link = self.link(&machine)?;
+            let version = self.wait_ready(&link, &wanted)?;
+            Ok::<_, String>((keep, link, version))
+        });
+        let (keep, link, version) = match installed {
+            Ok(i) => i,
             Err(m) => return self.step_failed(id, Step::Install, m),
         };
         let line = install::linger_by_hand(&look.user);
@@ -846,40 +1557,52 @@ impl Fleet {
         self.update_kept(id, |k| k.version = Some(version.clone()));
 
         self.emit(self.say(id, Step::Engines, StepState::Running));
-        match setup::engines(&self.ssh, &machine) {
-            Ok(engines) => {
-                // The hub finds its engines' programs as it starts: one
-                // installed after it started needs it started again.
-                if engines.installed {
-                    let restarted = setup::restart(
-                        &self.ssh,
-                        &machine,
-                        &look.bin(),
-                        &self.host.person(),
-                        keep == Keep::Service,
-                    );
-                    link.forget();
-                    if let Err(m) =
-                        restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop))
-                    {
-                        tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
-                    }
+        let engines = self.step(id).run(|| {
+            let engines = setup::engines(&self.ssh, &machine)?;
+            // The hub finds its engines' programs as it starts: one
+            // installed after it started needs it started again.
+            if engines.installed {
+                let restarted = setup::restart(
+                    &self.ssh,
+                    &machine,
+                    &look.bin(),
+                    &self.host.person(),
+                    keep == Keep::Service,
+                );
+                link.forget();
+                if let Err(m) = restarted.and_then(|()| self.wait_ready(&link, &wanted).map(drop)) {
+                    tracing::warn!(machine = id, problem = %m, "Desk didn't restart after its engines were installed");
                 }
+            }
+            Ok::<_, String>(engines)
+        });
+        if !self.save_added(id, Step::Engines, |_| {}) {
+            return;
+        }
+        match engines {
+            Ok(engines) => self.emit(SetupEvent {
+                detail: Some(engines.detail),
+                ..self.say(id, Step::Engines, StepState::Done)
+            }),
+            Err(m) => {
+                self.note(id, LogKind::Error, m.clone());
                 self.emit(SetupEvent {
-                    detail: Some(engines.detail),
-                    ..self.say(id, Step::Engines, StepState::Done)
+                    message: Some(m),
+                    ..self.say(id, Step::Engines, StepState::Failed)
                 })
             }
-            Err(m) => self.emit(SetupEvent {
-                message: Some(m),
-                ..self.say(id, Step::Engines, StepState::Failed)
-            }),
         }
-        if let Some(r) = self.rows().get_mut(id) {
-            r.saved = true;
-            r.busy = false;
-        }
-        self.save();
+        let at = now_ms();
+        let reach = self.reach_of(&machine);
+        self.set_now(id, |n| {
+            n.reason = None;
+            n.said = None;
+            n.connected_since = Some(at);
+            n.reach = reach;
+        });
+        self.update_kept(id, |k| k.last_connected = Some(at));
+        self.note(id, LogKind::Ok, format!("connected · Desk {version}"));
+        self.know_key(id, &machine);
         self.set_state(id, State::Ready);
         self.host.changed();
         self.supervise(id);
@@ -922,8 +1645,34 @@ impl Fleet {
     /// Copies this Desk's backend there and flips to it, then keeps it
     /// running. Blocking.
     fn update(&self, machine: &Machine, look: &probe::Look) -> Result<Keep, String> {
+        let id = machine.id.as_str();
         let arch = Self::fits(machine, look)?;
-        let backend = self.host.backend(arch)?;
+        self.update_step(id, UpdateKey::Download, StepState::Running, None);
+        let backend = match self.host.backend(arch) {
+            Ok(b) => b,
+            Err(m) => {
+                self.update_step(id, UpdateKey::Download, StepState::Failed, Some(m.clone()));
+                return Err(m);
+            }
+        };
+        self.update_step(
+            id,
+            UpdateKey::Download,
+            StepState::Done,
+            Some(format!(
+                "Desk {} for Linux {}, {}",
+                backend.version,
+                look.arch,
+                if backend.signed {
+                    "signature checked"
+                } else {
+                    "a development build, its signature not checked"
+                }
+            )),
+        );
+        if self.cancelled(id) {
+            return Err(UPDATE_CANCELLED.into());
+        }
         if !backend.signed {
             tracing::warn!(machine = %machine.id, version = %backend.version, "installing a development backend; its signature isn't checked");
             // Said where the machine is added too, not only in the log.
@@ -943,8 +1692,73 @@ impl Fleet {
         if look.installed.is_some() && !look.service {
             let _ = setup::stop(&self.ssh, machine, &bin);
         }
-        setup::copy(&self.ssh, machine, &bin, &backend.version, &backend.data)?;
-        setup::flip(&self.ssh, machine, &bin, &backend.version)?;
+        let mb = |b: u64| ((b as f64) / 1_000_000.0).round() as u64;
+        self.update_step(
+            id,
+            UpdateKey::Copy,
+            StepState::Running,
+            Some(format!("Copying it to {}…", machine.name)),
+        );
+        let progress = |sent: u64, total: u64| {
+            let said = format!(
+                "Copying Desk {} to {}… {} of {} MB",
+                backend.version,
+                machine.name,
+                mb(sent),
+                mb(total).max(1)
+            );
+            let short = format!(
+                "Copying it to {}… {} of {} MB",
+                machine.name,
+                mb(sent),
+                mb(total).max(1)
+            );
+            self.update_step(id, UpdateKey::Copy, StepState::Running, Some(short));
+            self.set_now(id, |n| n.progress = Some(said.clone()));
+            self.emit(SetupEvent {
+                detail: Some(said),
+                ..self.say(id, Step::Install, StepState::Running)
+            });
+        };
+        let copied = self.step(id).run(|| {
+            setup::copy(
+                &self.ssh,
+                machine,
+                &bin,
+                &backend.version,
+                &backend.data,
+                &progress,
+            )
+        });
+        self.set_now(id, |n| n.progress = None);
+        if let Err(m) = copied {
+            let m = if self.cancelled(id) {
+                UPDATE_CANCELLED.to_string()
+            } else {
+                m
+            };
+            self.update_step(id, UpdateKey::Copy, StepState::Failed, Some(m.clone()));
+            return Err(m);
+        }
+        self.update_step(
+            id,
+            UpdateKey::Copy,
+            StepState::Done,
+            Some(format!("Copied to {}", machine.name)),
+        );
+        // From here it can't be cancelled: Desk there restarts in seconds.
+        if !self.begin_switch(id) {
+            return Err(UPDATE_CANCELLED.into());
+        }
+        self.host.changed();
+        if let Err(m) = self
+            .step_uncancellable()
+            .run(|| setup::flip(&self.ssh, machine, &bin, &backend.version))
+        {
+            self.update_step(id, UpdateKey::Switch, StepState::Failed, Some(m.clone()));
+            return Err(m);
+        }
+        self.update_step(id, UpdateKey::Switch, StepState::Done, None);
         if let Some(l) = self.machines.get(machine.id.as_str()) {
             l.forget();
         }
@@ -983,6 +1797,9 @@ impl Fleet {
         let until = Instant::now() + self.timing.ready_within;
         let mut last = None;
         loop {
+            if let Some(why) = ssh::Step::current().and_then(|s| s.ended()) {
+                return Err(why.to_string());
+            }
             match link.read() {
                 Ok(Some(c)) if c.device_token.is_some() => {
                     match setup::running(&self.ssh, link.machine()) {
@@ -1021,15 +1838,122 @@ impl Fleet {
                 return true;
             }
             r.busy = true;
+            // A cancel was for the update it stopped, not this connect.
+            r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
             r.kept.machine.clone()
         };
+        let was_ready = matches!(self.state(id), Some(State::Ready));
         let state = self.connect_now(&machine);
         if let Some(r) = self.rows().get_mut(id) {
             r.busy = false;
         }
-        let ok = matches!(state, State::Ready | State::Newer);
+        let ok = matches!(
+            state,
+            State::Ready | State::Newer | State::UpdateFailed { .. }
+        );
+        match &state {
+            State::Ready => {
+                let at = now_ms();
+                self.set_now(id, |n| {
+                    n.reason = None;
+                    n.said = None;
+                    n.next_try = None;
+                    if !was_ready || n.connected_since.is_none() {
+                        n.connected_since = Some(at);
+                    }
+                });
+                self.update_kept(id, |k| k.last_connected = Some(at));
+                let version = self
+                    .rows()
+                    .get(id)
+                    .and_then(|r| r.kept.version.clone())
+                    .unwrap_or_default();
+                self.note(id, LogKind::Ok, format!("connected · Desk {version}"));
+                self.know_key(id, &machine);
+            }
+            State::Newer => self.note(id, LogKind::Warn, "it runs a newer Desk: driven no further"),
+            State::Failed { message } => {
+                let message = message.clone();
+                self.set_now(id, |n| {
+                    n.reason = Some(message);
+                    n.connected_since = None;
+                });
+            }
+            State::Unreachable => self.set_now(id, |n| n.connected_since = None),
+            _ => {}
+        }
         self.set_state(id, state);
         ok
+    }
+
+    /// Keeps the host key machine `id` shows, when Desk doesn't know it
+    /// yet: what makes another address the same machine.
+    fn know_key(&self, id: &str, machine: &Machine) {
+        if self
+            .rows()
+            .get(id)
+            .is_some_and(|r| r.kept.host_key.is_some())
+        {
+            return;
+        }
+        // All of it within one limit: it can run before the person is asked
+        // anything (checking another address), and never waits for good.
+        let ssh = self.ssh.until(Instant::now() + self.timing.edit_within);
+        let Ok((key, _)) = hostkey::capture(&ssh, machine) else {
+            return;
+        };
+        // Kept only once it is one the person's known_hosts already has for
+        // it: what answered a capture (which trusts nothing) isn't proof
+        // of anything by itself.
+        let files = match ssh.output(&machine.settings()) {
+            Ok(out) if out.status.success() => {
+                Files::parse(&String::from_utf8_lossy(&out.stdout), &self.home)
+            }
+            _ => return,
+        };
+        if !hostkey::known_fingerprints(&files).contains(&key.fingerprint) {
+            self.note(
+                id,
+                LogKind::Warn,
+                format!(
+                    "the host key it showed ({}) isn't in your known_hosts for it: not kept",
+                    key.fingerprint
+                ),
+            );
+            return;
+        }
+        self.update_kept(id, |k| {
+            k.host_key.get_or_insert(KeptKey {
+                kind: key.kind(),
+                fingerprint: key.fingerprint,
+                trusted_at: None,
+            });
+        });
+    }
+
+    /// How Desk reaches `machine` now, as the person's ssh config says.
+    fn reach_of(&self, machine: &Machine) -> Option<Reach> {
+        let said = self.settings_said(machine).ok()?;
+        let settings = ssh::Settings::parse(&said);
+        let files = Files::parse(&said, &self.home);
+        let entry = suggest::hosts(&self.home)
+            .into_iter()
+            .find(|e| e.host == machine.target.as_str());
+        Some(Reach {
+            user: settings.user,
+            hostname: settings.hostname,
+            port: settings.port,
+            via: settings.via.map(|v| {
+                if v.contains(' ') {
+                    "a ProxyCommand".to_string()
+                } else {
+                    v
+                }
+            }),
+            file: entry.as_ref().map(|e| e.file.clone()),
+            entry: entry.map(|e| e.host),
+            forget_key: hostkey::forget_line(&files, &self.home),
+        })
     }
 
     fn connect_now(&self, machine: &Machine) -> State {
@@ -1037,18 +1961,65 @@ impl Fleet {
         if !matches!(self.state(id), Some(State::Ready)) {
             self.set_state(id, State::Connecting);
         }
-        let look = match probe::look(&self.ssh, machine) {
+        let reach = self.reach_of(machine);
+        let through = reach
+            .as_ref()
+            .and_then(|r| r.via.clone())
+            .map(|v| format!(" through {v}"))
+            .unwrap_or_default();
+        self.note(
+            id,
+            LogKind::Info,
+            format!("connecting to {}{through}", machine.name),
+        );
+        self.set_now(id, |n| {
+            n.last_try = Some(now_ms());
+            n.next_try = None;
+            if reach.is_some() {
+                n.reach = reach;
+            }
+        });
+        let (look, said) = probe::look_said(&self.ssh, machine);
+        let look = match look {
             Ok(l) => l,
             Err(Missed::Unreachable(m)) => {
                 tracing::info!(machine = id, problem = %m, "machine unreachable");
+                self.note(
+                    id,
+                    LogKind::Error,
+                    said.clone().unwrap_or_else(|| m.clone()),
+                );
+                self.set_now(id, |n| {
+                    n.reason = Some(m);
+                    n.said = said;
+                });
                 return State::Unreachable;
             }
             Err(m) => {
-                return State::Failed {
-                    message: Self::missed(machine, m),
-                };
+                // Its key changed: the key it shows now, beside the one kept.
+                let shown = matches!(m, Missed::Key(hostkey::KeyTrouble::Changed))
+                    .then(|| hostkey::capture(&self.ssh, machine).ok())
+                    .flatten()
+                    .map(|(k, _)| KeptKey {
+                        kind: k.kind(),
+                        fingerprint: k.fingerprint,
+                        trusted_at: None,
+                    });
+                let message = Self::missed(machine, m);
+                self.note(
+                    id,
+                    LogKind::Error,
+                    said.clone().unwrap_or_else(|| message.clone()),
+                );
+                self.set_now(id, |n| {
+                    n.said = said;
+                    n.shown_key = shown;
+                });
+                return State::Failed { message };
             }
         };
+        self.set_now(id, |n| n.shown_key = None);
+        self.know_details(id, &look);
         // Never over desktop Desk, installed there since.
         if look.desktop {
             return State::Failed {
@@ -1075,8 +2046,33 @@ impl Fleet {
                 return State::Newer;
             }
             Plan::Install | Plan::Upgrade { .. } => {
+                let from = look.installed.clone();
+                self.set_now(id, |n| n.update = Some(UpdateRun::new(&wanted, from)));
+                self.note(
+                    id,
+                    LogKind::Info,
+                    format!("updating Desk there to {wanted}"),
+                );
                 self.set_state(id, State::Updating);
-                self.update(machine, &look)
+                match self.update(machine, &look) {
+                    Ok(k) => {
+                        self.update_step(id, UpdateKey::Reconnect, StepState::Running, None);
+                        Ok(k)
+                    }
+                    Err(message) => {
+                        self.note(id, LogKind::Error, message.clone());
+                        let from = look.installed.clone();
+                        let message = if message == UPDATE_CANCELLED {
+                            format!(
+                                "You cancelled the update: it stays on {} until it matches.",
+                                from.as_deref().unwrap_or("its version")
+                            )
+                        } else {
+                            message
+                        };
+                        return State::UpdateFailed { message, from };
+                    }
+                }
             }
             Plan::Nothing => {
                 let running = matches!(link.read(), Ok(Some(_)));
@@ -1093,13 +2089,35 @@ impl Fleet {
         if let Err(message) = kept {
             return State::Failed { message };
         }
-        match self.wait_ready(&link, &wanted) {
+        let updating = self.update_running(id) == Some(UpdateKey::Reconnect);
+        let step = if updating {
+            self.step_uncancellable()
+        } else {
+            self.step(id)
+        };
+        match step.run(|| self.wait_ready(&link, &wanted)) {
             Ok(version) => {
+                if updating {
+                    self.note(id, LogKind::Ok, format!("updated to Desk {version}"));
+                    self.set_now(id, |n| n.update = None);
+                }
                 if self.rows().get(id).and_then(|r| r.kept.version.clone()) != Some(version.clone())
                 {
                     self.update_kept(id, |k| k.version = Some(version));
                 }
                 State::Ready
+            }
+            Err(message) if updating => {
+                self.update_step(
+                    id,
+                    UpdateKey::Reconnect,
+                    StepState::Failed,
+                    Some(message.clone()),
+                );
+                State::UpdateFailed {
+                    message,
+                    from: self.rows().get(id).and_then(|r| r.kept.version.clone()),
+                }
             }
             Err(message) => State::Failed { message },
         }
@@ -1117,6 +2135,7 @@ impl Fleet {
             if again {
                 r.busy = true;
                 r.state = State::Adding;
+                r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
             }
             again
         };
@@ -1191,13 +2210,41 @@ impl Fleet {
                     let Some(state) = fleet.state(&id) else {
                         return;
                     };
+                    // Held (an uninstall stopped partway): only Reconnect
+                    // drives it again.
+                    if fleet.rows().get(&id).is_some_and(|r| r.hold) {
+                        let asked = fleet.wait_kick(&id, None);
+                        if let Some(r) = fleet.rows().get_mut(&id) {
+                            r.hold = !asked;
+                        }
+                        if !asked {
+                            continue;
+                        }
+                    }
                     let connect = match state {
                         State::Ready => {
                             if fleet.wait_kick(&id, Some(fleet.timing.check_every)) {
                                 true
-                            } else if fleet.machines.get(&id).is_some_and(|l| l.ready().is_none()) {
+                            } else if !fleet.rows().get(&id).is_some_and(|r| r.busy)
+                                && fleet.machines.get(&id).is_some_and(|l| l.ready().is_none())
+                            {
                                 misses += 1;
                                 if misses >= 3 {
+                                    let name =
+                                        fleet.machine(&id).map(|m| m.name).unwrap_or_default();
+                                    let secs = (fleet.timing.check_every * 3).as_secs().max(1);
+                                    fleet.note(
+                                        &id,
+                                        LogKind::Warn,
+                                        format!("link dropped: no answer for {secs} s"),
+                                    );
+                                    fleet.set_now(&id, |n| {
+                                        n.reason = Some(format!(
+                                            "Desk lost its link to {name}: no answer for {secs} s."
+                                        ));
+                                        n.said = None;
+                                        n.connected_since = None;
+                                    });
                                     fleet.set_state(&id, State::Unreachable);
                                 }
                                 misses >= 3
@@ -1206,7 +2253,8 @@ impl Fleet {
                                 false
                             }
                         }
-                        State::Newer => fleet.wait_kick(&id, None),
+                        // Driven no further until asked: Update to match.
+                        State::Newer | State::UpdateFailed { .. } => fleet.wait_kick(&id, None),
                         State::Adding => {
                             fleet.wait_kick(&id, Some(fleet.timing.poll));
                             false
@@ -1223,11 +2271,312 @@ impl Fleet {
                     if fleet.connect(&id) {
                         backoff = fleet.timing.first_backoff;
                     } else {
-                        fleet.wait_kick(&id, Some(backoff));
+                        let next = now_ms() + backoff.as_millis() as i64;
+                        fleet.note(
+                            &id,
+                            LogKind::Info,
+                            format!("next try in {} s", backoff.as_secs().max(1)),
+                        );
+                        fleet.set_now(&id, |n| n.next_try = Some(next));
+                        if fleet.wait_kick(&id, Some(backoff)) {
+                            fleet.note(&id, LogKind::Info, "reconnecting now, as asked");
+                        }
                         backoff = (backoff * 2).min(fleet.timing.max_backoff);
                     }
                 }
             });
+    }
+
+    // ── Reading and changing it ─────────────────────────────────────────
+
+    /// The `Host` entries in the person's SSH config, read as text.
+    pub fn ssh_hosts(&self) -> Vec<suggest::HostEntry> {
+        suggest::hosts(&self.home)
+    }
+
+    /// The last `lines` of Desk's own log on machine `id` (its service's,
+    /// from `journalctl --user`), read over SSH with Desk's fixed options;
+    /// each line cleaned to plain text. Gives up after `within`. Blocking.
+    pub fn remote_log(&self, id: &str, within: Duration) -> Result<String, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let words: Vec<String> = [
+            "journalctl",
+            "--user",
+            "-u",
+            desk_core::systemd::UNIT,
+            "-n",
+            "200",
+            "--no-pager",
+            "-o",
+            "short-iso",
+        ]
+        .iter()
+        .map(|w| w.to_string())
+        .collect();
+        let out = self
+            .ssh
+            .output_within(&machine.command(&words), within)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::TimedOut {
+                    format!(
+                        "{} didn't answer within {} s.",
+                        machine.name,
+                        within.as_secs()
+                    )
+                } else {
+                    format!("Desk couldn't run ssh: {e}")
+                }
+            })?;
+        if out.status.code() == Some(ssh::SSH_FAILED) {
+            return Err(ssh::problem(&machine, &out.stderr));
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<String> = text
+            .lines()
+            .map(|l| {
+                l.chars()
+                    .map(|c| if c == '\t' { ' ' } else { c })
+                    .filter(|c| !c.is_control() && !desk_core::machine::is_format(*c))
+                    .take(400)
+                    .collect::<String>()
+            })
+            .collect();
+        if lines.iter().all(|l| l.trim().is_empty()) {
+            return Ok(format!(
+                "{} has no log from Desk's service yet{}.",
+                machine.name,
+                if out.status.success() {
+                    ""
+                } else {
+                    " (journalctl couldn't read it)"
+                }
+            ));
+        }
+        Ok(lines.join("\n"))
+    }
+
+    /// Checks that `target` reaches machine `id` (`machine_check_reach`):
+    /// the person is asked natively first (nothing runs for the address
+    /// before), then the key it shows is read, within one limit, and
+    /// compared with the machine's own, checked against the person's
+    /// known_hosts. The same key stands for a switch for a few minutes.
+    /// Blocking.
+    pub fn check_reach(self: &Arc<Self>, id: &str, target: &str) -> Result<Checked, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let t = Target::new(target.trim()).map_err(|e| e.to_string())?;
+        if t == machine.target {
+            return Err(format!("{t} is how Desk reaches {} now.", machine.name));
+        }
+        if let Some((_, other)) = self
+            .rows()
+            .iter()
+            .find(|(other, r)| *other != id && r.kept.machine.target == t)
+        {
+            return Err(format!(
+                "{t} is how Desk reaches {} already.",
+                other.kept.machine.name
+            ));
+        }
+        // Only a key checked against the person's known_hosts says what
+        // the machine is: none on record, nothing moves.
+        if self
+            .rows()
+            .get(id)
+            .is_some_and(|r| r.kept.host_key.is_none())
+        {
+            self.know_key(id, &machine);
+        }
+        let known = self
+            .rows()
+            .get(id)
+            .and_then(|r| r.kept.host_key.clone())
+            .ok_or_else(|| {
+                format!(
+                    "Desk has no host key for {name} checked against your known_hosts yet, so it can't tell another address is the same machine. Reconnect {name}, then try again.",
+                    name = machine.name
+                )
+            })?;
+        let question = SwitchQuestion {
+            name: machine.name.clone(),
+            from: machine.target.to_string(),
+            to: t.to_string(),
+            kind: known.kind.clone(),
+            fingerprint: known.fingerprint.clone(),
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.switch_to(&question))? {
+            return Ok(Checked::Cancelled);
+        }
+        let moved = Machine {
+            target: t.clone(),
+            ..machine.clone()
+        };
+        // Only now does anything run for the new address, all of it within
+        // one limit.
+        let started = Instant::now();
+        let within = self.timing.edit_within;
+        let ssh = self.ssh.until(started + within);
+        let out = ssh
+            .output(&moved.settings())
+            .map_err(|e| ssh_ran_out(&moved, &e, within))?;
+        if !out.status.success() {
+            return Err(ssh::problem(&moved, &out.stderr));
+        }
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        ssh::no_forwards(&moved, &ssh::Settings::parse(&said))?;
+        let files = Files::parse(&said, &self.home);
+        let (shown, line) = hostkey::capture(&ssh, &moved)?;
+        let shown = KeptKey {
+            kind: shown.kind(),
+            fingerprint: shown.fingerprint,
+            trusted_at: None,
+        };
+        if shown.fingerprint != known.fingerprint {
+            self.note(
+                id,
+                LogKind::Warn,
+                format!(
+                    "{t} shows another host key ({}): not moved there",
+                    shown.fingerprint
+                ),
+            );
+            return Ok(Checked::DifferentKey { shown, known });
+        }
+        self.checked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                id.to_string(),
+                CheckedAt {
+                    target: t,
+                    line,
+                    files,
+                    at: Instant::now(),
+                },
+            );
+        Ok(Checked::Same {
+            key: known,
+            took_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    /// Changes machine `id`'s name, how it is reached (`target`), or both
+    /// (`machine_edit`). A new address must show the machine's own host
+    /// key: the person is asked natively first (nothing runs there before),
+    /// then the key it shows is read and compared; another key is refused
+    /// and nothing changes. Blocking.
+    pub fn edit(
+        self: &Arc<Self>,
+        id: &str,
+        target: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Edited, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let name = name.map(str::trim).filter(|n| *n != machine.name);
+        if let Some(n) = name {
+            if n.is_empty() || n.chars().count() > 60 {
+                return Err("Give it a name of up to 60 letters.".into());
+            }
+            // Shown as it says, as adding's names are: nothing that could
+            // make it read as something else (no zero-width or bidi marks).
+            if !desk_core::machine::plain(n) {
+                return Err(
+                    "A machine's name can only have letters, numbers, spaces and punctuation."
+                        .into(),
+                );
+            }
+            if self
+                .rows()
+                .iter()
+                .any(|(other, r)| other != id && r.kept.machine.name.eq_ignore_ascii_case(n))
+            {
+                return Err(format!(
+                    "Another machine is called {n} already. Two machines can't share a name."
+                ));
+            }
+        }
+        let target = match target
+            .map(str::trim)
+            .filter(|t| *t != machine.target.as_str())
+        {
+            Some(t) => Some(Target::new(t).map_err(|e| e.to_string())?),
+            None => None,
+        };
+        if let Some(t) = &target
+            && let Some((_, other)) = self
+                .rows()
+                .iter()
+                .find(|(other, r)| *other != id && r.kept.machine.target == *t)
+        {
+            return Err(format!(
+                "{t} is how Desk reaches {} already.",
+                other.kept.machine.name
+            ));
+        }
+        if let Some(t) = target {
+            let moved = Machine {
+                target: t.clone(),
+                ..machine.clone()
+            };
+            // Checked a moment ago (`check_reach`), or checked now.
+            let fresh = {
+                let mut checked = self.checked.lock().unwrap_or_else(|e| e.into_inner());
+                match checked.remove(id) {
+                    Some(c) if c.target == t && c.at.elapsed() < CHECK_STANDS => Some(c),
+                    _ => None,
+                }
+            };
+            let at = match fresh {
+                Some(c) => c,
+                None => match self.check_reach(id, t.as_str())? {
+                    Checked::Same { .. } => self
+                        .checked
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(id)
+                        .ok_or("Desk lost track of that check. Try again.")?,
+                    Checked::Cancelled => return Ok(Edited::Cancelled),
+                    Checked::DifferentKey { shown, known } => {
+                        return Ok(Edited::DifferentKey { shown, known });
+                    }
+                },
+            };
+            let within = self.timing.edit_within;
+            let ssh = self.ssh.until(Instant::now() + within);
+            match hostkey::trouble(&ssh, &moved)? {
+                None => {}
+                Some(hostkey::KeyTrouble::Unknown) => hostkey::learn(&at.files, &at.line)?,
+                Some(hostkey::KeyTrouble::Changed) => {
+                    return Err(format!(
+                        "Your known_hosts has another key for {t}. Desk won't change it: remove that line (ssh-keygen -R), then try again."
+                    ));
+                }
+            }
+            self.update_kept(id, |k| k.machine.target = t.clone());
+            self.note(
+                id,
+                LogKind::Info,
+                format!("now reached at {t}, the same host key"),
+            );
+            tracing::info!(machine = id, target = %t, "machine reached at another address");
+            // Its link and forward are made again, to the new address.
+            self.drop_link(id);
+            self.set_now(id, |n| n.reach = None);
+            self.set_state(id, State::Connecting);
+            self.kick(id);
+        }
+        if let Some(n) = name {
+            let n = n.to_string();
+            self.update_kept(id, |k| k.machine.name = n.clone());
+            self.note(id, LogKind::Info, format!("named {n}"));
+        }
+        Ok(Edited::Done)
     }
 
     // ── Removing ────────────────────────────────────────────────────────
@@ -1250,6 +2599,217 @@ impl Fleet {
         Ok(())
     }
 
+    /// Removes machine `id` and uninstalls Desk from it first
+    /// (`machine_uninstall`), saying each step on `machine-remove`: its
+    /// service stopped and its unit gone, everything Desk keeps there
+    /// removed (`--remove-everything`), linger off, then forgotten here.
+    /// Each step stops after [`Timing::step_within`]. A step that fails
+    /// says why and nothing is forgotten: Try again, or remove it without
+    /// uninstalling. Only a machine's own install is ever touched. Blocking.
+    pub fn uninstall(&self, id: &str) -> Result<bool, String> {
+        let machine = self
+            .machine(id)
+            .ok_or("That machine isn't in Desk any more.")?;
+        let name = machine.name.clone();
+        if !matches!(
+            self.state(id),
+            Some(State::Ready | State::UpdateFailed { .. } | State::Newer | State::Failed { .. })
+        ) {
+            return Err(format!(
+                "Desk can't reach {name} right now, so it can only forget it here."
+            ));
+        }
+        // Asked natively first, naming the machine and its address, Cancel
+        // the default: nothing runs there before a yes.
+        let question = UninstallQuestion {
+            name: name.clone(),
+            target: machine.target.to_string(),
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.uninstall(&question))? {
+            return Ok(false);
+        }
+        let say =
+            |step: RemoveStep, state: StepState, message: Option<String>, line: Option<String>| {
+                self.host.removing(&RemoveEvent {
+                    machine: id.to_string(),
+                    step,
+                    state,
+                    message,
+                    line,
+                });
+            };
+        // Each step whole, within its limit: Cancel takes effect between
+        // steps, never halfway through one.
+        let run = |step: RemoveStep, script: &str, what: &str| -> Result<(), String> {
+            say(step, StepState::Running, None, None);
+            let done = self
+                .step_uncancellable()
+                .run(|| setup::run(&self.ssh, &machine, script, what));
+            match done {
+                Ok(_) => {
+                    say(step, StepState::Done, None, None);
+                    Ok(())
+                }
+                Err(m) => {
+                    say(step, StepState::Failed, Some(m.clone()), None);
+                    self.note(id, LogKind::Error, m.clone());
+                    Err(m)
+                }
+            }
+        };
+        // Nothing connects to it (and so starts Desk there again) while it
+        // goes: its supervisor waits on `busy` until this is done.
+        // A connect under way finishes first (it can take a step's length).
+        let until = Instant::now() + self.timing.step_within;
+        loop {
+            {
+                let mut rows = self.rows();
+                let Some(r) = rows.get_mut(id) else {
+                    return Err("That machine isn't in Desk any more.".into());
+                };
+                if !r.busy {
+                    r.busy = true;
+                    r.removing = true;
+                    r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+                    break;
+                }
+            }
+            if Instant::now() >= until {
+                return Err(format!("{name} is busy connecting: try again in a moment."));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        struct Held<'a>(&'a Fleet, &'a str);
+        impl Drop for Held<'_> {
+            fn drop(&mut self) {
+                if let Some(r) = self.0.rows().get_mut(self.1) {
+                    r.busy = false;
+                    r.removing = false;
+                    r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+        }
+        let held = Held(self, id);
+        self.note(id, LogKind::Info, format!("uninstalling Desk from {name}"));
+        // The link goes first: nothing of Desk's talks to it while it goes.
+        self.drop_link(id);
+        let stopped = run(
+            RemoveStep::Stop,
+            &setup::uninstall_stop_script(),
+            &format!("Couldn't stop Desk's service on {name}"),
+        );
+        if let Err(m) = stopped {
+            // Nothing was removed: connecting again starts Desk there again.
+            drop(held);
+            self.kick(id);
+            return Err(m);
+        }
+        if self.cancelled(id) {
+            // Cancelled before anything was removed: Desk there starts again.
+            self.note(
+                id,
+                LogKind::Info,
+                "uninstalling was cancelled; nothing was removed",
+            );
+            drop(held);
+            self.kick(id);
+            return Ok(false);
+        }
+        let removed = run(
+            RemoveStep::Remove,
+            &setup::uninstall_remove_script(),
+            "Couldn't remove ~/.local/share/Desk",
+        )
+        .and_then(|()| {
+            // Checked, not assumed: the folder (and the sign-ins in it) is gone.
+            setup::run(
+                &self.ssh,
+                &machine,
+                &setup::uninstall_gone_script(),
+                "Desk couldn't check ~/.local/share/Desk is gone",
+            )
+            .map(drop)
+            .inspect_err(|m| {
+                say(RemoveStep::Remove, StepState::Failed, Some(m.clone()), None);
+            })
+        });
+        if let Err(m) = removed {
+            // Partway: Desk there is stopped and perhaps half gone. A connect
+            // would install it again, so it is held until the person says.
+            let message = format!(
+                "Uninstalling stopped partway: Desk on {name} is stopped, and ~/.local/share/Desk may be partly gone. Try again, or remove it without uninstalling."
+            );
+            if let Some(r) = self.rows().get_mut(id) {
+                r.hold = true;
+            }
+            drop(held);
+            self.set_state(id, State::Failed { message });
+            return Err(m);
+        }
+        // Linger turned off where the account may; else the line to run.
+        say(RemoveStep::Linger, StepState::Running, None, None);
+        match self.step_uncancellable().run(|| {
+            setup::run(
+                &self.ssh,
+                &machine,
+                setup::UNINSTALL_LINGER_SCRIPT,
+                "linger",
+            )
+        }) {
+            Ok(_) => say(RemoveStep::Linger, StepState::Done, None, None),
+            Err(_) => {
+                // The account's name as checked when it was read (a POSIX
+                // name), and quoted all the same.
+                let user = self
+                    .rows()
+                    .get(id)
+                    .and_then(|r| r.now.details.as_ref().and_then(|d| d.user.clone()))
+                    .filter(|u| probe::valid_user(u));
+                say(
+                    RemoveStep::Linger,
+                    StepState::Blocked,
+                    Some(format!(
+                        "Linger stays on for {}: turning it off needs an administrator there.",
+                        user.as_deref().unwrap_or("that account")
+                    )),
+                    Some(format!(
+                        "sudo loginctl disable-linger {}",
+                        user.as_deref()
+                            .map(desk_core::machine::quote)
+                            .unwrap_or_else(|| "\"$USER\"".into())
+                    )),
+                );
+            }
+        }
+        say(RemoveStep::Forget, StepState::Running, None, None);
+        drop(held);
+        self.remove(id)?;
+        say(RemoveStep::Forget, StepState::Done, None, None);
+        tracing::info!(
+            machine = id,
+            "uninstalled Desk from a machine and forgot it"
+        );
+        Ok(true)
+    }
+
+    /// "Cancel" while Desk is being uninstalled from machine `id`
+    /// (`machine_cancel_uninstall`): it stops before removing anything, when
+    /// the step running now is stopping Desk's service; once it removes,
+    /// it goes on to the end.
+    pub fn cancel_uninstall(&self, id: &str) -> Result<(), String> {
+        let rows = self.rows();
+        let r = rows.get(id).ok_or("That machine isn't in Desk any more.")?;
+        if !r.removing {
+            return Err(format!(
+                "{} isn't being uninstalled now.",
+                r.kept.machine.name
+            ));
+        }
+        r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
     /// Stops connecting to every machine (the app is quitting), keeping
     /// `machines.json` as it is.
     pub fn shutdown(&self) {
@@ -1268,7 +2828,10 @@ impl Fleet {
 
     /// Whether the page may drive machine `id` now: not one on a newer Desk.
     pub fn drivable(&self, id: &str) -> bool {
-        !matches!(self.state(id), Some(State::Newer))
+        !matches!(
+            self.state(id),
+            Some(State::Newer | State::UpdateFailed { .. })
+        )
     }
 
     pub fn home(&self) -> &Path {
@@ -1335,17 +2898,13 @@ mod tests {
             },
             version: Some("0.2.0".into()),
             system: None,
+            host_key: None,
+            last_connected: None,
         }
     }
 
     fn row(id: &str) -> Row {
-        Row {
-            kept: kept(id),
-            state: State::Ready,
-            saved: true,
-            busy: false,
-            kick: Arc::default(),
-        }
+        Row::new(kept(id), State::Ready, true, false)
     }
 
     #[test]
@@ -1440,6 +2999,13 @@ mod tests {
             }),
             serde_json::json!({"failed": {"message": "no"}})
         );
+        assert_eq!(
+            as_json(State::UpdateFailed {
+                message: "no room".into(),
+                from: Some("0.2.0".into())
+            }),
+            serde_json::json!({"update_failed": {"message": "no room", "from": "0.2.0"}})
+        );
     }
 
     #[test]
@@ -1452,12 +3018,49 @@ mod tests {
             system: Some(System {
                 os: "Ubuntu 24.04".into(),
                 arch: "x86_64".into(),
+                glibc: Some("2.39".into()),
             }),
-            state: State::Ready,
+            state: State::Unreachable,
+            reason: Some("SSH couldn't reach devbox.".into()),
+            said: Some("ssh: connect to host 10.0.3.14 port 22: Connection timed out".into()),
+            last_connected: Some(1),
+            last_try: Some(2),
+            next_try: Some(3),
+            connected_since: None,
+            reach: Some(Reach {
+                user: Some("dev".into()),
+                hostname: Some("10.0.3.14".into()),
+                port: Some("22".into()),
+                via: Some("bastion".into()),
+                entry: Some("devbox".into()),
+                file: Some("~/.ssh/config".into()),
+                forget_key: Some("ssh-keygen -R 10.0.3.14".into()),
+            }),
+            details: None,
+            host_key: Some(KeptKey {
+                kind: "ED25519".into(),
+                fingerprint: "SHA256:k3Vq".into(),
+                trusted_at: Some(4),
+            }),
+            shown_key: Some(KeptKey {
+                kind: "ED25519".into(),
+                fingerprint: "SHA256:x9Zp".into(),
+                trusted_at: None,
+            }),
+            progress: None,
+            update: None,
         };
         assert_eq!(
             serde_json::to_value(row).unwrap(),
-            serde_json::json!({"id": "devbox", "name": "devbox", "target": "dev@devbox", "version": "0.3.0", "system": {"os": "Ubuntu 24.04", "arch": "x86_64"}, "state": "ready"})
+            serde_json::json!({
+                "id": "devbox", "name": "devbox", "target": "dev@devbox", "version": "0.3.0",
+                "system": {"os": "Ubuntu 24.04", "arch": "x86_64", "glibc": "2.39"}, "state": "unreachable",
+                "reason": "SSH couldn't reach devbox.", "said": "ssh: connect to host 10.0.3.14 port 22: Connection timed out",
+                "lastConnected": 1, "lastTry": 2, "nextTry": 3,
+                "reach": {"user": "dev", "hostname": "10.0.3.14", "port": "22", "via": "bastion", "entry": "devbox", "file": "~/.ssh/config", "forgetKey": "ssh-keygen -R 10.0.3.14"},
+                "hostKey": {"kind": "ED25519", "fingerprint": "SHA256:k3Vq", "trustedAt": 4},
+                "shownKey": {"kind": "ED25519", "fingerprint": "SHA256:x9Zp"}
+            })
         );
         let event = SetupEvent {
             machine: "devbox".into(),

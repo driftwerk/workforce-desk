@@ -68,3 +68,112 @@ export const suggest = (folders: readonly Folder[], typed: string, max = 6): Fol
   const name = (p: string) => p.slice(p.lastIndexOf("/") + 1);
   return folders.filter((f) => f.path !== typed && name(f.path).toLowerCase().startsWith(prefix.toLowerCase())).slice(0, max);
 };
+
+/** How long a folder listing may take before Desk says so. */
+export const LIST_WITHIN_MS = 10_000;
+
+/** How long Desk waits for a machine to say where its home is. */
+export const HOME_WITHIN_MS = 10_000;
+
+/** `machine`'s home (`ask`, over SSH), or a plain failure once
+ *  [`HOME_WITHIN_MS`] pass without an answer. */
+export const homeWithin = (ask: () => Promise<string>, name: string, within = HOME_WITHIN_MS): Promise<string> =>
+  new Promise<string>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${name} didn’t say where its home is within ${Math.round(within / 1000)} s.`)), within);
+    ask().then(
+      (h) => {
+        clearTimeout(t);
+        resolve(h);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+
+/** A path as it is shown: without control characters, or the ones that
+ *  turn text around or hide in it (bidi overrides, zero-width marks), so a
+ *  folder's name can't make it read as another. What is opened is the path
+ *  itself. */
+export const shownPath = (path: string): string => path.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, "");
+
+/** A path as typed (`~`, `~/src`, `src`, `/srv`) as the machine's own:
+ *  absolute, under `home` unless it says otherwise. */
+export const onMachine = (typed: string, home: string): string => {
+  const t = typed.trim().replace(/\/+$/, "") || "~";
+  if (t === "~") return home;
+  if (t.startsWith("~/")) return `${home}/${t.slice(2)}`;
+  if (t.startsWith("/")) return t;
+  return `${home}/${t}`;
+};
+
+/** The folder above `path` (as typed), or null at the top. */
+export const parentOf = (path: string): string | null => {
+  const t = path.replace(/\/+$/, "");
+  if (t === "" || t === "~" || t === "/") return null;
+  const at = t.lastIndexOf("/");
+  if (at < 0) return "~";
+  return at === 0 ? "/" : t.slice(0, at);
+};
+
+/** What listing a folder found. */
+export type Listed =
+  | { kind: "ok"; folders: Folder[]; home: string | null }
+  /** There's no such folder there. */
+  | { kind: "missing" }
+  /** Outside what the machine lists (its home, and where sessions run). */
+  | { kind: "outside" }
+  /** No answer within `LIST_WITHIN_MS`. */
+  | { kind: "slow" }
+  | { kind: "failed"; why: string };
+
+/** The folders in `dir` (home when null), saying why when there are none
+ *  to show; never waits more than `within`. */
+export const listIn = async (t: DeskTransport, dir: string | null, within = LIST_WITHIN_MS): Promise<Listed> => {
+  const q = new URLSearchParams();
+  if (dir) q.set("path", dir);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const slow = new Promise<Listed>((r) => (timer = setTimeout(() => r({ kind: "slow" }), within)));
+  const read = (async (): Promise<Listed> => {
+    const res = await t.fetch("GET", `/api/desk/folders${q.size ? `?${q.toString()}` : ""}`);
+    if (res.status === 404) {
+      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      // The route itself missing (an old hub) isn't the folder missing.
+      return typeof body?.error === "string" && /no such folder/i.test(body.error) ? { kind: "missing" } : { kind: "failed", why: "Desk there can’t list folders yet." };
+    }
+    if (res.status === 403) return { kind: "outside" };
+    if (res.status === 400) return { kind: "missing" };
+    if (!res.ok) return { kind: "failed", why: `its Desk answered ${res.status}` };
+    const body: unknown = await res.json().catch(() => null);
+    const { folders, home } = readFolders(body, dir ? null : homeOfListing(body));
+    return { kind: "ok", folders: [...folders].sort((a, b) => Number(b.git) - Number(a.git) || a.path.localeCompare(b.path)), home };
+  })().catch((e: unknown): Listed => ({ kind: "failed", why: e instanceof Error ? e.message : String(e) }));
+  try {
+    return await Promise.race([read, slow]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** How many single-letter edits turn `a` into `b`. */
+const edits = (a: string, b: string): number => {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length]![b.length]!;
+};
+
+/** The folder among `folders` a mistyped `path` most likely meant: one or
+ *  two letters off its last part. */
+export const meant = (path: string, folders: readonly Folder[]): string | null => {
+  const name = path.replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
+  if (!name) return null;
+  let best: { path: string; d: number } | null = null;
+  for (const f of folders) {
+    const d = edits(name, (f.path.split("/").pop() ?? "").toLowerCase());
+    if (d > 0 && d <= 2 && (!best || d < best.d)) best = { path: f.path, d };
+  }
+  return best?.path ?? null;
+};

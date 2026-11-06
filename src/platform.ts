@@ -154,6 +154,9 @@ export const claudePluginDir = async (): Promise<string | null> => (preview ? nu
 export const machinePluginDir = async (machine: string): Promise<string | null> =>
   preview ? null : invoke<string | null>("claude_plugin_dir", { machine });
 
+/** A machine's home folder, as it says it over SSH: where `~` is there. */
+export const machineHome = async (machine: string): Promise<string> => invoke<string>("machine_home", { machine });
+
 /** The machines Desk drives, as the native side lists them (unread: see
  *  `readMachine`); none in the browser preview. */
 export const machinesList = async (): Promise<unknown[]> => (preview ? [] : invoke<unknown[]>("machines_list"));

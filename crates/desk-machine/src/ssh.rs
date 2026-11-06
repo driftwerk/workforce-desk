@@ -13,6 +13,8 @@ use desk_core::machine::{Machine, SSH};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshExe {
     program: PathBuf,
+    /// When everything it runs gives up: none, each runs as long as it takes.
+    until: Option<std::time::Instant>,
 }
 
 /// What `ssh` exits with when it failed itself, rather than the command it
@@ -30,6 +32,16 @@ impl SshExe {
     pub fn at(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            until: None,
+        }
+    }
+
+    /// This `ssh`, with every command it runs ended at `at` (said to have
+    /// run out of time): one deadline over several commands.
+    pub fn until(&self, at: std::time::Instant) -> Self {
+        Self {
+            program: self.program.clone(),
+            until: Some(at),
         }
     }
 
@@ -47,8 +59,195 @@ impl SshExe {
     }
 
     pub fn output(&self, invocation: &Invocation) -> std::io::Result<Output> {
-        self.command(invocation).output()
+        // A setup step's own limit and Cancel (`Step`), else this ssh's
+        // deadline, else as long as it takes.
+        if Step::current().is_some() {
+            let child = self
+                .command(invocation)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            return wait(child);
+        }
+        match self.until {
+            Some(at) => self.output_within(
+                invocation,
+                at.saturating_duration_since(std::time::Instant::now()),
+            ),
+            None => self.command(invocation).output(),
+        }
     }
+
+    /// As [`SshExe::output`], ended (and said to have run out of time) once
+    /// `within` has passed: Desk never waits on a machine for good.
+    pub fn output_within(
+        &self,
+        invocation: &Invocation,
+        within: std::time::Duration,
+    ) -> std::io::Result<Output> {
+        let mut child = self
+            .command(invocation)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        // Read on threads of their own, so a full pipe never holds it up.
+        fn drain(
+            pipe: Option<impl std::io::Read + Send + 'static>,
+        ) -> std::thread::JoinHandle<Vec<u8>> {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut r) = pipe {
+                    let _ = r.read_to_end(&mut buf);
+                }
+                buf
+            })
+        }
+        let out_t = drain(child.stdout.take());
+        let err_t = drain(child.stderr.take());
+        let until = std::time::Instant::now() + within;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if std::time::Instant::now() >= until {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("no answer within {} s", within.as_secs()),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        Ok(Output {
+            status,
+            stdout: out_t.join().unwrap_or_default(),
+            stderr: err_t.join().unwrap_or_default(),
+        })
+    }
+}
+
+/// The step of setting a machine up that this thread is running: every
+/// `ssh` it runs ends when the person cancels adding, or when the step has
+/// run [`Step::LIMIT`]. Desk never waits on a machine for good.
+#[derive(Clone)]
+pub struct Step {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    until: std::time::Instant,
+}
+
+thread_local! {
+    static STEP: std::cell::RefCell<Option<Step>> = const { std::cell::RefCell::new(None) };
+}
+
+impl Step {
+    /// How long one step may take.
+    pub const LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
+
+    pub fn new(
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        within: std::time::Duration,
+    ) -> Step {
+        Step {
+            cancel,
+            until: std::time::Instant::now() + within,
+        }
+    }
+
+    /// Runs `f` as this step: every `ssh` it runs is ended with it.
+    pub fn run<T>(self, f: impl FnOnce() -> T) -> T {
+        let before = STEP.with(|s| s.replace(Some(self)));
+        struct Restore(Option<Step>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let was = self.0.take();
+                STEP.with(|s| *s.borrow_mut() = was);
+            }
+        }
+        let _restore = Restore(before);
+        f()
+    }
+
+    /// The step this thread runs, if any.
+    pub fn current() -> Option<Step> {
+        STEP.with(|s| s.borrow().clone())
+    }
+
+    /// Why it must end now: cancelled, or out of time.
+    pub fn ended(&self) -> Option<std::io::Error> {
+        if self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return Some(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                CANCELLED,
+            ));
+        }
+        if std::time::Instant::now() >= self.until {
+            return Some(std::io::Error::new(std::io::ErrorKind::TimedOut, TOO_LONG));
+        }
+        None
+    }
+}
+
+/// Said when the person cancelled adding.
+pub const CANCELLED: &str = "Adding it was cancelled.";
+/// Said when a step ran out of time.
+pub const TOO_LONG: &str = "That step took longer than 3 minutes, so Desk stopped it.";
+
+/// Why running ssh failed, in the person's words.
+pub fn io_problem(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut => e.to_string(),
+        _ => format!("Desk couldn't run ssh: {e}"),
+    }
+}
+
+/// Waits for `child` (its output piped) as [`std::process::Child::wait_with_output`]
+/// does, ended (and said so) when this thread's [`Step`] is cancelled or
+/// runs out of time.
+pub fn wait(mut child: std::process::Child) -> std::io::Result<Output> {
+    fn drain(
+        pipe: Option<impl std::io::Read + Send + 'static>,
+    ) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = pipe {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let step = Step::current();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if let Some(why) = step.as_ref().and_then(Step::ended) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(why);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    };
+    Ok(Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
+}
+
+/// ssh's own last line on its error output (`ssh: connect to host … port
+/// 22: Connection timed out`), cleaned of anything that isn't plain text
+/// and cut short: its words, for the person to read beside Desk's. None
+/// when ssh itself said nothing (a machine's banner isn't ssh's).
+pub fn said(stderr: &[u8]) -> Option<String> {
+    let (own, line) = last_line(&String::from_utf8_lossy(stderr));
+    if !own {
+        return None;
+    }
+    let q = desk_core::machine::quoted_line(&line)?;
+    Some(q.trim_start_matches('“').trim_end_matches('”').to_string())
 }
 
 /// What went wrong reaching `machine`, from what `ssh` said on its error
@@ -154,6 +353,7 @@ pub struct Settings {
     /// person's own name here.
     pub user: Option<String>,
     pub hostname: Option<String>,
+    pub port: Option<String>,
     /// How it gets there, when not directly: `ProxyJump`, `ProxyCommand`.
     pub via: Option<String>,
     /// Forwards the config sets for it, by name (`localforward`, …).
@@ -172,6 +372,7 @@ impl Settings {
         Settings {
             user: value("user"),
             hostname: value("hostname"),
+            port: value("port"),
             via: value("proxyjump").or_else(|| value("proxycommand")),
             forwards: desk_core::machine::config_forwards(said),
         }

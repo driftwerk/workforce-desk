@@ -56,6 +56,9 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   removeAccount: (h) => h.removeAccount("a1"),
   signInCode: (h) => h.signInCode("i1", "code"),
   cancelSignIn: (h) => h.cancelSignIn("i1"),
+  startEngineSignIn: (h) => h.startEngineSignIn("codex"),
+  engineSignIn: (h) => h.engineSignIn("cx1"),
+  cancelEngineSignIn: (h) => h.cancelEngineSignIn("cx1"),
   dismissSignInProblem: (h) => h.dismissSignInProblem("a1"),
   switchAccount: (h) => h.switchAccount("s1", "a1"),
   switchAll: (h) => h.switchAll("a1", "a2"),
@@ -175,8 +178,15 @@ const HELPERS = new Set(["t", "request", "call", "desk", "text", "putText", "con
 const publicMembers = (h: DeskHub): string[] =>
   [...Object.keys(h), ...Object.getOwnPropertyNames(Object.getPrototypeOf(h))].filter((k) => !HELPERS.has(k)).sort();
 
+/** What DeskHub asks of a machine's hub alone, never this computer's: an
+ *  engine's own sign-in (Codex's device page). */
+const MACHINE_ONLY = new Set(["startEngineSignIn", "engineSignIn", "cancelEngineSignIn"]);
+
+/** The kind a request made now is recorded as. */
+let asking: "http" | "machine_http" = "http";
+
 interface Recorded {
-  kind: "http" | "socket";
+  kind: "http" | "machine_http" | "socket";
   method: string;
   path: string;
 }
@@ -188,7 +198,7 @@ const recording = (): { transport: DeskTransport; recorded: Recorded[] } => {
     recorded,
     transport: {
       fetch: async (method: string, path: string, _body?: Body) => {
-        recorded.push({ kind: "http", method, path });
+        recorded.push({ kind: asking, method, path });
         return new Response(JSON.stringify({ keys: [], providers: [], reads: [], revisions: [], suggestions: [], picture: null }), {
           headers: { "content-type": "application/json" },
         });
@@ -206,11 +216,13 @@ describe("what DeskHub asks of the local hub", () => {
     const { transport, recorded } = recording();
     const hub = new DeskHub(transport);
     expect(Object.keys(SAMPLES).sort()).toEqual(publicMembers(hub));
-    for (const sample of Object.values(SAMPLES)) {
+    for (const [name, sample] of Object.entries(SAMPLES)) {
+      asking = MACHINE_ONLY.has(name) ? "machine_http" : "http";
       const done = sample(hub);
       if (typeof done === "function") (done as () => void)();
       await Promise.resolve(done).catch(() => undefined);
     }
+    asking = "http";
     await expect(`${JSON.stringify(recorded, null, 2)}\n`).toMatchFileSnapshot("./brokered-requests.json");
   });
 });

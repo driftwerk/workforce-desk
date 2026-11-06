@@ -39,7 +39,7 @@ fn failed(machine: &Machine, what: &str, out: &std::process::Output) -> String {
 pub fn run(ssh: &SshExe, machine: &Machine, script: &str, what: &str) -> Result<String, String> {
     let out = ssh
         .output(&machine.command(&["sh".into(), "-c".into(), script.into()]))
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+        .map_err(|e| ssh::io_problem(&e))?;
     if !out.status.success() {
         return Err(failed(machine, what, &out));
     }
@@ -80,12 +80,16 @@ pub fn copy_script(bin: &str, version: &str, sha: &str) -> Result<String, String
 
 /// Copies `data` (the tarball's bytes, as they were checked here) there as
 /// `version`, checks it, unpacks it and asks it `--check`. Blocking.
+/// How much is sent between two words about it.
+const PROGRESS_EVERY: usize = 512 * 1024;
+
 pub fn copy(
     ssh: &SshExe,
     machine: &Machine,
     bin: &str,
     version: &str,
     data: &[u8],
+    progress: &(dyn Fn(u64, u64) + Sync),
 ) -> Result<(), String> {
     let script = copy_script(bin, version, &sha256(data))?;
     let mut command = ssh.command(&machine.command(&["sh".into(), "-c".into(), script]));
@@ -94,17 +98,43 @@ pub fn copy(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+        .map_err(|e| ssh::io_problem(&e))?;
     let mut stdin = child.stdin.take().expect("piped");
     let data = data.to_vec();
+    let total = data.len() as u64;
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let fed = std::sync::Arc::clone(&sent);
     let feed = std::thread::spawn(move || {
         use std::io::Write as _;
-        let _ = stdin.write_all(&data);
+        for chunk in data.chunks(PROGRESS_EVERY) {
+            if stdin.write_all(chunk).is_err() {
+                return;
+            }
+            fed.fetch_add(chunk.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        }
     });
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+    // Says how far it got while it goes, then waits for the rest.
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let out = std::thread::scope(|scope| {
+        let watcher = scope.spawn(|| {
+            let mut said = u64::MAX;
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                let now = sent.load(std::sync::atomic::Ordering::SeqCst);
+                if now != said {
+                    said = now;
+                    progress(now, total);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+        let out = ssh::wait(child);
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = watcher.join();
+        out
+    })
+    .map_err(|e| ssh::io_problem(&e))?;
     let _ = feed.join();
+    progress(sent.load(std::sync::atomic::Ordering::SeqCst), total);
     if !out.status.success() {
         return Err(failed(machine, "Desk couldn't be copied there", &out));
     }
@@ -296,6 +326,58 @@ pub fn restart(
     start(ssh, machine, bin, person)
 }
 
+/// Uninstalling: stops Desk's service there and takes its unit away (a
+/// helper Desk started itself is stopped too), and says if it still runs.
+/// Only a machine's install: never a desktop Desk's (no marker, no go).
+pub fn uninstall_stop_script() -> String {
+    format!(
+        "set -u\n\
+         d=\"$HOME/{root}\"\n\
+         if [ -d \"$d\" ] && [ ! -e \"$d/{marker}\" ]; then echo \"Desk there isn't one installed as a machine, so Desk leaves it as it is\" >&2; exit 3; fi\n\
+         if systemctl --user show-environment >/dev/null 2>&1; then systemctl --user disable --now {unit} >/dev/null 2>&1 || true; fi\n\
+         h=\"$d/bin/current/{helper}\"\n\
+         if [ -x \"$h\" ]; then \"$h\" --stop >/dev/null 2>&1 || true; fi\n\
+         rm -f \"${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user/{unit}\"\n\
+         systemctl --user daemon-reload >/dev/null 2>&1 || true\n\
+         p=$(cat \"$d/hub/run/desk-hubd.pid\" 2>/dev/null) && kill -0 \"$p\" 2>/dev/null && {{ echo \"Desk Helper (process $p) is still running there\" >&2; exit 1; }}\n\
+         exit 0\n",
+        root = desk_core::machine::MACHINE_ROOT,
+        marker = desk_core::MACHINE_MARKER,
+        unit = desk_core::systemd::UNIT,
+        helper = desk_core::LINUX_HELPER_EXECUTABLE,
+    )
+}
+
+/// Uninstalling: removes everything Desk keeps there (`--remove-everything`:
+/// its PTY holder, secrets and folder, sign-ins and memory with it), or the
+/// folder itself when its helper isn't there to do it.
+pub fn uninstall_remove_script() -> String {
+    format!(
+        "set -u\n\
+         d=\"$HOME/{root}\"\n\
+         [ -d \"$d\" ] || exit 0\n\
+         [ -e \"$d/{marker}\" ] || {{ echo \"Desk there isn't one installed as a machine, so Desk leaves it as it is\" >&2; exit 3; }}\n\
+         h=\"$d/bin/current/{helper}\"\n\
+         if [ -x \"$h\" ]; then \"$h\" --remove-everything; else rm -rf -- \"$d\"; fi\n",
+        root = desk_core::machine::MACHINE_ROOT,
+        marker = desk_core::MACHINE_MARKER,
+        helper = desk_core::LINUX_HELPER_EXECUTABLE,
+    )
+}
+
+/// Uninstalling: checks Desk's folder there is gone, and the sign-ins and
+/// memory in it with it.
+pub fn uninstall_gone_script() -> String {
+    format!(
+        "d=\"$HOME/{root}\"\n\
+         if [ -e \"$d\" ]; then echo \"~/.local/share/Desk is still there after removing it\" >&2; exit 1; fi\n",
+        root = desk_core::machine::MACHINE_ROOT,
+    )
+}
+
+/// Uninstalling: turns linger off for the account (as itself, never sudo).
+pub const UNINSTALL_LINGER_SCRIPT: &str = "loginctl disable-linger \"$(id -un)\"";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +393,18 @@ mod tests {
         assert!(s.contains(&sha));
         assert!(copy_script("/b", "../x", &sha).is_err());
         assert!(copy_script("/b", "0.3.0", "$(id)").is_err());
+    }
+
+    #[test]
+    fn uninstalling_touches_only_a_machines_install_and_never_sudo() {
+        for script in [uninstall_stop_script(), uninstall_remove_script()] {
+            assert!(script.contains("$d/machine"), "{script}");
+            assert!(!script.contains("sudo"), "{script}");
+        }
+        assert!(uninstall_remove_script().contains("--remove-everything"));
+        assert!(uninstall_remove_script().contains("rm -rf -- \"$d\""));
+        assert!(uninstall_stop_script().contains("disable --now desk-helper.service"));
+        assert!(!UNINSTALL_LINGER_SCRIPT.contains("sudo"));
     }
 
     #[test]
