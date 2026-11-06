@@ -856,6 +856,34 @@ legend.set-label {
   background: var(--surface);
   border: 1px solid var(--border);
 }
+.engine-head-action {
+  margin-left: auto;
+  align-self: center;
+}
+.signin-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.signin-code {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+.account-actions-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.account-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
 @media (max-width: 520px) {
   .account-row {
     grid-template-columns: minmax(0, 1fr);

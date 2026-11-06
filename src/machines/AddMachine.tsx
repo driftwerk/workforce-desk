@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useReducer, useRef, useState } from "rea
 import { plainError } from "../ui/plainError";
 import { setUp, setupFailed, START, step, type Item } from "./addFlow";
 import { native as realNative, type MachineNative } from "./native";
-import { SignInOn } from "./SignIn";
+import { EngineBlocks } from "../settings/EngineBlocks";
 
 /** Copies `text`, saying so on the button for a moment. */
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
@@ -280,7 +280,10 @@ export function AddMachine({ onClose, native = realNative }: { onClose: () => vo
         )}
 
         {flow.at === "setup" && ready && flow.machine && (
-          <SignInOn machine={flow.machine} name={flow.name} native={native} onSignedIn={signedIn} />
+          <div className="machine-box" role="group" aria-label={`Sign in on ${flow.name}`}>
+            <span className="ov-label muted">Sign in on {flow.name}</span>
+            <EngineBlocks machine={flow.machine} name={flow.name} native={native} onSignedIn={signedIn} only={["claude", "codex"]} />
+          </div>
         )}
 
         <footer className="sheet-foot">

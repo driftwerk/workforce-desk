@@ -115,6 +115,11 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/engines"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.
+    // An engine's own sign-in, run by its hub (Codex's device page): on
+    // this computer as on a machine.
+    route("POST", "/api/desk/engines/sign-ins"),
+    route("GET", "/api/desk/engines/sign-ins/{}"),
+    route("DELETE", "/api/desk/engines/sign-ins/{}"),
     route("GET", "/api/desk/accounts"),
     route("POST", "/api/desk/accounts"),
     route("PATCH", "/api/desk/accounts/{}"),
@@ -223,9 +228,6 @@ const HTTP: &[Route] = &[
 const MACHINE_HTTP: &[Route] = &[
     with_query("GET", "/api/desk/folders", &["path", "hidden"]),
     route("GET", "/api/desk/terminals/{}/programs"),
-    route("POST", "/api/desk/engines/sign-ins"),
-    route("GET", "/api/desk/engines/sign-ins/{}"),
-    route("DELETE", "/api/desk/engines/sign-ins/{}"),
     // Asked by the native side alone (see NATIVE_ONLY).
     route("GET", "/api/desk/accounts/sign-ins/{}/direct"),
 ];
@@ -651,8 +653,8 @@ mod tests {
             "not this computer's"
         );
         assert!(
-            http("POST", "/api/desk/engines/sign-ins").is_err(),
-            "not this computer's"
+            http("POST", "/api/desk/engines/sign-ins").is_ok(),
+            "this computer's Codex signs in in Settings → Engines too"
         );
         for (m, p) in [
             ("GET", "/api/desk/folders?path=x&token=y"),

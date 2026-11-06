@@ -118,7 +118,9 @@ it("signs in through Claude's page: opening, a code, checking, done", async () =
   fireEvent.click(screen.getByRole("button", { name: "Open the sign-in page again" }));
   expect(opened).toHaveBeenCalledWith("https://claude.ai/oauth/authorize?x=1");
 
-  await move(signIn({ state: "code", url: null }));
+  // The page shows a code: "Use a code instead" asks for it.
+  await move(signIn({ state: "code", url: "https://claude.ai/oauth/authorize?x=1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use a code instead" }));
   fireEvent.change(screen.getByPlaceholderText("Code from the page"), { target: { value: "c0de" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));
   expect(signInCode).toHaveBeenCalledWith("i-1", "c0de");

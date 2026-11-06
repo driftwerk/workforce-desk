@@ -45,6 +45,7 @@ beforeEach(() => {
         engine({ engine: "codex", title: "Codex", signIn: { state: "out" } }),
       ]),
       accounts: vi.fn(async () => ({ accounts: [], store: "Desk's private file", signIns: [] })),
+      startEngineSignIn: vi.fn(async () => ({ id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "WXYZ-98765" })),
     } as unknown as DeskHub,
   );
   useMachines.setState({
@@ -78,27 +79,20 @@ it("lists this computer and each machine, saying where each stands", async () =>
   expect(within(row("buildbox")).queryByRole("button", { name: "Open a terminal" })).toBeNull();
 });
 
-it("shows each machine's sign-in per engine, with a Sign in for one that isn't, after the add card has closed", async () => {
+it("shows each machine's engines with the same sign-in block as Settings → Engines, after the add card has closed", async () => {
   const { native, fake } = fakeNative();
-  const device = { id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "WXYZ-98765" };
-  fake.transport.mockReturnValue({
-    fetch: async (_method: string, path: string) => (path.startsWith("/api/desk/engines/sign-ins") ? Response.json(device) : new Response(null, { status: 404 })),
-    socket: () => {
-      throw new Error("no sockets here");
-    },
-  });
   render(<Machines native={native} />);
   await act(async () => {});
   const devbox = within(row("devbox"));
-  expect(devbox.getByRole("group", { name: "Claude" }).textContent).toContain("Signed in as dev@example.com");
-  expect(devbox.queryByRole("button", { name: "Sign in to Claude" })).toBeNull();
-  expect(devbox.getByRole("group", { name: "ChatGPT" }).textContent).toContain("Not signed in");
-  await act(async () => fireEvent.click(devbox.getByRole("button", { name: "Sign in to ChatGPT" })));
+  expect(devbox.getByRole("listitem", { name: "Claude Code" }).textContent).toContain("Signed in as dev@example.com, on max plan");
+  const codex = within(devbox.getByRole("listitem", { name: "Codex" }));
+  expect(codex.getByText("Not signed in")).toBeTruthy();
+  await act(async () => fireEvent.click(codex.getByRole("button", { name: "Sign in…" })));
   expect(fake.openSignInPage).toHaveBeenCalledWith("codex", "https://auth.openai.com/codex/device");
   expect(openUrl).not.toHaveBeenCalled();
   expect(devbox.getByText("WXYZ-98765")).toBeTruthy();
   // A machine that isn't connected shows none.
-  expect(within(row("buildbox")).queryByRole("group", { name: "Claude" })).toBeNull();
+  expect(within(row("buildbox")).queryByRole("listitem", { name: "Claude Code" })).toBeNull();
 });
 
 it("tries an unreachable machine again", async () => {

@@ -8,10 +8,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsOn, useAccounts } from "../engines/accounts";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
-import type { DeskTransport } from "../hub/transport";
 import type { EngineAccount } from "../hub/types";
 import { DEFAULT_HOST, useHost } from "../shell/host";
-import { SignInOn } from "./SignIn";
+import { EngineBlocks } from "../settings/EngineBlocks";
 import { fakeNative, noEngines, withEngine } from "./testing";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -45,31 +44,22 @@ const run = async (macCodex: "in" | "out") => {
   };
   useDesk.setState({ hub: local as unknown as DeskHub, fail: vi.fn() });
   const state = { accounts: [] as EngineAccount[] };
+  const codexStarted = vi.fn();
   const devbox = {
     accounts: vi.fn(async () => ({ accounts: state.accounts, store: "Desk's private file", signIns: [] })),
     engines: vi.fn(async () => engines("out")),
+    startEngineSignIn: vi.fn(async () => {
+      codexStarted();
+      return { id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "K7QF-2M9D" };
+    }),
   };
   withEngine("devbox", devbox as unknown as DeskHub);
-  const codexStarted = vi.fn();
-  const transport: DeskTransport = {
-    fetch: async (method, path) => {
-      if (method === "POST" && path === "/api/desk/engines/sign-ins") {
-        codexStarted();
-        return Response.json({ id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "K7QF-2M9D" }, { status: 202 });
-      }
-      return new Response(null, { status: 404 });
-    },
-    socket: () => {
-      throw new Error("no sockets here");
-    },
-  };
   const n = fakeNative();
-  n.fake.transport.mockReturnValue(transport);
   n.fake.shareAccounts.mockImplementation(async () => {
     state.accounts = [account("d-w", "Work", true), account("d-p", "Personal")];
     return { cancelled: false, copied: ["Work", "Personal"], already: [], failed: [], autoSwitch: true };
   });
-  render(<SignInOn machine="devbox" name="devbox" native={n.native} />);
+  render(<EngineBlocks machine="devbox" name="devbox" native={n.native} />);
   await act(async () => {});
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this Mac’s accounts…" })));
   await act(async () => {});
@@ -88,5 +78,5 @@ it("copies this Mac's Claude accounts and starts ChatGPT's own sign-in on devbox
 it("leaves ChatGPT alone when this Mac's Codex isn't signed in either", async () => {
   const { codexStarted } = await run("out");
   expect(codexStarted).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Sign in to ChatGPT" })).toBeTruthy();
+  expect(screen.getByRole("listitem", { name: "Codex" }).textContent).toContain("Sign in…");
 });

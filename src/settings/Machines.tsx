@@ -5,12 +5,12 @@ import { useDesk } from "../hub/store";
 import { AddMachine } from "../machines/AddMachine";
 import { LOCAL, sessionsOn, useMachines, type Machine } from "../machines/engines";
 import { native as realNative, type MachineNative } from "../machines/native";
-import { SignInOn } from "../machines/SignIn";
 import { openTerminalOn } from "../machines/watch";
 import { dotOf, stateText, thisComputer, thisComputerLower } from "../machines/words";
 import { inApp } from "../platform";
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
+import { EngineBlocks } from "./EngineBlocks";
 
 /** This Desk's version; null outside the app or until it's read. */
 const useDeskVersion = (): string | null => {
@@ -72,7 +72,11 @@ function MachineRow({ machine, version, native, onRemove }: { machine: Machine; 
           Remove…
         </button>
       )}
-      {s === "ready" && <SignInOn machine={machine.id} name={machine.name} native={native} boxed={false} />}
+      {s === "ready" && (
+        <div className="machine-row-signins">
+          <EngineBlocks machine={machine.id} name={machine.name} native={native} />
+        </div>
+      )}
     </li>
   );
 }

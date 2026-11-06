@@ -1,0 +1,463 @@
+// Signing an engine in, the same on this computer and on each machine:
+// Claude through a Desk account (`claude setup-token`, run by that engine's
+// hub), ChatGPT through Codex's device page (also run by that hub). Where
+// it runs is the only difference: on a machine the page opens here, and
+// Claude's page comes back to the machine through Desk's forward of its one
+// port for as long as the sign-in runs.
+//
+// Every wait has a limit, and every failure says why, with Try again:
+// - 30 s for the sign-in's page to open (Claude's, or Codex's device code);
+// - 10 minutes for the person to approve Claude's sign-in;
+// - 15 minutes for Codex's code to be typed (as long as the code lasts).
+// A sign-in that runs out of time is stopped on its hub.
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { HubError, type DeskHub } from "../hub/client";
+import { LOCAL, type MachineId } from "../hub/machines";
+import { useHubOf } from "../hub/store";
+import type { AccountSignIn, EngineSignIn } from "../hub/types";
+import { native as realNative, type MachineNative } from "../machines/native";
+import { openUrl } from "../platform";
+import { plainError } from "../ui/plainError";
+import { useLive } from "../ui/useLive";
+import { accountsOn } from "./accounts";
+
+/** How long the sign-in's page has to open. */
+export const OPEN_WITHIN_MS = 30_000;
+/** How long the person has to approve Claude's sign-in. */
+export const APPROVE_WITHIN_MS = 10 * 60_000;
+/** How long Codex's code works. */
+export const CODE_WITHIN_MS = 15 * 60_000;
+/** How often a sign-in under way is read again (besides its events). */
+export const SIGN_IN_POLL_MS = 1000;
+
+/** Codex's sign-in for a computer with no browser of its own, for a hub
+ *  too old to run it itself. */
+export const CODEX_LOGIN = "codex login --device-auth";
+
+/** Where a sign-in runs, mid-sentence: "this computer", "devbox". */
+export type Where = string;
+
+/** The page opened for a Claude sign-in: the one that comes back by itself
+ *  (a machine's, held by the native side, which opens it again), or a page
+ *  this computer opens (on this computer, or the page with a code). */
+type Page = { kind: "direct" } | { kind: "url"; url: string };
+
+export type ClaudeRun =
+  | { at: "idle" }
+  /** Begun: the page isn't open yet (30 s). */
+  | { at: "opening"; name: string; id: string | null; checking: boolean }
+  /** The page is open: approve it in the browser (10 minutes), or paste the
+   *  code it shows (`codeAsked`). */
+  | { at: "waiting"; name: string; id: string; page: Page | null; codeAsked: boolean; checking: boolean; why: string | null }
+  | { at: "done"; name: string }
+  /** `kind`: the page never opened, nobody approved it in time, or another
+   *  failure, said in `why`. */
+  | { at: "failed"; name: string; why: string; kind: "open" | "wait" | "other" };
+
+/** The page a sign-in shows, once it does. */
+const pageOf = (s: AccountSignIn): string | null => (s.state === "open" || s.state === "code" ? s.url : null);
+
+const over = (s: { state: string }) => s.state === "done" || s.state === "failed";
+
+/** What a sign-in on `where` says when its page didn't open in time. */
+export const notOpened = (where: Where): string => `Claude’s sign-in page didn’t open within 30 s: Claude Code on ${where} didn’t answer.`;
+export const notApproved = "Nobody approved the sign-in within 10 minutes, so Desk stopped it.";
+
+/** Signing a Claude account in on `machine`'s engine: `begin` with its name,
+ *  then the run says where it is. */
+export function useClaudeSignIn(machine: MachineId, where: Where, native: MachineNative = realNative, onDone?: (name: string) => void) {
+  const hub = useHubOf(machine);
+  const remote = machine !== LOCAL;
+  const store = accountsOn(machine);
+  const [run, setRun] = useState<ClaudeRun>({ at: "idle" });
+  const runNow = useRef(run);
+  runNow.current = run;
+  const live = useLive();
+  const done = useRef(onDone);
+  done.current = onDone;
+  /** The sign-in followed now, and what's been done for it. */
+  const seen = useRef<{ id: string; forwarding: boolean; wantCode: boolean; opened: string | null; latest: AccountSignIn } | null>(null);
+
+  const stopForward = useCallback(
+    (id: string | undefined = seen.current?.id) => {
+      if (remote && id) void native.signInForwardStop(machine, id).catch(() => undefined);
+    },
+    [native, machine, remote],
+  );
+
+  /** Opens a page the sign-in gave: here, this computer's; a machine's only
+   *  once the native side has checked it is Claude's own. */
+  const open = useCallback(
+    (url: string) => {
+      if (!remote) return openUrl(url);
+      void native.openSignInPage("claude", url).catch((e: unknown) => {
+        if (live.current) setRun((now) => (now.at === "waiting" ? { ...now, why: plainError(e) } : now));
+      });
+    },
+    [native, remote, live],
+  );
+
+  const toWaiting = useCallback((s: AccountSignIn, change: (now: Extract<ClaudeRun, { at: "waiting" }>) => Partial<Extract<ClaudeRun, { at: "waiting" }>> = () => ({})) => {
+    setRun((now) => {
+      const base: Extract<ClaudeRun, { at: "waiting" }> =
+        now.at === "waiting" && now.id === s.id
+          ? now
+          : { at: "waiting", name: now.at === "idle" || now.at === "done" ? s.name : now.name, id: s.id, page: null, codeAsked: false, checking: false, why: null };
+      return { ...base, checking: s.state === "checking", ...change(base) };
+    });
+  }, []);
+
+  /** The page with a code: opened once it shows, and the field for it. */
+  const toCode = useCallback(() => {
+    const s = seen.current;
+    if (!s) return;
+    s.wantCode = true;
+    const page = pageOf(s.latest);
+    if (page && s.opened !== page) {
+      s.opened = page;
+      open(page);
+    }
+    toWaiting(s.latest, (now) => ({ codeAsked: true, page: page ? { kind: "url", url: page } : now.page }));
+  }, [open, toWaiting]);
+
+  const follow = useCallback(
+    (s: AccountSignIn) => {
+      if (!live.current) return;
+      if (seen.current && seen.current.id !== s.id) return;
+      // Only the sign-in under way now: one stopped (cancelled, or out of
+      // time) says nothing more, whatever a read in flight brings back.
+      const now = runNow.current;
+      if (!((now.at === "opening" && (now.id === null || now.id === s.id)) || (now.at === "waiting" && now.id === s.id))) return;
+      if (s.state === "done") {
+        stopForward(s.id);
+        seen.current = null;
+        setRun((now) => ({ at: "done", name: now.at === "idle" ? s.name : "name" in now ? now.name : s.name }));
+        done.current?.(s.name);
+        return;
+      }
+      if (s.state === "failed") {
+        stopForward(s.id);
+        seen.current = null;
+        setRun((now) => ({ at: "failed", name: "name" in now ? now.name : s.name, why: s.why, kind: "other" }));
+        return;
+      }
+      const it = seen.current ?? { id: s.id, forwarding: false, wantCode: false, opened: null, latest: s };
+      it.latest = s;
+      seen.current = it;
+      if (it.wantCode) return toCode();
+      if (!remote) {
+        // This computer's Claude Code opens its page itself.
+        const page = pageOf(s);
+        if (page) toWaiting(s, () => ({ page: { kind: "url", url: page } }));
+        else setRun((now) => (now.at === "opening" ? { ...now, id: s.id, checking: s.state === "checking" } : now.at === "waiting" ? { ...now, checking: s.state === "checking" } : now));
+        return;
+      }
+      if (s.directReady && !it.forwarding) {
+        it.forwarding = true;
+        // The native side reads the page from the machine, listens for it
+        // coming back, and opens it: the page never names either.
+        native
+          .signInForward(machine, s.id)
+          .then(() => {
+            if (!live.current || seen.current !== it) return;
+            toWaiting(it.latest, () => ({ page: { kind: "direct" } }));
+          })
+          .catch((e: unknown) => {
+            if (!live.current || seen.current !== it) return;
+            // The page with a code still works: now, or once it shows.
+            toWaiting(it.latest, () => ({ why: plainError(e) }));
+            toCode();
+          });
+      } else if (!s.directReady && !it.forwarding && pageOf(s)) {
+        // A hub that can't give the page that comes back: the page with a code.
+        toCode();
+      } else {
+        setRun((now) => (now.at === "opening" ? { ...now, id: s.id, checking: s.state === "checking" } : now.at === "waiting" ? { ...now, checking: s.state === "checking" } : now));
+      }
+    },
+    [live, machine, native, remote, stopForward, toCode, toWaiting],
+  );
+
+  // Its events, as the engine says them.
+  const id = run.at === "opening" || run.at === "waiting" ? run.id : null;
+  const heard = store((s) => (id ? (s.signIns[id] ?? null) : null));
+  useEffect(() => {
+    if (heard) follow(heard);
+  }, [heard, follow]);
+
+  // And read again each second, so a missed event never strands it.
+  useEffect(() => {
+    if (!hub || !id) return;
+    const t = setInterval(() => {
+      void hub
+        .accounts()
+        .then((a) => {
+          const now = a?.signIns.find((s) => s.id === id);
+          if (now) follow(now);
+          else if (a && !a.signIns.some((s) => s.id === id)) {
+            const kept = seen.current?.latest.name;
+            if (kept && a.accounts.some((x) => x.engine === "claude" && x.name === kept)) follow({ ...seen.current!.latest, state: "done", account: "" });
+            else follow({ id, engine: "claude", name: kept ?? "", state: "failed", why: `The sign-in ended on ${where} before it finished. Start it again.` });
+          }
+        })
+        .catch(() => undefined);
+    }, SIGN_IN_POLL_MS);
+    return () => clearInterval(t);
+  }, [hub, id, follow, where]);
+
+  /** Stops the sign-in on its hub and here. */
+  const stop = useCallback(
+    (signIn: string | null) => {
+      if (signIn) void hub?.cancelSignIn(signIn).catch(() => undefined);
+      stopForward(signIn ?? undefined);
+      seen.current = null;
+    },
+    [hub, stopForward],
+  );
+
+  // Its limits: 30 s for the page, 10 minutes to approve.
+  // The page opening starts one clock; the page open, another.
+  const phase = run.at === "opening" ? "opening" : run.at === "waiting" ? `waiting:${run.id}` : null;
+  useEffect(() => {
+    if (!phase) return;
+    const opening = phase === "opening";
+    const t = setTimeout(
+      () => {
+        const now = runNow.current;
+        // Said at once, so a read in flight can't put it back.
+        const put = (r: ClaudeRun) => {
+          runNow.current = r;
+          setRun(r);
+        };
+        if (opening && now.at === "opening") {
+          put({ at: "failed", name: now.name, why: notOpened(where), kind: "open" });
+          stop(now.id);
+        } else if (!opening && now.at === "waiting") {
+          put({ at: "failed", name: now.name, why: notApproved, kind: "wait" });
+          stop(now.id);
+        }
+      },
+      opening ? OPEN_WITHIN_MS : APPROVE_WITHIN_MS,
+    );
+    return () => clearTimeout(t);
+  }, [phase, stop, where]);
+
+  // Ended with the card: a sign-in under way goes on there, and is picked
+  // up again by the next one; its forward doesn't outlive the page.
+  useEffect(
+    () => () => {
+      const signIn = seen.current?.id;
+      if (remote && signIn) void native.signInForwardStop(machine, signIn).catch(() => undefined);
+    },
+    [native, machine, remote],
+  );
+
+  /** Signs `name` in (the default for new sessions when `makeDefault`). One
+   *  already under way there with that name is picked up, not refused. */
+  /** Says where the sign-in is at once, so a read in flight sees it. */
+  const put = (r: ClaudeRun) => {
+    runNow.current = r;
+    setRun(r);
+  };
+
+  const begin = async (name: string, makeDefault: boolean) => {
+    if (!hub) return;
+    stop(run.at === "opening" || run.at === "waiting" ? run.id : null);
+    put({ at: "opening", name, id: null, checking: false });
+    try {
+      const accounts = await hub.accounts().catch(() => null);
+      const pending = accounts?.signIns.find((s) => s.engine === "claude" && !over(s) && s.name.toLowerCase() === name.toLowerCase());
+      if (pending) {
+        put({ at: "opening", name, id: pending.id, checking: false });
+        return follow(pending);
+      }
+      const added = await hub.addAccount({ engine: "claude", name, makeDefault, ...(remote ? { remote: true } : {}) });
+      if (!live.current) return;
+      if (added.kind === "account") {
+        setRun({ at: "done", name });
+        done.current?.(name);
+        return;
+      }
+      store.setState((st) => ({ signIns: { ...st.signIns, [added.signIn.id]: added.signIn } }));
+      put({ at: "opening", name, id: added.signIn.id, checking: false });
+      follow(added.signIn);
+    } catch (e) {
+      if (live.current) setRun({ at: "failed", name, why: plainError(e), kind: "other" });
+    }
+  };
+
+  const cancel = () => {
+    const id = run.at === "opening" || run.at === "waiting" ? run.id : null;
+    runNow.current = { at: "idle" };
+    setRun({ at: "idle" });
+    stop(id);
+  };
+
+  /** "Open the sign-in page again". */
+  const reopen = () => {
+    if (run.at !== "waiting" || !run.page) return;
+    if (run.page.kind === "url") return open(run.page.url);
+    void native.signInForward(machine, run.id).catch((e: unknown) => {
+      if (!live.current) return;
+      toWaiting(seen.current?.latest ?? ({ id: run.id, engine: "claude", name: run.name, state: "starting" } as AccountSignIn), () => ({ why: plainError(e) }));
+      toCode();
+    });
+  };
+
+  /** Sends the code the page showed. A refused code is said, and the field stays. */
+  const sendCode = async (code: string) => {
+    if (!hub || run.at !== "waiting") return;
+    try {
+      const s = await hub.signInCode(run.id, code.trim());
+      if (s.state === "failed") toWaiting(seen.current?.latest ?? s, () => ({ why: codeRefused(s.why) }));
+      else follow(s);
+    } catch (e) {
+      setRun((now) => (now.at === "waiting" ? { ...now, why: codeRefused(plainError(e)) } : now));
+    }
+  };
+
+  /** "Use a code instead". */
+  const withCode = () => toCode();
+
+  const reset = () => setRun({ at: "idle" });
+
+  return { run, begin, cancel, reopen, sendCode, withCode, reset, hub };
+}
+
+/** What a refused code says: Claude's own words, and what to do. */
+export const codeRefused = (why: string): string => `That code didn’t work: ${why.replace(/\.$/, "")}. Open the page again for a new one.`;
+
+/** Codex's device sign-in, as the engine's hub runs it. */
+export const codexRoutes = (hub: DeskHub) => ({
+  start: () => hub.startEngineSignIn("codex"),
+  read: (id: string) => hub.engineSignIn(id),
+  cancel: (id: string) => hub.cancelEngineSignIn(id),
+});
+
+export type CodexRun =
+  | { at: "idle" }
+  /** Begun: its device page isn't up yet (30 s). */
+  | { at: "opening"; id: string | null }
+  /** Type `code` on the page that opened (15 minutes). */
+  | { at: "device"; id: string; url: string; code: string }
+  | { at: "done" }
+  | { at: "failed"; why: string }
+  /** A hub too old to run Codex's sign-in itself: a terminal there. */
+  | { at: "terminal" };
+
+export const codeExpired = "The code ran out after 15 minutes, so Desk stopped the sign-in.";
+export const codexNotOpened = (where: Where): string => `ChatGPT’s sign-in page didn’t open within 30 s: Codex on ${where} didn’t answer.`;
+
+/** Signing ChatGPT in for Codex on `machine`'s engine, by Codex's device
+ *  page: opened here, its code shown to type there. */
+export function useCodexSignIn(machine: MachineId, where: Where, native: MachineNative = realNative, onDone?: () => void) {
+  const hub = useHubOf(machine);
+  const [run, setRun] = useState<CodexRun>({ at: "idle" });
+  const runNow = useRef(run);
+  runNow.current = run;
+  const opened = useRef<string | null>(null);
+  const live = useLive();
+  const done = useRef(onDone);
+  done.current = onDone;
+
+  /** The device page, opened only once it is checked to be Codex's own. */
+  const openPage = useCallback(
+    (url: string) =>
+      void native.openSignInPage("codex", url).catch((e: unknown) => {
+        if (live.current) setRun({ at: "failed", why: plainError(e) });
+      }),
+    [native, live],
+  );
+
+  const follow = useCallback(
+    (s: EngineSignIn) => {
+      if (!live.current) return;
+      // Only the sign-in under way now.
+      const now = runNow.current;
+      if (!((now.at === "opening" && (now.id === null || now.id === s.id)) || (now.at === "device" && now.id === s.id))) return;
+      switch (s.state) {
+        case "starting":
+          return setRun((now) => (now.at === "opening" ? { at: "opening", id: s.id } : now));
+        case "device":
+          if (opened.current !== s.id) {
+            opened.current = s.id;
+            openPage(s.url);
+          }
+          return setRun((now) => (now.at === "device" && now.id === s.id ? now : { at: "device", id: s.id, url: s.url, code: s.code }));
+        case "done":
+          setRun({ at: "done" });
+          return done.current?.();
+        case "failed":
+          return setRun({ at: "failed", why: s.why });
+      }
+    },
+    [openPage, live],
+  );
+
+  const id = run.at === "device" || run.at === "opening" ? (run.id ?? null) : null;
+  useEffect(() => {
+    if (!hub || !id) return;
+    const routes = codexRoutes(hub);
+    const t = setInterval(() => {
+      void routes
+        .read(id)
+        .then(follow)
+        .catch((e: unknown) => {
+          if (e instanceof HubError && e.status === 404) follow({ id, engine: "codex", state: "failed", why: `The sign-in ended on ${where} before it finished. Start it again.` });
+        });
+    }, SIGN_IN_POLL_MS);
+    return () => clearInterval(t);
+  }, [hub, id, follow, where]);
+
+  // Its limits: 30 s for the device page, 15 minutes for the code.
+  const phase = run.at === "opening" ? "opening" : run.at === "device" ? `device:${run.id}` : null;
+  useEffect(() => {
+    if (!phase || !hub) return;
+    const t = setTimeout(
+      () => {
+        const now = runNow.current;
+        const stopIt = (signIn: string | null) => {
+          if (signIn) void codexRoutes(hub).cancel(signIn).catch(() => undefined);
+        };
+        const put = (r: CodexRun) => {
+          runNow.current = r;
+          setRun(r);
+        };
+        if (phase === "opening" && now.at === "opening") {
+          put({ at: "failed", why: codexNotOpened(where) });
+          stopIt(now.id);
+        } else if (phase !== "opening" && now.at === "device") {
+          put({ at: "failed", why: codeExpired });
+          stopIt(now.id);
+        }
+      },
+      phase === "opening" ? OPEN_WITHIN_MS : CODE_WITHIN_MS,
+    );
+    return () => clearTimeout(t);
+  }, [phase, hub, where]);
+
+  const begin = async () => {
+    if (!hub) return;
+    opened.current = null;
+    runNow.current = { at: "opening", id: null };
+    setRun({ at: "opening", id: null });
+    try {
+      follow(await codexRoutes(hub).start());
+    } catch (e) {
+      if (!live.current) return;
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) setRun({ at: "terminal" });
+      else setRun({ at: "failed", why: plainError(e) });
+    }
+  };
+
+  const cancel = () => {
+    runNow.current = { at: "idle" };
+    setRun({ at: "idle" });
+    if (hub && id) void codexRoutes(hub).cancel(id).catch(() => undefined);
+  };
+
+  const reset = () => setRun({ at: "idle" });
+
+  return { run, begin, cancel, openPage, reset, busy: run.at === "opening" || run.at === "device" };
+}

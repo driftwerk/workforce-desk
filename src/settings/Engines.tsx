@@ -1,56 +1,54 @@
-import { useEffect, useState } from "react";
-import { hasAccounts } from "../engines/accounts";
-import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
-import { useDesk } from "../hub/store";
-import type { EngineInfo } from "../hub/types";
-import { Accounts } from "./Accounts";
+import { useState } from "react";
+import { LOCAL, useMachines, type MachineId } from "../machines/engines";
+import type { MachineNative } from "../machines/native";
+import { offlineWord, thisComputer, usable } from "../machines/words";
+import { useHost } from "../shell/host";
+import { EngineBlocks } from "./EngineBlocks";
 
-/** The engines on the computer Desk's sessions run on: whether each is
- *  installed, its version, who it is signed in as, and what Desk does with
- *  it. */
-export function Engines() {
-  const hub = useDesk((s) => s.hub);
-  const [engines, setEngines] = useState<EngineInfo[] | null | "failed">(null);
-  useEffect(() => {
-    let live = true;
-    hub
-      ?.engines()
-      .then((e) => live && setEngines(e))
-      .catch(() => live && setEngines("failed"));
-    return () => {
-      live = false;
-    };
-  }, [hub]);
+/** Settings → Engines: the engines on the computer Desk's sessions run
+ *  on, and, once there are machines, on any of them ("On"): whether each is
+ *  installed, its version, who it is signed in as, and its sign-in. */
+export function Engines({ native, on }: { native?: MachineNative; on?: MachineId }) {
+  const machines = useMachines((s) => s.machines);
+  const platform = useHost((h) => h.platform);
+  const [chosen, setChosen] = useState<MachineId>(on ?? LOCAL);
+  const machine = chosen === LOCAL || machines.some((m) => m.id === chosen && usable(m.state)) ? chosen : LOCAL;
+  const name = machines.find((m) => m.id === machine)?.name;
   return (
     <section className="settings-pane" aria-label="Engines">
       <h1 className="display-lg">Engines</h1>
-      <p className="muted small">
-        The coding CLIs on the computer Desk’s sessions run on. Desk reads each one’s version and sign-in every hour.
-      </p>
-      {engines === "failed" ? (
-        <p className="state-blocked small">Couldn’t ask the hub about its engines just now.</p>
-      ) : engines === null ? (
-        <p className="faint small">{hub ? "Reading…" : "Not connected to a hub."}</p>
-      ) : (
-        <ul className="engine-list">
-          {engines.map((e) => (
-            <li key={e.engine} className="engine-row">
-              <span className="engine-head">
-                <b>{e.title}</b>
-                <span className="muted small">{installedText(e)}</span>
-              </span>
-              {e.installed && <span className="small">{signInText(e.signIn)}</span>}
-              <span className="faint small">{runsText(e)}</span>
-              {defaultCaps(e)?.notes.map((n) => (
-                <span key={n} className="faint small">
-                  {n}
-                </span>
-              ))}
-              {e.installed && hasAccounts(defaultCaps(e)) && <Accounts engine={e} />}
-            </li>
-          ))}
-        </ul>
+      <p className="muted small">The coding CLIs on the computer Desk’s sessions run on. Desk reads each one’s version and sign-in every hour.</p>
+      {machines.length > 0 && (
+        <div className="field">
+          <span className="ov-label muted">On</span>
+          <div className="chip-row" role="radiogroup" aria-label="On">
+            <button type="button" role="radio" className="chip-btn" aria-checked={machine === LOCAL} aria-pressed={machine === LOCAL} onClick={() => setChosen(LOCAL)}>
+              {thisComputer(platform)}
+            </button>
+            {machines.map((m) => {
+              const off = offlineWord(m.state);
+              const can = usable(m.state);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="radio"
+                  className="chip-btn"
+                  aria-checked={machine === m.id}
+                  aria-pressed={machine === m.id}
+                  aria-disabled={!can || undefined}
+                  title={can ? undefined : `${m.name} is ${off} right now`}
+                  onClick={() => can && setChosen(m.id)}
+                >
+                  {m.name}
+                  {off && ` · ${off}`}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
+      <EngineBlocks key={machine} machine={machine} name={name} native={native} />
     </section>
   );
 }

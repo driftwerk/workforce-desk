@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
-import { accountsOf, accountsOn, problemText, sessionsText, signInStep, useAccounts, type AccountsStore } from "../engines/accounts";
+import { useEffect, useId, useRef, useState } from "react";
+import { useClaudeSignIn } from "../engines/signIn";
+import { accountsOf, accountsOn, freeName, problemText, sessionsText, useAccounts, type AccountsStore } from "../engines/accounts";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { useDesk, useHubOf } from "../hub/store";
-import type { AccountSignIn, EngineAccount, EngineInfo } from "../hub/types";
+import type { EngineAccount, EngineInfo } from "../hub/types";
 import { native as realNative, type MachineNative, type Shared } from "../machines/native";
-import { openUrl } from "../platform";
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
@@ -40,7 +40,9 @@ export function Accounts({
   const problems = store((s) => s.problems);
   const hub = useHubOf(machine);
   const fail = useDesk((s) => s.fail);
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<false | "form" | "quick">(false);
+  const signIns = store((s) => s.signIns);
+  const here = hereOf(useHost((h) => h.platform));
   useEffect(() => {
     void store.getState().load();
   }, [store, hub]);
@@ -75,10 +77,24 @@ export function Accounts({
       {where === null && supported ? (
         <span className="faint small">This Desk keeps no accounts yet: update Desk to add them.</span>
       ) : !canAdd ? null : adding ? (
-        <AddAccount engine={engine} first={accounts.length === 0} onDone={() => setAdding(false)} />
+        <AddAccount
+          engine={engine}
+          first={accounts.length === 0}
+          onDone={() => setAdding(false)}
+          machine={machine}
+          where={machine === LOCAL ? here : (name ?? machine)}
+          native={native}
+          start={adding === "quick" ? freeName([...all, ...Object.values(signIns)]) : undefined}
+        />
       ) : (
-        <span>
-          <button type="button" className="btn btn-ghost" onClick={() => setAdding(true)}>
+        <span className="account-actions-start">
+          {/* A machine with no account yet signs in at once, as "Claude". */}
+          {machine !== LOCAL && accounts.length === 0 && (
+            <button type="button" className="btn btn-sm btn-signal" onClick={() => setAdding("quick")}>
+              Sign in…
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost" onClick={() => setAdding("form")}>
             Add account…
           </button>
         </span>
@@ -86,6 +102,9 @@ export function Accounts({
     </div>
   );
 }
+
+/** Whether `machine`'s engine has a Claude account signed in. */
+export const useHasAccount = (machine: MachineId): boolean => accountsOn(machine)((s) => s.accounts.some((a) => a.engine === "claude" && a.signedIn));
 
 /** What this computer is called: "this Mac" on macos, else "this computer". */
 const hereOf = (platform: string): string => (platform === "macos" ? "this Mac" : "this computer");
@@ -259,37 +278,54 @@ function AccountRow({ account, machine, store, others }: { account: EngineAccoun
   );
 }
 
-/** Adding one: a name, then signing in through Claude Code's own page, or
- *  pasting a token made with `claude setup-token`. */
-function AddAccount({ engine, first, onDone }: { engine: EngineInfo; first: boolean; onDone: () => void }) {
-  const hub = useDesk((s) => s.hub);
+/** Adding one: a name, then signing in through Claude Code's own page
+ *  (run by the engine's hub, its page opened here), or pasting a token
+ *  made with `claude setup-token`. The same on this computer and on each
+ *  machine. */
+function AddAccount({
+  engine,
+  first,
+  onDone,
+  machine,
+  where,
+  native,
+  start,
+}: {
+  engine: EngineInfo;
+  first: boolean;
+  onDone: () => void;
+  machine: MachineId;
+  where: string;
+  native: MachineNative;
+  /** Signs in at once under this name, as the default (a machine's first). */
+  start?: string;
+}) {
+  const hub = useHubOf(machine);
   const [name, setName] = useState("");
   const [how, setHow] = useState<"browser" | "paste">("browser");
   const [token, setToken] = useState("");
   const [makeDefault, setMakeDefault] = useState(first);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [signInId, setSignInId] = useState<string | null>(null);
-  const signIn = useAccounts((s) => (signInId ? (s.signIns[signInId] ?? null) : null));
+  const claude = useClaudeSignIn(machine, where, native);
+  const nameId = useId();
+  const tokenId = useId();
+  const started = useRef(false);
+  useEffect(() => {
+    if (!start || started.current || !hub) return;
+    started.current = true;
+    void claude.begin(start, true);
+  });
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async () => {
     if (!hub || !name.trim()) return;
-    setBusy(true);
     setProblem(null);
+    if (how === "browser") return void claude.begin(name.trim(), makeDefault);
+    setBusy(true);
     try {
-      const added = await hub.addAccount({
-        engine: engine.engine,
-        name: name.trim(),
-        token: how === "paste" ? token.trim() : undefined,
-        makeDefault,
-      });
+      const added = await hub.addAccount({ engine: engine.engine, name: name.trim(), token: token.trim(), makeDefault });
       setToken("");
       if (added.kind === "account") onDone();
-      else {
-        useAccounts.setState((s) => ({ signIns: { ...s.signIns, [added.signIn.id]: added.signIn } }));
-        setSignInId(added.signIn.id);
-      }
     } catch (err) {
       setProblem(plainError(err));
     } finally {
@@ -297,13 +333,34 @@ function AddAccount({ engine, first, onDone }: { engine: EngineInfo; first: bool
     }
   };
 
-  if (signIn) return <SigningIn signIn={signIn} onDone={onDone} onPaste={() => (setSignInId(null), setHow("paste"))} />;
+  if (claude.run.at !== "idle")
+    return (
+      <SigningIn
+        claude={claude}
+        onDone={onDone}
+        onPaste={() => {
+          claude.reset();
+          setHow("paste");
+        }}
+      />
+    );
+  // A group, not a form: it sits inside the Add card's own form.
   return (
-    <form className="account-add" onSubmit={submit} aria-label="Add account">
-      <label className="field">
-        <span>Name</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Work" maxLength={40} required autoFocus />
-      </label>
+    <div
+      className="account-add"
+      role="group"
+      aria-label="Add account"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+          e.preventDefault();
+          void submit();
+        }
+      }}
+    >
+      <div className="field">
+        <label htmlFor={nameId}>Name</label>
+        <input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Work" maxLength={40} required autoFocus />
+      </div>
       <div className="seg" role="radiogroup" aria-label="Sign in">
         <button type="button" role="radio" aria-checked={how === "browser"} onClick={() => setHow("browser")}>
           Sign in with Claude
@@ -315,10 +372,10 @@ function AddAccount({ engine, first, onDone }: { engine: EngineInfo; first: bool
       {how === "browser" ? (
         <p className="faint small">Desk opens Claude’s sign-in page. Sign in there with the account you want; Desk keeps the sign-in without showing it.</p>
       ) : (
-        <label className="field">
-          <span>Token from claude setup-token</span>
-          <input type="password" className="mono" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" spellCheck={false} required />
-        </label>
+        <div className="field">
+          <label htmlFor={tokenId}>Token from claude setup-token</label>
+          <input id={tokenId} type="password" className="mono" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" spellCheck={false} required />
+        </div>
       )}
       <p className="faint small">An account’s sessions can’t use claude.ai connectors or Remote Control: its sign-in only makes model requests.</p>
       <label className="check small">
@@ -330,62 +387,133 @@ function AddAccount({ engine, first, onDone }: { engine: EngineInfo; first: bool
         <button type="button" className="btn btn-ghost" onClick={onDone}>
           Cancel
         </button>
-        <button type="submit" className="btn btn-signal" disabled={busy || !name.trim() || (how === "paste" && !token.trim())}>
+        <button type="button" className="btn btn-signal" disabled={busy || !name.trim() || (how === "paste" && !token.trim())} onClick={() => void submit()}>
           {how === "paste" ? "Add account" : "Sign in…"}
         </button>
       </span>
-    </form>
+    </div>
   );
 }
 
-function SigningIn({ signIn, onDone, onPaste }: { signIn: AccountSignIn; onDone: () => void; onPaste: () => void }) {
-  const hub = useDesk((s) => s.hub);
+/** The code field: a group, not a form, as it may sit inside another. */
+export function CodeField({ onSend, focus = false }: { onSend: (code: string) => void; focus?: boolean }) {
   const [code, setCode] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-  const url = signIn.state === "open" || signIn.state === "code" ? signIn.url : null;
-  const over = signIn.state === "done" || signIn.state === "failed";
-  const send = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await hub?.signInCode(signIn.id, code);
-      setCode("");
-    } catch (err) {
-      setProblem(plainError(err));
-    }
-  };
-  const cancel = async () => {
-    if (!over) await hub?.cancelSignIn(signIn.id).catch(() => undefined);
-    onDone();
+  const send = () => {
+    if (!code.trim()) return;
+    onSend(code);
+    setCode("");
   };
   return (
-    <div className="account-add" aria-label={`Signing in to ${signIn.name}`} aria-live="polite">
-      <b className="small">Signing in to {signIn.name}</b>
-      <p className={signIn.state === "failed" ? "state-blocked small" : "small"}>{signInStep(signIn)}</p>
-      {url && (
-        <span>
-          <button type="button" className="btn btn-ghost" onClick={() => openUrl(url)}>
-            Open the sign-in page again
-          </button>
-        </span>
+    <span className="field-row" role="group" aria-label="Sign-in code">
+      <input
+        className="field-text mono"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            send();
+          }
+        }}
+        placeholder="Code from the page"
+        aria-label="Code from the sign-in page"
+        autoComplete="off"
+        spellCheck={false}
+        autoFocus={focus}
+      />
+      <button type="button" className="btn" disabled={!code.trim()} onClick={send}>
+        Send
+      </button>
+    </span>
+  );
+}
+
+/** A Claude sign-in under way, as SignInStates draws it: opening (30 s),
+ *  waiting for approval (10 minutes) or a code, added, or failed with why. */
+export function SigningIn({ claude, onDone, onPaste }: { claude: ReturnType<typeof useClaudeSignIn>; onDone: () => void; onPaste: () => void }) {
+  const r = claude.run;
+  if (r.at === "idle") return null;
+  return (
+    <div className="account-add" role="group" aria-label={`Signing in to ${r.name}`} aria-live="polite">
+      <b className="small">Signing in to {r.name}</b>
+      {r.at === "opening" && (
+        <>
+          <p className="small">{r.checking ? "Checking the sign-in…" : "Opening Claude’s sign-in page…"}</p>
+          <span className="faint small">If the page hasn’t opened in 30 s, Desk stops and says why.</span>
+        </>
       )}
-      {signIn.state === "code" && (
-        <form className="field-row" onSubmit={send} aria-label="Sign-in code">
-          <input className="mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code from the page" autoComplete="off" spellCheck={false} />
-          <button type="submit" className="btn" disabled={!code.trim()}>
-            Send
-          </button>
-        </form>
+      {r.at === "waiting" &&
+        (r.codeAsked ? (
+          <>
+            <p className="small">{r.checking ? "Checking the sign-in…" : "If the page shows a code, paste it here."}</p>
+            {r.why && <p className="small state-blocked">{r.why}</p>}
+            <CodeField onSend={(code) => void claude.sendCode(code)} focus />
+            {r.page && (
+              <span>
+                <button type="button" className="btn btn-ghost" onClick={claude.reopen}>
+                  Open the sign-in page again
+                </button>
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="small">{r.checking ? "Checking the sign-in…" : r.page ? "Finish signing in in your browser." : "Opening Claude’s sign-in page…"}</p>
+            {r.why && <p className="small state-blocked">{r.why}</p>}
+            <span className="account-links">
+              {r.page && (
+                <button type="button" className="btn btn-ghost" onClick={claude.reopen}>
+                  Open the sign-in page again
+                </button>
+              )}
+              <button type="button" className="link small" onClick={claude.withCode}>
+                Use a code instead
+              </button>
+            </span>
+            <span className="faint small">Desk carries on by itself once you approve. It waits up to 10 minutes.</span>
+          </>
+        ))}
+      {r.at === "done" && (
+        <p className="small">
+          <span className="state-done">{r.name} is added.</span>
+        </p>
       )}
-      {problem && <p className="state-blocked small">{problem}</p>}
+      {r.at === "failed" && (
+        <>
+          <p className="small state-blocked" role="alert">
+            {r.why}
+          </p>
+          <span className="account-actions">
+            <button type="button" className="btn btn-ghost" onClick={onPaste}>
+              Paste a token instead
+            </button>
+          </span>
+        </>
+      )}
       <span className="account-actions">
-        {signIn.state === "failed" && (
-          <button type="button" className="btn btn-ghost" onClick={onPaste}>
-            Paste a token instead
+        {r.at === "done" ? (
+          <button type="button" className="btn" onClick={onDone}>
+            Done
           </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                claude.cancel();
+                onDone();
+              }}
+            >
+              Cancel
+            </button>
+            {r.at === "failed" && (
+              <button type="button" className="btn" onClick={() => void claude.begin(r.name, false)}>
+                Try again
+              </button>
+            )}
+          </>
         )}
-        <button type="button" className={over ? "btn" : "btn btn-ghost"} onClick={() => void cancel()}>
-          {over ? "Done" : "Cancel"}
-        </button>
       </span>
     </div>
   );

@@ -97,6 +97,21 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/engines/sign-ins"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/engines/sign-ins/cx1"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/engines/sign-ins/cx1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/accounts/problems/a1/dismiss"
   },
   {

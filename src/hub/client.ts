@@ -12,6 +12,7 @@ import type {
   Engine,
   EngineAccount,
   EngineInfo,
+  EngineSignIn,
   SpendBy,
   SwitchedAll,
   SpendPeriod,
@@ -356,6 +357,10 @@ export class DeskHub {
   /** The code the sign-in page showed, for the sign-in waiting on it. */
   signInCode = (id: string, code: string): Promise<AccountSignIn> =>
     this.call("POST", `/api/desk/accounts/sign-ins/${id}/code`, { code });
+  /** An engine's own sign-in, run by the hub (Codex's device page). */
+  startEngineSignIn = (engine: Engine): Promise<EngineSignIn> => this.call("POST", "/api/desk/engines/sign-ins", { engine });
+  engineSignIn = (id: string): Promise<EngineSignIn> => this.call("GET", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
+  cancelEngineSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
   /** "OK" on a sign-in problem the person has dealt with. */
   dismissSignInProblem = (account: string): Promise<void> => this.call("POST", `/api/desk/accounts/problems/${account}/dismiss`);
   cancelSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/sign-ins/${id}`);
