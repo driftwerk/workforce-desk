@@ -16,6 +16,37 @@ interface SettingsStore extends Settings {
   setShortcut: (id: ShortcutId, accel: string) => void;
 }
 
+/** The settings read under way, if any. */
+let reading: Promise<void> | null = null;
+
+/** Reads Desk's settings file into the store. */
+const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promise<void> => {
+  const s = await loadSettings();
+  // The pick first: a saved theme other than Auto, Night and Day (an older
+  // Desk's "harbour") is the chooser's, and setting it picks it again.
+  useThemeStore.getState().setPick(s.themePick ?? DEFAULT_PICK);
+  useThemeStore.getState().setChoice(s.theme);
+  const { keys, chosen } = resolve(s.shortcuts ?? {});
+  set({
+    ...s,
+    theme: useThemeStore.getState().choice,
+    themePick: useThemeStore.getState().pick,
+    shortcuts: chosen,
+    keys,
+    defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
+    agentVoices: repairVoices(s.agentVoices),
+    customVoices: s.customVoices ?? {},
+    groups: s.groups ?? EMPTY_LAYOUT.groups,
+    ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
+    sessionNames: s.sessionNames ?? {},
+    layoutOnHub: s.layoutOnHub ?? false,
+    emoticons: s.emoticons ?? true,
+    imageSites: s.imageSites ?? [],
+    writtenReplies: s.writtenReplies ?? [],
+    loaded: true,
+  });
+};
+
 /** Desk's settings file, mirrored here; the theme choice lives in the theme
  *  store and is saved with the rest. A chosen shortcut that's unreadable,
  *  can't be Desk's, or has another shortcut's keys loads as its default. */
@@ -39,32 +70,9 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   imageSites: [],
   keys: defaultShortcuts(),
   loaded: false,
-  load: async () => {
-    const s = await loadSettings();
-    // The pick first: a saved theme other than Auto, Night and Day (an older
-    // Desk's "harbour") is the chooser's, and setting it picks it again.
-    useThemeStore.getState().setPick(s.themePick ?? DEFAULT_PICK);
-    useThemeStore.getState().setChoice(s.theme);
-    const { keys, chosen } = resolve(s.shortcuts ?? {});
-    set({
-      ...s,
-      theme: useThemeStore.getState().choice,
-      themePick: useThemeStore.getState().pick,
-      shortcuts: chosen,
-      keys,
-      defaultVoice: repairVoice(s.defaultVoice) ?? s.defaultVoice,
-      agentVoices: repairVoices(s.agentVoices),
-      customVoices: s.customVoices ?? {},
-      groups: s.groups ?? EMPTY_LAYOUT.groups,
-      ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
-      sessionNames: s.sessionNames ?? {},
-      layoutOnHub: s.layoutOnHub ?? false,
-      emoticons: s.emoticons ?? true,
-      imageSites: s.imageSites ?? [],
-      writtenReplies: s.writtenReplies ?? [],
-      loaded: true,
-    });
-  },
+  // One read at a time: a second caller (the shell, after the read before
+  // the first render) waits on the one under way.
+  load: () => (reading ??= readSettings(set).finally(() => (reading = null))),
   set: (patch) => {
     if (patch.shortcuts) {
       const { keys, chosen } = resolve(patch.shortcuts);

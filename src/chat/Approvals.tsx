@@ -94,7 +94,7 @@ export function PromptCard({ prompt, onAnswer }: { prompt: Prompt; onAnswer: (ch
       </span>
       <span className="dm-action-buttons">
         {options.allow_once && (
-          <button type="button" className={irreversible ? "btn" : "btn btn-signal"} onClick={() => answer("allow_once")}>
+          <button type="button" className={irreversible ? "btn" : "btn btn-approve"} onClick={() => answer("allow_once")}>
             Allow once
           </button>
         )}
@@ -173,7 +173,7 @@ export function RoutedApproval({ hubId, requestId }: { hubId: string; requestId:
       </span>
       {!decided && hub && (
         <span className="dm-action-buttons">
-          <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void decide("allow_once")}>
+          <button type="button" className="btn btn-approve" disabled={busy} onClick={() => void decide("allow_once")}>
             Approve
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => void decide("deny_once")}>

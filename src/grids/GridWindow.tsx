@@ -14,6 +14,7 @@ import {
   monitorsNow,
   onThemesChanged,
   setGridWindowMode,
+  windowBackground,
   subscribe,
 } from "../platform";
 import { deskState } from "../restore/boot";
@@ -29,6 +30,7 @@ import { countsLine, GridCanvas, GridName, LayoutUndo, useFillKeys, useGridCount
 import { WINDOW_MODES, type WindowMode } from "./model";
 import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
+import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { startUnread } from "../unread/summary";
 
@@ -47,7 +49,10 @@ export function GridWindow({ gridId }: { gridId: string }) {
   const placement = useRef(grid?.placement);
   placement.current = grid?.placement;
 
-  useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => {
+    applyTheme(theme);
+    if (inApp) void windowBackground(theme.colors.bg).catch(() => undefined);
+  }, [theme]);
   // What its panes show is read here too: sessions by what the summary says
   // they did since, with the points every window writes.
   useEffect(() => startUnread(), []);
@@ -68,9 +73,10 @@ export function GridWindow({ gridId }: { gridId: string }) {
     let gone = false;
     const { fail } = useDesk.getState();
     // Settings are only read here: the main window is the one that saves them.
-    void useSettings.getState().load().catch(fail);
+    // Read before the first render (theme/boot); again only if that failed.
+    if (!useSettings.getState().loaded) void useSettings.getState().load().catch(fail);
     const refresh = () => loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
-    refresh();
+    void customThemesRead(() => loadCustomThemes().then(useThemeStore.getState().setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
     localHub()
       .then((t) => (stop = useDesk.getState().connect(t, { notify: false })))
@@ -204,7 +210,7 @@ function Toast() {
   const { error, clearError } = useDesk();
   if (!error) return null;
   return (
-    <div className="toast" role="alert">
+    <div className="toast toast-error" role="alert">
       <span>{error}</span>
       <button type="button" className="link" onClick={clearError}>
         Dismiss

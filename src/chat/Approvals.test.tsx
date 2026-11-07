@@ -106,10 +106,10 @@ describe("Desk's own card for a call on this computer", () => {
       />,
     );
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Allow once", "Always allow deleting in acme-web", "Deny"]);
-    expect(screen.getByRole("button", { name: "Allow once" }).className).not.toContain("btn-signal");
+    expect(screen.getByRole("button", { name: "Allow once" }).className).not.toContain("btn-approve");
     cleanup();
     render(<PromptCard prompt={ask({ facts })} onAnswer={() => true} />);
-    expect(screen.getByRole("button", { name: "Allow once" }).className).toContain("btn-signal");
+    expect(screen.getByRole("button", { name: "Allow once" }).className).toContain("btn-approve");
   });
 
   it("names the connector a write would always be allowed to", () => {

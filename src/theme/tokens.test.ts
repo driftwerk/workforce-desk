@@ -10,13 +10,12 @@ describe("themes", () => {
     expect([night.bg, night.signal, night.surface, night.blocked]).toEqual(["#111210", "#D4FF3A", "#171815", "#FFB547"]);
     const day = derive(DAY);
     expect(day.dark).toBe(false);
-    expect([day.colors.onSignal, day.colors.signal]).toEqual(["#E4FF8F", "#161714"]);
+    expect([day.colors.onSignal, day.colors.signal]).toEqual(["#F7FCDD", "#3F5A06"]);
     expect(derive(HARBOUR).colors.signal).toBe("#FF9F6B");
   });
 
   it("built-in themes pass their own contrast checks", () => {
-    // Day's needs-you and done on its panels are under 4.5:1 until its new palette.
-    for (const t of [NIGHT, HARBOUR]) {
+    for (const t of [NIGHT, DAY, HARBOUR]) {
       for (const c of contrastChecks(derive(t))) expect(c.pass, `${t.id}: ${c.label} ${c.ratio.toFixed(2)}`).toBe(true);
     }
   });

@@ -66,7 +66,7 @@ export function LineAnswer({ asking, focusKey, compact = false }: { asking: Aski
       {(asking.options?.length || asking.draft) && (
         <span className="line-answer-options">
           {asking.draft && (
-            <button type="button" className="btn btn-signal btn-sm" disabled={busy} title={asking.draft} onClick={() => void send(asking.draft!)}>
+            <button type="button" className="btn btn-approve btn-sm" disabled={busy} title={asking.draft} onClick={() => void send(asking.draft!)}>
               Send Desk’s answer
             </button>
           )}

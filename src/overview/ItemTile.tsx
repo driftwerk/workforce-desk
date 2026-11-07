@@ -178,7 +178,7 @@ function SessionAsk({
       <span className="ov-ask-actions">
         {approvalId && (
           <>
-            <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void answer("allow")}>
+            <button type="button" className="btn btn-approve" disabled={busy} onClick={() => void answer("allow")}>
               Allow
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => void answer("deny")}>

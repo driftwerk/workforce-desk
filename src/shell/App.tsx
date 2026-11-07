@@ -9,7 +9,7 @@ import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, onThemesChanged, subscribe } from "../platform";
+import { hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -43,6 +43,7 @@ import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
 import { useTerminalColors } from "../theme/hubColors";
+import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
@@ -132,6 +133,7 @@ export function App() {
 
   useEffect(() => {
     applyTheme(theme);
+    if (inApp) void windowBackground(theme.colors.bg).catch(() => undefined);
   }, [theme]);
   useTerminalColors(theme);
 
@@ -174,8 +176,9 @@ export function App() {
   useEffect(() => {
     let stop: (() => void) | undefined;
     const refresh = () => loadCustomThemes().then(setCustom).catch(fail);
-    loadSettings().catch(fail);
-    refresh();
+    // Read before the first render (theme/boot); again only if that failed.
+    if (!useSettings.getState().loaded) loadSettings().catch(fail);
+    void customThemesRead(() => loadCustomThemes().then(setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).
@@ -392,7 +395,7 @@ export function App() {
       <UpdateNotice />
       <HubDownBanner down={hubDown} />
       {error && (
-        <div className="toast" role="alert">
+        <div className="toast toast-error" role="alert">
           <span>{error}</span>
           <button type="button" className="link" onClick={clearError}>
             Dismiss

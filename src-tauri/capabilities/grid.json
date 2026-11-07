@@ -63,6 +63,7 @@
     "allow-desk-state-adopt",
     "allow-desk-state-flush",
     "allow-desk-ready",
+    "allow-window-background",
     "allow-claude-plugin-dir",
     "allow-machine-home",
     "allow-backend-home",

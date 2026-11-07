@@ -36,6 +36,11 @@ describe("themes from before the new tokens", () => {
       expect([c.shadow, c.lift, c.edge, c.onMark], spec.id).toEqual(["#00000059", "#00000000", "#00000000", "#161714"]);
       expect(c.logoDot, spec.id).toBe(c.signal);
       expect([c.mark1, c.mark2, c.mark3, c.mark4, c.mark5, c.mark6]).toEqual(["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"]);
+      // Buttons transparent, answer buttons in the signal, no glow or rings,
+      // a working ticket's edge the border, settings cards raised.
+      expect([c.buttonFill, c.askGlow, c.activeRing, c.focusRing], spec.id).toEqual(["#00000000", "#00000000", "#00000000", "#00000000"]);
+      expect([c.approve, c.onApprove, c.activeEdge, c.cardFill], spec.id).toEqual([c.signal, c.onSignal, c.border, c.raised]);
+      expect([c.modeGround, c.modeFill, c.onModeFill], spec.id).toEqual([c.sunken, c.signal, c.onSignal]);
     }
     const vars = cssVariables(derive(NIGHT));
     // Today's .35, .25 and .4 black shadows.

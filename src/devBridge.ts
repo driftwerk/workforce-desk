@@ -96,6 +96,7 @@ function stateCommand(cmd: string, args: Record<string, unknown> = {}): { answer
       return { answer: true };
     case "desk_state_flush":
     case "desk_ready":
+    case "window_background":
       return { answer: undefined };
     default:
       return null;

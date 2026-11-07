@@ -42,6 +42,7 @@
 }
 .board-search:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .board > .empty,
 .board-empty {
@@ -96,6 +97,7 @@
   padding: 16px 14px;
   gap: 8px;
   min-height: 0;
+  box-shadow: 0 1px 2px var(--lift);
 }
 .board-col-head {
   display: flex;
@@ -126,9 +128,18 @@
 .board-card {
   border-color: var(--border);
   background: var(--raised);
+  box-shadow: 0 1px 2px var(--lift);
 }
 .board-card:hover {
   border-color: var(--muted);
+}
+/* Being worked on: its edge and a soft ring, which are the border and none
+   unless the theme sets them. */
+.board-card-working {
+  border-color: var(--active-edge);
+  box-shadow:
+    0 0 0 2px var(--active-ring),
+    0 1px 2px var(--lift);
 }
 .board-card-head {
   display: flex;

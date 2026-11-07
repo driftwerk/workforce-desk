@@ -85,12 +85,12 @@ function Need({ need }: { need: AccountNeed }) {
           </button>
         )}
         {need.kind === "limit" && (
-          <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void move(need.from.id, need.to.id)}>
+          <button type="button" className="btn btn-approve" disabled={busy} onClick={() => void move(need.from.id, need.to.id)}>
             Switch all
           </button>
         )}
         {need.kind === "reset" && (
-          <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void move(need.from.id, need.account.id)}>
+          <button type="button" className="btn btn-approve" disabled={busy} onClick={() => void move(need.from.id, need.account.id)}>
             Switch back
           </button>
         )}
@@ -119,7 +119,7 @@ function WhichSignIn() {
   return (
     <>
       {accounts.map((a) => (
-        <button key={a.id} type="button" className="btn btn-signal" disabled={busy} onClick={() => void answer(a.id)}>
+        <button key={a.id} type="button" className="btn btn-approve" disabled={busy} onClick={() => void answer(a.id)}>
           {a.name}
         </button>
       ))}

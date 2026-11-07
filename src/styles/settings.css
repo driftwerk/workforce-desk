@@ -665,8 +665,9 @@ legend.set-label {
   gap: 14px;
   padding: 12px 14px;
   border-radius: var(--radius);
-  background: var(--raised);
+  background: var(--card-fill);
   border: 1px solid var(--border);
+  box-shadow: 0 1px 2px var(--lift);
 }
 .hub-name {
   flex: 1;
@@ -797,8 +798,9 @@ legend.set-label {
   gap: 2px;
   padding: 12px 14px;
   border-radius: var(--radius);
-  background: var(--raised);
+  background: var(--card-fill);
   border: 1px solid var(--border);
+  box-shadow: 0 1px 2px var(--lift);
 }
 .engine-head {
   display: flex;

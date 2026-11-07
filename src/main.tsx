@@ -1,9 +1,11 @@
 import "@fontsource-variable/bricolage-grotesque";
 import "@fontsource-variable/figtree";
 import "@fontsource-variable/geist-mono";
-import { StrictMode, useEffect } from "react";
+import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { deskReady } from "./platform";
+import { paintSavedTheme } from "./theme/boot";
+import { useTheme } from "./theme/store";
 import { followDrops } from "./drop/native";
 import { GridWindow } from "./grids/GridWindow";
 import { GRID_PREFIX } from "./grids/storage";
@@ -26,11 +28,14 @@ import "./styles/panels.css";
 import "./styles/attachments.css";
 import "./styles/board.css";
 
-/** Shows the window once the restored shell has been committed. (Not on an
- *  animation frame: a hidden window's page never gets one.) */
+/** Shows the window once the restored shell has been committed in its
+ *  theme, on that theme's background. (Not on an animation frame: a hidden
+ *  window's page never gets one.) */
 function Ready() {
+  const { bg } = useTheme().colors;
+  const first = useRef(bg);
   useEffect(() => {
-    void deskReady().catch(() => undefined);
+    void deskReady(first.current).catch(() => undefined);
   }, []);
   return null;
 }
@@ -50,7 +55,12 @@ const grid = detachedGrid();
 // (made hidden, where it was) is shown once it has: no default view first.
 // What this computer is (its platform, where the backend runs) is read then
 // too, so every screen words itself for it from the start.
-void Promise.all([restoreBeforeRender(grid ? [] : [mainUi, roomOrder, machineSessions]), loadHost().catch(() => undefined)]).then(() => {
+// The theme too: the window first shows in the one chosen.
+void Promise.all([
+  restoreBeforeRender(grid ? [] : [mainUi, roomOrder, machineSessions]),
+  loadHost().catch(() => undefined),
+  paintSavedTheme().catch(() => undefined),
+]).then(() => {
   // A detached grid has no drafts of its own to keep, nor rooms.
   if (!grid) {
     keepFileDrafts();

@@ -20,6 +20,16 @@ beforeEach(() => {
 });
 
 describe("settings", () => {
+  it("are read once while a read is under way, and again after it", async () => {
+    vi.mocked(loadSettings).mockClear().mockResolvedValue(older);
+    const first = useSettings.getState().load();
+    expect(useSettings.getState().load()).toBe(first);
+    await first;
+    expect(loadSettings).toHaveBeenCalledTimes(1);
+    await useSettings.getState().load();
+    expect(loadSettings).toHaveBeenCalledTimes(2);
+  });
+
   it("an older settings file gets the default shortcuts", async () => {
     vi.mocked(loadSettings).mockResolvedValue(older);
     await useSettings.getState().load();

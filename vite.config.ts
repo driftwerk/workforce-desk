@@ -10,5 +10,6 @@ export default defineConfig({
   resolve: { dedupe: ["react", "react-dom"] },
   server: { port: 5183, strictPort: true },
   build: { target: "safari16", outDir: "dist" },
-  test: { environment: "jsdom" },
+  // Styles read as text (?raw) are read as they are; other CSS is left out.
+  test: { environment: "jsdom", css: { include: [/\.css\?raw$/] } },
 });
