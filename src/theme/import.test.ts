@@ -168,21 +168,41 @@ describe("theme import", () => {
   it("reads a Ghostty theme, skipping a cursor that is just the text colour", () => {
     const t = importTheme("catppuccin-mocha", CATPPUCCIN);
     expect([t.name, t.background, t.text, t.signal]).toEqual(["catppuccin-mocha", "#1E1E2E", "#CDD6F4", "#89B4FA"]);
-    expect(t.overrides).toEqual({ ansiRed: "#F38BA8", ansiGreen: "#A6E3A1", ansiCyan: "#94E2D5" });
+    // Its 16 colours, cursor and selection; bright black is too dark to read on its terminal.
+    expect(t.overrides).toEqual({
+      ansiRed: "#F38BA8",
+      ansiGreen: "#A6E3A1",
+      ansiYellow: "#F9E2AF",
+      ansiBlue: "#89B4FA",
+      ansiMagenta: "#F5C2E7",
+      ansiCyan: "#94E2D5",
+      ansiWhite: "#BAC2DE",
+      ansiBrightBlue: "#89B4FA",
+      termCursor: "#F5E0DC",
+      termSelection: "#353749",
+    });
     readable(t);
   });
 
   it("reads an iTerm2 preset's float components", () => {
     const t = importTheme("Dracula.itermcolors", DRACULA);
     expect([t.name, t.background, t.text, t.signal]).toEqual(["Dracula", "#282A36", "#F8F8F2", "#BD93F9"]);
-    expect(t.overrides).toEqual({ ansiRed: "#FF5555", ansiGreen: "#00FA7B", ansiCyan: "#8BE9FD" });
+    expect(t.overrides).toEqual({ ansiRed: "#FF5555", ansiGreen: "#00FA7B", ansiBlue: "#BD93F9", ansiCyan: "#8BE9FD", termCursor: "#F8F8F2" });
     readable(t);
   });
 
   it("reads base16 schemes in the flat and the palette layout", () => {
     const g = importTheme("gruvbox-dark-medium.yaml", GRUVBOX);
     expect([g.name, g.background, g.text]).toEqual(["Gruvbox dark, medium", "#282828", "#D5C4A1"]);
-    expect(g.overrides).toEqual({ ansiRed: "#FB4934", ansiGreen: "#B8BB26", ansiCyan: "#8EC07C" });
+    expect(g.overrides).toEqual({
+      ansiRed: "#FB4934",
+      ansiGreen: "#B8BB26",
+      ansiYellow: "#FABD2F",
+      ansiBlue: "#83A598",
+      ansiMagenta: "#D3869B",
+      ansiCyan: "#8EC07C",
+      ansiWhite: "#D5C4A1",
+    });
     readable(g);
     const n = importTheme("nord.yml", NORD);
     expect([n.id, n.background, n.text]).toEqual(["nord", "#2E3440", "#E5E9F0"]);

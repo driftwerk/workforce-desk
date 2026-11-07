@@ -70,6 +70,8 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   allowAsked: (h) => h.allowAsked("s1"),
   dismissAsked: (h) => h.dismissAsked("s1"),
   resume: (h) => h.resume("s1", "go on"),
+  restart: (h) => h.restart("s1"),
+  setTerminalColors: (h) => h.setTerminalColors({ foreground: "#000000", background: "#FFFFFF", cursor: "#000000", ansi: [] }),
   remove: (h) => h.remove("s1", true),
   end: (h) => h.end("s1"),
   closedSessions: (h) => h.closedSessions(),

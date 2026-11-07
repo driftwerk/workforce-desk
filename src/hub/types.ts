@@ -139,6 +139,12 @@ export interface Session {
   account?: AccountRef | null;
   /** The account it moves to once its turn ends, while a switch waits. */
   switchingTo?: AccountRef | null;
+  /** The terminal ground, light or dark, its CLI took its colours from at
+   *  its start, when it can't follow the terminal while it runs (Codex reads
+   *  the colours once; Claude Code with a theme of the person's own): set,
+   *  a change of ground shows only once it restarts. Absent while it
+   *  follows the terminal, and from older hubs. */
+  fixedGround?: "light" | "dark" | null;
   /** The Desk terminal it runs in, when it was started there by hand and
    *  Desk's hooks registered it (a tracked terminal). */
   terminalId?: string | null;

@@ -42,6 +42,7 @@ import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
+import { useTerminalColors } from "../theme/hubColors";
 import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
@@ -132,6 +133,7 @@ export function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+  useTerminalColors(theme);
 
   // Workspaces add, remove and share agents without telling Desk, so their
   // agent lists are read again every minute and whenever Desk comes forward.

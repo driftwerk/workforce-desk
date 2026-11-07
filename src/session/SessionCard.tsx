@@ -14,6 +14,8 @@ import { sessionItem } from "../groups/model";
 import { SidePanel, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
+import { needsRestartForColors } from "../theme/hubColors";
+import { useTheme } from "../theme/store";
 import { approvalsSwitchable, lifecycleActions, runs, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
@@ -146,6 +148,30 @@ export function SessionCard({ session }: { session: Session }) {
   );
 }
 
+/** Shown while a running session's CLI draws for the other ground than its
+ *  terminal's now (it read the colours at its start): restarting it, which
+ *  resumes its conversation, gives it the new ones. */
+function RestartForColors({ session }: { session: Session }) {
+  const theme = useTheme();
+  const [busy, setBusy] = useState(false);
+  if (!needsRestartForColors(session, theme)) return null;
+  const restart = () => {
+    setBusy(true);
+    hubFor(session)
+      ?.restart(session.id)
+      .catch(useDesk.getState().fail)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="session-recolor small" role="status">
+      <span className="muted">Drawn for a {session.fixedGround} terminal; it takes the new colours when it restarts.</span>
+      <button type="button" className="link" disabled={busy} onClick={restart}>
+        {busy ? "Restarting…" : "Restart to apply"}
+      </button>
+    </div>
+  );
+}
+
 /** What a session shows: its terminal while it runs (the Desk terminal it
  *  was started in, for a tracked one), else why it isn't running and the
  *  last thing it said. */
@@ -158,6 +184,7 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
   return session.live ? (
     <>
       {seen}
+      <RestartForColors session={session} />
       {session.terminalId ? (
         <Terminal key={session.terminalId} terminalId={session.terminalId} machine={machineOf(session)} autoFocus={autoFocus} />
       ) : (

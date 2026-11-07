@@ -167,6 +167,16 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/sessions/s1/restart"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/terminal/colors"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/sessions/s1/remove"
   },
   {

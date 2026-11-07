@@ -1,5 +1,6 @@
 import type { Layout } from "../groups/model";
 import { preview } from "../preview";
+import type { TerminalPalette } from "../theme/xterm";
 import type { Provider } from "./providers";
 import type { SearchFilters } from "../rooms/search";
 import type {
@@ -385,6 +386,22 @@ export class DeskHub {
   dismissAsked = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/asked/dismiss`);
   resume = (id: string, prompt?: string): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/resume`, { prompt });
+  /** Stops it and resumes its conversation, as a new process: what a CLI
+   *  that reads the terminal's colours only at its start needs to take new
+   *  ones. */
+  restart = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/restart`);
+  /** Tells the hub the colours its terminals are drawn in, which it answers
+   *  programs' colour queries with while no pane is there to, and gives the
+   *  CLIs it starts. False from a hub without the route. */
+  setTerminalColors = async (palette: TerminalPalette): Promise<boolean> => {
+    try {
+      await this.call("PUT", "/api/desk/terminal/colors", palette);
+      return true;
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return false;
+      throw e;
+    }
+  };
   /** Removes a session from Desk: its record, Activity, read points and
    *  floor turns; never adopted again. Its engine's transcript is deleted
    *  only when `transcript` (it can't be resumed then). */

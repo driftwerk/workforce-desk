@@ -16,7 +16,7 @@ import { useSettings } from "../settings/store";
 import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
-import { xtermTheme } from "../theme/xterm";
+import { minimumContrast, xtermTheme } from "../theme/xterm";
 import { Viewer } from "./viewer";
 
 /** What a link a program prints in a terminal does when clicked (Claude
@@ -102,6 +102,7 @@ export function Terminal({
       scrollback: 10_000,
       linkHandler: terminalLinks,
       theme: xtermTheme(theme),
+      minimumContrastRatio: minimumContrast(theme.colors),
     });
     const fit = new FitAddon();
     x.loadAddon(fit);
@@ -265,7 +266,9 @@ export function Terminal({
   }, [hub, sessionId, terminalId, machine]);
 
   useEffect(() => {
-    if (term.current) term.current.options.theme = xtermTheme(theme);
+    if (!term.current) return;
+    term.current.options.theme = xtermTheme(theme);
+    term.current.options.minimumContrastRatio = minimumContrast(theme.colors);
   }, [theme]);
 
   // A new size or face changes how many columns and rows fit.
