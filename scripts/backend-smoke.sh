@@ -37,7 +37,8 @@
 #     starts finds Claude Code's first run settled and its folder trusted
 #     (the stand-in refuses to start otherwise, as Claude Code's onboarding
 #     and trust dialog would stop it), and reaches its prompt (idle), what
-#     was there kept, and so does it when resumed;
+#     was there kept, and so does it when resumed, without the file being
+#     written again; a session in the home folder isn't trusted there;
 #   - with Claude Code never logged in there, after this Mac's accounts are
 #     copied to it (as "Use this Mac's accounts" posts them), a Claude
 #     session it starts is signed in by the first of them, never left at a
@@ -268,6 +269,16 @@ if [ -n "$machine" ]; then
   [ "$(stat -c %a "$cfg")" = 600 ] || fail "~/.claude.json is $(stat -c %a "$cfg"), not 600"
   [ ! -e "$cfg.lock" ] || fail "Claude Code's config lock was left behind"
 
+  say "a session in the home folder isn't trusted there: that would trust everything below it"
+  home_session=$(api "$admin" /api/desk/sessions -X POST -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg cwd "$HOME" '{engine: "claude", name: "home", cwd: $cwd}')")
+  hsid=$(jq -r '.id // empty' <<<"$home_session")
+  [ -n "$hsid" ] || fail "the session in the home folder didn't start: $home_session"
+  home_refused() { grep -q -- "--session-id $hsid refused" "$sessions"; }
+  until_ok 30 home_refused || fail "the session in the home folder got past the trust dialog: $(cat "$sessions")"
+  jq -e --arg d "$(cd "$HOME" && pwd -P)" '.projects[$d].hasTrustDialogAccepted != true' "$cfg" >/dev/null ||
+    fail "the home folder was trusted: $(cat "$cfg")"
+
   say "after this Mac's accounts are copied, a Claude session there is signed in"
   json() { api "$admin" "$1" -X "$2" -H 'Content-Type: application/json' -d "$3"; }
   signed_out() {
@@ -342,6 +353,8 @@ if [ -n "$machine" ]; then
     fail "couldn't plant the earlier boss's charge"
 
   say "after the box restarts, the session is resumed"
+  # Settled already: resuming rewrites nothing.
+  settled_as=$(stat -c '%i %Y' "$cfg")
   holder=$(cat "$DESK_HOME/hub/run/pty.pid")
   "$helper" --stop
   wait "$pid" || true
@@ -358,6 +371,7 @@ if [ -n "$machine" ]; then
   gateway=$(jq -r .gateway_url <<<"$conn")
   admin=$(jq -r .admin_token <<<"$conn")
   until_ok 60 idle || fail "the resumed session is $(state "$sid"), not at its prompt: $(cat "$sessions")"
+  [ "$(stat -c '%i %Y' "$cfg")" = "$settled_as" ] || fail "resuming rewrote ~/.claude.json: $(cat "$cfg")"
 
   say "the hub forgot the earlier agent's chat sessions, and kept Desk's own"
   pgport=$(sed -n 's/^postgres = //p' "$DESK_HOME/hub/state.toml")
