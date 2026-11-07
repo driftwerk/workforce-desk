@@ -11,7 +11,7 @@ export const BACKGROUNDS: readonly Swatch[] = [
   { label: "Ink", hex: "#111210" },
   { label: "Harbour", hex: "#0E1822" },
   { label: "Plum", hex: "#1A1423" },
-  { label: "Paper", hex: "#F6F6F1" },
+  { label: "Paper", hex: "#FBFAF7" },
   { label: "White", hex: "#FFFFFF" },
   { label: "Mist", hex: "#EEF2F6" },
 ];

@@ -10,6 +10,7 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  box-shadow: 0 1px 2px var(--lift);
 }
 .floor-card-head {
   display: flex;
