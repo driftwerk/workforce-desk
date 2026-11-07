@@ -6,7 +6,7 @@
 // group goes.
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
@@ -17,6 +17,7 @@ import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type Layout } from "./model";
 import { useHubLayout } from "./hubLayout";
 import { SidebarGroups } from "./SidebarGroups";
+import { oversightHub } from "./testing";
 
 vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
@@ -64,15 +65,10 @@ class FakeHub implements DeskTransport {
     mia: `[llm]\nprovider = "claude-code"\n`,
   };
 
-  /** What the configs make, one boss per group the sidebar has. */
-  manager = (): Manager => {
-    const bosses = Object.entries(this.configs).flatMap(([id, toml]) => {
-      const o = (parse(toml) as { oversight?: { enabled?: boolean; group?: string } }).oversight;
-      const named = o?.enabled && o.group && this.layout.groups.some((g) => g.id === o.group);
-      return named ? [{ agentId: id, name: id[0]!.toUpperCase() + id.slice(1), group: o.group!, level: "act" as const }] : [];
-    });
-    return { agentId: "desk", level: "act", bosses };
-  };
+  /** The configs as the hub keeps them (one boss per group, a boss replaced
+   *  naming its group no more). */
+  kept = oversightHub(this.configs);
+  manager = (): Manager => this.kept.manager(this.layout.groups.map((g) => g.id));
 
   fetch = async (method: string, path: string, body?: { data: string | Blob }): Promise<Response> => {
     const route = `${method} ${path}`;
@@ -85,7 +81,7 @@ class FakeHub implements DeskTransport {
       // The hub refuses a group the sidebar hasn't got.
       if (group && !this.layout.groups.some((g) => g.id === group))
         return json({ error: "The group it oversees must be one of your sidebar's groups." }, 400);
-      this.configs[config[1]!] = toml;
+      this.kept.save(config[1]!, toml);
       return new Response(null, { status: 204 });
     }
     if (route === "GET /api/desk/manager") return json(this.manager());
@@ -95,6 +91,13 @@ class FakeHub implements DeskTransport {
     if (group && method === "DELETE") {
       const gone = this.layout.groups.find((g) => g.id === group[1]);
       if (!gone) return json({ error: "not found" }, 404);
+      // The hub takes the group's boss off itself, first.
+      for (const [id, toml] of Object.entries(this.configs)) {
+        const o = (parse(toml) as { oversight?: { group?: string } }).oversight;
+        if (o?.group !== gone.id) continue;
+        const { group: _g, ...rest } = o;
+        this.configs[id] = stringify({ ...(parse(toml) as object), oversight: { ...rest, enabled: false } });
+      }
       this.layout = {
         groups: this.layout.groups.filter((g) => g !== gone),
         ungrouped: { ...this.layout.ungrouped, items: [...this.layout.ungrouped.items, ...gone.items] },
@@ -150,6 +153,23 @@ afterEach(() => {
 });
 
 describe("a group's boss, against the hub", () => {
+  it("replaced by another and then stopped, leaves its group open to the main overseer", async () => {
+    hub.layout = { ...hub.layout, groups: [{ ...hub.layout.groups[0]!, items: ["agent:local/sarah", "agent:local/mia"] }, { ...hub.layout.groups[1]!, items: [] }] };
+    await connect();
+    render(<SidebarGroups />);
+    fireEvent.contextMenu(row("Mia"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
+    // Acme had a boss: it only changes boss, unasked.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    expect((parse(hub.configs.sarah!) as { oversight: object }).oversight).not.toHaveProperty("group");
+    fireEvent.contextMenu(row("Mia"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop overseeing" }));
+    await waitFor(() => expect(within(row("Mia")).queryByText("boss")).toBeNull());
+    expect(hub.manager()).toEqual({ agentId: "desk", level: "act", bosses: [], sealed: [] });
+    expect(within(screen.getByRole("group", { name: "Acme" })).queryByText(/oversees/)).toBeNull();
+  });
+
   it("is made from its row once asked, shows on its row and group, and is taken off before its group is deleted", async () => {
     await connect();
     render(<SidebarGroups />);

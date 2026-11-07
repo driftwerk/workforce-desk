@@ -64,7 +64,19 @@ import { lifecycleActions, sessionActions } from "../session/actions";
 import { askLifecycle } from "../session/lifecycle";
 import { Confirm } from "../ui/Confirm";
 import type { GroupBoss } from "../hub/types";
-import { asksBeforeOverseeing, bossOfGroup, deleteAsk, groupOfBoss, overseeAsk, overseeChoices, overseeGroup, stopOverseeing } from "./bosses";
+import {
+  asksBeforeOverseeing,
+  bossOfGroup,
+  deleteAsk,
+  groupOfBoss,
+  isSealed,
+  overseeAsk,
+  overseeChoices,
+  overseeGroup,
+  overseeSaid,
+  stopOverseeing,
+} from "./bosses";
+import { plainError } from "../ui/plainError";
 import { GroupDot } from "./GroupChip";
 
 const ENGINE = ENGINE_SHORT;
@@ -281,10 +293,11 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (with_) setSaid(`Moved ${nameOf(items.get(with_))} to a new group`);
   };
 
-  const deleteNow = (id: string) => {
+  const deleteNow = (id: string, failed?: (e: unknown) => void): Promise<boolean> => {
     const name = groupName(id);
-    deleteGroup(present, id);
+    const done = deleteGroup(present, id, failed);
     after(`group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
+    return done;
   };
 
   /** A group with a boss asks first; deleting it takes the boss off it. */
@@ -303,10 +316,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   };
 
   const overseeNow = async (agent: Agent, group: string) => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
-    await overseeGroup(hub, agent.id, group, agent);
-    setSaid(`${agent.name} oversees ${groupName(group)}`);
+    const left = groupOfBoss(manager, agent.id);
+    await overseeGroup(useDesk.getState().hub, agent.id, group, agent);
+    setSaid(overseeSaid(agent.name, groupName(group), left && left !== group ? groupName(left) : null, !!managerId));
   };
   /** Asks first only when the main overseer saw what's in the group. */
   const oversee = (agent: Agent, group: string) => {
@@ -314,10 +326,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     overseeNow(agent, group).catch(useDesk.getState().fail);
   };
   const stop = (agent: Agent) => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
     const group = groupOfBoss(manager, agent.id);
-    stopOverseeing(hub, agent.id, agent)
+    stopOverseeing(useDesk.getState().hub, agent.id, agent)
       .then(() => setSaid(`${agent.name} no longer oversees ${group ? groupName(group) : "a group"}`))
       .catch(useDesk.getState().fail);
   };
@@ -351,10 +361,15 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   /** The group the agent's row is the boss of, when it is one of this
    *  computer's. */
   const bossGroupOf = (item: Item): string | null => (item.kind === "agent" && isLocal(item.agent) ? groupOfBoss(manager, item.agent.id) : null);
+  /** Its row wears the boss tag: in the group it oversees. */
+  const tagged = (item: Item): boolean => {
+    const g = bossGroupOf(item);
+    return !!g && shown.find((x) => x.id === g)?.items.includes(item.key) === true;
+  };
 
   const metaOf = (item: Item): string => {
     if (item.kind === "agent")
-      return item.agent.id === managerId && isLocal(item.agent) ? "overseer" : bossGroupOf(item) ? "" : hubLabel(item.agent.hubId);
+      return item.agent.id === managerId && isLocal(item.agent) ? "overseer" : tagged(item) ? "" : hubLabel(item.agent.hubId);
     const away = awayWord(machineOfRow(item));
     if (away) return away;
     if (item.kind === "away") return ENGINE[item.seen.engine];
@@ -465,11 +480,29 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const clearing: MenuEntry = { kind: "item", label: "Clear finished sessions…", onSelect: () => askLifecycle({ kind: "clear" }) };
   /** A new session, in this group unless another is chosen. */
   const starting = (id: string): MenuEntry[] => (onNewSession ? [{ kind: "item", label: "New session…", onSelect: () => onNewSession(id) }] : []);
+  /** A sealed group's way out: one of its agents oversees it. */
+  const choosing = (id: string): MenuEntry[] => {
+    if (!isSealed(manager, id) || bossOfGroup(manager, id)) return [];
+    const agents = (shown.find((g) => g.id === id)?.items ?? []).flatMap((k) => {
+      const item = items.get(k);
+      return item?.kind === "agent" && overseeChoices(manager, { id: item.agent.id, local: isLocal(item.agent) }, id).oversee ? [item.agent] : [];
+    });
+    return [
+      {
+        kind: "item",
+        label: "Choose who oversees",
+        submenu: agents.length
+          ? agents.map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => oversee(a, id) }))
+          : [{ kind: "item", label: "Drag one of your agents here first" }],
+      },
+    ];
+  };
   const groupMenu = (id: string): MenuEntry[] =>
     id === UNGROUPED
       ? [...starting(id), ...(onNewSession ? [{ kind: "separator" as const }] : []), clearing]
       : [
           ...starting(id),
+          ...choosing(id),
           { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
           { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
           { kind: "separator" },
@@ -556,12 +589,12 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         <span id={`${hint}-group`} className="sr-only">
           Alt+Up and Alt+Down move the group. F2 renames it. Shift+F10 opens its options.
         </span>
-        {shown.map((g, index) => (
+        {shown.map((g) => (
           <GroupSection
             key={g.id}
             group={g}
-            index={index}
             boss={g.id === UNGROUPED ? null : bossOfGroup(manager, g.id)}
+            sealed={g.id !== UNGROUPED && isSealed(manager, g.id) && !bossOfGroup(manager, g.id)}
             onBoss={openBoss}
             hint={`${hint}-group`}
             dropBefore={drop?.kind === "group" && drop.before === g.id && dragging?.kind === "group"}
@@ -604,7 +637,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                           : view === "floor" && panelAgent === agentKey(item.agent)
                   }
                   meta={metaOf(item)}
-                  boss={!!bossGroupOf(item)}
+                  boss={tagged(item)}
                   title={titleOf(item)}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
@@ -662,11 +695,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
               title={ask.title}
               action={ask.action}
               onConfirm={async () => {
-                const hub = useDesk.getState().hub;
-                if (!hub) throw new Error("Desk isn’t connected to this computer’s hub.");
-                // The boss first, so the group is no one's before it goes.
-                await stopOverseeing(hub, asking.boss.agentId, localAgent(asking.boss.agentId));
-                deleteNow(asking.group);
+                const name = groupName(asking.group);
+                // The boss first, so the group is no one's before it goes
+                // (a hub that takes it off itself finds nothing left to do).
+                await stopOverseeing(useDesk.getState().hub, asking.boss.agentId, localAgent(asking.boss.agentId));
+                let why = "";
+                if (!(await deleteNow(asking.group, (e) => (why = plainError(e)))))
+                  throw new Error(`${asking.boss.name} no longer oversees ${name}; ${name} couldn’t be deleted${why ? `: ${why}` : "."}`);
               }}
               onClose={() => setAsking(null)}
             >
@@ -688,8 +723,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
 function GroupSection({
   group,
-  index,
   boss,
+  sealed,
   onBoss,
   hint,
   dropBefore,
@@ -707,10 +742,10 @@ function GroupSection({
   children,
 }: {
   group: Shown;
-  /** Its place among the groups, for its dot's colour. */
-  index: number;
   /** Its boss, when it has one. */
   boss: GroupBoss | null;
+  /** Closed to everyone but the person, with no boss now. */
+  sealed: boolean;
   onBoss: (boss: GroupBoss) => void;
   hint: string;
   dropBefore: boolean;
@@ -729,6 +764,8 @@ function GroupSection({
   children: ReactNode;
 }) {
   const fixed = group.id === UNGROUPED;
+  /** Who oversees it is said on its header. */
+  const noted = !!boss || sealed;
   const section = useRef<HTMLElement>(null);
   const handle = useRef<HTMLSpanElement>(null);
   const toggle = useRef<HTMLButtonElement | null>(null);
@@ -771,7 +808,7 @@ function GroupSection({
                 register(id, el);
               }}
               type="button"
-              className={`grp-toggle ${boss ? "grp-toggle-bossed" : ""}`}
+              className={`grp-toggle ${noted ? "grp-toggle-bossed" : ""}`}
               aria-expanded={open}
               aria-controls={open ? listId : undefined}
               aria-describedby={fixed ? undefined : hint}
@@ -803,9 +840,15 @@ function GroupSection({
                   <path d="M3 2l4 3-4 3" />
                 </svg>
               </span>
-              {!fixed && <GroupDot index={index} />}
+              {!fixed && <GroupDot id={group.id} />}
               <span className="grp-name">{group.name}</span>
-              {!boss && (
+              {noted ? (
+                // Shown at the header's end; said here, with its name.
+                <span className="sr-only">
+                  {" "}
+                  {group.items.length} <Marks badge={badge} />
+                </span>
+              ) : (
                 <>
                   <span className="grp-count">{group.items.length}</span>
                   <Marks badge={badge} />
@@ -813,13 +856,25 @@ function GroupSection({
               )}
             </button>
           )}
-          {boss && !editing && (
+          {noted && !editing && (
             <>
-              <button type="button" className="grp-boss" title={`Open ${boss.name}’s messages`} onClick={() => onBoss(boss)}>
-                {boss.name} oversees
-              </button>
+              {boss ? (
+                <button type="button" className="grp-boss" title={`Open ${boss.name}’s messages`} onClick={() => onBoss(boss)}>
+                  {boss.name} oversees
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="grp-boss grp-sealed"
+                  title="No one oversees it, and the main overseer doesn’t see it. Choose who oversees it."
+                  aria-haspopup="menu"
+                  onClick={(e) => onMenu(below(e.currentTarget), e.currentTarget)}
+                >
+                  nobody oversees
+                </button>
+              )}
               {/* The rest of the header still opens and closes the group. */}
-              <span className="grp-tail" onClick={onToggle}>
+              <span className="grp-tail" aria-hidden="true" onClick={onToggle}>
                 <span className="grp-count">{group.items.length}</span>
                 <Marks badge={badge} />
               </span>

@@ -112,6 +112,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     ? (roster.find((a) => a.id === otherId && hubs.find((h) => h.id === a.hubId)?.local)?.name ?? otherId)
     : null;
   const usable = config !== undefined && readable(config);
+  // The sidebar group it sits in, whose boss it may have been.
+  const sitsIn = groups.find((g) => g.items.includes(`agent:${agentKey(agent)}`))?.name ?? null;
   // A group's boss oversees only that group.
   const bossOf = o?.group ? (groups.find((g) => g.id === o.group)?.name ?? null) : null;
 
@@ -187,9 +189,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
 
   const enable = (on: boolean) => {
     if (on && other) return setConfirming(true);
-    // Off names no group, so a group it oversaw opens to the main overseer
-    // (a group any config names stays apart from everyone).
-    update((x) => ({ ...x, enabled: on, group: on ? x.group : null }));
+    // This switch is the main overseer's: on or off it names no group, so
+    // a group it oversaw opens to the main overseer (a group any config
+    // names stays apart from everyone).
+    update((x) => ({ ...x, enabled: on, group: null }));
   };
 
   const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
@@ -535,6 +538,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   {other} oversees the crew now — make {name} the overseer instead? {other} stops overseeing; nothing else about{" "}
                   {other} changes.
                 </p>
+                {sitsIn && <p>What {name} learned about {sitsIn} stays with it.</p>}
               </span>
               <CloseButton onClose={() => setConfirming(false)} />
             </header>
@@ -550,7 +554,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               className="btn btn-signal"
               onClick={() => {
                 setConfirming(false);
-                update((x) => ({ ...x, enabled: true }));
+                update((x) => ({ ...x, enabled: true, group: null }));
               }}
             >
               Make {name} the overseer

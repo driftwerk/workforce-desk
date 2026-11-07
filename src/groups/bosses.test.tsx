@@ -9,10 +9,12 @@ import type { Manager } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { openTarget } from "../shell/navigate";
-import { asksBeforeOverseeing, bossOfGroup, deleteAsk, groupDot, groupOfBoss, overseeAsk, overseeChoices } from "./bosses";
+import { asksBeforeOverseeing, bossOfGroup, deleteAsk, groupDot, groupOfBoss, isSealed, overseeAsk, overseeChoices, overseeGroup, overseeSaid, stopOverseeing } from "./bosses";
+import { oversightHub } from "./testing";
 import { GroupChip } from "./GroupChip";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { SidebarGroups } from "./SidebarGroups";
+import { useHubLayout } from "./hubLayout";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -65,11 +67,31 @@ describe("who oversees a group", () => {
     });
   });
 
-  it("colours each group's dot from the theme's terminal colours", () => {
-    expect(groupDot(0)).toBe("var(--ansi-cyan)");
-    expect(groupDot(1)).toBe("var(--ansi-green)");
-    expect(groupDot(2)).toBe("var(--ansi-magenta)");
-    expect(groupDot(3)).toBe(groupDot(0));
+  it("colours each group's dot from its id, in the theme's toned terminal colours only", () => {
+    const ids = ["acme", "globex", "g-1", "g-2", "7f3c", "a long id with spaces"];
+    for (const id of ids) {
+      expect(groupDot(id)).toMatch(/^var\(--ansi-(cyan|green|magenta)\)$/);
+      expect(groupDot(id)).toBe(groupDot(id));
+    }
+    expect(new Set(ids.map(groupDot)).size).toBeGreaterThan(1);
+  });
+
+  it("doesn't ask for a sealed group, which the main overseer can't see", () => {
+    const sealed: Manager = { ...MAIN, sealed: ["globex"] };
+    expect(isSealed(sealed, "globex")).toBe(true);
+    expect(asksBeforeOverseeing(sealed, "globex")).toBe(false);
+    expect(asksBeforeOverseeing(sealed, "initech")).toBe(true);
+  });
+
+  it("says, when a boss moves to another group, that the main boss sees the old one from now on", () => {
+    expect(overseeSaid("Sarah", "Globex", "Acme", true)).toBe("Sarah oversees Globex; the main boss sees Acme from now on");
+    expect(overseeSaid("Sarah", "Globex", null, true)).toBe("Sarah oversees Globex");
+    expect(overseeSaid("Sarah", "Globex", "Acme", false)).toBe("Sarah oversees Globex");
+  });
+
+  it("says plainly when Desk isn't connected, rather than doing nothing", async () => {
+    await expect(overseeGroup(null, "mia", "globex", null)).rejects.toThrow(/isn’t connected/);
+    await expect(stopOverseeing(null, "mia", null)).rejects.toThrow(/isn’t connected/);
   });
 });
 
@@ -78,23 +100,20 @@ describe("who oversees a group", () => {
 const agent = (hubId: string, id: string, name: string): Agent => ({ hubId, id, name, model: null, provider: null, isDefault: false });
 
 const ACME: DeskGroup = { id: "acme", name: "Acme", collapsed: false, items: ["agent:local/sarah", "agent:local/desk"] };
-const ATLAS: DeskGroup = { id: "globex", name: "Globex", collapsed: false, items: ["agent:local/mia", "agent:remote/ada"] };
+const GLOBEX: DeskGroup = { id: "globex", name: "Globex", collapsed: false, items: ["agent:local/mia", "agent:remote/ada"] };
 
-/** A hub keeping each agent's config, saying the bosses the configs make. */
+/** A hub keeping each agent's config as the real one does (see `testing`),
+ *  saying the bosses and sealed groups the configs make. */
 const fakeHub = (configs: Record<string, string>) => {
   const order: string[] = [];
-  const bosses = () =>
-    Object.entries(configs).flatMap(([id, toml]) => {
-      const o = (parse(toml) as { oversight?: { enabled?: boolean; group?: string } }).oversight;
-      return o?.enabled && o.group ? [{ agentId: id, name: id[0]!.toUpperCase() + id.slice(1), group: o.group, level: "act" as const }] : [];
-    });
+  const kept = oversightHub(configs);
   const hub = {
     agentConfig: vi.fn(async (id: string) => configs[id] ?? ""),
     saveAgentConfig: vi.fn(async (id: string, toml: string) => {
       order.push(`save ${id}: groups ${useSettings.getState().groups.map((g) => g.id).join(",")}`);
-      configs[id] = toml;
+      kept.save(id, toml);
     }),
-    manager: vi.fn(async (): Promise<Manager> => ({ agentId: "desk", level: "act", bosses: bosses() })),
+    manager: vi.fn(async (): Promise<Manager> => kept.manager(useSettings.getState().groups.map((g) => g.id))),
   };
   return { hub, order, configs };
 };
@@ -121,7 +140,7 @@ beforeEach(() => {
   });
   useDesk.setState({ sessions: {}, openId: null, hub: world.hub as unknown as DeskHub });
   useOverview.setState({ manager: MAIN, managerSupport: "yes" });
-  useSettings.setState({ loaded: true, groups: [ACME, ATLAS], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  useSettings.setState({ loaded: true, groups: [ACME, GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
 });
 afterEach(cleanup);
 
@@ -181,7 +200,7 @@ describe("a group's boss in the sidebar", () => {
   });
 
   it("doesn't ask when the group only changes boss, or there is no main overseer", async () => {
-    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "agent:local/mia"] }, { ...ATLAS, items: ["agent:remote/ada"] }] });
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "agent:local/mia"] }, { ...GLOBEX, items: ["agent:remote/ada"] }] });
     render(<SidebarGroups />);
     fireEvent.contextMenu(row("Mia"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
@@ -191,7 +210,7 @@ describe("a group's boss in the sidebar", () => {
 
     cleanup();
     useOverview.setState({ manager: { agentId: null, level: null, bosses: [] } });
-    useSettings.setState({ groups: [ACME, ATLAS] });
+    useSettings.setState({ groups: [ACME, GLOBEX] });
     world.configs.mia = "";
     render(<SidebarGroups />);
     fireEvent.contextMenu(row("Mia"));
@@ -254,6 +273,86 @@ describe("a group's boss in the sidebar", () => {
   });
 });
 
+describe("the fix round", () => {
+  it("replacing a boss and then stopping the new one leaves the group open, asking nothing", async () => {
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "agent:local/mia"] }, { ...GLOBEX, items: ["agent:remote/ada"] }] });
+    render(<SidebarGroups />);
+    fireEvent.contextMenu(row("Mia"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    // Sarah, replaced, names Acme no more.
+    expect((parse(world.configs.sarah!) as { oversight: object }).oversight).not.toHaveProperty("group");
+    fireEvent.contextMenu(row("Mia"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop overseeing" }));
+    await waitFor(() => expect(within(row("Mia")).queryByText("boss")).toBeNull());
+    expect(useOverview.getState().manager?.sealed).toEqual([]);
+    expect(within(screen.getByRole("group", { name: "Acme" })).queryByText(/oversees/)).toBeNull();
+  });
+
+  it("shows a sealed group as nobody's, asks nothing to give it a boss, and offers its agents from its header", async () => {
+    world.configs.sarah = `[oversight]\nenabled = false\ngroup = "acme"\n`;
+    useOverview.setState({ manager: { agentId: "desk", level: "act", bosses: [], sealed: ["acme"] } });
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "agent:local/mia"] }, GLOBEX] });
+    render(<SidebarGroups />);
+    const acme = screen.getByRole("group", { name: "Acme" });
+    fireEvent.click(within(acme).getByRole("button", { name: "nobody oversees" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Choose who oversees/ }));
+    const offered = screen.getAllByRole("menuitem").map((m) => m.textContent);
+    expect(offered).toContain("Sarah");
+    expect(offered).toContain("Mia");
+    expect(offered).not.toContain("Desk");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mia" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(within(acme).getByRole("button", { name: "Mia oversees" })).toBeTruthy());
+    // The stale name went with it: stopping Mia later leaves Acme open.
+    expect((parse(world.configs.sarah!) as { oversight: object }).oversight).not.toHaveProperty("group");
+  });
+
+  it("says, when a boss moves to another group, that the main boss sees the old one from now on", async () => {
+    useSettings.setState({ groups: [{ ...ACME, items: ["agent:local/desk"] }, { ...GLOBEX, items: [...GLOBEX.items, "agent:local/sarah"] }] });
+    render(<SidebarGroups />);
+    // Sarah sits in Globex but oversees Acme: no tag there.
+    expect(within(row("Sarah")).queryByText("boss")).toBeNull();
+    fireEvent.contextMenu(row("Sarah"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
+    // Globex had no boss and the main overseer saw it: the one question.
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Oversee Globex" }));
+    await waitFor(() => expect(screen.getByText("Sarah oversees Globex; the main boss sees Acme from now on")).toBeTruthy());
+  });
+
+  it("says a delete that failed after the boss was taken off, and keeps the dialog open", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Kept on a hub, whose delete fails.
+    const layout = { groups: [ACME, GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped };
+    Object.assign(world.hub, {
+      deleteGroup: vi.fn(async () => {
+        throw new Error("The hub is busy.");
+      }),
+      layout: vi.fn(async () => layout),
+    });
+    useHubLayout.setState({ layout, kept: true });
+    world.hub.manager.mockImplementation(async () => oversightHub(world.configs).manager(["acme", "globex"]));
+    render(<SidebarGroups />);
+    fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Acme" }));
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").textContent).toContain("Sarah no longer oversees Acme; Acme couldn’t be deleted: The hub is busy."),
+    );
+    await waitFor(() => expect(screen.getByRole("group", { name: "Acme" })).toBeTruthy());
+    useHubLayout.setState({ layout: null, kept: null });
+  });
+
+  it("keeps a bossed header's count and unread in its toggle's name, and the shown copy out of the reading", () => {
+    render(<SidebarGroups />);
+    const acme = screen.getByRole("group", { name: "Acme" });
+    const toggle = within(acme).getAllByRole("button")[0]!;
+    expect(toggle.textContent).toContain("2");
+    expect(acme.querySelector(".grp-tail")!.getAttribute("aria-hidden")).toBe("true");
+  });
+});
+
 describe("a group's chip", () => {
   it("names the group an item sits in, with its dot, and nothing for Ungrouped", () => {
     const { container } = render(
@@ -265,13 +364,13 @@ describe("a group's chip", () => {
     const chips = container.querySelectorAll(".chip-group");
     expect(chips).toHaveLength(1);
     expect(chips[0]!.textContent).toBe("Globex");
-    expect((chips[0]!.querySelector(".grp-dot") as HTMLElement).style.background).toBe("var(--ansi-green)");
+    expect((chips[0]!.querySelector(".grp-dot") as HTMLElement).style.background).toBe(groupDot("globex"));
   });
 
   it("follows the group when it is renamed", () => {
     render(<GroupChip item="agent:local/sarah" />);
     expect(screen.getByText("Acme")).toBeTruthy();
-    act(() => useSettings.setState({ groups: [{ ...ACME, name: "Acme Labs" }, ATLAS] }));
+    act(() => useSettings.setState({ groups: [{ ...ACME, name: "Acme Labs" }, GLOBEX] }));
     expect(screen.getByText("Acme Labs")).toBeTruthy();
   });
 });

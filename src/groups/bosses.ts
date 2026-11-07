@@ -40,10 +40,20 @@ export const overseeChoices = (
   return { oversee: group !== UNGROUPED && bossOf !== group, stop: bossOf !== null };
 };
 
+/** Whether `group` is closed to everyone but the person: named for a boss
+ *  that oversees nothing now. */
+export const isSealed = (manager: Manager | null, group: string): boolean => !!manager?.sealed?.includes(group);
+
 /** Whether making a boss of `group` asks first: the main overseer saw what is
- *  in it until now. A group that has a boss already only changes boss. */
+ *  in it until now. A group that has a boss already only changes boss, and a
+ *  sealed one the main overseer doesn't see. */
 export const asksBeforeOverseeing = (manager: Manager | null, group: string): boolean =>
-  !!manager?.agentId && !bossOfGroup(manager, group);
+  !!manager?.agentId && !bossOfGroup(manager, group) && !isSealed(manager, group);
+
+/** What is said once `agent` oversees `group`: and, when it left another
+ *  group it oversaw (`left`), that the main overseer sees that one now. */
+export const overseeSaid = (agent: string, group: string, left: string | null, main: boolean): string =>
+  `${agent} oversees ${group}` + (left && main ? `; the main boss sees ${left} from now on` : "");
 
 /** What is asked before `agent` oversees `group`, which the main overseer
  *  saw. */
@@ -60,6 +70,8 @@ export const deleteAsk = (boss: string, group: string) => ({
   action: `Delete ${group}`,
 });
 
+const NOT_CONNECTED = "Desk isn’t connected to this computer’s hub just now; try again in a moment.";
+
 /** Reads again who oversees what, and the Floor, after a change. */
 const heard = async (): Promise<void> => {
   const s = useOverview.getState();
@@ -75,7 +87,8 @@ const keep = (agent: Pick<Agent, "hubId" | "id"> | null, toml: string) => {
  *  group, and the rest of how it oversees as it was. The hub takes the group
  *  off any boss it had. `agent` is its roster entry, kept current with what
  *  was written. */
-export async function overseeGroup(hub: DeskHub, id: string, group: string, agent: Pick<Agent, "hubId" | "id"> | null): Promise<void> {
+export async function overseeGroup(hub: DeskHub | null, id: string, group: string, agent: Pick<Agent, "hubId" | "id"> | null): Promise<void> {
+  if (!hub) throw new Error(NOT_CONNECTED);
   const toml = await setAgentOversight(hub, id, (o) => ({ ...o, enabled: true, group }));
   keep(agent, toml);
   await heard();
@@ -84,16 +97,21 @@ export async function overseeGroup(hub: DeskHub, id: string, group: string, agen
 /** Takes the agent `id` off the group it oversees: its `[oversight]` off and
  *  naming no group, so the hub opens the group to the main overseer from now
  *  on (never its past). */
-export async function stopOverseeing(hub: DeskHub, id: string, agent: Pick<Agent, "hubId" | "id"> | null): Promise<void> {
+export async function stopOverseeing(hub: DeskHub | null, id: string, agent: Pick<Agent, "hubId" | "id"> | null): Promise<void> {
+  if (!hub) throw new Error(NOT_CONNECTED);
   const toml = await setAgentOversight(hub, id, (o) => ({ ...o, enabled: false, group: null }));
   keep(agent, toml);
   await heard();
 }
 
 /** Group dots, in the theme's terminal colours that Desk tones for its own
- *  ground (so they hold up in Day and Night alike): each group its own
- *  among the first three, by its place among the groups, then again. */
+ *  ground (so they hold up in Day and Night alike). */
 const DOTS = ["--ansi-cyan", "--ansi-green", "--ansi-magenta"];
 
-/** The colour of the dot for the group at `index` among the groups. */
-export const groupDot = (index: number): string => `var(${DOTS[((index % DOTS.length) + DOTS.length) % DOTS.length]})`;
+/** The colour of group `id`'s dot: from its id, so it keeps it wherever the
+ *  group moves and whatever it is renamed. */
+export const groupDot = (id: string): string => {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.codePointAt(0)!) >>> 0;
+  return `var(${DOTS[h % DOTS.length]})`;
+};
