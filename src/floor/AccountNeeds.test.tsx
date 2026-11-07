@@ -96,7 +96,8 @@ it("shows a need once, however often it came", () => {
 
 it("asks which account this computer is signed in to, and keeps the answer", async () => {
   const setOwnSignIn = vi.fn(async () => undefined);
-  withHub({ setOwnSignIn });
+  const putOffNeed = vi.fn(async () => undefined);
+  withHub({ setOwnSignIn, putOffNeed });
   useAccounts.setState({
     accounts: [
       { id: "a-w", engine: "claude", name: "Work", isDefault: true, signedIn: true, sessions: [], createdAt: "2026-11-01T00:00:00Z" },
@@ -111,7 +112,9 @@ it("asks which account this computer is signed in to, and keeps the answer", asy
   expect(setOwnSignIn).toHaveBeenCalledWith("a-p");
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "None of these" })));
   expect(setOwnSignIn).toHaveBeenCalledWith(null);
-  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  // Always dismissable.
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  expect(putOffNeed).toHaveBeenCalledWith("which-sign-in");
 });
 
 it("says a session in a terminal of its own sits on a full plan, and what to do there", () => {

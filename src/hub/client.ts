@@ -375,7 +375,8 @@ export class DeskHub {
    *  signed in to (null: none of them). */
   setOwnSignIn = (account: string | null): Promise<void> => this.call("PUT", "/api/desk/accounts/own-sign-in", { account });
   /** What the person's other computers know of their accounts' plans. */
-  learnStanding = (accounts: StandingElsewhere[]): Promise<void> => this.call("PUT", "/api/desk/accounts/standing", { accounts });
+  learnStanding = (accounts: StandingElsewhere[], sentAt: string): Promise<void> =>
+    this.call("PUT", "/api/desk/accounts/standing", { accounts, sentAt });
   /** Moves a session to another account (null: the CLI's own sign-in). */
   switchAccount = (id: string, account: string | null): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/account`, { account });

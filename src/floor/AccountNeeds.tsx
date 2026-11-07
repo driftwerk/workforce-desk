@@ -69,7 +69,12 @@ function Need({ need }: { need: AccountNeed }) {
           )}
         </span>
         {need.kind === "whichSignIn" ? (
-          <WhichSignIn />
+          <>
+            <WhichSignIn />
+            <button type="button" className="btn btn-ghost" onClick={() => hub?.putOffNeed(need.id).catch(fail)}>
+              Not now
+            </button>
+          </>
         ) : need.kind === "signIn" ? (
           <button type="button" className="btn btn-ghost" onClick={() => need.account.id && hub?.dismissSignInProblem(need.account.id).catch(fail)}>
             OK

@@ -148,11 +148,13 @@ describe("the plan cards", () => {
     cleanup();
     // Not known as one of them: by who Claude Code says it is, never "this
     // computer's sign-in" as one more plan.
-    useAccounts.setState({ accounts: [] });
-    show(usage({ readings: [reading(w, { account: "own" })] }));
+    useAccounts.setState({ accounts: [], ownPlanKey: "own" });
+    show(usage({ readings: [reading(w, { account: "own" }), reading(w, { account: "left-over" })] }));
     render(<PlanCards />);
     expect(card("Claude plan · kim@example.com usage")).toBeTruthy();
-    useAccounts.setState({ claudeSignIn: null });
+    // Another key's card is never named by the sign-in's email.
+    expect(screen.getAllByRole("region", { name: /kim@example.com/ })).toHaveLength(1);
+    useAccounts.setState({ claudeSignIn: null, ownPlanKey: null });
   });
 
   it("wait for a first reading on a plan signed in", () => {

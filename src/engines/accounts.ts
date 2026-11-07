@@ -144,6 +144,9 @@ export interface AccountsState {
   /** What its Claude Code says of its own sign-in, as last read: whether
    *  "this computer's sign-in" is a choice there. */
   claudeSignIn: SignIn | null;
+  /** The key this computer's CLI sign-in's plan card has: the card named by
+   *  its email while it is none of the accounts. */
+  ownPlanKey: string | null;
   load: () => Promise<void>;
 }
 
@@ -158,6 +161,7 @@ const makeStore = (machine: MachineId) =>
     signIns: {},
     supported: null,
     claudeSignIn: null,
+    ownPlanKey: null,
     load: async () => {
       const hub = hubOf(machine);
       if (!hub) return;
@@ -178,6 +182,7 @@ const makeStore = (machine: MachineId) =>
           needs: info.needs ?? [],
           autoSwitch: info.autoSwitch ?? false,
           problems: info.problems ?? [],
+          ownPlanKey: info.ownPlanKey ?? null,
           store: info.store,
           signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
         });
@@ -212,7 +217,14 @@ const heard = (store: AccountsStore, e: DeskEvent): void => {
       void store.getState().load();
       return;
     case "accounts":
-      store.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
+      store.setState((s) => ({
+        accounts: e.accounts,
+        problems: e.problems ?? [],
+        needs: e.needs ?? [],
+        autoSwitch: e.autoSwitch ?? s.autoSwitch,
+        ownPlanKey: e.ownPlanKey === undefined ? s.ownPlanKey : e.ownPlanKey,
+        supported: true,
+      }));
       return;
     case "accountSignIn":
       store.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));

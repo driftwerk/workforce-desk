@@ -344,7 +344,7 @@ export type DeskEvent =
   /** A session's spend changed: what its engine recorded was read. */
   | { type: "spend"; session: string }
   /** The person's engine accounts changed: all of them as they now are. */
-  | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[]; needs?: AccountNeed[]; autoSwitch?: boolean }
+  | { type: "accounts"; accounts: EngineAccount[]; problems?: SignInProblem[]; needs?: AccountNeed[]; autoSwitch?: boolean; ownPlanKey?: string | null }
   /** Signing in to a new account moved on. */
   | { type: "accountSignIn"; signIn: AccountSignIn }
   /** The budgets changed: all of them as they now are. */
@@ -395,6 +395,8 @@ export interface EngineAccount {
 }
 
 export interface AccountIdentity {
+  /** Its identity's key: a hash, never its organization or email. */
+  key: string;
   email: string | null;
   linkedBy: "manual" | "usage";
   /** This computer's own Claude Code is signed in to it. */
@@ -489,6 +491,8 @@ export interface AccountsInfo {
   signIns: AccountSignIn[];
   needs?: AccountNeed[];
   autoSwitch?: boolean;
+  /** The key this computer's CLI sign-in's plan card has. */
+  ownPlanKey?: string | null;
   problems?: SignInProblem[];
 }
 

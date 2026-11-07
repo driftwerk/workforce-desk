@@ -202,7 +202,7 @@ it("says when a sign-in can't be used, in plain words, until the person says OK"
 
 it("says which account this computer's sign-in is, how Desk knows, and lets the person change it", async () => {
   const setOwnSignIn = vi.fn(async () => undefined);
-  const gmail = account("a-g", "Kingsley Gmail", { identity: { email: "sam@example.com", linkedBy: "usage", thisComputer: true } });
+  const gmail = account("a-g", "Kingsley Gmail", { identity: { key: "k-gmail", email: "sam@example.com", linkedBy: "usage", thisComputer: true } });
   const work = account("a-w", "Work");
   withHub({ setOwnSignIn }, [gmail, work]);
   render(<Accounts engine={claude} />);

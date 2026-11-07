@@ -69,7 +69,9 @@ function Card({ card, now }: { card: PlanCard; now: number }) {
   // This computer's own sign-in, not known as one of the accounts: by who
   // Claude Code says it is.
   const who = useAccounts((s) => (s.claudeSignIn?.state === "in" ? s.claudeSignIn.who : null));
-  const own = !account && card.kind === "claude" && card.where === "this computer" && card.state === "reading" ? who : null;
+  const ownKey = useAccounts((s) => s.ownPlanKey);
+  // Only the card of the sign-in's own key: never another reading's.
+  const own = !account && ownKey !== null && card.key === `claude:${ownKey}` ? who : null;
   const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
   const title = account ? `${TITLE[card.kind]} · ${account.name}` : own ? `${TITLE[card.kind]} · ${own}` : TITLE[card.kind];
   return (

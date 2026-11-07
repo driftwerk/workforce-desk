@@ -65,7 +65,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   putOffNeed: (h) => h.putOffNeed("limit:a1:a2"),
   setAutoSwitch: (h) => h.setAutoSwitch(true),
   setOwnSignIn: (h) => h.setOwnSignIn("a1"),
-  learnStanding: (h) => h.learnStanding([]),
+  learnStanding: (h) => h.learnStanding([], "2026-11-07T10:00:00Z"),
   update: (h) => h.update("s1", { name: "x" }),
   stop: (h) => h.stop("s1"),
   interrupt: (h) => h.interrupt("s1"),
