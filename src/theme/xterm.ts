@@ -1,5 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
-import { contrast, luminance, mix, type Palette, type Theme, type Token } from "./tokens";
+import { contrast, isDarkGround, mix, type Palette, type Theme, type Token } from "./tokens";
 
 /** The 16 ANSI colours' tokens, in their index order. */
 export const ANSI: readonly Token[] = [
@@ -21,9 +21,10 @@ export const ANSI: readonly Token[] = [
   "ansiBrightWhite",
 ];
 
-/** Whether a theme's terminal is light: by its ground's own luminance, so a
- *  dark terminal in a light theme (or the other way) is what it looks like. */
-export const terminalLight = (c: Palette): boolean => luminance(c.sunken) >= 0.2;
+/** Whether a theme's terminal is light: by its own ground, by the rule a
+ *  theme's background is told by (`isDarkGround`), so a dark terminal in a
+ *  light theme (or the other way) is what it looks like. */
+export const terminalLight = (c: Palette): boolean => !isDarkGround(c.sunken);
 
 /** The contrast text in a terminal keeps (WCAG AA). */
 export const TERMINAL_CONTRAST = 4.5;

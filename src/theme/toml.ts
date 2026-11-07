@@ -1,6 +1,6 @@
 import { parse, stringify } from "smol-toml";
 import { BUILTIN } from "./builtin";
-import { SIZE_RANGES, TOKENS, isHex, type Corners, type Density, type Palette, type SizeRole, type ThemeSpec, type Token } from "./tokens";
+import { SIZE_RANGES, TOKENS, isHex, takesAlpha, type Corners, type Density, type Palette, type SizeRole, type ThemeSpec, type Token } from "./tokens";
 
 export class ThemeError extends Error {}
 
@@ -14,9 +14,11 @@ const table = (v: unknown): Table => (v && typeof v === "object" && !Array.isArr
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-const color = (where: string, v: unknown): string => {
+/** A colour; one that may carry alpha (a shadow, a hairline) may also be
+ *  like "#11223344". */
+const color = (where: string, v: unknown, alpha = false): string => {
   const s = str(v);
-  if (!s || !isHex(s)) throw new ThemeError(`${where} must be a colour like "#112233"`);
+  if (!s || !isHex(s, alpha)) throw new ThemeError(`${where} must be a colour like "#112233"${alpha ? ' or "#11223344"' : ""}`);
   return s.toUpperCase();
 };
 
@@ -51,8 +53,12 @@ export const parseTheme = (id: string, source: string): ThemeSpec => {
   const shape = table(doc.shape);
   const overrides: Partial<Palette> = {};
   for (const [k, v] of Object.entries(table(colors.override))) {
-    if (!isToken(k)) throw new ThemeError(`[colors.override] has unknown colour "${k}"`);
-    overrides[k] = color(`[colors.override].${k}`, v);
+    // A colour from a newer Desk is left out, so its themes still open here.
+    if (!isToken(k)) {
+      console.warn(`theme ${id}: [colors.override] has a colour this Desk doesn't know, "${k}"; it is left out`);
+      continue;
+    }
+    overrides[k] = color(`[colors.override].${k}`, v, takesAlpha(k));
   }
   // A theme from before chats and code had sizes of their own looks as it
   // did: its chats at its one size, its code at Desk's.

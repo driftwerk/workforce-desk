@@ -13,8 +13,6 @@ import {
   type WslDetection,
 } from "../platform";
 import "../styles/setup.css";
-import { logoDot } from "../theme/builtin";
-import { useTheme } from "../theme/store";
 import { useSetup } from "./store";
 import { firstPick, optionFor, problemText, STEPS, stepsAfter } from "./wsl";
 
@@ -30,7 +28,6 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
  *  work meanwhile, so it can wait. */
 export function WindowsSetup() {
   const hide = useSetup((s) => s.hide);
-  const theme = useTheme();
   const [stage, setStage] = useState<Stage>("finding");
   const [found, setFound] = useState<WslDetection | null>(null);
   const [pick, setPick] = useState<string | null>(null);
@@ -104,7 +101,7 @@ export function WindowsSetup() {
       <aside className="wsl-rail">
         <div className="wordmark">
           <span>desk</span>
-          <span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />
+          <span className="wordmark-dot" />
         </div>
         <h1 className="display-md">Your agents and sessions run in Linux, inside WSL</h1>
         <p className="muted small">

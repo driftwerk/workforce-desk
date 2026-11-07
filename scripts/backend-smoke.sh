@@ -264,8 +264,8 @@ if [ -n "$machine" ]; then
   jq -e --arg d "$(cd "$work/acme-api" && pwd -P)" \
     '.hasCompletedOnboarding == true and .projects[$d].hasTrustDialogAccepted == true' "$cfg" >/dev/null ||
     fail "~/.claude.json isn't settled: $(cat "$cfg")"
-  jq -e '.userID == "smoke" and .firstStartTime == "2026-01-01T00:00:00.000Z" and .theme == "dark"' "$cfg" >/dev/null ||
-    fail "~/.claude.json lost what was there, or has no theme: $(cat "$cfg")"
+  jq -e '.userID == "smoke" and .firstStartTime == "2026-01-01T00:00:00.000Z" and .theme == "auto"' "$cfg" >/dev/null ||
+    fail "~/.claude.json lost what was there, or isn't set to follow the terminal (theme auto): $(cat "$cfg")"
   [ "$(stat -c %a "$cfg")" = 600 ] || fail "~/.claude.json is $(stat -c %a "$cfg"), not 600"
   [ ! -e "$cfg.lock" ] || fail "Claude Code's config lock was left behind"
 

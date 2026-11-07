@@ -1,7 +1,7 @@
 import { formatHex, parse } from "culori";
 import { DAY, NIGHT } from "./builtin";
 import { ThemeError, parseTheme, slug } from "./toml";
-import { contrast, derive, luminance, mix, type Palette, type ThemeSpec } from "./tokens";
+import { bestOn, contrast, derive, isDarkGround, mix, ON_FILL_CHOICES, type Palette, type ThemeSpec } from "./tokens";
 import { baseName } from "../ui/paths";
 import { ANSI } from "./xterm";
 
@@ -70,9 +70,11 @@ const solid = (raw: string | undefined, over?: string): string | undefined => {
   return over && alpha < 1 ? mix(over, hex, alpha) : hex;
 };
 
-const isDark = (bg: string): boolean => luminance(bg) < 0.2;
+const isDark = isDarkGround;
 
-const onSignalOf = (spec: ThemeSpec, signal: string): string => derive({ ...spec, signal }).colors.onSignal;
+/** Text on an imported theme's signal: the one that reads best on it. The
+ *  theme is new, so this is set in it rather than left to Desk's fixed rule. */
+const onSignalOf = (_spec: ThemeSpec, signal: string): string => bestOn(signal, ON_FILL_CHOICES);
 
 const usableSignal = (spec: ThemeSpec, c: string): boolean =>
   contrast(c, spec.background) >= 3 && contrast(onSignalOf(spec, c), c) >= 4.5;
@@ -136,6 +138,8 @@ const assemble = (format: ThemeFormat, fallbackName: string, found: Found): Them
     // and is kept only where it shows there.
     if (c && (token === "termSelection" || contrast(c, terminalBg) >= 3)) overrides[token] = c;
   }
+  const onSignal = onSignalOf(base, signal);
+  if (onSignal !== derive({ ...base, signal }).colors.onSignal) overrides.onSignal = onSignal;
   return { ...base, signal, overrides };
 };
 

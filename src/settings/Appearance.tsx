@@ -5,8 +5,8 @@ import { DAY, NIGHT } from "../theme/builtin";
 import { importTheme } from "../theme/import";
 import { allThemes, resolveTheme, useThemeStore } from "../theme/store";
 import { serializeTheme } from "../theme/toml";
-import { contrastChecks, cssVariables, derive, isHex, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
-import { applyEdit, BACKGROUNDS, copyOf, DERIVED, isBuiltin, SIGNALS, upsert, withOverride, type Swatch } from "./editing";
+import { contrastChecks, cssVariables, derive, isHex, takesAlpha, tokenVar, type ContrastCheck, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
+import { applyEdit, BACKGROUNDS, copyOf, DERIVED, derivedGroups, isBuiltin, signalsFor, upsert, withOverride, type Swatch } from "./editing";
 import { exportThemeFile, pickThemeFile } from "./files";
 import { TypeSettings } from "./TypeSettings";
 
@@ -47,6 +47,7 @@ export function Appearance() {
   const [draft, setDraft] = useState<ThemeSpec | null>(null);
   const [token, setToken] = useState<Token | null>(null);
   const [textOpen, setTextOpen] = useState(false);
+  const [allChecks, setAllChecks] = useState(false);
   const pending = useRef<{ spec: ThemeSpec; timer: ReturnType<typeof setTimeout> } | null>(null);
 
   const resolved = resolveTheme(choice, custom, systemDark).spec;
@@ -160,7 +161,7 @@ export function Appearance() {
           </label>
 
           <SwatchPicker label="Background" options={BACKGROUNDS} value={spec.background} onPick={(background) => edit({ background })} />
-          <SwatchPicker label="Signal (your accent)" options={SIGNALS} value={spec.signal} onPick={(signal) => edit({ signal })} />
+          <SwatchPicker label="Signal (your accent)" options={signalsFor(spec.background)} value={spec.signal} onPick={(signal) => edit({ signal })} />
 
           <div className="set-group">
             <span className="set-label">Text</span>
@@ -197,26 +198,32 @@ export function Appearance() {
 
           <div className="set-group">
             <span className="set-label">Derived, override any of them</span>
-            <div className="tokens">
-              {DERIVED.map(([t, label]) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`token ${t in spec.overrides ? "token-set" : ""}`}
-                  title={theme.colors[t]}
-                  aria-pressed={token === t}
-                  onClick={() => setToken(token === t ? null : t)}
-                >
-                  <span className="swatch swatch-sm" style={{ background: theme.colors[t] }} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
+            {derivedGroups().map((g) => (
+              <div key={g.label} className="token-group">
+                <span className="small faint">{g.label}</span>
+                <div className="tokens">
+                  {g.tokens.map(([t, label]) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`token ${t in spec.overrides ? "token-set" : ""}`}
+                      title={theme.colors[t]}
+                      aria-pressed={token === t}
+                      onClick={() => setToken(token === t ? null : t)}
+                    >
+                      <span className="swatch swatch-sm" style={{ background: theme.colors[t] }} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
             {token && (
               <div className="token-edit">
                 <span className="strong">{DERIVED.find(([t]) => t === token)?.[1]}</span>
                 <ColourField
                   label={`${token} colour`}
+                  alpha={takesAlpha(token)}
                   value={theme.colors[token]}
                   onChange={(hex) => edit({ overrides: withOverride(spec, token, hex) })}
                 />
@@ -231,16 +238,12 @@ export function Appearance() {
             )}
           </div>
 
-          <div className="set-group">
-            <span className="set-label">Readability</span>
-            {contrastChecks(theme).map((c) => (
-              <span key={c.label} className="check">
-                <span className={`badge ${c.pass ? "badge-pass" : "badge-low"}`}>{c.pass ? "Pass" : "Low"}</span>
-                <span className="check-label">{c.label}</span>
-                <span className="mono muted">{c.ratio.toFixed(1)}:1</span>
-              </span>
-            ))}
-          </div>
+          <Readability
+            checks={contrastChecks(theme)}
+            all={allChecks}
+            onAll={() => setAllChecks(!allChecks)}
+            onReadable={(fg, hex) => edit(fg === "text" ? { text: hex } : { overrides: withOverride(spec, fg, hex) })}
+          />
         </section>
 
         <section className="appearance-side" aria-label="Preview and file">
@@ -254,11 +257,11 @@ export function Appearance() {
               <span className="pv-ask">Ask anyone</span>
               <span className="small faint">Crew</span>
               <span className="pv-crew">
-                <span className="pv-mark pv-mark-working" style={{ background: "#C9B8FF" }} />
+                <span className="pv-mark pv-mark-working" style={{ background: tokenVar("mark1") }} />
                 atlas
               </span>
               <span className="pv-crew">
-                <span className="pv-mark" style={{ background: "#FFC98A" }} />
+                <span className="pv-mark" style={{ background: tokenVar("mark2") }} />
                 allan
               </span>
             </div>
@@ -347,33 +350,94 @@ function SwatchPicker({
   );
 }
 
-function ColourField({ label, value, onChange }: { label: string; value: string; onChange: (hex: string) => void }) {
+/** A colour's picker and its hex. One that may carry alpha (`alpha`) takes
+ *  `#RRGGBBAA` too; the picker sets its colour and keeps its alpha. */
+function ColourField({
+  label,
+  value,
+  alpha = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  alpha?: boolean;
+  onChange: (hex: string) => void;
+}) {
   const [text, setText] = useState(value);
   useEffect(() => {
     setText(value);
   }, [value]);
+  // A transparent one (lift and edge unless set) becomes opaque when picked:
+  // a colour picked should show.
+  const opacity = value.slice(7) === "00" ? "FF" : value.slice(7);
   return (
     <span className="colour-field">
       <input
         type="color"
         aria-label={`${label} picker`}
-        value={value.toLowerCase()}
-        onChange={(e) => onChange(e.target.value.toUpperCase())}
+        value={value.slice(0, 7).toLowerCase()}
+        onChange={(e) => onChange(e.target.value.toUpperCase() + (alpha ? opacity : ""))}
       />
       <input
-        className="mono"
+        className={`mono ${alpha ? "colour-field-alpha" : ""}`}
         aria-label={label}
         value={text}
         spellCheck={false}
-        maxLength={7}
+        maxLength={alpha ? 9 : 7}
         onChange={(e) => {
           const v = e.target.value.trim();
           const hex = v.startsWith("#") ? v : `#${v}`;
           setText(v);
-          if (isHex(hex)) onChange(hex.toUpperCase());
+          if (isHex(hex, alpha)) onChange(hex.toUpperCase());
         }}
       />
     </span>
+  );
+}
+
+/** How the theme's colours read on each other: the low ones always, every
+ *  pair on asking. */
+function Readability({
+  checks,
+  all,
+  onAll,
+  onReadable,
+}: {
+  checks: ContrastCheck[];
+  all: boolean;
+  onAll: () => void;
+  /** Sets `fg` to the text that reads. */
+  onReadable: (fg: Token, hex: string) => void;
+}) {
+  const low = checks.filter((c) => !c.pass);
+  const shown = all ? checks : low;
+  return (
+    <div className="set-group">
+      <span className="set-label">Readability</span>
+      <span className="check-summary">
+        <span className={`badge ${low.length ? "badge-low" : "badge-pass"}`}>{low.length ? "Low" : "Pass"}</span>
+        <span className="check-label">
+          {low.length ? `${low.length} of ${checks.length} pairs read too faintly` : `All ${checks.length} pairs read`}
+        </span>
+        <button type="button" className="link" onClick={onAll}>
+          {all ? "Hide pairs" : "Show pairs"}
+        </button>
+      </span>
+      {shown.map((c) => (
+        <span key={c.label} className="check">
+          <span className={`badge ${c.pass ? "badge-pass" : "badge-low"}`}>{c.pass ? "Pass" : "Low"}</span>
+          <span className="check-label">{c.label}</span>
+          <span className="mono muted">
+            {c.ratio.toFixed(1)}:1 <span className="faint">/ {c.bar}</span>
+          </span>
+          {c.readable && (
+            <button type="button" className="link link-signal" aria-label={`Use readable text: ${c.label}`} onClick={() => onReadable(c.fg, c.readable!)}>
+              Use readable text
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
   );
 }
 

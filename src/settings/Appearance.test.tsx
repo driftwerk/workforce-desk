@@ -77,6 +77,42 @@ describe("Appearance", () => {
     expect(useThemeStore.getState().custom[0]?.overrides.blocked).toBeUndefined();
   });
 
+  it("a shadow, lift or edge takes a colour with alpha, and a picked one shows", () => {
+    render(<Appearance />);
+    fireEvent.click(screen.getByRole("button", { name: "shadow" }));
+    fireEvent.change(screen.getByLabelText("shadow colour"), { target: { value: "#3C341E38" } });
+    expect(useThemeStore.getState().custom[0]?.overrides.shadow).toBe("#3C341E38");
+    // The picker sets the colour and keeps the alpha.
+    fireEvent.change(screen.getByLabelText("shadow colour picker"), { target: { value: "#102030" } });
+    expect(useThemeStore.getState().custom[0]?.overrides.shadow).toBe("#10203038");
+    // Night's lift is transparent: one picked for it is opaque.
+    fireEvent.click(screen.getByRole("button", { name: "lift" }));
+    fireEvent.change(screen.getByLabelText("lift colour picker"), { target: { value: "#102030" } });
+    expect(useThemeStore.getState().custom[0]?.overrides.lift).toBe("#102030FF");
+    // Text never takes alpha.
+    fireEvent.click(screen.getByRole("button", { name: "muted" }));
+    fireEvent.change(screen.getByLabelText("muted colour"), { target: { value: "#10203040" } });
+    expect(useThemeStore.getState().custom[0]?.overrides.muted).toBe(NIGHT.overrides.muted);
+  });
+
+  it("offers signals that read on the background: brights on a dark one, deep ones on a light one", () => {
+    render(<Appearance />);
+    expect(screen.getByRole("button", { name: "Signal" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Paper" }));
+    expect(screen.queryByRole("button", { name: "Signal" })).toBeNull();
+    for (const name of ["Olive", "Sky", "Ember", "Lavender", "Rose"]) expect(screen.getByRole("button", { name })).toBeTruthy();
+  });
+
+  it("offers the text that reads where a pair falls short, and sets it", () => {
+    const pink = { ...NIGHT, id: "pink", name: "Pink", signal: "#FF6B9A", overrides: {} };
+    useThemeStore.setState({ choice: "pink", custom: [pink] });
+    render(<Appearance />);
+    // White on the pink signal is 3.0:1 by Desk's fixed rule.
+    fireEvent.click(screen.getByRole("button", { name: "Use readable text: Button text on signal" }));
+    expect(useThemeStore.getState().custom.find((t) => t.id === "pink")?.overrides.onSignal).toBe("#161714");
+    expect(screen.queryByRole("button", { name: /^Use readable text/ })).toBeNull();
+  });
+
   it("closing the screen saves a pending edit", () => {
     vi.useFakeTimers();
     const view = render(<Appearance />);
