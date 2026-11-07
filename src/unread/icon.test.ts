@@ -11,7 +11,9 @@ const canvas = () => {
     fill: vi.fn(),
     fillText: (t: string) => drawn.push(`text ${t}`),
     getImageData: () => ({ data: new Uint8ClampedArray(OVERLAY_PX * OVERLAY_PX * 4) }),
-    set fillStyle(_v: string) {},
+    set fillStyle(v: string) {
+      drawn.push(`fill ${v}`);
+    },
     set font(_v: string) {},
     set textAlign(_v: string) {},
     set textBaseline(_v: string) {},
@@ -21,17 +23,18 @@ const canvas = () => {
 
 describe("the app's unread mark", () => {
   it("draws Windows' overlay for a count, 99+ or a dot, and none for nothing", () => {
-    expect(overlayFor({ count: 0, dot: false }, "#f80", canvas().el)).toBeNull();
+    expect(overlayFor({ count: 0, dot: false }, "#D4FF3A", "#161A05", canvas().el)).toBeNull();
     for (const [count, label] of [
       [7, "7"],
       [120, "99+"],
     ] as const) {
       const c = canvas();
-      expect(overlayFor({ count, dot: false }, "#f80", c.el)).toHaveLength(OVERLAY_PX * OVERLAY_PX * 4);
-      expect(c.drawn).toEqual([`circle ${OVERLAY_PX / 2}`, `text ${label}`]);
+      expect(overlayFor({ count, dot: false }, "#D4FF3A", "#161A05", c.el)).toHaveLength(OVERLAY_PX * OVERLAY_PX * 4);
+      // The count is in the theme's text on its signal, not white (1.2:1 on Night's lime).
+      expect(c.drawn).toEqual(["fill #D4FF3A", `circle ${OVERLAY_PX / 2}`, "fill #161A05", `text ${label}`]);
     }
     const dot = canvas();
-    expect(overlayFor({ count: 0, dot: true }, "#f80", dot.el)).toHaveLength(OVERLAY_PX * OVERLAY_PX * 4);
-    expect(dot.drawn).toEqual([`circle ${OVERLAY_PX / 4}`]);
+    expect(overlayFor({ count: 0, dot: true }, "#D4FF3A", "#161A05", dot.el)).toHaveLength(OVERLAY_PX * OVERLAY_PX * 4);
+    expect(dot.drawn).toEqual(["fill #D4FF3A", `circle ${OVERLAY_PX / 4}`]);
   });
 });

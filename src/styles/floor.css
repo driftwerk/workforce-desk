@@ -107,8 +107,11 @@
 .floor-stale .floor-item-what {
   color: var(--faint);
 }
+/* Stale: the idle ring, which keeps 3:1 on the panels, not a faded one. */
 .floor-stale .dot {
-  opacity: 0.55;
+  border-color: var(--idle);
+  background: transparent;
+  animation: none;
 }
 .dot-failed {
   border-color: var(--ansi-red);

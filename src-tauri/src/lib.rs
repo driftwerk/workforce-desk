@@ -448,15 +448,48 @@ fn desk_state_flush(store: State<'_, Arc<state::StateStore>>) -> CommandResult<(
     store.flush().map_err(text)
 }
 
-/// The page has put back what was open: the window can be seen.
+/// The page has put back what was open and painted its theme: the window
+/// takes the theme's background (`#RRGGBB`), seen at its edges while it
+/// resizes, and can be seen.
 #[tauri::command]
-fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>) {
+fn desk_ready(window: tauri::WebviewWindow, frames: State<'_, Frames>, background: Option<String>) {
     tracing::info!(label = window.label(), "page ready");
+    if let Some(bg) = background {
+        window_background(window.clone(), bg);
+    }
     if let Some(t) = frames.0.lock().expect("frames").get(window.label()) {
         t.show(&window, "page ready");
     } else {
         let _ = window.show();
     }
+}
+
+/// Keeps a window's own background on its theme's (`#RRGGBB`); a colour that
+/// isn't one is left out.
+#[tauri::command]
+fn window_background(window: tauri::WebviewWindow, background: String) {
+    match theme_colour(&background) {
+        Some(c) => {
+            if let Err(e) = window.set_background_color(Some(c)) {
+                tracing::warn!(label = window.label(), error = %e, "couldn't set the window's background");
+            }
+        }
+        None => tracing::warn!(
+            label = window.label(),
+            background,
+            "not a background colour"
+        ),
+    }
+}
+
+/// `#RRGGBB` as an opaque colour.
+fn theme_colour(hex: &str) -> Option<tauri::window::Color> {
+    let h = hex.strip_prefix('#')?;
+    if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let at = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some(tauri::window::Color(at(0)?, at(2)?, at(4)?, 255))
 }
 
 /// Each window's frame keeper, by label.
@@ -931,6 +964,7 @@ pub fn run() {
             desk_state_adopt,
             desk_state_flush,
             desk_ready,
+            window_background,
             claude_plugin_dir,
             machine_home,
             backend_home,
@@ -1002,6 +1036,19 @@ pub fn run() {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// A theme's background reaches the window as the same opaque colour; a
+    /// colour that isn't `#RRGGBB` is refused.
+    #[test]
+    fn a_theme_background_is_read_as_its_colour() {
+        let c = theme_colour("#FBFAF7").unwrap();
+        assert_eq!((c.0, c.1, c.2, c.3), (0xFB, 0xFA, 0xF7, 255));
+        let c = theme_colour("#111210").unwrap();
+        assert_eq!((c.0, c.1, c.2, c.3), (0x11, 0x12, 0x10, 255));
+        for bad in ["111210", "#11121", "#1112100", "#GG1210", "", "#ééé"] {
+            assert!(theme_colour(bad).is_none(), "{bad}");
+        }
+    }
 
     /// Every command `generate_handler!` registers is declared to the ACL
     /// (`commands.rs`, read by build.rs), and nothing else: one left out

@@ -444,5 +444,9 @@ export const stateFlush = (): Promise<void> => invoke("desk_state_flush");
 /** Changes Desk's native side made to it (a window's frame). */
 export const onNativeState = (f: (changes: [string, StateEntry][]) => void): Promise<() => void> =>
   listen<[string, StateEntry][]>("desk-state", (e) => f(e.payload));
-/** The page has put back what was open: the window can be shown. */
-export const deskReady = (): Promise<void> => invoke("desk_ready");
+/** The page has put back what was open and painted its theme: the window
+ *  takes the theme's `background` and can be shown. */
+export const deskReady = (background: string): Promise<void> => invoke("desk_ready", { background });
+/** Keeps the window's own background (seen at its edges while it resizes)
+ *  on the theme's. */
+export const windowBackground = (background: string): Promise<void> => invoke("window_background", { background });

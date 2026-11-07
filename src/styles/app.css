@@ -1436,8 +1436,12 @@ button {
   padding: 12px 16px;
   border-radius: 14px;
   background: var(--raised);
-  border: 1px solid var(--blocked);
+  border: 1px solid var(--border);
   z-index: 20;
+}
+/* An error's toast is edged in the needs-you colour; any other in the border's. */
+.toast-error {
+  border-color: var(--blocked);
 }
 .panel-error {
   flex: 1;
@@ -2450,8 +2454,14 @@ button.thread-bar:hover {
   background: var(--raised);
   border-color: var(--border);
 }
+/* Read: drawn in the theme's quieter text colours, not faded, so it
+   still reads on any ground. */
 .urow-read {
-  opacity: 0.55;
+  color: var(--muted);
+}
+.urow-read .urow-line,
+.urow-read .urow-where {
+  color: var(--faint);
 }
 .urow-read:hover,
 .urow-read:focus-within {
