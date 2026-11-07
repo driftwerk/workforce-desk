@@ -1149,6 +1149,9 @@ export interface PlanReading {
   where: PlanWhere;
   /** The same for every reading of one account, wherever it was made. */
   account: string | null;
+  /** Which of the hub's logins made it (a key, never its credential):
+   *  absent from hubs that don't say. */
+  login?: string | null;
   plan: string | null;
   windows: PlanWindow[];
   observedAt: string;

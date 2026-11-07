@@ -205,7 +205,7 @@ describe("the Floor across hubs", () => {
 
   it("shows a plan window reset when it resets, without reading again", async () => {
     await shell();
-    const claude = screen.getByRole("region", { name: "Claude plan usage" });
+    const claude = screen.getByRole("region", { name: "Claude on this computer usage" });
     expect(within(claude).getByText("80%")).toBeTruthy();
     hubs.local!.down = true;
     await act(() => vi.advanceTimersByTimeAsync(3 * MIN + 100));
