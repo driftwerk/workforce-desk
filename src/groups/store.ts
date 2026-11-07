@@ -144,14 +144,33 @@ export const collapseGroup = (id: string, to: boolean): void =>
     (h) => h.updateGroup(id, { collapsed: to }),
   );
 
-/** Its members go to the end of Ungrouped. Settles with whether it was
- *  deleted; `failed`, when given, is told why not instead of the person. */
-export const deleteGroup = (present: readonly ItemKey[], id: string, failed?: (e: unknown) => void): Promise<boolean> =>
-  changeLayout(
+/** How a delete went: done, done but Ungrouped's new order not kept, or
+ *  not done. */
+export type Deleted = "deleted" | "unordered" | "failed";
+
+/** Its members go to the end of Ungrouped. Settles with how it went;
+ *  `failed`, when given, is told why it wasn't deleted (or why its order
+ *  wasn't kept) instead of the person. */
+export const deleteGroup = async (present: readonly ItemKey[], id: string, failed?: (e: unknown) => void): Promise<Deleted> => {
+  let unordered = false;
+  const took = await changeLayout(
     (l) => deleted(l, present, id),
-    (h, next) => h.deleteGroup(id).then(() => h.orderUngrouped(next.ungrouped.items)),
+    async (h, next) => {
+      const gone = await h.deleteGroup(id);
+      try {
+        return await h.orderUngrouped(next.ungrouped.items);
+      } catch (e) {
+        // Deleted all the same: only where its members went isn't kept.
+        unordered = true;
+        if (failed) failed(e);
+        else useDesk.getState().fail(e);
+        return gone;
+      }
+    },
     failed ?? false,
   );
+  return !took ? "failed" : unordered ? "unordered" : "deleted";
+};
 
 export const moveGroup = (id: string, before: string | null): void =>
   void changeLayout(

@@ -54,6 +54,7 @@ import {
   removeFromGroup,
   renameGroup,
   useLayout,
+  type Deleted,
 } from "./store";
 import { ENGINE_SHORT } from "../engines/engines";
 import { LOCAL, machineOf, sessionKey, splitKey, useMachines, type MachineId } from "../machines/engines";
@@ -293,18 +294,18 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (with_) setSaid(`Moved ${nameOf(items.get(with_))} to a new group`);
   };
 
-  const deleteNow = (id: string, failed?: (e: unknown) => void): Promise<boolean> => {
+  const deleteNow = async (id: string, failed?: (e: unknown) => void): Promise<Deleted> => {
     const name = groupName(id);
-    const done = deleteGroup(present, id, failed);
-    after(`group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
-    return done;
+    const how = await deleteGroup(present, id, failed);
+    if (how !== "failed") after(`group:${UNGROUPED}`, `Deleted ${name}; its members are in Ungrouped`);
+    return how;
   };
 
   /** A group with a boss asks first; deleting it takes the boss off it. */
   const removeGroup = (id: string) => {
     const boss = bossOfGroup(manager, id);
     if (boss) return setAsking({ kind: "delete", group: id, boss });
-    deleteNow(id);
+    void deleteNow(id);
   };
 
   const isLocal = (a: Agent) => !!hubs.find((h) => h.id === a.hubId)?.local;
@@ -493,7 +494,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         label: "Choose who oversees",
         submenu: agents.length
           ? agents.map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => oversee(a, id) }))
-          : [{ kind: "item", label: "Drag one of your agents here first" }],
+          : [{ kind: "item", label: "Drag one of your agents here first", disabled: true }],
       },
     ];
   };
@@ -700,8 +701,11 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                 // (a hub that takes it off itself finds nothing left to do).
                 await stopOverseeing(useDesk.getState().hub, asking.boss.agentId, localAgent(asking.boss.agentId));
                 let why = "";
-                if (!(await deleteNow(asking.group, (e) => (why = plainError(e)))))
-                  throw new Error(`${asking.boss.name} no longer oversees ${name}; ${name} couldn’t be deleted${why ? `: ${why}` : "."}`);
+                const how = await deleteNow(asking.group, (e) => (why = plainError(e)));
+                const reason = why ? `: ${why}` : ".";
+                if (how === "failed") throw new Error(`${asking.boss.name} no longer oversees ${name}; ${name} couldn’t be deleted${reason}`);
+                // Deleted; only where its members went in Ungrouped isn't kept.
+                if (how === "unordered") useDesk.getState().fail(new Error(`${name} was deleted, but its members’ order in Ungrouped wasn’t saved${reason}`));
               }}
               onClose={() => setAsking(null)}
             >

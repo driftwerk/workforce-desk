@@ -2098,6 +2098,10 @@ button.thread-bar:hover {
   color: var(--signal-soft-text);
   outline: none;
 }
+.menu-item[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
 .menu-item:focus-visible {
   box-shadow: inset 0 0 0 2px var(--signal);
 }

@@ -344,6 +344,41 @@ describe("the fix round", () => {
     useHubLayout.setState({ layout: null, kept: null });
   });
 
+  it("says a group deleted whose Ungrouped order wasn't saved as deleted, not as failed", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const layout = { groups: [ACME, GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped };
+    const fail = vi.fn();
+    useDesk.setState({ fail });
+    Object.assign(world.hub, {
+      deleteGroup: vi.fn(async () => ({ groups: [GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped })),
+      orderUngrouped: vi.fn(async () => {
+        throw new Error("The hub is busy.");
+      }),
+      layout: vi.fn(async () => layout),
+    });
+    useHubLayout.setState({ layout, kept: true });
+    render(<SidebarGroups />);
+    fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Acme" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(fail.mock.calls.map(([e]) => (e as Error).message)).toEqual(["Acme was deleted, but its members’ order in Ungrouped wasn’t saved: The hub is busy."]);
+    expect(screen.getByText("Deleted Acme; its members are in Ungrouped")).toBeTruthy();
+    useHubLayout.setState({ layout: null, kept: null });
+  });
+
+  it("offers a sealed group with none of your agents only a disabled hint", async () => {
+    useOverview.setState({ manager: { agentId: "desk", level: "act", bosses: [], sealed: ["globex"] } });
+    useSettings.setState({ groups: [ACME, { ...GLOBEX, items: ["agent:remote/ada"] }] });
+    render(<SidebarGroups />);
+    fireEvent.click(within(screen.getByRole("group", { name: "Globex" })).getByRole("button", { name: "nobody oversees" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Choose who oversees/ }));
+    const only = screen.getByRole("menuitem", { name: "Drag one of your agents here first" });
+    expect(only.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(only);
+    expect(screen.getByRole("menuitem", { name: "Drag one of your agents here first" })).toBeTruthy();
+  });
+
   it("keeps a bossed header's count and unread in its toggle's name, and the shown copy out of the reading", () => {
     render(<SidebarGroups />);
     const acme = screen.getByRole("group", { name: "Acme" });
