@@ -338,6 +338,7 @@ export const usePlans = (): PlanCard[] => {
   const hubs = useFloor((s) => s.hubs);
   const list = useChat((s) => s.hubs);
   const accounts = useAccounts((s) => s.accounts);
+  const ownKey = useAccounts((s) => s.ownPlanKey);
   return useMemo(
     () =>
       plans(
@@ -345,8 +346,11 @@ export const usePlans = (): PlanCard[] => {
           const f = hubs[h.id];
           return f?.usage ? [{ hubId: h.id, label: h.label, local: h.local, usage: f.usage, offset: f.offset }] : [];
         }),
-        accounts.flatMap((a) => (a.planKey ? [`${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`] : [])),
+        {
+          accounts: accounts.flatMap((a) => (a.planKey ? [`${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`] : [])),
+          own: ownKey ? `claude:${ownKey}` : null,
+        },
       ),
-    [hubs, list, accounts],
+    [hubs, list, accounts, ownKey],
   );
 };
