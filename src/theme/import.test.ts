@@ -202,6 +202,9 @@ describe("theme import", () => {
       ansiMagenta: "#D3869B",
       ansiCyan: "#8EC07C",
       ansiWhite: "#D5C4A1",
+      // Ink reads better than white on its blue signal (Desk's fixed rule
+      // gives white), and an imported theme is new, so it is set.
+      onSignal: "#161714",
     });
     readable(g);
     const n = importTheme("nord.yml", NORD);

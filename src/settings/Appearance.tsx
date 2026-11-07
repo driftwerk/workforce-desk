@@ -5,7 +5,7 @@ import { DAY, NIGHT } from "../theme/builtin";
 import { importTheme } from "../theme/import";
 import { allThemes, resolveTheme, useThemeStore } from "../theme/store";
 import { serializeTheme } from "../theme/toml";
-import { contrastChecks, cssVariables, derive, isHex, takesAlpha, tokenVar, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
+import { contrastChecks, cssVariables, derive, isHex, takesAlpha, tokenVar, type ContrastCheck, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
 import { applyEdit, BACKGROUNDS, copyOf, DERIVED, derivedGroups, isBuiltin, signalsFor, upsert, withOverride, type Swatch } from "./editing";
 import { exportThemeFile, pickThemeFile } from "./files";
 import { TypeSettings } from "./TypeSettings";
@@ -238,7 +238,12 @@ export function Appearance() {
             )}
           </div>
 
-          <Readability checks={contrastChecks(theme)} all={allChecks} onAll={() => setAllChecks(!allChecks)} />
+          <Readability
+            checks={contrastChecks(theme)}
+            all={allChecks}
+            onAll={() => setAllChecks(!allChecks)}
+            onReadable={(fg, hex) => edit(fg === "text" ? { text: hex } : { overrides: withOverride(spec, fg, hex) })}
+          />
         </section>
 
         <section className="appearance-side" aria-label="Preview and file">
@@ -392,7 +397,18 @@ function ColourField({
 
 /** How the theme's colours read on each other: the low ones always, every
  *  pair on asking. */
-function Readability({ checks, all, onAll }: { checks: ReturnType<typeof contrastChecks>; all: boolean; onAll: () => void }) {
+function Readability({
+  checks,
+  all,
+  onAll,
+  onReadable,
+}: {
+  checks: ContrastCheck[];
+  all: boolean;
+  onAll: () => void;
+  /** Sets `fg` to the text that reads. */
+  onReadable: (fg: Token, hex: string) => void;
+}) {
   const low = checks.filter((c) => !c.pass);
   const shown = all ? checks : low;
   return (
@@ -414,6 +430,11 @@ function Readability({ checks, all, onAll }: { checks: ReturnType<typeof contras
           <span className="mono muted">
             {c.ratio.toFixed(1)}:1 <span className="faint">/ {c.bar}</span>
           </span>
+          {c.readable && (
+            <button type="button" className="link link-signal" aria-label={`Use readable text: ${c.label}`} onClick={() => onReadable(c.fg, c.readable!)}>
+              Use readable text
+            </button>
+          )}
         </span>
       ))}
     </div>

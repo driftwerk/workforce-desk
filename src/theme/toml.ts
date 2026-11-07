@@ -53,7 +53,11 @@ export const parseTheme = (id: string, source: string): ThemeSpec => {
   const shape = table(doc.shape);
   const overrides: Partial<Palette> = {};
   for (const [k, v] of Object.entries(table(colors.override))) {
-    if (!isToken(k)) throw new ThemeError(`[colors.override] has unknown colour "${k}"`);
+    // A colour from a newer Desk is left out, so its themes still open here.
+    if (!isToken(k)) {
+      console.warn(`theme ${id}: [colors.override] has a colour this Desk doesn't know, "${k}"; it is left out`);
+      continue;
+    }
     overrides[k] = color(`[colors.override].${k}`, v, takesAlpha(k));
   }
   // A theme from before chats and code had sizes of their own looks as it

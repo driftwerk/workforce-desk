@@ -16,7 +16,11 @@ import { clampChroma, formatHex, oklch } from "culori";
  *  - `shadow`: what menus, dialogs and popovers cast; `lift`: the soft
  *    shadow under cards, buttons and a selected pill; `edge`: the hairline
  *    round a selected pill or row and a mark. These three may carry alpha
- *    (`#RRGGBBAA`); lift and edge are transparent unless set.
+ *    (`#RRGGBBAA`); lift and edge are transparent unless set. Most menus
+ *    and popovers cast `shadow` as it is; the lighter ones (pills, the
+ *    emoji and mention pickers) 0.25/0.35 of its alpha, and the crew dialog
+ *    0.4/0.35 of it, which is clamped at opaque: a solid shadow (`#RRGGBB`)
+ *    stays solid there.
  *  - `logoDot`: the wordmark's dot, the signal unless set.
  *  - `onMark`: the initials on a mark; `mark1`…`mark6`: the marks' colours
  *    (an engine's is `mark6`).
@@ -179,13 +183,27 @@ export const contrast = (a: string, b: string): number => {
 const INK = "#161714";
 const PAPER_TEXT = "#F1F2EC";
 
-/** Of `options`, the one that reads best on `ground` (WCAG contrast). */
+/** Of `options`, the one that reads best on `ground` (WCAG contrast). The
+ *  editor sets a text colour to it when asked ("Use readable text"); a
+ *  theme that sets nothing keeps Desk's fixed rules below, so it looks as it
+ *  always has. */
 export const bestOn = (ground: string, options: readonly string[]): string =>
   options.reduce((best, o) => (contrast(o, ground) > contrast(best, ground) ? o : best));
 
-/** Whether `bg` is a dark ground: light text reads better on it than dark
- *  text does. */
-export const isDarkGround = (bg: string): boolean => bestOn(bg, [INK, PAPER_TEXT]) === PAPER_TEXT;
+/** The text `bestOn` chooses between: Desk's ink and its paper text, and
+ *  ink or white on a fill. */
+export const TEXT_CHOICES = [INK, PAPER_TEXT] as const;
+export const ON_FILL_CHOICES = [INK, "#FFFFFF"] as const;
+
+/** Desk's rule for a dark ground: relative luminance under 0.2. A theme's
+ *  background and a terminal's ground are told by it, here and on the hub. */
+export const DARK_BELOW = 0.2;
+export const isDarkGround = (bg: string): boolean => luminance(bg) < DARK_BELOW;
+
+/** Desk's rule for text on the signal: ink on a signal of relative
+ *  luminance over 0.35, white on one at or under it. */
+export const INK_ON_SIGNAL_ABOVE = 0.35;
+const onSignalOf = (signal: string): string => (luminance(signal) > INK_ON_SIGNAL_ABOVE ? INK : "#FFFFFF");
 
 /** The status and terminal colours as Desk draws them on its own text:
  *  near-white on a dark background, ink on a light one. */
@@ -260,7 +278,7 @@ export const derive = (spec: ThemeSpec): Theme => {
     muted: mix(text, bg, 0.28),
     faint: mix(text, bg, 0.42),
     signal,
-    onSignal: bestOn(signal, [INK, "#FFFFFF"]),
+    onSignal: onSignalOf(signal),
     signalSoft,
     signalSoftText:
       contrast(signal, signalSoft) >= 4.5 ? signal : dark ? mix(signal, "#FFFFFF", 0.45) : mix(signal, "#000000", 0.55),
@@ -482,47 +500,68 @@ export const tokenVar = (token: Token): string => `var(--${kebab(token)})`;
 
 export interface ContrastCheck {
   label: string;
+  /** The colour drawn, and what it is drawn on. */
+  fg: Token;
+  bg: Token;
   ratio: number;
   /** The least it should be: 4.5 for text, 3 for marks that aren't text. */
   bar: number;
   pass: boolean;
+  /** For text that falls short: the text colour that reads best there, which
+   *  the editor offers to set. */
+  readable?: string;
 }
 
 /** Text (WCAG AA) and what isn't text but must be seen (dots, focus rings). */
 export const TEXT_CONTRAST = 4.5;
 export const MARK_CONTRAST = 3;
 
+type Pair = [label: string, fg: Token, bg: Token, bar: number];
+
 /** Every pair of colours Desk draws one on the other where it has to be
  *  read, with its bar. */
-export const contrastPairs = (c: Palette): [label: string, fg: string, bg: string, bar: number][] => [
-  ["Text on background", c.text, c.bg, TEXT_CONTRAST],
-  ["Text on panels", c.text, c.surface, TEXT_CONTRAST],
-  ["Text on the terminal", c.text, c.sunken, TEXT_CONTRAST],
-  ["Secondary text on background", c.muted, c.bg, TEXT_CONTRAST],
-  ["Secondary text on panels", c.muted, c.surface, TEXT_CONTRAST],
-  ["Secondary text on the terminal", c.muted, c.sunken, TEXT_CONTRAST],
-  ["Labels and timestamps", c.faint, c.bg, TEXT_CONTRAST],
-  ["Labels on panels", c.faint, c.surface, TEXT_CONTRAST],
-  ["Labels on the terminal", c.faint, c.sunken, TEXT_CONTRAST],
-  ["Signal as text", c.signal, c.bg, TEXT_CONTRAST],
-  ["Button text on signal", c.onSignal, c.signal, TEXT_CONTRAST],
-  ["Text on the soft tint", c.signalSoftText, c.signalSoft, TEXT_CONTRAST],
-  ["Working on panels", c.working, c.surface, TEXT_CONTRAST],
-  ["Working on the terminal", c.working, c.sunken, TEXT_CONTRAST],
-  ["Needs you on panels", c.blocked, c.surface, TEXT_CONTRAST],
-  ["Needs you on its card", c.blocked, c.blockedSoft, TEXT_CONTRAST],
-  ["Text on a needs-you button", c.onBlocked, c.blocked, TEXT_CONTRAST],
-  ["Done on panels", c.done, c.surface, TEXT_CONTRAST],
-  ["Done on the terminal", c.done, c.sunken, TEXT_CONTRAST],
-  ["Terminal text", c.termText, c.sunken, TEXT_CONTRAST],
-  ...MARK_TOKENS.map((m, i) => [`Initials on mark ${i + 1}`, c.onMark, c[m], TEXT_CONTRAST] as [string, string, string, number]),
-  ["Idle dot on panels", c.idle, c.surface, MARK_CONTRAST],
-  ["Focus ring on background", c.signal, c.bg, MARK_CONTRAST],
+export const CONTRAST_PAIRS: readonly Pair[] = [
+  ["Text on background", "text", "bg", TEXT_CONTRAST],
+  ["Text on panels", "text", "surface", TEXT_CONTRAST],
+  ["Text on the terminal", "text", "sunken", TEXT_CONTRAST],
+  ["Secondary text on background", "muted", "bg", TEXT_CONTRAST],
+  ["Secondary text on panels", "muted", "surface", TEXT_CONTRAST],
+  ["Secondary text on the terminal", "muted", "sunken", TEXT_CONTRAST],
+  ["Labels and timestamps", "faint", "bg", TEXT_CONTRAST],
+  ["Labels on panels", "faint", "surface", TEXT_CONTRAST],
+  ["Labels on the terminal", "faint", "sunken", TEXT_CONTRAST],
+  ["Signal as text", "signal", "bg", TEXT_CONTRAST],
+  ["Button text on signal", "onSignal", "signal", TEXT_CONTRAST],
+  ["Text on the soft tint", "signalSoftText", "signalSoft", TEXT_CONTRAST],
+  ["Working on panels", "working", "surface", TEXT_CONTRAST],
+  ["Working on the terminal", "working", "sunken", TEXT_CONTRAST],
+  ["Needs you on panels", "blocked", "surface", TEXT_CONTRAST],
+  ["Needs you on its card", "blocked", "blockedSoft", TEXT_CONTRAST],
+  ["Text on a needs-you button", "onBlocked", "blocked", TEXT_CONTRAST],
+  ["Done on panels", "done", "surface", TEXT_CONTRAST],
+  ["Done on the terminal", "done", "sunken", TEXT_CONTRAST],
+  ["Terminal text", "termText", "sunken", TEXT_CONTRAST],
+  ...MARK_TOKENS.map((m, i): Pair => [`Initials on mark ${i + 1}`, "onMark", m, TEXT_CONTRAST]),
+  ["Idle dot on panels", "idle", "surface", MARK_CONTRAST],
+  ["Focus ring on background", "signal", "bg", MARK_CONTRAST],
 ];
 
-/** How each pair reads: shown in the theme editor, where a low one says so. */
+/** Text colours the editor can put right by choosing the one that reads
+ *  best, from Desk's own: the theme's text, and text on a fill. */
+const FIXABLE: Partial<Record<Token, readonly string[]>> = {
+  text: TEXT_CHOICES,
+  onSignal: ON_FILL_CHOICES,
+  onBlocked: ON_FILL_CHOICES,
+  onMark: ON_FILL_CHOICES,
+};
+
+/** How each pair reads: shown in the theme editor, where a low one says so
+ *  and, for text, offers the text that reads. */
 export const contrastChecks = ({ colors }: Theme): ContrastCheck[] =>
-  contrastPairs(colors).map(([label, a, b, bar]) => {
-    const ratio = contrast(a, b);
-    return { label, ratio, bar, pass: ratio >= bar };
+  CONTRAST_PAIRS.map(([label, fg, bg, bar]) => {
+    const ratio = contrast(colors[fg], colors[bg]);
+    const pass = ratio >= bar;
+    const choices = FIXABLE[fg];
+    const best = !pass && choices ? bestOn(colors[bg], choices) : undefined;
+    return { label, fg, bg, ratio, bar, pass, ...(best && best !== colors[fg] ? { readable: best } : {}) };
   });

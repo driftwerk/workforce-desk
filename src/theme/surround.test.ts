@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BUILTIN, HARBOUR, NIGHT } from "./builtin";
 import before from "./fixtures/before-day.json";
-import { ALPHA_TOKENS, contrast, cssVariables, derive, isDarkGround, isHex, scaleAlpha, TOKENS, type ThemeSpec } from "./tokens";
+import { ALPHA_TOKENS, bestOn, contrast, contrastChecks, cssVariables, derive, isDarkGround, isHex, ON_FILL_CHOICES, scaleAlpha, TOKENS, type ThemeSpec } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 import { dimVariables, xtermTheme } from "./xterm";
 
@@ -84,23 +84,34 @@ describe("colours with alpha", () => {
 });
 
 describe("a dark ground or a light one", () => {
-  it("is the one whose text reads better on it, not a luminance cut-off", () => {
+  it("is told by Desk's fixed rule, luminance under 0.2, so a theme that sets nothing looks as it did", () => {
     expect(isDarkGround("#111210")).toBe(true);
     expect(isDarkGround("#FBFAF7")).toBe(false);
-    // A mid grey reads better with dark text.
-    expect(isDarkGround("#8A8A8A")).toBe(false);
-    // Just under the old cut-off (luminance 0.2) and light text still reads worse.
-    expect(isDarkGround("#7A7A7A")).toBe(contrast("#F1F2EC", "#7A7A7A") > contrast("#161714", "#7A7A7A"));
-    for (const bg of ["#000000", "#333333", "#595959", "#6E6E6E", "#808080", "#A0A0A0", "#FFFFFF"]) {
-      const t = derive({ ...NIGHT, id: "g", background: bg, overrides: {} });
-      expect(contrast(t.colors.text, bg), bg).toBeGreaterThanOrEqual(Math.max(contrast("#161714", bg), contrast("#F1F2EC", bg)) - 0.01);
-    }
+    // Luminance 0.195: dark, as before, though dark text reads a little better.
+    expect(isDarkGround("#7A7A7A")).toBe(true);
+    expect(contrast("#161714", "#7A7A7A")).toBeGreaterThan(contrast("#F1F2EC", "#7A7A7A"));
+    expect(derive({ ...NIGHT, id: "g", background: "#7A7A7A", overrides: {} }).dark).toBe(true);
   });
 
-  it("gives button text that reads best on the signal", () => {
-    for (const signal of ["#D4FF3A", "#3F5A06", "#8A8A8A", "#1F5FBF", "#FF6B9A", "#9A9A9A"]) {
-      const c = derive({ ...NIGHT, id: "s", signal, overrides: {} }).colors;
-      expect(contrast(c.onSignal, signal), signal).toBeGreaterThanOrEqual(Math.max(contrast("#161714", signal), contrast("#FFFFFF", signal)));
-    }
+  it("gives text on the signal by Desk's fixed rule, and the editor offers the text that reads", () => {
+    // Luminance 0.33: white by the rule, at 3.0:1; ink would read at 7.1:1.
+    const t = derive({ ...NIGHT, id: "s", signal: "#FF6B9A", overrides: {} });
+    expect(t.colors.onSignal).toBe("#FFFFFF");
+    const check = contrastChecks(t).find((c) => c.fg === "onSignal")!;
+    expect(check.pass).toBe(false);
+    expect(check.readable).toBe("#161714");
+    expect(bestOn("#FF6B9A", ON_FILL_CHOICES)).toBe("#161714");
+    // A pair that passes, or one that isn't text, offers nothing.
+    expect(contrastChecks(derive(NIGHT)).every((c) => !c.readable)).toBe(true);
+  });
+});
+
+describe("a theme file from a newer Desk", () => {
+  it("opens, without the colours this Desk doesn't know", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const t = parseTheme("newer", '[colors]\nbackground = "#111210"\nsignal = "#D4FF3A"\n[colors.override]\nblocked = "#FFB547"\nsomethingNew = "#123456"\n');
+    expect(t.overrides).toEqual({ blocked: "#FFB547" });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"somethingNew"'));
+    warn.mockRestore();
   });
 });

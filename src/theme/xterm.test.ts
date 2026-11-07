@@ -1,7 +1,7 @@
 import { Terminal as XTerm } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 import { BUILTIN, DAY, HARBOUR, NIGHT } from "./builtin";
-import { contrast, derive, mix, TOKENS, type ThemeSpec } from "./tokens";
+import { contrast, derive, isDarkGround, mix, TOKENS, type ThemeSpec } from "./tokens";
 import { ANSI, dimmed, dimVariables, minimumContrast, terminalLight, terminalPalette, TERMINAL_CONTRAST, xtermTheme } from "./xterm";
 
 /** The terminal colours Night and Harbour were drawn in before they were
@@ -87,6 +87,17 @@ describe("the terminal's colours", () => {
     expect(terminalPalette(theme).ground).toBe("dark");
     expect(terminalPalette(derive(DAY)).ground).toBe("light");
     expect(terminalPalette(derive(NIGHT)).ground).toBe("dark");
+  });
+
+  it("is light or dark by the rule a theme's own ground is told by, mid greys included", () => {
+    for (const grey of ["#5A5A5A", "#707070", "#747474", "#777777", "#7A7A7A", "#808080", "#9A9A9A"]) {
+      const c = derive({ ...DAY, id: "g", overrides: { ...DAY.overrides, sunken: grey } }).colors;
+      expect(terminalLight(c), grey).toBe(!isDarkGround(grey));
+      // The same grey as a theme's background is told the same way.
+      expect(terminalLight(c), grey).toBe(!derive({ ...NIGHT, id: "g", background: grey, overrides: {} }).dark);
+    }
+    // Luminance 0.184, under 0.2: dark, as it always was.
+    expect(terminalLight(derive({ ...DAY, id: "g", overrides: { ...DAY.overrides, sunken: "#777777" } }).colors)).toBe(false);
   });
 });
 

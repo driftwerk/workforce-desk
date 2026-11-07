@@ -103,6 +103,16 @@ describe("Appearance", () => {
     for (const name of ["Olive", "Sky", "Ember", "Lavender", "Rose"]) expect(screen.getByRole("button", { name })).toBeTruthy();
   });
 
+  it("offers the text that reads where a pair falls short, and sets it", () => {
+    const pink = { ...NIGHT, id: "pink", name: "Pink", signal: "#FF6B9A", overrides: {} };
+    useThemeStore.setState({ choice: "pink", custom: [pink] });
+    render(<Appearance />);
+    // White on the pink signal is 3.0:1 by Desk's fixed rule.
+    fireEvent.click(screen.getByRole("button", { name: "Use readable text: Button text on signal" }));
+    expect(useThemeStore.getState().custom.find((t) => t.id === "pink")?.overrides.onSignal).toBe("#161714");
+    expect(screen.queryByRole("button", { name: /^Use readable text/ })).toBeNull();
+  });
+
   it("closing the screen saves a pending edit", () => {
     vi.useFakeTimers();
     const view = render(<Appearance />);

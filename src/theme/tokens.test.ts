@@ -36,7 +36,7 @@ describe("themes", () => {
 
   it("bad themes say what is wrong", () => {
     expect(() => parseTheme("x", "[colors]\nbackground = 'red'\nsignal = '#000000'")).toThrow(/background/);
-    expect(() => parseTheme("x", "[colors]\nbackground = '#000000'\nsignal = '#FFFFFF'\n[colors.override]\nnope = '#000000'")).toThrow(ThemeError);
+    expect(() => parseTheme("x", "[colors]\nbackground = '#000000'\nsignal = '#FFFFFF'\n[colors.override]\nblocked = 'amber'")).toThrow(ThemeError);
     expect(() => parseTheme("x", "[colors]\nbackground = '#000000'\nsignal = '#FFFFFF'\n[shape]\ncorners = 'wobbly'")).toThrow(/corners/);
     expect(() => parseTheme("x", "not = [toml")).toThrow(/TOML/);
   });
