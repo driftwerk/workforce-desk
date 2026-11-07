@@ -140,10 +140,10 @@ export interface Session {
   /** The account it moves to once its turn ends, while a switch waits. */
   switchingTo?: AccountRef | null;
   /** The terminal ground, light or dark, its CLI took its colours from at
-   *  its start, when it can't follow the terminal while it runs (Codex reads
-   *  the colours once; Claude Code with a theme of the person's own): set,
-   *  a change of ground shows only once it restarts. Absent while it
-   *  follows the terminal, and from older hubs. */
+   *  its start, for a CLI that reads them only then (Codex): a change of
+   *  ground shows once it restarts. Absent for one that follows the
+   *  terminal as it runs (Claude Code), one started before Desk said its
+   *  colours or taken back after the hub restarted, and from older hubs. */
   fixedGround?: "light" | "dark" | null;
   /** The Desk terminal it runs in, when it was started there by hand and
    *  Desk's hooks registered it (a tracked terminal). */

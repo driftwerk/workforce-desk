@@ -84,6 +84,9 @@ export interface TerminalPalette {
   background: string;
   cursor: string;
   ansi: string[];
+  /** Light or dark, Desk's call ([`terminalLight`]): the hub has no rule of
+   *  its own, so CLIs it starts read the ground the panes are drawn as. */
+  ground: "light" | "dark";
 }
 
 export const terminalPalette = ({ colors: c }: Theme): TerminalPalette => ({
@@ -91,4 +94,5 @@ export const terminalPalette = ({ colors: c }: Theme): TerminalPalette => ({
   background: c.sunken,
   cursor: c.termCursor,
   ansi: ANSI.map((t) => c[t]),
+  ground: terminalLight(c) ? "light" : "dark",
 });

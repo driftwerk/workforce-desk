@@ -224,7 +224,7 @@ export const derive = (spec: ThemeSpec): Theme => {
   const colors = { ...derived, ...spec.overrides };
   // The handles and the rest of the terminal follow the colours as they end
   // up, overrides included, unless a theme sets them itself.
-  return { spec, dark, colors: { ...colors, ...followers(colors, dark), ...spec.overrides } };
+  return { spec, dark, colors: { ...colors, ...followers(colors), ...spec.overrides } };
 };
 
 /** The colours that follow others unless a theme sets them. */
@@ -246,18 +246,22 @@ type Follower =
   | "ansiBrightCyan"
   | "ansiBrightWhite";
 
-const followers = (c: Omit<Palette, Follower> & Partial<Palette>, dark: boolean): Record<Follower, string> => {
+const followers = (c: Omit<Palette, Follower> & Partial<Palette>): Record<Follower, string> => {
   const yellow = c.ansiYellow ?? c.blocked;
   const blue = c.ansiBlue ?? c.working;
-  // On a light terminal a derived colour is darkened toward the text until
-  // it reads there; a dark one's are as they are.
+  // The terminal's own ground, light or dark as `terminalLight` (xterm.ts)
+  // has it: a theme's terminal may be dark in a light theme, or the other way.
+  const light = luminance(c.sunken) >= 0.2;
+  // A derived colour is moved toward the terminal's text until it reads on
+  // the ground; one that reads is as it is. Text that doesn't read there
+  // itself gives way to black or white.
+  const toward = contrast(c.termText, c.sunken) >= STATE_CONTRAST ? c.termText : light ? "#000000" : "#FFFFFF";
   const reads = (hex: string): string => {
-    if (dark) return hex;
     for (let p = 0; p <= 1; p += 0.05) {
-      const next = mix(hex, c.text, p);
+      const next = mix(hex, toward, p);
       if (contrast(next, c.sunken) >= STATE_CONTRAST) return next;
     }
-    return c.text;
+    return toward;
   };
   // A bright colour is its plain one a quarter of the way to the text.
   const bright = (plain: string) => reads(mix(plain, c.text, 0.25));
@@ -266,10 +270,11 @@ const followers = (c: Omit<Palette, Follower> & Partial<Palette>, dark: boolean)
     handleActive: c.signal,
     termCursor: c.signal,
     termSelection: mix(c.sunken, c.signal, 0.28),
-    ansiBlack: dark ? mix(c.sunken, c.text, 0.18) : c.text,
+    // Black is the ground's end on a dark terminal, the text's on a light one.
+    ansiBlack: light ? c.text : mix(c.sunken, c.text, 0.18),
     ansiYellow: yellow,
     ansiBlue: blue,
-    ansiWhite: dark ? c.termText : reads(mix(c.text, c.bg, 0.4)),
+    ansiWhite: reads(light ? mix(c.text, c.bg, 0.4) : c.termText),
     ansiBrightBlack: reads(c.faint),
     ansiBrightRed: bright(c.ansiRed),
     ansiBrightGreen: bright(c.ansiGreen),
@@ -277,7 +282,7 @@ const followers = (c: Omit<Palette, Follower> & Partial<Palette>, dark: boolean)
     ansiBrightBlue: bright(blue),
     ansiBrightMagenta: bright(c.ansiMagenta),
     ansiBrightCyan: bright(c.ansiCyan),
-    ansiBrightWhite: c.text,
+    ansiBrightWhite: reads(c.text),
   };
 };
 

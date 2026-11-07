@@ -154,20 +154,38 @@ export function SessionCard({ session }: { session: Session }) {
 function RestartForColors({ session }: { session: Session }) {
   const theme = useTheme();
   const [busy, setBusy] = useState(false);
+  // A turn under way stops with it: asked first.
+  const [asking, setAsking] = useState(false);
   if (!needsRestartForColors(session, theme)) return null;
   const restart = () => {
+    setAsking(false);
     setBusy(true);
     hubFor(session)
       ?.restart(session.id)
       .catch(useDesk.getState().fail)
       .finally(() => setBusy(false));
   };
+  const working = session.state === "working";
   return (
     <div className="session-recolor small" role="status">
-      <span className="muted">Drawn for a {session.fixedGround} terminal; it takes the new colours when it restarts.</span>
-      <button type="button" className="link" disabled={busy} onClick={restart}>
-        {busy ? "Restarting…" : "Restart to apply"}
-      </button>
+      {asking ? (
+        <>
+          <span className="muted">It is working: restarting stops this turn, and the conversation resumes.</span>
+          <button type="button" className="link" onClick={restart}>
+            Restart now
+          </button>
+          <button type="button" className="link" onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="muted">Drawn for a {session.fixedGround} terminal; it takes the new colours when it restarts.</span>
+          <button type="button" className="link" disabled={busy} onClick={working ? () => setAsking(true) : restart}>
+            {busy ? "Restarting…" : "Restart to apply"}
+          </button>
+        </>
+      )}
     </div>
   );
 }

@@ -69,9 +69,24 @@ describe("the terminal's colours", () => {
     expect(contrast(mix("#24251F", "#FFFFFF", 0.5), "#FFFFFF")).toBeLessThan(4.5);
   });
 
-  it("a dark terminal in a light theme counts as dark", () => {
-    const c = derive({ ...DAY, id: "x", overrides: { ...DAY.overrides, sunken: "#101010" } }).colors;
+  it("a dark terminal in a light theme counts as dark, and its derived colours read on it", () => {
+    const theme = derive({ ...DAY, id: "x", overrides: { ...DAY.overrides, sunken: "#101010" } });
+    const c = theme.colors;
     expect(terminalLight(c)).toBe(false);
+    expect(terminalPalette(theme).ground).toBe("dark");
+    const derived = ["ansiBrightBlack", "ansiBrightRed", "ansiBrightGreen", "ansiBrightYellow", "ansiBrightBlue", "ansiBrightMagenta", "ansiBrightCyan", "ansiBrightWhite"] as const;
+    for (const t of derived) expect(contrast(c[t], c.sunken), `${t} ${c[t]}`).toBeGreaterThanOrEqual(TERMINAL_CONTRAST);
+    // Black is the ground's end there.
+    expect(contrast(c.ansiBlack, c.sunken)).toBeLessThan(1.5);
+  });
+
+  it("a mid grey terminal is dark by luminance, and the hub is told so", () => {
+    // Dark text reads a shade better on #777777, but its luminance is under 0.2.
+    const theme = derive({ ...DAY, id: "x", overrides: { ...DAY.overrides, sunken: "#777777" } });
+    expect(terminalLight(theme.colors)).toBe(false);
+    expect(terminalPalette(theme).ground).toBe("dark");
+    expect(terminalPalette(derive(DAY)).ground).toBe("light");
+    expect(terminalPalette(derive(NIGHT)).ground).toBe("dark");
   });
 });
 
