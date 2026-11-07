@@ -7,6 +7,7 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
+import { useLayout } from "../groups/store";
 import { startable } from "../engines/engines";
 import type { EngineInfo } from "../hub/types";
 import {
@@ -79,6 +80,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const manager = useOverview((s) => s.manager);
   const support = useOverview((s) => s.managerSupport);
   const roster = useChat((s) => s.roster);
+  const { groups } = useLayout();
   const hubs = useChat((s) => s.hubs);
   const [o, setO] = useState<Oversight | null>(null);
   const [fields, setFields] = useState<Record<Field, Typed> | null>(null);
@@ -110,6 +112,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     ? (roster.find((a) => a.id === otherId && hubs.find((h) => h.id === a.hubId)?.local)?.name ?? otherId)
     : null;
   const usable = config !== undefined && readable(config);
+  // A group's boss oversees only that group.
+  const bossOf = o?.group ? (groups.find((g) => g.id === o.group)?.name ?? null) : null;
 
   const update = (change: Change) => {
     if (!desk || !o) return;
@@ -183,7 +187,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
 
   const enable = (on: boolean) => {
     if (on && other) return setConfirming(true);
-    update((x) => ({ ...x, enabled: on }));
+    // Off names no group, so a group it oversaw opens to the main overseer
+    // (a group any config names stays apart from everyone).
+    update((x) => ({ ...x, enabled: on, group: on ? x.group : null }));
   };
 
   const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
@@ -199,6 +205,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             {name} keeps track of every agent and session and tells you what needs you. Only one crew member oversees at a time.
           </span>
           {o && !o.enabled && other && <span className="oversee-sub">{other} oversees the crew now.</span>}
+          {o?.enabled && bossOf && <span className="oversee-sub">Oversees only {bossOf}: its sessions and agents.</span>}
         </span>
         <button
           type="button"

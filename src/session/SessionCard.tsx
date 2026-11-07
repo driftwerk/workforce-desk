@@ -11,6 +11,7 @@ import { useGrids } from "../grids/store";
 import { placesOf } from "../grids/where";
 import { useTerminals } from "../grids/terminals";
 import { sessionItem } from "../groups/model";
+import { GroupChip } from "../groups/GroupChip";
 import { SidePanel, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
@@ -84,6 +85,7 @@ export function SessionCard({ session }: { session: Session }) {
           <span className="session-title">
             <span className="mono">{name}</span>
             <OnMachine machine={machineOf(session)} />
+            <GroupChip item={sessionItem(key)} />
             <span className="faint small">{where(session)}</span>
           </span>
         </>

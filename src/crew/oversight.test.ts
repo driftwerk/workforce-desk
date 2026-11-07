@@ -30,6 +30,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
 `);
     expect(o).toEqual({
       enabled: true,
+      group: null,
       level: "act",
       track: { crew: true, deskSessions: false, externalSessions: true, workspaces: true },
       wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true, onMessage: false },
@@ -107,6 +108,25 @@ wake = { waiting_minutes = 2.5 }
       work: { prefer_sessions: true, parallel: 4, take_on: "handed", engine: "claude", max_turns_per_hour: 60 },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
+  });
+
+  it("reads the group it oversees, and writes one only while it has one, so a boss taken off leaves no group named", () => {
+    const boss = oversightOf(`[oversight]\nenabled = true\ngroup = "g-acme"\n`);
+    expect(boss).toMatchObject({ enabled: true, group: "g-acme" });
+    expect(oversightOf(`[oversight]\ngroup = ""\n`).group).toBeNull();
+    expect(oversightOf(`[oversight]\ngroup = 3\n`).group).toBeNull();
+    // Another change keeps the group.
+    const kept = parse(withOversight(`[oversight]\nenabled = true\ngroup = "g-acme"\n`, { ...boss, level: "act" })) as { oversight: Record<string, unknown> };
+    expect(kept.oversight).toMatchObject({ enabled: true, group: "g-acme", level: "act" });
+    // Stopping writes it off and names no group.
+    const off = parse(withOversight(`[oversight]\nenabled = true\ngroup = "g-acme"\n`, { ...boss, enabled: false, group: null })) as {
+      oversight: Record<string, unknown>;
+    };
+    expect(off.oversight.enabled).toBe(false);
+    expect("group" in off.oversight).toBe(false);
+    // The main overseer's config never gains one.
+    const main = parse(withOversight(CONFIG, { ...DEFAULT_OVERSIGHT, enabled: true })) as { oversight: Record<string, unknown> };
+    expect("group" in main.oversight).toBe(false);
   });
 
   it("reads how it runs sessions, inline or as its own table, and writes it under [oversight.work] as the hub reads it", () => {

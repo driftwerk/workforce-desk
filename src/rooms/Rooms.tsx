@@ -33,6 +33,8 @@ import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useAnchoredScroll } from "../restore/scroll";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
+import { GroupChip } from "../groups/GroupChip";
+import { agentItem } from "../groups/model";
 import type { OversightLevel } from "../hub/types";
 import { useFocusRequest } from "../shell/focus";
 import { useOutOfSight } from "../panels/Stage";
@@ -271,7 +273,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         <header className="room-head">
           <AgentMark agent={agentKey(agent)} name={agent.name} size="lg" />
           <span className="room-title">
-            <h1 className="display-lg">{agent.name}</h1>
+            <span className="room-title-name">
+              <h1 className="display-lg">{agent.name}</h1>
+              <GroupChip item={agentItem(agent)} />
+            </span>
             <span className="faint small">
               {subtitle}
               {convo.connected ? "" : " · reconnecting…"}

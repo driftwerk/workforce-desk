@@ -3,7 +3,8 @@ import { CloseButton, Dialog } from "./Dialog";
 import { plainError } from "./plainError";
 
 /** Asks before something that can't be undone: `action` runs on the red
- *  button, and the dialog stays open, saying why, if it fails. */
+ *  button (the signal's for `tone="signal"`), and the dialog stays open,
+ *  saying why, if it fails. */
 export function Confirm({
   title,
   children,
@@ -11,6 +12,7 @@ export function Confirm({
   onConfirm,
   onClose,
   disabled = false,
+  tone = "danger",
 }: {
   title: string;
   children: ReactNode;
@@ -20,6 +22,9 @@ export function Confirm({
   onClose: () => void;
   /** The red button can't be pressed yet (nothing to do). */
   disabled?: boolean;
+  /** "signal" for something asked about that removes nothing: the button is
+   *  the signal's, not red. */
+  tone?: "danger" | "signal";
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -54,7 +59,7 @@ export function Confirm({
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel
         </button>
-        <button type="button" className="btn btn-danger" disabled={busy || disabled} onClick={() => void go()}>
+        <button type="button" className={`btn btn-${tone}`} disabled={busy || disabled} onClick={() => void go()}>
           {busy ? `${action}…` : action}
         </button>
       </footer>

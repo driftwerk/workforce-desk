@@ -6,6 +6,7 @@ import type { Agent } from "../chat/types";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useOverview } from "../overview/store";
+import { useSettings } from "../settings/store";
 import { useAgentConfigs } from "./agentBrain";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 
@@ -72,6 +73,17 @@ describe("Oversees the crew", () => {
     expect((parse(file) as { llm: unknown }).llm).toEqual({ provider: "claude-code" });
     expect(hub.manager).toHaveBeenCalled();
     expect(await screen.findByRole("status")).toBeTruthy();
+  });
+
+  it("says a group's boss oversees only its group, and switching it off names the group no more", async () => {
+    useSettings.setState({ groups: [{ id: "g-acme", name: "Acme", collapsed: false, items: ["agent:local/ledger"] }] });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\ngroup = "g-acme"\n`);
+    expect(screen.getByText("Oversees only Acme: its sessions and agents.")).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Oversees the crew" })));
+    await waitFor(() => expect(oversight()?.enabled).toBe(false));
+    expect("group" in oversight()!).toBe(false);
+    useSettings.setState({ groups: [] });
   });
 
   it("shows Act's own rules only at Act, and saves each choice as it's made", async () => {

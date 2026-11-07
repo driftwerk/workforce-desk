@@ -5,6 +5,9 @@ import type { OversightLevel } from "../hub/types";
 /** An agent's `[oversight]`: whether it oversees the crew and how. */
 export interface Oversight {
   enabled: boolean;
+  /** The sidebar group it oversees as that group's boss; null: everything
+   *  ungrouped, as the main overseer. */
+  group: string | null;
   level: OversightLevel;
   track: { crew: boolean; deskSessions: boolean; externalSessions: boolean; workspaces: boolean };
   /** Minutes of 0 mean it doesn't speak up for that. */
@@ -67,6 +70,7 @@ export const MAX_WORK_TURNS_PER_HOUR = 600;
 
 export const DEFAULT_OVERSIGHT: Oversight = {
   enabled: false,
+  group: null,
   level: "watch",
   track: { crew: true, deskSessions: true, externalSessions: true, workspaces: false },
   wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true, onMessage: true },
@@ -131,6 +135,7 @@ export const oversightOf = (source: string): Oversight => {
   const work = table(o.work);
   return {
     enabled: bool(o.enabled, d.enabled),
+    group: typeof o.group === "string" && o.group.trim() ? o.group : d.group,
     level: LEVELS.includes(o.level as OversightLevel) ? (o.level as OversightLevel) : d.level,
     track: {
       crew: bool(track.crew, d.track.crew),
@@ -169,13 +174,15 @@ export const oversightOf = (source: string): Oversight => {
 };
 
 /** The config with `o` as its `[oversight]`; anything else in the file, and
- *  any key of `[oversight]` Desk doesn't know, stays. */
+ *  any key of `[oversight]` Desk doesn't know, stays. No group leaves no
+ *  `group` key: the hub keeps a group apart while any config names it. */
 export const withOversight = (source: string, o: Oversight): string => {
   const doc = (source.trim() ? parse(source) : {}) as Doc;
-  const was = table(doc.oversight);
+  const { group: _group, ...was } = table(doc.oversight);
   doc.oversight = {
     ...was,
     enabled: o.enabled,
+    ...(o.group ? { group: o.group } : {}),
     level: o.level,
     track: {
       ...table(was.track),
