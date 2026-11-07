@@ -25,6 +25,13 @@ import { clampChroma, formatHex, oklch } from "culori";
  *  - `onMark`: the initials on a mark; `mark1`…`mark6`: the marks' colours
  *    (an engine's is `mark6`).
  *  - `series1`…`series8`: a chart's series, slot by slot.
+ *  - `buttonFill`: a plain button's ground (transparent unless set);
+ *    `approve`, `onApprove`: the button that answers what waits on you, and
+ *    its text (the signal's unless set); `askGlow`: the glow under Ask anyone;
+ *    `activeEdge`, `activeRing`: the edge and soft ring of a ticket being
+ *    worked on (the border, and none, unless set); `focusRing`: the soft ring
+ *    round a focused input; `cardFill`: a settings card's ground (raised
+ *    unless set). The fills and rings may carry alpha.
  *  Failed states are drawn in `ansiRed`, the terminal's red, so setting one
  *  sets the other. */
 export const TOKENS = [
@@ -88,6 +95,14 @@ export const TOKENS = [
   "series6",
   "series7",
   "series8",
+  "buttonFill",
+  "approve",
+  "onApprove",
+  "askGlow",
+  "activeEdge",
+  "activeRing",
+  "focusRing",
+  "cardFill",
 ] as const;
 
 export type Token = (typeof TOKENS)[number];
@@ -130,7 +145,7 @@ const HEX_ALPHA = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 /** The colours that may carry alpha (`#RRGGBBAA`): shadows and hairlines
  *  drawn over whatever is under them. Every other colour is solid. */
-export const ALPHA_TOKENS: readonly Token[] = ["shadow", "edge", "lift"];
+export const ALPHA_TOKENS: readonly Token[] = ["shadow", "edge", "lift", "buttonFill", "askGlow", "activeRing", "focusRing"];
 
 export const takesAlpha = (token: string): boolean => (ALPHA_TOKENS as readonly string[]).includes(token);
 
@@ -324,7 +339,15 @@ type Surround =
   | "series5"
   | "series6"
   | "series7"
-  | "series8";
+  | "series8"
+  | "buttonFill"
+  | "approve"
+  | "onApprove"
+  | "askGlow"
+  | "activeEdge"
+  | "activeRing"
+  | "focusRing"
+  | "cardFill";
 
 const TRANSPARENT = "#00000000";
 
@@ -350,6 +373,14 @@ const surround = (c: Omit<Palette, Follower | Surround> & Partial<Palette>, dark
     onMark: INK,
     ...(Object.fromEntries(MARKS.map((m, i) => [`mark${i + 1}`, m])) as Record<`mark${1 | 2 | 3 | 4 | 5 | 6}`, string>),
     ...(Object.fromEntries(series.map((s, i) => [`series${i + 1}`, s])) as Record<`series${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, string>),
+    buttonFill: TRANSPARENT,
+    approve: c.signal,
+    onApprove: c.onSignal,
+    askGlow: TRANSPARENT,
+    activeEdge: c.border,
+    activeRing: TRANSPARENT,
+    focusRing: TRANSPARENT,
+    cardFill: c.raised,
   };
 };
 
@@ -532,6 +563,8 @@ export const CONTRAST_PAIRS: readonly Pair[] = [
   ["Labels on the terminal", "faint", "sunken", TEXT_CONTRAST],
   ["Signal as text", "signal", "bg", TEXT_CONTRAST],
   ["Button text on signal", "onSignal", "signal", TEXT_CONTRAST],
+  ["Text on an answer button", "onApprove", "approve", TEXT_CONTRAST],
+  ["Text on settings cards", "text", "cardFill", TEXT_CONTRAST],
   ["Text on the soft tint", "signalSoftText", "signalSoft", TEXT_CONTRAST],
   ["Working on panels", "working", "surface", TEXT_CONTRAST],
   ["Working on the terminal", "working", "sunken", TEXT_CONTRAST],
@@ -553,6 +586,7 @@ const FIXABLE: Partial<Record<Token, readonly string[]>> = {
   onSignal: ON_FILL_CHOICES,
   onBlocked: ON_FILL_CHOICES,
   onMark: ON_FILL_CHOICES,
+  onApprove: ON_FILL_CHOICES,
 };
 
 /** How each pair reads: shown in the theme editor, where a low one says so

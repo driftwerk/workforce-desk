@@ -99,6 +99,14 @@ export const DERIVED: readonly [Token, string][] = [
   ["series6", "chart 6"],
   ["series7", "chart 7"],
   ["series8", "chart 8"],
+  ["buttonFill", "button"],
+  ["approve", "answer button"],
+  ["onApprove", "on answer button"],
+  ["askGlow", "ask glow"],
+  ["focusRing", "focus ring"],
+  ["activeEdge", "active edge"],
+  ["activeRing", "active ring"],
+  ["cardFill", "settings card"],
 ];
 
 /** How the editor sets the derived colours out: by what they colour. */
@@ -109,6 +117,13 @@ const GROUP_OF: Partial<Record<Token, string>> = {
   blockedSoft: "States",
   done: "States",
   idle: "States",
+  buttonFill: "Buttons and focus",
+  approve: "Buttons and focus",
+  onApprove: "Buttons and focus",
+  askGlow: "Buttons and focus",
+  focusRing: "Buttons and focus",
+  activeEdge: "Depth",
+  activeRing: "Depth",
   shadow: "Depth",
   lift: "Depth",
   edge: "Depth",

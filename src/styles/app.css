@@ -211,7 +211,9 @@ button {
   color: var(--on-signal);
   font-weight: 600;
   min-height: 44px;
-  box-shadow: 0 1px 2px var(--lift);
+  box-shadow:
+    0 1px 2px var(--lift),
+    0 6px 14px -6px var(--ask-glow);
 }
 .ask kbd {
   font-family: var(--font-mono);
@@ -651,7 +653,7 @@ button {
   padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--button-fill);
   color: var(--text);
   min-height: 38px;
   white-space: nowrap;
@@ -672,6 +674,13 @@ button {
   border: 0;
   background: var(--blocked);
   color: var(--on-blocked);
+  font-weight: 600;
+}
+/* The button that answers what waits on you: an approval's allow, a reply. */
+.btn-approve {
+  border: 0;
+  background: var(--approve);
+  color: var(--on-approve);
   font-weight: 600;
 }
 .link {
@@ -1387,6 +1396,7 @@ button {
 .field input:focus,
 .quick-ask input:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .field-row {
   display: flex;
@@ -1662,6 +1672,7 @@ button.thread-bar:hover {
 }
 .field-text:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* ── Updates ────────────────────────────────────────────────────────────── */

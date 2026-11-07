@@ -84,7 +84,7 @@ function InlineApproval({ approval }: { approval: Approval }) {
         !decided &&
         waiting && (
           <span className="dm-action-buttons">
-            <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void answer("allow")}>
+            <button type="button" className="btn btn-approve" disabled={busy} onClick={() => void answer("allow")}>
               Allow
             </button>
             <button type="button" className="btn" disabled={busy} onClick={() => void answer("deny")}>

@@ -133,7 +133,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
                 <button
                   key={choice}
                   type="button"
-                  className={choice === "allow" ? (isBreaker(need) ? "btn btn-blocked" : "btn btn-signal") : "btn"}
+                  className={choice === "allow" ? (isBreaker(need) ? "btn btn-blocked" : "btn btn-approve") : "btn"}
                   aria-label={`${word} “${need.ask}” for ${name}`}
                   disabled={need.stale}
                   aria-disabled={!!deciding}
@@ -147,7 +147,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
           {denied?.allowable && (
             <button
               type="button"
-              className="btn btn-signal"
+              className="btn btn-approve"
               aria-label={`${allowLabel(denied)}: ${name}`}
               disabled={need.stale || acting}
               title={denied.detail ? `Only ${denied.detail}, until the session ends` : undefined}
@@ -160,7 +160,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             <>
               <button
                 type="button"
-                className="btn btn-signal"
+                className="btn btn-approve"
                 aria-label={`Go to ${name}`}
                 disabled={need.stale || acting}
                 onClick={() => goToQuestions(ours!)}
@@ -187,7 +187,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
           {!line && target && need.answer.kind === "reply" && (
             <button
               type="button"
-              className="btn btn-signal"
+              className="btn btn-approve"
               aria-label={`Reply to ${name}…`}
               disabled={need.stale || !!deciding}
               title={stale}

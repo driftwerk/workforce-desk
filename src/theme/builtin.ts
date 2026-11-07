@@ -95,6 +95,14 @@ export const DAY = builtin({
     series6: "#2D7A12",
     series7: "#5B45C9",
     series8: "#C43A38",
+    buttonFill: "#FFFFFF",
+    approve: "#9A5200",
+    onApprove: "#FFFFFF",
+    askGlow: "#3F5A0673",
+    activeEdge: "#3F5A06",
+    activeRing: "#E8F0C4",
+    focusRing: "#E8F0C4",
+    cardFill: "#F3F1EB",
   },
 });
 

@@ -81,7 +81,21 @@ export function TicketCard({
   const blocked = (t.state === "todo" || t.state === "doing") && blockers(t, states).length > 0;
   const needs = needsLine(t, all, states);
   const pr = t.links.find((l) => l.kind === "pr");
-  const look = settled ? "board-card-settled" : waiting ? "board-card-waiting" : theirs ? "board-card-theirs" : "";
+  // Being worked on: in Doing, its session working.
+  const working = useDesk((s) => {
+    const who = t.assignee;
+    const session = who?.kind === "session" && t.state === "doing" ? s.sessions[who.id] : undefined;
+    return session ? lookOf(session) === "working" : false;
+  });
+  const look = settled
+    ? "board-card-settled"
+    : waiting
+      ? "board-card-waiting"
+      : theirs
+        ? "board-card-theirs"
+        : working
+          ? "board-card-working"
+          : "";
   return (
     <button
       ref={buttonRef}

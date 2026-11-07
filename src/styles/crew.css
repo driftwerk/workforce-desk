@@ -4,6 +4,7 @@
 
 .btn-ghost {
   border-color: transparent;
+  background: transparent;
   color: var(--muted);
 }
 .btn-ghost:hover:not(:disabled) {
@@ -57,6 +58,7 @@
 .field-stack input:focus,
 .field-stack textarea:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .field-stack input[readonly] {
   color: var(--muted);
