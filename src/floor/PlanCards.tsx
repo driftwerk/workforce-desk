@@ -72,8 +72,15 @@ function Card({ card, now }: { card: PlanCard; now: number }) {
   const ownKey = useAccounts((s) => s.ownPlanKey);
   // Only the card of the sign-in's own key: never another reading's.
   const own = !account && ownKey !== null && card.key === `claude:${ownKey}` ? who : null;
-  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
-  const title = account ? `${TITLE[card.kind]} · ${account.name}` : own ? `${TITLE[card.kind]} · ${own}` : TITLE[card.kind];
+  // A remote hub's own plan says whose it is in its title.
+  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.hub === null && card.where].filter(Boolean).join(" · ");
+  const title = account
+    ? `${TITLE[card.kind]} · ${account.name}`
+    : own
+      ? `${TITLE[card.kind]} · ${own}`
+      : card.hub !== null
+        ? `${card.hub} hub’s ${NAME[card.kind]} plan`
+        : TITLE[card.kind];
   return (
     <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">

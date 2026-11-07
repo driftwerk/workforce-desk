@@ -157,6 +157,30 @@ describe("the plan cards", () => {
     useAccounts.setState({ claudeSignIn: null, ownPlanKey: null });
   });
 
+  it("title a remote hub's own plan as that hub's", () => {
+    useChat.setState({ hubs: [hub("local"), hub("dw", { label: "Driftwerk" })] });
+    useFloor.setState({
+      hubs: {
+        local: ready(view(), { usage: usage({}) }),
+        dw: ready(view(), { usage: usage({ logins: [], readings: [reading([{ usedPercent: 20, resetsAt: later(100), minutes: 300 }], { account: null, where: "hub", plan: "max" })] }) }),
+      },
+    });
+    render(<PlanCards />);
+    const theirs = card("Driftwerk hub’s Claude plan usage");
+    expect(within(theirs).getByText("Max")).toBeTruthy();
+  });
+
+  it("give an account with no reading yet its own card, by its name", () => {
+    useAccounts.setState({
+      accounts: [{ id: "a-s", engine: "claude", name: "Kingsley Starmoire", isDefault: false, signedIn: true, sessions: [], createdAt: at(0), planKey: "star" }],
+    });
+    show(usage({ readings: [reading([{ usedPercent: 26, resetsAt: later(100), minutes: 10_080 }], { account: null, where: "hub" })] }));
+    render(<PlanCards />);
+    expect(screen.getAllByRole("region", { name: /^Claude plan/ }).map((r) => r.getAttribute("aria-label"))).toEqual(["Claude plan · Kingsley Starmoire usage"]);
+    expect(within(card("Claude plan · Kingsley Starmoire usage")).getByText(/^No reading yet/)).toBeTruthy();
+    useAccounts.setState({ accounts: [] });
+  });
+
   it("wait for a first reading on a plan signed in", () => {
     show(usage({}));
     render(<PlanCards />);

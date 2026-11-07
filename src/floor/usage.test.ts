@@ -43,17 +43,51 @@ describe("plan cards", () => {
     expect(cards.filter((c) => c.kind === "claude").map((c) => c.where)).toEqual(["this computer", "Hub b"]);
   });
 
-  it("put a reading with no account with the only card of its kind, else on its own", () => {
-    const one = plans([
-      source("local", { readings: [reading({ observedAt: at(5) })] }),
-      source("b", { readings: [reading({ account: null, where: "hub" })] }),
+  it("put this computer's reading with no account with the only card of its kind, else nowhere", () => {
+    const one = plans([source("local", { readings: [reading({ observedAt: at(9) }), reading({ account: null, observedAt: at(5) })] })]);
+    expect(one.filter((c) => c.kind === "claude")).toEqual([expect.objectContaining({ key: "claude:acct-1", hub: null })]);
+    expect(one[0]!.reading!.observedAt).toBe(at(5));
+    const two = plans([source("local", { readings: [reading(), reading({ account: "acct-2" }), reading({ account: null })] })]);
+    expect(two.filter((c) => c.kind === "claude").map((c) => c.key)).toEqual(["claude:acct-1", "claude:acct-2"]);
+  });
+
+  it("never make a card of the local hub's own calls on a login no account is known to be", () => {
+    // Its install login's readings, several logins over time, and the
+    // freshest of them: none of them an account's.
+    const cards = plans([
+      source("local", {
+        readings: [
+          reading({ account: "gmail" }),
+          reading({ account: null, where: "hub", observedAt: at(30) }),
+          reading({ account: null, where: "hub", windows: [five(100, 10)] }),
+        ],
+      }),
     ]);
-    expect(one.filter((c) => c.kind === "claude")).toHaveLength(1);
-    const two = plans([
-      source("local", { readings: [reading(), reading({ account: "acct-2", where: "hub" })] }),
-      source("b", { readings: [reading({ account: null, where: "hub" })] }),
+    const claude = cards.filter((c) => c.kind === "claude");
+    expect(claude.map((c) => c.key)).toEqual(["claude:gmail"]);
+    expect(claude[0]!.reading!.observedAt).toBe(at(1));
+  });
+
+  it("give each of the person's accounts its card, waiting for a first reading", () => {
+    const cards = plans([source("local", { readings: [reading({ account: "gmail" })] })], ["claude:gmail", "claude:starmoire"]);
+    const claude = (cs: typeof cards) => cs.filter((c) => c.kind === "claude");
+    expect(claude(cards).map((c) => [c.key, c.state])).toEqual([
+      ["claude:gmail", "reading"],
+      ["claude:starmoire", "no-reading"],
     ]);
-    expect(two.filter((c) => c.kind === "claude")).toHaveLength(3);
+    // An account with no reading yet is its kind's card: no nameless one.
+    expect(claude(plans([source("local", {})], ["claude:starmoire"])).map((c) => c.key)).toEqual(["claude:starmoire"]);
+  });
+
+  it("make a remote hub's reading with no account that hub's own plan, after the person's", () => {
+    const cards = plans([
+      source("dw", { readings: [reading({ account: null, where: "hub", plan: null })] }, { label: "Driftwerk" }),
+      source("local", { readings: [reading({ account: "gmail" })] }),
+    ]);
+    expect(cards.filter((c) => c.kind === "claude").map((c) => [c.key, c.hub])).toEqual([
+      ["claude:gmail", null],
+      ["claude@dw", "Driftwerk"],
+    ]);
   });
 
   it("wait for a reading while signed in, and offer sign-in on this computer only", () => {

@@ -19,6 +19,9 @@ export interface PlanCard {
   plan: string | null;
   /** Where its reading came from: "this computer", or a remote hub's name. */
   where: string;
+  /** A remote hub's own plan (its own login, none of the person's
+   *  accounts): that hub's name. */
+  hub: string | null;
   state: "reading" | "no-reading" | "signed-out";
   /** In this computer's time. */
   reading: PlanReading | null;
@@ -37,28 +40,40 @@ const shifted = (r: PlanReading, offset: number): PlanReading => ({
 interface Seen {
   reading: PlanReading;
   where: string;
-  from: string;
+  source: PlanSource;
 }
 
-/** The cards for every hub's readings: one per account (readings of one
- *  account through several logins are one card, the freshest shown); a
- *  reading that names no account joins the only card of its kind, else has
- *  its own; a kind with no reading has a card while some login of it is
- *  signed in, or on this computer while none is. */
-export const plans = (sources: readonly PlanSource[]): PlanCard[] => {
-  const seen: Seen[] = sources.flatMap((s) =>
-    s.usage.readings.map((r) => ({ reading: shifted(r, s.offset), where: whereOf(s), from: `${s.hubId}:${r.where}` })),
-  );
+/** The cards for every hub's readings, one per account the person has:
+ *  - an account's readings, through whichever of its logins, are its card,
+ *    the freshest shown; each of the person's accounts (`accounts`: its
+ *    card's key, `claude:<planKey>`) has its card, waiting for a reading
+ *    until one comes;
+ *  - a reading that names no account is no account's: this computer's
+ *    joins the only card of its kind, else has none (the local hub's own
+ *    calls, on a login none of the accounts is known to be, never do); a
+ *    remote hub's is that hub's own plan, its card titled so;
+ *  - a kind with no card has one while some login of it is signed in, or
+ *    on this computer while none is. */
+export const plans = (sources: readonly PlanSource[], accounts: readonly string[] = []): PlanCard[] => {
+  const seen: Seen[] = sources.flatMap((s) => s.usage.readings.map((r) => ({ reading: shifted(r, s.offset), where: whereOf(s), source: s })));
   const push = (m: Map<string, Seen[]>, key: string, x: Seen) => m.set(key, [...(m.get(key) ?? []), x]);
-  const accounts = seen
+  const byAccount = seen
     .filter((x) => x.reading.account)
     .reduce((m, x) => push(m, `${x.reading.kind}:${x.reading.account}`, x), new Map<string, Seen[]>());
+  const named = new Set([...byAccount.keys(), ...accounts]);
+  const hubs = new Map<string, string>();
   const groups = seen
     .filter((x) => !x.reading.account)
     .reduce((m, x) => {
-      const ofKind = [...accounts.keys()].filter((k) => k.startsWith(`${x.reading.kind}:`));
-      return push(m, ofKind.length === 1 ? ofKind[0]! : `${x.reading.kind}@${x.from}`, x);
-    }, new Map(accounts));
+      if (!x.source.local) {
+        const key = `${x.reading.kind}@${x.source.hubId}`;
+        hubs.set(key, x.source.label);
+        return push(m, key, x);
+      }
+      if (x.reading.where === "hub") return m;
+      const ofKind = [...named].filter((k) => k.startsWith(`${x.reading.kind}:`));
+      return ofKind.length === 1 ? push(m, ofKind[0]!, x) : m;
+    }, new Map(byAccount));
   const cards: PlanCard[] = [...groups].map(([key, xs]) => {
     const newest = [...xs].sort((a, b) => b.reading.observedAt.localeCompare(a.reading.observedAt));
     const top = newest[0]!;
@@ -67,16 +82,29 @@ export const plans = (sources: readonly PlanSource[]): PlanCard[] => {
       kind: top.reading.kind,
       plan: newest.find((x) => x.reading.plan)?.reading.plan ?? null,
       where: top.where,
+      hub: hubs.get(key) ?? null,
       state: "reading",
       reading: top.reading,
     };
   });
-  const empty = KINDS.filter((kind) => !cards.some((c) => c.kind === kind)).flatMap((kind): PlanCard[] => {
+  const waiting = accounts
+    .filter((key) => !groups.has(key))
+    .flatMap((key): PlanCard[] => {
+      const kind = KINDS.find((k) => key.startsWith(`${k}:`));
+      return kind ? [{ key, kind, plan: null, where: "this computer", hub: null, state: "no-reading", reading: null }] : [];
+    });
+  const all = [...cards, ...waiting];
+  const empty = KINDS.filter((kind) => !all.some((c) => c.kind === kind)).flatMap((kind): PlanCard[] => {
     const signedIn = sources.find((s) => s.usage.logins.some((l) => l.kind === kind && l.signedIn));
-    if (signedIn) return [{ key: `${kind}@none`, kind, plan: null, where: whereOf(signedIn), state: "no-reading", reading: null }];
-    return sources.some((s) => s.local) ? [{ key: `${kind}@out`, kind, plan: null, where: "this computer", state: "signed-out", reading: null }] : [];
+    if (signedIn)
+      return [{ key: `${kind}@none`, kind, plan: null, where: whereOf(signedIn), hub: null, state: "no-reading", reading: null }];
+    return sources.some((s) => s.local)
+      ? [{ key: `${kind}@out`, kind, plan: null, where: "this computer", hub: null, state: "signed-out", reading: null }]
+      : [];
   });
-  return [...cards, ...empty].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind));
+  // A remote hub's own plan after the person's own.
+  const rank = (c: PlanCard) => KINDS.indexOf(c.kind) * 2 + (c.hub === null ? 0 : 1);
+  return [...all, ...empty].sort((a, b) => rank(a) - rank(b));
 };
 
 export type Fullness = "ok" | "high" | "full";
