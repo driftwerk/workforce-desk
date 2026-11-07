@@ -71,9 +71,22 @@ function Card({ card, now }: { card: PlanCard; now: number }) {
   const who = useAccounts((s) => (s.claudeSignIn?.state === "in" ? s.claudeSignIn.who : null));
   const ownKey = useAccounts((s) => s.ownPlanKey);
   // Only the card of the sign-in's own key: never another reading's.
-  const own = !account && ownKey !== null && card.key === `claude:${ownKey}` ? who : null;
-  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
-  const title = account ? `${TITLE[card.kind]} · ${account.name}` : own ? `${TITLE[card.kind]} · ${own}` : TITLE[card.kind];
+  const own = !account && ownKey !== null && card.key === `claude:${ownKey}`;
+  // Whose plan it is, always: an account's, this computer's sign-in's (by
+  // who Claude Code says it is, else as this computer's), a remote hub's
+  // own, or whatever this computer's CLI is signed in to.
+  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.hub === null && !card.computer && card.where]
+    .filter(Boolean)
+    .join(" · ");
+  const title = account
+    ? `${TITLE[card.kind]} · ${account.name}`
+    : own
+      ? `${TITLE[card.kind]} · ${who ?? "this computer’s sign-in"}`
+      : card.hub !== null
+        ? `${card.hub} hub’s ${NAME[card.kind]} plan`
+        : card.state === "signed-out"
+          ? `${NAME[card.kind]} on this computer · not signed in`
+          : `${NAME[card.kind]} on this computer`;
   return (
     <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
+import { useAccounts } from "../engines/accounts";
 import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { deskListeners } from "../hub/store";
@@ -331,10 +332,13 @@ export const useNeedCounts = (): Map<string, number> => {
   return useMemo(() => countsByItem(needs), [needs]);
 };
 
-/** The plan cards, from every hub's usage. */
+/** The plan cards, from every hub's usage: one for each of the person's
+ *  accounts. */
 export const usePlans = (): PlanCard[] => {
   const hubs = useFloor((s) => s.hubs);
   const list = useChat((s) => s.hubs);
+  const accounts = useAccounts((s) => s.accounts);
+  const ownKey = useAccounts((s) => s.ownPlanKey);
   return useMemo(
     () =>
       plans(
@@ -342,7 +346,11 @@ export const usePlans = (): PlanCard[] => {
           const f = hubs[h.id];
           return f?.usage ? [{ hubId: h.id, label: h.label, local: h.local, usage: f.usage, offset: f.offset }] : [];
         }),
+        {
+          accounts: accounts.flatMap((a) => (a.planKey ? [`${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`] : [])),
+          own: ownKey ? `claude:${ownKey}` : null,
+        },
       ),
-    [hubs, list],
+    [hubs, list, accounts, ownKey],
   );
 };

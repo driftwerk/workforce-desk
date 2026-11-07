@@ -72,8 +72,10 @@ describe("the plan cards", () => {
       }),
     );
     render(<PlanCards />);
-    const claude = card("Claude plan usage");
-    expect(within(claude).getByText("Max · this computer")).toBeTruthy();
+    // Whatever this computer's Claude Code is signed in to, none of the
+    // person's accounts: said so.
+    const claude = card("Claude on this computer usage");
+    expect(within(claude).getByText("Max")).toBeTruthy();
     expect(within(claude).getByText(`as of ${clock(at(1))}`)).toBeTruthy();
     expect(within(claude).getByText("40%").className).toBe("plan-ok");
     expect(within(claude).getByText(`resets ${clock(later(148))} · in 2h 28m`)).toBeTruthy();
@@ -96,7 +98,7 @@ describe("the plan cards", () => {
       }),
     );
     render(<PlanCards />);
-    const claude = card("Claude plan usage");
+    const claude = card("Claude on this computer usage");
     expect(within(claude).getByText("92%").className).toBe("plan-full");
     const hits = NOW + 8 / (92 / (240 * MIN));
     expect(
@@ -111,7 +113,7 @@ describe("the plan cards", () => {
   it("name the day the weekly limit is reached when it isn't today", () => {
     show(usage({ readings: [reading([{ usedPercent: 58, resetsAt: later(3 * 1440), minutes: 10_080 }])] }));
     render(<PlanCards />);
-    const claude = card("Claude plan usage");
+    const claude = card("Claude on this computer usage");
     const hits = NOW + 42 / (58 / (4 * 1440 * MIN));
     const line = within(claude).getByText(/^At this pace you reach the limit about /).textContent!;
     expect(line).toContain(`about ${dayClock(hits, NOW)},`);
@@ -121,17 +123,17 @@ describe("the plan cards", () => {
   it("colour a window by the percent they show", () => {
     show(usage({ readings: [reading([{ usedPercent: 89.6, resetsAt: later(60), minutes: 300 }])] }));
     render(<PlanCards />);
-    const shown = within(card("Claude plan usage")).getByText("90%");
+    const shown = within(card("Claude on this computer usage")).getByText("90%");
     expect(shown.className).toBe("plan-full");
   });
 
   it("show a window that resets while shown as reset, without reading again", async () => {
     show(usage({ readings: [reading([{ usedPercent: 70, resetsAt: later(2), minutes: 300 }])] }));
     render(<PlanCards />);
-    expect(within(card("Claude plan usage")).getByText("70%")).toBeTruthy();
+    expect(within(card("Claude on this computer usage")).getByText("70%")).toBeTruthy();
     await act(() => vi.advanceTimersByTimeAsync(3 * MIN));
-    expect(within(card("Claude plan usage")).getByText("0%")).toBeTruthy();
-    expect(within(card("Claude plan usage")).getByText(`Reset at ${clock(later(2))} · no use seen since.`)).toBeTruthy();
+    expect(within(card("Claude on this computer usage")).getByText("0%")).toBeTruthy();
+    expect(within(card("Claude on this computer usage")).getByText(`Reset at ${clock(later(2))} · no use seen since.`)).toBeTruthy();
   });
 
   it("are one card per account, by its name, whichever sign-in of it reported", () => {
@@ -157,20 +159,77 @@ describe("the plan cards", () => {
     useAccounts.setState({ claudeSignIn: null, ownPlanKey: null });
   });
 
+  it("title a remote hub's own plan as that hub's", () => {
+    useChat.setState({ hubs: [hub("local"), hub("dw", { label: "Driftwerk" })] });
+    useFloor.setState({
+      hubs: {
+        local: ready(view(), { usage: usage({}) }),
+        dw: ready(view(), { usage: usage({ logins: [], readings: [reading([{ usedPercent: 20, resetsAt: later(100), minutes: 300 }], { account: null, where: "hub", plan: "max" })] }) }),
+      },
+    });
+    render(<PlanCards />);
+    const theirs = card("Driftwerk hub’s Claude plan usage");
+    expect(within(theirs).getByText("Max")).toBeTruthy();
+  });
+
+  it("give an account with no reading yet its own card, by its name", () => {
+    useAccounts.setState({
+      accounts: [{ id: "a-s", engine: "claude", name: "Kingsley Starmoire", isDefault: false, signedIn: true, sessions: [], createdAt: at(0), planKey: "star" }],
+    });
+    show(usage({ readings: [reading([{ usedPercent: 26, resetsAt: later(100), minutes: 10_080 }], { account: null, where: "hub" })] }));
+    render(<PlanCards />);
+    expect(screen.getAllByRole("region", { name: /^Claude plan/ }).map((r) => r.getAttribute("aria-label"))).toEqual(["Claude plan · Kingsley Starmoire usage"]);
+    expect(within(card("Claude plan · Kingsley Starmoire usage")).getByText(/^No reading yet/)).toBeTruthy();
+    useAccounts.setState({ accounts: [] });
+  });
+
+  it("name this computer's sign-in's card though Claude Code hasn't said who it is", () => {
+    useAccounts.setState({ accounts: [], ownPlanKey: "own", claudeSignIn: null });
+    show(usage({ readings: [reading([{ usedPercent: 10, resetsAt: later(100), minutes: 300 }], { account: "own" })] }));
+    render(<PlanCards />);
+    expect(card("Claude plan · this computer’s sign-in usage")).toBeTruthy();
+    useAccounts.setState({ ownPlanKey: null });
+  });
+
+  it("title a remote hub's plan whose account is none of the person's as that hub's, ChatGPT too", () => {
+    useChat.setState({ hubs: [hub("local"), hub("dw", { label: "Driftwerk" })] });
+    useFloor.setState({
+      hubs: {
+        local: ready(view(), { usage: usage({}) }),
+        dw: ready(view(), {
+          usage: usage({
+            logins: [],
+            readings: [reading([{ usedPercent: 5, resetsAt: later(100), minutes: 10_080 }], { kind: "chatgpt", account: "team", where: "hub", plan: "prolite" })],
+          }),
+        }),
+      },
+    });
+    render(<PlanCards />);
+    expect(within(card("Driftwerk hub’s ChatGPT plan usage")).getByText("Prolite")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "ChatGPT plan usage" })).toBeNull();
+  });
+
+  it("title a remote hub's signed-in plan with no reading yet as that hub's", () => {
+    useChat.setState({ hubs: [hub("dw", { label: "Driftwerk" })] });
+    useFloor.setState({ hubs: { dw: ready(view(), { usage: usage({ logins: [{ kind: "claude", where: "hub", signedIn: true }] }) }) } });
+    render(<PlanCards />);
+    expect(card("Driftwerk hub’s Claude plan usage")).toBeTruthy();
+  });
+
   it("wait for a first reading on a plan signed in", () => {
     show(usage({}));
     render(<PlanCards />);
-    expect(within(card("ChatGPT plan usage")).getByText("No reading yet. It shows after Codex next answers on this plan.")).toBeTruthy();
+    expect(within(card("ChatGPT on this computer usage")).getByText("No reading yet. It shows after Codex next answers on this plan.")).toBeTruthy();
   });
 
   it("offer sign-in on this computer when no plan of a kind is, and nothing for a remote hub", async () => {
     show(usage({ logins: [] }));
     render(<PlanCards />);
-    const claude = card("Claude plan usage");
+    const claude = card("Claude on this computer · not signed in usage");
     expect(within(claude).getByText("Not signed in on this computer, so there’s no usage to show.")).toBeTruthy();
     await act(async () => fireEvent.click(within(claude).getByRole("button", { name: "Sign in to Claude" })));
     expect(startLogin).toHaveBeenCalledWith("claude");
-    expect(within(card("ChatGPT plan usage")).getByRole("button", { name: "Sign in to ChatGPT" })).toBeTruthy();
+    expect(within(card("ChatGPT on this computer · not signed in usage")).getByRole("button", { name: "Sign in to ChatGPT" })).toBeTruthy();
     cleanup();
     show(usage({ logins: [] }), "b");
     render(<PlanCards />);
