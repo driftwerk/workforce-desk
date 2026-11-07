@@ -3,6 +3,7 @@ import { DAY, NIGHT } from "./builtin";
 import { ThemeError, parseTheme, slug } from "./toml";
 import { contrast, derive, luminance, mix, type Palette, type ThemeSpec } from "./tokens";
 import { baseName } from "../ui/paths";
+import { ANSI } from "./xterm";
 
 export type ThemeFormat = "vscode" | "ghostty" | "iterm" | "base16" | "desk";
 
@@ -14,7 +15,11 @@ export const FORMAT_NAMES: Record<ThemeFormat, string> = {
   desk: "Desk",
 };
 
-type Terminal = "ansiRed" | "ansiGreen" | "ansiCyan" | "termText";
+type Terminal = (typeof ANSI)[number] | "termText" | "termCursor" | "termSelection";
+
+/** A terminal's 16 colours, by index, as the tokens they set. */
+const sixteen = (at: (i: number) => string | undefined): Partial<Record<Terminal, string>> =>
+  Object.fromEntries(ANSI.flatMap((t, i) => (at(i) ? [[t, at(i)]] : [])));
 
 interface Found {
   name?: string;
@@ -127,7 +132,9 @@ const assemble = (format: ThemeFormat, fallbackName: string, found: Found): Them
   const overrides: Partial<Palette> = {};
   for (const [token, raw] of Object.entries(found.terminal) as [Terminal, string][]) {
     const c = solid(raw, terminalBg);
-    if (c && contrast(c, terminalBg) >= 3) overrides[token] = c;
+    // A selection is a ground; everything else is drawn on the terminal's
+    // and is kept only where it shows there.
+    if (c && (token === "termSelection" || contrast(c, terminalBg) >= 3)) overrides[token] = c;
   }
   return { ...base, signal, overrides };
 };
@@ -197,13 +204,17 @@ export const importVsCode = (fileName: string, source: string): ThemeSpec => {
     text: c("editor.foreground") ?? c("foreground"),
     accents: [c("focusBorder"), c("button.background"), c("activityBarBadge.background"), c("textLink.foreground")],
     terminal: {
-      ansiRed: c("terminal.ansiRed"),
-      ansiGreen: c("terminal.ansiGreen"),
-      ansiCyan: c("terminal.ansiCyan"),
+      ...sixteen((i) => c(`terminal.${VSCODE_ANSI[i]}`)),
       termText: c("terminal.foreground"),
+      termCursor: c("terminalCursor.foreground"),
+      termSelection: c("terminal.selectionBackground"),
     },
   });
 };
+
+const VSCODE_ANSI = ["Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"].map((n) => `ansi${n}`).concat(
+  ["Black", "Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"].map((n) => `ansiBright${n}`),
+);
 
 const unquote = (raw: string): string => {
   const v = raw.trim();
@@ -234,7 +245,7 @@ export const importGhostty = (fileName: string, source: string): ThemeSpec => {
     background: keys.background,
     text: keys.foreground,
     accents: [keys["cursor-color"], palette[4], palette[5], palette[12], palette[13], palette[6], palette[2], palette[3]],
-    terminal: { ansiRed: palette[1], ansiGreen: palette[2], ansiCyan: palette[6] },
+    terminal: { ...sixteen((i) => palette[i]), termCursor: keys["cursor-color"], termSelection: keys["selection-background"] },
   });
 };
 
@@ -274,7 +285,7 @@ export const importITerm = (fileName: string, source: string): ThemeSpec => {
     background: colour("Background Color"),
     text: colour("Foreground Color"),
     accents: [colour("Cursor Color"), ansi(4), ansi(5), ansi(12), ansi(13), ansi(6), ansi(2), ansi(3)],
-    terminal: { ansiRed: ansi(1), ansiGreen: ansi(2), ansiCyan: ansi(6) },
+    terminal: { ...sixteen(ansi), termCursor: colour("Cursor Color"), termSelection: colour("Selection Color") },
   });
 };
 
@@ -293,7 +304,9 @@ export const importBase16 = (fileName: string, source: string): ThemeSpec => {
     background: fields.base00,
     text: fields.base05,
     accents: [fields.base0d, fields.base0e, fields.base0c, fields.base0b, fields.base09, fields.base0a],
-    terminal: { ansiRed: fields.base08, ansiGreen: fields.base0b, ansiCyan: fields.base0c },
+    // base16's shell mapping; its black is the background, which is the
+    // terminal's own and dropped as unreadable on it.
+    terminal: sixteen((i) => [fields.base00, fields.base08, fields.base0b, fields.base0a, fields.base0d, fields.base0e, fields.base0c, fields.base05, fields.base03][i]),
   });
 };
 

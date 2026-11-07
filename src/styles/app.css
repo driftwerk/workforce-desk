@@ -1219,8 +1219,71 @@ button {
 .terminal .xterm {
   height: 100%;
 }
+/* A running CLI drawn for the other ground than its terminal's now. */
+.session-recolor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
 .terminal .xterm-viewport {
   background: transparent !important;
+}
+/* Dim text on a light terminal ground: xterm draws it at half opacity,
+   which doesn't read on a light ground, so it is the theme's dim colour
+   (see dimVariables in theme/xterm.ts). A dark ground keeps xterm's. */
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-dim {
+  color: var(--term-dim);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-0.xterm-dim {
+  color: var(--term-dim-0);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-1.xterm-dim {
+  color: var(--term-dim-1);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-2.xterm-dim {
+  color: var(--term-dim-2);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-3.xterm-dim {
+  color: var(--term-dim-3);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-4.xterm-dim {
+  color: var(--term-dim-4);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-5.xterm-dim {
+  color: var(--term-dim-5);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-6.xterm-dim {
+  color: var(--term-dim-6);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-7.xterm-dim {
+  color: var(--term-dim-7);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-8.xterm-dim {
+  color: var(--term-dim-8);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-9.xterm-dim {
+  color: var(--term-dim-9);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-10.xterm-dim {
+  color: var(--term-dim-10);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-11.xterm-dim {
+  color: var(--term-dim-11);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-12.xterm-dim {
+  color: var(--term-dim-12);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-13.xterm-dim {
+  color: var(--term-dim-13);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-14.xterm-dim {
+  color: var(--term-dim-14);
+}
+:root[data-term-ground="light"] .terminal .xterm-rows .xterm-fg-15.xterm-dim {
+  color: var(--term-dim-15);
 }
 .terminal-idle {
   flex: 1;

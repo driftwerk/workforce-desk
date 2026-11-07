@@ -56,9 +56,12 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/sessions/{}/asked/allow"),
     route("POST", "/api/desk/sessions/{}/asked/dismiss"),
     route("POST", "/api/desk/sessions/{}/resume"),
+    route("POST", "/api/desk/sessions/{}/restart"),
     route("POST", "/api/desk/sessions/{}/remove"),
     route("POST", "/api/desk/sessions/{}/end"),
     route("POST", "/api/desk/sessions/{}/approvals/{}"),
+    // The colours its terminals are drawn in.
+    route("PUT", "/api/desk/terminal/colors"),
     // Desk's line: a session's thread, your messages and answers, setting
     // a question aside, and putting your words in its prompt unsent.
     with_query("GET", "/api/desk/sessions/{}/line", &["before"]),

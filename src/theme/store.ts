@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { BUILTIN } from "./builtin";
 import { cssVariables, derive, type Theme, type ThemeSpec } from "./tokens";
+import { dimVariables, terminalLight } from "./xterm";
 
 export type ThemeChoice = string | "system";
 
@@ -66,7 +67,9 @@ export const useTheme = (): Theme => {
 };
 
 export const applyTheme = (theme: Theme, root: HTMLElement = document.documentElement): void => {
-  for (const [k, v] of Object.entries(cssVariables(theme))) root.style.setProperty(k, v);
+  for (const [k, v] of Object.entries({ ...cssVariables(theme), ...dimVariables(theme) })) root.style.setProperty(k, v);
+  // The terminal's ground, by its own colour: a theme's may differ from its panels'.
+  root.dataset.termGround = terminalLight(theme.colors) ? "light" : "dark";
   root.dataset.theme = theme.dark ? "dark" : "light";
   root.style.colorScheme = theme.dark ? "dark" : "light";
 };

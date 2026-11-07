@@ -3,6 +3,11 @@ import { clampChroma, formatHex, oklch } from "culori";
 /** Every colour a theme has. Each can be overridden under
  *  `[colors.override]` in a theme's TOML; those not set are derived from
  *  the background, signal and text (see `derive`):
+ *  - the terminal's: its ground is `sunken`, its text `termText`, its
+ *    cursor `termCursor`, selection `termSelection`, and the 16 ANSI
+ *    colours `ansiBlack`…`ansiWhite` and `ansiBrightBlack`…`ansiBrightWhite`
+ *    (the bright ones follow their plain colour unless set). The programs
+ *    in a terminal are told these when they ask (OSC 4, 10 and 11).
  *  - `handle`: drag handles at rest (a column's resize grip, the edges
  *    between grid panes) — the border colour unless set.
  *  - `handleActive`: a drag handle hovered, dragged or focused — the
@@ -27,9 +32,24 @@ export const TOKENS = [
   "done",
   "idle",
   "termText",
+  "termCursor",
+  "termSelection",
+  "ansiBlack",
   "ansiRed",
   "ansiGreen",
+  "ansiYellow",
+  "ansiBlue",
+  "ansiMagenta",
   "ansiCyan",
+  "ansiWhite",
+  "ansiBrightBlack",
+  "ansiBrightRed",
+  "ansiBrightGreen",
+  "ansiBrightYellow",
+  "ansiBrightBlue",
+  "ansiBrightMagenta",
+  "ansiBrightCyan",
+  "ansiBrightWhite",
   "handle",
   "handleActive",
 ] as const;
@@ -121,6 +141,7 @@ const TONES = {
   ansiRed: ["#FF8A7A", "#B42318"],
   ansiGreen: ["#A6E37A", "#3F7A12"],
   ansiCyan: ["#8FD8E8", "#0E7490"],
+  ansiMagenta: ["#C9B8FF", "#7240C4"],
 } as const;
 
 type Tone = keyof typeof TONES;
@@ -174,7 +195,7 @@ export const derive = (spec: ThemeSpec): Theme => {
   // Text on a blocked fill: Desk's, unless the other reads better on it.
   const [on, otherOn] = dark ? ["#2B1B03", "#FFFFFF"] : ["#FFFFFF", "#2B1B03"];
   const onBlocked = contrast(on, blocked) >= STATE_CONTRAST || contrast(on, blocked) >= contrast(otherOn, blocked) ? on : otherOn;
-  const derived: Omit<Palette, "handle" | "handleActive"> = {
+  const derived: Omit<Palette, Follower> = {
     bg,
     surface,
     raised,
@@ -198,11 +219,71 @@ export const derive = (spec: ThemeSpec): Theme => {
     ansiRed: tone("ansiRed"),
     ansiGreen: tone("ansiGreen"),
     ansiCyan: tone("ansiCyan"),
+    ansiMagenta: tone("ansiMagenta"),
   };
   const colors = { ...derived, ...spec.overrides };
-  // The handles follow the border and signal as they end up, overrides
-  // included, unless a theme sets them itself.
-  return { spec, dark, colors: { ...colors, handle: spec.overrides.handle ?? colors.border, handleActive: spec.overrides.handleActive ?? colors.signal } };
+  // The handles and the rest of the terminal follow the colours as they end
+  // up, overrides included, unless a theme sets them itself.
+  return { spec, dark, colors: { ...colors, ...followers(colors), ...spec.overrides } };
+};
+
+/** The colours that follow others unless a theme sets them. */
+type Follower =
+  | "handle"
+  | "handleActive"
+  | "termCursor"
+  | "termSelection"
+  | "ansiBlack"
+  | "ansiYellow"
+  | "ansiBlue"
+  | "ansiWhite"
+  | "ansiBrightBlack"
+  | "ansiBrightRed"
+  | "ansiBrightGreen"
+  | "ansiBrightYellow"
+  | "ansiBrightBlue"
+  | "ansiBrightMagenta"
+  | "ansiBrightCyan"
+  | "ansiBrightWhite";
+
+const followers = (c: Omit<Palette, Follower> & Partial<Palette>): Record<Follower, string> => {
+  const yellow = c.ansiYellow ?? c.blocked;
+  const blue = c.ansiBlue ?? c.working;
+  // The terminal's own ground, light or dark as `terminalLight` (xterm.ts)
+  // has it: a theme's terminal may be dark in a light theme, or the other way.
+  const light = luminance(c.sunken) >= 0.2;
+  // A derived colour is moved toward the terminal's text until it reads on
+  // the ground; one that reads is as it is. Text that doesn't read there
+  // itself gives way to black or white.
+  const toward = contrast(c.termText, c.sunken) >= STATE_CONTRAST ? c.termText : light ? "#000000" : "#FFFFFF";
+  const reads = (hex: string): string => {
+    for (let p = 0; p <= 1; p += 0.05) {
+      const next = mix(hex, toward, p);
+      if (contrast(next, c.sunken) >= STATE_CONTRAST) return next;
+    }
+    return toward;
+  };
+  // A bright colour is its plain one a quarter of the way to the text.
+  const bright = (plain: string) => reads(mix(plain, c.text, 0.25));
+  return {
+    handle: c.border,
+    handleActive: c.signal,
+    termCursor: c.signal,
+    termSelection: mix(c.sunken, c.signal, 0.28),
+    // Black is the ground's end on a dark terminal, the text's on a light one.
+    ansiBlack: light ? c.text : mix(c.sunken, c.text, 0.18),
+    ansiYellow: yellow,
+    ansiBlue: blue,
+    ansiWhite: reads(light ? mix(c.text, c.bg, 0.4) : c.termText),
+    ansiBrightBlack: reads(c.faint),
+    ansiBrightRed: bright(c.ansiRed),
+    ansiBrightGreen: bright(c.ansiGreen),
+    ansiBrightYellow: bright(yellow),
+    ansiBrightBlue: bright(blue),
+    ansiBrightMagenta: bright(c.ansiMagenta),
+    ansiBrightCyan: bright(c.ansiCyan),
+    ansiBrightWhite: reads(c.text),
+  };
 };
 
 const kebab = (token: string): string => token.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
