@@ -49,7 +49,7 @@ interface Seen {
  *    card's key, `claude:<planKey>`) has its card, waiting for a reading
  *    until one comes;
  *  - a reading that names no account is no account's: this computer's
- *    joins the only card of its kind, else has none (the local hub's own
+ *    joins the only card of its kind with readings, else has none (the local hub's own
  *    calls, on a login none of the accounts is known to be, never do); a
  *    remote hub's is that hub's own plan, its card titled so;
  *  - a kind with no card has one while some login of it is signed in, or
@@ -60,7 +60,6 @@ export const plans = (sources: readonly PlanSource[], accounts: readonly string[
   const byAccount = seen
     .filter((x) => x.reading.account)
     .reduce((m, x) => push(m, `${x.reading.kind}:${x.reading.account}`, x), new Map<string, Seen[]>());
-  const named = new Set([...byAccount.keys(), ...accounts]);
   const hubs = new Map<string, string>();
   const groups = seen
     .filter((x) => !x.reading.account)
@@ -71,7 +70,9 @@ export const plans = (sources: readonly PlanSource[], accounts: readonly string[
         return push(m, key, x);
       }
       if (x.reading.where === "hub") return m;
-      const ofKind = [...named].filter((k) => k.startsWith(`${x.reading.kind}:`));
+      // Only onto a card with readings of its own: never a guess under an
+      // account's name that has none yet.
+      const ofKind = [...byAccount.keys()].filter((k) => k.startsWith(`${x.reading.kind}:`));
       return ofKind.length === 1 ? push(m, ofKind[0]!, x) : m;
     }, new Map(byAccount));
   const cards: PlanCard[] = [...groups].map(([key, xs]) => {

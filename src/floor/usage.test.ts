@@ -75,6 +75,11 @@ describe("plan cards", () => {
       ["claude:gmail", "reading"],
       ["claude:starmoire", "no-reading"],
     ]);
+    // A reading of this computer's that names no account never takes the
+    // name of an account with none of its own.
+    expect(claude(plans([source("local", { readings: [reading({ account: null })] })], ["claude:starmoire"]))).toEqual([
+      expect.objectContaining({ key: "claude:starmoire", state: "no-reading" }),
+    ]);
     // An account with no reading yet is its kind's card: no nameless one.
     expect(claude(plans([source("local", {})], ["claude:starmoire"])).map((c) => c.key)).toEqual(["claude:starmoire"]);
   });
