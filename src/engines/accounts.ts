@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { LOCAL, machineOf, type MachineId } from "../hub/machines";
 import { deskListeners, engineListeners, hubOf } from "../hub/store";
 import type { AccountNeed, AccountSignIn, Caps, DeskEvent, Engine, EngineAccount, Session, SignIn, SignInProblem } from "../hub/types";
+import { passStanding } from "./standing";
 
 /** The choice that runs a session on the CLI's own sign-in. */
 export const OWN_SIGN_IN = "own";
@@ -92,6 +93,16 @@ export const needText = (n: AccountNeed, at: (iso: string) => string): { title: 
         title: `${n.account.name} has reset — switch ${sessionsCount(n.sessions.length)} back from ${n.from.name}?`,
         detail: null,
       };
+    case "inTerminal":
+      return {
+        title: `${n.name} is at ${n.account.name}’s limit in a terminal of its own`,
+        detail: `Desk can’t move it: run /login there to use another account, or start it in Desk.${n.resetsAt ? ` ${n.account.name} resets ${at(n.resetsAt)}.` : ""}`,
+      };
+    case "whichSignIn":
+      return {
+        title: "Which of your accounts is this computer signed in to?",
+        detail: `Claude Code here is signed in${n.email ? ` as ${n.email}` : ""}. Desk asks rather than guess before it moves sessions.`,
+      };
     case "signIn":
       return {
         title: n.problem === "notRemoved" ? `${n.account.name}’s sign-in was left behind` : `${n.account.name}’s sign-in can’t be used`,
@@ -133,6 +144,9 @@ export interface AccountsState {
   /** What its Claude Code says of its own sign-in, as last read: whether
    *  "this computer's sign-in" is a choice there. */
   claudeSignIn: SignIn | null;
+  /** The key this computer's CLI sign-in's plan card has: the card named by
+   *  its email while it is none of the accounts. */
+  ownPlanKey: string | null;
   load: () => Promise<void>;
 }
 
@@ -147,6 +161,7 @@ const makeStore = (machine: MachineId) =>
     signIns: {},
     supported: null,
     claudeSignIn: null,
+    ownPlanKey: null,
     load: async () => {
       const hub = hubOf(machine);
       if (!hub) return;
@@ -167,6 +182,7 @@ const makeStore = (machine: MachineId) =>
           needs: info.needs ?? [],
           autoSwitch: info.autoSwitch ?? false,
           problems: info.problems ?? [],
+          ownPlanKey: info.ownPlanKey ?? null,
           store: info.store,
           signIns: Object.fromEntries(info.signIns.map((s) => [s.id, s])),
         });
@@ -201,7 +217,14 @@ const heard = (store: AccountsStore, e: DeskEvent): void => {
       void store.getState().load();
       return;
     case "accounts":
-      store.setState((s) => ({ accounts: e.accounts, problems: e.problems ?? [], needs: e.needs ?? [], autoSwitch: e.autoSwitch ?? s.autoSwitch, supported: true }));
+      store.setState((s) => ({
+        accounts: e.accounts,
+        problems: e.problems ?? [],
+        needs: e.needs ?? [],
+        autoSwitch: e.autoSwitch ?? s.autoSwitch,
+        ownPlanKey: e.ownPlanKey === undefined ? s.ownPlanKey : e.ownPlanKey,
+        supported: true,
+      }));
       return;
     case "accountSignIn":
       store.setState((s) => ({ signIns: { ...s.signIns, [e.signIn.id]: e.signIn } }));
@@ -211,9 +234,28 @@ const heard = (store: AccountsStore, e: DeskEvent): void => {
   }
 };
 
-deskListeners.add((e) => heard(useAccounts, e));
+let passing: ReturnType<typeof setTimeout> | null = null;
+
+/** Soon after any computer's accounts change: what each knows of their
+ *  plans is passed to the others ([`passStanding`]). A machine's accounts
+ *  stay its own; only their standing travels. */
+const passSoon = () => {
+  if (passing) return;
+  passing = setTimeout(() => {
+    passing = null;
+    void passStanding((m) => accountsOn(m).getState().accounts, [...stores.keys()]);
+  }, 1000);
+};
+
+deskListeners.add((e) => {
+  heard(useAccounts, e);
+  if (e.type === "accounts") passSoon();
+});
 // A machine's accounts are its own: they never reach this computer's.
 engineListeners.add((e) => {
   const machine = machineOf(e);
-  if (machine !== LOCAL) heard(accountsOn(machine), e);
+  if (machine !== LOCAL) {
+    heard(accountsOn(machine), e);
+    if (e.type === "accounts") passSoon();
+  }
 });

@@ -66,8 +66,14 @@ export function PlanCards() {
 function Card({ card, now }: { card: PlanCard; now: number }) {
   // One of the person's accounts: its name, and the sessions on it.
   const account = useAccounts((s) => accountOfCard(s.accounts, card.key));
+  // This computer's own sign-in, not known as one of the accounts: by who
+  // Claude Code says it is.
+  const who = useAccounts((s) => (s.claudeSignIn?.state === "in" ? s.claudeSignIn.who : null));
+  const ownKey = useAccounts((s) => s.ownPlanKey);
+  // Only the card of the sign-in's own key: never another reading's.
+  const own = !account && ownKey !== null && card.key === `claude:${ownKey}` ? who : null;
   const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.where].filter(Boolean).join(" · ");
-  const title = account ? `${TITLE[card.kind]} · ${account.name}` : TITLE[card.kind];
+  const title = account ? `${TITLE[card.kind]} · ${account.name}` : own ? `${TITLE[card.kind]} · ${own}` : TITLE[card.kind];
   return (
     <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">

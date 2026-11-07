@@ -71,6 +71,7 @@ export function Accounts({
           ))}
         </ul>
       )}
+      {accounts.length > 0 && engine.engine === "claude" && <OwnSignIn engine={engine} accounts={accounts} machine={machine} />}
       {accounts.length > 0 && <AutoSwitch machine={machine} store={store} />}
       {machine !== LOCAL && engine.engine === "claude" && where && <UseMine machine={machine} name={name ?? machine} native={native} store={store} onShared={onShared} ownWorks={ownSignInWorks(engine.signIn)} />}
       {where === null && supported ? (
@@ -220,6 +221,71 @@ function UseMine({
         </span>
       ))}
     </div>
+  );
+}
+
+/** "This computer's sign-in is Kingsley Gmail (matched by its usage)": which
+ *  of the person's accounts the engine's own Claude Code is signed in to,
+ *  so it is that account on the Floor and in every switch, never one more.
+ *  The person's answer is kept, and always wins over a match by usage. */
+export function OwnSignIn({ engine, accounts, machine }: { engine: EngineInfo; accounts: EngineAccount[]; machine: MachineId }) {
+  const hub = useHubOf(machine);
+  const fail = useDesk((s) => s.fail);
+  const [changing, setChanging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const signIn = engine.signIn;
+  if (signIn?.state !== "in" || signIn.via !== "plan") return null;
+  const linked = accounts.find((a) => a.identity?.thisComputer) ?? null;
+  const where = machine === LOCAL ? "This computer’s" : "Its";
+  const choose = async (choice: string) => {
+    if (!hub) return;
+    setBusy(true);
+    try {
+      await hub.setOwnSignIn(choice === "none" ? null : choice);
+      setChanging(false);
+      await accountsOn(machine).getState().load();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="account-share-row">
+      <span className="small">
+        {linked ? (
+          <>
+            {where} Claude Code sign-in is <b>{linked.name}</b>{" "}
+            <span className="faint">
+              {linked.identity?.linkedBy === "usage" ? "(matched by its usage)" : "(you said so)"}
+              {signIn.who ? ` · ${signIn.who}` : ""}
+            </span>
+          </>
+        ) : (
+          <>
+            {where} Claude Code is signed in{signIn.who ? ` as ${signIn.who}` : ""}.{" "}
+            <span className="faint">Which of your accounts is it? Desk asks before a switch depends on it.</span>
+          </>
+        )}
+      </span>
+      {changing || !linked ? (
+        <select aria-label={`Which account ${where.toLowerCase()} sign-in is`} disabled={busy} value={linked?.id ?? ""} onChange={(e) => void choose(e.target.value)}>
+          <option value="" disabled>
+            Choose…
+          </option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+          <option value="none">None of these</option>
+        </select>
+      ) : (
+        <button type="button" className="btn btn-sm" onClick={() => setChanging(true)}>
+          Change
+        </button>
+      )}
+    </span>
   );
 }
 

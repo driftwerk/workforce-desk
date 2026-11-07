@@ -14,6 +14,7 @@ import type {
   EngineInfo,
   EngineSignIn,
   SpendBy,
+  StandingElsewhere,
   SwitchedAll,
   SpendPeriod,
   SpendView,
@@ -370,6 +371,12 @@ export class DeskHub {
   /** "Not now" on an account need. */
   putOffNeed = (id: string): Promise<void> => this.call("POST", `/api/desk/accounts/needs/${encodeURIComponent(id)}/put-off`);
   setAutoSwitch = (on: boolean): Promise<void> => this.call("PUT", "/api/desk/accounts/auto-switch", { on });
+  /** "This computer's sign-in is …": which account its Claude Code is
+   *  signed in to (null: none of them). */
+  setOwnSignIn = (account: string | null): Promise<void> => this.call("PUT", "/api/desk/accounts/own-sign-in", { account });
+  /** What the person's other computers know of their accounts' plans. */
+  learnStanding = (accounts: StandingElsewhere[], sentAt: string): Promise<void> =>
+    this.call("PUT", "/api/desk/accounts/standing", { accounts, sentAt });
   /** Moves a session to another account (null: the CLI's own sign-in). */
   switchAccount = (id: string, account: string | null): Promise<Session> =>
     this.call("POST", `/api/desk/sessions/${id}/account`, { account });

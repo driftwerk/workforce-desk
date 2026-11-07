@@ -199,3 +199,27 @@ it("says when a sign-in can't be used, in plain words, until the person says OK"
   fireEvent.click(screen.getByRole("button", { name: "OK" }));
   expect(dismissSignInProblem).toHaveBeenCalledWith("a-p");
 });
+
+it("says which account this computer's sign-in is, how Desk knows, and lets the person change it", async () => {
+  const setOwnSignIn = vi.fn(async () => undefined);
+  const gmail = account("a-g", "Kingsley Gmail", { identity: { key: "k-gmail", email: "sam@example.com", linkedBy: "usage", thisComputer: true } });
+  const work = account("a-w", "Work");
+  withHub({ setOwnSignIn }, [gmail, work]);
+  render(<Accounts engine={claude} />);
+  await act(async () => {});
+  expect(screen.getByText(/This computer’s Claude Code sign-in is/).textContent).toContain("Kingsley Gmail");
+  expect(screen.getByText(/\(matched by its usage\) · sam@example.com/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  await act(async () => fireEvent.change(screen.getByRole("combobox"), { target: { value: "a-w" } }));
+  expect(setOwnSignIn).toHaveBeenCalledWith("a-w");
+});
+
+it("asks which account an unmatched sign-in is, and takes none of them", async () => {
+  const setOwnSignIn = vi.fn(async () => undefined);
+  withHub({ setOwnSignIn }, [account("a-w", "Work")]);
+  render(<Accounts engine={claude} />);
+  await act(async () => {});
+  expect(screen.getByText(/This computer’s Claude Code is signed in as sam@example.com/)).toBeTruthy();
+  await act(async () => fireEvent.change(screen.getByRole("combobox"), { target: { value: "none" } }));
+  expect(setOwnSignIn).toHaveBeenCalledWith(null);
+});
