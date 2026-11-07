@@ -20,6 +20,7 @@ describe("Desk's Claude Code plugin hooks", () => {
         "UserPromptSubmit",
         "Notification",
         "Stop",
+        "StopFailure",
         "SubagentStart",
         "SubagentStop",
         "SessionEnd",
@@ -28,6 +29,14 @@ describe("Desk's Claude Code plugin hooks", () => {
     for (const [event, entries] of Object.entries(events)) {
       expect(entries[0]?.hooks[0]?.args[0], event).toBe("${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh");
     }
+  });
+
+  it("tells the hub of a turn an API error ended, which fires StopFailure and never Stop", () => {
+    // Claude Code 2.1.319: a turn its plan's limit (or another API error)
+    // ended fires StopFailure alone; without it the session stays working.
+    const failed = events.StopFailure?.[0];
+    expect(failed?.hooks[0]?.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh", "10"]);
+    expect(failed?.hooks[0]?.timeout).toBe(10);
   });
 
   it("tells the hub of every tool auto mode refused, so a turn stuck on one isn't done", () => {
