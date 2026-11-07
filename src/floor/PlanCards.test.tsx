@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
+import { useAccounts } from "../engines/accounts";
 import type { PlanReading, UsageView } from "../hub/types";
 import { startLogin } from "../platform";
 import { PlanCards } from "./PlanCards";
@@ -131,6 +132,27 @@ describe("the plan cards", () => {
     await act(() => vi.advanceTimersByTimeAsync(3 * MIN));
     expect(within(card("Claude plan usage")).getByText("0%")).toBeTruthy();
     expect(within(card("Claude plan usage")).getByText(`Reset at ${clock(later(2))} · no use seen since.`)).toBeTruthy();
+  });
+
+  it("are one card per account, by its name, whichever sign-in of it reported", () => {
+    useAccounts.setState({
+      accounts: [{ id: "a-g", engine: "claude", name: "Kingsley Gmail", isDefault: true, signedIn: true, sessions: [], createdAt: at(0), planKey: "gmail" }],
+      claudeSignIn: { state: "in", via: "plan", who: "kim@example.com", plan: "max" },
+    });
+    const w = [{ usedPercent: 12, resetsAt: later(100), minutes: 300 }];
+    // This computer's sign-in and the Desk account of the same identity.
+    show(usage({ readings: [reading(w, { account: "gmail", observedAt: at(1) }), reading(w, { account: "gmail", observedAt: at(2) })] }));
+    render(<PlanCards />);
+    expect(screen.getAllByRole("region", { name: /^Claude plan/ })).toHaveLength(1);
+    expect(card("Claude plan · Kingsley Gmail usage")).toBeTruthy();
+    cleanup();
+    // Not known as one of them: by who Claude Code says it is, never "this
+    // computer's sign-in" as one more plan.
+    useAccounts.setState({ accounts: [] });
+    show(usage({ readings: [reading(w, { account: "own" })] }));
+    render(<PlanCards />);
+    expect(card("Claude plan · kim@example.com usage")).toBeTruthy();
+    useAccounts.setState({ claudeSignIn: null });
   });
 
   it("wait for a first reading on a plan signed in", () => {

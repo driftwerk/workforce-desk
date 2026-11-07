@@ -124,6 +124,10 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/accounts/switch-all"),
     route("POST", "/api/desk/accounts/needs/{}/put-off"),
     route("PUT", "/api/desk/accounts/auto-switch"),
+    // Which account this computer's Claude Code is signed in to, and what
+    // the person's other computers know of the accounts' plans (no token).
+    route("PUT", "/api/desk/accounts/own-sign-in"),
+    route("PUT", "/api/desk/accounts/standing"),
     route("POST", "/api/desk/accounts/problems/{}/dismiss"),
     route("POST", "/api/desk/sessions/{}/account"),
     // The vault: which keys there are, and setting one. Never a key's value.

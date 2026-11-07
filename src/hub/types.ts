@@ -385,7 +385,37 @@ export interface EngineAccount {
   sessions: string[];
   /** The key its plan readings have (a plan card's `claude:<key>`). */
   planKey?: string | null;
+  /** Which Anthropic account it is, when known: the person said so, or its
+   *  usage matched this computer's own Claude Code sign-in. */
+  identity?: AccountIdentity | null;
+  /** What its hub knows of its plan: passed to the person's other
+   *  computers' hubs, which have the same account. */
+  standing?: AccountStanding | null;
   createdAt: string;
+}
+
+export interface AccountIdentity {
+  email: string | null;
+  linkedBy: "manual" | "usage";
+  /** This computer's own Claude Code is signed in to it. */
+  thisComputer: boolean;
+}
+
+/** What a hub knows of one account's plan, as it keeps it. */
+export interface AccountStanding {
+  windows: { usedPercent: number; resetsAt: string | null; minutes: number }[];
+  readAt: string | null;
+  hitAt: string | null;
+  hitUntil: string | null;
+  hitWindow: number | null;
+}
+
+/** One account's standing as another of the person's computers knew it. */
+export interface StandingElsewhere {
+  engine: Engine;
+  name: string;
+  identity?: string | null;
+  standing: AccountStanding;
 }
 
 /** One side of a switch: an account, or (`id` null) the CLI's own sign-in. */
@@ -400,7 +430,13 @@ export type AccountNeed =
   | { kind: "allFull"; id: string; engine: Engine; resets: [AccountSide, string | null][] }
   | { kind: "reset"; id: string; engine: Engine; account: AccountSide; from: AccountSide; sessions: string[] }
   /** An account's sign-in can't be used: nothing switches to it. */
-  | { kind: "signIn"; id: string; engine: Engine; account: AccountSide; problem: SignInProblem["problem"] };
+  | { kind: "signIn"; id: string; engine: Engine; account: AccountSide; problem: SignInProblem["problem"] }
+  /** A session in a terminal of its own sits on a full plan: Desk can't
+   *  move it. */
+  | { kind: "inTerminal"; id: string; engine: Engine; session: string; name: string; account: AccountSide; resetsAt: string | null }
+  /** Which of the person's accounts this computer's Claude Code is signed
+   *  in to isn't known, and a switch depends on it. */
+  | { kind: "whichSignIn"; id: string; engine: Engine; email: string | null };
 
 /** What moving every session off an account did. */
 export interface SwitchedAll {

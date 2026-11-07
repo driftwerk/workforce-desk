@@ -85,3 +85,44 @@ it("says why an account's sign-in can't be used, and OK clears it", async () => 
   fireEvent.click(screen.getByRole("button", { name: "OK" }));
   expect(dismissSignInProblem).toHaveBeenCalledWith("a-p");
 });
+
+it("shows a need once, however often it came", () => {
+  withHub({});
+  const reset: AccountNeed = { kind: "reset", id: "reset:w:p", engine: "claude", account: work, from: personal, sessions: ["s1"] };
+  useAccounts.setState({ needs: [reset, reset, reset, reset, reset] });
+  render(<AccountNeeds />);
+  expect(screen.getAllByText("Work has reset — switch 1 session back from Personal?")).toHaveLength(1);
+});
+
+it("asks which account this computer is signed in to, and keeps the answer", async () => {
+  const setOwnSignIn = vi.fn(async () => undefined);
+  withHub({ setOwnSignIn });
+  useAccounts.setState({
+    accounts: [
+      { id: "a-w", engine: "claude", name: "Work", isDefault: true, signedIn: true, sessions: [], createdAt: "2026-11-01T00:00:00Z" },
+      { id: "a-p", engine: "claude", name: "Personal", isDefault: false, signedIn: true, sessions: [], createdAt: "2026-11-02T00:00:00Z" },
+    ],
+    needs: [{ kind: "whichSignIn", id: "which-sign-in", engine: "claude", email: "kim@example.com" }],
+  });
+  render(<AccountNeeds />);
+  expect(screen.getByText("Which of your accounts is this computer signed in to?")).toBeTruthy();
+  expect(screen.getByText(/signed in as kim@example.com/)).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Personal" })));
+  expect(setOwnSignIn).toHaveBeenCalledWith("a-p");
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "None of these" })));
+  expect(setOwnSignIn).toHaveBeenCalledWith(null);
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+});
+
+it("says a session in a terminal of its own sits on a full plan, and what to do there", () => {
+  const putOffNeed = vi.fn(async () => undefined);
+  withHub({ putOffNeed });
+  useAccounts.setState({
+    needs: [{ kind: "inTerminal", id: "terminal:x", engine: "claude", session: "x", name: "api-fix", account: work, resetsAt: null }],
+  });
+  render(<AccountNeeds />);
+  expect(screen.getByText("api-fix is at Work’s limit in a terminal of its own")).toBeTruthy();
+  expect(screen.getByText(/run \/login there to use another account, or start it in Desk/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  expect(putOffNeed).toHaveBeenCalledWith("terminal:x");
+});
