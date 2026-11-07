@@ -42,6 +42,8 @@ export const NIGHT = builtin({
     ansiCyan: "#8FD8E8",
     ansiGreen: "#A6E37A",
     ansiRed: "#FF8A7A",
+    diffAdd: "#1B2A14",
+    diffDel: "#33191A",
   },
 });
 
@@ -78,6 +80,7 @@ export const DAY = builtin({
     ansiMagenta: "#7240C4",
     ansiCyan: "#0A6B84",
     ansiWhite: "#5E6157",
+    logoDot: "#9BC400",
   },
 });
 
@@ -112,6 +115,3 @@ export const HARBOUR = builtin({
 });
 
 export const BUILTIN: readonly ThemeSpec[] = [NIGHT, DAY, HARBOUR];
-
-/** Logo dot on Day uses the signal-green, since Day's signal is ink. */
-export const logoDot = (spec: ThemeSpec): string => (spec.id === "day" ? "#9BC400" : spec.signal);

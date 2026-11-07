@@ -11,7 +11,18 @@ import { clampChroma, formatHex, oklch } from "culori";
  *  - `handle`: drag handles at rest (a column's resize grip, the edges
  *    between grid panes) — the border colour unless set.
  *  - `handleActive`: a drag handle hovered, dragged or focused — the
- *    signal colour unless set. */
+ *    signal colour unless set.
+ *  - `diffAdd`, `diffDel`: the grounds of added and removed lines.
+ *  - `shadow`: what menus, dialogs and popovers cast; `lift`: the soft
+ *    shadow under cards, buttons and a selected pill; `edge`: the hairline
+ *    round a selected pill or row and a mark. These three may carry alpha
+ *    (`#RRGGBBAA`); lift and edge are transparent unless set.
+ *  - `logoDot`: the wordmark's dot, the signal unless set.
+ *  - `onMark`: the initials on a mark; `mark1`…`mark6`: the marks' colours
+ *    (an engine's is `mark6`).
+ *  - `series1`…`series8`: a chart's series, slot by slot.
+ *  Failed states are drawn in `ansiRed`, the terminal's red, so setting one
+ *  sets the other. */
 export const TOKENS = [
   "bg",
   "surface",
@@ -52,6 +63,27 @@ export const TOKENS = [
   "ansiBrightWhite",
   "handle",
   "handleActive",
+  "diffAdd",
+  "diffDel",
+  "shadow",
+  "edge",
+  "lift",
+  "logoDot",
+  "onMark",
+  "mark1",
+  "mark2",
+  "mark3",
+  "mark4",
+  "mark5",
+  "mark6",
+  "series1",
+  "series2",
+  "series3",
+  "series4",
+  "series5",
+  "series6",
+  "series7",
+  "series8",
 ] as const;
 
 export type Token = (typeof TOKENS)[number];
@@ -90,8 +122,23 @@ export interface Theme {
 }
 
 const HEX = /^#([0-9a-f]{6})$/i;
+const HEX_ALPHA = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i;
 
-export const isHex = (value: string): boolean => HEX.test(value);
+/** The colours that may carry alpha (`#RRGGBBAA`): shadows and hairlines
+ *  drawn over whatever is under them. Every other colour is solid. */
+export const ALPHA_TOKENS: readonly Token[] = ["shadow", "edge", "lift"];
+
+export const takesAlpha = (token: string): boolean => (ALPHA_TOKENS as readonly string[]).includes(token);
+
+/** A colour like `#112233`, or `#11223344` where `alpha` allows it. */
+export const isHex = (value: string, alpha = false): boolean => (alpha ? HEX_ALPHA : HEX).test(value);
+
+/** `hex` with its alpha scaled by `k` (a solid colour's alpha is 1). */
+export const scaleAlpha = (hex: string, k: number): string => {
+  const a = hex.length === 9 ? parseInt(hex.slice(7), 16) : 255;
+  const scaled = Math.round(Math.max(0, Math.min(255, a * k)));
+  return `${hex.slice(0, 7)}${scaled.toString(16).padStart(2, "0")}`.toUpperCase();
+};
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.slice(1);
@@ -131,6 +178,14 @@ export const contrast = (a: string, b: string): number => {
 
 const INK = "#161714";
 const PAPER_TEXT = "#F1F2EC";
+
+/** Of `options`, the one that reads best on `ground` (WCAG contrast). */
+export const bestOn = (ground: string, options: readonly string[]): string =>
+  options.reduce((best, o) => (contrast(o, ground) > contrast(best, ground) ? o : best));
+
+/** Whether `bg` is a dark ground: light text reads better on it than dark
+ *  text does. */
+export const isDarkGround = (bg: string): boolean => bestOn(bg, [INK, PAPER_TEXT]) === PAPER_TEXT;
 
 /** The status and terminal colours as Desk draws them on its own text:
  *  near-white on a dark background, ink on a light one. */
@@ -175,7 +230,7 @@ const toned = (tone: string, dark: boolean, text: string, grounds: (hex: string)
 
 export const derive = (spec: ThemeSpec): Theme => {
   const bg = spec.background;
-  const dark = luminance(bg) < 0.2;
+  const dark = isDarkGround(bg);
   const text = spec.text ?? (dark ? PAPER_TEXT : INK);
   const signal = spec.signal;
   const signalSoft = mix(signal, bg, 0.78);
@@ -195,7 +250,7 @@ export const derive = (spec: ThemeSpec): Theme => {
   // Text on a blocked fill: Desk's, unless the other reads better on it.
   const [on, otherOn] = dark ? ["#2B1B03", "#FFFFFF"] : ["#FFFFFF", "#2B1B03"];
   const onBlocked = contrast(on, blocked) >= STATE_CONTRAST || contrast(on, blocked) >= contrast(otherOn, blocked) ? on : otherOn;
-  const derived: Omit<Palette, Follower> = {
+  const derived: Omit<Palette, Follower | Surround> = {
     bg,
     surface,
     raised,
@@ -205,7 +260,7 @@ export const derive = (spec: ThemeSpec): Theme => {
     muted: mix(text, bg, 0.28),
     faint: mix(text, bg, 0.42),
     signal,
-    onSignal: luminance(signal) > 0.35 ? INK : "#FFFFFF",
+    onSignal: bestOn(signal, [INK, "#FFFFFF"]),
     signalSoft,
     signalSoftText:
       contrast(signal, signalSoft) >= 4.5 ? signal : dark ? mix(signal, "#FFFFFF", 0.45) : mix(signal, "#000000", 0.55),
@@ -224,7 +279,60 @@ export const derive = (spec: ThemeSpec): Theme => {
   const colors = { ...derived, ...spec.overrides };
   // The handles and the rest of the terminal follow the colours as they end
   // up, overrides included, unless a theme sets them itself.
-  return { spec, dark, colors: { ...colors, ...followers(colors), ...spec.overrides } };
+  return { spec, dark, colors: { ...colors, ...followers(colors), ...surround(colors, dark), ...spec.overrides } };
+};
+
+/** The colours of what surrounds the panels — depth, diffs, the logo,
+ *  marks and charts — unless a theme sets them: what Desk drew before they
+ *  were tokens, so a theme that leaves them out looks as it did. */
+type Surround =
+  | "diffAdd"
+  | "diffDel"
+  | "shadow"
+  | "edge"
+  | "lift"
+  | "logoDot"
+  | "onMark"
+  | "mark1"
+  | "mark2"
+  | "mark3"
+  | "mark4"
+  | "mark5"
+  | "mark6"
+  | "series1"
+  | "series2"
+  | "series3"
+  | "series4"
+  | "series5"
+  | "series6"
+  | "series7"
+  | "series8";
+
+const TRANSPARENT = "#00000000";
+
+/** Marks' colours: pastels, read with `onMark` ink on them. */
+const MARKS = ["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"] as const;
+
+/** A chart's series, slot by slot: one categorical palette, validated for
+ *  colour-vision deficiency, stepped for a light ground or a dark one. Its
+ *  slot order keeps neighbours apart, so a theme changes the steps and never
+ *  the order. */
+const SERIES_LIGHT = ["#2A78D6", "#EB6834", "#1BAF7A", "#EDA100", "#E87BA4", "#008300", "#6250D6", "#E34948"] as const;
+const SERIES_DARK = ["#3987E5", "#D95926", "#199E70", "#C98500", "#D55181", "#008300", "#9085E9", "#E66767"] as const;
+
+const surround = (c: Omit<Palette, Follower | Surround> & Partial<Palette>, dark: boolean): Record<Surround, string> => {
+  const series = dark ? SERIES_DARK : SERIES_LIGHT;
+  return {
+    diffAdd: mix(c.sunken, c.ansiGreen, 0.14),
+    diffDel: mix(c.sunken, c.ansiRed, 0.14),
+    shadow: "#00000059",
+    edge: TRANSPARENT,
+    lift: TRANSPARENT,
+    logoDot: c.signal,
+    onMark: INK,
+    ...(Object.fromEntries(MARKS.map((m, i) => [`mark${i + 1}`, m])) as Record<`mark${1 | 2 | 3 | 4 | 5 | 6}`, string>),
+    ...(Object.fromEntries(series.map((s, i) => [`series${i + 1}`, s])) as Record<`series${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, string>),
+  };
 };
 
 /** The colours that follow others unless a theme sets them. */
@@ -246,7 +354,7 @@ type Follower =
   | "ansiBrightCyan"
   | "ansiBrightWhite";
 
-const followers = (c: Omit<Palette, Follower> & Partial<Palette>): Record<Follower, string> => {
+const followers = (c: Omit<Palette, Follower | Surround> & Partial<Palette>): Record<Follower, string> => {
   const yellow = c.ansiYellow ?? c.blocked;
   const blue = c.ansiBlue ?? c.working;
   // The terminal's own ground, light or dark as `terminalLight` (xterm.ts)
@@ -324,7 +432,11 @@ export const cssVariables = (theme: Theme): Record<string, string> => {
     "--rich-muted": colors.muted,
     "--rich-border": colors.border,
     "--rich-accent": colors.signal,
-    ...Object.fromEntries(chartSeries(theme.dark).map((c, i) => [`--rich-series-${i + 1}`, c])),
+    // The lighter and heavier shadows: today's .25 and .4 beside the .35
+    // `shadow` is, in its own colour.
+    "--shadow-soft": scaleAlpha(colors.shadow, 0.25 / 0.35),
+    "--shadow-strong": scaleAlpha(colors.shadow, 0.4 / 0.35),
+    ...Object.fromEntries(chartSeries(colors).map((c, i) => [`--rich-series-${i + 1}`, c])),
     ...Object.fromEntries(Object.entries(codeColors(colors)).map(([k, v]) => [`--rich-code-${k}`, v])),
   };
 };
@@ -349,38 +461,68 @@ export const codeColors = (c: Palette): Record<string, string> => ({
   changed: c.blocked,
 });
 
-export const MARKS = ["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"] as const;
+/** A chart's series colours, slot by slot. */
+export const chartSeries = (c: Palette): readonly string[] => [c.series1, c.series2, c.series3, c.series4, c.series5, c.series6, c.series7, c.series8];
 
-/** The colours a chart's series are drawn in, slot by slot: one categorical
- *  palette, validated for colour-vision deficiency, stepped for a light
- *  ground or a dark one. Its slot order keeps neighbours apart, so a theme
- *  changes the steps and never the order. */
-const SERIES_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"] as const;
-const SERIES_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"] as const;
+/** The mark tokens, in the order names are spread over them. */
+export const MARK_TOKENS = ["mark1", "mark2", "mark3", "mark4", "mark5", "mark6"] as const satisfies readonly Token[];
 
-export const chartSeries = (dark: boolean): readonly string[] => (dark ? SERIES_DARK : SERIES_LIGHT);
+/** An engine's mark (Claude Code's, Codex's). */
+export const ENGINE_MARK: Token = "mark6";
 
-export const markFor = (name: string): string => {
+/** The mark token `name` is drawn in: the same one for a name every time. */
+export const markFor = (name: string): Token => {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return MARKS[h % MARKS.length] ?? MARKS[0];
+  return MARK_TOKENS[h % MARK_TOKENS.length] ?? MARK_TOKENS[0];
 };
+
+/** A token as the CSS variable it is set as. */
+export const tokenVar = (token: Token): string => `var(--${kebab(token)})`;
 
 export interface ContrastCheck {
   label: string;
   ratio: number;
+  /** The least it should be: 4.5 for text, 3 for marks that aren't text. */
+  bar: number;
   pass: boolean;
 }
 
-export const contrastChecks = ({ colors: c }: Theme): ContrastCheck[] =>
-  (
-    [
-      ["Text on background", c.text, c.bg],
-      ["Secondary text on panels", c.muted, c.surface],
-      ["Labels and timestamps", c.faint, c.bg],
-      ["Button text on signal", c.onSignal, c.signal],
-    ] as const
-  ).map(([label, a, b]) => {
+/** Text (WCAG AA) and what isn't text but must be seen (dots, focus rings). */
+export const TEXT_CONTRAST = 4.5;
+export const MARK_CONTRAST = 3;
+
+/** Every pair of colours Desk draws one on the other where it has to be
+ *  read, with its bar. */
+export const contrastPairs = (c: Palette): [label: string, fg: string, bg: string, bar: number][] => [
+  ["Text on background", c.text, c.bg, TEXT_CONTRAST],
+  ["Text on panels", c.text, c.surface, TEXT_CONTRAST],
+  ["Text on the terminal", c.text, c.sunken, TEXT_CONTRAST],
+  ["Secondary text on background", c.muted, c.bg, TEXT_CONTRAST],
+  ["Secondary text on panels", c.muted, c.surface, TEXT_CONTRAST],
+  ["Secondary text on the terminal", c.muted, c.sunken, TEXT_CONTRAST],
+  ["Labels and timestamps", c.faint, c.bg, TEXT_CONTRAST],
+  ["Labels on panels", c.faint, c.surface, TEXT_CONTRAST],
+  ["Labels on the terminal", c.faint, c.sunken, TEXT_CONTRAST],
+  ["Signal as text", c.signal, c.bg, TEXT_CONTRAST],
+  ["Button text on signal", c.onSignal, c.signal, TEXT_CONTRAST],
+  ["Text on the soft tint", c.signalSoftText, c.signalSoft, TEXT_CONTRAST],
+  ["Working on panels", c.working, c.surface, TEXT_CONTRAST],
+  ["Working on the terminal", c.working, c.sunken, TEXT_CONTRAST],
+  ["Needs you on panels", c.blocked, c.surface, TEXT_CONTRAST],
+  ["Needs you on its card", c.blocked, c.blockedSoft, TEXT_CONTRAST],
+  ["Text on a needs-you button", c.onBlocked, c.blocked, TEXT_CONTRAST],
+  ["Done on panels", c.done, c.surface, TEXT_CONTRAST],
+  ["Done on the terminal", c.done, c.sunken, TEXT_CONTRAST],
+  ["Terminal text", c.termText, c.sunken, TEXT_CONTRAST],
+  ...MARK_TOKENS.map((m, i) => [`Initials on mark ${i + 1}`, c.onMark, c[m], TEXT_CONTRAST] as [string, string, string, number]),
+  ["Idle dot on panels", c.idle, c.surface, MARK_CONTRAST],
+  ["Focus ring on background", c.signal, c.bg, MARK_CONTRAST],
+];
+
+/** How each pair reads: shown in the theme editor, where a low one says so. */
+export const contrastChecks = ({ colors }: Theme): ContrastCheck[] =>
+  contrastPairs(colors).map(([label, a, b, bar]) => {
     const ratio = contrast(a, b);
-    return { label, ratio, pass: ratio >= 4.5 };
+    return { label, ratio, bar, pass: ratio >= bar };
   });

@@ -11,8 +11,6 @@ import { dismiss, retry } from "../rooms/engine";
 import { openTarget } from "../shell/navigate";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
-import { logoDot } from "../theme/builtin";
-import { useTheme } from "../theme/store";
 import { Badge, needsYou } from "../ui/Badge";
 import { AgentMark, Mark } from "../ui/Mark";
 import { isLive, useUpdates } from "../updates/store";
@@ -46,11 +44,10 @@ const onTheirWay = (drafts: Readonly<Record<string, readonly RoomDraft[]>>): Rec
 
 /** Desk's own mark, for its report and its update. */
 function DeskMark() {
-  const theme = useTheme();
   return (
     <span className="mark mark-sm" aria-hidden="true">
       <span className="mark-face urow-desk-face">
-        d<span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />
+        d<span className="wordmark-dot" />
       </span>
     </span>
   );

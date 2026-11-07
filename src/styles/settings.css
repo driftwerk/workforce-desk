@@ -223,6 +223,9 @@ legend.set-label {
   background: transparent;
   text-transform: uppercase;
 }
+.colour-field input.colour-field-alpha {
+  width: 9.5ch;
+}
 
 .text-row {
   display: flex;
@@ -307,7 +310,7 @@ legend.set-label {
   border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
-  box-shadow: 0 18px 50px rgb(0 0 0 / 0.35);
+  box-shadow: 0 18px 50px var(--shadow);
 }
 .font-search {
   padding: 8px 10px;
@@ -420,6 +423,14 @@ legend.set-label {
   font-size: 12px;
 }
 
+.token-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.token-group + .token-group {
+  margin-top: 6px;
+}
 .tokens {
   display: flex;
   gap: 8px;
@@ -474,6 +485,12 @@ legend.set-label {
 .check-label {
   flex: 1;
 }
+.check-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
 .badge {
   padding: 2px 8px;
   border-radius: 999px;
@@ -522,7 +539,7 @@ legend.set-label {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--signal);
+  background: var(--logo-dot);
 }
 .pv-ask {
   padding: 6px 10px;

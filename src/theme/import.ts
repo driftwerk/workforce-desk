@@ -1,7 +1,7 @@
 import { formatHex, parse } from "culori";
 import { DAY, NIGHT } from "./builtin";
 import { ThemeError, parseTheme, slug } from "./toml";
-import { contrast, derive, luminance, mix, type Palette, type ThemeSpec } from "./tokens";
+import { contrast, derive, isDarkGround, mix, type Palette, type ThemeSpec } from "./tokens";
 import { baseName } from "../ui/paths";
 import { ANSI } from "./xterm";
 
@@ -70,7 +70,7 @@ const solid = (raw: string | undefined, over?: string): string | undefined => {
   return over && alpha < 1 ? mix(over, hex, alpha) : hex;
 };
 
-const isDark = (bg: string): boolean => luminance(bg) < 0.2;
+const isDark = isDarkGround;
 
 const onSignalOf = (spec: ThemeSpec, signal: string): string => derive({ ...spec, signal }).colors.onSignal;
 

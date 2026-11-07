@@ -9,8 +9,6 @@ import { markRoomRead } from "../unread/reads";
 import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
-import { logoDot } from "../theme/builtin";
-import { useTheme } from "../theme/store";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
@@ -153,7 +151,6 @@ export function Sidebar({
     requestAnimationFrame(() => roomRows.current.get(id)?.focus());
   };
   const hubs = useChat((s) => workspaces(s.hubs));
-  const theme = useTheme();
   const keys = useSettings((s) => s.keys);
   // Where it was scrolled is kept (in `ui.main`) and put back.
   const saved = useSavedScroll<HTMLElement>("sidebar");
@@ -170,7 +167,7 @@ export function Sidebar({
       <div className="side-top">
         <div className="wordmark" onMouseDown={dragWindow}>
           <span>desk</span>
-          <span className="wordmark-dot" style={{ background: logoDot(theme.spec) }} />
+          <span className="wordmark-dot" />
         </div>
         <button type="button" className="ask" onClick={onAsk}>
           Ask anyone <kbd>{shortcutLabel(keys.ask)}</kbd>

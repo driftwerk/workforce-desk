@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Look } from "../floor/background";
 import { useAgentImage, useYou } from "../pictures/who";
-import { markFor } from "../theme/tokens";
+import { ENGINE_MARK, markFor, tokenVar } from "../theme/tokens";
 import { firstGrapheme } from "./graphemes";
 
 const RING: Partial<Record<Look, string>> = {
@@ -40,7 +40,7 @@ export function Mark({
   const picture = src && src !== broken ? src : null;
   return (
     <span className={`mark mark-${size} ${person ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
-      <span className="mark-face" style={picture ? undefined : { background: engine ? "#E8DDB5" : markFor(name) }}>
+      <span className="mark-face" style={picture ? undefined : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) }}>
         {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : initialsFor(name, engine)}
       </span>
     </span>

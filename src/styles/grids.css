@@ -562,7 +562,7 @@ body.gsplitting-h * {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--raised);
-  box-shadow: 0 14px 34px rgb(0 0 0 / 0.35);
+  box-shadow: 0 14px 34px var(--shadow);
 }
 .gstrip-label {
   font-size: 12px;
