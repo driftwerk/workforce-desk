@@ -474,11 +474,15 @@ fn window_background(window: tauri::WebviewWindow, background: String) {
                 tracing::warn!(label = window.label(), error = %e, "couldn't set the window's background");
             }
         }
-        None => tracing::warn!(
-            label = window.label(),
-            background,
-            "not a background colour"
-        ),
+        None => {
+            // What the page sent, cut short: it may be anything.
+            let shown: String = background.chars().take(16).collect();
+            tracing::warn!(
+                label = window.label(),
+                background = %shown,
+                "not a background colour"
+            )
+        }
     }
 }
 

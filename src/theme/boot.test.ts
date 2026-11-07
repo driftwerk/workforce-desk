@@ -6,7 +6,7 @@ const themes = vi.hoisted(() => ({ list: vi.fn<() => Promise<unknown[]>>() }));
 vi.mock("../settings/store", () => ({ useSettings: { getState: () => ({ load: settings.load }) } }));
 vi.mock("./custom", () => ({ loadCustomThemes: themes.list }));
 
-import { paintSavedTheme } from "./boot";
+import { customThemesRead, paintSavedTheme } from "./boot";
 import { DAY } from "./builtin";
 import { useThemeStore } from "./store";
 
@@ -32,5 +32,17 @@ describe("the theme before the first render", () => {
     // Auto with a dark system: Night.
     expect(theme.spec.id).toBe("night");
     expect(document.documentElement.style.getPropertyValue("--bg")).toBe("#111210");
+  });
+
+  it("hands the custom themes' first read to the shell once, then reads again", async () => {
+    settings.load.mockResolvedValue(undefined);
+    themes.list.mockResolvedValue([]);
+    await paintSavedTheme();
+    const again = vi.fn(() => Promise.resolve());
+    await customThemesRead(again);
+    expect(again).not.toHaveBeenCalled();
+    expect(themes.list).toHaveBeenCalledTimes(1);
+    await customThemesRead(again);
+    expect(again).toHaveBeenCalledTimes(1);
   });
 });

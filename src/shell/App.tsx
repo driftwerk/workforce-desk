@@ -43,6 +43,7 @@ import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 import { applyTheme, useTheme, useThemeStore } from "../theme/store";
 import { useTerminalColors } from "../theme/hubColors";
+import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
@@ -177,7 +178,7 @@ export function App() {
     const refresh = () => loadCustomThemes().then(setCustom).catch(fail);
     // Read before the first render (theme/boot); again only if that failed.
     if (!useSettings.getState().loaded) loadSettings().catch(fail);
-    refresh();
+    void customThemesRead(() => loadCustomThemes().then(setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).

@@ -30,6 +30,7 @@ import { countsLine, GridCanvas, GridName, LayoutUndo, useFillKeys, useGridCount
 import { WINDOW_MODES, type WindowMode } from "./model";
 import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
+import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { startUnread } from "../unread/summary";
 
@@ -75,7 +76,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
     // Read before the first render (theme/boot); again only if that failed.
     if (!useSettings.getState().loaded) void useSettings.getState().load().catch(fail);
     const refresh = () => loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
-    refresh();
+    void customThemesRead(() => loadCustomThemes().then(useThemeStore.getState().setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
     localHub()
       .then((t) => (stop = useDesk.getState().connect(t, { notify: false })))
