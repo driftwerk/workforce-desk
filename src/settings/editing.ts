@@ -12,6 +12,7 @@ export const BACKGROUNDS: readonly Swatch[] = [
   { label: "Harbour", hex: "#0E1822" },
   { label: "Plum", hex: "#1A1423" },
   { label: "Paper", hex: "#FBFAF7" },
+  { label: "Linen", hex: "#F6F6F1" },
   { label: "White", hex: "#FFFFFF" },
   { label: "Mist", hex: "#EEF2F6" },
 ];
@@ -107,6 +108,9 @@ export const DERIVED: readonly [Token, string][] = [
   ["activeEdge", "active edge"],
   ["activeRing", "active ring"],
   ["cardFill", "settings card"],
+  ["modeGround", "look switcher"],
+  ["modeFill", "chosen look"],
+  ["onModeFill", "on chosen look"],
 ];
 
 /** How the editor sets the derived colours out: by what they colour. */
@@ -122,6 +126,9 @@ const GROUP_OF: Partial<Record<Token, string>> = {
   onApprove: "Buttons and focus",
   askGlow: "Buttons and focus",
   focusRing: "Buttons and focus",
+  modeGround: "Buttons and focus",
+  modeFill: "Buttons and focus",
+  onModeFill: "Buttons and focus",
   activeEdge: "Depth",
   activeRing: "Depth",
   shadow: "Depth",

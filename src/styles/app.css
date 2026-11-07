@@ -382,7 +382,7 @@ button {
   gap: 2px;
   padding: 3px;
   border-radius: 999px;
-  background: var(--sunken);
+  background: var(--mode-ground);
   border: 1px solid var(--border);
 }
 .look-modes button {
@@ -398,9 +398,14 @@ button {
 .look-modes button:hover {
   color: var(--text);
 }
+/* The chosen look: a pill like a segmented control's, with its edge and
+   lift (both transparent unless the theme sets them). */
 .look-modes button[aria-checked="true"] {
-  background: var(--signal);
-  color: var(--on-signal);
+  background: var(--mode-fill);
+  color: var(--on-mode-fill);
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 1px 2px var(--lift);
 }
 .look-chooser {
   flex: 1;
@@ -412,7 +417,7 @@ button {
   padding: 0 8px 0 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--sunken);
+  background: var(--mode-ground);
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
@@ -663,6 +668,7 @@ button {
 .btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
 .btn-signal {
   border: 0;

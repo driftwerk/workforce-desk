@@ -32,6 +32,9 @@ import { clampChroma, formatHex, oklch } from "culori";
  *    worked on (the border, and none, unless set); `focusRing`: the soft ring
  *    round a focused input; `cardFill`: a settings card's ground (raised
  *    unless set). The fills and rings may carry alpha.
+ *  - `modeGround`, `modeFill`, `onModeFill`: the Auto/Night/Day switcher's
+ *    ground (and the theme chooser's beside it) and its chosen pill and text (sunken, the signal and its text,
+ *    unless set).
  *  Failed states are drawn in `ansiRed`, the terminal's red, so setting one
  *  sets the other. */
 export const TOKENS = [
@@ -103,6 +106,9 @@ export const TOKENS = [
   "activeRing",
   "focusRing",
   "cardFill",
+  "modeGround",
+  "modeFill",
+  "onModeFill",
 ] as const;
 
 export type Token = (typeof TOKENS)[number];
@@ -347,7 +353,10 @@ type Surround =
   | "activeEdge"
   | "activeRing"
   | "focusRing"
-  | "cardFill";
+  | "cardFill"
+  | "modeGround"
+  | "modeFill"
+  | "onModeFill";
 
 const TRANSPARENT = "#00000000";
 
@@ -381,6 +390,9 @@ const surround = (c: Omit<Palette, Follower | Surround> & Partial<Palette>, dark
     activeRing: TRANSPARENT,
     focusRing: TRANSPARENT,
     cardFill: c.raised,
+    modeGround: c.sunken,
+    modeFill: c.signal,
+    onModeFill: c.onSignal,
   };
 };
 
@@ -565,6 +577,7 @@ export const CONTRAST_PAIRS: readonly Pair[] = [
   ["Button text on signal", "onSignal", "signal", TEXT_CONTRAST],
   ["Text on an answer button", "onApprove", "approve", TEXT_CONTRAST],
   ["Text on settings cards", "text", "cardFill", TEXT_CONTRAST],
+  ["Text on the chosen look", "onModeFill", "modeFill", TEXT_CONTRAST],
   ["Text on the soft tint", "signalSoftText", "signalSoft", TEXT_CONTRAST],
   ["Working on panels", "working", "surface", TEXT_CONTRAST],
   ["Working on the terminal", "working", "sunken", TEXT_CONTRAST],
@@ -587,6 +600,7 @@ const FIXABLE: Partial<Record<Token, readonly string[]>> = {
   onBlocked: ON_FILL_CHOICES,
   onMark: ON_FILL_CHOICES,
   onApprove: ON_FILL_CHOICES,
+  onModeFill: ON_FILL_CHOICES,
 };
 
 /** How each pair reads: shown in the theme editor, where a low one says so

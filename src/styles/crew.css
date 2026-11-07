@@ -2,9 +2,11 @@
    Settings and Files tabs, and Settings → Providers. Every colour comes from
    the theme's tokens. */
 
+/* Flat: no fill and no lift, whatever the theme gives buttons. */
 .btn-ghost {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
   color: var(--muted);
 }
 .btn-ghost:hover:not(:disabled) {

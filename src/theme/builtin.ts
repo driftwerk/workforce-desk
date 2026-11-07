@@ -103,6 +103,9 @@ export const DAY = builtin({
     activeRing: "#E8F0C4",
     focusRing: "#E8F0C4",
     cardFill: "#F3F1EB",
+    modeGround: "#FFFFFF",
+    modeFill: "#FBFAF7",
+    onModeFill: "#1B1C18",
   },
 });
 

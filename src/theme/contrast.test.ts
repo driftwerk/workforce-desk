@@ -23,6 +23,7 @@ const PAIRS: [fg: Token, bg: Token, bar: number][] = [
   ["blocked", "blockedSoft", 4.5],
   ["onBlocked", "blocked", 4.5],
   ["onApprove", "approve", 4.5],
+  ["onModeFill", "modeFill", 4.5],
   ["approve", "blockedSoft", 3],
   ["text", "cardFill", 4.5],
   ["muted", "cardFill", 4.5],

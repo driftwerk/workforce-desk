@@ -573,7 +573,8 @@ body.gsplitting-h * {
 }
 
 /* A grid's row in the sidebar with a pane dragged over it. */
-.gi.drop-in {
+.gi.drop-in,
+.gi.in-focus.on.drop-in {
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--signal);
 }
