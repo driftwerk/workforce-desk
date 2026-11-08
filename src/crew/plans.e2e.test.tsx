@@ -18,7 +18,7 @@ import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskEvent } from "../hub/types";
 import { DeskActions } from "../overview/DeskActions";
 import { useOverview } from "../overview/store";
-import { PLAN, PlanHub, ticket, webFor } from "./planTesting";
+import { FakeViewport, PLAN, PlanHub, ticket, webFor } from "./planTesting";
 import { usePlans } from "./planStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -80,6 +80,7 @@ class FakeHub implements DeskTransport {
 }
 
 let hub: FakeHub;
+let viewport: FakeViewport;
 let disconnect: () => void;
 let stop: () => void;
 
@@ -115,13 +116,14 @@ const runs = async () => {
 
 beforeEach(() => {
   hub = new FakeHub();
+  viewport = new FakeViewport();
   vi.stubGlobal("fetch", hub.web);
   useChat.setState({
     hubs: [{ id: "local", label: "This computer", url: "http://local.test", local: true, revision: "t" }],
     roster: [{ hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false }],
   });
   useOverview.setState({ manager: null, managerSupport: "unknown", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
-  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {} });
+  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {}, looking: {} });
   useBoard.setState({ boards: {}, tickets: {} });
   useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
   stop = watchFloor();
@@ -206,6 +208,37 @@ describe("a boss's plan, against the hub", () => {
     await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve “Plan change/ })));
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" }]);
     expect(hub.plans.plan.approvedRevision).toBe(2);
+  });
+});
+
+describe("the Floor's approve", () => {
+  it("waits until the revision is looked at, and again for a newer one", async () => {
+    viewport.visible = false;
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+    render(
+      <>
+        <DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} />
+        <RightNow brief={null} />
+      </>,
+    );
+    await waitFor(() => expect(within(card()).getByText("Waiting for you")).toBeTruthy());
+    // The card is mounted, but scrolled away: not seen.
+    await waitFor(() => expect(floor().getByText("Look at it first")).toBeTruthy());
+    expect(floor().queryByRole("button", { name: /^Approve/ })).toBeNull();
+    // Look brings it into view: now it is approved here too.
+    fireEvent.click(floor().getByRole("button", { name: "Open in chat: Sarah's plan" }));
+    await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and run/ })).toBeTruthy());
+    expect(floor().queryByText("Look at it first")).toBeNull();
+    // Sarah changes it: the Floor asks about revision 2, which no one has seen.
+    hub.plans.bossAdds("Fix the flaky payment test");
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(floor().getByText("Look at it first")).toBeTruthy());
+    expect(floor().queryByRole("button", { name: /^Approve/ })).toBeNull();
+    expect(hub.decided).toEqual([]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBoard } from "../board/store";
 import { ENGINE_TITLE } from "../engines/engines";
 import { useDesk } from "../hub/store";
@@ -174,13 +174,47 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   // Everything approving the change would approve, each part in full.
   const approvedSnapshot = plan.approvedRevision !== null ? revisionOf(detail, plan.approvedRevision)?.snapshot : undefined;
   const changes = change && approvedSnapshot ? changesBetween(approvedSnapshot, change.snapshot) : null;
+  // Each ticket by its key where it has one, else its title.
+  const ticketNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of detail.revisions) for (const t of r.snapshot.tickets) m.set(t.id, `“${t.title}”`);
+    for (const t of detail.tickets) if (t.key) m.set(t.id, t.key);
+    return m;
+  }, [detail]);
   // A newer revision was announced than the one read: nothing is decided on
   // the older one shown until it is read.
   const stale = plan.revision > detail.revision;
-  // The person has seen this revision whole: the Floor may approve it now.
+  // The person has seen this revision: what approving it approves (the
+  // change, else the tickets) was on screen, or Look brought it there. The
+  // Floor may approve it then, and not before.
+  const changeRef = useRef<HTMLDivElement>(null);
+  const ticketsRef = useRef<HTMLDivElement>(null);
+  const looking = usePlans((s) => !!s.looking[plan.id]);
   useEffect(() => {
-    if (!stale) usePlans.getState().saw(plan.id, detail.revision);
-  }, [stale, plan.id, detail.revision]);
+    const el = changeRef.current ?? ticketsRef.current;
+    if (!el || stale) return;
+    const id = plan.id;
+    const revision = detail.revision;
+    const store = usePlans.getState();
+    if (looking) {
+      el.scrollIntoView?.({ block: "center" });
+      store.looked(id);
+      store.saw(id, revision);
+      return;
+    }
+    if (typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(inView)) {
+          usePlans.getState().saw(id, revision);
+          io.disconnect();
+        }
+      },
+      { threshold: [0, 0.5, 1] },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [stale, plan.id, detail.revision, looking, !!change]);
   const ended = plan.state === "done" || plan.state === "dropped";
   // The newest revision's tickets: an edit is made from them, so a change
   // the boss proposes is never lost by one.
@@ -253,11 +287,11 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
         </div>
       )}
       {change && (
-        <div className="pc-change" role="group" aria-label="A change to the plan">
+        <div ref={changeRef} className="pc-change" role="group" aria-label="A change to the plan">
           <span>
             <b>{boss}</b> wants to change the plan: {change.summary}
           </span>
-          {changes && <ChangeDetails changes={changes} />}
+          {changes && <ChangeDetails changes={changes} names={ticketNames} />}
           <span className="small muted">
             A change of scope, so it needs you. The plan keeps running on revision {plan.approvedRevision} meanwhile.
           </span>
@@ -302,7 +336,8 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
           onSave={(t) => void save(t)}
         />
       ) : (
-        shownWaves.map((wave, i) => {
+        <div ref={ticketsRef} className="pc-waves">
+        {shownWaves.map((wave, i) => {
           const title = waveTitle(i, shownWaves, byId);
           return (
             <div key={i} className="pc-wave">
@@ -326,7 +361,8 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
               })}
             </div>
           );
-        })
+        })}
+        </div>
       )}
 
       {!ended && (
@@ -438,6 +474,11 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   );
 }
 
+/** Whether `e` shows enough of what it watches to count as seen: half of
+ *  it, or (taller than the window) half the window's height of it. */
+const inView = (e: IntersectionObserverEntry): boolean =>
+  e.isIntersecting && (e.intersectionRatio >= 0.5 || (!!e.rootBounds && e.intersectionRect.height >= e.rootBounds.height / 2));
+
 /** What the card says while the hub answers, for those who can't see the
  *  button's own word change. */
 const BUSY: Record<Exclude<Asking, null>, string> = {
@@ -452,8 +493,9 @@ const BUSY: Record<Exclude<Asking, null>, string> = {
 };
 
 /** A change of scope in full: what approving it would approve. */
-function ChangeDetails({ changes }: { changes: PlanChanges }) {
+function ChangeDetails({ changes, names }: { changes: PlanChanges; names: ReadonlyMap<string, string> }) {
   const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${homeShort(t.folder)}`;
+  const named = (ids: readonly string[]) => ids.map((id) => names.get(id) ?? "a ticket").join(", ");
   return (
     <ul className="pc-changes" aria-label="What approving it changes">
       {changes.goal && (
@@ -470,11 +512,20 @@ function ChangeDetails({ changes }: { changes: PlanChanges }) {
           </span>
         </li>
       )}
+      {changes.order && (
+        <li>
+          <span>
+            Order: {named(changes.order.from)} → {named(changes.order.to)}
+          </span>
+        </li>
+      )}
       {changes.added.map((t) => (
         <li key={t.id}>
           <span>
             <b>Adds</b> {t.title} · <span className="mono">{where(t)}</span>
+            {t.view && <span className="mono"> · {t.view} view</span>}
           </span>
+          <span className="small">{t.needs.length > 0 ? `Starts after ${named(t.needs)}` : "Starts at once, alongside the others ready"}</span>
           {t.body.trim() && <span className="pc-body">{t.body}</span>}
         </li>
       ))}
@@ -498,6 +549,21 @@ function ChangeDetails({ changes }: { changes: PlanChanges }) {
           {c.folder && (
             <span className="small mono">
               Folder: {homeShort(c.folder.from)} → {homeShort(c.folder.to)}
+            </span>
+          )}
+          {c.view && (
+            <span className="small">
+              View: {c.view.from ?? "the engine's own"} → {c.view.to ?? "the engine's own"}
+            </span>
+          )}
+          {c.needs && (
+            <span className="small">
+              {[
+                c.needs.added.length ? `Now waits for ${named(c.needs.added)}` : null,
+                c.needs.dropped.length ? `no longer waits for ${named(c.needs.dropped)}, so it may start alongside it` : null,
+              ]
+                .filter(Boolean)
+                .join("; ")}
             </span>
           )}
           {c.body && (

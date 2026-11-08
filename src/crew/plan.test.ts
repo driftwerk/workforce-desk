@@ -4,6 +4,7 @@ import progressCases from "./fixtures/plan/progress.json";
 import wavesCases from "./fixtures/plan/waves.json";
 import {
   awaiting,
+  changesBetween,
   draftOf,
   needChoices,
   ownWorktrees,
@@ -14,6 +15,7 @@ import {
   waves,
   withoutTicket,
   liveCard,
+  isCardText,
   type PlanTicket,
 } from "./plan";
 
@@ -105,5 +107,44 @@ describe("an edit", () => {
     const d = draftOf([planned("a"), planned("b", ["a"]), planned("c", ["b"]), planned("d")]);
     expect(needChoices(d, 0)).toEqual([3]);
     expect(needChoices(d, 2)).toEqual([0, 1, 3]);
+  });
+});
+
+describe("what a change of scope changes", () => {
+  const planned = (id: string, needs: string[] = [], over: Partial<PlannedTicket> = {}): PlannedTicket => ({ id, title: id, body: "", engine: "claude", folder: "/w", view: null, needs, ...over });
+  const snap = (tickets: PlannedTicket[], parallel?: number) => ({ goal: "Refunds", tickets, ...(parallel ? { parallel } : {}) });
+  it("says a need gained or dropped, the order, the view and the limit", () => {
+    const before = snap([planned("a"), planned("b", ["a"]), planned("c")]);
+    const after = snap([planned("c"), planned("a", [], { view: "terminal" }), planned("b", ["c"]), planned("d", ["a"])], 6);
+    const c = changesBetween(before, after);
+    expect(c.order).toEqual({ from: ["a", "b", "c"], to: ["c", "a", "b"] });
+    expect(c.parallel).toEqual({ from: null, to: 6 });
+    expect(c.added.map((t) => [t.id, t.needs])).toEqual([["d", ["a"]]]);
+    expect(c.changed.map((x) => [x.ticket.id, x.needs, x.view])).toEqual([
+      ["a", undefined, { from: null, to: "terminal" }],
+      ["b", { added: ["c"], dropped: ["a"] }, undefined],
+    ]);
+  });
+  it("is nothing for the same revision", () => {
+    const s = snap([planned("a"), planned("b", ["a"])]);
+    expect(changesBetween(s, s)).toEqual({ added: [], removed: [], changed: [] });
+  });
+});
+
+// The hub writes a plan card's own header in these words (crates/hub/src/
+// desk_crew/plan.rs, as of hub.ref): Desk leaves that text out beside the
+// card, and keeps anything else. A change of wording there fails here.
+describe("the plan card's header, as the hub writes it", async () => {
+  // Read as a file: Vite serves nothing as text from outside Desk's folder.
+  // (The module is named at run time: Desk's types leave out Node's.)
+  const fs = (await import(["node", "fs"].join(":"))) as { existsSync(p: string): boolean; readFileSync(p: string, e: string): string };
+  const desk = decodeURIComponent(import.meta.url.replace(/^file:\/\//, "")).replace(/\/src\/crew\/[^/]*$/, "");
+  const at = `${desk}/../workforce-public-desk/crates/hub/src/desk_crew/plan.rs`;
+  const source = fs.existsSync(at) ? fs.readFileSync(at, "utf8") : undefined;
+  it.skipIf(source === undefined)("is the wording Desk reads as the card's own (skipped without the hub checked out)", () => {
+    for (const said of ['"{} proposes a plan: {}\\n\\n{}"', '"{name} changed the plan: {}"', '"{name} proposes a change to the plan: {}"']) expect(source).toContain(said);
+    expect(isCardText("Sarah proposes a plan: Refunds\n\n1. ACM-20 Refunds endpoint")).toBe(true);
+    expect(isCardText("Sarah changed the plan: Moved “A” after “B”")).toBe(true);
+    expect(isCardText("Sarah proposes a change to the plan: Added “C”")).toBe(true);
   });
 });

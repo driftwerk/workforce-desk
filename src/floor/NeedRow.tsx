@@ -238,6 +238,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               Reply…
             </button>
           )}
+          {plan && !decides && <span className="small faint">Look at it first</span>}
           {!line && target && (
             <button
               type="button"
@@ -247,7 +248,11 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               }
               disabled={need.stale || !!deciding}
               title={need.answer.kind === "terminal" ? "Answer in the terminal" : stale}
-              onClick={() => openTarget(target, { beside: true, reply: need.answer.kind === "terminal" })}
+              onClick={() => {
+                // A plan opens on its card, scrolled to, to be looked at.
+                if (plan) usePlans.getState().look(plan);
+                openTarget(target, { beside: true, reply: need.answer.kind === "terminal" });
+              }}
             >
               {plan ? PLAN[ask].open : "Open"}
             </button>

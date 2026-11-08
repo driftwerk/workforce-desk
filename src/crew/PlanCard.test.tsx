@@ -6,13 +6,14 @@ import { DeskHub } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import { DeskActions } from "../overview/DeskActions";
-import { PLAN, PlanHub, ticket, webFor } from "./planTesting";
+import { FakeViewport, PLAN, PlanHub, ticket, webFor } from "./planTesting";
 import { usePlans } from "./planStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
 
 let plans: PlanHub;
+let viewport: FakeViewport;
 /** Each decide the card sent, as the Floor sends them. */
 let decided: unknown[];
 const allow = (revision: number) => ({ at: { kind: "plan", plan: PLAN, revision }, choice: "allow" });
@@ -35,6 +36,7 @@ const show = async (revision = 1) => {
 
 beforeEach(() => {
   plans = new PlanHub();
+  viewport = new FakeViewport();
   decided = [];
   vi.stubGlobal("fetch", vi.fn(webFor(plans, decided)));
   plans.say = (e) => deskListeners.forEach((l) => l(e));
@@ -43,7 +45,7 @@ beforeEach(() => {
     roster: [{ hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false }],
   });
   useDesk.setState({ hub: new DeskHub(transport(() => plans)) });
-  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {} });
+  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {}, looking: {} });
   useBoard.setState({ boards: { "board-acme": { id: "board-acme", name: "Acme", group: "acme", prefix: "ACM", createdAt: "", updatedAt: "" } }, tickets: {} });
 });
 afterEach(() => {
@@ -210,7 +212,7 @@ describe("a running plan", () => {
     await show(2);
     const change = within(card()).getByRole("group", { name: "A change to the plan" });
     expect(change.textContent).toBe(
-      "Sarah wants to change the plan: Added “Fix the flaky payment test”Adds Fix the flaky payment test · Claude Code in ~/code/acme-webA change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.",
+      "Sarah wants to change the plan: Added “Fix the flaky payment test”Adds Fix the flaky payment test · Claude Code in ~/code/acme-webStarts at once, alongside the others readyA change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.",
     );
     expect(within(card()).getByText("A change waits for you")).toBeTruthy();
     // The person's edit waits until Sarah's change is answered: it never
@@ -246,6 +248,39 @@ describe("a running plan", () => {
     expect(changed.textContent).toContain("Folder: ~/code/acme-web → ~/code/acme-shop");
     expect(changed.textContent).toContain("What it starts with now: Also refund partial orders.");
     expect(within(card()).getByText("rev 2")).toBeTruthy();
+  });
+
+  it("shows a ticket made to start alongside another rather than after it, and one added after another", async () => {
+    plans.bossProposes("Moved “Refund from the order page”; added “Fix the flaky payment test”", (ts) => [
+      ...ts.map((t) => (t.id === "t22" ? { ...t, needs: [] } : t)),
+      ticket(19, "Fix the flaky payment test", { needs: ["t21"] }),
+    ]);
+    await show(2);
+    const shown = within(card()).getByRole("list", { name: "What approving it changes" });
+    expect(within(shown).getByText(/Refund from the order page/).closest("li")!.textContent).toContain("no longer waits for ACM-20, so it may start alongside it");
+    expect(within(shown).getByText(/Fix the flaky payment test/).closest("li")!.textContent).toContain("Starts after ACM-21");
+  });
+
+  it("counts a revision seen only once it is in view, or Look brought it there", async () => {
+    plans.bossAdds("Fix the flaky payment test");
+    viewport.visible = false;
+    await show(2);
+    // Mounted, but scrolled away.
+    expect(usePlans.getState().seen[PLAN]).toBeUndefined();
+    act(() => viewport.show());
+    expect(usePlans.getState().seen[PLAN]).toBe(2);
+  });
+
+  it("scrolls to the card the Floor's Look asked for, and counts it seen", async () => {
+    viewport.visible = false;
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    await show();
+    expect(usePlans.getState().seen[PLAN]).toBeUndefined();
+    act(() => usePlans.getState().look(PLAN));
+    expect(scrolled).toHaveBeenCalled();
+    expect(usePlans.getState().seen[PLAN]).toBe(1);
+    expect(usePlans.getState().looking[PLAN]).toBeUndefined();
   });
 
   it("decides nothing on a revision older than the newest announced, until it is read", async () => {

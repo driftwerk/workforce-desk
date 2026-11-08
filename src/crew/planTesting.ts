@@ -3,6 +3,7 @@
 // it (by the plan's route or the Floor's decide) moves its tickets to To do
 // and starts the ready ones, as the runner would, announcing each.
 
+import { vi } from "vitest";
 import type { BossPlan, BossPlanDetail, BossPlanRevision, BossPlanTicket, DeskEvent, DraftTicket, EngineInfo, Need, PlannedTicket, Ticket, TicketState } from "../hub/types";
 
 export const PLAN = "00000000-0000-4000-8000-00000000aa01";
@@ -300,3 +301,42 @@ export const webFor = (plans: PlanHub, decided: unknown[] = []) =>
     }
     return new Response("Not Found", { status: 404 });
   };
+
+/** The window as `IntersectionObserver` sees it, for tests: what a card
+ *  watches is in view while `visible`, and `show` brings it there. */
+export class FakeViewport {
+  visible: boolean;
+  private watched: { el: Element; cb: IntersectionObserverCallback; io: IntersectionObserver; gone: boolean }[] = [];
+
+  constructor(visible = true) {
+    this.visible = visible;
+    const viewport = this;
+    class Observer {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) {
+        const w = { el, cb: this.cb, io: this as unknown as IntersectionObserver, gone: false };
+        viewport.watched.push(w);
+        if (viewport.visible) viewport.fire(w);
+      }
+      unobserve() {}
+      disconnect() {
+        for (const w of viewport.watched) if (w.io === (this as unknown)) w.gone = true;
+      }
+      takeRecords() {
+        return [];
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", Observer);
+  }
+
+  private fire(w: { el: Element; cb: IntersectionObserverCallback; io: IntersectionObserver; gone: boolean }) {
+    const rect = { x: 0, y: 0, width: 600, height: 300, top: 0, left: 0, right: 600, bottom: 300 } as DOMRectReadOnly;
+    w.cb([{ target: w.el, isIntersecting: true, intersectionRatio: 1, intersectionRect: rect, boundingClientRect: rect, rootBounds: rect, time: 0 }], w.io);
+  }
+
+  /** Scrolls everything watched into view. */
+  show() {
+    this.visible = true;
+    for (const w of this.watched) if (!w.gone) this.fire(w);
+  }
+}

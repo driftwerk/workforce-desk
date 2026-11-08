@@ -33,6 +33,11 @@ interface PlanState {
   seen: Record<string, number>;
   /** The person sees revision `revision` of plan `id` whole. */
   saw: (id: string, revision: number) => void;
+  /** Plans the person asked to look at from the Floor: their card scrolls
+   *  itself into view. */
+  looking: Record<string, true>;
+  look: (id: string) => void;
+  looked: (id: string) => void;
   load: () => Promise<void>;
   /** Reads plan `id` in full. */
   fetch: (id: string) => Promise<void>;
@@ -114,6 +119,9 @@ export const usePlans = create<PlanState>((set, get) => {
     refusals: {},
     cards: {},
     seen: {},
+    looking: {},
+    look: (id) => set((s) => ({ looking: { ...s.looking, [id]: true } })),
+    looked: (id) => set((s) => ({ looking: without(s.looking, id) })),
     saw: (id, revision) => {
       if ((get().seen[id] ?? 0) < revision) set((s) => ({ seen: { ...s.seen, [id]: revision } }));
     },

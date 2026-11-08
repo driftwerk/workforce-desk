@@ -296,6 +296,9 @@ export interface TicketChange {
   body?: { from: string; to: string };
   engine?: { from: Engine; to: Engine };
   folder?: { from: string; to: string };
+  view?: { from: View | null; to: View | null };
+  /** What it needs done first, by ticket id: needs it gains and loses. */
+  needs?: { added: string[]; dropped: string[] };
 }
 
 /** Everything `after` changes from `before`, the revision approved: what
@@ -304,6 +307,9 @@ export interface PlanChanges {
   goal?: { from: string; to: string };
   /** Its limit of sessions at once; null is its boss's. */
   parallel?: { from: number | null; to: number | null };
+  /** The tickets in both, by id, in the order each lists them, when that
+   *  changed: what starts first. */
+  order?: { from: string[]; to: string[] };
   added: PlannedTicket[];
   removed: PlannedTicket[];
   changed: TicketChange[];
@@ -321,13 +327,20 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
     if (w.body !== t.body) c.body = { from: w.body, to: t.body };
     if (w.engine !== t.engine) c.engine = { from: w.engine, to: t.engine };
     if (w.folder !== t.folder) c.folder = { from: w.folder, to: t.folder };
-    if (c.title || c.body || c.engine || c.folder) changed.push(c);
+    if ((w.view ?? null) !== (t.view ?? null)) c.view = { from: w.view ?? null, to: t.view ?? null };
+    const added = t.needs.filter((n) => !w.needs.includes(n));
+    const dropped = w.needs.filter((n) => !t.needs.includes(n));
+    if (added.length || dropped.length) c.needs = { added, dropped };
+    if (c.title || c.body || c.engine || c.folder || c.view || c.needs) changed.push(c);
   }
   const from = before.parallel ?? null;
   const to = after.parallel ?? null;
+  const kept = (s: PlanSnapshot) => s.tickets.map((t) => t.id).filter((id) => was.has(id) && now.has(id));
+  const order = { from: kept(before), to: kept(after) };
   return {
     ...(before.goal.trim() !== after.goal.trim() ? { goal: { from: before.goal, to: after.goal } } : {}),
     ...(from !== to ? { parallel: { from, to } } : {}),
+    ...(order.from.join() !== order.to.join() ? { order } : {}),
     added: after.tickets.filter((t) => !was.has(t.id)),
     removed: before.tickets.filter((t) => !now.has(t.id)),
     changed,
