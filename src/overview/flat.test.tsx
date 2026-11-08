@@ -114,7 +114,8 @@ const drawn = async (floor: FloorView): Promise<string> => {
   stop = watchFloor();
   const { container } = render(<Floor onNewSession={() => {}} />);
   await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS + 1));
-  const html = container.innerHTML;
+  // Times as the computer's locale writes them ("16:41", "4:41 PM"), as one.
+  const html = container.innerHTML.replace(/\b\d{1,2}:\d{2}(?:\s?[AP]M)?/g, "hh:mm");
   stop();
   cleanup();
   return html;
