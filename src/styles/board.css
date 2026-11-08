@@ -472,3 +472,22 @@ button.ticket-chip:hover {
 .ticket-conflict p {
   margin: 0;
 }
+
+/* A boss's plans on the board (BD11): the filter, and the chip on a plan's
+   tickets. */
+.board-plan {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board-plan-chip {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  border-color: transparent;
+}

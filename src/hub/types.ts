@@ -370,7 +370,10 @@ export type DeskEvent =
   | { type: "ticketRemoved"; id: string }
   /** A board was made or changed. */
   | { type: "board"; board: Board }
-  | { type: "boardRemoved"; id: string };
+  | { type: "boardRemoved"; id: string }
+  /** A boss's plan was made or changed: proposed, approved, edited,
+   *  paused, dropped or done. */
+  | { type: "plan"; plan: BossPlan };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 
@@ -563,7 +566,13 @@ export type BudgetScope =
   | { kind: "each_session" }
   | { kind: "each_agent" }
   | { kind: "session"; id: string }
-  | { kind: "agent"; id: string };
+  | { kind: "agent"; id: string }
+  /** A boss's plan's own budget, set as it is approved. */
+  | { kind: "plan"; id: string };
+
+/** A budget's period: a plan's may be its whole run (`total`), which never
+ *  resets. */
+export type BudgetPeriod = SpendPeriod | "total";
 
 export type BudgetUnit = "usd" | "tokens";
 /** Over a budget: `pause` the turn after (agents' new turns; a total's new
@@ -575,7 +584,7 @@ export interface Budget {
   scope: BudgetScope;
   /** The sidebar group it is the budget of; null is ungrouped. */
   group: string | null;
-  period: SpendPeriod;
+  period: BudgetPeriod;
   unit: BudgetUnit;
   amount: number;
   /** The share it warns at, between 0 and 1. */
@@ -589,7 +598,8 @@ export type BudgetStatus = "under" | "warn" | "over";
 /** Where what a budget counts stands now. */
 export interface Standing {
   budget: string;
-  period: SpendPeriod;
+  /** A `total`'s `to` is far off (2200): it never resets. */
+  period: BudgetPeriod;
   unit: BudgetUnit;
   used: number;
   of: number;
@@ -597,6 +607,8 @@ export interface Standing {
   onExceed: OnExceed;
   from: string;
   to: string;
+  /** Counted over many sessions together (a plan's), not one's own alone. */
+  shared?: boolean;
 }
 
 export interface BudgetView extends Budget {
@@ -912,6 +924,9 @@ export interface DeskExtras {
   suggestions?: { id: string; text: string; state: Suggestion["state"] }[];
   /** Questions sessions asked on their line that the overseer gave you. */
   questions?: MentionedQuestion[];
+  /** The boss's plan a plan card shows, as of the revision it was posted
+   *  for. */
+  plan?: { id: string; revision: number };
 }
 
 /** A session's question on its line, as the overseer's DM shows it. */
@@ -1038,7 +1053,10 @@ export type DecideRef =
   | { kind: "codex"; sessionId: string; approvalId: string; choices: Choice[] }
   /** What Desk's breaker holds (`session:<id>`, `agent:<id>`, `pool:desk`,
    *  `pool:group:<id>`): allow is Continue, deny is Keep paused. */
-  | { kind: "breaker"; subject: string };
+  | { kind: "breaker"; subject: string }
+  /** A boss's plan, or a change of scope to it, as of `revision`: allow is
+   *  Approve and run; deny leaves it as it is. Only the person answers it. */
+  | { kind: "plan"; plan: string; revision: number };
 
 /** An answer to a need: Codex's requests take the last two as well. */
 export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
@@ -1048,9 +1066,10 @@ export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
 export type Answer = { kind: "decide"; at: DecideRef } | { kind: "terminal" } | { kind: "reply" };
 
 /** An agent (its id), a Desk session (its id) on a hub, or Desk itself
- *  (what its breaker holds new sessions for: `pool:…`). */
+ *  (what its breaker holds new sessions for: `pool:…`). A boss, as a plan's
+ *  need names it, is `manager`: the Floor reads it as the agent it is. */
 export interface Who {
-  kind: "agent" | "session" | "desk";
+  kind: "agent" | "session" | "desk" | "manager";
   id: string;
   name: string;
   engine: Engine | null;
@@ -1335,6 +1354,142 @@ export interface TicketMove {
 
 /** Whom a ticket goes to; null takes it off whoever has it. */
 export type AssignTo = { session: string } | { agent: string } | { newSession: { path: string; engine: Engine } } | null;
+
+// ── A boss's plans: a goal broken into tickets, approved before it runs ──
+
+/** The Floor's names for the same: a plan's state and its tickets' tally. */
+export type BossPlanState = PlanState;
+
+/** Why a plan that would run starts nothing. */
+export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss" | "start_failing";
+
+export type BossPlanProgress = PlanTally;
+
+/** A plan, with where its tickets stand. */
+export interface BossPlan {
+  id: string;
+  board: string;
+  /** The board's group when it was made; null is ungrouped. */
+  group: string | null;
+  /** The boss's agent id. */
+  boss: string;
+  bossName: string;
+  goal: string;
+  state: BossPlanState;
+  /** Why it starts nothing; a newer hub may name reasons Desk doesn't know
+   *  yet, said in `pausedWhy`. */
+  paused: BossPlanPaused | (string & {}) | null;
+  /** Why it is paused, in the hub's own words, when it says. */
+  pausedWhy?: string | null;
+  /** Its own limit of sessions at once, when lower than its boss's. */
+  parallel: number | null;
+  /** Its newest revision. */
+  revision: number;
+  /** The revision its runner follows; null before the person approves. */
+  approvedRevision: number | null;
+  createdAt: string;
+  updatedAt: string;
+  progress: BossPlanProgress;
+  /** What it may spend: as approved, or as proposed before it is; none is
+   *  no budget of its own. Absent from hubs before plan budgets. */
+  budget?: PlanBudget | null;
+  /** What holds its new starts while Desk's breaker does, in the Floor's
+   *  words: Continue on the Floor. */
+  held?: string | null;
+}
+
+/** What a plan may spend. */
+export interface PlanBudget {
+  amount: number;
+  unit: BudgetUnit;
+  period: BudgetPeriod;
+  /** The share it warns at, between 0 and 1. */
+  warnAt: number;
+  onExceed: OnExceed;
+}
+
+/** A plan's ticket as its card shows it: the board's ticket, and what its
+ *  session starts in. */
+export interface BossPlanTicket extends Ticket {
+  engine: Engine | null;
+  folder: string | null;
+  view: View | null;
+  /** Its session is being started. */
+  starting: boolean;
+  /** What holds its session while Desk's breaker does: it is blocked on
+   *  the person, and nothing starts in its place. */
+  held?: string | null;
+}
+
+/** One ticket of a revision, as the plan has it. */
+export interface PlannedTicket {
+  id: string;
+  title: string;
+  body: string;
+  engine: Engine;
+  folder: string;
+  view: View | null;
+  /** The plan's tickets it needs done first. */
+  needs: string[];
+}
+
+/** One revision of a plan, as kept. */
+export interface BossPlanRevision {
+  plan: string;
+  revision: number;
+  at: string;
+  by: ActivityParty;
+  /** A change within what was approved, or of its scope. */
+  change: "minor" | "scope";
+  summary: string;
+  /** `parallel`: its own limit of sessions at once; none is its boss's. */
+  snapshot: { goal: string; tickets: PlannedTicket[]; parallel?: number; budget?: PlanBudget | null };
+}
+
+/** A plan in full: its tickets in its order, its waves and revisions. */
+export interface BossPlanDetail extends BossPlan {
+  tickets: BossPlanTicket[];
+  waves: string[][];
+  revisions: BossPlanRevision[];
+  /** Where its budget stands now, when it has one and it can be counted. */
+  spend?: Standing | null;
+}
+
+/** A ticket as the person's edit writes it: by its id when the plan has
+ *  it, what it needs by its place in the list (from 0). */
+export interface DraftTicket {
+  id?: string;
+  title: string;
+  body?: string;
+  /** None: the plan's first ticket's engine. */
+  engine?: Engine;
+  folder: string;
+  view?: View | null;
+  needs: number[];
+}
+
+/** The person's edit, made from `revision`. */
+export interface BossPlanEdit {
+  revision: number;
+  goal?: string;
+  /** null takes the boss's limit again. */
+  parallel?: number | null;
+  /** Every ticket it is to have, in order. */
+  tickets?: DraftTicket[];
+  /** What it may spend; null takes its budget off. */
+  budget?: PlanBudget | null;
+}
+
+/** What an edit came to. */
+export interface BossPlanChanged {
+  plan: BossPlanDetail;
+  change: "minor" | "scope" | null;
+  applied: boolean;
+  summary: string;
+}
+
+/** What dropping a plan does with the sessions working on it. */
+export type OnPlanDrop = "stop" | "leave";
 
 /** A decision, fact or to-do Desk noted from a session, or the person wrote. */
 export interface MemoryNote {

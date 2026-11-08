@@ -1,4 +1,4 @@
-import type { BreakerView, Budget, BudgetScope, BudgetUnit, SpendPeriod, Standing } from "../hub/types";
+import type { BreakerView, Budget, BudgetPeriod, BudgetScope, BudgetUnit, SpendPeriod, Standing } from "../hub/types";
 import { tokensText, usdText } from "./spend";
 
 export const PERIODS: readonly SpendPeriod[] = ["day", "week", "month", "five_hours"];
@@ -11,12 +11,13 @@ export const PERIOD_LABEL: Record<SpendPeriod, string> = {
   month: "Month",
 };
 
-/** "a day budget", "a five-hour budget". */
-export const periodWord = (p: SpendPeriod): string => (p === "five_hours" ? "five-hour" : p);
+/** "a day budget", "a five-hour budget", "a total budget" (a plan's whole run). */
+export const periodWord = (p: BudgetPeriod): string => (p === "five_hours" ? "five-hour" : p);
 
-/** When a period's spend is from: "today", "this week", "in the last five hours". */
-export const periodWhen = (p: SpendPeriod): string =>
-  p === "day" ? "today" : p === "week" ? "this week" : p === "month" ? "this month" : "in the last five hours";
+/** When a period's spend is from: "today", "this week", "in the last five
+ *  hours"; a total's is everything, and it never resets. */
+export const periodWhen = (p: BudgetPeriod): string =>
+  p === "day" ? "today" : p === "week" ? "this week" : p === "month" ? "this month" : p === "total" ? "in all" : "in the last five hours";
 
 /** "$11", "500k tokens". */
 export const amountText = (unit: BudgetUnit, n: number): string =>
@@ -53,12 +54,14 @@ export const scopeLabel = (scope: BudgetScope, group: string | null, names: Name
       return names.session(scope.id) ?? "A session since forgotten";
     case "agent":
       return names.agent(scope.id) ?? scope.id;
+    case "plan":
+      return g ? `A plan in ${g}` : "A plan";
   }
 };
 
 /** "A day budget of $11, warns at 80%, pauses when over". */
 export const budgetLine = (b: Pick<Budget, "period" | "unit" | "amount" | "warnAt" | "onExceed">): string =>
-  `${amountText(b.unit, b.amount)} a ${periodWord(b.period)} · warns at ${Math.round(b.warnAt * 100)}% · ${
+  `${amountText(b.unit, b.amount)} ${b.period === "total" ? "in all" : b.period === "five_hours" ? "per five hours" : `a ${periodWord(b.period)}`} · warns at ${Math.round(b.warnAt * 100)}% · ${
     b.onExceed === "pause" ? "pauses when over" : "only warns"
   }`;
 

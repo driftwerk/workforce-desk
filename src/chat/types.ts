@@ -168,7 +168,7 @@ export const FEATURES = {
   clientIds: "desk.client_ids",
 } as const;
 
-export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "other";
+export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "plan" | "other";
 
 export type DeskPlace =
   | { kind: "dm" }
