@@ -170,7 +170,7 @@ export function ActivityRail({
   const events = useMemo(
     () =>
       group && localId
-        ? fed.filter((e) => sectionOfEvent(place, localId, e) === group)
+        ? fed.filter((e) => sectionOfEvent(place, e) === group)
         : fed,
     [fed, group, localId, place],
   );

@@ -273,6 +273,31 @@ describe("a sealed group while no group has a boss", () => {
   });
 });
 
+describe("a Desk item with a turn earlier today", () => {
+  const doneThisMorning = fw(work(session("s-web"), { group: "acme", boss: "sarah", since: at(300), endedAt: at(240), outcome: "finished" }));
+  const run = (look: DeskItem["look"]) => {
+    const out = floorSections({ needs: [], working: [], done: [doneThisMorning] }, oversight(), layout, { localHub: "local", day: Date.parse(at(600)), desk: [desk("session", "s-web", look)] });
+    if (out.kind !== "sections") throw new Error("flat");
+    return byId(out.sections, "acme");
+  };
+  it("had a done turn this morning, now blocked: shows in its section's Working", () => {
+    const acme = run("blocked");
+    expect(acme.desk.map((d) => `${d.who.id}:${d.look}`)).toEqual(["s-web:blocked"]);
+    expect(acme.done).toHaveLength(1);
+  });
+  it("had a done turn, now working: shows in its section's Working", () => {
+    expect(run("working").desk.map((d) => `${d.who.id}:${d.look}`)).toEqual(["s-web:working"]);
+  });
+  it("done today with a done turn today is that turn, once", () => {
+    expect(run("done").desk).toEqual([]);
+  });
+  it("done today whose hub turn ended before the day began still shows as done", () => {
+    const out = floorSections({ needs: [], working: [], done: [doneThisMorning] }, oversight(), layout, { localHub: "local", day: Date.parse(at(100)), desk: [desk("session", "s-web", "done")] });
+    if (out.kind !== "sections") throw new Error("flat");
+    expect(byId(out.sections, "acme").desk.map((d) => d.look)).toEqual(["done"]);
+  });
+});
+
 describe("the main boss and you in Activity", () => {
   it("are the main boss's section, wherever the main boss's row sits", () => {
     const p = placer({ ...layout, groups: layout.groups.map((g) => (g.id === "acme" ? { ...g, items: [...g.items, "agent:local/desk"] } : g)) }, oversight());
@@ -284,16 +309,15 @@ describe("the main boss and you in Activity", () => {
 
 describe("an Activity event's section", () => {
   const p = placer(layout, oversight());
-  const ev = (over: Partial<Parameters<typeof sectionOfEvent>[2]>) => ({ actor: { kind: "session" as const, id: "s-web", name: "acme-web" }, subject: null, ...over });
   it("is the group the hub stamped it with: a moved session's past stays where it happened", () => {
     // s-web sits in Acme now; this happened while it was in Globex.
-    expect(sectionOfEvent(p, "local", ev({ group: "globex" }))).toBe("globex");
-    expect(sectionOfEvent(p, "local", ev({ group: null }))).toBe(MAIN);
-    expect(sectionOfEvent(p, "local", ev({ group: "old" }))).toBe(sealedSection("old"));
+    expect(sectionOfEvent(p, { group: "globex" })).toBe("globex");
+    expect(sectionOfEvent(p, { group: "old" })).toBe(sealedSection("old"));
+    expect(sectionOfEvent(p, { group: "personal" })).toBe(MAIN);
   });
-  it("is by the sidebar now only from a hub that stamps none, and by its subject alone", () => {
-    expect(sectionOfEvent(p, "local", ev({}))).toBe("acme");
-    expect(sectionOfEvent(p, "local", ev({ actor: { kind: "manager", id: "desk", name: "Desk" }, subject: { kind: "session", id: "s-idx", name: "i" } }))).toBe("globex");
-    expect(sectionOfEvent(p, "local", ev({ actor: { kind: "you", id: "sam", name: "You" } }))).toBe(MAIN);
+  it("is the main boss's when the hub stamps none: it leaves `group` out for what was ungrouped", () => {
+    const ungrouped = JSON.parse('{"id":"e1","actor":{"kind":"session","id":"s-web","name":"acme-web"}}') as { group?: string | null };
+    expect("group" in ungrouped).toBe(false);
+    expect(sectionOfEvent(p, ungrouped)).toBe(MAIN);
   });
 });

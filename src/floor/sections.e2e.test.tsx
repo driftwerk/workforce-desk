@@ -339,7 +339,7 @@ describe("the Floor by group, across hubs", () => {
   });
 
   it("filters Activity by the group each event happened in, so a moved session's past stays there", async () => {
-    const ev = (id: string, group: string | null | undefined, min: number): ActivityEvent => ({
+    const ev = (id: string, group: string | undefined, min: number): ActivityEvent => ({
       id,
       at: at(min),
       kind: "finished",
@@ -349,7 +349,7 @@ describe("the Floor by group, across hubs", () => {
       ...(group === undefined ? {} : { group }),
     });
     // acme-web is in Acme now; it ran in Globex before it moved.
-    transport.activity = [ev("e3", "acme", 1), ev("e2", "globex", 50), ev("e1", null, 90)];
+    transport.activity = [ev("e3", "acme", 1), ev("e2", "globex", 50), ev("e1", undefined, 90)];
     await floor();
     const groups = within(rail()).getByRole("radiogroup", { name: "Group" });
     const shown = () => within(rail()).queryAllByText(/^finished e\d$/).map((e) => e.textContent);

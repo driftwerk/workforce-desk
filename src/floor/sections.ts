@@ -224,9 +224,12 @@ export const floorSections = (
   for (const w of floor.done) if (w.endedAt && Date.parse(w.endedAt) >= day) into(w).done.push(w);
   for (const p of oversight.plans) (byId.get(place.ofGroup(p.group)) ?? main).plans.push(p);
   // Desk's own, where no hub's floor has them: in their sidebar section.
-  const onFloor = new Set([...floor.needs, ...floor.working, ...floor.done].map((i) => itemKeyOf(i)));
+  // Each list on its own: a session done this morning and blocked now is
+  // still to show in Working.
+  const live = new Set([...floor.needs, ...floor.working].map((i) => itemKeyOf(i)));
+  const doneToday = new Set(floor.done.filter((w) => w.endedAt && Date.parse(w.endedAt) >= day).map((i) => itemKeyOf(i)));
   for (const d of desk) {
-    if (onFloor.has(d.key)) continue;
+    if ((d.look === "done" ? doneToday : live).has(d.key)) continue;
     const s = (localHub ? byId.get(place.ofLocal(localHub, d.who)) : undefined) ?? main;
     s.desk.push(d);
     const g = groupOf(layout, d.key);
@@ -243,11 +246,10 @@ export const floorSections = (
 };
 
 /** The section an event of this computer's hub belongs to: the group it
- *  was in when it happened, as the hub stamped it, so a moved session's past
- *  stays where it was; by the sidebar now only from a hub that doesn't
- *  stamp. */
-export const sectionOfEvent = (place: Placer, localHub: string, e: Pick<ActivityEvent, "group" | "subject" | "actor">): string =>
-  e.group !== undefined ? place.ofGroup(e.group) : place.ofLocal(localHub, e.subject ?? e.actor);
+ *  was in when it happened, as the hub stamped it (none: ungrouped), so a
+ *  moved session's past stays where it was. Sections exist only with a hub
+ *  that names bosses, and such a hub stamps every event. */
+export const sectionOfEvent = (place: Placer, e: Pick<ActivityEvent, "group">): string => place.ofGroup(e.group ?? null);
 
 /** What a section shows as working: the hubs' turns, and Desk's own that
  *  no hub has a turn for (blocked ones too). */

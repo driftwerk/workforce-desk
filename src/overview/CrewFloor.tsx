@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
@@ -121,7 +121,10 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const needs = useNeedCounts();
   const now = useMinute();
   const all = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
-  const sectioned = useSections(onFloor ? deskItems(all, localId) : undefined);
+  // Desk's own lists, kept while they're the same, so the sections are.
+  const deskKey = JSON.stringify(onFloor ? deskItems(all, localId) : null);
+  const desk = useMemo(() => (JSON.parse(deskKey) as DeskItem[] | null) ?? undefined, [deskKey]);
+  const sectioned = useSections(desk);
   const sections = onFloor && sectioned.kind === "sections" ? sectioned.sections : null;
   const groups = sections ? all.filter((g) => !IN_SECTIONS.has(g.title)) : all;
   const count = (title: string) => {
