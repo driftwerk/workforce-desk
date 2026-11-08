@@ -157,7 +157,8 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   const [asking, setAsking] = useState<Asking>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [editing, setEditing] = useState<DraftTicket[] | null>(null);
-  const [dropping, setDropping] = useState<OnPlanDrop | null>(null);
+  // Dropping: "ask" until the person says what becomes of its sessions.
+  const [dropping, setDropping] = useState<OnPlanDrop | "ask" | null>(null);
 
   const tickets = useMemo(() => liveTickets(detail, board), [detail, board]);
   const rules = useMemo(() => tickets.map(ruled), [tickets]);
@@ -270,6 +271,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
           choices={choices ?? engineChoices(null)}
           lockedIds={new Set(tickets.filter(started).map((t) => t.id))}
           busy={busy}
+          pending={change ? `Saving includes ${boss}'s proposed change (${change.summary}) and applies it now.` : null}
           onChange={setEditing}
           onCancel={() => setEditing(null)}
           onSave={(t) => void save(t)}
@@ -331,7 +333,12 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                 <button type="button" className="btn" onClick={() => setDropping(null)} disabled={busy}>
                   Keep it
                 </button>
-                <button type="button" className="btn btn-danger" onClick={() => void drop(dropping)} disabled={busy}>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => dropping !== "ask" && void drop(dropping)}
+                  disabled={busy || dropping === "ask"}
+                >
                   {asking === "drop" ? "Dropping…" : "Drop the plan"}
                 </button>
               </span>
@@ -345,7 +352,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                   </span>
                 )}
                 {plan.state === "paused" && plan.paused && !resumable(plan.paused) && <span className="pc-note">Paused: {PAUSED_WHY[plan.paused]}. It goes on by itself once that's past.</span>}
-                <button type="button" className="btn" disabled={busy} onClick={() => setDropping("stop")}>
+                <button type="button" className="btn" disabled={busy} onClick={() => setDropping(sessionsRun ? "ask" : "stop")}>
                   Drop
                 </button>
                 <button type="button" className="btn" disabled={busy} onClick={() => setEditing(draft())}>
@@ -435,11 +442,14 @@ function PlanEditor({
   choices,
   lockedIds,
   busy,
+  pending,
   onChange,
   onCancel,
   onSave,
 }: {
   draft: DraftTicket[];
+  /** A change of scope the boss proposed, which saving the edit takes in. */
+  pending: string | null;
   choices: EngineChoice[];
   /** Tickets that have started: where they run stays. */
   lockedIds: ReadonlySet<string>;
@@ -505,7 +515,7 @@ function PlanEditor({
         <button type="button" className="btn btn-ghost" onClick={() => onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, needs: [] }])}>
           Add a ticket
         </button>
-        <span className="pc-note" />
+        <span className="pc-note">{pending}</span>
         <button type="button" className="btn" onClick={onCancel} disabled={busy}>
           Cancel
         </button>

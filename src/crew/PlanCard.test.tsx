@@ -152,6 +152,9 @@ describe("a running plan", () => {
   it("asks whether to stop its sessions or leave them, when it is dropped", async () => {
     await show();
     fireEvent.click(within(card()).getByRole("button", { name: "Drop" }));
+    // Nothing is chosen for the person: the drop waits for their answer.
+    expect(within(card()).getAllByRole("radio").map((r) => (r as HTMLInputElement).checked)).toEqual([false, false]);
+    expect((within(card()).getByRole("button", { name: "Drop the plan" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(card()).getByRole("radio", { name: "Leave them running, yours to finish" }));
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Drop the plan" })));
     expect(bodies(`POST /api/desk/plans/${PLAN}/drop`)).toEqual([{ sessions: "leave" }]);
@@ -181,6 +184,10 @@ describe("a running plan", () => {
     const change = within(card()).getByRole("group", { name: "A change to the plan" });
     expect(change.textContent).toBe("Sarah wants to change the plan: Added “Fix the flaky payment test”A change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.");
     expect(within(card()).getByText("A change waits for you")).toBeTruthy();
+    // An edit made now takes the change in, and says so before it is saved.
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    expect(within(card()).getByRole("form", { name: "Edit the plan" }).textContent).toContain("Saving includes Sarah's proposed change (Added “Fix the flaky payment test”) and applies it now.");
+    fireEvent.click(within(card()).getByRole("button", { name: "Cancel" }));
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve the change" })));
     expect(bodies(`POST /api/desk/plans/${PLAN}/approve`)).toEqual([{ revision: 2 }]);
   });
