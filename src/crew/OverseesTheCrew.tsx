@@ -8,6 +8,8 @@ import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
 import { useLayout } from "../groups/store";
+import { useHubLayout } from "../groups/hubLayout";
+import { askMove } from "../groups/move";
 import { startable } from "../engines/engines";
 import type { EngineInfo } from "../hub/types";
 import {
@@ -81,6 +83,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const support = useOverview((s) => s.managerSupport);
   const roster = useChat((s) => s.roster);
   const { groups } = useLayout();
+  const movable = useHubLayout((s) => s.layout !== null);
   const hubs = useChat((s) => s.hubs);
   const [o, setO] = useState<Oversight | null>(null);
   const [fields, setFields] = useState<Record<Field, Typed> | null>(null);
@@ -208,7 +211,16 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             {name} keeps track of every agent and session and tells you what needs you. Only one crew member oversees at a time.
           </span>
           {o && !o.enabled && other && <span className="oversee-sub">{other} oversees the crew now.</span>}
-          {o?.enabled && bossOf && <span className="oversee-sub">Oversees only {bossOf}: its sessions and agents.</span>}
+          {o?.enabled && bossOf && (
+            <span className="oversee-sub">
+              Oversees only {bossOf}: its sessions and agents.{" "}
+              {movable && o.group && (
+                <button type="button" className="link" onClick={() => askMove({ kind: "boss", id: agent.id, name, from: o.group! })}>
+                  Move {name} to another group…
+                </button>
+              )}
+            </span>
+          )}
         </span>
         <button
           type="button"

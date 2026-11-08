@@ -149,6 +149,168 @@
   color: var(--faint);
 }
 
+/* ── Move to group ──────────────────────────────────────────────────────── */
+
+.move-body {
+  gap: 16px;
+}
+.move-field {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.move-field legend,
+.move-legend {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.move-field > legend + .move-opts {
+  margin-top: 0;
+}
+.move-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.move-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.move-opt:has(input:checked) {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+}
+.move-opt:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+.move-opt input {
+  accent-color: var(--signal);
+  margin: 0;
+  flex: none;
+}
+.move-opt-lead {
+  display: inline-flex;
+  flex: none;
+}
+.move-opt-mark {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+}
+.move-opt-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.move-opt-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.move-effects {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.move-effects li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.move-effects li svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.move-effects li.stay svg {
+  color: var(--faint);
+}
+.move-note {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+.move-note:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.move-note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+}
+.move-note-meta b {
+  color: var(--text);
+}
+.move-callout {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.move-refused {
+  color: var(--text);
+  background: var(--blocked-soft);
+}
+.move-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.move-ask p {
+  margin: 0;
+  line-height: 1.5;
+}
+@media (max-width: 560px) {
+  .move-foot .btn {
+    flex: 1 1 auto;
+  }
+}
+
 /* ── How they think ─────────────────────────────────────────────────────── */
 
 .brain-nav {

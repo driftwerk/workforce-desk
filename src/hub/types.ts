@@ -248,6 +248,9 @@ export interface Room {
   channel?: string;
   members: RoomMemberRef[];
   defaultMember: string | null;
+  /** The sidebar group it belongs to; absent when none, and from older
+   *  hubs. One with a boss of its own takes only that group's agents. */
+  group?: string | null;
   createdAt: string;
   updatedAt: string;
 }

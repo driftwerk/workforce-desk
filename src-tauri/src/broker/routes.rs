@@ -603,6 +603,34 @@ mod tests {
         }
     }
 
+    /// Moves between groups (and the handover notes they carry) are the
+    /// hub holder's alone: the page asks them as the person over the paired
+    /// path, and the broker's token, which the hub refuses for them, is
+    /// never let ask them, nor is a machine's.
+    #[test]
+    fn moves_are_asked_as_the_person_never_through_the_broker() {
+        for (method, target) in [
+            ("POST", "/api/desk/moves/preview"),
+            ("POST", "/api/desk/moves"),
+            ("GET", "/api/desk/handovers/h1"),
+            ("GET", "/api/desk/moves/preview"),
+            ("PUT", "/api/desk/handovers/h1"),
+        ] {
+            assert!(
+                http(method, target).is_err(),
+                "{method} {target} was allowed"
+            );
+            assert!(
+                machine_http(method, target).is_err(),
+                "{method} {target} was allowed on a machine"
+            );
+            assert!(
+                native_local(method, target).is_err(),
+                "{method} {target} was native"
+            );
+        }
+    }
+
     #[test]
     fn a_route_takes_its_own_segments_and_queries() {
         let got = http("GET", "/api/desk/spend?period=week&by=engine&limit=10").unwrap();

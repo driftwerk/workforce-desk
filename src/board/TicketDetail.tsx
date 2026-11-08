@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
+import { useHubLayout } from "../groups/hubLayout";
+import { askMove, ticketSubject } from "../groups/move";
 import { deskListeners, sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { ActivityEvent, ActivityParty, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
 import { SidePanel } from "../panels/Stage";
@@ -173,6 +175,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const handEntries = useHandEntries(t);
   const spend = useTicketSpend(t);
   const history = useTicketHistory(t);
+  const movable = useHubLayout((s) => s.layout !== null);
   const names = useSessionNames();
   const roster = useChat((s) => s.roster);
   const store = useBoard.getState;
@@ -388,6 +391,11 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
           >
             Copy link
           </button>
+          {movable && (
+            <button type="button" className="link small" onClick={() => askMove(ticketSubject(t))}>
+              Move to group…
+            </button>
+          )}
           <button type="button" className="link small" onClick={() => setDeleting(true)}>
             Delete ticket…
           </button>
