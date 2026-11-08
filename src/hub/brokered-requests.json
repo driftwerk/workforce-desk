@@ -542,6 +542,46 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/plans"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/plans?state=running&group=acme"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/plans/p1"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/plans/p1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/approve"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/pause"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/resume"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/drop"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/history?subject=s1"
   },
   {

@@ -1,0 +1,233 @@
+// A hub's plans, for tests: Acme's boss Sarah proposes a plan of four
+// tickets on Acme's board, and the routes answer as the hub's do. Approving
+// it (by the plan's route or the Floor's decide) moves its tickets to To do
+// and starts the ready ones, as the runner would, announcing each.
+
+import type { BossPlan, BossPlanDetail, BossPlanRevision, BossPlanTicket, DeskEvent, DraftTicket, EngineInfo, Need, PlannedTicket, Ticket, TicketState } from "../hub/types";
+
+export const PLAN = "00000000-0000-4000-8000-00000000aa01";
+export const BOARD = "board-acme";
+export const AT = "2026-11-08T10:03:00.000Z";
+
+const SARAH = { kind: "manager" as const, id: "sarah", name: "Sarah" };
+
+let clock = Date.parse(AT);
+const tick = (): string => new Date((clock += 1000)).toISOString();
+
+export const ticket = (n: number, title: string, over: Partial<BossPlanTicket> = {}): BossPlanTicket => ({
+  id: `t${n}`,
+  board: BOARD,
+  number: n,
+  title,
+  body: "",
+  state: "backlog",
+  rank: n * 1024,
+  assignee: null,
+  needs: [],
+  links: [],
+  createdBy: SARAH,
+  pinned: false,
+  snoozedUntil: null,
+  stateAt: AT,
+  createdAt: AT,
+  updatedAt: AT,
+  key: `ACM-${n}`,
+  ready: false,
+  blockers: [],
+  settled: false,
+  snoozed: false,
+  engine: "claude",
+  folder: "/Users/sam/code/acme-api",
+  view: null,
+  starting: false,
+  ...over,
+});
+
+/** Refunds, as Sarah proposed it: the endpoint and the admin button side
+ *  by side, the order page after the endpoint, the test last. */
+export const refunds = (): BossPlanTicket[] => [
+  ticket(20, "Refunds endpoint over Stripe refunds"),
+  ticket(21, "Refund button in admin", { engine: "codex", folder: "/Users/sam/code/acme-admin" }),
+  ticket(22, "Refund from the order page", { needs: ["t20"], folder: "/Users/sam/code/acme-web" }),
+  ticket(23, "End-to-end refund test in CI", { needs: ["t21", "t22"], folder: "/Users/sam/code/acme-web" }),
+];
+
+const planned = (t: BossPlanTicket): PlannedTicket => ({ id: t.id, title: t.title, body: t.body, engine: t.engine ?? "claude", folder: t.folder ?? "", view: t.view, needs: t.needs });
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+export const engines = (): EngineInfo[] =>
+  (["claude", "codex", "devin"] as const).map((engine) => ({
+    engine,
+    title: engine,
+    program: engine === "devin" ? null : `/usr/local/bin/${engine}`,
+    installed: engine !== "devin",
+    version: "1",
+    signIn: { state: "in", via: "plan", who: null, plan: null },
+    views: ["terminal"],
+    caps: { terminal: { state: "hooks", approvals: "desk", resume: "byId", interrupt: "keys", plan: null, line: "submit", notes: [] } },
+  }));
+
+/** The hub's side of one plan. */
+export class PlanHub {
+  plan: BossPlanDetail;
+  /** Each request, with its body. */
+  requests: { route: string; body: unknown }[] = [];
+  /** Where it announces what changed (the events socket). */
+  say: (e: DeskEvent) => void = () => {};
+  /** How many of the plan's sessions start at once. */
+  limit = 2;
+  /** The board's tickets in no plan. */
+  others: Ticket[] = [];
+
+  constructor(tickets: BossPlanTicket[] = refunds(), over: Partial<BossPlanDetail> = {}) {
+    this.plan = {
+      id: PLAN,
+      board: BOARD,
+      group: "acme",
+      boss: "sarah",
+      bossName: "Sarah",
+      goal: "Refunds from the order page and from admin, covered by a test",
+      state: "proposed",
+      paused: null,
+      parallel: null,
+      revision: 1,
+      approvedRevision: null,
+      createdAt: AT,
+      updatedAt: AT,
+      progress: { done: 0, doing: 0, review: 0, ready: 0, blocked: 0, waiting: tickets.length, total: tickets.length, next: [] },
+      tickets,
+      waves: [],
+      revisions: [],
+      ...over,
+    };
+    this.plan.revisions = [this.revisionOf(1, SARAH, "scope", `Proposed ${tickets.length} tickets for “${this.plan.goal}”`)];
+  }
+
+  private revisionOf(n: number, by: BossPlanRevision["by"], change: "minor" | "scope", summary: string, tickets = this.plan.tickets): BossPlanRevision {
+    return { plan: PLAN, revision: n, at: tick(), by, change, summary, snapshot: { goal: this.plan.goal, tickets: tickets.map(planned) } };
+  }
+
+  summary(): BossPlan {
+    const { tickets: _t, waves: _w, revisions: _r, ...p } = this.plan;
+    return p;
+  }
+
+  /** The floor's need for it, while it waits on the person. */
+  need(): Need | null {
+    const p = this.plan;
+    if (p.state === "done" || p.state === "dropped" || p.approvedRevision === p.revision) return null;
+    return {
+      id: `plan:${p.id}`,
+      kind: "approval",
+      who: { kind: "manager", id: "sarah", name: "Sarah", engine: null },
+      ask: p.approvedRevision === null ? `Approve Sarah's plan: ${p.goal}` : `Plan change: ${p.revisions.at(-1)!.summary}`,
+      why: `${p.tickets.length} tickets.`,
+      options: null,
+      since: AT,
+      place: { kind: "dm" },
+      answer: { kind: "decide", at: { kind: "plan", plan: p.id, revision: p.revision } },
+    };
+  }
+
+  private touch() {
+    this.plan.updatedAt = tick();
+    this.say({ type: "plan", plan: this.summary() });
+  }
+
+  private move(t: BossPlanTicket, state: TicketState, over: Partial<Ticket> = {}) {
+    Object.assign(t, { state, stateAt: tick(), updatedAt: tick(), ...over });
+    const { engine: _e, folder: _f, view: _v, starting: _s, ...board } = t;
+    this.say({ type: "ticket", ticket: board });
+  }
+
+  /** The person approves `revision`: refused unless it is the newest. */
+  approve(revision: number): Response | null {
+    const p = this.plan;
+    if (revision !== p.revision) return json({ error: `Sarah changed the plan; look at revision ${p.revision}.` }, 409);
+    if (p.approvedRevision === null) for (const t of p.tickets) if (t.state === "backlog") this.move(t, "todo");
+    p.state = "running";
+    p.approvedRevision = revision;
+    this.touch();
+    // The runner: the ready tickets start, up to the limit.
+    const done = new Set(p.tickets.filter((t) => t.state === "done").map((t) => t.id));
+    const ready = p.tickets.filter((t) => t.state === "todo" && !t.assignee && t.needs.every((n) => done.has(n))).slice(0, this.limit);
+    for (const t of ready) this.move(t, "doing", { assignee: { kind: "session", id: `s-${t.id}`, name: t.key! } });
+    if (ready.length > 0) this.touch();
+    return null;
+  }
+
+  /** Sarah adds a ticket: a change of scope, said to no one (no event). */
+  bossAdds(title: string) {
+    const p = this.plan;
+    const added = ticket(19, title, { folder: "/Users/sam/code/acme-web" });
+    const next = [...p.tickets, added];
+    if (p.approvedRevision === null) p.tickets = next;
+    p.revision += 1;
+    p.revisions.push(this.revisionOf(p.revision, SARAH, "scope", `Added “${title}”`, next));
+  }
+
+  edit(body: { revision?: number; tickets?: DraftTicket[] }): Response {
+    const p = this.plan;
+    if (body.revision !== p.revision) return json({ error: `Sarah changed the plan; look at revision ${p.revision}.` }, 409);
+    const tickets = body.tickets ?? [];
+    let n = 30;
+    const ids = tickets.map((d) => d.id ?? `t${n++}`);
+    p.tickets = tickets.map((d, i) => {
+      const was = p.tickets.find((t) => t.id === d.id);
+      const base = was ?? ticket(Number(ids[i]!.slice(1)), d.title, { folder: d.folder });
+      return { ...base, title: d.title, engine: d.engine ?? base.engine, folder: d.folder, needs: d.needs.map((k) => ids[k]!), rank: (i + 1) * 1024 };
+    });
+    p.revision += 1;
+    p.revisions.push(this.revisionOf(p.revision, { kind: "you", id: "you", name: "You" }, "minor", "Changed the plan"));
+    this.touch();
+    return json({ plan: this.plan, change: "minor", applied: true, summary: "Changed the plan" });
+  }
+
+  /** Answers a plan route (or the Floor's decide of one); null for any other. */
+  route(method: string, path: string, body: unknown): Response | null {
+    const route = `${method} ${path.split("?")[0]}`;
+    const base = `/api/desk/plans/${PLAN}`;
+    if (route.includes("/api/desk/plans") || route === "POST /api/desk/needs/decide") this.requests.push({ route, body });
+    const b = (body ?? {}) as Record<string, unknown>;
+    switch (route) {
+      case "GET /api/desk/plans":
+        return json([this.summary()]);
+      case `GET ${base}`:
+        return json(this.plan);
+      case `PATCH ${base}`:
+        return this.edit(b as { revision?: number; tickets?: DraftTicket[] });
+      case `POST ${base}/approve`:
+        return this.approve(b.revision as number) ?? json(this.plan);
+      case `POST ${base}/pause`:
+        if (this.plan.state !== "running" && this.plan.state !== "paused") return json({ error: "Only a running plan can be paused." }, 409);
+        Object.assign(this.plan, { state: "paused", paused: "person" });
+        this.touch();
+        return json(this.plan);
+      case `POST ${base}/resume`:
+        Object.assign(this.plan, { state: "running", paused: null });
+        this.touch();
+        return json(this.plan);
+      case `POST ${base}/drop`:
+        if (b.sessions !== "stop" && b.sessions !== "leave") return json({ error: "say what becomes of its sessions" }, 400);
+        for (const t of this.plan.tickets) if (t.state !== "done" && (b.sessions === "stop" || (t.state !== "doing" && t.state !== "review"))) this.move(t, "dropped");
+        Object.assign(this.plan, { state: "dropped", paused: null });
+        this.touch();
+        return json(this.plan);
+      case "POST /api/desk/needs/decide": {
+        const at = (b.at ?? {}) as { kind?: string; plan?: string; revision?: number };
+        if (at.kind !== "plan" || at.plan !== PLAN) return null;
+        if (b.choice !== "allow") return new Response(null, { status: 204 });
+        return this.approve(at.revision!) ? json({ error: "already_answered" }, 409) : new Response(null, { status: 204 });
+      }
+      case "GET /api/desk/engines":
+        return json(engines());
+      case "GET /api/desk/boards":
+        return json([{ id: BOARD, name: "Acme", group: "acme", prefix: "ACM", createdAt: AT, updatedAt: AT }]);
+      case `GET /api/desk/boards/${BOARD}/tickets`:
+        return json([...this.plan.tickets.map(({ engine: _e, folder: _f, view: _v, starting: _s, ...t }) => t), ...this.others]);
+      default:
+        return null;
+    }
+  }
+}

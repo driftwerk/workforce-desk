@@ -9,6 +9,7 @@ import { homeShort } from "../ui/paths";
 import { ENGINE_TITLE } from "../engines/engines";
 import { LineAnswer } from "../line/LineAnswer";
 import { messageIn, useLine } from "../line/store";
+import { PlanCard } from "../crew/PlanCard";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -17,10 +18,13 @@ type Mentioned = NonNullable<DeskExtras["suggestions"]>[number];
 type Question = NonNullable<DeskExtras["questions"]>[number];
 
 /** What an overseer's message mentions, to act on where it's said: a
- *  session's request to allow or deny, and its suggestions. */
-export function DeskActions({ extras }: { extras: DeskExtras }) {
+ *  session's request to allow or deny, its suggestions, the questions it
+ *  gave you, and its plan (`text`, the message's own words, shown while
+ *  the plan can't be). */
+export function DeskActions({ extras, text }: { extras: DeskExtras; text?: string }) {
   return (
     <>
+      {extras.plan && <PlanCard mentioned={extras.plan} text={text} />}
       {(extras.approvals ?? []).map((a) => (
         <InlineApproval key={a.approvalId} approval={a} />
       ))}

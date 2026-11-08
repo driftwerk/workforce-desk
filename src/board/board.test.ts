@@ -15,6 +15,7 @@ import {
   moved,
   needsLine,
   nudge,
+  planOfTickets,
   rankBetween,
   ready,
   sessionsOf,
@@ -215,5 +216,21 @@ describe("a move placed in the whole column", () => {
     const mv = nudge(cols, "t3", "up")!;
     expect(anchored(mv, col, "t3")).toEqual({ state: "todo", before: "t1", after: "t2" });
     expect(mv).toEqual({ state: "todo", before: "t1", after: "t2" });
+  });
+});
+
+describe("the board's plan filter", () => {
+  it("shows only the chosen plan's tickets, whatever else is chosen", () => {
+    const tickets = [ticket(1, { state: "todo" }), ticket(2, { state: "doing", pinned: true }), ticket(3, { state: "todo", pinned: true })];
+    const plans = planOfTickets([
+      { id: "p1", tickets: [{ id: "t2" }, { id: "t3" }] },
+      { id: "p2", tickets: [{ id: "t1" }] },
+    ]);
+    expect(plans.get("t1")).toBe("p2");
+    const p1 = new Set([...plans].filter(([, p]) => p === "p1").map(([t]) => t));
+    expect(columns(tickets, { ...everything, plan: p1 }).flatMap((c) => ids(c.cards))).toEqual(["t3", "t2"]);
+    // With the other filters: p2's one ticket isn't pinned.
+    expect(columns(tickets, { ...everything, plan: new Set(["t1"]), filter: "pinned" }).flatMap((c) => ids(c.cards))).toEqual([]);
+    expect(columns(tickets, { ...everything, plan: null }).flatMap((c) => ids(c.cards))).toHaveLength(3);
   });
 });

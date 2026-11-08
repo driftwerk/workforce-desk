@@ -15,6 +15,7 @@ import { placeLabel, targetOf } from "./target";
 import { dayClock, durationOf } from "./time";
 import { hubFor } from "../hub/store";
 import { sessionKeyOfItem } from "./needs";
+import { usePlans } from "../crew/planStore";
 
 /** Focus in a row that goes moves to the list it was in. */
 const useFocusKept = () => {
@@ -44,9 +45,25 @@ const BREAKER: Record<"allow" | "deny", { word: string; busy: string; done: stri
 
 const isBreaker = (need: FloorNeed): boolean => need.answer.kind === "decide" && need.answer.at.kind === "breaker";
 
-/** How a choice reads on `need`. */
-const wordsOf = (need: FloorNeed, choice: Choice) =>
-  isBreaker(need) && (choice === "allow" || choice === "deny") ? BREAKER[choice] : DECIDING[choice];
+/** A boss's plan to approve, or a change of scope to one: the plan's id. */
+const planOf = (need: Pick<FloorNeed, "answer">): string | null =>
+  need.answer.kind === "decide" && need.answer.at.kind === "plan" ? need.answer.at.plan : null;
+
+/** A plan is approved (and runs) from the Floor; looking at it, editing or
+ *  dropping it is in its boss's DM. */
+const PLAN = {
+  proposed: { word: "Approve and run", busy: "Approving…", done: "Approved: it starts", open: "Open in chat" },
+  change: { word: "Approve", busy: "Approving…", done: "Approved", open: "Look" },
+} as const;
+
+/** How a choice reads on `need` (`change`: a plan's need is a change to a
+ *  plan already approved). */
+const wordsOf = (need: FloorNeed, choice: Choice, change = false) =>
+  planOf(need) && choice === "allow"
+    ? PLAN[change ? "change" : "proposed"]
+    : isBreaker(need) && (choice === "allow" || choice === "deny")
+      ? BREAKER[choice]
+      : DECIDING[choice];
 
 /** The answers a need offers, in the order they read: Codex says its own
  *  (an escalated command offers only Allow and Cancel); the rest allow or
@@ -54,6 +71,8 @@ const wordsOf = (need: FloorNeed, choice: Choice) =>
 const choicesOf = (need: FloorNeed): Choice[] => {
   if (need.answer.kind !== "decide") return [];
   const at = need.answer.at;
+  // A plan's Deny only leaves it be: Open in chat is the other answer.
+  if (at.kind === "plan") return ["allow"];
   if (at.kind !== "codex") return ["allow", "deny"];
   const order: Choice[] = ["allow", "allow_for_session", "deny", "cancel"];
   return order.filter((c) => at.choices.includes(c));
@@ -97,6 +116,9 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       .finally(() => setActing(false));
   };
   const denied = asking?.asked?.denied ?? null;
+  const plan = planOf(need);
+  // A change to a plan already approved, as the plans read say.
+  const change = usePlans((s) => (plan ? (s.plans[plan]?.approvedRevision ?? null) !== null : false));
   const deciding = useFloor((s) => s.deciding[need.key]);
   const problem = useFloor((s) => s.problems[need.key]) ?? refused;
   const stale = useStaleNote(need);
@@ -127,13 +149,13 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       {actions && (
         <span className="floor-need-buttons">
           {choicesOf(need).map((choice) => {
-              const words = wordsOf(need, choice);
+              const words = wordsOf(need, choice, change);
               const word = deciding === choice ? words.busy : words.word;
               return (
                 <button
                   key={choice}
                   type="button"
-                  className={choice === "allow" ? (isBreaker(need) ? "btn btn-blocked" : "btn btn-approve") : "btn"}
+                  className={choice === "allow" ? (isBreaker(need) || plan ? "btn btn-blocked" : "btn btn-approve") : "btn"}
                   aria-label={`${word} “${need.ask}” for ${name}`}
                   disabled={need.stale}
                   aria-disabled={!!deciding}
@@ -200,12 +222,14 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             <button
               type="button"
               className="btn"
-              aria-label={need.answer.kind === "terminal" ? `Open ${name} to answer in the terminal` : `Open ${name}`}
+              aria-label={
+                plan ? `${PLAN[change ? "change" : "proposed"].open}: ${name}'s plan` : need.answer.kind === "terminal" ? `Open ${name} to answer in the terminal` : `Open ${name}`
+              }
               disabled={need.stale || !!deciding}
               title={need.answer.kind === "terminal" ? "Answer in the terminal" : stale}
               onClick={() => openTarget(target, { beside: true, reply: need.answer.kind === "terminal" })}
             >
-              Open
+              {plan ? PLAN[change ? "change" : "proposed"].open : "Open"}
             </button>
           )}
           {asking && (
@@ -214,7 +238,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             </button>
           )}
           <span className="sr-only" role="status">
-            {deciding ? wordsOf(need, deciding).done : ""}
+            {deciding ? wordsOf(need, deciding, change).done : ""}
           </span>
           {problem && (
             <span className="small state-blocked" role="alert">

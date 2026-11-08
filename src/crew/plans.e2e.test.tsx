@@ -1,0 +1,235 @@
+// A boss's plan, end to end against a fake hub: Desk's own client over a
+// transport that answers the plan, board and engine routes as the hub does
+// and announces on its events socket what changed, and the Floor read over
+// `fetch` from the same hub. Sarah's plan is approved from her DM, or from
+// the Floor; either way it runs (its first wave's sessions start, and both
+// say so). A revision Sarah made meanwhile is shown, and asked again.
+
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Board } from "../board/BoardView";
+import { useBoard } from "../board/store";
+import { useChat } from "../chat/store";
+import { RightNow } from "../floor/RightNow";
+import { useFloor, watchFloor } from "../floor/store";
+import { view } from "../floor/testing";
+import { useDesk } from "../hub/store";
+import type { DeskSocket, DeskTransport } from "../hub/transport";
+import type { DeskEvent } from "../hub/types";
+import { DeskActions } from "../overview/DeskActions";
+import { useOverview } from "../overview/store";
+import { PLAN, PlanHub, ticket } from "./planTesting";
+import { usePlans } from "./planStore";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/plugin-notification", () => ({}));
+vi.mock("@xterm/xterm", () => ({ Terminal: class {} }));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
+vi.mock("@workforce/rich", () => ({
+  RichMarkdown: ({ text }: { text: string }) => text,
+  RichHostProvider: ({ children }: { children: ReactNode }) => children,
+}));
+
+class Socket implements DeskSocket {
+  readyState = 0;
+  binaryType: BinaryType = "arraybuffer";
+  onopen: ((ev: Event) => void) | null = null;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
+  onclose: ((ev: CloseEvent) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  constructor() {
+    queueMicrotask(() => {
+      this.readyState = 1;
+      this.onopen?.(new Event("open"));
+    });
+  }
+  send() {}
+  close() {
+    this.readyState = 3;
+  }
+  say(e: DeskEvent) {
+    this.onmessage?.({ data: JSON.stringify(e) } as MessageEvent);
+  }
+}
+
+/** This computer's hub: Desk's routes over its transport, the Floor's over
+ *  `fetch`, one set of plans behind both. */
+class FakeHub implements DeskTransport {
+  plans = new PlanHub();
+  events: Socket | null = null;
+  /** Each Floor decide's body. */
+  decided: unknown[] = [];
+
+  constructor() {
+    this.plans.say = (e) => this.events?.say(e);
+  }
+
+  fetch = async (method: string, path: string, body?: { data: string | Blob }): Promise<Response> =>
+    this.plans.route(method, path, body ? JSON.parse(String(body.data)) : undefined) ?? new Response("Not Found", { status: 404 });
+
+  socket = (path: string): DeskSocket => {
+    const s = new Socket();
+    if (path === "/api/desk/events") this.events = s;
+    return s;
+  };
+
+  /** `fetch`, as paired hubs are reached (the Floor's reads and decides). */
+  web = vi.fn(async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(input);
+    const route = `${init?.method ?? "GET"} ${url.pathname}`;
+    if (route === "GET /api/desk/floor") {
+      const need = this.plans.need();
+      return new Response(JSON.stringify({ ...view({ needs: need ? [need] : [], counts: { working: 0, needsYou: need ? 1 : 0, doneToday: 0 } }), asOf: new Date().toISOString() }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (route === "POST /api/desk/needs/decide") {
+      const body = JSON.parse(String(init?.body));
+      this.decided.push(body);
+      return this.plans.route("POST", url.pathname, body) ?? new Response(JSON.stringify({ error: "not_yours" }), { status: 403 });
+    }
+    return new Response("Not Found", { status: 404 });
+  });
+}
+
+let hub: FakeHub;
+let disconnect: () => void;
+let stop: () => void;
+
+const card = () => screen.getByRole("article", { name: /^Plan: / });
+const floor = () => within(screen.getByRole("region", { name: "Right now" }));
+
+const connect = async () => {
+  disconnect = useDesk.getState().connect(hub);
+  await act(async () => {
+    await Promise.resolve();
+    hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+  });
+  render(
+    <>
+      <DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} text="Sarah proposes a plan." />
+      <RightNow brief={null} />
+    </>,
+  );
+  await waitFor(() => expect(within(card()).getByText("Waiting for you")).toBeTruthy());
+  await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and run/ })).toBeTruthy());
+};
+
+/** The run started: the plan runs, its first wave's two sessions started,
+ *  the DM's card says so, and nothing about it waits on the Floor. */
+const runs = async () => {
+  await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
+  expect(hub.plans.plan.state).toBe("running");
+  expect(hub.plans.plan.tickets.filter((t) => t.state === "doing").map((t) => t.key)).toEqual(["ACM-20", "ACM-21"]);
+  await waitFor(() => expect(within(card()).getByText("0 of 4 done · 2 running")).toBeTruthy());
+  await waitFor(() => expect(floor().getByText("Nothing is waiting on you.")).toBeTruthy());
+  expect(floor().queryByRole("button", { name: /^Approve/ })).toBeNull();
+};
+
+beforeEach(() => {
+  hub = new FakeHub();
+  vi.stubGlobal("fetch", hub.web);
+  useChat.setState({
+    hubs: [{ id: "local", label: "This computer", url: "http://local.test", local: true, revision: "t" }],
+    roster: [{ hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false }],
+  });
+  useOverview.setState({ manager: null, managerSupport: "unknown", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
+  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {} });
+  useBoard.setState({ boards: {}, tickets: {} });
+  useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
+  stop = watchFloor();
+});
+afterEach(() => {
+  stop();
+  disconnect?.();
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("a boss's plan, against the hub", () => {
+  it("approved in the DM, runs", async () => {
+    await connect();
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve")).map((r) => r.body)).toEqual([{ revision: 1 }]);
+    await runs();
+    expect(hub.decided).toEqual([]);
+  });
+
+  it("approved on the Floor, runs", async () => {
+    await connect();
+    expect(floor().getByRole("button", { name: "Open in chat: Sarah's plan" })).toBeTruthy();
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
+    await runs();
+    expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve"))).toEqual([]);
+  });
+
+  it("changed by its boss before the Floor's approve reached the hub, is asked again at its newest revision", async () => {
+    await connect();
+    hub.plans.bossAdds("Fix the flaky payment test");
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    await waitFor(() => expect(floor().getByRole("alert").textContent).toBe("The plan changed since you read it. This is its newest revision: look at it again."));
+    expect(hub.plans.plan.state).toBe("proposed");
+    // The Floor reads it again: its need is now for revision 2.
+    await waitFor(() => expect(hub.web.mock.calls.filter(([u]) => String(u).includes("/api/desk/floor")).length).toBeGreaterThan(1));
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    expect(hub.decided).toEqual([
+      { at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" },
+      { at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" },
+    ]);
+    await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
+    await waitFor(() => expect(within(card()).getByText("rev 2")).toBeTruthy());
+    expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
+  });
+
+  it("changed by its boss before the DM's approve reached the hub, shows the newer revision and asks again", async () => {
+    await connect();
+    hub.plans.bossAdds("Fix the flaky payment test");
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    expect(within(card()).getByRole("alert").textContent).toContain("This is revision 2: look at it, then ask again.");
+    expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve")).map((r) => r.body)).toEqual([{ revision: 1 }, { revision: 2 }]);
+    await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
+  });
+
+  it("waiting on a change of scope, is approved on the Floor as a change, or looked at in the DM", async () => {
+    hub.plans.approve(1);
+    hub.plans.bossAdds("Fix the flaky payment test");
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+    render(<RightNow brief={null} />);
+    await waitFor(() => expect(floor().getByRole("button", { name: /^Approve “Plan change/ })).toBeTruthy());
+    expect(floor().getByRole("button", { name: "Look: Sarah's plan" })).toBeTruthy();
+    expect(floor().queryByRole("button", { name: /Approve and run/ })).toBeNull();
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve “Plan change/ })));
+    expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" }]);
+    expect(hub.plans.plan.approvedRevision).toBe(2);
+  });
+});
+
+describe("the board's plan filter", () => {
+  it("shows only the plan's tickets, each with the plan's chip", async () => {
+    hub.plans.others = [{ ...ticket(7, "Tidy the README"), createdBy: { kind: "you" as const, id: "you", name: "You" } }].map(({ engine: _e, folder: _f, view: _v, starting: _s, ...t }) => t);
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+    render(<Board />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).toBeTruthy());
+    const goal = hub.plans.plan.goal;
+    await waitFor(() => expect(within(screen.getByRole("button", { name: "ACM-20: Refunds endpoint over Stripe refunds" })).getByText(goal)).toBeTruthy());
+    expect(within(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).queryByText(goal)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: PLAN } });
+    expect(screen.queryByRole("button", { name: "ACM-7: Tidy the README" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^ACM-2\d: / })).toHaveLength(4);
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).toBeTruthy();
+  });
+});

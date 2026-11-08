@@ -166,7 +166,8 @@ export const Message = memo(function Message({
             ))}
           </span>
         )}
-        {!message.content.trim() ? null : message.status === "error" && message.superseded ? (
+        {/* A plan card says all its message does, and shows it while it can't. */}
+        {!message.content.trim() || (message.role === "assistant" && message.desk?.plan) ? null : message.status === "error" && message.superseded ? (
           <details className="msg-steps">
             <summary className="small">Didn’t finish · answered below</summary>
             <TurnError raw={message.content} />
@@ -195,7 +196,7 @@ export const Message = memo(function Message({
           </details>
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
-        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} />}
+        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={message.content} />}
         {message.delivery === "approval" && message.requestId && origin && (
           <RoutedApproval hubId={origin.hub} requestId={message.requestId} />
         )}

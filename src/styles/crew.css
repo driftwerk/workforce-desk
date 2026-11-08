@@ -937,3 +937,330 @@ button.card-icon:hover:not(:disabled) {
   flex: 1;
   accent-color: var(--signal);
 }
+
+/* ── A boss's plan in its DM (BD11): goal, waves, each ticket's engine and
+   folder, where it stands, and Approve and run. After the approved mockup
+   (floor-groups-mockup.html, b); every colour is a token. */
+
+.plancard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  overflow: hidden;
+  max-width: 760px;
+  min-width: 0;
+}
+.pc-head {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.pc-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pc-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pc-chip-blocked {
+  color: var(--blocked);
+  border-color: color-mix(in srgb, var(--blocked) 45%, var(--border));
+}
+.pc-chip-working {
+  color: var(--working);
+  border-color: color-mix(in srgb, var(--working) 45%, var(--border));
+}
+.pc-chip-done {
+  color: var(--done);
+  border-color: color-mix(in srgb, var(--done) 45%, var(--border));
+}
+.pc-chip-idle {
+  color: var(--faint);
+}
+.pc-change,
+.pc-notice-line {
+  margin: 10px 16px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  border: 1px solid color-mix(in srgb, var(--blocked) 30%, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13.5px;
+}
+.pc-notice-line {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pc-progress {
+  padding: 12px 16px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pc-paused {
+  color: var(--blocked);
+}
+.pc-segbar {
+  display: flex;
+  height: 8px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--border);
+  gap: 2px;
+}
+.pc-segbar i {
+  display: block;
+  height: 100%;
+}
+.pc-s-done {
+  background: var(--done);
+}
+.pc-s-doing {
+  background: var(--working);
+}
+.pc-s-review {
+  background: var(--ansi-cyan);
+}
+.pc-s-ready {
+  background: color-mix(in srgb, var(--text) 30%, transparent);
+}
+.pc-s-blocked {
+  background: var(--blocked);
+}
+.pc-s-waiting {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.pc-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pc-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pc-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.pc-wave {
+  padding: 10px 16px 6px;
+}
+.pc-wave-label {
+  font-size: 12px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.pc-wave-note {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.pc-tk {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+}
+.pc-wave .pc-tk:first-of-type {
+  border-top: 0;
+}
+.pc-key {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.pc-t {
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pc-sub {
+  grid-column: 2 / 4;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+.pc-engine {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 26px 3px 10px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 13px) 55%,
+    calc(100% - 9px) 55%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  max-width: 100%;
+}
+.pc-engine:disabled {
+  opacity: 0.6;
+}
+.pc-foot {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pc-facts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pc-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pc-note {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1 1 220px;
+}
+.pc-drop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pc-drop-choice {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pc-drop-choice legend {
+  color: var(--faint);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+  padding: 0;
+}
+.pc-drop-choice .opt {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+}
+.pc-drop-choice .opt:has(input:checked) {
+  border-color: var(--text);
+  background: var(--surface);
+}
+.pc-drop-choice .opt input {
+  accent-color: var(--text);
+  margin: 0;
+}
+.pc-edit {
+  padding: 10px 16px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pc-edit-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pc-edit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+}
+.pc-edit-row:first-child {
+  border-top: 0;
+}
+.pc-edit-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pc-edit-title,
+.pc-edit-folder {
+  flex: 1 1 220px;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.pc-edit-folder {
+  font-size: 12.5px;
+}
+.pc-edit-needs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pc-notice .chip {
+  margin-right: 4px;
+}
+.pc-fallback {
+  white-space: pre-wrap;
+}
+@media (max-width: 560px) {
+  .pc-tk {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .pc-tk .pc-engine {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .pc-sub {
+    grid-column: 1 / 3;
+  }
+}
