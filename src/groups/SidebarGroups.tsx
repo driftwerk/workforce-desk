@@ -15,6 +15,7 @@ import { useOverview } from "../overview/store";
 import { openTarget, targetOfItem } from "../shell/navigate";
 import { AgentMark } from "../ui/Mark";
 import { Menu, type MenuEntry } from "../ui/Menu";
+import { GroupMemoryDialog } from "../memory/GroupMemory";
 import { RenameField } from "../ui/RenameField";
 import {
   agentItem,
@@ -155,6 +156,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const seen = useMachineSessions((s) => s.seen);
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
+  // The group whose memory switches are open.
+  const [memoryOf, setMemoryOf] = useState<string | null>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [dragging, setDragging] = useState<{ kind: "item" | "group"; id: string } | null>(null);
   const [said, setSaid] = useState("");
@@ -504,6 +507,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       : [
           ...starting(id),
           ...choosing(id),
+          { kind: "item", label: "Memory…", onSelect: () => setMemoryOf(id) },
           { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
           { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
           { kind: "separator" },
@@ -713,6 +717,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
             </Confirm>
           );
         })()}
+      {memoryOf && <GroupMemoryDialog group={{ id: memoryOf, name: groupName(memoryOf) }} hub={useDesk.getState().hub} onClose={() => setMemoryOf(null)} />}
       {menu && (
         <Menu
           label={menu.kind === "item" ? `${nameOf(items.get(menu.key))} options` : `${groupName(menu.id)} options`}

@@ -53,6 +53,13 @@ import type {
   Suggestion,
   TerminalInfo,
   UnreadSummary,
+  GroupMemory,
+  MemoryIndexStatus,
+  MemoryNote,
+  MemorySearch,
+  MemorySettings,
+  NoteChange,
+  SessionMemory,
 } from "./types";
 import { pairedHub, type HubRef } from "./net";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
@@ -716,6 +723,69 @@ export class DeskHub {
   ptySocket(id: string): DeskSocket {
     return this.t.socket(`/api/desk/sessions/${id}/pty`);
   }
+
+  // ── Desk Memory: what it remembers of sessions ─────────────────────────
+
+  /** What Desk remembers of a session; null when it remembers nothing of it,
+   *  or the hub keeps no memory (an older one). */
+  sessionMemory = async (id: string): Promise<SessionMemory | null> => {
+    try {
+      return await this.call<SessionMemory>("GET", `/api/desk/sessions/${encodeURIComponent(id)}/memory`);
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** Forgets what Desk remembers of a session; it is never remembered again. */
+  forgetMemory = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${encodeURIComponent(id)}/memory`);
+  /** Turns a session's own remembering on or off. */
+  rememberSession = (id: string, on: boolean): Promise<void> =>
+    this.call("PATCH", `/api/desk/sessions/${encodeURIComponent(id)}/memory`, { on });
+  /** Reads the session's new exchanges for decisions, facts and to-dos now
+   *  (the hub answers 202, with nothing). */
+  deriveMemory = async (id: string): Promise<void> => {
+    const res = await this.t.fetch("POST", `/api/desk/sessions/${encodeURIComponent(id)}/memory/derive`);
+    if (!res.ok) throw await refusal(res);
+  };
+  /** Confirms, corrects or drops a note: the note as it now stands, none once dropped. */
+  changeNote = async (id: string, change: NoteChange): Promise<MemoryNote | null> =>
+    (await this.call<{ item?: MemoryNote } | undefined>("PATCH", `/api/desk/memory/items/${encodeURIComponent(id)}`, change))?.item ?? null;
+  /** Searches what Desk remembers: every session's, or one session's or group's. */
+  searchMemory = (q: { q: string; session?: string; group?: string; kind?: string; limit?: number }): Promise<MemorySearch> => {
+    const params = new URLSearchParams({ q: q.q });
+    if (q.session) params.set("session", q.session);
+    if (q.group) params.set("group", q.group);
+    if (q.kind) params.set("kind", q.kind);
+    if (q.limit) params.set("limit", String(q.limit));
+    return this.call("GET", `/api/desk/memory/search?${params.toString()}`);
+  };
+  /** How Desk Memory's search index stands; null from a hub without one. */
+  memoryIndex = async (): Promise<MemoryIndexStatus | null> => {
+    try {
+      return await this.call<MemoryIndexStatus>("GET", "/api/desk/memory/index");
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** Starts the search index again from what Desk keeps: how many exchanges it adds back. */
+  rebuildMemoryIndex = async (): Promise<number> =>
+    (await this.call<{ queued?: number } | undefined>("POST", "/api/desk/memory/index/rebuild"))?.queued ?? 0;
+  /** The person's memory settings, the install's limits and what is kept;
+   *  null from a hub that can't set them (an older one). */
+  memorySettings = async (): Promise<MemorySettings | null> => {
+    try {
+      return await this.call<MemorySettings>("GET", "/api/desk/memory/settings");
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** Pauses or resumes remembering every session. */
+  pauseMemory = (paused: boolean): Promise<MemorySettings> => this.call("PATCH", "/api/desk/memory/settings", { paused });
+  /** Changes a group's memory switches: what `change` names, the rest kept. */
+  changeGroupMemory = (id: string, change: Partial<Omit<GroupMemory, "deriveDecided">>): Promise<GroupMemory> =>
+    this.call("PATCH", `/api/desk/memory/groups/${encodeURIComponent(id)}`, change);
 
   // ── The sidebar's groups, kept by the hub ───────────────────────────────
   // Every route answers with the whole layout as it now is.

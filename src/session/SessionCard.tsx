@@ -33,6 +33,7 @@ import { SessionTicketChip } from "../board/TicketChip";
 import { SubjectHistory } from "../board/History";
 import { keyOf, machineOf, sessionKey } from "../hub/machines";
 import { sessionContent } from "../grids/engine";
+import { MemoryPanel } from "../memory/MemoryPanel";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -69,13 +70,16 @@ export function SessionCard({ session }: { session: Session }) {
   const [editingGoal, setEditingGoal] = useState(false);
   const [goal, setGoal] = useState(session.goal);
   const [history, setHistory] = useState(false);
+  // The session's own view, or what Desk remembers of it. The session's
+  // stays mounted (its terminal, its seen mark) while Memory shows.
+  const [tab, setTab] = useState<"session" | "memory">("session");
   const saveGoal = () => {
     setEditingGoal(false);
     if (goal !== session.goal) hubFor(session)?.update(session.id, { goal }).catch(fail);
   };
   return (
     <SidePanel
-      className="session-card"
+      className={`session-card${tab === "memory" ? " showing-memory" : ""}`}
       label={`Session ${name}`}
       noun="this session"
       onClose={() => open(null)}
@@ -106,6 +110,15 @@ export function SessionCard({ session }: { session: Session }) {
         </>
       }
     >
+      <div className="tabs session-tabs" role="tablist" aria-label={`${name}: what shows`}>
+        <button type="button" role="tab" aria-selected={tab === "session"} onClick={() => setTab("session")}>
+          Session
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "memory"} onClick={() => setTab("memory")}>
+          Memory
+        </button>
+      </div>
+      {tab === "memory" && <MemoryPanel session={session} name={name} item={sessionItem(key)} hub={hubFor(session)} />}
       {(places.length > 0 || loose) && <ShownIn places={places} loose={loose} onShown={() => open(null)} />}
       <div className="session-goal">
         <SessionTicketChip session={key} />
