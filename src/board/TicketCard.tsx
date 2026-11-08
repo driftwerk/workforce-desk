@@ -62,10 +62,13 @@ export function TicketCard({
   states,
   waiting,
   settled = false,
+  plan,
   buttonRef,
   onOpen,
   onKeyDown,
 }: {
+  /** The goal of the boss's plan it is in, if it is in one. */
+  plan?: string;
   ticket: Ticket;
   all: Readonly<Record<string, Ticket>>;
   /** Every ticket's state, worked out once for the board. */
@@ -113,6 +116,11 @@ export function TicketCard({
         {t.pinned && <span className="board-pinned">Pinned</span>}
         {t.state === "dropped" && <span className="faint small">Dropped</span>}
         {written && !theirs && <By who={t.createdBy} />}
+        {plan !== undefined && (
+          <span className="chip board-plan-chip" title={plan ? `In the plan “${plan}”` : "In a plan"}>
+            {plan || "Plan"}
+          </span>
+        )}
       </span>
       <b className="board-title">{t.title}</b>
       {pr?.kind === "pr" && (

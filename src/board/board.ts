@@ -107,16 +107,18 @@ export interface Column {
 export const waitingOnYou = (t: Ticket, needsYou: (t: Ticket) => boolean): boolean =>
   t.state === "review" || (t.state !== "done" && t.state !== "dropped" && needsYou(t));
 
-/** The board's columns as `filter` and `q` show them: snoozed tickets
- *  hidden, settled ones on Done's shelf, each column by rank. `waiting`
- *  says whether a ticket's session or agent waits on the person. */
+/** The board's columns as `filter` and `q` show them (and `plan`, the
+ *  tickets of the plan chosen, when one is): snoozed tickets hidden,
+ *  settled ones on Done's shelf, each column by rank. `waiting` says
+ *  whether a ticket's session or agent waits on the person. */
 export const columns = (
   tickets: readonly Ticket[],
-  opts: { filter: BoardFilter; q: string; now: number; waiting: (t: Ticket) => boolean },
+  opts: { filter: BoardFilter; q: string; now: number; waiting: (t: Ticket) => boolean; plan?: ReadonlySet<string> | null },
 ): Column[] => {
   const shown = tickets.filter(
     (t) =>
       !snoozed(t, opts.now) &&
+      (!opts.plan || opts.plan.has(t.id)) &&
       matches(t, opts.q) &&
       (opts.filter === "all" || (opts.filter === "pinned" ? t.pinned : waitingOnYou(t, opts.waiting))),
   );
@@ -289,3 +291,7 @@ export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: str
   const last = column.at(-1);
   return { state: mv.state, ...(last ? { before: last } : {}) };
 };
+
+/** Each ticket's plan, by ticket id, from the plans read in full. */
+export const planOfTickets = (plans: readonly { id: string; tickets: readonly { id: string }[] }[]): Map<string, string> =>
+  new Map(plans.flatMap((p) => p.tickets.map((t) => [t.id, p.id] as const)));

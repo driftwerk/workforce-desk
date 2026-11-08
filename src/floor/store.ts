@@ -8,6 +8,7 @@ import { deskListeners } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
 import type { DeskEvent, FloorView, LineAsked, Need, UsageView } from "../hub/types";
 import { useLine } from "../line/store";
+import { usePlans as useBossPlans } from "../crew/planStore";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { useWatching, watched } from "../unread/watching";
@@ -87,7 +88,8 @@ export const useFloor = create<FloorStore>((set, get) => {
       if (missing(floor.reason)) return put(hubId, () => ({ ...blank(), state: "unsupported" }));
       return put(hubId, (was) => (was.floor ? { ...was, state: "ready", stale: true } : { ...was, state: "failed" }));
     }
-    const { view, receivedAt } = floor.value;
+    const { view: raw, receivedAt } = floor.value;
+    const view = asAgents(raw);
     const listed = new Set(view.needs.map((n) => `${hubId}/${n.id}`));
     set((s) => ({
       day: day.getTime(),
@@ -141,7 +143,14 @@ export const useFloor = create<FloorStore>((set, get) => {
         ask([hubId]);
       } catch (e) {
         set((s) => ({ deciding: without(s.deciding, (k) => k === key) }));
-        if (e instanceof HubError && e.status === 409) {
+        if (e instanceof HubError && e.status === 409 && need.answer.at.kind === "plan") {
+          // The boss changed the plan since it was read: its newest revision
+          // is asked again, as it is now.
+          set((s) => ({ problems: { ...s.problems, [key]: "The plan changed since you read it. This is its newest revision: look at it again." } }));
+          ask([hubId]);
+          // Its card shows the newest revision, to look at before approving.
+          void useBossPlans.getState().fetch(need.answer.at.plan);
+        } else if (e instanceof HubError && e.status === 409) {
           put(hubId, (was) => (was.floor ? { ...was, floor: { ...was.floor, needs: was.floor.needs.filter((n) => n.id !== need.id) } } : was));
           set((s) => ({ answered: { ...s.answered, [key]: { hubId, need, read: begun.get(hubId) ?? 0 } } }));
         } else set((s) => ({ problems: { ...s.problems, [key]: plainError(e) } }));
@@ -149,6 +158,13 @@ export const useFloor = create<FloorStore>((set, get) => {
     },
   };
 });
+
+/** `view` with the boss a plan's need names (as a manager) read as the
+ *  agent it is: it opens in its DM, by its name on the roster. */
+const asAgents = (view: FloorView): FloorView => {
+  const boss = (n: Need) => n.who.kind === "manager" && n.id.startsWith("plan:");
+  return view.needs.some(boss) ? { ...view, needs: view.needs.map((n) => (boss(n) ? { ...n, who: { ...n.who, kind: "agent" as const } } : n)) } : view;
+};
 
 /** How long reads asked for together wait, so they make one. */
 export const SETTLE_MS = 250;
@@ -223,7 +239,9 @@ export const watchFloor = (): (() => void) => {
     // ahead without, answered, dismissed) moves the Floor, whatever the
     // hub's link says: its floor signal doesn't cover the lines.
     const lineQuestion = e.type === "line" && e.message.kind === "ask";
-    if (lineQuestion || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
+    // A boss's plan proposed, changed or approved: its need comes or goes.
+    const plan = e.type === "plan";
+    if (lineQuestion || plan || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
   };
   deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;
