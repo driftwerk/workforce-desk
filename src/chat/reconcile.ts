@@ -25,19 +25,33 @@ const unnamed = (m: ChatMessage): boolean =>
  *  and the steps a kept one does are not its words. */
 const wordsOf = (m: ChatMessage): string => m.content.replace(/\s+/g, " ").trim();
 
-/** Whether kept `k` isn't from well before live `m` was. */
-const notEarlier = (k: ChatMessage, m: ChatMessage): boolean => {
-  const kt = Date.parse(k.at);
-  const mt = Date.parse(m.at);
-  return Number.isNaN(kt) || Number.isNaN(mt) || kt >= mt - SKEW_MS;
+/** How much later than a live answer began its kept copy may say it was:
+ *  a long turn is kept as it ends, and the clocks may differ. */
+export const LATE_MS = 60 * 60_000;
+
+/** How far kept `k` is in time from live `m`, if it could be its copy: not
+ *  from well before it, nor from far after it. Null where it couldn't be,
+ *  or where either has no time. */
+const apart = (k: ChatMessage, m: ChatMessage): number | null => {
+  const d = Date.parse(k.at) - Date.parse(m.at);
+  return Number.isNaN(d) || d < -SKEW_MS || d > LATE_MS ? null : Math.abs(d);
 };
+
+/** Whether `k` and `m` answer the same question, where both say which: the
+ *  same words in the next turn are another answer. */
+const sameQuestion = (k: ChatMessage, m: ChatMessage): boolean => !k.replyTo || !m.replyTo || k.replyTo === m.replyTo;
+
+/** Whether `k` and `m` are said by the same one, where both say who. */
+const sameAuthor = (k: ChatMessage, m: ChatMessage): boolean =>
+  !k.author || !m.author || (k.author.kind === m.author.kind && k.author.id === m.author.id);
 
 /** The live messages `kept` (a page the hub just read) now shows, to drop:
  *  one it kept under its id or its client id, and what a turn said live (its
  *  answer, its tools, its failure) once its turn is over and the hub kept
  *  the turn's own word on the message it was asked with. An answer with no
- *  id of the hub's is the oldest kept answer, not from well before it, that
- *  says the same and is no other live message's. */
+ *  id of the hub's is the kept answer nearest it in time (not from well
+ *  before it, nor far after) that says the same, by the same one and to the
+ *  same question where both say, and is no other live message's. */
 export const keptOf = (kept: readonly ChatMessage[], live: readonly ChatMessage[]): Set<string> => {
   const ids = new Set(kept.map((m) => m.id));
   const clientIds = new Set(kept.flatMap((m) => (m.clientId ? [m.clientId] : [])));
@@ -55,7 +69,12 @@ export const keptOf = (kept: readonly ChatMessage[], live: readonly ChatMessage[
   const answers = inOrder(kept).filter((k) => k.role === "assistant" && !taken.has(k.id));
   for (const m of byWords) {
     const words = wordsOf(m);
-    const k = answers.find((k) => !taken.has(k.id) && notEarlier(k, m) && wordsOf(k) === words);
+    let k: ChatMessage | undefined;
+    let nearest = Infinity;
+    for (const c of answers) {
+      const d = taken.has(c.id) || !sameAuthor(c, m) || !sameQuestion(c, m) || wordsOf(c) !== words ? null : apart(c, m);
+      if (d !== null && d < nearest) [k, nearest] = [c, d];
+    }
     if (!k) continue;
     taken.add(k.id);
     drop.add(m.id);
@@ -105,7 +124,10 @@ const byTime = (kept: readonly ChatMessage[], live: readonly ChatMessage[]): Cha
   const after: ChatMessage[] = [];
   for (const m of live) {
     const t = Date.parse(m.at);
-    const at = !timed(m) || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
+    let at = !timed(m) || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
+    // Never before the question it answers, whatever the clocks say.
+    const asked = m.replyTo ? kept.findIndex((k) => k.clientId === m.replyTo) : -1;
+    if (at >= 0 && asked >= at) at = asked + 1 < kept.length ? asked + 1 : -1;
     if (at < 0) after.push(m);
     else before.set(at, [...(before.get(at) ?? []), m]);
   }

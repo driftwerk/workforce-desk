@@ -275,4 +275,58 @@ describe("an answer Desk heard after it restarted mid-turn", () => {
     const shown = shownWith([...base, story, ...later], toShow(s.messages));
     expect(shown.at(-1)?.status).toBe("streaming");
   });
+
+  /** A live message Desk made itself, said at `at`. */
+  const live = (m: Partial<ChatMessage> & Pick<ChatMessage, "content" | "at">): ChatMessage => ({
+    id: `m-${m.at}`,
+    role: "assistant",
+    status: "complete",
+    tools: [],
+    ...m,
+  });
+
+  it("is the kept answer nearest its time, of two that say the same in successive turns", () => {
+    const first = row({ id: "h-d1", from: "agent", text: "Done.", seq: 21, at: "2026-11-08T10:00:00Z", mark: { in_reply_to: "a1" } });
+    const second = row({ id: "h-d2", from: "agent", text: "Done.", seq: 23, at: "2026-11-08T10:01:30Z", mark: { in_reply_to: "a2" } });
+    const one = row({ id: "h-a1", from: "user", text: "do one", client_id: "a1", seq: 20, at: "2026-11-08T09:59:50Z" });
+    const two = row({ id: "h-a2", from: "user", text: "do two", client_id: "a2", seq: 22, at: "2026-11-08T10:01:00Z" });
+    // The second turn's answer, live, before the hub has kept it: the first
+    // turn's "Done." is another answer.
+    const answer = live({ content: "Done.", at: "2026-11-08T10:01:20Z", replyTo: "a2" });
+    expect(keptOf([one, first, two], [answer]).size).toBe(0);
+    expect(shownWith([one, first, two], [answer]).map((m) => m.id)).toEqual(["h-a1", "h-d1", "h-a2", answer.id]);
+    expect([...keptOf([one, first, two, second], [answer])]).toEqual([answer.id]);
+    // Not knowing its question, it is the nearer of the two; the other is
+    // the earlier one's.
+    const unasked = live({ content: "Done.", at: "2026-11-08T10:01:20Z" });
+    const earlier = live({ content: "Done.", at: "2026-11-08T10:00:05Z" });
+    expect(keptOf([one, first, two, second], [unasked, earlier])).toEqual(new Set([unasked.id, earlier.id]));
+    expect([...keptOf([one, second], [unasked])]).toEqual([unasked.id]);
+  });
+
+  it("is no copy of the same words said by another in a room, nor of one kept far after it", () => {
+    const allan = { kind: "agent" as const, id: "allan", name: "Allan" };
+    const sarah = row({ id: "h-sa", from: "agent", text: "Done.", seq: 30, at: "2026-11-08T10:01:30Z", author: { kind: "agent", id: "sarah", name: "Sarah" } });
+    const answer = live({ content: "Done.", at: "2026-11-08T10:01:20Z", author: allan });
+    expect(keptOf([sarah], [answer]).size).toBe(0);
+    expect([...keptOf([{ ...sarah, author: allan }], [answer])]).toEqual([answer.id]);
+    const muchLater = row({ id: "h-late", from: "agent", text: "Done.", seq: 31, at: "2026-11-08T12:00:00Z" });
+    expect(keptOf([muchLater], [answer]).size).toBe(0);
+  });
+
+  it("places a failure the hub didn't keep by its time, never before the question it answers", () => {
+    const failed = live({ role: "system", status: "error", content: ERR, at: "2026-11-08T07:49:00Z", replyTo: "s" });
+    expect(shownWith([...base, story, ...later], [failed]).map((m) => m.id)).toEqual(["h-m", "h-r", "h-s", failed.id, "h-ok", "h-br"]);
+  });
+
+  it("keeps an answer after its question, and finds its copy, on a hub whose clock is minutes ahead", () => {
+    const ahead = (m: ChatMessage, min = 5) => ({ ...m, at: new Date(Date.parse(m.at) + min * 60_000).toISOString() });
+    const answer = live({ content: VOTE, at: "2026-11-08T07:49:05Z", replyTo: "s", byWords: true, id: "R" });
+    // The question, kept at 07:51:30 by the hub's clock, was asked before it.
+    const kept = [...base, ahead(story), ...later.map((m) => ahead(m))];
+    expect(shownWith(kept, [answer]).map((m) => m.id)).toEqual(["h-m", "h-r", "h-s", "R", "h-ok", "h-br"]);
+    const withCopy = [...base, ahead(story), ahead(vote), ...later.map((m) => ahead(m))];
+    expect([...keptOf(withCopy, [answer])]).toEqual(["R"]);
+    expect(shownWith(withCopy, [answer]).map((m) => m.id)).toEqual(["h-m", "h-r", "h-s", "h-v", "h-ok", "h-br"]);
+  });
 });
