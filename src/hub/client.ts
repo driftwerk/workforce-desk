@@ -4,6 +4,12 @@ import type { TerminalPalette } from "../theme/xterm";
 import type { Provider } from "./providers";
 import type { SearchFilters } from "../rooms/search";
 import type {
+  BossPlan,
+  BossPlanChanged,
+  BossPlanDetail,
+  BossPlanEdit,
+  BossPlanState,
+  OnPlanDrop,
   ActivityFilter,
   ActivityPage,
   Decision,
@@ -604,6 +610,26 @@ export class DeskHub {
     this.call(needs ? "PUT" : "DELETE", `/api/desk/tickets/${encodeURIComponent(id)}/needs/${encodeURIComponent(other)}`);
   /** Gives a ticket to a session, an agent or a new session, as you. */
   assignTicket = (id: string, to: AssignTo): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/assign`, { to });
+  /** A boss's plans with where their tickets stand; null from a hub
+   *  without plans (an older one). */
+  plans = async (q: { state?: BossPlanState; group?: string } = {}): Promise<BossPlan[] | null> => {
+    const query = new URLSearchParams(Object.entries(q).filter((e): e is [string, string] => e[1] !== undefined)).toString();
+    try {
+      return await this.call<BossPlan[]>("GET", `/api/desk/plans${query ? `?${query}` : ""}`);
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
+      throw e;
+    }
+  };
+  /** A plan in full: its tickets, waves and revisions. */
+  plan = (id: string): Promise<BossPlanDetail> => this.call("GET", `/api/desk/plans/${encodeURIComponent(id)}`);
+  /** The person's edit, from the revision they read: a newer one refuses it (409). */
+  editPlan = (id: string, edit: BossPlanEdit): Promise<BossPlanChanged> => this.call("PATCH", `/api/desk/plans/${encodeURIComponent(id)}`, edit);
+  pausePlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/pause`);
+  resumePlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/resume`);
+  /** Drops a plan, stopping the sessions on it or leaving them as yours. */
+  dropPlan = (id: string, sessions: OnPlanDrop): Promise<BossPlanDetail> =>
+    this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/drop`, { sessions });
   /** A page of a ticket's history, newest first. */
   ticketHistory = (id: string, before?: string): Promise<ActivityPage> =>
     this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}/history${before ? `?before=${encodeURIComponent(before)}` : ""}`);

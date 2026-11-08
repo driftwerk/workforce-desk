@@ -97,6 +97,15 @@ const HTTP: &[Route] = &[
     route("DELETE", "/api/desk/tickets/{}/needs/{}"),
     route("POST", "/api/desk/tickets/{}/assign"),
     with_query("GET", "/api/desk/tickets/{}/history", &["before"]),
+    // A boss's plans: the list, one in full, the person's edit, pausing,
+    // resuming and dropping. Approving one is the person's own (the Floor's
+    // decide, as their device), never this token's.
+    with_query("GET", "/api/desk/plans", &["state", "group"]),
+    route("GET", "/api/desk/plans/{}"),
+    route("PATCH", "/api/desk/plans/{}"),
+    route("POST", "/api/desk/plans/{}/pause"),
+    route("POST", "/api/desk/plans/{}/resume"),
+    route("POST", "/api/desk/plans/{}/drop"),
     with_query("GET", "/api/desk/history", &["subject", "before"]),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),
@@ -578,6 +587,15 @@ mod tests {
             ("GET", "/api/desk/tickets/t1?q=a"),
             ("GET", "/api/desk/history?subject=s1&limit=500"),
             ("GET", "/api/desk/boards/b1/tickets?token=x"),
+            // Plans, the wrong way: a boss proposes and changes its plans
+            // with its crew tools, never through the page.
+            ("POST", "/api/desk/plans"),
+            ("DELETE", "/api/desk/plans/p1"),
+            ("GET", "/api/desk/plans/p1/approve"),
+            ("POST", "/api/desk/plans/p1/approve"),
+            ("POST", "/api/desk/plans/p1/finish"),
+            ("GET", "/api/desk/plans?token=x"),
+            ("GET", "/api/desk/plans?boss=sarah"),
             // Desk Memory, the wrong way.
             ("PUT", "/api/desk/sessions/s1/memory"),
             ("POST", "/api/desk/sessions/s1/memory"),

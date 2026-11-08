@@ -13,6 +13,7 @@ export const besideOf = (item: OnHub): Target | null => {
     case "session":
       return sessionKeyOfItem(item) ? { kind: "session", sessionId: sessionKeyOfItem(item)! } : null;
     case "agent":
+    case "manager":
       return { kind: "agent", key: `${item.hubId}/${item.who.id}` };
     // Desk itself (its breaker holding new sessions) opens nowhere.
     case "desk":

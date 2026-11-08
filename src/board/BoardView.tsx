@@ -1,7 +1,8 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useChat } from "../chat/store";
 import { useBoss } from "../crew/chargeStore";
+import { plansOn, usePlans } from "../crew/planStore";
 import { waitsOnYou } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
@@ -11,7 +12,7 @@ import type { Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { BoardDialog, DeleteBoard } from "./BoardDialogs";
-import { FILTERS, STATE_TITLE, anchored, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
+import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
@@ -38,6 +39,8 @@ export const useWaiting = (): ((t: Ticket) => boolean) => {
 
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
+/** The plan each ticket is in, by its goal, for the board's cards. */
+const Plans = createContext<ReadonlyMap<string, string>>(new Map());
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
@@ -64,7 +67,20 @@ export function Board() {
   const cards = useRef(new Map<string, HTMLElement>());
 
   const mine = useMemo(() => (board ? Object.values(all).filter((t) => t.board === board.id) : []), [all, board]);
-  const cols = useMemo(() => columns(mine, { filter, q, now, waiting }), [mine, filter, q, now, waiting]);
+  // The boss's plans on this board, each read in full for its tickets.
+  const plansAll = usePlans((s) => s.plans);
+  const details = usePlans((s) => s.details);
+  const plans = useMemo(() => (board ? plansOn(plansAll, board.id) : []), [plansAll, board]);
+  useEffect(() => {
+    for (const p of plans) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
+  }, [plans]);
+  const [planShown, setPlan] = useState<string | null>(null);
+  const plan = planShown && plans.some((p) => p.id === planShown) ? planShown : null;
+  const ticketPlans = useMemo(() => planOfTickets(plans.map((p) => details[p.id]).filter((d) => !!d)), [plans, details]);
+  const planTickets = useMemo(() => (plan ? new Set([...ticketPlans].filter(([, p]) => p === plan).map(([t]) => t)) : null), [plan, ticketPlans]);
+  const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.goal])), [plans]);
+  const planChips = useMemo(() => new Map([...ticketPlans].map(([t, p]) => [t, planNames.get(p) ?? ""])), [ticketPlans, planNames]);
+  const cols = useMemo(() => columns(mine, { filter, q, now, waiting, plan: planTickets }), [mine, filter, q, now, waiting, planTickets]);
   const counts = useMemo(() => columns(mine, { filter: "all", q: "", now, waiting }), [mine, now, waiting]);
   const waitingCount = mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length;
 
@@ -182,6 +198,16 @@ export function Board() {
             </button>
           ))}
         </div>
+        {plans.length > 0 && (
+          <select className="pc-engine board-plan" aria-label="Plan" value={plan ?? ""} onChange={(e) => setPlan(e.target.value || null)}>
+            <option value="">Every plan</option>
+            {plans.map((p) => (
+              <option key={p.id} value={p.id}>
+                Plan: {p.goal}
+              </option>
+            ))}
+          </select>
+        )}
         <label className="sr-only" htmlFor="board-search">
           Search tickets
         </label>
@@ -204,6 +230,7 @@ export function Board() {
         </button>
       </header>
       <States.Provider value={states}>
+      <Plans.Provider value={planChips}>
       <Columns
         cols={cols}
         counts={counts}
@@ -215,6 +242,7 @@ export function Board() {
         onCardKey={onCardKey}
         register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
       />
+      </Plans.Provider>
       </States.Provider>
       <p className="sr-only" aria-live="polite">
         {said}
@@ -390,6 +418,7 @@ function DraggableCard({
 }) {
   const el = useRef<HTMLButtonElement | null>(null);
   const states = useContext(States);
+  const plan = useContext(Plans).get(ticket.id);
   // A dropped ticket comes back by Bring it back, never by landing in a column.
   const drag = useDraggable({ id: ticket.id, type: "ticket", element: el, disabled: ticket.state === "dropped" });
   useDroppable({ id: ticket.id, type: "ticket", accept: "ticket", element: el, collisionPriority: 1 });
@@ -403,6 +432,7 @@ function DraggableCard({
           states={states}
           waiting={waiting}
           settled={settled}
+          plan={plan}
           buttonRef={(b) => {
             el.current = b;
             register(ticket.id, b);
