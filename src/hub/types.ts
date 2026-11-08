@@ -875,6 +875,21 @@ export type OversightLevel = "watch" | "suggest" | "act";
 export interface Manager {
   agentId: string | null;
   level: OversightLevel | null;
+  /** Each sidebar group's boss; an older hub says none. */
+  bosses?: GroupBoss[];
+  /** Groups closed to everyone but the person: named for a boss that
+   *  oversees nothing now. */
+  sealed?: string[];
+}
+
+/** A sidebar group's boss: an agent of this computer's hub that oversees
+ *  only that group. */
+export interface GroupBoss {
+  agentId: string;
+  name: string;
+  /** The group's id. */
+  group: string;
+  level: OversightLevel;
 }
 
 export interface Suggestion {

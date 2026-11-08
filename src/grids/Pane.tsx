@@ -36,6 +36,8 @@ import { useSeenSession } from "../unread/seen";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
 import { AgentMark } from "../ui/Mark";
+import { GroupChip } from "../groups/GroupChip";
+import { itemOf } from "./where";
 import { baseName, homeShort } from "../ui/paths";
 import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, ownSignInWorks, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
@@ -279,6 +281,7 @@ export function GridPane({
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const shows = sessionKeyIn(pane.content);
   const session = useDesk((s) => (shows ? s.sessions[shows] : undefined)) ?? label.tracked;
+  const paneItem = useDesk((s) => itemOf(s.sessions, pane.content));
   const actions = session ? sessionActions(session) : [];
   const charge = useCharge(session && sessionKey(session));
   const chargeActions = useChargeActions(session);
@@ -316,6 +319,7 @@ export function GridPane({
             {end && <span className="gpane-name-end">{end}</span>}
           </span>
           <OnMachine machine={session ? machineOf(session) : machineOf(pane.content?.kind === "agent" ? null : pane.content)} />
+          {paneItem && <GroupChip item={paneItem} />}
           {label.meta && (
             <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
               {label.meta}

@@ -992,6 +992,13 @@ button {
   display: flex;
   flex-direction: column;
 }
+/* An agent's name and, when it sits in a group, the group's chip. */
+.room-title-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 .room-scroll {
   flex: 1;
   overflow-y: auto;
@@ -1825,6 +1832,79 @@ button.thread-bar:hover {
   font-weight: 500;
   color: var(--faint);
 }
+/* A group's dot, in the colour it is known by in the sidebar and on chips. */
+.grp-dot {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+/* A group with a boss: its name, "Sarah oversees" (which opens Sarah's
+   messages), then the count at the end of the header. */
+.grp-toggle-bossed {
+  flex: 0 1 auto;
+}
+.grp-toggle-bossed .grp-name {
+  flex: 0 1 auto;
+}
+.grp-boss {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 500;
+}
+.grp-boss:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.grp-tail {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px;
+  cursor: default;
+}
+/* A boss's row: "boss" after its name, in the signal's soft colour, as a
+   session a boss runs says so. */
+.gi-boss {
+  flex: none;
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* "● Acme" beside a session's or an agent's name. */
+.chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.chip-group .grp-dot {
+  width: 7px;
+  height: 7px;
+}
 .grp-more {
   opacity: 0;
 }
@@ -2017,6 +2097,10 @@ button.thread-bar:hover {
   background: var(--signal-soft);
   color: var(--signal-soft-text);
   outline: none;
+}
+.menu-item[aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
 }
 .menu-item:focus-visible {
   box-shadow: inset 0 0 0 2px var(--signal);

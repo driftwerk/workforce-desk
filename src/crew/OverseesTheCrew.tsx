@@ -7,6 +7,7 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
+import { useLayout } from "../groups/store";
 import { startable } from "../engines/engines";
 import type { EngineInfo } from "../hub/types";
 import {
@@ -79,6 +80,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const manager = useOverview((s) => s.manager);
   const support = useOverview((s) => s.managerSupport);
   const roster = useChat((s) => s.roster);
+  const { groups } = useLayout();
   const hubs = useChat((s) => s.hubs);
   const [o, setO] = useState<Oversight | null>(null);
   const [fields, setFields] = useState<Record<Field, Typed> | null>(null);
@@ -110,6 +112,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     ? (roster.find((a) => a.id === otherId && hubs.find((h) => h.id === a.hubId)?.local)?.name ?? otherId)
     : null;
   const usable = config !== undefined && readable(config);
+  // The sidebar group it sits in, whose boss it may have been.
+  const sitsIn = groups.find((g) => g.items.includes(`agent:${agentKey(agent)}`))?.name ?? null;
+  // A group's boss oversees only that group.
+  const bossOf = o?.group ? (groups.find((g) => g.id === o.group)?.name ?? null) : null;
 
   const update = (change: Change) => {
     if (!desk || !o) return;
@@ -183,7 +189,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
 
   const enable = (on: boolean) => {
     if (on && other) return setConfirming(true);
-    update((x) => ({ ...x, enabled: on }));
+    // This switch is the main overseer's: on or off it names no group, so
+    // a group it oversaw opens to the main overseer (a group any config
+    // names stays apart from everyone).
+    update((x) => ({ ...x, enabled: on, group: null }));
   };
 
   const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
@@ -199,6 +208,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             {name} keeps track of every agent and session and tells you what needs you. Only one crew member oversees at a time.
           </span>
           {o && !o.enabled && other && <span className="oversee-sub">{other} oversees the crew now.</span>}
+          {o?.enabled && bossOf && <span className="oversee-sub">Oversees only {bossOf}: its sessions and agents.</span>}
         </span>
         <button
           type="button"
@@ -528,6 +538,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   {other} oversees the crew now — make {name} the overseer instead? {other} stops overseeing; nothing else about{" "}
                   {other} changes.
                 </p>
+                {sitsIn && <p>What {name} learned about {sitsIn} stays with it.</p>}
               </span>
               <CloseButton onClose={() => setConfirming(false)} />
             </header>
@@ -543,7 +554,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               className="btn btn-signal"
               onClick={() => {
                 setConfirming(false);
-                update((x) => ({ ...x, enabled: true }));
+                update((x) => ({ ...x, enabled: true, group: null }));
               }}
             >
               Make {name} the overseer

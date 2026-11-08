@@ -69,9 +69,13 @@ const adopt = (layout: Layout) => {
   else useHubLayout.setState({ layout });
 };
 
+/** What a failed change does: shown to the person (`false`), only logged
+ *  (`true`: one Desk retries itself), or handed to its caller to say. */
+type OnFailure = boolean | ((e: unknown) => void);
+
 /** Sends one change to the hub, in order after the others; whether the hub
- *  took it. `quiet`: a failure is only logged (one Desk retries itself). */
-const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet = false): Promise<boolean> => {
+ *  took it. */
+const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet: OnFailure = false): Promise<boolean> => {
   inFlight++;
   let took = false;
   sending = sending.then(async () => {
@@ -79,7 +83,8 @@ const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet = fal
       heard = await call(hub);
       took = true;
     } catch (e) {
-      if (quiet) console.warn("couldn't change the groups on the hub:", e);
+      if (typeof quiet === "function") quiet(e);
+      else if (quiet) console.warn("couldn't change the groups on the hub:", e);
       else useDesk.getState().fail(e);
       // Show what the hub really has.
       heard = await hub.layout().catch(() => heard);
@@ -101,7 +106,7 @@ const send = (hub: DeskHub, call: (hub: DeskHub) => Promise<Layout>, quiet = fal
 export const changeLayout = (
   change: (layout: Layout) => Layout | null,
   call: (hub: DeskHub, next: Layout) => Promise<Layout>,
-  quiet = false,
+  quiet: OnFailure = false,
 ): Promise<boolean> => {
   const hubLayout = useHubLayout.getState().layout;
   const hub = useDesk.getState().hub;
@@ -139,12 +144,33 @@ export const collapseGroup = (id: string, to: boolean): void =>
     (h) => h.updateGroup(id, { collapsed: to }),
   );
 
-/** Its members go to the end of Ungrouped. */
-export const deleteGroup = (present: readonly ItemKey[], id: string): void =>
-  void changeLayout(
+/** How a delete went: done, done but Ungrouped's new order not kept, or
+ *  not done. */
+export type Deleted = "deleted" | "unordered" | "failed";
+
+/** Its members go to the end of Ungrouped. Settles with how it went;
+ *  `failed`, when given, is told why it wasn't deleted (or why its order
+ *  wasn't kept) instead of the person. */
+export const deleteGroup = async (present: readonly ItemKey[], id: string, failed?: (e: unknown) => void): Promise<Deleted> => {
+  let unordered = false;
+  const took = await changeLayout(
     (l) => deleted(l, present, id),
-    (h, next) => h.deleteGroup(id).then(() => h.orderUngrouped(next.ungrouped.items)),
+    async (h, next) => {
+      const gone = await h.deleteGroup(id);
+      try {
+        return await h.orderUngrouped(next.ungrouped.items);
+      } catch (e) {
+        // Deleted all the same: only where its members went isn't kept.
+        unordered = true;
+        if (failed) failed(e);
+        else useDesk.getState().fail(e);
+        return gone;
+      }
+    },
+    failed ?? false,
   );
+  return !took ? "failed" : unordered ? "unordered" : "deleted";
+};
 
 export const moveGroup = (id: string, before: string | null): void =>
   void changeLayout(
