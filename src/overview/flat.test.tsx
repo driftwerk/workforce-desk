@@ -24,7 +24,7 @@ import { useUi } from "../shell/ui";
 import { useOverview } from "./store";
 
 // Times are said in the computer's zone; the snapshot is in one.
-process.env.TZ = "UTC";
+(globalThis as unknown as { process: { env: Record<string, string> } }).process.env.TZ = "UTC";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -124,7 +124,6 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   vi.setSystemTime(NOW);
   useSettings.setState({ loaded: true, shortcuts: {}, keys: defaultShortcuts(), groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
-  useHubLayout.setState({ layout, kept: true });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useUi.setState({ activityOpen: true });
@@ -140,6 +139,8 @@ beforeEach(() => {
       suggestions: vi.fn(() => Promise.resolve([])),
     } as unknown as DeskHub,
   });
+  // After the hub: a new hub starts from Desk's own layout until its snapshot.
+  useHubLayout.setState({ layout, kept: true });
   useOverview.setState({ overview: null, overviewSupport: "unknown", activitySupport: "unknown", feeds: {}, manager: null });
   useChat.setState({
     hubs: [hub("local")],

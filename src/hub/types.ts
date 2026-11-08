@@ -1068,6 +1068,13 @@ export interface Need {
   since: string;
   place: Place;
   answer: Answer;
+  /** The sidebar group it is in now, as this computer's hub stamps its own
+   *  items for the person who holds its Desk; absent when ungrouped, and
+   *  from other hubs and older ones. */
+  group?: string | null;
+  /** That group's own boss (its agent id): absent for what is ungrouped, in
+   *  a group with no boss of its own (the main boss's), or sealed. */
+  boss?: string | null;
 }
 
 export type Outcome = "finished" | "asked" | "failed" | "stopped" | "limit" | "interrupted";
@@ -1085,6 +1092,9 @@ export interface Work {
   background?: Background | null;
   /** What its agent or session is for and doing, in plain words; absent from older hubs. */
   gist?: Gist | null;
+  /** As on `Need`. */
+  group?: string | null;
+  boss?: string | null;
 }
 
 /** What an agent or session is for (`purpose`) and what it is doing or did
@@ -1134,6 +1144,66 @@ export interface FloorView {
   /** Questions to you their sessions went ahead without, until answered or
    *  dismissed. Absent when none (and from older hubs). */
   wentAhead?: WentAhead[];
+  /** The overseers, each with its scope: the main boss too. Only for the
+   *  person who holds this hub's Desk; absent elsewhere. */
+  bosses?: BossView[];
+  /** Groups closed to everyone but the person: named for a boss that isn't
+   *  overseeing them now. Their items carry their group and no boss. */
+  sealed?: string[];
+  /** The bosses' open plans, each in its own group. */
+  plans?: PlanProgress[];
+}
+
+/** One overseer's part of Desk: everything in no bossed group (the main
+ *  boss's), or one sidebar group. */
+export type Scope = { kind: "ungrouped" } | { kind: "group"; group: string };
+
+/** An overseer, as the Floor shows it at the head of its section. */
+export interface BossView {
+  scope: Scope;
+  agent: string;
+  name: string;
+  /** `watch`, `suggest` or `act`. */
+  level: string;
+  state: "idle" | "working";
+  /** What holds its turns, in plain words, while something does. */
+  paused?: string | null;
+  /** Its group's budget, the furthest along: none for the main boss, and
+   *  for a group with no budget of its own. */
+  spend?: Standing | null;
+}
+
+export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";
+
+/** Where a plan's tickets stand. */
+export interface PlanTally {
+  done: number;
+  doing: number;
+  review: number;
+  /** In To do with every need done, and no one on it yet. */
+  ready: number;
+  /** Held back by a need that was dropped. */
+  blocked: number;
+  /** Waiting on needs not done yet, or not handed out yet. */
+  waiting: number;
+  /** Every ticket but the dropped. */
+  total: number;
+  /** The tickets that start next as slots free, by key, in order. */
+  next: string[];
+}
+
+/** A plan as the Floor shows it in its group's section. */
+export interface PlanProgress {
+  id: string;
+  goal: string;
+  /** Its group, as it was made; null is ungrouped. */
+  group: string | null;
+  boss: string;
+  bossName: string;
+  state: PlanState;
+  /** Why it is paused, in the person's words, while it is. */
+  pausedWhy?: string | null;
+  progress: PlanTally;
 }
 
 /** A question to you its session went ahead without. */

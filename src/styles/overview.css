@@ -345,6 +345,298 @@
   }
 }
 
+/* ── The Floor by group ─────────────────────────────────────────────────── */
+
+.needs-jump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.needs-jump-label {
+  color: var(--blocked);
+  font-weight: 600;
+}
+.needs-jump-to {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--blocked-soft);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--blocked) 30%, var(--border));
+  font: inherit;
+  cursor: pointer;
+}
+.needs-jump-to b {
+  color: var(--blocked);
+}
+.fsec {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  min-width: 0;
+  scroll-margin-top: 12px;
+}
+.fsec-needs {
+  border-color: color-mix(in srgb, var(--blocked) 35%, var(--border));
+}
+.fsec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.fsec-folded:not(.fsec-needs) .fsec-head {
+  border-bottom: 0;
+}
+.fsec-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.fsec-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.fsec-boss {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.fsec-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.fsec-fold {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+.fsec-fold:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+.fsec-fold svg {
+  transition: transform 0.15s;
+}
+.fsec-folded .fsec-fold svg {
+  transform: rotate(-90deg);
+}
+.fsec-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.fsec-body:empty {
+  display: none;
+}
+.fsec-body .ov-label {
+  margin-bottom: 8px;
+}
+.fsec-needs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fsec-need {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.fsec-need > .floor-need {
+  align-self: stretch;
+}
+.fsec-need-chip {
+  margin-left: 10px;
+}
+.fsec-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fsec-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.fsec-plan-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.fsec-plan-name {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fsec-chip-waiting {
+  color: var(--blocked);
+  border-color: color-mix(in srgb, var(--blocked) 45%, var(--border));
+}
+.fsec-paused {
+  color: var(--blocked);
+}
+.fsec-segbar {
+  display: flex;
+  height: 8px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--border);
+  gap: 2px;
+}
+.fsec-seg {
+  display: block;
+  height: 100%;
+  flex-basis: 0;
+}
+.fsec-seg-done {
+  background: var(--done);
+}
+.fsec-seg-doing {
+  background: var(--working);
+}
+.fsec-seg-review {
+  background: var(--ansi-cyan);
+}
+.fsec-seg-ready {
+  background: color-mix(in srgb, var(--text) 30%, transparent);
+}
+.fsec-seg-blocked {
+  background: var(--blocked);
+}
+.fsec-seg-waiting {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+.fsec-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fsec-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fsec-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.fsec-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+}
+.fsec-tile {
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.fsec-tile-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+button.fsec-tile-head {
+  cursor: pointer;
+}
+.fsec-tile-title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.fsec-tile-gist {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fsec-tile-foot {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.fsec-done-line {
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+.fsec-done-line:hover {
+  color: var(--text);
+}
+.fsec-done-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.activity-groups {
+  flex-wrap: wrap;
+}
+
 /* ── The overseer's DM ──────────────────────────────────────────────────── */
 
 .dm-action {

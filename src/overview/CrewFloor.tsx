@@ -4,6 +4,8 @@ import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
+import { FloorSection, useSections } from "../floor/FloorSection";
+import { NeedsJump } from "../floor/NeedsJump";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
 import { isAgentTurn } from "../floor/needs";
@@ -32,6 +34,10 @@ const AGENT_GROUP: Record<OverviewItem["state"], string> = {
 };
 
 const ORDER = ["Needs you", "Working", "Done today", "Recently done and idle", "In other terminals", "Not running"];
+
+/** What the Floor in sections leaves to its sections: they say what needs
+ *  you, what's working and what's done, each in its group. */
+const IN_SECTIONS = new Set(["Needs you", "Working", "Done today"]);
 
 interface FloorGroup {
   title: string;
@@ -84,9 +90,12 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const merged = useMerged();
   const needs = useNeedCounts();
   const now = useMinute();
-  const groups = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
+  const sectioned = useSections();
+  const sections = onFloor && sectioned.kind === "sections" ? sectioned.sections : null;
+  const all = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
+  const groups = sections ? all.filter((g) => !IN_SECTIONS.has(g.title)) : all;
   const count = (title: string) => {
-    const g = groups.find((x) => x.title === title);
+    const g = all.find((x) => x.title === title);
     return (g?.agents.length ?? 0) + (g?.sessions.length ?? 0);
   };
   const counts = onFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
@@ -133,11 +142,12 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
       </header>
       <div className="crew-floor-body">
         <div ref={scroller} className="crew-floor-main">
+          {sections && <NeedsJump sections={sections} />}
           <RestoreBanner />
           <AccountNeeds />
           {onFloor ? (
             <>
-              <RightNow brief={brief || null} />
+              <RightNow brief={brief || null} needs={!sections} />
               <PlanCards />
               <SpendCard />
               <Today now={now} />
@@ -145,7 +155,10 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
           ) : (
             brief
           )}
-          {groups.length === 0 && (
+          {sections?.map((s) => (
+            <FloorSection key={s.id} section={s} now={now} />
+          ))}
+          {!sections && groups.length === 0 && (
             <p className="empty muted">
               Nothing’s happening on the crew right now. Start a session, or message someone from Crew, and it shows here.
             </p>
@@ -156,7 +169,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
         </div>
         {activitySupport !== "no" &&
           (activityOpen ? (
-            <ActivityRail managerName={managerName} closeRef={railClose} onClose={() => showActivity(false)} />
+            <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={() => showActivity(false)} />
           ) : (
             <DockStrip label="Docked">
               <DockTab
