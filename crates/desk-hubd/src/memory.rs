@@ -168,9 +168,31 @@ fn spawn(
     let child = child.with_context(|| format!("starting {}", binary.display()))?;
     if let Some(pid) = child.id() {
         std::fs::write(pidfile(paths), pid.to_string())?;
+        quieten(pid);
     }
     Ok(child)
 }
+
+/// How far the store is lowered below the person's own programs: it
+/// embeds with every core but one, so a first launch's backlog would
+/// otherwise take the computer over until it is through.
+#[cfg(unix)]
+const STORE_NICENESS: libc::c_int = 10;
+
+/// Runs the store below the person's own programs, so what it embeds in
+/// the background gives way to what they are doing. Best effort: a store
+/// left at the usual priority still works.
+#[cfg(unix)]
+fn quieten(pid: u32) {
+    // SAFETY: `setpriority` takes plain integers and touches no memory.
+    let done = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, STORE_NICENESS) };
+    if done != 0 {
+        tracing::warn!(pid, error = %std::io::Error::last_os_error(), "couldn't lower the memory store's priority");
+    }
+}
+
+#[cfg(not(unix))]
+fn quieten(_pid: u32) {}
 
 /// Stops a store an earlier Desk Helper left running (it was killed before
 /// it could stop it), which would otherwise hold the tenant and its port.
