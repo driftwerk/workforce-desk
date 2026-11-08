@@ -1416,6 +1416,8 @@ export interface MemorySettings {
     fallbackProviders?: boolean;
   };
   totals: MemoryTotals[];
+  /** What the person should know of the change just made. */
+  notice?: string;
 }
 
 /** An exchange or a note a search of Desk's memory found. */

@@ -6,6 +6,7 @@ import type { MemoryIndexStatus, MemoryNote, MemoryNotes, MemorySearch, Session,
 import { LOCAL, useMachines } from "../machines/engines";
 import { plainError } from "../ui/plainError";
 import { ForgetMemory } from "./ForgetMemory";
+import { useFloor } from "../floor/store";
 import { useSessionGist } from "./gist";
 import { changedFiles, clock, fallbackText, notedByDeskText, providerName, rememberedLine, replacedOf, shortFile } from "./words";
 
@@ -50,14 +51,14 @@ export function MemoryPanel({
   const [forgetting, setForgetting] = useState(false);
   const gist = useSessionGist(session.id);
   const machine = machineOf(session);
-  const machineName = useMachines((s) => (machine === LOCAL ? null : (s.machines.find((x) => x.id === machine)?.name ?? machine)));
+  // Never its id: a machine Desk can't name is "this machine".
+  const machineName = useMachines((s) => (machine === LOCAL ? null : (s.machines.find((x) => x.id === machine)?.name ?? "this machine")));
 
   const load = useCallback(async () => {
     if (!hub) return;
     try {
       const [memory, index] = await Promise.all([hub.sessionMemory(session.id), hub.memoryIndex().catch(() => null)]);
       setLoaded({ memory, index });
-      setProblem(null);
     } catch (e) {
       setProblem(plainError(e));
     }
@@ -91,14 +92,18 @@ export function MemoryPanel({
   /** Runs a change, then reads again; `letsNote`, a change that may let
    *  Desk note again, makes the session's notes due first. */
   const act = async (run: () => Promise<unknown>, letsNote = false) => {
+    let said: string | null = null;
     try {
-      await run();
-      setProblem(null);
+      const done = await run();
+      // A switch says when some of what was said last may not be kept.
+      said = typeof done === "string" ? done : done && typeof done === "object" && "notice" in done ? ((done as { notice?: string }).notice ?? null) : null;
       if (letsNote) noteNow();
     } catch (e) {
-      setProblem(plainError(e));
+      said = plainError(e);
     }
+    // Read again, then say what the change said: the read doesn't clear it.
     await load();
+    setProblem(said);
   };
 
   const purpose = gist?.purpose ?? (session.goal || null);
@@ -167,7 +172,9 @@ export function MemoryPanel({
               engine={session.engine}
               onForget={async () => {
                 await hub!.forgetMemory(session.id);
-                await load();
+                // Its summary went with it: the Floor is read again for it.
+                const floor = useFloor.getState();
+                await Promise.all([load(), ...Object.keys(floor.hubs).map((h) => floor.load(h))]);
               }}
               onClose={() => setForgetting(false)}
             />
@@ -218,15 +225,24 @@ function Notes({
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const send = useRef(onChange);
   send.current = onChange;
-  // Leaving the panel drops what was waiting to be.
+  // Leaving the panel, or the page going (the window closing, a reload),
+  // drops what was waiting to be.
   useEffect(() => {
     const pending = timers.current;
-    return () => {
+    const flush = () => {
       for (const [id, t] of pending) {
         clearTimeout(t);
         send.current(id, { action: "drop" });
       }
       pending.clear();
+      setDropping([]);
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      flush();
     };
   }, []);
   const drop = (id: string) => {

@@ -738,9 +738,10 @@ export class DeskHub {
   };
   /** Forgets what Desk remembers of a session; it is never remembered again. */
   forgetMemory = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${encodeURIComponent(id)}/memory`);
-  /** Turns a session's own remembering on or off. */
-  rememberSession = (id: string, on: boolean): Promise<void> =>
-    this.call("PATCH", `/api/desk/sessions/${encodeURIComponent(id)}/memory`, { on });
+  /** Turns a session's own remembering on or off: what the person should
+   *  know of it, if anything (some of what it said last may not be kept). */
+  rememberSession = async (id: string, on: boolean): Promise<string | null> =>
+    (await this.call<{ notice?: string } | undefined>("PATCH", `/api/desk/sessions/${encodeURIComponent(id)}/memory`, { on }))?.notice ?? null;
   /** Reads the session's new exchanges for decisions, facts and to-dos now
    *  (the hub answers 202, with nothing). */
   deriveMemory = async (id: string): Promise<void> => {
@@ -784,7 +785,7 @@ export class DeskHub {
   /** Pauses or resumes remembering every session. */
   pauseMemory = (paused: boolean): Promise<MemorySettings> => this.call("PATCH", "/api/desk/memory/settings", { paused });
   /** Changes a group's memory switches: what `change` names, the rest kept. */
-  changeGroupMemory = (id: string, change: Partial<Omit<GroupMemory, "deriveDecided">>): Promise<GroupMemory> =>
+  changeGroupMemory = (id: string, change: Partial<Omit<GroupMemory, "deriveDecided">>): Promise<GroupMemory & { notice?: string }> =>
     this.call("PATCH", `/api/desk/memory/groups/${encodeURIComponent(id)}`, change);
 
   // ── The sidebar's groups, kept by the hub ───────────────────────────────

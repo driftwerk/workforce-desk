@@ -53,8 +53,9 @@ export function Memory() {
 
   const pause = async (paused: boolean) => {
     try {
-      setSettings(await hub!.pauseMemory(paused));
-      setProblem(null);
+      const now = await hub!.pauseMemory(paused);
+      setSettings(now);
+      setProblem(now.notice ?? null);
     } catch (e) {
       setProblem(plainError(e));
     }

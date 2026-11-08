@@ -32,8 +32,9 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
     if (!hub || !settings) return;
     try {
       const now = await hub.changeGroupMemory(group.id, patch);
-      setSettings({ ...settings, groups: settings.groups.map((g) => (g.id === group.id ? { ...g, ...now } : g)) });
-      setProblem(null);
+      const { notice, ...switches } = now;
+      setSettings({ ...settings, groups: settings.groups.map((g) => (g.id === group.id ? { ...g, ...switches } : g)) });
+      setProblem(notice ?? null);
     } catch (e) {
       setProblem(plainError(e));
     }

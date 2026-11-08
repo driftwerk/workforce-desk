@@ -33,8 +33,9 @@ const show = async (hub: Fake, session = sessionOf()) => {
   await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
 };
 
+const realLoad = useFloor.getState().load;
 beforeEach(() => {
-  useFloor.setState({ hubs: {} });
+  useFloor.setState({ hubs: {}, load: realLoad });
 });
 afterEach(() => {
   cleanup();
@@ -85,6 +86,69 @@ describe("what Desk remembers of a session", () => {
     expect(screen.getByRole("button", { name: /auth\/signin\.ts, auth\/session\.ts/ })).toBeTruthy();
     expect(screen.getByText(`Remembered: 48 exchanges · 2 secrets hidden · last read ${clock("2026-11-08T10:41:00Z")}`)).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Remember" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("reads the Floor again after a forget, and says no summary once it has none", async () => {
+    const floor = (gist: boolean) => ({
+      state: "ready" as const,
+      offset: 0,
+      stale: false,
+      at: null,
+      usage: null,
+      floor: {
+        asOf: "2026-11-08T10:42:00Z",
+        needs: [],
+        working: [
+          {
+            who: { kind: "session" as const, id: "s1", name: "atlas-api", engine: "claude" as const },
+            what: "",
+            place: { kind: "session" } as never,
+            since: "2026-11-08T10:00:00Z",
+            heardAt: "2026-11-08T10:41:00Z",
+            endedAt: null,
+            outcome: null,
+            gist: gist ? { purpose: "Making sign-in safe against a race.", now: "Tidying.", at: "2026-11-08T10:41:00Z" } : null,
+          },
+        ],
+        done: [],
+        lanes: [],
+        counts: {} as never,
+        more: { done: 0, lanes: 0 },
+      },
+    });
+    const load = vi.fn(async (h: string) => useFloor.setState({ hubs: { [h]: floor(false) } }));
+    useFloor.setState({ hubs: { local: floor(true) }, load });
+    const hub = fakeHub(remembered());
+    await show(hub);
+    expect(screen.getByText("Making sign-in safe against a race.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Forget…" }));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Forget" })));
+    expect(load).toHaveBeenCalledWith("local");
+    await waitFor(() => expect(screen.queryByText("Making sign-in safe against a race.")).toBeNull());
+    expect(screen.getByText("Not said yet.")).toBeTruthy();
+  });
+
+  it("drops what waits to be dropped when the page goes", async () => {
+    const hub = fakeHub(remembered());
+    await show(hub);
+    fireEvent.click(within(screen.getByText(/Sessions live in Postgres/).closest("li")!).getByRole("button", { name: "Drop" }));
+    expect(hub.changeNote).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event("pagehide"));
+    expect(hub.changeNote).toHaveBeenCalledWith("f1", { action: "drop" });
+    fireEvent.click(within(screen.getByText(/Check the logout path/).closest("li")!).getByRole("button", { name: "Drop" }));
+    window.dispatchEvent(new Event("beforeunload"));
+    expect(hub.changeNote).toHaveBeenCalledWith("t1", { action: "drop" });
+    // Once each.
+    cleanup();
+    expect(hub.changeNote).toHaveBeenCalledTimes(2);
+  });
+
+  it("never names a machine by its id", async () => {
+    useMachines.setState({ machines: [] });
+    const off = remembered({ notes: notes([], { noting: "off", reason: "group_off", why: "x" }), switches: { paused: false, group: acme() } });
+    await show(fakeHub(off), sessionOf({ machine: "m-7f3a" }));
+    expect(screen.getByText(/Memory settings for this machine's sessions come later\./)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("m-7f3a");
   });
 
   it("says what a note is for when asked, naming whose model wrote it", async () => {
@@ -243,6 +307,23 @@ describe("what Desk remembers of a session", () => {
     await show(hub);
     await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Remember" })));
     expect(hub.rememberSession).toHaveBeenCalledWith("s1", false);
+  });
+
+  it("says when turning off couldn't keep what was said last", async () => {
+    const hub = fakeHub(remembered());
+    hub.rememberSession.mockResolvedValue("Remembering is off, but Desk couldn't read what this session said last, so some of it may not have been kept.");
+    await show(hub);
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Remember" })));
+    expect(screen.getByRole("alert").textContent).toContain("some of it may not have been kept");
+  });
+
+  it("says why a switch couldn't be turned on, and keeps saying it after reading again", async () => {
+    const hub = fakeHub(remembered({ memoryOn: false }));
+    hub.rememberSession.mockRejectedValue(new Error("Desk couldn't turn remembering on just now; try again."));
+    await show(hub);
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Remember" })));
+    expect(screen.getByRole("alert").textContent).toBe("Desk couldn't turn remembering on just now; try again.");
+    expect(screen.getByRole("switch", { name: "Remember" }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("leaves the switch out for a hub that can't set it", async () => {
