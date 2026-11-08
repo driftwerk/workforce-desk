@@ -97,6 +97,8 @@ pub const MAX_CLAUDE_CODE_AT_ONCE: i64 = 3;
 /// machine's has none ([`remove_machine_agent`]): its hub is told to forget
 /// this one's sessions.
 pub const DESK_AGENT: &str = "desk";
+/// Passages of sessions' memory the hub indexes a minute on Desk.
+pub const MEMORY_INDEX_PER_MINUTE: i64 = 120;
 
 /// A machine runs no memory store: what an earlier Desk Helper kept for it
 /// there is removed, the store's data, cache, embedding model and the notes
@@ -518,6 +520,13 @@ pub fn render(
             s(&format!("${{{}}}", Secret::GatewayToken.env())),
         ),
         ("accounts", accounts(paths, keys)),
+        // Sessions' memory is indexed in the background: slowly enough
+        // that a first launch, with weeks of sessions to read, never takes
+        // the computer over.
+        (
+            "memory",
+            table(&[("index_per_minute", Value::Integer(MEMORY_INDEX_PER_MINUTE))]),
+        ),
     ];
     // Nobody is at a machine to be asked after it restarts: its sessions
     // are resumed, each in its folder. Its hub runs them and serves no
@@ -675,6 +684,10 @@ mod tests {
             Mode::Machine,
         ))
         .unwrap();
+        assert_eq!(
+            machine["desk"]["memory"]["index_per_minute"].as_integer(),
+            Some(MEMORY_INDEX_PER_MINUTE)
+        );
         assert_eq!(machine["desk"]["restore"].as_str(), Some("auto"));
         assert_eq!(machine["desk"]["agents"].as_bool(), Some(false));
         assert_eq!(
