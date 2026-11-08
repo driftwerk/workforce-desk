@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { dropped, emptyConversation, reduce, toShow, type ConversationState, type Turn } from "./conversation";
 import { fromHub, type HubMessage } from "./history";
 import { withHistory } from "./legacy";
@@ -171,5 +171,88 @@ describe("a DM on a hub with client ids", () => {
     const shown = shownWith(kept, toShow(s.messages));
     expect(shown.map((m) => m.id)).toEqual(["h-q", "A"]);
     expect(shown[1]!.steps).toEqual([{ tool: "web.search", ok: true, ms: 5 }]);
+  });
+});
+
+describe("an answer Desk heard after it restarted mid-turn", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const VOTE = "You're right, Kings. My vote: two lost lights.";
+  const story = row({ id: "h-s", from: "user", text: "what about the story?", client_id: "s", seq: 10, at: "2026-11-08T07:46:30Z" });
+  const later = [
+    row({ id: "h-ok", from: "user", text: "ok its all good - I like it", client_id: "ok", seq: 13, at: "2026-11-08T08:22:00Z" }),
+    row({ id: "h-br", from: "agent", text: "Brilliant, Kings", seq: 14, at: "2026-11-08T08:22:30Z", mark: { in_reply_to: "ok" } }),
+  ];
+  /** The hub's copy of the answer, kept under an id of its own. */
+  const vote = row({ id: "h-v", from: "agent", text: VOTE, seq: 11, at: "2026-11-08T07:49:10Z", mark: { in_reply_to: "s", steps: [{ tool: "notes", ok: true, ms: 40 }] } });
+
+  /** A Desk that started at 07:47 hears the rest of a turn it never asked:
+   *  it knows neither the question's client id nor, here, an id the answer
+   *  was kept under. */
+  const restarted = (frames: ServerMessage[]): ConversationState => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-08T07:47:20Z"));
+    let s: ConversationState = { ...emptyConversation(), connected: true, features: new Set([FEATURES.stream, FEATURES.clientIds]) };
+    s = fold(s, frames.slice(0, 2));
+    vi.setSystemTime(new Date("2026-11-08T07:49:05Z"));
+    s = fold(s, frames.slice(2));
+    vi.useRealTimers();
+    return s;
+  };
+
+  const stamped: ServerMessage[] = [
+    { type: "turn_snapshot", turn_ref: "r0", id: "R", text: "", status: "working" },
+    { type: "tool_start", turn_ref: "r0", id: "R", content: "notes: Spores video: user approved the test" },
+    { type: "tool_end", turn_ref: "r0", id: "R" },
+    { type: "stream_start", turn_ref: "r0", id: "R" },
+    { type: "stream_delta", turn_ref: "r0", id: "R", content: VOTE },
+    { type: "stream_end", turn_ref: "r0", id: "R" },
+    // Not kept under the id it streamed with.
+    { type: "turn_end", turn_ref: "r0" },
+  ];
+  const unstamped: ServerMessage[] = [
+    { type: "tool_start", content: "notes: Spores video: user approved the test" },
+    { type: "tool_end" },
+    { type: "stream_start" },
+    { type: "stream_delta", content: VOTE },
+    { type: "stream_end" },
+  ];
+
+  it.each([
+    ["its turn's end said it wasn't kept under its id", stamped],
+    ["its frames named no id", unstamped],
+  ])("is its kept copy, once, in its place, when %s", (_why, frames) => {
+    let s = restarted(frames);
+    const answer = s.messages.find((m) => m.role === "assistant")!;
+    expect(answer.tools.length).toBe(1);
+    expect(answer.replyTo).toBeUndefined();
+
+    const history = [...base, story, vote, ...later];
+    s = refreshed(s, history);
+    expect(s.messages).toEqual([]);
+    const shown = shownWith(history, toShow(s.messages));
+    expect(shown.map((m) => m.id)).toEqual(["h-m", "h-r", "h-s", "h-v", "h-ok", "h-br"]);
+  });
+
+  it("goes by its own time, never below what was said after it, where the hub kept no copy that says the same", () => {
+    const s = restarted(unstamped);
+    const history = [...base, story, ...later];
+    const shown = shownWith(history, toShow(s.messages));
+    expect(shown.map((m) => (m.id.startsWith("m-") ? "live" : m.id))).toEqual(["h-m", "h-r", "h-s", "live", "h-ok", "h-br"]);
+  });
+
+  it("never takes a kept answer from well before it, or one another live answer is by its id", () => {
+    const s = restarted(unstamped);
+    const answer = s.messages.find((m) => m.role === "assistant")!;
+    const older = row({ id: "h-old", from: "agent", text: VOTE, seq: 3, at: "2026-11-08T06:00:00Z" });
+    expect(keptOf([older, ...later], s.messages).size).toBe(0);
+    const mine: ChatMessage = { ...answer, id: "h-v", byWords: false };
+    expect([...keptOf([vote], [mine, answer])]).toEqual(["h-v"]);
+  });
+
+  it("stays last while it is still being written", () => {
+    const s = restarted(unstamped.slice(0, 4));
+    const shown = shownWith([...base, story, ...later], toShow(s.messages));
+    expect(shown.at(-1)?.status).toBe("streaming");
   });
 });
