@@ -178,16 +178,28 @@ describe("a running plan", () => {
     expect(within(card()).queryByRole("button", { name: "Resume" })).toBeNull();
   });
 
+  it("paused for a reason Desk doesn't know, says it in the hub's words, else as named", async () => {
+    Object.assign(plans.plan, { state: "paused", paused: "start_failed", pausedWhy: "ACM-21 failed to start 3 times" });
+    await show();
+    expect(within(card()).getByText("Paused: ACM-21 failed to start 3 times")).toBeTruthy();
+    expect(within(card()).queryByRole("button", { name: "Resume" })).toBeNull();
+    cleanup();
+    usePlans.setState({ details: {}, plans: {}, cards: {} });
+    Object.assign(plans.plan, { pausedWhy: null });
+    await show();
+    expect(within(card()).getByText("Paused: start failed")).toBeTruthy();
+  });
+
   it("shows a change of scope the boss proposes, and runs on as approved until it is approved", async () => {
     plans.bossAdds("Fix the flaky payment test");
     await show(2);
     const change = within(card()).getByRole("group", { name: "A change to the plan" });
     expect(change.textContent).toBe("Sarah wants to change the plan: Added “Fix the flaky payment test”A change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.");
     expect(within(card()).getByText("A change waits for you")).toBeTruthy();
-    // An edit made now takes the change in, and says so before it is saved.
-    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
-    expect(within(card()).getByRole("form", { name: "Edit the plan" }).textContent).toContain("Saving includes Sarah's proposed change (Added “Fix the flaky payment test”) and applies it now.");
-    fireEvent.click(within(card()).getByRole("button", { name: "Cancel" }));
+    // The person's edit waits until Sarah's change is answered: it never
+    // takes the change in unasked.
+    expect((within(card()).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(card()).getByText("Approve or turn down Sarah's change first, then edit the plan.")).toBeTruthy();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve the change" })));
     expect(bodies(`POST /api/desk/plans/${PLAN}/approve`)).toEqual([{ revision: 2 }]);
   });

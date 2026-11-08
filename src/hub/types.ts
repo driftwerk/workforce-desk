@@ -1306,7 +1306,11 @@ export interface BossPlan {
   bossName: string;
   goal: string;
   state: BossPlanState;
-  paused: BossPlanPaused | null;
+  /** Why it starts nothing; a newer hub may name reasons Desk doesn't know
+   *  yet, said in `pausedWhy`. */
+  paused: BossPlanPaused | (string & {}) | null;
+  /** Why it is paused, in the hub's own words, when it says. */
+  pausedWhy?: string | null;
   /** Its own limit of sessions at once, when lower than its boss's. */
   parallel: number | null;
   /** Its newest revision. */

@@ -13,7 +13,7 @@ import {
   liveTickets,
   needChoices,
   ownWorktrees,
-  PAUSED_WHY,
+  pausedWhy,
   progress,
   progressLine,
   resumable,
@@ -216,7 +216,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
       <div className="pc-head">
         <div className="pc-row">
           <h4 className="pc-title">{plan.goal}</h4>
-          <span className={`chip pc-chip-${stand.look}`}>{plan.state === "paused" && plan.paused ? `Paused: ${PAUSED_WHY[plan.paused]}` : stand.text}</span>
+          <span className={`chip pc-chip-${stand.look}`}>{plan.state === "paused" && plan.paused ? `Paused: ${pausedWhy(plan)}` : stand.text}</span>
           <span className="chip">rev {plan.revision}</span>
         </div>
         <span className="muted small">
@@ -247,7 +247,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
         <div className="pc-progress">
           <span className="muted small">
             {progressLine(now)}
-            {plan.state === "paused" && plan.paused && <span className="pc-paused"> · new starts paused: {PAUSED_WHY[plan.paused]}</span>}
+            {plan.state === "paused" && plan.paused && <span className="pc-paused"> · new starts paused: {pausedWhy(plan)}</span>}
           </span>
           <div className="pc-segbar" role="img" aria-label={segments(now).map((s) => `${s.n} ${s.kind}`).join(", ") || "nothing yet"}>
             {segments(now).map((s) => (
@@ -271,7 +271,6 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
           choices={choices ?? engineChoices(null)}
           lockedIds={new Set(tickets.filter(started).map((t) => t.id))}
           busy={busy}
-          pending={change ? `Saving includes ${boss}'s proposed change (${change.summary}) and applies it now.` : null}
           onChange={setEditing}
           onCancel={() => setEditing(null)}
           onSave={(t) => void save(t)}
@@ -351,11 +350,18 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                     {boss} answers routine questions and approvals for these sessions. Force-pushes, deletes outside the folder and sends to people come to you.
                   </span>
                 )}
-                {plan.state === "paused" && plan.paused && !resumable(plan.paused) && <span className="pc-note">Paused: {PAUSED_WHY[plan.paused]}. It goes on by itself once that's past.</span>}
+                {plan.state === "paused" && plan.paused && !resumable(plan.paused) && <span className="pc-note">Paused: {pausedWhy(plan)}. It goes on by itself once that's past.</span>}
                 <button type="button" className="btn" disabled={busy} onClick={() => setDropping(sessionsRun ? "ask" : "stop")}>
                   Drop
                 </button>
-                <button type="button" className="btn" disabled={busy} onClick={() => setEditing(draft())}>
+                {change && <span className="pc-note">Approve or turn down {boss}'s change first, then edit the plan.</span>}
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || !!change}
+                  title={change ? `Approve or turn down ${boss}'s change first` : undefined}
+                  onClick={() => setEditing(draft())}
+                >
                   Edit
                 </button>
                 {plan.state === "running" && (
@@ -442,14 +448,11 @@ function PlanEditor({
   choices,
   lockedIds,
   busy,
-  pending,
   onChange,
   onCancel,
   onSave,
 }: {
   draft: DraftTicket[];
-  /** A change of scope the boss proposed, which saving the edit takes in. */
-  pending: string | null;
   choices: EngineChoice[];
   /** Tickets that have started: where they run stays. */
   lockedIds: ReadonlySet<string>;
@@ -515,7 +518,7 @@ function PlanEditor({
         <button type="button" className="btn btn-ghost" onClick={() => onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, needs: [] }])}>
           Add a ticket
         </button>
-        <span className="pc-note">{pending}</span>
+        <span className="pc-note" />
         <button type="button" className="btn" onClick={onCancel} disabled={busy}>
           Cancel
         </button>

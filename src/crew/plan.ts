@@ -148,11 +148,21 @@ export const PAUSED_WHY: Record<BossPlanPaused, string> = {
   no_boss: "its group has no boss",
 };
 
+/** Why `p` is paused, after "Paused: ": the hub's own words when it says
+ *  them (a reason Desk doesn't know, such as starts that kept failing),
+ *  else Desk's for the reasons it knows, else the reason as named. */
+export const pausedWhy = (p: Pick<BossPlan, "paused" | "pausedWhy">): string => {
+  if (!p.paused) return "";
+  const said = p.pausedWhy?.trim();
+  if (said) return said;
+  return (PAUSED_WHY as Record<string, string | undefined>)[p.paused] ?? p.paused.replace(/_/g, " ");
+};
+
 /** The pauses the person lifts with Resume; the others lift themselves. */
-export const resumable = (why: BossPlanPaused | null): boolean => why === "person" || why === "no_boss";
+export const resumable = (why: string | null): boolean => why === "person" || why === "no_boss";
 
 /** What a plan's card says it is at, and how it is drawn. */
-export const standing = (p: Pick<BossPlan, "state" | "paused" | "revision" | "approvedRevision">): { text: string; look: "blocked" | "working" | "done" | "idle" } => {
+export const standing = (p: Pick<BossPlan, "state" | "revision" | "approvedRevision">): { text: string; look: "blocked" | "working" | "done" | "idle" } => {
   if (p.state === "proposed") return { text: "Waiting for you", look: "blocked" };
   if (awaiting(p)) return { text: "A change waits for you", look: "blocked" };
   switch (p.state) {
