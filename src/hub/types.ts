@@ -335,6 +335,8 @@ export type DeskEvent =
     }
   /** The sidebar's groups changed on the hub. */
   | { type: "layout"; layout: Layout }
+  /** One of the person's settings changed (`memory.paused`, `memory.group.<id>`, `memory.session.<id>`). */
+  | { type: "setting"; key: string }
   | { type: "terminal"; terminal: TerminalInfo }
   | { type: "terminalRemoved"; id: string }
   | { type: "session"; session: Session }
@@ -1330,3 +1332,186 @@ export interface TicketMove {
 
 /** Whom a ticket goes to; null takes it off whoever has it. */
 export type AssignTo = { session: string } | { agent: string } | { newSession: { path: string; engine: Engine } } | null;
+
+/** A decision, fact or to-do Desk noted from a session, or the person wrote. */
+export interface MemoryNote {
+  id: string;
+  kind: "decision" | "fact" | "todo";
+  text: string;
+  /** A to-do's `open`, `done` or `dropped`; anything else `held`. */
+  state: "open" | "done" | "dropped" | "held";
+  /** Since when it is so. */
+  at: string;
+  /** Desk's model wrote it, and it may be wrong. */
+  notedByDesk: boolean;
+  /** The person confirmed or wrote it. */
+  confirmed: boolean;
+  /** None of the exchanges it came from is kept any more. */
+  sourceGone: boolean;
+}
+
+/** A note another replaced: what it said, and when. */
+export interface ReplacedNote {
+  id: string;
+  kind: MemoryNote["kind"];
+  text: string;
+  replacedAt: string;
+}
+
+/** Why Desk isn't noting decisions from a session, for the panel to act on. */
+export type NotingReason = "desk_off" | "no_model" | "paused" | "session_off" | "group_off" | "day_cap" | "failing";
+
+export interface MemoryNotes {
+  decisions: MemoryNote[];
+  facts: MemoryNote[];
+  todos: MemoryNote[];
+  counts: {
+    decisions: number;
+    facts: number;
+    todos: number;
+    openTodos: number;
+    /** Every note kept, replaced and dropped ones too: what forgetting deletes. */
+    kept?: number;
+  };
+  /** `paused`: the day's calls are spent, until tomorrow. */
+  noting: "on" | "paused" | "off";
+  /** Why it isn't, or what else to know, in plain words. */
+  why: string | null;
+  /** Absent from hubs before the memory switches' routes. */
+  reason?: NotingReason | null;
+  /** Exchanges not yet read for notes. */
+  unread: number;
+  /** Whose model writes the notes (`anthropic`, `codex`, …). */
+  provider: string | null;
+  /** The hub may write them on another provider when that one can't. */
+  fallbackProviders: boolean;
+  /** Notes replaced lately, latest first; absent from older hubs. */
+  replaced?: ReplacedNote[];
+}
+
+/** One prompt and what the session did for it, as Desk keeps it. */
+export interface KeptExchange {
+  seq: number;
+  at: string;
+  ended: string | null;
+  asker: string;
+  ask: string;
+  answer: string;
+  files: string[];
+  commands: string[];
+  errors: string[];
+  compaction: boolean;
+  /** Secrets hidden in it. */
+  redacted: number;
+}
+
+/** What Desk remembers of one session. */
+export interface SessionMemory {
+  exchanges: KeptExchange[];
+  counts: { exchanges: number; open: number; compactions: number; secretsHidden: number; pastCap: number };
+  /** What it says now is being remembered. */
+  remembering: boolean;
+  /** Why not, in plain words. */
+  why: string | null;
+  notice: string | null;
+  notes: MemoryNotes;
+  /** Its own Remember switch; absent from older hubs. */
+  memoryOn?: boolean;
+  /** Its engine keeps no record Desk can read. */
+  noRecord?: boolean;
+  /** When Desk last kept something it said. */
+  lastRead?: string | null;
+  /** Desk no longer has the session: there is no switch to turn. */
+  cleared?: boolean;
+  /** The pause and its group's switches, as its hub has them. */
+  switches?: { paused: boolean; group: (GroupMemory & { id: string; name: string }) | null };
+}
+
+/** What the person does to a note. */
+export type NoteChange = { action: "confirm" } | { action: "correct"; text: string } | { action: "drop" };
+
+/** How Desk Memory's search index stands. */
+export interface MemoryIndexStatus {
+  /** This computer has a search index at all. */
+  installed: boolean;
+  /** Exchanges not yet in it. */
+  backlog: number;
+  purges: number;
+  /** Why it isn't answering, while it isn't. */
+  failing: string | null;
+  caughtUp: string | null;
+  reconciled: string | null;
+  /** Exchanges it kept refusing, found by keyword. */
+  setAside: number;
+  /** Forgotten conversations it kept refusing to delete, until a rebuild. */
+  purgesSetAside: number;
+  diskMb: number | null;
+  maxDiskMb: number;
+}
+
+/** A group's memory switches. */
+export interface GroupMemory {
+  harvest: boolean;
+  derive: boolean;
+  handoffAsk: boolean;
+  /** The person answered whether Desk's model may read its sessions. */
+  deriveDecided: boolean;
+}
+
+/** What session memory holds of one group's sessions (`group` null: ungrouped). */
+export interface MemoryTotals {
+  group: string | null;
+  sessions: number;
+  exchanges: number;
+  secretsHidden: number;
+  notes: number;
+}
+
+/** The person's memory settings, the install's limits, and what is kept. */
+export interface MemorySettings {
+  paused: boolean;
+  groups: (GroupMemory & { id: string; name: string })[];
+  limits: {
+    enabled: boolean;
+    derive: boolean;
+    backfillDays: number;
+    retainDays: number;
+    maxDiskMb: number;
+    indexPerMinute: number;
+    deriveCallsPerDay: number;
+    deriveCallsToday: number;
+    /** Whose model writes the notes (`anthropic`, …); none without one. */
+    provider?: string | null;
+    /** The hub may write them on another provider when that one can't. */
+    fallbackProviders?: boolean;
+  };
+  totals: MemoryTotals[];
+  /** What the person should know of the change just made. */
+  notice?: string;
+}
+
+/** An exchange or a note a search of Desk's memory found. */
+export interface MemoryHit {
+  session: string;
+  group: string | null;
+  project: string;
+  at: string;
+  asker: string;
+  ask: string;
+  answer: string;
+  compaction: boolean;
+  kind: "exchange" | "compaction" | "decision" | "fact" | "todo";
+  notedByDesk: boolean;
+  confirmed: boolean;
+  superseded: boolean;
+  name: string | null;
+  engine: Engine | null;
+  groupName: string | null;
+}
+
+export interface MemorySearch {
+  hits: MemoryHit[];
+  /** Only keywords were matched: the search index isn't ready. */
+  keywordOnly: boolean;
+  notice: string | null;
+}

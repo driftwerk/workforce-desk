@@ -19,6 +19,7 @@ describe("Desk's Claude Code plugin hooks", () => {
         "PermissionDenied",
         "UserPromptSubmit",
         "Notification",
+        "PreCompact",
         "Stop",
         "StopFailure",
         "SubagentStart",
@@ -37,6 +38,14 @@ describe("Desk's Claude Code plugin hooks", () => {
     const failed = events.StopFailure?.[0];
     expect(failed?.hooks[0]?.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh", "10"]);
     expect(failed?.hooks[0]?.timeout).toBe(10);
+  });
+
+  it("tells the hub before Claude Code compacts, so what was said is kept first, and never holds the compaction up", () => {
+    // The hub answers at once and reads the record; 5 s at most either way.
+    const compact = events.PreCompact?.[0];
+    expect(compact?.matcher).toBeUndefined();
+    expect(compact?.hooks[0]?.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh", "5"]);
+    expect(compact?.hooks[0]?.timeout).toBe(5);
   });
 
   it("tells the hub of every tool auto mode refused, so a turn stuck on one isn't done", () => {

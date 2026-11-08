@@ -11,6 +11,7 @@ import { Engines } from "./Engines";
 import { Help } from "./Help";
 import { Hubs } from "./Hubs";
 import { Machines } from "./Machines";
+import { Memory } from "./Memory";
 import { Profile } from "./Profile";
 import { Providers } from "./Providers";
 import { Shortcuts } from "./Shortcuts";
@@ -63,6 +64,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "connections" && <Connections />}
       {section === "engines" && <Engines />}
       {section === "sessions" && <Sessions />}
+      {section === "memory" && <Memory />}
       {section === "budgets" && <Budgets />}
       {section === "voices" && <Voices />}
       {section === "calls" && <Calls />}
