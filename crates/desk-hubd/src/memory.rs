@@ -135,6 +135,7 @@ fn store_command(
         .current_dir(paths.memory())
         .env_clear()
         .envs(env);
+    quieten(&mut cmd);
     let entries = secrets.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let handover = crate::handover::hand_over(&mut cmd, &entries)?;
     Ok((cmd, handover))
@@ -168,7 +169,6 @@ fn spawn(
     let child = child.with_context(|| format!("starting {}", binary.display()))?;
     if let Some(pid) = child.id() {
         std::fs::write(pidfile(paths), pid.to_string())?;
-        quieten(pid);
     }
     Ok(child)
 }
@@ -180,19 +180,23 @@ fn spawn(
 const STORE_NICENESS: libc::c_int = 10;
 
 /// Runs the store below the person's own programs, so what it embeds in
-/// the background gives way to what they are doing. Best effort: a store
-/// left at the usual priority still works.
+/// the background gives way to what they are doing. Set in the child before
+/// it runs, so every thread it starts has it too (on Linux a niceness is per
+/// thread). Best effort: a store left at the usual priority still works.
 #[cfg(unix)]
-fn quieten(pid: u32) {
-    // SAFETY: `setpriority` takes plain integers and touches no memory.
-    let done = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, STORE_NICENESS) };
-    if done != 0 {
-        tracing::warn!(pid, error = %std::io::Error::last_os_error(), "couldn't lower the memory store's priority");
+fn quieten(cmd: &mut Command) {
+    // SAFETY: between fork and exec only `setpriority`, which is
+    // async-signal-safe, is called, and nothing is allocated.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setpriority(libc::PRIO_PROCESS, 0, STORE_NICENESS);
+            Ok(())
+        });
     }
 }
 
 #[cfg(not(unix))]
-fn quieten(_pid: u32) {}
+fn quieten(_cmd: &mut Command) {}
 
 /// Stops a store an earlier Desk Helper left running (it was killed before
 /// it could stop it), which would otherwise hold the tenant and its port.
