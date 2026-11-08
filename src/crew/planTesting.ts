@@ -4,7 +4,7 @@
 // and starts the ready ones, as the runner would, announcing each.
 
 import { vi } from "vitest";
-import type { BossPlan, BossPlanDetail, BossPlanRevision, BossPlanTicket, DeskEvent, DraftTicket, EngineInfo, Need, PlannedTicket, Ticket, TicketState } from "../hub/types";
+import type { PlanBudget, BossPlan, BossPlanDetail, BossPlanRevision, BossPlanTicket, DeskEvent, DraftTicket, EngineInfo, Need, PlannedTicket, Ticket, TicketState } from "../hub/types";
 
 export const PLAN = "00000000-0000-4000-8000-00000000aa01";
 export const BOARD = "board-acme";
@@ -111,7 +111,7 @@ export class PlanHub {
   }
 
   summary(): BossPlan {
-    const { tickets: _t, waves: _w, revisions: _r, ...p } = this.plan;
+    const { tickets: _t, waves: _w, revisions: _r, spend: _s, ...p } = this.plan;
     return p;
   }
 
@@ -182,10 +182,12 @@ export class PlanHub {
 
   /** Sarah proposes `next` (the plan's tickets as she would have them) and
    *  `parallel`, as a change of scope that waits on the person. */
-  bossProposes(summary: string, next: (tickets: BossPlanTicket[]) => BossPlanTicket[], parallel?: number) {
+  bossProposes(summary: string, next: (tickets: BossPlanTicket[]) => BossPlanTicket[], parallel?: number, budget?: PlanBudget) {
     const p = this.plan;
     p.revision += 1;
-    p.revisions.push(this.revisionOf(p.revision, SARAH, "scope", summary, next(p.tickets.map((t) => ({ ...t }))), parallel));
+    const r = this.revisionOf(p.revision, SARAH, "scope", summary, next(p.tickets.map((t) => ({ ...t }))), parallel);
+    if (budget) r.snapshot.budget = budget;
+    p.revisions.push(r);
   }
 
   /** The person turns down the boss's waiting change: the plan runs on as

@@ -122,3 +122,21 @@ describe("a session's card says where the session already is", () => {
     expect(useDesk.getState().openId).toBeNull();
   });
 });
+
+describe("a session Desk started that isn't running", () => {
+  it("never says it runs in another terminal, and offers Resume", () => {
+    // A machine's Claude Code that never drew, stopped: its last state is "starting".
+    useDesk.setState({ sessions: { s1: session({ machine: "devbox", live: false, state: "starting", cliSessionId: "c1" }) } });
+    card();
+    expect(screen.queryByText(/Running in another terminal/)).toBeNull();
+    expect(screen.getByText("Not running. Resume picks up the same conversation.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Stop tracking/ })).toBeNull();
+  });
+
+  it("one from another terminal still says so", () => {
+    useDesk.setState({ sessions: { s1: session({ origin: "external", live: false, state: "working", cliSessionId: "c1" }) } });
+    card();
+    expect(screen.getByText(/Running in another terminal/)).toBeTruthy();
+  });
+});

@@ -125,6 +125,14 @@ describe("what a change of scope changes", () => {
       ["b", { added: ["c"], dropped: ["a"] }, undefined],
     ]);
   });
+  it("says a budget raised or taken off", () => {
+    const cap = (amount: number) => ({ amount, unit: "usd" as const, period: "total" as const, warnAt: 0.8, onExceed: "pause" as const });
+    const s = snap([planned("a")]);
+    expect(changesBetween({ ...s, budget: cap(25) }, { ...s, budget: cap(40) }).budget).toEqual({ from: cap(25), to: cap(40) });
+    expect(changesBetween({ ...s, budget: cap(25) }, s).budget).toEqual({ from: cap(25), to: null });
+    expect(changesBetween({ ...s, budget: null }, s).budget).toBeUndefined();
+  });
+
   it("is nothing for the same revision", () => {
     const s = snap([planned("a"), planned("b", ["a"])]);
     expect(changesBetween(s, s)).toEqual({ added: [], removed: [], changed: [] });

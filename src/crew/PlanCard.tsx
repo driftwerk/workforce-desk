@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useBoard } from "../board/store";
 import { ENGINE_TITLE } from "../engines/engines";
 import { useDesk } from "../hub/store";
-import type { BossPlan, BossPlanDetail, BossPlanTicket, DraftTicket, Engine, EngineInfo, OnPlanDrop } from "../hub/types";
+import type { PlanBudget, BossPlan, BossPlanDetail, BossPlanTicket, DraftTicket, Engine, EngineInfo, OnPlanDrop } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
 import { homeShort } from "../ui/paths";
 import { plainError } from "../ui/plainError";
+import { amountText, parseAmount, standingText } from "../spend/budgets";
 import {
   awaiting,
+  budgetText,
+  capOf,
   changesBetween,
   draftOf,
   liveCard,
@@ -161,6 +164,11 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   const [editing, setEditing] = useState<DraftTicket[] | null>(null);
   // Dropping: "ask" until the person says what becomes of its sessions.
   const [dropping, setDropping] = useState<OnPlanDrop | "ask" | null>(null);
+  // The cap the person approves a proposed plan with, in dollars: the
+  // boss's proposal to start with ("" is none).
+  const proposedCap = plan.budget && plan.budget.unit === "usd" ? String(plan.budget.amount) : "";
+  const [cap, setCap] = useState(proposedCap);
+  useEffect(() => setCap(proposedCap), [proposedCap]);
 
   const tickets = useMemo(() => liveTickets(detail, board), [detail, board]);
   const rules = useMemo(() => tickets.map(ruled), [tickets]);
@@ -242,7 +250,22 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   const store = usePlans.getState();
   // Approving, turning a change down and going on are the person's own,
   // answered as the Floor answers them.
-  const approve = () => void run("approve", () => store.decide(plan.id, detail.revision, "allow"));
+  // A proposal's cap as typed: the proposal's kept as it is (nothing
+  // sent), another amount, or none (its budget taken off).
+  const capAmount = parseAmount(cap, "usd");
+  const capProblem = plan.approvedRevision === null && cap.trim() !== "" && capAmount === null ? "Say the cap in dollars, like 40." : null;
+  const capSent: PlanBudget | null | undefined =
+    plan.approvedRevision !== null || cap.trim() === proposedCap
+      ? undefined
+      : cap.trim() === ""
+        ? plan.budget
+          ? null
+          : undefined
+        : capAmount !== null
+          ? capOf(capAmount, plan.budget)
+          : undefined;
+  const approvedCap = capSent === undefined ? (plan.budget ?? null) : capSent;
+  const approve = () => void run("approve", () => store.decide(plan.id, detail.revision, "allow", capSent));
   const turnDown = () => void run("turnDown", () => store.decide(plan.id, detail.revision, "deny"));
   const goOn = () => void run("continue", () => store.decide(plan.id, detail.revision, "allow"));
   // Its starts kept failing: the person says whether it goes on.
@@ -297,6 +320,16 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
           </span>
         </div>
       )}
+      {plan.held && !ended && (
+        <div className="pc-notice-line" role="status">
+          <span>
+            New starts are held: {plan.held}. Continue on the Floor lets them start again.
+            {detail.spend?.period === "total" && detail.spend.status === "over"
+              ? " Continued while it is over a budget for the whole plan, the plan runs uncapped for the rest of its run."
+              : ""}
+          </span>
+        </div>
+      )}
       {stale && (
         <div className="pc-notice-line" role="status">
           <span>Revision {plan.revision} has come: reading it before anything is approved.</span>
@@ -309,6 +342,12 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
             {progressLine(now)}
             {plan.state === "paused" && plan.paused && <span className="pc-paused"> · new starts paused: {pausedWhy(plan)}</span>}
           </span>
+          {detail.spend && (
+            <span className="muted small">
+              Spent {standingText(detail.spend)}
+              {detail.spend.shared ? ", shared by the plan's sessions" : ""}
+            </span>
+          )}
           <div className="pc-segbar" role="img" aria-label={segments(now).map((s) => `${s.n} ${s.kind}`).join(", ") || "nothing yet"}>
             {segments(now).map((s) => (
               <i key={s.kind} className={`pc-s-${s.kind}`} style={{ flex: s.n }} />
@@ -372,6 +411,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
               {now.total} ticket{now.total === 1 ? "" : "s"}
             </span>
             {plan.parallel !== null && <span className="chip">up to {plan.parallel} at once</span>}
+            {plan.budget && <span className="chip">cap {budgetText(plan.budget)}</span>}
           </div>
           {dropping ? (
             <div className="pc-drop" role="group" aria-label="Drop the plan">
@@ -452,10 +492,38 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                     {asking === "turnDown" ? "Turning it down…" : "Turn down"}
                   </button>
                 )}
+                {waitsOnYou && plan.approvedRevision === null && (!plan.budget || plan.budget.unit === "usd") && (
+                  <label className="pc-cap">
+                    <span className="small muted">Cap it at $</span>
+                    <input
+                      aria-label="Cap the plan's spend, in dollars"
+                      inputMode="decimal"
+                      value={cap}
+                      placeholder="none"
+                      onChange={(e) => setCap(e.target.value)}
+                    />
+                  </label>
+                )}
                 {waitsOnYou && (
-                  <button type="button" className="btn btn-signal" aria-disabled={busy || stale || undefined} onClick={() => !busy && !stale && approve()}>
-                    {asking === "approve" ? "Approving…" : plan.approvedRevision === null ? "Approve and run" : "Approve the change"}
+                  <button
+                    type="button"
+                    className="btn btn-signal"
+                    aria-disabled={busy || stale || !!capProblem || undefined}
+                    onClick={() => !busy && !stale && !capProblem && approve()}
+                  >
+                    {asking === "approve"
+                      ? "Approving…"
+                      : plan.approvedRevision !== null
+                        ? "Approve the change"
+                        : approvedCap
+                          ? `Approve and run, capped at ${amountText(approvedCap.unit, approvedCap.amount)}`
+                          : "Approve and run"}
                   </button>
+                )}
+                {capProblem && (
+                  <span className="small state-blocked" role="alert">
+                    {capProblem}
+                  </span>
                 )}
               </div>
             )
@@ -509,6 +577,14 @@ function ChangeDetails({ changes, names }: { changes: PlanChanges; names: Readon
         <li>
           <span>
             At once: {changes.parallel.from ?? "the boss's limit"} → {changes.parallel.to ?? "the boss's limit"}
+          </span>
+        </li>
+      )}
+      {changes.budget && (
+        <li>
+          <span>
+            Budget: {changes.budget.from ? budgetText(changes.budget.from) : "none of its own"} →{" "}
+            {changes.budget.to ? budgetText(changes.budget.to) : "none of its own (the cap is taken off)"}
           </span>
         </li>
       )}
@@ -618,6 +694,7 @@ function TicketRow({
         {needs.length > 0 && <span>· needs {needs.join(", ")}</span>}
         {own && <span>· own worktree</span>}
         {t.starting && <span className="state-working">· starting</span>}
+        {t.held && <span className="state-blocked">· held: {t.held}</span>}
         {state && <span className={state.look}>· {state.word}</span>}
       </span>
       {t.body.trim() && (

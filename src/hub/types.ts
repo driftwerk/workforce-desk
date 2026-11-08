@@ -566,7 +566,13 @@ export type BudgetScope =
   | { kind: "each_session" }
   | { kind: "each_agent" }
   | { kind: "session"; id: string }
-  | { kind: "agent"; id: string };
+  | { kind: "agent"; id: string }
+  /** A boss's plan's own budget, set as it is approved. */
+  | { kind: "plan"; id: string };
+
+/** A budget's period: a plan's may be its whole run (`total`), which never
+ *  resets. */
+export type BudgetPeriod = SpendPeriod | "total";
 
 export type BudgetUnit = "usd" | "tokens";
 /** Over a budget: `pause` the turn after (agents' new turns; a total's new
@@ -578,7 +584,7 @@ export interface Budget {
   scope: BudgetScope;
   /** The sidebar group it is the budget of; null is ungrouped. */
   group: string | null;
-  period: SpendPeriod;
+  period: BudgetPeriod;
   unit: BudgetUnit;
   amount: number;
   /** The share it warns at, between 0 and 1. */
@@ -592,7 +598,8 @@ export type BudgetStatus = "under" | "warn" | "over";
 /** Where what a budget counts stands now. */
 export interface Standing {
   budget: string;
-  period: SpendPeriod;
+  /** A `total`'s `to` is far off (2200): it never resets. */
+  period: BudgetPeriod;
   unit: BudgetUnit;
   used: number;
   of: number;
@@ -600,6 +607,8 @@ export interface Standing {
   onExceed: OnExceed;
   from: string;
   to: string;
+  /** Counted over many sessions together (a plan's), not one's own alone. */
+  shared?: boolean;
 }
 
 export interface BudgetView extends Budget {
@@ -1381,6 +1390,22 @@ export interface BossPlan {
   createdAt: string;
   updatedAt: string;
   progress: BossPlanProgress;
+  /** What it may spend: as approved, or as proposed before it is; none is
+   *  no budget of its own. Absent from hubs before plan budgets. */
+  budget?: PlanBudget | null;
+  /** What holds its new starts while Desk's breaker does, in the Floor's
+   *  words: Continue on the Floor. */
+  held?: string | null;
+}
+
+/** What a plan may spend. */
+export interface PlanBudget {
+  amount: number;
+  unit: BudgetUnit;
+  period: BudgetPeriod;
+  /** The share it warns at, between 0 and 1. */
+  warnAt: number;
+  onExceed: OnExceed;
 }
 
 /** A plan's ticket as its card shows it: the board's ticket, and what its
@@ -1391,6 +1416,9 @@ export interface BossPlanTicket extends Ticket {
   view: View | null;
   /** Its session is being started. */
   starting: boolean;
+  /** What holds its session while Desk's breaker does: it is blocked on
+   *  the person, and nothing starts in its place. */
+  held?: string | null;
 }
 
 /** One ticket of a revision, as the plan has it. */
@@ -1415,7 +1443,7 @@ export interface BossPlanRevision {
   change: "minor" | "scope";
   summary: string;
   /** `parallel`: its own limit of sessions at once; none is its boss's. */
-  snapshot: { goal: string; tickets: PlannedTicket[]; parallel?: number };
+  snapshot: { goal: string; tickets: PlannedTicket[]; parallel?: number; budget?: PlanBudget | null };
 }
 
 /** A plan in full: its tickets in its order, its waves and revisions. */
@@ -1423,6 +1451,8 @@ export interface BossPlanDetail extends BossPlan {
   tickets: BossPlanTicket[];
   waves: string[][];
   revisions: BossPlanRevision[];
+  /** Where its budget stands now, when it has one and it can be counted. */
+  spend?: Standing | null;
 }
 
 /** A ticket as the person's edit writes it: by its id when the plan has
@@ -1446,6 +1476,8 @@ export interface BossPlanEdit {
   parallel?: number | null;
   /** Every ticket it is to have, in order. */
   tickets?: DraftTicket[];
+  /** What it may spend; null takes its budget off. */
+  budget?: PlanBudget | null;
 }
 
 /** What an edit came to. */

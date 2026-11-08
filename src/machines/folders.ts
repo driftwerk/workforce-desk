@@ -156,6 +156,27 @@ export const listIn = async (t: DeskTransport, dir: string | null, within = LIST
   }
 };
 
+/** What making a folder came to: the folder made (as the machine spells
+ *  it), or why not, in words. */
+export type Made = { ok: true; path: string } | { ok: false; why: string };
+
+/** Makes `typed` (`~/x`, `/home/dev/x`, or `x` under home) on the machine,
+ *  and any folders above it that aren't there: the hub's
+ *  `POST /api/desk/folders`, which makes folders only inside its home. */
+export const makeFolder = async (t: DeskTransport, typed: string): Promise<Made> => {
+  const p = typed.trim().replace(/\/+$/, "");
+  const path = p.startsWith("~") || p.startsWith("/") ? p : `~/${p}`;
+  try {
+    const res = await t.fetch("POST", "/api/desk/folders", { type: "application/json", data: JSON.stringify({ path }) });
+    const body = (await res.json().catch(() => null)) as { path?: unknown; error?: unknown } | null;
+    if (res.ok && typeof body?.path === "string") return { ok: true, path: body.path };
+    if (res.status === 404 || res.status === 405) return { ok: false, why: "Desk there can’t make folders yet." };
+    return { ok: false, why: typeof body?.error === "string" ? body.error : `its Desk answered ${res.status}` };
+  } catch (e) {
+    return { ok: false, why: e instanceof Error ? e.message : String(e) };
+  }
+};
+
 /** How many single-letter edits turn `a` into `b`. */
 const edits = (a: string, b: string): number => {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);

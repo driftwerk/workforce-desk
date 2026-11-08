@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
-import type { BossPlan, BossPlanDetail, BossPlanEdit, DeskEvent, OnPlanDrop } from "../hub/types";
+import type { BossPlan, BossPlanDetail, BossPlanEdit, DeskEvent, OnPlanDrop, PlanBudget } from "../hub/types";
 
 /** What the person was told of a plan after the hub refused them: a newer
  *  revision they now see (to look at before asking again), or why. */
@@ -47,7 +47,7 @@ interface PlanState {
    *  it (their device's, never Desk's own token): allow approves it (or
    *  the change of scope waiting, or goes on after its starts kept
    *  failing); deny turns a waiting change down. */
-  decide: (id: string, revision: number, choice: "allow" | "deny") => Promise<void>;
+  decide: (id: string, revision: number, choice: "allow" | "deny", budget?: PlanBudget | null) => Promise<void>;
   edit: (id: string, edit: BossPlanEdit) => Promise<void>;
   pause: (id: string) => Promise<void>;
   resume: (id: string) => Promise<void>;
@@ -164,12 +164,12 @@ export const usePlans = create<PlanState>((set, get) => {
           return { cards: { ...s.cards, [id]: list } };
         });
     },
-    decide: (id, revision, choice) =>
+    decide: (id, revision, choice, budget) =>
       act(id, async () => {
         const local = useChat.getState().hubs.find((h) => h.local);
         if (!local) throw new Error("This computer's hub isn't paired yet.");
         // The hub answers with the plan as it now is (an older one, with nothing).
-        const now = await floorOf(local).decidePlan({ kind: "plan", plan: id, revision }, choice);
+        const now = await floorOf(local).decidePlan({ kind: "plan", plan: id, revision }, choice, budget);
         return now && typeof now === "object" && "tickets" in now ? now : hubNow()!.plan(id);
       }),
     edit: (id, edit) => act(id, async () => (await hubNow()!.editPlan(id, edit)).plan),

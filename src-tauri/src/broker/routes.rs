@@ -255,6 +255,8 @@ const HTTP: &[Route] = &[
 /// page (this computer signs its own Codex in itself).
 const MACHINE_HTTP: &[Route] = &[
     with_query("GET", "/api/desk/folders", &["path", "hidden"]),
+    // Making one there for New session (the hub makes it in its home only).
+    route("POST", "/api/desk/folders"),
     route("GET", "/api/desk/terminals/{}/programs"),
     route("POST", "/api/desk/engines/sign-ins"),
     route("GET", "/api/desk/engines/sign-ins/{}"),
@@ -735,6 +737,11 @@ mod tests {
     fn a_machine_takes_the_same_list_and_its_folders() {
         assert!(machine_http("GET", "/api/desk/sessions").is_ok());
         assert!(machine_http("GET", "/api/desk/folders?path=%2Fhome%2Fdev&hidden=1").is_ok());
+        assert!(machine_http("POST", "/api/desk/folders").is_ok());
+        assert!(
+            http("POST", "/api/desk/folders").is_err(),
+            "not this computer's"
+        );
         assert!(machine_http("GET", "/api/desk/terminals/t1/programs").is_ok());
         assert!(machine_http("POST", "/api/desk/engines/sign-ins").is_ok());
         assert!(machine_http("GET", "/api/desk/engines/sign-ins/e1").is_ok());
@@ -756,7 +763,8 @@ mod tests {
         );
         for (m, p) in [
             ("GET", "/api/desk/folders?path=x&token=y"),
-            ("POST", "/api/desk/folders"),
+            ("POST", "/api/desk/folders?path=x"),
+            ("PUT", "/api/desk/folders"),
             ("GET", "/api/desk/terminals/t1/programs/x"),
             ("GET", "/api/admin/reset-model"),
             ("GET", "/api/vault/speech/openai/api_key"),

@@ -224,3 +224,64 @@ it("lets Cancel stop a terminal that's still asking the machine, and gives up on
   expect(opened).not.toHaveBeenCalled();
   vi.mocked(machineHome).mockImplementation(async () => "/home/dev");
 });
+
+it("offers to create a folder that isn't there, asks first, and then uses it", async () => {
+  const made: string[] = [];
+  const home = [{ path: "/home/dev/src" }, { path: "/home/dev/notes" }];
+  const t: DeskTransport = {
+    fetch: async (m, path, body) => {
+      if (m === "POST") {
+        const asked = (JSON.parse(String(body?.data)) as { path: string }).path;
+        made.push(asked);
+        home.push({ path: asked.replace("~", "/home/dev") });
+        return Response.json({ path: asked.replace("~", "/home/dev") }, { status: 201 });
+      }
+      const p = new URL(`http://x${path}`).searchParams.get("path") ?? "";
+      if (p !== "") return Response.json({ error: "no such folder" }, { status: 404 });
+      return Response.json({ path: "/home/dev", parent: null, truncated: false, folders: home.map((f) => ({ name: f.path.split("/").pop(), hidden: false, git: false, path: f.path })) });
+    },
+    socket: () => {
+      throw new Error("none");
+    },
+  };
+  render(<Picker t={t} initial="~/dagr" />);
+  await settle();
+  expect(screen.getByRole("alert").textContent).toBe("devbox has no folder ~/dagr.");
+  fireEvent.click(screen.getByRole("button", { name: "Create /home/dev/dagr on devbox…" }));
+  // Nothing made until it is confirmed.
+  expect(made).toEqual([]);
+  const ask = screen.getByRole("group", { name: "Create the folder" });
+  expect(ask.textContent).toContain("Create /home/dev/dagr on devbox?");
+  await act(async () => void fireEvent.click(within(ask).getByRole("button", { name: "Create" })));
+  await settle();
+  expect(made).toEqual(["~/dagr"]);
+  expect(input().value).toBe("~/dagr");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("says why a folder couldn't be created, and creates nothing on Cancel", async () => {
+  const posts: string[] = [];
+  const t: DeskTransport = {
+    fetch: async (m, path, body) => {
+      if (m === "POST") {
+        posts.push(String(body?.data));
+        return Response.json({ error: "only a folder inside the home folder can be made" }, { status: 403 });
+      }
+      const p = new URL(`http://x${path}`).searchParams.get("path") ?? "";
+      if (p === "/srv") return Response.json({ path: "/srv", parent: null, truncated: false, folders: [] });
+      return Response.json({ error: "no such folder" }, { status: 404 });
+    },
+    socket: () => {
+      throw new Error("none");
+    },
+  };
+  render(<Picker t={t} initial="/srv/app" />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Create /srv/app on devbox…" }));
+  fireEvent.click(within(screen.getByRole("group", { name: "Create the folder" })).getByRole("button", { name: "Cancel" }));
+  expect(posts).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Create /srv/app on devbox…" }));
+  await act(async () => void fireEvent.click(within(screen.getByRole("group", { name: "Create the folder" })).getByRole("button", { name: "Create" })));
+  expect(posts).toEqual([JSON.stringify({ path: "/srv/app" })]);
+  expect(screen.getAllByRole("alert").map((a) => a.textContent)).toContain("Couldn’t create /srv/app: only a folder inside the home folder can be made");
+});

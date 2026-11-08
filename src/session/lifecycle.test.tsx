@@ -6,7 +6,7 @@ import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { deliver, layOut, startGrids, useGrids } from "../grids/store";
 import { Sessions } from "../settings/Sessions";
-import { endSession, lifecycleActions } from "./actions";
+import { endSession, lifecycleActions, runs, sessionActions } from "./actions";
 import { LifecycleDialogs } from "./LifecycleDialogs";
 import { askLifecycle, closeLifecycle, useLifecycle } from "./lifecycle";
 import { useHubLayout } from "../groups/hubLayout";
@@ -72,6 +72,15 @@ describe("a session's life in its menus", () => {
     expect(labels({ live: true, state: "idle", terminalId: "t1" })).toEqual(["Remove…"]);
     expect(labels({ origin: "external", state: "working" })).toEqual(["Stop tracking…"]);
     expect(labels({ origin: "external", state: "closed" })).toEqual(["Remove…"]);
+  });
+
+  it("never takes one Desk started for another terminal's when its process isn't held: it ends, removes and resumes", () => {
+    // A machine's Claude Code that never drew, stopped: still "starting".
+    const stuck = session({ machine: "devbox", live: false, state: "starting" });
+    expect(lifecycleActions(stuck).map((a) => a.label)).toEqual(["End session…", "Remove…"]);
+    expect(sessionActions(stuck).map((a) => a.label)).toEqual(["Resume"]);
+    expect(runs(stuck)).toBe(false);
+    expect(labels({ state: "working" })).toEqual(["End session…", "Remove…"]);
   });
 
   it("asks before ending one that works, and ends one that doesn't at once", async () => {

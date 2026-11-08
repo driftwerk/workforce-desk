@@ -161,6 +161,71 @@ describe("a plan waiting for the person", () => {
   });
 });
 
+describe("a plan's budget", () => {
+  const cap = (amount: number) => ({ amount, unit: "usd" as const, period: "total" as const, warnAt: 0.8, onExceed: "pause" as const });
+
+  it("is shown before approving, approved as proposed, raised, or taken off", async () => {
+    plans.plan.budget = cap(25);
+    await show();
+    expect(within(card()).getByText("cap $25 for the whole plan")).toBeTruthy();
+    const field = within(card()).getByRole("textbox", { name: "Cap the plan's spend, in dollars" }) as HTMLInputElement;
+    expect(field.value).toBe("25");
+    expect(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })).toBeTruthy();
+    fireEvent.change(field, { target: { value: "40" } });
+    expect(within(card()).getByRole("button", { name: "Approve and run, capped at $40" })).toBeTruthy();
+    fireEvent.change(field, { target: { value: "" } });
+    expect(within(card()).getByRole("button", { name: "Approve and run" })).toBeTruthy();
+    fireEvent.change(field, { target: { value: "lots" } });
+    expect(within(card()).getByRole("alert").textContent).toBe("Say the cap in dollars, like 40.");
+    fireEvent.click(within(card()).getByRole("button", { name: /^Approve and run/ }));
+    expect(decided).toEqual([]);
+    fireEvent.change(field, { target: { value: "40" } });
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $40" })));
+    expect(decided).toEqual([{ ...allow(1), budget: cap(40) }]);
+  });
+
+  it("as proposed, is approved without saying it again; taken off, is sent as none", async () => {
+    plans.plan.budget = cap(25);
+    await show();
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })));
+    expect(decided).toEqual([allow(1)]);
+    cleanup();
+    Object.assign(plans.plan, { state: "proposed", approvedRevision: null });
+    usePlans.setState({ details: {}, plans: {}, cards: {} });
+    decided.length = 0;
+    await show();
+    fireEvent.change(within(card()).getByRole("textbox", { name: "Cap the plan's spend, in dollars" }), { target: { value: "" } });
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    expect(decided).toEqual([{ ...allow(1), budget: null }]);
+  });
+
+  it("says what is spent, shared by its sessions, what holds its starts, and that Continue past a total runs it uncapped", async () => {
+    plans.approve(1);
+    plans.plan.budget = cap(40);
+    plans.plan.held = "Refunds is over its budget for the whole plan";
+    plans.plan.tickets[0]!.held = "over the plan's budget";
+    plans.plan.spend = { budget: "b1", period: "total", unit: "usd", used: 41, of: 40, status: "over", onExceed: "pause", from: "1970-01-01T00:00:00Z", to: "2200-01-01T00:00:00Z", shared: true };
+    await show();
+    expect(within(card()).getByText("Spent $41 of $40 in all · 102%, shared by the plan's sessions")).toBeTruthy();
+    expect(card().textContent).toContain(
+      "New starts are held: Refunds is over its budget for the whole plan. Continue on the Floor lets them start again. Continued while it is over a budget for the whole plan, the plan runs uncapped for the rest of its run.",
+    );
+    expect(card().textContent).toContain("· held: over the plan's budget");
+    // A total never resets: no time is given for it.
+    expect(card().textContent).not.toMatch(/2200|resets/);
+  });
+
+  it("raised in a change of scope, says so before it is approved", async () => {
+    plans.approve(1);
+    plans.plan.budget = cap(25);
+    plans.plan.revisions[0]!.snapshot.budget = cap(25);
+    plans.bossProposes("Raised the budget to $40", (ts) => ts, undefined, cap(40));
+    await show(2);
+    const shown = within(card()).getByRole("list", { name: "What approving it changes" });
+    expect(within(shown).getByText("Budget: $25 for the whole plan → $40 for the whole plan")).toBeTruthy();
+  });
+});
+
 describe("a running plan", () => {
   beforeEach(() => {
     plans.approve(1);

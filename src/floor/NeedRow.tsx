@@ -16,6 +16,7 @@ import { dayClock, durationOf } from "./time";
 import { hubFor } from "../hub/store";
 import { sessionKeyOfItem } from "./needs";
 import { usePlans } from "../crew/planStore";
+import { budgetText } from "../crew/plan";
 
 /** Focus in a row that goes moves to the list it was in. */
 const useFocusKept = () => {
@@ -137,6 +138,8 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   // A plan, or a change to it, is approved here only once the person has
   // seen that revision whole on its card (Look first); going on after its
   // starts kept failing approves nothing new.
+  // What the plan may spend, said before it is approved.
+  const planBudget = usePlans((s) => (plan && ask !== "failing" ? (s.plans[plan]?.budget ?? null) : null));
   const looked = usePlans((s) => (plan ? (s.seen[plan] ?? 0) >= revision : true));
   const decides = !plan || ask === "failing" || looked;
   const deciding = useFloor((s) => s.deciding[need.key]);
@@ -164,6 +167,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         {where && <span className="faint"> · {where}</span>}
         {asking?.asked && <span className="faint"> · {asking.asked.why}</span>}
         {need.why && <span className="floor-need-why faint small">{need.why}</span>}
+        {planBudget && <span className="floor-need-why faint small">Capped at {budgetText(planBudget)}.</span>}
       </FloorRow>
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (

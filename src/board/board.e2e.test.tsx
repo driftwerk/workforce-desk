@@ -173,14 +173,16 @@ afterEach(() => {
 describe("the board", () => {
   it("shows its five columns, each by rank, with Done's settled tickets folded away until asked", async () => {
     const old = new Date(Date.now() - SETTLE_AFTER_MS - 60_000).toISOString();
+    // Done a minute ago, read against the real clock as `old` is: never the
+    // fixture's fixed time, which settles once three days have passed.
+    const lately = new Date(Date.now() - 60_000).toISOString();
     for (const t of [
       ticket(15, { title: "Retire the legacy routes", rank: 2048 }),
       ticket(16, { rank: 1024 }),
       ticket(13, { state: "todo", pinned: true }),
       ticket(12, { state: "doing" }),
       ticket(10, { state: "done", stateAt: old }),
-      // Done just now: not settled, whatever day the test runs.
-      ticket(11, { state: "done", stateAt: new Date().toISOString() }),
+      ticket(11, { state: "done", stateAt: lately }),
       ticket(9, { state: "dropped" }),
     ])
       hub.tickets.set(t.id, t);

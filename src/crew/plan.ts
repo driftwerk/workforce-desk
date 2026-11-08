@@ -4,6 +4,7 @@
 // both with a plan; Desk works them out again over the board's tickets as
 // they move, which the hub announces one ticket at a time.
 
+import { amountText, periodWord } from "../spend/budgets";
 import type {
   BossPlan,
   BossPlanDetail,
@@ -13,6 +14,7 @@ import type {
   BossPlanTicket,
   DraftTicket,
   Engine,
+  PlanBudget,
   PlannedTicket,
   Ticket,
   TicketState,
@@ -307,6 +309,8 @@ export interface PlanChanges {
   goal?: { from: string; to: string };
   /** Its limit of sessions at once; null is its boss's. */
   parallel?: { from: number | null; to: number | null };
+  /** What it may spend; null is no budget of its own. */
+  budget?: { from: PlanBudget | null; to: PlanBudget | null };
   /** The tickets in both, by id, in the order each lists them, when that
    *  changed: what starts first. */
   order?: { from: string[]; to: string[] };
@@ -340,6 +344,7 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
   return {
     ...(before.goal.trim() !== after.goal.trim() ? { goal: { from: before.goal, to: after.goal } } : {}),
     ...(from !== to ? { parallel: { from, to } } : {}),
+    ...(JSON.stringify(before.budget ?? null) !== JSON.stringify(after.budget ?? null) ? { budget: { from: before.budget ?? null, to: after.budget ?? null } } : {}),
     ...(order.from.join() !== order.to.join() ? { order } : {}),
     added: after.tickets.filter((t) => !was.has(t.id)),
     removed: before.tickets.filter((t) => !now.has(t.id)),
@@ -352,3 +357,13 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
  *  of it. Anything else the boss says (its closing summary) is its own. */
 export const isCardText = (text: string): boolean =>
   /^[^\n]{1,80}? (proposes a plan|changed the plan|proposes a change to the plan): /.test(text.trim());
+
+/** What a plan may spend, as its card says it: "$40 for the whole plan",
+ *  "$10 a day". */
+export const budgetText = (b: PlanBudget): string =>
+  b.period === "total" ? `${amountText(b.unit, b.amount)} for the whole plan` : `${amountText(b.unit, b.amount)} a ${periodWord(b.period)}`;
+
+/** A cap of `amount` dollars on a plan, from what was proposed (or over its
+ *  whole run, warning at 80% and pausing when over, as the hub's default). */
+export const capOf = (amount: number, proposed: PlanBudget | null | undefined): PlanBudget =>
+  proposed && proposed.unit === "usd" ? { ...proposed, amount } : { amount, unit: "usd", period: "total", warnAt: 0.8, onExceed: "pause" };

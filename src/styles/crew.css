@@ -1297,3 +1297,19 @@ button.card-icon:hover:not(:disabled) {
   font-size: 12px;
   color: var(--faint);
 }
+.pc-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pc-cap input {
+  width: 72px;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+}

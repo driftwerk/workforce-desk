@@ -85,7 +85,9 @@ describe("a session's actions", () => {
     expect(labels({ live: false, state: "stopped", cliSessionId: "c1" })).toEqual(["Resume"]);
     // Nothing to resume without a conversation, nor while it runs elsewhere.
     expect(labels({ live: false, state: "stopped", cliSessionId: null })).toEqual([]);
-    expect(labels({ live: false, state: "working", cliSessionId: "c1" })).toEqual([]);
+    expect(labels({ live: false, state: "working", cliSessionId: "c1", origin: "external" })).toEqual([]);
+    // One Desk started whose process the hub doesn't hold runs nowhere: it resumes.
+    expect(labels({ live: false, state: "working", cliSessionId: "c1" })).toEqual(["Resume"]);
     // A Codex typed in a Desk terminal is a session like any, and resumes by its id.
     expect(labels({ engine: "codex", live: false, state: "stopped", cliSessionId: "th-1", terminalId: "t1" })).toEqual(["Resume"]);
     expect(labels({ engine: "codex", live: true, state: "working", cliSessionId: "th-1", terminalId: "t1" })).toEqual(["Interrupt"]);

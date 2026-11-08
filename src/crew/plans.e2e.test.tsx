@@ -145,8 +145,10 @@ describe("a boss's plan, against the hub", () => {
     await runs();
   });
 
-  it("approved on the Floor, runs", async () => {
+  it("approved on the Floor, runs, its cap said there first", async () => {
+    hub.plans.plan.budget = { amount: 25, unit: "usd", period: "total", warnAt: 0.8, onExceed: "pause" };
     await connect();
+    await waitFor(() => expect(floor().getByText("Capped at $25 for the whole plan.")).toBeTruthy());
     expect(floor().getByRole("button", { name: "Open in chat: Sarah's plan" })).toBeTruthy();
     await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
