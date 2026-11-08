@@ -3,7 +3,7 @@ import { useDesk } from "../hub/store";
 import { machineHome } from "../platform";
 import type { MachineId } from "./engines";
 import { sessionsOn } from "./engines";
-import { homeWithin, listIn, meant, parentOf, shownPath, splitTyped, tilde, type Folder, type Listed } from "./folders";
+import { homeWithin, listIn, makeFolder, meant, onMachine, parentOf, shownPath, splitTyped, tilde, type Folder, type Listed } from "./folders";
 import type { MachineNative } from "./native";
 
 /** How long typing rests before the machine is asked for its folders. */
@@ -83,6 +83,8 @@ export function FolderPicker({
   const [listed, setListed] = useState<Listed | null>(null);
   const [parentFolders, setParentFolders] = useState<Folder[]>([]);
   const [again, setAgain] = useState(0);
+  /** Making the folder typed: asked, under way, or what stopped it. */
+  const [making, setMaking] = useState<null | "asking" | "making" | { why: string }>(null);
   const home = useMachineHome(machine, listed?.kind === "ok" ? listed.home : null);
   const recent = useRecentFolders(machine, home);
 
@@ -127,6 +129,19 @@ export function FolderPicker({
   useEffect(() => tell.current?.(!!missingPath), [missingPath]);
   const open = (path: string) => onChange(`${path.replace(/\/+$/, "")}/`);
   const retry = useCallback(() => setAgain((n) => n + 1), []);
+  // Another folder typed: whatever was asked of the last is over.
+  useEffect(() => setMaking(null), [typed]);
+  // The folder that would be made: all of what was typed, as the machine's path.
+  const toMake = typed.replace(/\/+$/, "") || "~";
+  const toMakeShown = home ? onMachine(toMake, home) : toMake;
+  const make = async () => {
+    setMaking("making");
+    const made = await makeFolder(native.transport(machine), toMake);
+    if (!made.ok) return setMaking({ why: made.why });
+    setMaking(null);
+    onChange(tilde(made.path, home));
+    retry();
+  };
 
   return (
     <div className="field folder-picker">
@@ -191,6 +206,36 @@ export function FolderPicker({
               Did you mean {shownPath(suggestion)}?{" "}
               <button type="button" className="btn btn-sm" onClick={() => onChange(suggestion)}>
                 Use it
+              </button>
+            </span>
+          )}
+          {making === null && (
+            <span className="folder-meant small">
+              <button type="button" className="btn btn-sm" onClick={() => setMaking("asking")}>
+                Create {shownPath(toMakeShown)} on {name}…
+              </button>
+            </span>
+          )}
+          {(making === "asking" || making === "making") && (
+            <span className="folder-meant small" role="group" aria-label="Create the folder">
+              <span>
+                Create {shownPath(toMakeShown)} on {name}?
+              </span>
+              <button type="button" className="btn btn-sm btn-signal" disabled={making === "making"} onClick={() => void make()}>
+                {making === "making" ? "Creating…" : "Create"}
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" disabled={making === "making"} onClick={() => setMaking(null)}>
+                Cancel
+              </button>
+            </span>
+          )}
+          {making !== null && typeof making === "object" && (
+            <span className="folder-meant small">
+              <span className="state-blocked" role="alert">
+                Couldn’t create {shownPath(toMakeShown)}: {making.why}
+              </span>
+              <button type="button" className="btn btn-sm" onClick={() => setMaking("asking")}>
+                Try again
               </button>
             </span>
           )}
