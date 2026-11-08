@@ -1,6 +1,6 @@
 import { deskCall } from "./client";
 import type { HubRef } from "./net";
-import type { Choice, DecideRef, FloorView, UsageView } from "./types";
+import type { BossPlanDetail, Choice, DecideRef, FloorView, UsageView } from "./types";
 
 export type { Choice } from "./types";
 
@@ -11,6 +11,10 @@ export const floorOf = (hub: HubRef) => ({
   floor: (day: Date): Promise<FloorView> => deskCall(hub, "GET", `/api/desk/floor?${new URLSearchParams({ day: localIso(day) })}`),
   usage: (): Promise<UsageView> => deskCall(hub, "GET", "/api/desk/usage"),
   decide: (at: DecideRef, choice: Choice): Promise<void> => deskCall(hub, "POST", "/api/desk/needs/decide", { at, choice }),
+  /** The person's answer to a boss's plan (the decide above, for a plan):
+   *  the plan as it now is. */
+  decidePlan: (at: Extract<DecideRef, { kind: "plan" }>, choice: "allow" | "deny"): Promise<BossPlanDetail> =>
+    deskCall(hub, "POST", "/api/desk/needs/decide", { at, choice }),
 });
 
 const pad = (n: number, width = 2): string => String(Math.abs(n)).padStart(width, "0");

@@ -78,7 +78,7 @@ export const usePlans = create<PlanState>((set, get) => {
     try {
       keep(await request());
     } catch (e) {
-      if (!(e instanceof HubError) || (e.status !== 409 && e.status !== 400 && e.status !== 404)) throw e;
+      if (!(e instanceof HubError) || (e.status !== 409 && e.status !== 400 && e.status !== 404 && e.status !== 422)) throw e;
       if (e.status === 404) {
         set((s) => ({ refusals: { ...s.refusals, [id]: { text: "This plan isn't on this computer any more." } } }));
         throw e;
@@ -88,7 +88,14 @@ export const usePlans = create<PlanState>((set, get) => {
       const newer = e.status === 409 && now && shown !== undefined && now.revision > shown;
       const refusal: PlanRefusal = newer
         ? { text: `${now.bossName || "The boss"} changed the plan since you read it. This is revision ${now.revision}: look at it, then ask again.`, from: shown }
-        : { text: e.message === "already_answered" ? "That was answered already, here or on another device." : e.message };
+        : {
+            text:
+              e.message === "already_answered"
+                ? "That was answered already, here or on another device."
+                : e.message === "not_offered"
+                  ? "The plan can't be answered that way now: look at it as it is."
+                  : e.message,
+          };
       set((s) => ({ refusals: { ...s.refusals, [id]: refusal } }));
       throw e;
     }
@@ -144,8 +151,9 @@ export const usePlans = create<PlanState>((set, get) => {
       act(id, async () => {
         const local = useChat.getState().hubs.find((h) => h.local);
         if (!local) throw new Error("This computer's hub isn't paired yet.");
-        await floorOf(local).decide({ kind: "plan", plan: id, revision }, choice);
-        return hubNow()!.plan(id);
+        // The hub answers with the plan as it now is (an older one, with nothing).
+        const now = await floorOf(local).decidePlan({ kind: "plan", plan: id, revision }, choice);
+        return now && typeof now === "object" && "tickets" in now ? now : hubNow()!.plan(id);
       }),
     edit: (id, edit) => act(id, async () => (await hubNow()!.editPlan(id, edit)).plan),
     pause: (id) => act(id, () => hubNow()!.pausePlan(id)),

@@ -183,8 +183,11 @@ export class PlanHub {
   turnDown(revision: number): Response | null {
     const p = this.plan;
     if (revision !== p.revision || p.approvedRevision === null || p.approvedRevision === p.revision) return json({ error: "already_answered" }, 409);
-    p.revisions.pop();
-    p.revision = p.approvedRevision;
+    // Kept as approved, under a revision of its own.
+    const was = p.revisions.at(-1)!;
+    p.revision += 1;
+    p.approvedRevision = p.revision;
+    p.revisions.push(this.revisionOf(p.revision, { kind: "you", id: "you", name: "You" }, "scope", `Kept as approved, not: ${was.summary}`));
     this.touch();
     return null;
   }
@@ -242,13 +245,14 @@ export class PlanHub {
       case "POST /api/desk/needs/decide": {
         const at = (b.at ?? {}) as { kind?: string; plan?: string; revision?: number };
         if (at.kind !== "plan" || at.plan !== PLAN) return null;
+        // Answered with the plan as it now is.
         if (b.choice === "deny") {
           const p = this.plan;
           // A proposal denied is left as it is; a waiting change is turned down.
-          if (p.approvedRevision === null) return new Response(null, { status: 204 });
-          return this.turnDown(at.revision!) ?? new Response(null, { status: 204 });
+          if (p.approvedRevision === null) return json(this.plan);
+          return this.turnDown(at.revision!) ?? json(this.plan);
         }
-        return this.approve(at.revision!) ? json({ error: "already_answered" }, 409) : new Response(null, { status: 204 });
+        return this.approve(at.revision!) ? json({ error: "already_answered" }, 409) : json(this.plan);
       }
       case "GET /api/desk/engines":
         return json(engines());
