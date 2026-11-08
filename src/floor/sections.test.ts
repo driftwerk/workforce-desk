@@ -195,6 +195,16 @@ describe("the Floor by group", () => {
   });
 });
 
+describe("done today", () => {
+  it("counts only what ended since the day began, though the hubs send the last 24 hours", () => {
+    const today = fw(work(session("s-idx"), { group: "globex", since: at(90), endedAt: at(30), outcome: "finished" }));
+    const yesterday = fw(work(session("s-web"), { group: "globex", since: at(900), endedAt: at(800), outcome: "finished" }));
+    const out = floorSections({ needs: [], working: [], done: [today, yesterday] }, oversight(), layout, Date.parse(at(60)));
+    if (out.kind !== "sections") throw new Error("flat");
+    expect(ids(byId(out.sections, "globex").done)).toEqual(["s-idx"]);
+  });
+});
+
 describe("placing what carries no stamp", () => {
   it("puts this computer's agents and sessions by the sidebar, a boss in the group it oversees", () => {
     const p = placer({ ...layout, ungrouped: { collapsed: false, items: ["agent:local/sarah", "session:s-blog"] }, groups: layout.groups.map((g) => ({ ...g, items: g.items.filter((k) => k !== "agent:local/sarah") })) }, oversight());

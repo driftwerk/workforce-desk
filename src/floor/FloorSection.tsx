@@ -34,7 +34,8 @@ export const useSections = (): FloorLayout => {
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
   const local = useFloor((s) => (localId ? s.hubs[localId]?.floor : null));
   const layout = useLayout();
-  return useMemo(() => floorSections(merged, oversightOf(local), layout), [merged, local, layout]);
+  const day = useFloor((s) => s.day);
+  return useMemo(() => floorSections(merged, oversightOf(local), layout, day), [merged, local, layout, day]);
 };
 
 /** How what's on the floor is placed among the sections now. */

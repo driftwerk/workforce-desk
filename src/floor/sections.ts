@@ -56,7 +56,7 @@ export interface Section {
   needs: FloorNeed[];
   /** Latest started first. */
   working: FloorWork[];
-  /** Latest ended first. */
+  /** What ended today, latest first. */
   done: FloorWork[];
   plans: PlanProgress[];
   /** Each item's group, for those of the main section that sit in a group
@@ -139,7 +139,14 @@ const hasAnything = (s: Section): boolean => s.needs.length + s.working.length +
  *  boss alone is no reason for sections). Each need, piece of work and plan
  *  is in exactly one section. Sections with needs come first, the oldest
  *  need first; then the rest in sidebar order, the main boss's last. */
-export const floorSections = (floor: Pick<Merged, "needs" | "working" | "done">, oversight: Oversight, layout: Layout): FloorLayout => {
+export const floorSections = (
+  floor: Pick<Merged, "needs" | "working" | "done">,
+  oversight: Oversight,
+  layout: Layout,
+  /** The start of the person's day (ms): what ended before it isn't done
+   *  today, though the hubs' `done` reaches back 24 hours. */
+  day = 0,
+): FloorLayout => {
   const place = placer(layout, oversight);
   if (place.bossed.size === 0) return { kind: "flat" };
   const main = blank(
@@ -167,7 +174,7 @@ export const floorSections = (floor: Pick<Merged, "needs" | "working" | "done">,
   };
   for (const n of floor.needs) into(n).needs.push(n);
   for (const w of floor.working) into(w).working.push(w);
-  for (const w of floor.done) into(w).done.push(w);
+  for (const w of floor.done) if (w.endedAt && Date.parse(w.endedAt) >= day) into(w).done.push(w);
   for (const p of oversight.plans) (byId.get(place.ofGroup(p.group)) ?? main).plans.push(p);
 
   // A sealed group with nothing on the floor has nothing to show.

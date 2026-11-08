@@ -12,9 +12,9 @@ import type { GridStorage } from "../grids/storage";
 import { startGrids, useGrids } from "../grids/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { EMPTY_LAYOUT, type Layout } from "../groups/model";
-import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
-import type { BossView, FloorView, Overview, Session } from "../hub/types";
+import type { DeskSocket, DeskTransport } from "../hub/transport";
+import type { BossView, DeskEvent, FloorView, Overview, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { useUi } from "../shell/ui";
@@ -105,8 +105,59 @@ const devboxFloor = (): FloorView =>
 
 const overview: Overview = { brief: null, counts: { working: 0, needsYou: 0, doneToday: 0 }, items: [] };
 
+class Socket implements DeskSocket {
+  readyState = 0;
+  binaryType: BinaryType = "arraybuffer";
+  onopen: ((ev: Event) => void) | null = null;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
+  onclose: ((ev: CloseEvent) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  constructor() {
+    queueMicrotask(() => {
+      this.readyState = 1;
+      this.onopen?.(new Event("open"));
+    });
+  }
+  send() {}
+  close() {
+    this.readyState = 3;
+  }
+  say(e: DeskEvent) {
+    this.onmessage?.({ data: JSON.stringify(e) } as MessageEvent);
+  }
+}
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/** This computer's hub as Desk's own client reaches it: the sidebar's
+ *  layout, who oversees what, the overview, and its events. Its floor is read
+ *  as every hub's is, through `fakeFetch`. */
+class Transport implements DeskTransport {
+  events: Socket | null = null;
+  layout: Layout = structuredClone(layout);
+  sessions = [live("s-web", "acme-web"), live("s-dot", "dotfiles"), live("s-old", "old-site"), live("s-idx", "globex-indexer")];
+  fetch = async (method: string, path: string): Promise<Response> => {
+    const route = `${method} ${path.split("?")[0]}`;
+    if (route === "GET /api/desk/manager")
+      return json({ agentId: "desk", level: "act", bosses: [{ agentId: "sarah", name: "Sarah", group: "acme", level: "act" }, { agentId: "mia", name: "Mia", group: "globex", level: "act" }], sealed: ["old"] });
+    if (route === "GET /api/desk/sessions") return json(this.sessions);
+    if (route === "GET /api/desk/layout") return json(this.layout);
+    if (route === "GET /api/desk/overview") return json(overview);
+    if (route === "GET /api/desk/activity") return json({ events: [], more: false });
+    if (route === "GET /api/desk/suggestions") return json({ suggestions: [] });
+    return new Response("Not Found", { status: 404 });
+  };
+  socket = (path: string): DeskSocket => {
+    const s = new Socket();
+    if (path === "/api/desk/events") this.events = s;
+    return s;
+  };
+}
+
 let hubs: Record<string, FakeHub>;
+let transport: Transport;
 let stop: () => void;
+let disconnect: (() => void) | undefined;
 
 const memory = (): GridStorage => {
   const kept = new Map<string, unknown>();
@@ -120,26 +171,14 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   hubs = { local: fakeHub({ floor: localFloor() }), b: fakeHub({ floor: bFloor() }), devbox: fakeHub({ floor: devboxFloor() }) };
   vi.stubGlobal("fetch", fakeFetch(hubs));
-  useSettings.setState({ loaded: true, shortcuts: {}, keys: defaultShortcuts(), groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  transport = new Transport();
+  useSettings.setState({ loaded: true, layoutOnHub: true, shortcuts: {}, keys: defaultShortcuts(), groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
   useFolded.setState({ folded: {} });
   useUi.setState({ activityOpen: true });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
-  useDesk.setState({
-    view: "floor",
-    rooms: {},
-    sessions: { "s-web": live("s-web", "acme-web"), "s-dot": live("s-dot", "dotfiles"), "s-old": live("s-old", "old-site"), "s-idx": live("s-idx", "globex-indexer") },
-    openId: null,
-    hub: {
-      overview: vi.fn(() => Promise.resolve(overview)),
-      manager: vi.fn(() => Promise.resolve({ agentId: "desk", level: "act" })),
-      activity: vi.fn(() => Promise.resolve({ events: [], more: false })),
-      suggestions: vi.fn(() => Promise.resolve([])),
-    } as unknown as DeskHub,
-  });
-  // After the hub: a new hub starts from Desk's own layout until its snapshot.
-  useHubLayout.setState({ layout, kept: true });
-  useOverview.setState({ overview: null, overviewSupport: "unknown", activitySupport: "unknown", feeds: {}, manager: null });
+  useDesk.setState({ view: "floor", rooms: {}, sessions: {}, openId: null });
+  useOverview.setState({ overview: null, overviewSupport: "unknown", activitySupport: "unknown", feeds: {}, manager: null, suggestions: {}, suggestionsLoaded: true });
   useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
   useChat.setState({
     panelAgent: null,
@@ -155,14 +194,23 @@ beforeEach(() => {
   stop = watchFloor();
 });
 afterEach(() => {
+  disconnect?.();
+  disconnect = undefined;
   stop();
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  useHubLayout.setState({ layout: null, kept: null });
 });
 
+/** Desk connected to this computer's hub, its snapshot (with the sidebar's
+ *  layout) in, and the Floor shown. */
 const floor = async () => {
+  disconnect = useDesk.getState().connect(transport);
+  await act(async () => {
+    await Promise.resolve();
+    transport.events!.say({ type: "snapshot", sessions: transport.sessions, restore: [], rooms: [], layout: transport.layout } as DeskEvent);
+  });
+  expect(useHubLayout.getState().layout).toEqual(transport.layout);
   render(<Floor onNewSession={() => {}} />);
   await settle();
 };
@@ -249,5 +297,30 @@ describe("the Floor by group, across hubs", () => {
     expect(screen.queryByRole("navigation", { name: "Needs you, by group" })).toBeNull();
     expect(within(screen.getByRole("region", { name: "Right now" })).getByRole("group", { name: "Needs you · 6" })).toBeTruthy();
     expect(within(rail()).queryByRole("radiogroup", { name: "Group" })).toBeNull();
+  });
+
+  it("shows a session where it is moved to: the hub's new layout, then its floor stamped anew", async () => {
+    await floor();
+    expect(needsIn("Acme")).toContain("acme-web");
+    const moved: Layout = {
+      ...transport.layout,
+      groups: transport.layout.groups.map((g) =>
+        g.id === "acme" ? { ...g, items: g.items.filter((k) => k !== "session:s-web") } : g.id === "globex" ? { ...g, items: [...g.items, "session:s-web"] } : g,
+      ),
+    };
+    transport.layout = moved;
+    const f = localFloor();
+    hubs.local!.floor = {
+      ...f,
+      needs: f.needs.map((n) => (n.who.id === "s-web" ? { ...n, group: "globex", boss: "mia" } : n)),
+      working: f.working.map((w) => (w.who.id === "s-web" ? { ...w, group: "globex", boss: "mia" } : w)),
+    };
+    await act(async () => transport.events!.say({ type: "layout", layout: moved }));
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(needsIn("Acme")).not.toContain("acme-web");
+    expect(needsIn("Globex")).toEqual(["acme-web"]);
+    expect(within(section("Globex")).getByRole("article", { name: "acme-web" })).toBeTruthy();
+    expect(within(section("Acme")).queryByRole("article", { name: "acme-web" })).toBeNull();
   });
 });
