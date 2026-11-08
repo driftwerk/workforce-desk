@@ -527,8 +527,14 @@ jobs:
           path: out/
           if-no-files-found: error
 
+  # The Mac app and the machines' backend must have built. The Linux and
+  # Windows desktop apps go in when they built and are left out when they
+  # didn't: a release isn't held back by them.
   publish:
     needs: [version, macos, linux-x86_64, windows, backend]
+    if: >-
+      always() && needs.version.result == 'success' &&
+      needs.macos.result == 'success' && needs.backend.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7
@@ -592,26 +598,29 @@ jobs:
           done
 
       # One latest.json for every system's updater: the universal app for
-      # both Macs, the AppImage for Linux, the NSIS installer for Windows.
+      # both Macs, and the AppImage for Linux and the NSIS installer for
+      # Windows when they were built.
       - name: latest.json
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           base="https://github.com/$RELEASES_REPO/releases/download/v$VERSION"
-          appimage=$(basename out/*.AppImage)
-          setup=$(basename out/*-setup.exe)
+          platforms=$(jq -n --arg mac "$base/Desk.app.tar.gz" --arg mac_sig "$(cat out/Desk.app.tar.gz.sig)" \
+            '{"darwin-aarch64": {signature: $mac_sig, url: $mac}, "darwin-x86_64": {signature: $mac_sig, url: $mac}}')
+          shopt -s nullglob
+          for appimage in out/*.AppImage; do
+            name=$(basename "$appimage")
+            platforms=$(jq --arg url "$base/$name" --arg sig "$(cat "$appimage.sig")" \
+              '. + {"linux-x86_64": {signature: $sig, url: $url}}' <<<"$platforms")
+          done
+          for setup in out/*-setup.exe; do
+            name=$(basename "$setup")
+            platforms=$(jq --arg url "$base/$name" --arg sig "$(cat "$setup.sig")" \
+              '. + {"windows-x86_64": {signature: $sig, url: $url}}' <<<"$platforms")
+          done
           jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION" \
-            --arg mac "$base/Desk.app.tar.gz" --arg mac_sig "$(cat out/Desk.app.tar.gz.sig)" \
-            --arg linux "$base/$appimage" --arg linux_sig "$(cat "out/$appimage.sig")" \
-            --arg windows "$base/$setup" --arg windows_sig "$(cat "out/$setup.sig")" '{
-              version: $v, notes: $notes, pub_date: $date,
-              platforms: {
-                "darwin-aarch64": { signature: $mac_sig, url: $mac },
-                "darwin-x86_64": { signature: $mac_sig, url: $mac },
-                "linux-x86_64": { signature: $linux_sig, url: $linux },
-                "windows-x86_64": { signature: $windows_sig, url: $windows }
-              }
-            }' > out/latest.json
+            --argjson platforms "$platforms" \
+            '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > out/latest.json
           jq '.platforms | keys' out/latest.json
 
       - name: Publish the release
