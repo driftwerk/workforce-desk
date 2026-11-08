@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
+import { FloorSection, SealedNotes, useSections } from "../floor/FloorSection";
+import { totals, type DeskItem } from "../floor/sections";
+import { plain } from "../ui/plain";
+import { NeedsJump } from "../floor/NeedsJump";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
 import { isAgentTurn } from "../floor/needs";
@@ -32,6 +36,10 @@ const AGENT_GROUP: Record<OverviewItem["state"], string> = {
 };
 
 const ORDER = ["Needs you", "Working", "Done today", "Recently done and idle", "In other terminals", "Not running"];
+
+/** What the Floor in sections leaves to its sections: they say what needs
+ *  you, what's working and what's done, each in its group. */
+const IN_SECTIONS = new Set(["Needs you", "Working", "Done today"]);
 
 interface FloorGroup {
   title: string;
@@ -70,6 +78,34 @@ export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyM
   return [...groups.values()].filter((g) => g.agents.length + g.sessions.length > 0);
 };
 
+const LOOK: Record<string, DeskItem["look"]> = { "Needs you": "blocked", Working: "working", "Done today": "done" };
+
+/** Desk's own Needs you, Working and Done today, as the Floor by group keeps
+ *  them where no hub's floor has a turn for them. */
+export const deskItems = (groups: readonly FloorGroup[], hubId: string | null): DeskItem[] =>
+  groups.flatMap((g) => {
+    const look = LOOK[g.title];
+    if (!look) return [];
+    return [
+      ...g.sessions.map(
+        (s): DeskItem => ({
+          key: sessionItem(s.id),
+          who: { kind: "session", id: s.id },
+          name: s.name,
+          engine: s.engine,
+          text: s.goal || (s.lastPrompt ? plain(s.lastPrompt) : null),
+          // Blocked with nothing on a hub's floor asking: said as it is.
+          look: s.state === "blocked" || s.state === "asking" ? "blocked" : look,
+        }),
+      ),
+      ...(hubId
+        ? g.agents.map(
+            (a): DeskItem => ({ key: agentItem({ hubId, id: a.id }), who: { kind: "agent", id: a.id }, name: a.name, engine: null, text: a.task ?? null, look: a.state === "needs_you" ? "blocked" : look }),
+          )
+        : []),
+    ];
+  });
+
 /** The Floor as the crew's overview: the overseer's brief, then who needs
  *  you, who's working and what's done, beside what's happening. */
 export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
@@ -84,12 +120,18 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const merged = useMerged();
   const needs = useNeedCounts();
   const now = useMinute();
-  const groups = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
+  const all = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
+  // Desk's own lists, kept while they're the same, so the sections are.
+  const deskKey = JSON.stringify(onFloor ? deskItems(all, localId) : null);
+  const desk = useMemo(() => (JSON.parse(deskKey) as DeskItem[] | null) ?? undefined, [deskKey]);
+  const sectioned = useSections(desk);
+  const sections = onFloor && sectioned.kind === "sections" ? sectioned.sections : null;
+  const groups = sections ? all.filter((g) => !IN_SECTIONS.has(g.title)) : all;
   const count = (title: string) => {
-    const g = groups.find((x) => x.title === title);
+    const g = all.find((x) => x.title === title);
     return (g?.agents.length ?? 0) + (g?.sessions.length ?? 0);
   };
-  const counts = onFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
+  const counts = sections ? totals(sections) : onFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
   const scroller = useSavedScroll<HTMLDivElement>("floor");
   const brief =
     overview.brief && manager?.agentId ? (
@@ -133,11 +175,13 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
       </header>
       <div className="crew-floor-body">
         <div ref={scroller} className="crew-floor-main">
+          {sections && <NeedsJump sections={sections} />}
           <RestoreBanner />
           <AccountNeeds />
           {onFloor ? (
             <>
-              <RightNow brief={brief || null} />
+              {sectioned.kind === "flat" && <SealedNotes notes={sectioned.sealed} />}
+              <RightNow brief={brief || null} needs={!sections} />
               <PlanCards />
               <SpendCard />
               <Today now={now} />
@@ -145,7 +189,10 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
           ) : (
             brief
           )}
-          {groups.length === 0 && (
+          {sections?.map((s) => (
+            <FloorSection key={s.id} section={s} now={now} />
+          ))}
+          {!sections && groups.length === 0 && (
             <p className="empty muted">
               Nothing’s happening on the crew right now. Start a session, or message someone from Crew, and it shows here.
             </p>
@@ -156,7 +203,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
         </div>
         {activitySupport !== "no" &&
           (activityOpen ? (
-            <ActivityRail managerName={managerName} closeRef={railClose} onClose={() => showActivity(false)} />
+            <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={() => showActivity(false)} />
           ) : (
             <DockStrip label="Docked">
               <DockTab

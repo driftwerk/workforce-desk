@@ -12,6 +12,7 @@ export const SETTINGS_SECTIONS = {
   connections: "Connections",
   engines: "Engines",
   sessions: "Sessions",
+  memory: "Memory",
   budgets: "Budgets",
   voices: "Voices",
   calls: "Calls and voice",

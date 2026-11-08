@@ -335,6 +335,8 @@ export type DeskEvent =
     }
   /** The sidebar's groups changed on the hub. */
   | { type: "layout"; layout: Layout }
+  /** One of the person's settings changed (`memory.paused`, `memory.group.<id>`, `memory.session.<id>`). */
+  | { type: "setting"; key: string }
   | { type: "terminal"; terminal: TerminalInfo }
   | { type: "terminalRemoved"; id: string }
   | { type: "session"; session: Session }
@@ -823,6 +825,9 @@ export interface ActivityEvent {
   ticket?: string | null;
   /** What the hub kept beside the text: a comment's own words. */
   detail?: { comment?: string } | null;
+  /** The sidebar group it was in when it happened, as the hub stamped it
+   *  (null: ungrouped); absent from hubs that don't stamp. */
+  group?: string | null;
 }
 
 export type ActivityFilter = "all" | "needs_you" | "manager";
@@ -1078,6 +1083,13 @@ export interface Need {
   since: string;
   place: Place;
   answer: Answer;
+  /** The sidebar group it is in now, as this computer's hub stamps its own
+   *  items for the person who holds its Desk; absent when ungrouped, and
+   *  from other hubs and older ones. */
+  group?: string | null;
+  /** That group's own boss (its agent id): absent for what is ungrouped, in
+   *  a group with no boss of its own (the main boss's), or sealed. */
+  boss?: string | null;
 }
 
 export type Outcome = "finished" | "asked" | "failed" | "stopped" | "limit" | "interrupted";
@@ -1095,6 +1107,9 @@ export interface Work {
   background?: Background | null;
   /** What its agent or session is for and doing, in plain words; absent from older hubs. */
   gist?: Gist | null;
+  /** As on `Need`. */
+  group?: string | null;
+  boss?: string | null;
 }
 
 /** What an agent or session is for (`purpose`) and what it is doing or did
@@ -1144,6 +1159,66 @@ export interface FloorView {
   /** Questions to you their sessions went ahead without, until answered or
    *  dismissed. Absent when none (and from older hubs). */
   wentAhead?: WentAhead[];
+  /** The overseers, each with its scope: the main boss too. Only for the
+   *  person who holds this hub's Desk; absent elsewhere. */
+  bosses?: BossView[];
+  /** Groups closed to everyone but the person: named for a boss that isn't
+   *  overseeing them now. Their items carry their group and no boss. */
+  sealed?: string[];
+  /** The bosses' open plans, each in its own group. */
+  plans?: PlanProgress[];
+}
+
+/** One overseer's part of Desk: everything in no bossed group (the main
+ *  boss's), or one sidebar group. */
+export type Scope = { kind: "ungrouped" } | { kind: "group"; group: string };
+
+/** An overseer, as the Floor shows it at the head of its section. */
+export interface BossView {
+  scope: Scope;
+  agent: string;
+  name: string;
+  /** `watch`, `suggest` or `act`. */
+  level: string;
+  state: "idle" | "working";
+  /** What holds its turns, in plain words, while something does. */
+  paused?: string | null;
+  /** Its group's budget, the furthest along: none for the main boss, and
+   *  for a group with no budget of its own. */
+  spend?: Standing | null;
+}
+
+export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";
+
+/** Where a plan's tickets stand. */
+export interface PlanTally {
+  done: number;
+  doing: number;
+  review: number;
+  /** In To do with every need done, and no one on it yet. */
+  ready: number;
+  /** Held back by a need that was dropped. */
+  blocked: number;
+  /** Waiting on needs not done yet, or not handed out yet. */
+  waiting: number;
+  /** Every ticket but the dropped. */
+  total: number;
+  /** The tickets that start next as slots free, by key, in order. */
+  next: string[];
+}
+
+/** A plan as the Floor shows it in its group's section. */
+export interface PlanProgress {
+  id: string;
+  goal: string;
+  /** Its group, as it was made; null is ungrouped. */
+  group: string | null;
+  boss: string;
+  bossName: string;
+  state: PlanState;
+  /** Why it is paused, in the person's words, while it is. */
+  pausedWhy?: string | null;
+  progress: PlanTally;
 }
 
 /** A question to you its session went ahead without. */
@@ -1273,27 +1348,13 @@ export type AssignTo = { session: string } | { agent: string } | { newSession: {
 
 // ── A boss's plans: a goal broken into tickets, approved before it runs ──
 
-export type BossPlanState = "proposed" | "running" | "paused" | "done" | "dropped";
+/** The Floor's names for the same: a plan's state and its tickets' tally. */
+export type BossPlanState = PlanState;
 
 /** Why a plan that would run starts nothing. */
 export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss" | "start_failing";
 
-/** Where a plan's tickets stand. */
-export interface BossPlanProgress {
-  done: number;
-  doing: number;
-  review: number;
-  /** In To do with every need done, and no one on it yet. */
-  ready: number;
-  /** Held back by a need that was dropped. */
-  blocked: number;
-  /** Waiting on needs not done yet, or not handed out yet. */
-  waiting: number;
-  /** Every ticket but the dropped. */
-  total: number;
-  /** What starts next as slots free, by key, in order. */
-  next: string[];
-}
+export type BossPlanProgress = PlanTally;
 
 /** A plan, with where its tickets stand. */
 export interface BossPlan {
@@ -1397,3 +1458,186 @@ export interface BossPlanChanged {
 
 /** What dropping a plan does with the sessions working on it. */
 export type OnPlanDrop = "stop" | "leave";
+
+/** A decision, fact or to-do Desk noted from a session, or the person wrote. */
+export interface MemoryNote {
+  id: string;
+  kind: "decision" | "fact" | "todo";
+  text: string;
+  /** A to-do's `open`, `done` or `dropped`; anything else `held`. */
+  state: "open" | "done" | "dropped" | "held";
+  /** Since when it is so. */
+  at: string;
+  /** Desk's model wrote it, and it may be wrong. */
+  notedByDesk: boolean;
+  /** The person confirmed or wrote it. */
+  confirmed: boolean;
+  /** None of the exchanges it came from is kept any more. */
+  sourceGone: boolean;
+}
+
+/** A note another replaced: what it said, and when. */
+export interface ReplacedNote {
+  id: string;
+  kind: MemoryNote["kind"];
+  text: string;
+  replacedAt: string;
+}
+
+/** Why Desk isn't noting decisions from a session, for the panel to act on. */
+export type NotingReason = "desk_off" | "no_model" | "paused" | "session_off" | "group_off" | "day_cap" | "failing";
+
+export interface MemoryNotes {
+  decisions: MemoryNote[];
+  facts: MemoryNote[];
+  todos: MemoryNote[];
+  counts: {
+    decisions: number;
+    facts: number;
+    todos: number;
+    openTodos: number;
+    /** Every note kept, replaced and dropped ones too: what forgetting deletes. */
+    kept?: number;
+  };
+  /** `paused`: the day's calls are spent, until tomorrow. */
+  noting: "on" | "paused" | "off";
+  /** Why it isn't, or what else to know, in plain words. */
+  why: string | null;
+  /** Absent from hubs before the memory switches' routes. */
+  reason?: NotingReason | null;
+  /** Exchanges not yet read for notes. */
+  unread: number;
+  /** Whose model writes the notes (`anthropic`, `codex`, …). */
+  provider: string | null;
+  /** The hub may write them on another provider when that one can't. */
+  fallbackProviders: boolean;
+  /** Notes replaced lately, latest first; absent from older hubs. */
+  replaced?: ReplacedNote[];
+}
+
+/** One prompt and what the session did for it, as Desk keeps it. */
+export interface KeptExchange {
+  seq: number;
+  at: string;
+  ended: string | null;
+  asker: string;
+  ask: string;
+  answer: string;
+  files: string[];
+  commands: string[];
+  errors: string[];
+  compaction: boolean;
+  /** Secrets hidden in it. */
+  redacted: number;
+}
+
+/** What Desk remembers of one session. */
+export interface SessionMemory {
+  exchanges: KeptExchange[];
+  counts: { exchanges: number; open: number; compactions: number; secretsHidden: number; pastCap: number };
+  /** What it says now is being remembered. */
+  remembering: boolean;
+  /** Why not, in plain words. */
+  why: string | null;
+  notice: string | null;
+  notes: MemoryNotes;
+  /** Its own Remember switch; absent from older hubs. */
+  memoryOn?: boolean;
+  /** Its engine keeps no record Desk can read. */
+  noRecord?: boolean;
+  /** When Desk last kept something it said. */
+  lastRead?: string | null;
+  /** Desk no longer has the session: there is no switch to turn. */
+  cleared?: boolean;
+  /** The pause and its group's switches, as its hub has them. */
+  switches?: { paused: boolean; group: (GroupMemory & { id: string; name: string }) | null };
+}
+
+/** What the person does to a note. */
+export type NoteChange = { action: "confirm" } | { action: "correct"; text: string } | { action: "drop" };
+
+/** How Desk Memory's search index stands. */
+export interface MemoryIndexStatus {
+  /** This computer has a search index at all. */
+  installed: boolean;
+  /** Exchanges not yet in it. */
+  backlog: number;
+  purges: number;
+  /** Why it isn't answering, while it isn't. */
+  failing: string | null;
+  caughtUp: string | null;
+  reconciled: string | null;
+  /** Exchanges it kept refusing, found by keyword. */
+  setAside: number;
+  /** Forgotten conversations it kept refusing to delete, until a rebuild. */
+  purgesSetAside: number;
+  diskMb: number | null;
+  maxDiskMb: number;
+}
+
+/** A group's memory switches. */
+export interface GroupMemory {
+  harvest: boolean;
+  derive: boolean;
+  handoffAsk: boolean;
+  /** The person answered whether Desk's model may read its sessions. */
+  deriveDecided: boolean;
+}
+
+/** What session memory holds of one group's sessions (`group` null: ungrouped). */
+export interface MemoryTotals {
+  group: string | null;
+  sessions: number;
+  exchanges: number;
+  secretsHidden: number;
+  notes: number;
+}
+
+/** The person's memory settings, the install's limits, and what is kept. */
+export interface MemorySettings {
+  paused: boolean;
+  groups: (GroupMemory & { id: string; name: string })[];
+  limits: {
+    enabled: boolean;
+    derive: boolean;
+    backfillDays: number;
+    retainDays: number;
+    maxDiskMb: number;
+    indexPerMinute: number;
+    deriveCallsPerDay: number;
+    deriveCallsToday: number;
+    /** Whose model writes the notes (`anthropic`, …); none without one. */
+    provider?: string | null;
+    /** The hub may write them on another provider when that one can't. */
+    fallbackProviders?: boolean;
+  };
+  totals: MemoryTotals[];
+  /** What the person should know of the change just made. */
+  notice?: string;
+}
+
+/** An exchange or a note a search of Desk's memory found. */
+export interface MemoryHit {
+  session: string;
+  group: string | null;
+  project: string;
+  at: string;
+  asker: string;
+  ask: string;
+  answer: string;
+  compaction: boolean;
+  kind: "exchange" | "compaction" | "decision" | "fact" | "todo";
+  notedByDesk: boolean;
+  confirmed: boolean;
+  superseded: boolean;
+  name: string | null;
+  engine: Engine | null;
+  groupName: string | null;
+}
+
+export interface MemorySearch {
+  hits: MemoryHit[];
+  /** Only keywords were matched: the search index isn't ready. */
+  keywordOnly: boolean;
+  notice: string | null;
+}

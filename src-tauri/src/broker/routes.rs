@@ -142,6 +142,23 @@ const HTTP: &[Route] = &[
     route("PUT", "/api/desk/accounts/standing"),
     route("POST", "/api/desk/accounts/problems/{}/dismiss"),
     route("POST", "/api/desk/sessions/{}/account"),
+    // Desk Memory: what it remembers of a session, its notes, forgetting,
+    // search, its index, and the person's switches.
+    route("GET", "/api/desk/sessions/{}/memory"),
+    route("DELETE", "/api/desk/sessions/{}/memory"),
+    route("PATCH", "/api/desk/sessions/{}/memory"),
+    route("POST", "/api/desk/sessions/{}/memory/derive"),
+    route("PATCH", "/api/desk/memory/items/{}"),
+    with_query(
+        "GET",
+        "/api/desk/memory/search",
+        &["q", "session", "group", "kind", "limit"],
+    ),
+    route("GET", "/api/desk/memory/index"),
+    route("POST", "/api/desk/memory/index/rebuild"),
+    route("GET", "/api/desk/memory/settings"),
+    route("PATCH", "/api/desk/memory/settings"),
+    route("PATCH", "/api/desk/memory/groups/{}"),
     // The vault: which keys there are, and setting one. Never a key's value.
     route("GET", "/api/vault"),
     Route {
@@ -577,6 +594,21 @@ mod tests {
             ("POST", "/api/desk/plans/p1/finish"),
             ("GET", "/api/desk/plans?token=x"),
             ("GET", "/api/desk/plans?boss=sarah"),
+            // Desk Memory, the wrong way.
+            ("PUT", "/api/desk/sessions/s1/memory"),
+            ("POST", "/api/desk/sessions/s1/memory"),
+            ("GET", "/api/desk/sessions/s1/memory/derive"),
+            ("GET", "/api/desk/memory/items/n1"),
+            ("DELETE", "/api/desk/memory/items/n1"),
+            ("DELETE", "/api/desk/memory/settings"),
+            ("PUT", "/api/desk/memory/settings"),
+            ("POST", "/api/desk/memory/index"),
+            ("GET", "/api/desk/memory/index/rebuild"),
+            ("GET", "/api/desk/memory/groups/g"),
+            ("PATCH", "/api/desk/memory/groups/g/x"),
+            ("GET", "/api/desk/memory/search?q=a&token=x"),
+            ("GET", "/api/desk/memory/search?q=a&reader=overseer"),
+            ("GET", "/api/desk/sessions/s1/memory?q=a"),
             ("GET", "/api/desk/spend?period=a#b"),
             ("GET", "/api/desk/spend?period=a b"),
         ] {
@@ -610,6 +642,39 @@ mod tests {
         assert!(http("GET", "/api/desk/tickets/search?q=ACM-12").is_ok());
         assert!(http("GET", "/api/desk/tickets/t1").is_ok());
         assert!(http("GET", "/api/desk/history?subject=s1&before=e1").is_ok());
+    }
+
+    #[test]
+    fn desk_memory_takes_a_sessions_memory_its_notes_search_and_switches() {
+        for (method, target) in [
+            ("GET", "/api/desk/sessions/s1/memory"),
+            ("DELETE", "/api/desk/sessions/s1/memory"),
+            ("PATCH", "/api/desk/sessions/s1/memory"),
+            ("POST", "/api/desk/sessions/s1/memory/derive"),
+            ("PATCH", "/api/desk/memory/items/n1"),
+            ("GET", "/api/desk/memory/index"),
+            ("POST", "/api/desk/memory/index/rebuild"),
+            ("GET", "/api/desk/memory/settings"),
+            ("PATCH", "/api/desk/memory/settings"),
+            ("PATCH", "/api/desk/memory/groups/g-acme"),
+        ] {
+            assert!(
+                http(method, target).is_ok(),
+                "{method} {target} was refused"
+            );
+        }
+        let got = http(
+            "GET",
+            "/api/desk/memory/search?q=the+cookie&session=s1&group=g&kind=decisions&limit=20",
+        )
+        .unwrap();
+        assert_eq!(got.path, "/api/desk/memory/search");
+        assert_eq!(
+            got.query.as_deref(),
+            Some("q=the+cookie&session=s1&group=g&kind=decisions&limit=20")
+        );
+        // A machine's hub takes the same.
+        assert!(machine_http("PATCH", "/api/desk/memory/groups/g-acme").is_ok());
     }
 
     #[test]

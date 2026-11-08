@@ -179,7 +179,8 @@ describe("the board", () => {
       ticket(13, { state: "todo", pinned: true }),
       ticket(12, { state: "doing" }),
       ticket(10, { state: "done", stateAt: old }),
-      ticket(11, { state: "done" }),
+      // Done just now: not settled, whatever day the test runs.
+      ticket(11, { state: "done", stateAt: new Date().toISOString() }),
       ticket(9, { state: "dropped" }),
     ])
       hub.tickets.set(t.id, t);

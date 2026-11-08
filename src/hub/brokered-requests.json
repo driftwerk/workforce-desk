@@ -697,6 +697,61 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/sessions/s1/memory"
+  },
+  {
+    "kind": "http",
+    "method": "DELETE",
+    "path": "/api/desk/sessions/s1/memory"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/sessions/s1/memory"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/memory/derive"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/memory/items/n1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/memory/search?q=the+cookie&session=s1&group=g&kind=decisions&limit=20"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/memory/index"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/memory/index/rebuild"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/memory/settings"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/memory/settings"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/memory/groups/g"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/layout"
   },
   {
