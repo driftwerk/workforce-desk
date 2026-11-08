@@ -7,7 +7,7 @@ import type { Layout } from "../groups/model";
 import { useDesk } from "../hub/store";
 import type { BossView, ChargeView, Need, PlanProgress, Session, Work } from "../hub/types";
 import { useSettings } from "../settings/store";
-import { FloorSection, PlanProgressCard, useFolded } from "./FloorSection";
+import { DeskTile, FloorSection, PlanProgressCard, SealedNotes, useFolded } from "./FloorSection";
 import type { FloorNeed, FloorWork } from "./merge";
 import { NeedsJump } from "./NeedsJump";
 import { MAIN, floorSections, sealedSection, sectionDomId, type Section } from "./sections";
@@ -177,7 +177,7 @@ describe("a group's section", () => {
 describe("the main boss's section", () => {
   it("is everything else, run by the main boss, and its grouped items keep their group's chip", () => {
     render(<FloorSection section={of(MAIN)} now={NOW} />);
-    const sec = screen.getByRole("region", { name: "Everything else, Desk runs it" });
+    const sec = screen.getByRole("region", { name: "Desk, everything else" });
     expect(within(sec).getByText(/^Desk runs it/).textContent).toBe("Desk runs it · idle · Act · ungrouped, and Personal (no boss of its own)");
     expect(within(sec).getByRole("button", { name: "Message Desk" })).toBeTruthy();
     const need = within(sec).getByRole("listitem");
@@ -248,5 +248,61 @@ describe("other hubs on a section", () => {
     const tile = screen.getByRole("article", { name: "Scout" });
     // An agent has no engine chip and is no one's charge.
     expect(within(tile).queryByText("yours")).toBeNull();
+  });
+});
+
+describe("what Desk shows that no hub has a turn for", () => {
+  it("draws a blocked session with nothing asked in its blocked tone, saying so", () => {
+    render(<DeskTile item={{ key: "session:s-api", who: { kind: "session", id: "s-api" }, name: "acme-api", engine: "codex", text: "Stripe intents", look: "blocked" }} chip={null} />);
+    const tile = screen.getByRole("article", { name: "acme-api" });
+    expect(tile.classList.contains("fsec-tile-blocked")).toBe(true);
+    expect(within(tile).getByText("Blocked, nothing asked").className).toContain("state-blocked");
+    expect(within(tile).getByText("Codex")).toBeTruthy();
+    expect(within(tile).getByText("yours")).toBeTruthy();
+  });
+
+  it("counts it in its section's Working, beside the hubs' turns", () => {
+    const acme = { ...of("acme"), desk: [{ key: "session:s-x", who: { kind: "session" as const, id: "s-x" }, name: "acme-x", engine: "claude" as const, text: null, look: "blocked" as const }] };
+    render(<FloorSection section={acme} now={NOW} />);
+    const sec = screen.getByRole("region", { name: "Acme" });
+    expect(within(sec).getByText("Working · 3")).toBeTruthy();
+    expect(within(sec).getAllByRole("article")).toHaveLength(3);
+  });
+});
+
+describe("a turn Desk can't put to anyone", () => {
+  it("still draws, by what the hub calls it, so drawn and counted agree", () => {
+    const acme = { ...of("acme"), working: [fw(work(session("s-turn", "at-dm-d4774cbb6c89"), { group: "acme" }))] };
+    render(<FloorSection section={acme} now={NOW} />);
+    const sec = screen.getByRole("region", { name: "Acme" });
+    expect(within(sec).getByText("Working · 1")).toBeTruthy();
+    expect(within(sec).getAllByRole("article")).toHaveLength(1);
+  });
+});
+
+describe("a sealed group on the flat Floor", () => {
+  it("says no one oversees it, naming what's in it", () => {
+    render(<SealedNotes notes={[{ group: { id: "old", name: "Old work" }, items: [fn(need("q-old", session("s-old", "old-site"), { group: "old" }))] }]} />);
+    expect(screen.getByRole("note").textContent).toBe("No one oversees Old work now · old-site is yours alone. Give Old work a boss from its menu in the sidebar.");
+  });
+});
+
+describe("the jump bar, for someone who asked for less motion", () => {
+  it("jumps without the smooth scroll", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(prefers-reduced-motion: reduce)" }) as MediaQueryList);
+    const sections = built();
+    render(
+      <>
+        <NeedsJump sections={sections} />
+        {sections.map((s) => (
+          <FloorSection key={s.id} section={s} now={NOW} />
+        ))}
+      </>,
+    );
+    const scroll = vi.fn();
+    document.getElementById(sectionDomId("acme"))!.scrollIntoView = scroll;
+    fireEvent.click(screen.getByRole("button", { name: "Acme: 1 needs you" }));
+    expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+    vi.unstubAllGlobals();
   });
 });

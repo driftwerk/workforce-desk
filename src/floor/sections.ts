@@ -15,7 +15,7 @@
 // Pure: the hook and the drawing are in FloorSection.tsx.
 
 import { groupOf, UNGROUPED, type ItemKey, type Layout } from "../groups/model";
-import type { BossView, FloorView, PlanProgress, Who } from "../hub/types";
+import type { ActivityEvent, BossView, Engine, FloorView, PlanProgress, Who } from "../hub/types";
 import type { FloorNeed, FloorWork, Merged, Tagged } from "./merge";
 import { itemKeyOf } from "./needs";
 
@@ -59,12 +59,37 @@ export interface Section {
   /** What ended today, latest first. */
   done: FloorWork[];
   plans: PlanProgress[];
+  /** What Desk itself shows as needing you, working or done today that no
+   *  hub's floor has a need or a turn for: kept in its section's Working,
+   *  so nothing leaves the Floor. */
+  desk: DeskItem[];
   /** Each item's group, for those of the main section that sit in a group
    *  with no boss (they keep their chip there), by the item's `key`. */
   chips: Record<string, string>;
 }
 
-export type FloorLayout = { kind: "flat" } | { kind: "sections"; sections: Section[] };
+/** One of this computer's sessions or agents as Desk's own Floor groups it
+ *  (Needs you, Working, Done today). */
+export interface DeskItem {
+  /** Its sidebar item: `session:<id>`, `agent:<hub>/<agent>`. */
+  key: ItemKey;
+  who: { kind: "agent" | "session"; id: string };
+  name: string;
+  engine: Engine | null;
+  /** What it is doing or for, when Desk knows. */
+  text: string | null;
+  /** Blocked: Desk shows it waiting on you, though nothing asks you. */
+  look: "blocked" | "working" | "done";
+}
+
+/** A sealed group's items while no group has a boss: the Floor is flat, and
+ *  says no one oversees it so the person can give it one. */
+export interface SealedNote {
+  group: { id: string; name: string };
+  items: (FloorNeed | FloorWork)[];
+}
+
+export type FloorLayout = { kind: "flat"; sealed: SealedNote[] } | { kind: "sections"; sections: Section[] };
 
 /** An item on the merged floor, wherever it came from. */
 type Placeable = Pick<Tagged, "hubId" | "local" | "machine"> & { who: Pick<Who, "kind" | "id">; group?: string | null };
@@ -80,10 +105,10 @@ export interface Placer {
   /** The section an item is in. */
   of: (item: Placeable) => string;
   /** The section an agent or session of this computer's hub (`localHub`) is
-   *  in, by the sidebar alone (for what carries no stamp, such as the
-   *  activity log): a boss in the group it oversees, wherever it sits; null
-   *  for anyone else (you, the main boss, Desk itself). */
-  ofLocal: (localHub: string, who: { kind: string; id: string }) => string | null;
+   *  in, by the sidebar alone (for what carries no stamp): a boss in the
+   *  group it oversees, wherever it sits; the main boss, you and Desk itself
+   *  in the main boss's. */
+  ofLocal: (localHub: string, who: { kind: string; id: string }) => string;
   /** The bossed groups' bosses, by group id. */
   bossed: ReadonlyMap<string, BossView>;
   sealed: ReadonlySet<string>;
@@ -109,9 +134,13 @@ export const placer = (layout: Layout, oversight: Oversight): Placer => {
     const g = groupOf(layout, itemKeyOf(item) as ItemKey);
     return g === UNGROUPED ? null : g;
   };
-  const ofLocal = (localHub: string, who: { kind: string; id: string }): string | null => {
-    if (who.kind !== "agent" && who.kind !== "session") return null;
-    if (who.kind === "agent") for (const [g, b] of bossed) if (b.agent === who.id) return g;
+  const mainBoss = oversight.bosses.find((b) => b.scope.kind === "ungrouped")?.agent ?? null;
+  const ofLocal = (localHub: string, who: { kind: string; id: string }): string => {
+    if (who.kind !== "agent" && who.kind !== "session") return MAIN;
+    if (who.kind === "agent") {
+      if (who.id === mainBoss) return MAIN;
+      for (const [g, b] of bossed) if (b.agent === who.id) return g;
+    }
     const key = itemKeyOf({ hubId: localHub, local: true, who: { kind: who.kind, id: who.id } });
     return ofGroup(groupOf(layout, key));
   };
@@ -128,10 +157,21 @@ const blank = (id: string, kind: SectionKind, group: Section["group"], boss: Bos
   working: [],
   done: [],
   plans: [],
+  desk: [],
   chips: {},
 });
 
-const hasAnything = (s: Section): boolean => s.needs.length + s.working.length + s.done.length + s.plans.length > 0;
+const hasAnything = (s: Section): boolean => s.needs.length + s.working.length + s.done.length + s.plans.length + s.desk.length > 0;
+
+export interface SectionsOptions {
+  /** The start of the person's day (ms): what ended before it isn't done
+   *  today, though the hubs' `done` reaches back 24 hours. */
+  day?: number;
+  /** Desk's own Needs you, Working and Done today, of this computer. */
+  desk?: readonly DeskItem[];
+  /** This computer's hub, whose agents Desk's own items are. */
+  localHub?: string | null;
+}
 
 /** The Floor's sections, from every hub's floor merged (`floor`, as the
  *  header counts it), this computer's hub's word on who oversees what, and
@@ -143,12 +183,19 @@ export const floorSections = (
   floor: Pick<Merged, "needs" | "working" | "done">,
   oversight: Oversight,
   layout: Layout,
-  /** The start of the person's day (ms): what ended before it isn't done
-   *  today, though the hubs' `done` reaches back 24 hours. */
-  day = 0,
+  { day = 0, desk = [], localHub = null }: SectionsOptions = {},
 ): FloorLayout => {
   const place = placer(layout, oversight);
-  if (place.bossed.size === 0) return { kind: "flat" };
+  if (place.bossed.size === 0) {
+    const notes = layout.groups
+      .filter((g) => place.sealed.has(g.id))
+      .map((g) => ({
+        group: { id: g.id, name: g.name },
+        items: [...floor.needs, ...floor.working].filter((i) => place.groupOfItem(i) === g.id),
+      }))
+      .filter((n) => n.items.length > 0);
+    return { kind: "flat", sealed: notes };
+  }
   const main = blank(
     MAIN,
     "main",
@@ -176,6 +223,15 @@ export const floorSections = (
   for (const w of floor.working) into(w).working.push(w);
   for (const w of floor.done) if (w.endedAt && Date.parse(w.endedAt) >= day) into(w).done.push(w);
   for (const p of oversight.plans) (byId.get(place.ofGroup(p.group)) ?? main).plans.push(p);
+  // Desk's own, where no hub's floor has them: in their sidebar section.
+  const onFloor = new Set([...floor.needs, ...floor.working, ...floor.done].map((i) => itemKeyOf(i)));
+  for (const d of desk) {
+    if (onFloor.has(d.key)) continue;
+    const s = (localHub ? byId.get(place.ofLocal(localHub, d.who)) : undefined) ?? main;
+    s.desk.push(d);
+    const g = groupOf(layout, d.key);
+    if (s === main && main.unbossed.some((x) => x.id === g)) main.chips[d.key] = g;
+  }
 
   // A sealed group with nothing on the floor has nothing to show.
   const shown = [...ordered.filter((s) => s.kind !== "sealed" || hasAnything(s)), main];
@@ -185,6 +241,27 @@ export const floorSections = (
   const rest = shown.filter((s) => s.needs.length === 0);
   return { kind: "sections", sections: [...needing, ...rest] };
 };
+
+/** The section an event of this computer's hub belongs to: the group it
+ *  was in when it happened, as the hub stamped it, so a moved session's past
+ *  stays where it was; by the sidebar now only from a hub that doesn't
+ *  stamp. */
+export const sectionOfEvent = (place: Placer, localHub: string, e: Pick<ActivityEvent, "group" | "subject" | "actor">): string =>
+  e.group !== undefined ? place.ofGroup(e.group) : place.ofLocal(localHub, e.subject ?? e.actor);
+
+/** What a section shows as working: the hubs' turns, and Desk's own that
+ *  no hub has a turn for (blocked ones too). */
+export const workingIn = (s: Pick<Section, "working" | "desk">): number => s.working.length + s.desk.filter((d) => d.look !== "done").length;
+
+/** What a section shows as done today. */
+export const doneIn = (s: Pick<Section, "done" | "desk">): number => s.done.length + s.desk.filter((d) => d.look === "done").length;
+
+/** The header's counts, from the sections' own lists, so they agree. */
+export const totals = (sections: readonly Section[]): { working: number; needsYou: number; doneToday: number } => ({
+  working: sections.reduce((n, s) => n + workingIn(s), 0),
+  needsYou: sections.reduce((n, s) => n + s.needs.length, 0),
+  doneToday: sections.reduce((n, s) => n + doneIn(s), 0),
+});
 
 /** What a section is called where it's named in a list (the jump bar, the
  *  Activity's filter): its group's name, else the main boss's. */

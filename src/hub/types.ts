@@ -822,6 +822,9 @@ export interface ActivityEvent {
   ticket?: string | null;
   /** What the hub kept beside the text: a comment's own words. */
   detail?: { comment?: string } | null;
+  /** The sidebar group it was in when it happened, as the hub stamped it
+   *  (null: ungrouped); absent from hubs that don't stamp. */
+  group?: string | null;
 }
 
 export type ActivityFilter = "all" | "needs_you" | "manager";

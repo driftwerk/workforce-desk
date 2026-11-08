@@ -11,7 +11,7 @@ import { useMinute } from "../floor/RightNow";
 import { useWhoName } from "../floor/Row";
 import { useFloor, useLocalFloor, useNeeds, type Answered } from "../floor/store";
 import { usePlacer } from "../floor/FloorSection";
-import { sectionName, type Section } from "../floor/sections";
+import { sectionName, sectionOfEvent, type Section } from "../floor/sections";
 import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
@@ -170,10 +170,7 @@ export function ActivityRail({
   const events = useMemo(
     () =>
       group && localId
-        ? fed.filter((e) => {
-            const party = e.subject ?? e.actor;
-            return place.ofLocal(localId, party) === group || place.ofLocal(localId, e.actor) === group;
-          })
+        ? fed.filter((e) => sectionOfEvent(place, localId, e) === group)
         : fed,
     [fed, group, localId, place],
   );

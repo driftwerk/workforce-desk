@@ -8,7 +8,8 @@ import { sectionDomId, sectionName, type Section } from "./sections";
 const jumpTo = (id: string) => {
   const el = document.getElementById(sectionDomId(id));
   if (!el) return;
-  el.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
   el.querySelector<HTMLElement>('[role="list"]')?.focus({ preventScroll: true });
 };
 

@@ -15,28 +15,46 @@ import { GroupDot } from "../groups/GroupChip";
 import { useLayout } from "../groups/store";
 import type { BossView, PlanProgress } from "../hub/types";
 import { localKey, openLocalDm } from "../overview/people";
+import { useSessionName } from "../groups/names";
+import { Mark } from "../ui/Mark";
 import { openTarget } from "../shell/navigate";
 import { standingText } from "../spend/budgets";
 import { AgentMark } from "../ui/Mark";
+import type { Target } from "../shell/navigate";
 import type { FloorNeed, FloorWork } from "./merge";
 import { sessionKeyOfItem } from "./needs";
 import { NeedRow } from "./NeedRow";
-import { FloorRow, useStaleNote, useWho, useWhoName } from "./Row";
+import { FloorRow, useStaleNote, useWhoName } from "./Row";
 import { useFloor, useMerged } from "./store";
-import { floorSections, oversightOf, placer, sectionDomId, type FloorLayout, type Placer, type Section } from "./sections";
+import {
+  doneIn,
+  floorSections,
+  oversightOf,
+  placer,
+  sectionDomId,
+  sectionName,
+  workingIn,
+  type DeskItem,
+  type FloorLayout,
+  type Placer,
+  type Section,
+  type SealedNote,
+} from "./sections";
 import { besideOf } from "./target";
 import { clock, durationOf } from "./time";
 
 /** The Floor's sections now, from every hub's floor (as the header counts
  *  it), this computer's hub's word on who oversees what, and the sidebar. */
-export const useSections = (): FloorLayout => {
+export const useSections = (desk: readonly DeskItem[] = NO_DESK): FloorLayout => {
   const merged = useMerged();
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
   const local = useFloor((s) => (localId ? s.hubs[localId]?.floor : null));
   const layout = useLayout();
   const day = useFloor((s) => s.day);
-  return useMemo(() => floorSections(merged, oversightOf(local), layout, day), [merged, local, layout, day]);
+  return useMemo(() => floorSections(merged, oversightOf(local), layout, { day, desk, localHub: localId }), [merged, local, layout, day, desk, localId]);
 };
+
+const NO_DESK: readonly DeskItem[] = [];
 
 /** How what's on the floor is placed among the sections now. */
 export const usePlacer = (): Placer => {
@@ -156,10 +174,10 @@ function Whose({ work }: { work: FloorWork }) {
 /** Something running in a section: who, what it's doing now, its engine, its
  *  ticket and whose it is. It opens beside the Floor. */
 function WorkTile({ work, now, chip }: { work: FloorWork; now: number; chip: { id: string; name: string } | null }) {
-  const who = useWho()(work);
+  // One Desk can't put to anyone still shows, by what the hub calls it, so
+  // what's drawn and what's counted agree.
   const name = useWhoName(work);
   const stale = useStaleNote(work);
-  if (!who) return null;
   const target = besideOf(work);
   const key = sessionKeyOfItem(work);
   const look = work.background ? "background" : "working";
@@ -197,14 +215,14 @@ function WorkTile({ work, now, chip }: { work: FloorWork; now: number; chip: { i
 }
 
 /** "Done today · 5", opening to what finished. */
-function DoneToday({ done }: { done: readonly FloorWork[] }) {
+function DoneToday({ done, desk }: { done: readonly FloorWork[]; desk: readonly DeskItem[] }) {
   const [open, setOpen] = useState(false);
-  if (done.length === 0) return null;
+  if (done.length + desk.length === 0) return null;
   return (
     <div className="fsec-done">
       <button type="button" className="fsec-done-line" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="dot dot-done" aria-hidden="true" />
-        Done today · {done.length}
+        Done today · {done.length + desk.length}
       </button>
       {open && (
         <div className="fsec-done-list">
@@ -213,8 +231,100 @@ function DoneToday({ done }: { done: readonly FloorWork[] }) {
               {w.gist?.now ?? w.what}
             </FloorRow>
           ))}
+          {desk.length > 0 && (
+            <div className="fsec-tiles">
+              {desk.map((d) => (
+                <DeskTile key={d.key} item={d} chip={null} />
+              ))}
+            </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+const DESK_STATE: Record<DeskItem["look"], { text: string; tone: string }> = {
+  blocked: { text: "Blocked, nothing asked", tone: "blocked" },
+  working: { text: "working", tone: "working" },
+  done: { text: "done", tone: "done" },
+};
+
+/** One of this computer's sessions or agents that Desk shows needing you,
+ *  working or done, with no turn on any hub's floor: drawn in its section
+ *  all the same, saying so when it is blocked with nothing asked. */
+export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; name: string } | null }) {
+  const named = useSessionName(item.who.kind === "session" ? item.who.id : null, item.name);
+  const name = item.who.kind === "session" ? named : item.name;
+  const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
+  const charge = useCharge(item.who.kind === "session" ? item.who.id : null);
+  const state = DESK_STATE[item.look];
+  const target: Target | null =
+    item.who.kind === "session" ? { kind: "session", sessionId: item.who.id } : localId ? { kind: "agent", key: `${localId}/${item.who.id}` } : null;
+  const head = (
+    <>
+      {item.who.kind === "agent" && localId ? (
+        <AgentMark agent={`${localId}/${item.who.id}`} name={name} state={item.look} />
+      ) : (
+        <Mark name={name} engine={item.engine ?? undefined} state={item.look} />
+      )}
+      <span className={item.who.kind === "session" ? "mono fsec-tile-title" : "fsec-tile-title"}>{name}</span>
+    </>
+  );
+  return (
+    <article className={`fsec-tile fsec-tile-${item.look}`} aria-label={name}>
+      {target ? (
+        <button type="button" className="fsec-tile-head" onClick={() => openTarget(target, { beside: true })}>
+          {head}
+        </button>
+      ) : (
+        <div className="fsec-tile-head">{head}</div>
+      )}
+      <span className={`small state-${state.tone}`}>{state.text}</span>
+      {item.text && <p className="fsec-tile-gist">{item.text}</p>}
+      <div className="fsec-tile-foot">
+        {item.engine && item.who.kind === "session" && <span className="chip">{ENGINE_TITLE[item.engine]}</span>}
+        {item.who.kind === "session" && <SessionTicketChip session={item.who.id} />}
+        {chip && (
+          <span className="chip chip-group" title={`In ${chip.name}`}>
+            <GroupDot id={chip.id} />
+            {chip.name}
+          </span>
+        )}
+        {item.who.kind === "session" &&
+          (charge && !charge.releasedAt ? <ChargeBadge charge={charge} short /> : <span className="charge-badge charge-you">yours</span>)}
+      </div>
+    </article>
+  );
+}
+
+/** One of a sealed group's items, by name. */
+function SealedItem({ item }: { item: FloorNeed | FloorWork }) {
+  const name = useWhoName(item);
+  return <b className={item.who.kind === "session" ? "mono" : undefined}>{name}</b>;
+}
+
+/** With no bossed group the Floor is flat, but a sealed group's items still
+ *  reach only you: said, so you can give the group a boss again. */
+export function SealedNotes({ notes }: { notes: readonly SealedNote[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <div className="fsec-sealed-notes">
+      {notes.map((n) => (
+        <p key={n.group.id} className="fsec-sealed-note" role="note">
+          <GroupDot id={n.group.id} />
+          <span>
+            No one oversees {n.group.name} now ·{" "}
+            {n.items.map((i, k) => (
+              <span key={i.key}>
+                {k > 0 && ", "}
+                <SealedItem item={i} />
+              </span>
+            ))}{" "}
+            {n.items.length === 1 ? "is" : "are"} yours alone. Give {n.group.name} a boss from its menu in the sidebar.
+          </span>
+        </p>
+      ))}
     </div>
   );
 }
@@ -243,7 +353,7 @@ export function FloorSection({ section, now }: { section: Section; now: number }
     <section
       id={sectionDomId(section.id)}
       className={`fsec ${section.needs.length ? "fsec-needs" : ""} ${folded ? "fsec-folded" : ""}`}
-      aria-label={section.kind === "main" ? `${title}, ${boss?.name ?? "no one"} runs it` : title}
+      aria-label={section.kind === "main" && boss ? `${sectionName(section)}, everything else` : title}
     >
       <div className="fsec-head">
         {boss && bossKey ? <AgentMark agent={bossKey} name={boss.name} /> : section.group && <GroupDot id={section.group.id} />}
@@ -285,18 +395,23 @@ export function FloorSection({ section, now }: { section: Section; now: number }
                 </div>
               </div>
             )}
-            {section.working.length > 0 && (
+            {workingIn(section) > 0 && (
               <div>
-                <h3 className="ov-label state-working">Working · {section.working.length}</h3>
+                <h3 className="ov-label state-working">Working · {workingIn(section)}</h3>
                 <div className="fsec-tiles">
                   {section.working.map((w) => (
                     <WorkTile key={w.key} work={w} now={now} chip={chipOf(w.key)} />
                   ))}
+                  {section.desk
+                    .filter((d) => d.look !== "done")
+                    .map((d) => (
+                      <DeskTile key={d.key} item={d} chip={chipOf(d.key)} />
+                    ))}
                 </div>
               </div>
             )}
-            <DoneToday done={section.done} />
-            {section.needs.length + section.plans.length + section.working.length + section.done.length === 0 && (
+            <DoneToday done={section.done} desk={section.desk.filter((d) => d.look === "done")} />
+            {section.needs.length + section.plans.length + workingIn(section) + doneIn(section) === 0 && (
               <p className="faint small">Nothing here needs you, and nothing is running.</p>
             )}
           </>

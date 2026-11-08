@@ -14,7 +14,7 @@ import { useHubLayout } from "../groups/hubLayout";
 import { EMPTY_LAYOUT, type Layout } from "../groups/model";
 import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
-import type { BossView, DeskEvent, FloorView, Overview, Session } from "../hub/types";
+import type { ActivityEvent, BossView, DeskEvent, FloorView, Overview, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { useUi } from "../shell/ui";
@@ -135,6 +135,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 class Transport implements DeskTransport {
   events: Socket | null = null;
   layout: Layout = structuredClone(layout);
+  activity: ActivityEvent[] = [];
   sessions = [live("s-web", "acme-web"), live("s-dot", "dotfiles"), live("s-old", "old-site"), live("s-idx", "globex-indexer")];
   fetch = async (method: string, path: string): Promise<Response> => {
     const route = `${method} ${path.split("?")[0]}`;
@@ -143,7 +144,7 @@ class Transport implements DeskTransport {
     if (route === "GET /api/desk/sessions") return json(this.sessions);
     if (route === "GET /api/desk/layout") return json(this.layout);
     if (route === "GET /api/desk/overview") return json(overview);
-    if (route === "GET /api/desk/activity") return json({ events: [], more: false });
+    if (route === "GET /api/desk/activity") return json({ events: this.activity, more: false });
     if (route === "GET /api/desk/suggestions") return json({ suggestions: [] });
     return new Response("Not Found", { status: 404 });
   };
@@ -230,9 +231,9 @@ describe("the Floor by group, across hubs", () => {
     // Needs: b's Scout 40 min (Acme, by the sidebar), Acme's push 30, dotfiles
     // 20 (main), devbox 15 (Acme), Ada 10 (main), Old work 4 (sealed). Globex
     // has none: after them, in sidebar order.
-    expect(sections().map((s) => s.getAttribute("aria-label"))).toEqual(["Acme", "Everything else, Desk runs it", "Old work", "Globex"]);
+    expect(sections().map((s) => s.getAttribute("aria-label"))).toEqual(["Acme", "Desk, everything else", "Old work", "Globex"]);
     expect(needsIn("Acme")).toEqual(["Scout", "acme-web", "acme-worker"]);
-    expect(needsIn("Everything else, Desk runs it")).toEqual(["dotfiles", "Ada"]);
+    expect(needsIn("Desk, everything else")).toEqual(["dotfiles", "Ada"]);
     expect(needsIn("Old work")).toEqual(["old-site"]);
     expect(within(section("Globex")).queryByRole("group", { name: /^Needs you/ })).toBeNull();
   });
@@ -322,5 +323,42 @@ describe("the Floor by group, across hubs", () => {
     expect(needsIn("Globex")).toEqual(["acme-web"]);
     expect(within(section("Globex")).getByRole("article", { name: "acme-web" })).toBeTruthy();
     expect(within(section("Acme")).queryByRole("article", { name: "acme-web" })).toBeNull();
+  });
+
+  it("keeps a session Desk shows blocked, with nothing asked on any hub, in its group, counted there and in the header", async () => {
+    transport.sessions = [...transport.sessions, live("s-api", "acme-api", { state: "blocked" })];
+    transport.layout = { ...transport.layout, groups: transport.layout.groups.map((g) => (g.id === "acme" ? { ...g, items: [...g.items, "session:s-api"] } : g)) };
+    await floor();
+    const tile = within(section("Acme")).getByRole("article", { name: "acme-api" });
+    expect(within(tile).getByText("Blocked, nothing asked")).toBeTruthy();
+    expect(within(section("Acme")).getByText("Working · 2")).toBeTruthy();
+    // The header counts what the sections show.
+    expect(counts()).toBe("3 working · 6 need you · 1 done today");
+    const shown = sections().reduce((n, s) => n + Number(/Working · (\d+)/.exec(s.textContent ?? "")?.[1] ?? 0), 0);
+    expect(shown).toBe(3);
+  });
+
+  it("filters Activity by the group each event happened in, so a moved session's past stays there", async () => {
+    const ev = (id: string, group: string | null | undefined, min: number): ActivityEvent => ({
+      id,
+      at: at(min),
+      kind: "finished",
+      actor: { kind: "session", id: "s-web", name: "acme-web" },
+      subject: { kind: "session", id: "s-web", name: "acme-web" },
+      text: `finished ${id}`,
+      ...(group === undefined ? {} : { group }),
+    });
+    // acme-web is in Acme now; it ran in Globex before it moved.
+    transport.activity = [ev("e3", "acme", 1), ev("e2", "globex", 50), ev("e1", null, 90)];
+    await floor();
+    const groups = within(rail()).getByRole("radiogroup", { name: "Group" });
+    const shown = () => within(rail()).queryAllByText(/^finished e\d$/).map((e) => e.textContent);
+    expect(shown()).toEqual(["finished e3", "finished e2", "finished e1"]);
+    fireEvent.click(within(groups).getByRole("radio", { name: "Acme" }));
+    expect(shown()).toEqual(["finished e3"]);
+    fireEvent.click(within(groups).getByRole("radio", { name: "Globex" }));
+    expect(shown()).toEqual(["finished e2"]);
+    fireEvent.click(within(groups).getByRole("radio", { name: "Desk" }));
+    expect(shown()).toEqual(["finished e1"]);
   });
 });

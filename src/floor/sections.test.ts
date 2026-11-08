@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Layout } from "../groups/model";
 import type { BossView, Need, PlanProgress, Work } from "../hub/types";
 import type { FloorNeed, FloorWork } from "./merge";
-import { MAIN, floorSections, oversightOf, placer, sealedSection, sectionDomId, sectionName, type Oversight, type Section } from "./sections";
+import { MAIN, floorSections, oversightOf, placer, sealedSection, sectionDomId, sectionName, sectionOfEvent, totals, type DeskItem, type Oversight, type Section } from "./sections";
 import { agent, approval, at, need, session, view, work } from "./testing";
 
 const layout: Layout = {
@@ -68,12 +68,12 @@ const ids = (items: readonly { who: { id: string } }[]) => items.map((i) => i.wh
 describe("the Floor by group", () => {
   it("is flat with no bossed group, though the hub names the main boss and stamps a group with no boss", () => {
     const floor = { needs: [fn(need("q1", agent("scout"), { group: "personal" }))], working: [fw(work(session("s-dot"), { group: "personal" }))], done: [] };
-    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS], sealed: [] }), layout)).toEqual({ kind: "flat" });
+    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS], sealed: [] }), layout)).toEqual({ kind: "flat", sealed: [] });
     // Only a sealed group isn't a bossed one either.
-    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS] }), layout)).toEqual({ kind: "flat" });
+    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS] }), layout)).toEqual({ kind: "flat", sealed: [] });
     // Nor is a boss of a group the sidebar no longer has.
-    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS, boss("zed", "Zed", "gone")] }), layout)).toEqual({ kind: "flat" });
-    expect(floorSections(floor, oversightOf(view()), layout)).toEqual({ kind: "flat" });
+    expect(floorSections(floor, oversight({ bosses: [MAIN_BOSS, boss("zed", "Zed", "gone")] }), layout)).toEqual({ kind: "flat", sealed: [] });
+    expect(floorSections(floor, oversightOf(view()), layout)).toEqual({ kind: "flat", sealed: [] });
   });
 
   it("places this computer's hub's items by its stamp: where they are now, a moved one too", () => {
@@ -199,7 +199,7 @@ describe("done today", () => {
   it("counts only what ended since the day began, though the hubs send the last 24 hours", () => {
     const today = fw(work(session("s-idx"), { group: "globex", since: at(90), endedAt: at(30), outcome: "finished" }));
     const yesterday = fw(work(session("s-web"), { group: "globex", since: at(900), endedAt: at(800), outcome: "finished" }));
-    const out = floorSections({ needs: [], working: [], done: [today, yesterday] }, oversight(), layout, Date.parse(at(60)));
+    const out = floorSections({ needs: [], working: [], done: [today, yesterday] }, oversight(), layout, { day: Date.parse(at(60)) });
     if (out.kind !== "sections") throw new Error("flat");
     expect(ids(byId(out.sections, "globex").done)).toEqual(["s-idx"]);
   });
@@ -212,7 +212,88 @@ describe("placing what carries no stamp", () => {
     expect(p.ofLocal("local", { kind: "session", id: "s-idx" })).toBe("globex");
     expect(p.ofLocal("local", { kind: "session", id: "s-old" })).toBe(sealedSection("old"));
     expect(p.ofLocal("local", { kind: "session", id: "s-blog" })).toBe(MAIN);
-    expect(p.ofLocal("local", { kind: "you", id: "me" })).toBeNull();
-    expect(p.ofLocal("local", { kind: "manager", id: "desk" })).toBeNull();
+    expect(p.ofLocal("local", { kind: "you", id: "me" })).toBe(MAIN);
+    expect(p.ofLocal("local", { kind: "manager", id: "desk" })).toBe(MAIN);
+  });
+});
+
+const desk = (kind: "agent" | "session", id: string, look: DeskItem["look"]): DeskItem => ({
+  key: kind === "session" ? `session:${id}` : `agent:local/${id}`,
+  who: { kind, id },
+  name: id,
+  engine: kind === "session" ? "claude" : null,
+  text: null,
+  look,
+});
+
+describe("Desk's own sessions and agents, with no turn on any hub's floor", () => {
+  it("keeps each in its own sidebar section, a blocked one too, and leaves out those the floor has", () => {
+    const out = floorSections(
+      { needs: [fn(need("q-dot", session("s-dot"), { group: "personal" }))], working: [fw(work(session("s-idx"), { group: "globex", boss: "mia" }))], done: [] },
+      oversight(),
+      layout,
+      {
+        localHub: "local",
+        desk: [
+          desk("session", "s-web", "blocked"),
+          desk("session", "s-idx", "working"),
+          desk("session", "s-dot", "blocked"),
+          desk("session", "s-blog", "working"),
+          desk("agent", "mia", "working"),
+          desk("session", "s-old", "done"),
+        ],
+      },
+    );
+    if (out.kind !== "sections") throw new Error("flat");
+    const deskIn = (id: string) => byId(out.sections, id).desk.map((d) => `${d.who.id}:${d.look}`);
+    expect(deskIn("acme")).toEqual(["s-web:blocked"]);
+    // Mia is in her group, though her row sits elsewhere; s-idx is on the floor already.
+    expect(deskIn("globex")).toEqual(["mia:working"]);
+    expect(deskIn(MAIN)).toEqual(["s-blog:working"]);
+    expect(deskIn(sealedSection("old"))).toEqual(["s-old:done"]);
+    // They count where they show: the header's totals are the sections' own.
+    expect(totals(out.sections)).toEqual({ working: 4, needsYou: 1, doneToday: 1 });
+  });
+
+  it("adds up to the header from the sections' own lists", () => {
+    const all = sections({
+      needs: [fn(need("a", session("s-web"), { group: "acme" })), fn(need("b", session("s-blog")))],
+      working: [fw(work(session("s-web"), { group: "acme" })), fw(work(session("s-idx"), { group: "globex" }))],
+      done: [fw(work(session("s-blog"), { since: at(90), endedAt: at(30), outcome: "finished" }))],
+    });
+    expect(totals(all)).toEqual({ working: 2, needsYou: 2, doneToday: 1 });
+  });
+});
+
+describe("a sealed group while no group has a boss", () => {
+  it("stays flat, and says which items no one oversees", () => {
+    const old = fn(need("q-old", session("s-old"), { group: "old" }));
+    const out = floorSections({ needs: [old, fn(need("q-blog", session("s-blog")))], working: [], done: [] }, oversight({ bosses: [MAIN_BOSS] }), layout);
+    expect(out).toEqual({ kind: "flat", sealed: [{ group: { id: "old", name: "Old work" }, items: [old] }] });
+  });
+});
+
+describe("the main boss and you in Activity", () => {
+  it("are the main boss's section, wherever the main boss's row sits", () => {
+    const p = placer({ ...layout, groups: layout.groups.map((g) => (g.id === "acme" ? { ...g, items: [...g.items, "agent:local/desk"] } : g)) }, oversight());
+    expect(p.ofLocal("local", { kind: "agent", id: "desk" })).toBe(MAIN);
+    expect(p.ofLocal("local", { kind: "manager", id: "desk" })).toBe(MAIN);
+    expect(p.ofLocal("local", { kind: "you", id: "sam" })).toBe(MAIN);
+  });
+});
+
+describe("an Activity event's section", () => {
+  const p = placer(layout, oversight());
+  const ev = (over: Partial<Parameters<typeof sectionOfEvent>[2]>) => ({ actor: { kind: "session" as const, id: "s-web", name: "acme-web" }, subject: null, ...over });
+  it("is the group the hub stamped it with: a moved session's past stays where it happened", () => {
+    // s-web sits in Acme now; this happened while it was in Globex.
+    expect(sectionOfEvent(p, "local", ev({ group: "globex" }))).toBe("globex");
+    expect(sectionOfEvent(p, "local", ev({ group: null }))).toBe(MAIN);
+    expect(sectionOfEvent(p, "local", ev({ group: "old" }))).toBe(sealedSection("old"));
+  });
+  it("is by the sidebar now only from a hub that stamps none, and by its subject alone", () => {
+    expect(sectionOfEvent(p, "local", ev({}))).toBe("acme");
+    expect(sectionOfEvent(p, "local", ev({ actor: { kind: "manager", id: "desk", name: "Desk" }, subject: { kind: "session", id: "s-idx", name: "i" } }))).toBe("globex");
+    expect(sectionOfEvent(p, "local", ev({ actor: { kind: "you", id: "sam", name: "You" } }))).toBe(MAIN);
   });
 });

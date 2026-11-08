@@ -636,6 +636,28 @@ button.fsec-tile-head {
 .activity-groups {
   flex-wrap: wrap;
 }
+.fsec-tile-blocked {
+  border-color: color-mix(in srgb, var(--blocked) 40%, var(--border));
+}
+.fsec-sealed-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fsec-sealed-note {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--blocked) 30%, var(--border));
+  background: var(--blocked-soft);
+  font-size: 13px;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* ── The overseer's DM ──────────────────────────────────────────────────── */
 
