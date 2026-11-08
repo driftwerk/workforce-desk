@@ -8,6 +8,7 @@ import { homeShort } from "../ui/paths";
 import { plainError } from "../ui/plainError";
 import {
   awaiting,
+  changesBetween,
   draftOf,
   liveCard,
   liveTickets,
@@ -26,6 +27,7 @@ import {
   waveTitle,
   withoutTicket,
   working,
+  type PlanChanges,
 } from "./plan";
 import { usePlans } from "./planStore";
 
@@ -168,7 +170,17 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   const now = useMemo(() => progress(rules), [rules]);
   const stand = standing(plan);
   const waitsOnYou = awaiting(plan);
-  const change = waitsOnYou && plan.approvedRevision !== null ? revisionOf(detail, plan.revision) : undefined;
+  const change = waitsOnYou && plan.approvedRevision !== null ? revisionOf(detail, detail.revision) : undefined;
+  // Everything approving the change would approve, each part in full.
+  const approvedSnapshot = plan.approvedRevision !== null ? revisionOf(detail, plan.approvedRevision)?.snapshot : undefined;
+  const changes = change && approvedSnapshot ? changesBetween(approvedSnapshot, change.snapshot) : null;
+  // A newer revision was announced than the one read: nothing is decided on
+  // the older one shown until it is read.
+  const stale = plan.revision > detail.revision;
+  // The person has seen this revision whole: the Floor may approve it now.
+  useEffect(() => {
+    if (!stale) usePlans.getState().saw(plan.id, detail.revision);
+  }, [stale, plan.id, detail.revision]);
   const ended = plan.state === "done" || plan.state === "dropped";
   // The newest revision's tickets: an edit is made from them, so a change
   // the boss proposes is never lost by one.
@@ -223,7 +235,9 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
         <div className="pc-row">
           <h4 className="pc-title">{plan.goal}</h4>
           <span className={`chip pc-chip-${stand.look}`}>{plan.state === "paused" && plan.paused ? `Paused: ${pausedWhy(plan)}` : stand.text}</span>
-          <span className="chip">rev {plan.revision}</span>
+          <span className="chip" title={stale ? `Revision ${plan.revision} is being read` : undefined}>
+            rev {detail.revision}
+          </span>
         </div>
         <span className="muted small">
           {[boardName ? `Board: ${boardName}` : null, `${boss}'s plan`].filter(Boolean).join(" · ")}
@@ -243,9 +257,15 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
           <span>
             <b>{boss}</b> wants to change the plan: {change.summary}
           </span>
+          {changes && <ChangeDetails changes={changes} />}
           <span className="small muted">
             A change of scope, so it needs you. The plan keeps running on revision {plan.approvedRevision} meanwhile.
           </span>
+        </div>
+      )}
+      {stale && (
+        <div className="pc-notice-line" role="status">
+          <span>Revision {plan.revision} has come: reading it before anything is approved.</span>
         </div>
       )}
 
@@ -335,14 +355,15 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                 <span className="small muted">Its tickets not done are dropped from the board.</span>
               )}
               <span className="pc-actions">
-                <button type="button" className="btn" onClick={() => setDropping(null)} disabled={busy}>
+                <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && setDropping(null)}>
                   Keep it
                 </button>
                 <button
                   type="button"
                   className="btn btn-danger"
-                  onClick={() => dropping !== "ask" && void drop(dropping)}
-                  disabled={busy || dropping === "ask"}
+                  onClick={() => !busy && dropping !== "ask" && void drop(dropping)}
+                  disabled={dropping === "ask"}
+                  aria-disabled={busy || undefined}
                 >
                   {asking === "drop" ? "Dropping…" : "Drop the plan"}
                 </button>
@@ -361,47 +382,51 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                     Paused: {pausedWhy(plan)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
                   </span>
                 )}
-                <button type="button" className="btn" disabled={busy} onClick={() => setDropping(sessionsRun ? "ask" : "stop")}>
+                <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && setDropping(sessionsRun ? "ask" : "stop")}>
                   Drop
                 </button>
                 {change && <span className="pc-note">Approve or turn down {boss}'s change first, then edit the plan.</span>}
                 <button
                   type="button"
                   className="btn"
-                  disabled={busy || !!change}
+                  disabled={!!change}
+                  aria-disabled={busy || undefined}
                   title={change ? `Approve or turn down ${boss}'s change first` : undefined}
-                  onClick={() => setEditing(draft())}
+                  onClick={() => !busy && setEditing(draft())}
                 >
                   Edit
                 </button>
                 {plan.state === "running" && (
-                  <button type="button" className="btn" disabled={busy} onClick={() => void run("pause", () => store.pause(plan.id))}>
+                  <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && void run("pause", () => store.pause(plan.id))}>
                     {asking === "pause" ? "Pausing…" : "Pause"}
                   </button>
                 )}
                 {plan.state === "paused" && resumable(plan.paused) && (
-                  <button type="button" className="btn" disabled={busy} onClick={() => void run("resume", () => store.resume(plan.id))}>
+                  <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && void run("resume", () => store.resume(plan.id))}>
                     {asking === "resume" ? "Resuming…" : "Resume"}
                   </button>
                 )}
                 {failing && !waitsOnYou && (
-                  <button type="button" className="btn btn-signal" disabled={busy} onClick={goOn}>
+                  <button type="button" className="btn btn-signal" aria-disabled={busy || undefined} onClick={() => !busy && goOn()}>
                     {asking === "continue" ? "Going on…" : "Continue"}
                   </button>
                 )}
                 {change && (
-                  <button type="button" className="btn" disabled={busy} onClick={turnDown}>
+                  <button type="button" className="btn" aria-disabled={busy || stale || undefined} onClick={() => !busy && !stale && turnDown()}>
                     {asking === "turnDown" ? "Turning it down…" : "Turn down"}
                   </button>
                 )}
                 {waitsOnYou && (
-                  <button type="button" className="btn btn-signal" disabled={busy} onClick={approve}>
+                  <button type="button" className="btn btn-signal" aria-disabled={busy || stale || undefined} onClick={() => !busy && !stale && approve()}>
                     {asking === "approve" ? "Approving…" : plan.approvedRevision === null ? "Approve and run" : "Approve the change"}
                   </button>
                 )}
               </div>
             )
           )}
+          <span className="sr-only" role="status">
+            {asking ? BUSY[asking] : ""}
+          </span>
           {problem && (
             <span className="small state-blocked" role="alert">
               {problem}
@@ -410,6 +435,79 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
         </div>
       )}
     </article>
+  );
+}
+
+/** What the card says while the hub answers, for those who can't see the
+ *  button's own word change. */
+const BUSY: Record<Exclude<Asking, null>, string> = {
+  approve: "Approving…",
+  turnDown: "Turning the change down…",
+  continue: "Going on…",
+  pause: "Pausing…",
+  resume: "Resuming…",
+  drop: "Dropping…",
+  save: "Saving…",
+  engine: "Saving the engine…",
+};
+
+/** A change of scope in full: what approving it would approve. */
+function ChangeDetails({ changes }: { changes: PlanChanges }) {
+  const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${homeShort(t.folder)}`;
+  return (
+    <ul className="pc-changes" aria-label="What approving it changes">
+      {changes.goal && (
+        <li>
+          <span>
+            Goal: “{changes.goal.from}” → “{changes.goal.to}”
+          </span>
+        </li>
+      )}
+      {changes.parallel && (
+        <li>
+          <span>
+            At once: {changes.parallel.from ?? "the boss's limit"} → {changes.parallel.to ?? "the boss's limit"}
+          </span>
+        </li>
+      )}
+      {changes.added.map((t) => (
+        <li key={t.id}>
+          <span>
+            <b>Adds</b> {t.title} · <span className="mono">{where(t)}</span>
+          </span>
+          {t.body.trim() && <span className="pc-body">{t.body}</span>}
+        </li>
+      ))}
+      {changes.removed.map((t) => (
+        <li key={t.id}>
+          <span>
+            <b>Drops</b> {t.title}
+          </span>
+        </li>
+      ))}
+      {changes.changed.map((c) => (
+        <li key={c.ticket.id}>
+          <span>
+            <b>Changes</b> {c.title ? `“${c.title.from}” → “${c.title.to}”` : c.ticket.title}
+          </span>
+          {c.engine && (
+            <span className="small">
+              Engine: {ENGINE_TITLE[c.engine.from]} → {ENGINE_TITLE[c.engine.to]}
+            </span>
+          )}
+          {c.folder && (
+            <span className="small mono">
+              Folder: {homeShort(c.folder.from)} → {homeShort(c.folder.to)}
+            </span>
+          )}
+          {c.body && (
+            <span className="pc-body">
+              <span className="small muted">What it starts with now:</span> {c.body.to || "(nothing)"}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -456,6 +554,12 @@ function TicketRow({
         {t.starting && <span className="state-working">· starting</span>}
         {state && <span className={state.look}>· {state.word}</span>}
       </span>
+      {t.body.trim() && (
+        <details className="pc-tk-body">
+          <summary className="small muted">What it starts with</summary>
+          <span className="pc-body">{t.body}</span>
+        </details>
+      )}
     </div>
   );
 }
@@ -484,6 +588,8 @@ function PlanEditor({
   const put = (i: number, t: Partial<DraftTicket>) => onChange(draft.map((x, j) => (j === i ? { ...x, ...t } : x)));
   const firstEngine = draft.find((t) => t.engine)?.engine ?? "claude";
   const firstFolder = draft[draft.length - 1]?.folder ?? "";
+  // A ticket added starts in the folder of the one before it.
+  const [defaultFolder, setDefault] = useState("");
   const ok = draft.length > 0 && draft.every((t) => t.title.trim() && t.folder.trim());
   const label = (i: number) => `ticket ${i + 1}`;
   return (
@@ -509,7 +615,12 @@ function PlanEditor({
                 </button>
               </span>
               {!t.id && (
-                <input className="pc-edit-folder mono" aria-label={`Folder of ${label(i)}`} value={t.folder} placeholder="/path/to/repo" onChange={(e) => put(i, { folder: e.target.value })} required />
+                <>
+                  <input className="pc-edit-folder mono" aria-label={`Folder of ${label(i)}`} value={t.folder} placeholder="/path/to/repo" onChange={(e) => put(i, { folder: e.target.value })} required />
+                  {t.folder && t.folder === defaultFolder && (
+                    <span className="pc-edit-default">The folder of the ticket above, as a start: change it if this one works elsewhere.</span>
+                  )}
+                </>
               )}
               {draft.length > 1 && (
                 <span className="pc-edit-needs" role="group" aria-label={`What ${label(i)} needs first`}>
@@ -535,7 +646,10 @@ function PlanEditor({
         })}
       </ol>
       <span className="pc-actions">
-        <button type="button" className="btn btn-ghost" onClick={() => onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, needs: [] }])}>
+        <button type="button" className="btn btn-ghost" onClick={() => {
+            setDefault(firstFolder);
+            onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, needs: [] }]);
+          }}>
           Add a ticket
         </button>
         <span className="pc-note" />

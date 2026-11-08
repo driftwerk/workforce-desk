@@ -28,6 +28,11 @@ interface PlanState {
   /** The revisions each plan's cards in the DMs were posted for, by id:
    *  the newest is shown whole. */
   cards: Record<string, number[]>;
+  /** The newest revision of each plan the person has seen whole on its
+   *  card in this window, by id: the Floor approves no other. */
+  seen: Record<string, number>;
+  /** The person sees revision `revision` of plan `id` whole. */
+  saw: (id: string, revision: number) => void;
   load: () => Promise<void>;
   /** Reads plan `id` in full. */
   fetch: (id: string) => Promise<void>;
@@ -108,6 +113,10 @@ export const usePlans = create<PlanState>((set, get) => {
     unread: {},
     refusals: {},
     cards: {},
+    seen: {},
+    saw: (id, revision) => {
+      if ((get().seen[id] ?? 0) < revision) set((s) => ({ seen: { ...s.seen, [id]: revision } }));
+    },
     load: async () => {
       const hub = hubNow();
       if (!hub) return;
@@ -185,7 +194,7 @@ deskListeners.add(onEvent);
 
 // Another hub (or none): what the last one said is no longer so.
 useDesk.subscribe((now, before) => {
-  if (now.hub !== before.hub) usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {} });
+  if (now.hub !== before.hub) usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, seen: {} });
 });
 
 /** The plans on board `board` that aren't dropped, newest first. */

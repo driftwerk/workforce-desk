@@ -104,8 +104,9 @@ export class PlanHub {
     this.plan.revisions = [this.revisionOf(1, SARAH, "scope", `Proposed ${tickets.length} tickets for “${this.plan.goal}”`)];
   }
 
-  private revisionOf(n: number, by: BossPlanRevision["by"], change: "minor" | "scope", summary: string, tickets = this.plan.tickets): BossPlanRevision {
-    return { plan: PLAN, revision: n, at: tick(), by, change, summary, snapshot: { goal: this.plan.goal, tickets: tickets.map(planned) } };
+  private revisionOf(n: number, by: BossPlanRevision["by"], change: "minor" | "scope", summary: string, tickets = this.plan.tickets, parallel?: number): BossPlanRevision {
+    const snapshot = { goal: this.plan.goal, tickets: tickets.map(planned), ...(parallel !== undefined ? { parallel } : {}) };
+    return { plan: PLAN, revision: n, at: tick(), by, change, summary, snapshot };
   }
 
   summary(): BossPlan {
@@ -176,6 +177,14 @@ export class PlanHub {
     if (p.approvedRevision === null) p.tickets = next;
     p.revision += 1;
     p.revisions.push(this.revisionOf(p.revision, SARAH, "scope", `Added “${title}”`, next));
+  }
+
+  /** Sarah proposes `next` (the plan's tickets as she would have them) and
+   *  `parallel`, as a change of scope that waits on the person. */
+  bossProposes(summary: string, next: (tickets: BossPlanTicket[]) => BossPlanTicket[], parallel?: number) {
+    const p = this.plan;
+    p.revision += 1;
+    p.revisions.push(this.revisionOf(p.revision, SARAH, "scope", summary, next(p.tickets.map((t) => ({ ...t }))), parallel));
   }
 
   /** The person turns down the boss's waiting change: the plan runs on as

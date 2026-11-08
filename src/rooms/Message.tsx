@@ -8,6 +8,7 @@ import { DESK_RICH_HOST } from "../shell/richHost";
 import type { Relayed } from "../chat/relayed";
 import type { ChatMessage, DeliveryKind } from "../chat/types";
 import { DeskActions } from "../overview/DeskActions";
+import { isCardText } from "../crew/plan";
 import { AgentMark, Mark, YouMark } from "../ui/Mark";
 import type { Step } from "../hub/types";
 import { stepsOf } from "./progress";
@@ -137,6 +138,7 @@ export const Message = memo(function Message({
   const you = message.role === "user" && !fromOverseer;
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
   const badge = message.delivery && DELIVERY_BADGES[message.delivery];
+  const cardText = message.role === "assistant" && !!message.desk?.plan && isCardText(message.content);
   return (
     <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`} data-message-id={message.id}>
       {you ? <YouMark hub={youOn} /> : fromOverseer || !authorKey ? <Mark name={fromOverseer ? relayed.overseer : author} /> : <AgentMark agent={authorKey} name={author} />}
@@ -166,8 +168,9 @@ export const Message = memo(function Message({
             ))}
           </span>
         )}
-        {/* A plan card says all its message does, and shows it while it can't. */}
-        {!message.content.trim() || (message.role === "assistant" && message.desk?.plan) ? null : message.status === "error" && message.superseded ? (
+        {/* A plan card says all its own header does, and shows it while it can't;
+            anything else the boss said with it (its closing summary) stays. */}
+        {!message.content.trim() || cardText ? null : message.status === "error" && message.superseded ? (
           <details className="msg-steps">
             <summary className="small">Didn’t finish · answered below</summary>
             <TurnError raw={message.content} />
@@ -196,7 +199,7 @@ export const Message = memo(function Message({
           </details>
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
-        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={message.content} />}
+        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={cardText ? message.content : undefined} />}
         {message.delivery === "approval" && message.requestId && origin && (
           <RoutedApproval hubId={origin.hub} requestId={message.requestId} />
         )}

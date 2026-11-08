@@ -43,7 +43,7 @@ beforeEach(() => {
     roster: [{ hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false }],
   });
   useDesk.setState({ hub: new DeskHub(transport(() => plans)) });
-  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {} });
+  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {} });
   useBoard.setState({ boards: { "board-acme": { id: "board-acme", name: "Acme", group: "acme", prefix: "ACM", createdAt: "", updatedAt: "" } }, tickets: {} });
 });
 afterEach(() => {
@@ -69,6 +69,15 @@ describe("a plan waiting for the person", () => {
     expect(within(c).getByText("· needs ACM-21, ACM-22")).toBeTruthy();
     expect(within(c).getByText("4 tickets")).toBeTruthy();
     expect(within(c).getAllByRole("button").map((b) => b.textContent)).toEqual(["Drop", "Edit", "Approve and run"]);
+  });
+
+  it("shows what each ticket starts with, folded away", async () => {
+    plans.plan.tickets[0]!.body = "Add POST /refunds over Stripe's refunds API.";
+    plans.plan.revisions[0]!.snapshot.tickets[0]!.body = plans.plan.tickets[0]!.body;
+    await show();
+    const body = within(card()).getByText("Add POST /refunds over Stripe's refunds API.");
+    expect(body.closest("details")).toBeTruthy();
+    expect(within(body.closest("details")!).getByText("What it starts with")).toBeTruthy();
   });
 
   it("runs once approved, and shows its progress as its sessions start", async () => {
@@ -200,7 +209,9 @@ describe("a running plan", () => {
     plans.bossAdds("Fix the flaky payment test");
     await show(2);
     const change = within(card()).getByRole("group", { name: "A change to the plan" });
-    expect(change.textContent).toBe("Sarah wants to change the plan: Added “Fix the flaky payment test”A change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.");
+    expect(change.textContent).toBe(
+      "Sarah wants to change the plan: Added “Fix the flaky payment test”Adds Fix the flaky payment test · Claude Code in ~/code/acme-webA change of scope, so it needs you. The plan keeps running on revision 1 meanwhile.",
+    );
     expect(within(card()).getByText("A change waits for you")).toBeTruthy();
     // The person's edit waits until Sarah's change is answered: it never
     // takes the change in unasked.
@@ -208,6 +219,48 @@ describe("a running plan", () => {
     expect(within(card()).getByText("Approve or turn down Sarah's change first, then edit the plan.")).toBeTruthy();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve the change" })));
     expect(decided).toEqual([allow(2)]);
+  });
+
+  it("shows in full what approving a change would approve: tickets added and dropped, bodies, engines, folders and the limit", async () => {
+    plans.bossProposes(
+      "Added “Fix the flaky payment test”; dropped “End-to-end refund test in CI”",
+      (ts) => [
+        ...ts
+          .filter((t) => t.id !== "t23")
+          .map((t) =>
+            t.id === "t22" ? { ...t, body: "Also refund partial orders.", engine: "codex" as const, folder: "/Users/sam/code/acme-shop" } : t,
+          ),
+        ticket(19, "Fix the flaky payment test", { engine: "codex", folder: "/Users/sam/code/acme-pay", body: "Run the payment suite 20 times; fix what flakes." }),
+      ],
+      6,
+    );
+    await show(2);
+    const shown = within(card()).getByRole("list", { name: "What approving it changes" });
+    expect(within(shown).getByText("At once: the boss's limit → 6")).toBeTruthy();
+    const added = within(shown).getByText(/Fix the flaky payment test/).closest("li")!;
+    expect(added.textContent).toContain("Codex in ~/code/acme-pay");
+    expect(added.textContent).toContain("Run the payment suite 20 times; fix what flakes.");
+    expect(within(shown).getByText(/End-to-end refund test in CI/).closest("li")!.textContent).toBe("Drops End-to-end refund test in CI");
+    const changed = within(shown).getByText(/Refund from the order page/).closest("li")!;
+    expect(changed.textContent).toContain("Engine: Claude Code → Codex");
+    expect(changed.textContent).toContain("Folder: ~/code/acme-web → ~/code/acme-shop");
+    expect(changed.textContent).toContain("What it starts with now: Also refund partial orders.");
+    expect(within(card()).getByText("rev 2")).toBeTruthy();
+  });
+
+  it("decides nothing on a revision older than the newest announced, until it is read", async () => {
+    plans.bossAdds("Fix the flaky payment test");
+    await show(2);
+    // A newer revision is announced; its read hasn't come yet.
+    const hold = plans.route.bind(plans);
+    plans.route = (m, p, b) => (m === "GET" && p.endsWith(PLAN) ? new Promise<Response>(() => {}) as never : hold(m, p, b));
+    act(() => deskListeners.forEach((l) => l({ type: "plan", plan: { ...plans.summary(), revision: 3, updatedAt: "2030-01-01T00:00:00.000Z" } })));
+    const approve = within(card()).getByRole("button", { name: "Approve the change" });
+    expect(approve.getAttribute("aria-disabled")).toBe("true");
+    expect(within(card()).getByText("Revision 3 has come: reading it before anything is approved.")).toBeTruthy();
+    expect(within(card()).getByText("rev 2")).toBeTruthy();
+    fireEvent.click(approve);
+    expect(decided).toEqual([]);
   });
 
   it("turns down a change of scope the boss proposes, and runs on as approved", async () => {

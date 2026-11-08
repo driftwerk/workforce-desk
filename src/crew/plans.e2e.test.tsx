@@ -121,7 +121,7 @@ beforeEach(() => {
     roster: [{ hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false }],
   });
   useOverview.setState({ manager: null, managerSupport: "unknown", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
-  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {} });
+  usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {} });
   useBoard.setState({ boards: {}, tickets: {} });
   useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
   stop = watchFloor();
@@ -193,6 +193,12 @@ describe("a boss's plan, against the hub", () => {
       hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
     });
     render(<RightNow brief={null} />);
+    // Not seen yet: the Floor only offers to look at it.
+    await waitFor(() => expect(floor().getByRole("button", { name: "Look: Sarah's plan" })).toBeTruthy());
+    expect(floor().queryByRole("button", { name: /^Approve/ })).toBeNull();
+    expect(floor().queryByRole("button", { name: /^Turn down/ })).toBeNull();
+    // Seen whole on its card, it is approved there or here.
+    render(<DeskActions extras={{ plan: { id: PLAN, revision: 2 } }} />);
     await waitFor(() => expect(floor().getByRole("button", { name: /^Approve “Plan change/ })).toBeTruthy());
     expect(floor().getByRole("button", { name: "Look: Sarah's plan" })).toBeTruthy();
     expect(floor().getByRole("button", { name: /^Turn down “Plan change/ })).toBeTruthy();

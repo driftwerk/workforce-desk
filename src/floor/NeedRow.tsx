@@ -125,12 +125,20 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   };
   const denied = asking?.asked?.denied ?? null;
   const plan = planOf(need);
-  // What a plan's need asks, as the plans read say.
+  // What a plan's need asks: by the revision it asks about against the
+  // one approved (none approved, or the first, is the plan itself).
+  const revision = need.answer.kind === "decide" && need.answer.at.kind === "plan" ? need.answer.at.revision : 0;
   const ask = usePlans((s): PlanAsk => {
     const p = plan ? s.plans[plan] : undefined;
-    if (!p || p.approvedRevision === null) return "proposed";
-    return p.approvedRevision !== p.revision ? "change" : p.paused === "start_failing" ? "failing" : "change";
+    if (p && p.approvedRevision === revision && p.paused === "start_failing") return "failing";
+    if (revision === 1 || p?.approvedRevision === null) return "proposed";
+    return "change";
   });
+  // A plan, or a change to it, is approved here only once the person has
+  // seen that revision whole on its card (Look first); going on after its
+  // starts kept failing approves nothing new.
+  const looked = usePlans((s) => (plan ? (s.seen[plan] ?? 0) >= revision : true));
+  const decides = !plan || ask === "failing" || looked;
   const deciding = useFloor((s) => s.deciding[need.key]);
   const problem = useFloor((s) => s.problems[need.key]) ?? refused;
   const stale = useStaleNote(need);
@@ -160,14 +168,14 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
-          {choicesOf(need, ask).map((choice) => {
+          {(decides ? choicesOf(need, ask) : []).map((choice) => {
               const words = wordsOf(need, choice, ask);
               const word = deciding === choice ? words.busy : words.word;
               return (
                 <button
                   key={choice}
                   type="button"
-                  className={choice === "allow" ? (isBreaker(need) || plan ? "btn btn-blocked" : "btn btn-approve") : "btn"}
+                  className={choice === "allow" ? (plan ? "btn btn-signal" : isBreaker(need) ? "btn btn-blocked" : "btn btn-approve") : "btn"}
                   aria-label={`${word} “${need.ask}” for ${name}`}
                   disabled={need.stale}
                   aria-disabled={!!deciding}

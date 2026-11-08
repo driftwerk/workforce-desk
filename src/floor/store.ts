@@ -8,6 +8,7 @@ import { deskListeners } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
 import type { DeskEvent, FloorView, LineAsked, Need, UsageView } from "../hub/types";
 import { useLine } from "../line/store";
+import { usePlans as useBossPlans } from "../crew/planStore";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { useWatching, watched } from "../unread/watching";
@@ -147,6 +148,8 @@ export const useFloor = create<FloorStore>((set, get) => {
           // is asked again, as it is now.
           set((s) => ({ problems: { ...s.problems, [key]: "The plan changed since you read it. This is its newest revision: look at it again." } }));
           ask([hubId]);
+          // Its card shows the newest revision, to look at before approving.
+          void useBossPlans.getState().fetch(need.answer.at.plan);
         } else if (e instanceof HubError && e.status === 409) {
           put(hubId, (was) => (was.floor ? { ...was, floor: { ...was.floor, needs: was.floor.needs.filter((n) => n.id !== need.id) } } : was));
           set((s) => ({ answered: { ...s.answered, [key]: { hubId, need, read: begun.get(hubId) ?? 0 } } }));
@@ -156,12 +159,12 @@ export const useFloor = create<FloorStore>((set, get) => {
   };
 });
 
-/** `view` with each boss a need names as a manager (a plan's) read as the
+/** `view` with the boss a plan's need names (as a manager) read as the
  *  agent it is: it opens in its DM, by its name on the roster. */
-const asAgents = (view: FloorView): FloorView =>
-  view.needs.some((n) => n.who.kind === "manager")
-    ? { ...view, needs: view.needs.map((n) => (n.who.kind === "manager" ? { ...n, who: { ...n.who, kind: "agent" } } : n)) }
-    : view;
+const asAgents = (view: FloorView): FloorView => {
+  const boss = (n: Need) => n.who.kind === "manager" && n.id.startsWith("plan:");
+  return view.needs.some(boss) ? { ...view, needs: view.needs.map((n) => (boss(n) ? { ...n, who: { ...n.who, kind: "agent" as const } } : n)) } : view;
+};
 
 /** How long reads asked for together wait, so they make one. */
 export const SETTLE_MS = 250;

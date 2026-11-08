@@ -285,3 +285,57 @@ export const working = (tickets: readonly Pick<BossPlanTicket, "state">[]): bool
  *  newest one posted for it (the person's own edits and approvals post
  *  none); the others say only what changed. */
 export const liveCard = (posted: readonly number[], revision: number): boolean => posted.length === 0 || revision >= Math.max(...posted);
+
+/** A revision's goal, tickets and limit. */
+export type PlanSnapshot = BossPlanRevision["snapshot"];
+
+/** What one ticket of a revision changes from the one approved. */
+export interface TicketChange {
+  ticket: PlannedTicket;
+  title?: { from: string; to: string };
+  body?: { from: string; to: string };
+  engine?: { from: Engine; to: Engine };
+  folder?: { from: string; to: string };
+}
+
+/** Everything `after` changes from `before`, the revision approved: what
+ *  approving it would approve, each part shown in full. */
+export interface PlanChanges {
+  goal?: { from: string; to: string };
+  /** Its limit of sessions at once; null is its boss's. */
+  parallel?: { from: number | null; to: number | null };
+  added: PlannedTicket[];
+  removed: PlannedTicket[];
+  changed: TicketChange[];
+}
+
+export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanChanges => {
+  const was = new Map(before.tickets.map((t) => [t.id, t]));
+  const now = new Set(after.tickets.map((t) => t.id));
+  const changed: TicketChange[] = [];
+  for (const t of after.tickets) {
+    const w = was.get(t.id);
+    if (!w) continue;
+    const c: TicketChange = { ticket: t };
+    if (w.title !== t.title) c.title = { from: w.title, to: t.title };
+    if (w.body !== t.body) c.body = { from: w.body, to: t.body };
+    if (w.engine !== t.engine) c.engine = { from: w.engine, to: t.engine };
+    if (w.folder !== t.folder) c.folder = { from: w.folder, to: t.folder };
+    if (c.title || c.body || c.engine || c.folder) changed.push(c);
+  }
+  const from = before.parallel ?? null;
+  const to = after.parallel ?? null;
+  return {
+    ...(before.goal.trim() !== after.goal.trim() ? { goal: { from: before.goal, to: after.goal } } : {}),
+    ...(from !== to ? { parallel: { from, to } } : {}),
+    added: after.tickets.filter((t) => !was.has(t.id)),
+    removed: before.tickets.filter((t) => !now.has(t.id)),
+    changed,
+  };
+};
+
+/** Whether a DM message's text is only its plan card's own header, as the
+ *  hub writes it when a boss proposes or changes a plan: the card says all
+ *  of it. Anything else the boss says (its closing summary) is its own. */
+export const isCardText = (text: string): boolean =>
+  /^[^\n]{1,80}? (proposes a plan|changed the plan|proposes a change to the plan): /.test(text.trim());
