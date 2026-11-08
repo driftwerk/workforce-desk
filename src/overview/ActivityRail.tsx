@@ -10,6 +10,8 @@ import { NeedRow } from "../floor/NeedRow";
 import { useMinute } from "../floor/RightNow";
 import { useWhoName } from "../floor/Row";
 import { useFloor, useLocalFloor, useNeeds, type Answered } from "../floor/store";
+import { usePlacer } from "../floor/FloorSection";
+import { sectionName, sectionOfEvent, type Section } from "../floor/sections";
 import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import type { ActivityEvent, ActivityFilter } from "../hub/types";
@@ -123,21 +125,33 @@ function OpenNeeds({ needs, now }: { needs: readonly FloorNeed[]; now: number })
  *  Closing it docks it as a tab. */
 export function ActivityRail({
   managerName,
+  sections = null,
   onClose,
   closeRef,
 }: {
   managerName: string | null;
+  /** The Floor's sections, when it is in them: then Activity can show one
+   *  group's alone. */
+  sections?: readonly Section[] | null;
   onClose: () => void;
   closeRef?: Ref<HTMLButtonElement>;
 }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
+  const [groupPicked, setGroup] = useState<string | null>(null);
+  const group = sections && groupPicked && sections.some((s) => s.id === groupPicked) ? groupPicked : null;
   const shown: ActivityFilter = filter === "manager" && !managerName ? "all" : filter;
   const feed = useOverview((s) => s.feeds[shown]);
   const loadActivity = useOverview((s) => s.loadActivity);
   const loadEarlier = useOverview((s) => s.loadEarlier);
   const floorOn = useLocalFloor();
-  const needs = useNeeds();
+  const allNeeds = useNeeds();
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  const place = usePlacer();
+  const inGroup = useMemo(() => {
+    const section = group ? sections?.find((s) => s.id === group) : null;
+    return section ? new Set(section.needs.map((n) => n.key)) : null;
+  }, [group, sections]);
+  const needs = useMemo(() => (inGroup ? allNeeds.filter((n) => inGroup.has(n.key)) : allNeeds), [allNeeds, inGroup]);
   const now = useMinute();
   const answered = useFloor((s) => Object.keys(s.answered).length);
   const fromLog = !(floorOn && shown === "needs_you");
@@ -148,11 +162,18 @@ export function ActivityRail({
 
   const options: { id: ActivityFilter; label: string; count?: number }[] = [
     { id: "all", label: "All" },
-    { id: "needs_you", label: "Needs you", count: floorOn ? needs.length : undefined },
+    { id: "needs_you", label: "Needs you", count: floorOn ? allNeeds.length : undefined },
     ...(managerName ? [{ id: "manager" as const, label: `${managerName}’s actions` }] : []),
   ];
   const current = options.findIndex((o) => o.id === shown);
-  const events = feed?.events ?? NO_EVENTS;
+  const fed = feed?.events ?? NO_EVENTS;
+  const events = useMemo(
+    () =>
+      group && localId
+        ? fed.filter((e) => sectionOfEvent(place, e) === group)
+        : fed,
+    [fed, group, localId, place],
+  );
   const earlier = () => void loadEarlier(shown);
   // What happened is read as its rows show; the newest row seen is the point.
   const scroller = useRef<HTMLDivElement>(null);
@@ -160,7 +181,7 @@ export function ActivityRail({
   useSeen(shown === "all" ? { kind: "activity" } : null, scroller, seenItems, { enabled: !useMainHidden() });
   const activity = useUnread((s) => s.local?.activity);
   const brief = useUnread((s) => s.local?.brief);
-  const floorBadge = badgeOfFloor(needs, activity, brief);
+  const floorBadge = badgeOfFloor(allNeeds, activity, brief);
   const states = useMemo(
     () =>
       floorOn && shown === "all"
@@ -255,6 +276,7 @@ export function ActivityRail({
             </button>
           ))}
         </div>
+        {sections && <GroupFilter sections={sections} group={group} onPick={setGroup} />}
       </div>
       <div
         ref={scroller}
@@ -281,5 +303,31 @@ export function ActivityRail({
         )}
       </div>
     </aside>
+  );
+}
+
+/** Activity for one group's section alone, or all of them. */
+function GroupFilter({ sections, group, onPick }: { sections: readonly Section[]; group: string | null; onPick: (id: string | null) => void }) {
+  const options = [{ id: null as string | null, label: "All groups" }, ...sections.map((s) => ({ id: s.id as string | null, label: sectionName(s) }))];
+  const current = Math.max(
+    0,
+    options.findIndex((o) => o.id === group),
+  );
+  return (
+    <div className="seg activity-filter activity-groups" role="radiogroup" aria-label="Group">
+      {options.map((o, i) => (
+        <button
+          key={o.id ?? "all"}
+          type="button"
+          role="radio"
+          aria-checked={i === current}
+          tabIndex={i === current ? 0 : -1}
+          onClick={() => onPick(o.id)}
+          onKeyDown={(e) => radioKeys(e, options, current, (next) => onPick(next.id))}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

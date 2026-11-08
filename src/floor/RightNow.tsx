@@ -45,8 +45,10 @@ const useParagraph = (m: Merged, entries: readonly FloorEntry[], names: Readonly
 };
 
 /** What needs the person, then what each agent and session is doing, with
- *  the overseer's brief (or, without one, the floor's paragraph) above. */
-export function RightNow({ brief }: { brief: ReactNode | null }) {
+ *  the overseer's brief (or, without one, the floor's paragraph) above.
+ *  With `needs` false (the Floor in sections), the sections list what needs
+ *  the person instead. */
+export function RightNow({ brief, needs = true }: { brief: ReactNode | null; needs?: boolean }) {
   const m = useMerged();
   const now = useMinute();
   const names = useSessionNames();
@@ -63,17 +65,19 @@ export function RightNow({ brief }: { brief: ReactNode | null }) {
           {paragraph.text} {needsLine(m.needs.length)}
         </p>
       )}
-      <Column
-        label={`Needs you · ${m.needs.length}`}
-        tone="blocked"
-        empty="Nothing is waiting on you."
-        list="Waiting on you"
-        rows={m.needs.map((n) => (
-          <div key={n.key} role="listitem">
-            <NeedRow need={n} now={now} actions />
-          </div>
-        ))}
-      />
+      {needs && (
+        <Column
+          label={`Needs you · ${m.needs.length}`}
+          tone="blocked"
+          empty="Nothing is waiting on you."
+          list="Waiting on you"
+          rows={m.needs.map((n) => (
+            <div key={n.key} role="listitem">
+              <NeedRow need={n} now={now} actions />
+            </div>
+          ))}
+        />
+      )}
       {m.wentAhead.length > 0 && (
         <Column
           label={`It went ahead without you · ${m.wentAhead.length}`}
