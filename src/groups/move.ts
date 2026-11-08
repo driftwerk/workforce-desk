@@ -109,8 +109,9 @@ export const scopeOf = (manager: Manager | null, group: string): string =>
 /** Moves a sidebar row from `from` to `to`. A session of this computer's
  *  hub is previewed first: when that crosses from one boss to another, the
  *  dialog asks, and nothing moves unless the person says so; otherwise (or
- *  for an agent's row, or a machine's session) `layout` makes the move in
- *  the sidebar as before. */
+ *  for a machine's session, or groups no hub keeps) `layout` makes the move
+ *  in the sidebar as before. An agent's row asks when it crosses, or while
+ *  Desk doesn't know who oversees what. */
 export async function moveRow(
   subject: MoveSubject,
   to: string,
@@ -118,16 +119,21 @@ export async function moveRow(
   placed?: (to: string) => void,
 ): Promise<void> {
   if (subject.from === to) return layout();
+  // Groups Desk keeps itself (no hub keeps them) have no bosses to cross.
+  if (!useHubLayout.getState().layout) return layout();
   if (subject.kind === "agent") {
     const manager = useOverview.getState().manager;
-    // Within one boss's part only the sidebar changes.
-    if (scopeOf(manager, subject.from) === scopeOf(manager, to)) return layout();
+    // Within one boss's part only the sidebar changes; until Desk has heard
+    // who oversees what, it asks.
+    if (manager && scopeOf(manager, subject.from) === scopeOf(manager, to)) return layout();
     return useMove.getState().open({ subject, to, apply: () => layout() });
   }
   const hub = localAccount();
   const item = itemOf(subject);
-  // Groups Desk keeps itself (no hub keeps them) have no bosses to cross.
-  if (!hub || !item || !useHubLayout.getState().layout) return layout();
+  if (!item) return layout();
+  // The hub keeps the groups but can't be asked as the person just now:
+  // nothing moves, and the dialog says why.
+  if (!hub) return useMove.getState().open({ subject, to, placed });
   let preview: MovePreview;
   try {
     preview = await movesOf(hub).preview(item, hubGroup(to), subject.kind === "session" ? FIRST_CHOICES : NO_CHOICES);

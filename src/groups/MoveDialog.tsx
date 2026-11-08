@@ -35,8 +35,13 @@ interface Note {
   /** The hub's text as last read. */
   draft: string;
   edited: boolean;
-  /** Its old boss's draft came after the person began editing. */
+  /** Who wrote what is shown, while the person hasn't edited it. */
+  by: "desk" | "boss";
+  /** A draft from its old boss is there that isn't what is shown: it is
+   *  offered, never put in its place. */
   arrived: boolean;
+  /** The person chose not to wait for its old boss's draft. */
+  stopped: boolean;
 }
 
 /** Each note of `p`, keeping what the person wrote in `was` (by what it is
@@ -47,7 +52,8 @@ const notesOf = (p: MovePreview | null | undefined, was: Record<string, Note>): 
   return Object.fromEntries(
     p.handovers.map((h) => {
       const text = edited.get(h.item);
-      return [h.id, { item: h.item, text: text ?? h.note, draft: h.note, edited: text !== undefined, arrived: false }];
+      const by = h.draftedBy.kind === "desk" ? "desk" : "boss";
+      return [h.id, { item: h.item, text: text ?? h.note, draft: h.note, edited: text !== undefined, by, arrived: false, stopped: false }];
     }),
   );
 };
@@ -200,6 +206,8 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   // ── Notes its old boss is still drafting ──────────────────────────────
   const drafting = preview?.handovers.filter((h) => h.drafting).map((h) => h.id) ?? [];
   const draftingKey = drafting.join(",");
+  // Notes the person stopped waiting for are read no more.
+  const stoppedIds = useRef(new Set<string>());
   useEffect(() => {
     if (!draftingKey) return;
     const hub = localAccount();
@@ -208,6 +216,10 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
     const since = Date.now();
     const read = async () => {
       for (const id of [...left]) {
+        if (stoppedIds.current.has(id)) {
+          left.delete(id);
+          continue;
+        }
         let h: Handover;
         try {
           h = await movesOf(hub).handover(id);
@@ -218,8 +230,9 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
         setPreview((p) => (p ? { ...p, handovers: p.handovers.map((x) => (x.id === id ? { ...x, ...h } : x)) } : p));
         setNotes((was) => {
           const n = was[id];
-          if (!n || n.draft === h.note) return was;
-          return { ...was, [id]: n.edited ? { ...n, draft: h.note, arrived: true } : { ...n, text: h.note, draft: h.note } };
+          if (!n || n.stopped || n.draft === h.note) return was;
+          // Offered, never put in place of what the person reads.
+          return { ...was, [id]: { ...n, draft: h.note, arrived: h.note !== n.text } };
         });
       }
       if (!left.size || Date.now() - since > DRAFT_POLL_FOR_MS) clearInterval(every);
@@ -235,8 +248,18 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   });
   const asksToReplace = preview?.effects.find((e) => e.kind === "asks_to_replace") ?? null;
   const refused = preview?.effects.find((e) => e.kind === "refused") ?? null;
+  // Notes their old boss is still writing: Move waits until each is in, or
+  // the person chooses to send what they have.
+  const waiting = preview?.handovers.filter((h) => h.drafting && !notes[h.id]?.stopped) ?? [];
   const canMove =
-    !!to && !busy && !loading && (subject.kind === "agent" ? true : !!preview && !preview.blocked && notesOk);
+    !!to &&
+    !busy &&
+    !loading &&
+    (subject.kind === "agent" ? true : !!preview && !preview.blocked && notesOk && waiting.length === 0);
+  const stopWaiting = (h: Handover) => {
+    stoppedIds.current.add(h.id);
+    setNotes((was) => (was[h.id] ? { ...was, [h.id]: { ...was[h.id]!, stopped: true } } : was));
+  };
 
   const move = async () => {
     if (!to || !canMove) return;
@@ -271,6 +294,9 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   const fromBoss = scopeBoss(manager, subject.from);
   const handover = preview?.effects.find((e) => e.kind === "handover") ?? null;
   const newBoss = handover?.to ?? preview?.effects.find((e) => e.kind === "charge_to")?.boss ?? null;
+  // A ticket that goes to another group's board is its boss's to read.
+  const ticketGoesTo =
+    preview?.effects.some((e) => e.kind === "ticket_goes") && to ? (handover?.to ?? newBoss ?? scopeBoss(manager, to)) : null;
   const toOwnBoss = !!to && to !== UNGROUPED && !!bossOfGroup(manager, to);
   const targets = [
     ...layout.groups.map((g) => g.id),
@@ -282,6 +308,7 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
    *  the part of Desk its group is in (the hub's `allowed_member`). */
   const agentEffects = (): string[] => {
     if (!to) return [];
+    if (!manager) return [`Desk hasn’t heard yet who oversees each group, so it can’t say what else moving ${subject.name} changes.`];
     if (scopeOf(manager, subject.from) === scopeOf(manager, to)) return [`Only where ${subject.name} shows in the sidebar changes.`];
     const was = fromBoss;
     const next = scopeBoss(manager, to);
@@ -305,9 +332,9 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   };
   const drafter = (h: Handover, n: Note | undefined): string => {
     if (n?.edited) return "Edited by you";
-    if (h.drafting) return `${bossName(h.fromBoss)} is writing it; this is what Desk knows meanwhile`;
-    if (h.draftedBy.kind === "desk") return "Written by Desk from what it knows";
-    return `Drafted by ${roster.find((a) => a.id === h.draftedBy.id && isLocal(a.hubId))?.name ?? h.draftedBy.name}`;
+    if (h.drafting && !n?.stopped) return `${bossName(h.fromBoss)} is writing a draft; this is what Desk knows meanwhile`;
+    if ((n?.by ?? (h.draftedBy.kind === "desk" ? "desk" : "boss")) === "desk") return "Written by Desk from what it knows";
+    return `Drafted by ${bossName(h.fromBoss)}`;
   };
 
   const now = subject.from;
@@ -477,7 +504,10 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
                   disabled={busy}
                   onChange={(e) => {
                     const v = e.target.value;
-                    setNotes((was) => ({ ...was, [h.id]: { ...(was[h.id] ?? { item: h.item, draft: h.note, arrived: false }), text: v, edited: true } }));
+                    setNotes((was) => {
+                      const n0: Note = was[h.id] ?? { item: h.item, text: h.note, draft: h.note, edited: false, by: "desk", arrived: false, stopped: false };
+                      return { ...was, [h.id]: { ...n0, text: v, edited: true, arrived: n0.arrived && n0.draft !== v } };
+                    });
                   }}
                 />
                 <div className="move-note-meta small">
@@ -488,14 +518,22 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
                     {count} / {MAX_NOTE}
                   </span>
                 </div>
-                {n?.arrived && (
-                  <button
-                    type="button"
-                    className="link small"
-                    onClick={() => setNotes((was) => ({ ...was, [h.id]: { ...n, text: n.draft, edited: false, arrived: false } }))}
-                  >
-                    {bossName(h.fromBoss)}’s draft came in: use it instead
+                {h.drafting && !n?.stopped && (
+                  <button type="button" className="link small" onClick={() => stopWaiting(h)}>
+                    {n?.edited ? "Send my note now" : "Send Desk’s facts now"}
                   </button>
+                )}
+                {n?.arrived && (
+                  <span className="small move-note-meta">
+                    <span>{bossName(h.fromBoss)}’s draft is ready.</span>
+                    <button
+                      type="button"
+                      className="link small"
+                      onClick={() => setNotes((was) => ({ ...was, [h.id]: { ...n, text: n.draft, edited: false, by: "boss", arrived: false } }))}
+                    >
+                      Use {bossName(h.fromBoss)}’s draft
+                    </button>
+                  </span>
                 )}
               </div>
             );
@@ -508,6 +546,12 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
               : `This note is all ${bossName(handover.to)} gets from ${groupName(now)}: edit anything ${bossName(handover.to)} shouldn’t see before you move it.`}
           </p>
         )}
+        {preview && !preview.blocked && ticketGoesTo && ticketGoesTo !== fromBoss && (
+          <p className="move-callout">
+            {bossName(ticketGoesTo)} sees {subject.kind === "ticket" ? subject.name : (ticket?.key ?? "its ticket")}’s title, description and links
+            from now on.
+          </p>
+        )}
         {preview && !preview.blocked && subject.kind === "session" && newBoss && (
           <p className="move-callout">
             From now on {bossName(newBoss)} sees {subject.name} as it is: its goal, its last reply and its terminal. Its past messages
@@ -516,9 +560,13 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
         )}
       </div>
       <footer className="dialog-foot move-foot">
-        <span className="dialog-foot-note state-blocked" role={sendProblem ? "alert" : undefined}>
-          {sendProblem}
-        </span>
+        {sendProblem || !waiting.length ? (
+          <span className="dialog-foot-note state-blocked" role={sendProblem ? "alert" : undefined}>
+            {sendProblem}
+          </span>
+        ) : (
+          <span className="dialog-foot-note faint">Waiting for {bossName(waiting[0]!.fromBoss)}’s draft…</span>
+        )}
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel
         </button>

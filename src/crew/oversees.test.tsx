@@ -54,14 +54,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Oversees the crew", () => {
-  it("switched back on, makes the main overseer, names no group, and says what it learned of its group stays", async () => {
+  it("switched back on, asks before a group's boss becomes the main one, then names no group", async () => {
     useSettings.setState({ groups: [{ id: "g-acme", name: "Acme", collapsed: false, items: ["agent:local/ledger"] }] });
     const hub = fakeHub();
     // A boss taken off by hand, its group still named.
     show(hub, `${START}\n[oversight]\nenabled = false\ngroup = "g-acme"\n`);
     fireEvent.click(screen.getByRole("switch", { name: "Oversees the crew" }));
-    expect(screen.getByText("What Ledger learned about Acme stays with it.")).toBeTruthy();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Make Ledger the overseer" })));
+    expect(screen.getByRole("dialog", { name: "Make Ledger the main boss?" })).toBeTruthy();
+    expect(screen.getByText(/Ledger stops overseeing only Acme: everything no boss of its own oversees is Ledger’s from now on, Acme included/)).toBeTruthy();
+    expect(screen.getByText(/What Ledger learned in Acme stays there: it won’t recall it as the main boss/)).toBeTruthy();
+    expect(hub.saveAgentConfig).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Make Ledger the main boss" })));
     await waitFor(() => expect(oversight()?.enabled).toBe(true));
     expect("group" in oversight()!).toBe(false);
     useSettings.setState({ groups: [] });

@@ -191,7 +191,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   };
 
   const enable = (on: boolean) => {
-    if (on && other) return setConfirming(true);
+    // Taking over from the main overseer, or a group's boss becoming the
+    // main one, asks first.
+    if (on && (other || o?.group)) return setConfirming(true);
     // This switch is the main overseer's: on or off it names no group, so
     // a group it oversaw opens to the main overseer (a group any config
     // names stays apart from everyone).
@@ -537,20 +539,30 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
         </>
       )}
 
-      {confirming && other && (
+      {confirming && (other || o?.group) && (
         <Dialog
           onClose={() => setConfirming(false)}
           title={(id) => (
             <header className="dialog-head">
               <span className="dialog-title">
                 <h1 id={id} className="display-md">
-                  Make {name} the overseer?
+                  Make {name} the {o?.group ? "main boss" : "overseer"}?
                 </h1>
-                <p>
-                  {other} oversees the crew now — make {name} the overseer instead? {other} stops overseeing; nothing else about{" "}
-                  {other} changes.
-                </p>
-                {sitsIn && <p>What {name} learned about {sitsIn} stays with it.</p>}
+                {other && (
+                  <p>
+                    {other} oversees the crew now — make {name} the overseer instead? {other} stops overseeing; nothing else about{" "}
+                    {other} changes.
+                  </p>
+                )}
+                {o?.group ? (
+                  <p>
+                    {name} stops overseeing only {bossOf ?? "its group"}: everything no boss of its own oversees is {name}’s from now on,{" "}
+                    {bossOf ?? "that group"} included. What {name} learned in {bossOf ?? "that group"} stays there: it won’t recall it as the main
+                    boss.
+                  </p>
+                ) : (
+                  sitsIn && <p>What {name} learned about {sitsIn} stays with it.</p>
+                )}
               </span>
               <CloseButton onClose={() => setConfirming(false)} />
             </header>
@@ -559,7 +571,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           <footer className="dialog-foot">
             <span className="dialog-foot-note" />
             <button type="button" className="btn btn-ghost" data-autofocus onClick={() => setConfirming(false)}>
-              Keep {other}
+              {other ? `Keep ${other}` : "Cancel"}
             </button>
             <button
               type="button"
@@ -569,7 +581,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 update((x) => ({ ...x, enabled: true, group: null }));
               }}
             >
-              Make {name} the overseer
+              Make {name} the {o?.group ? "main boss" : "overseer"}
             </button>
           </footer>
         </Dialog>

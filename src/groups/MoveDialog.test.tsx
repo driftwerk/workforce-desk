@@ -121,6 +121,7 @@ describe("moving a session to another boss's group", () => {
     expect(screen.getByText("Written by Desk from what it knows", { exact: false })).toBeTruthy();
     expect(screen.getByText(/Globex is another client\. This note is all Mia gets from Acme/)).toBeTruthy();
     expect(screen.getByText(/Mia sees acme-docs as it is: its goal, its last reply and its terminal/)).toBeTruthy();
+    expect(screen.getByText(/Mia sees ACM-17’s title, description and links\s+from now on\./)).toBeTruthy();
     // Where it is now can't be chosen; Ungrouped can.
     expect((screen.getByRole("radio", { name: /^Acme/ }) as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByRole("radio", { name: /^Ungrouped/ })).toBeTruthy();
@@ -199,26 +200,54 @@ describe("moving a session to another boss's group", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("shows the old boss's draft once it comes, unless the person is writing their own", async () => {
+  it("waits for the old boss's draft, offers it when it comes, and never puts it in place of what's shown", async () => {
     serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", "sarah", "mia", "Desk's facts.", { drafting: true })] }));
     open(SESSION, "globex");
     await screen.findByText("Mia runs acme-docs from now on.");
-    expect(screen.getByText(/Sarah is writing it/)).toBeTruthy();
+    expect(screen.getByText(/Sarah is writing a draft/)).toBeTruthy();
+    expect(screen.getByText("Waiting for Sarah’s draft…")).toBeTruthy();
+    expect(moveButton("Globex").disabled).toBe(true);
+    // The draft comes just before the person presses Move.
     hub.handovers.set("p1-h0", { ...hub.handovers.get("p1-h0")!, note: "Sarah's note: the guide needs its last section.", drafting: false, draftedBy: { kind: "agent", id: "sarah", name: "Sarah" } });
-    await waitFor(() => expect(note().value).toBe("Sarah's note: the guide needs its last section."), { timeout: 4000 });
-    expect(screen.getByText(/Drafted by Sarah/)).toBeTruthy();
+    const use = await screen.findByRole("button", { name: "Use Sarah’s draft" }, { timeout: 4000 });
+    // Offered, not swapped in: what's shown is still what the person read.
+    expect(note().value).toBe("Desk's facts.");
+    expect(screen.getByText(/Written by Desk from what it knows/)).toBeTruthy();
+    expect(moveButton("Globex").disabled).toBe(false);
+    fireEvent.click(moveButton("Globex"));
+    await waitFor(() => expect(hub.commits).toHaveLength(1));
+    expect(hub.commits[0]!.note).toBe("Desk's facts.");
+    expect(use).toBeTruthy();
   });
 
-  it("keeps the person's edit when the draft comes, and offers the draft", async () => {
+  it("puts the old boss's draft in only when the person chooses it", async () => {
     serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", "sarah", "mia", "Desk's facts.", { drafting: true })] }));
     open(SESSION, "globex");
     await screen.findByText("Mia runs acme-docs from now on.");
     fireEvent.change(note(), { target: { value: "Mine." } });
     hub.handovers.set("p1-h0", { ...hub.handovers.get("p1-h0")!, note: "Sarah's draft.", drafting: false, draftedBy: { kind: "agent", id: "sarah", name: "Sarah" } });
-    const use = await screen.findByRole("button", { name: "Sarah’s draft came in: use it instead" }, { timeout: 4000 });
+    const use = await screen.findByRole("button", { name: "Use Sarah’s draft" }, { timeout: 4000 });
     expect(note().value).toBe("Mine.");
     fireEvent.click(use);
     expect(note().value).toBe("Sarah's draft.");
+    expect(screen.getByText(/Drafted by Sarah/)).toBeTruthy();
+    fireEvent.click(moveButton("Globex"));
+    await waitFor(() => expect(hub.commits[0]?.note).toBe("Sarah's draft."));
+  });
+
+  it("sends Desk's facts without waiting once the person says so", async () => {
+    serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", "sarah", "mia", "Desk's facts.", { drafting: true })] }));
+    open(SESSION, "globex");
+    await screen.findByText("Mia runs acme-docs from now on.");
+    expect(moveButton("Globex").disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send Desk’s facts now" }));
+    expect(moveButton("Globex").disabled).toBe(false);
+    // A draft that comes after is no longer read, nor offered.
+    hub.handovers.set("p1-h0", { ...hub.handovers.get("p1-h0")!, note: "Late.", drafting: false });
+    fireEvent.click(moveButton("Globex"));
+    await waitFor(() => expect(hub.commits).toHaveLength(1));
+    expect(hub.commits[0]!.note).toBe("Desk's facts.");
+    expect(screen.queryByRole("button", { name: "Use Sarah’s draft" })).toBeNull();
   });
 
   it("previews only once a target is picked, and says only the holder may move", async () => {
@@ -283,6 +312,7 @@ describe("moving the other kinds", () => {
     open({ kind: "ticket", id: "t1", name: "ACM-17", from: "acme" }, "personal");
     await screen.findByText("ACM-17 is taken off the session working on it.");
     expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/Desk sees ACM-17’s title, description and links\s+from now on\./)).toBeTruthy();
     fireEvent.click(moveButton("Personal"));
     await waitFor(() => expect(hub.commits).toEqual([{ preview: "p1", choices: { ticketGoes: false, release: false, replace: false }, notes: [] }]));
   });
@@ -291,6 +321,12 @@ describe("moving the other kinds", () => {
     open({ kind: "agent", agent: agent("scout", "Scout"), name: "Scout", from: "acme" }, "personal", vi.fn());
     expect(screen.getByText("Desk oversees Scout from now on, not Sarah.")).toBeTruthy();
     expect(screen.getByText("It no longer answers in Acme’s rooms.")).toBeTruthy();
+  });
+
+  it("says it can't tell what an agent's move changes before Desk knows who oversees what", () => {
+    useOverview.setState({ manager: null });
+    open({ kind: "agent", agent: agent("scout", "Scout"), name: "Scout", from: "acme" }, "globex", vi.fn());
+    expect(screen.getByText("Desk hasn’t heard yet who oversees each group, so it can’t say what else moving Scout changes.")).toBeTruthy();
   });
 
   it("moves an agent's row in the sidebar, saying who oversees it from now on", async () => {

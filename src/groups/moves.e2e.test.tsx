@@ -73,7 +73,7 @@ class FakeHub implements DeskTransport {
   events: Socket | null = null;
   layout: Layout = {
     groups: [
-      { id: "acme", name: "Acme", collapsed: false, items: ["agent:local/sarah", "session:s1"] },
+      { id: "acme", name: "Acme", collapsed: false, items: ["agent:local/sarah", "agent:local/scout", "session:s1"] },
       { id: "globex", name: "Globex", collapsed: false, items: ["agent:local/mia"] },
       { id: "personal", name: "Personal", collapsed: false, items: [] },
     ],
@@ -178,6 +178,7 @@ beforeEach(() => {
       { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true },
       { hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false },
       { hubId: "local", id: "mia", name: "Mia", model: null, provider: null, isDefault: false },
+      { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false },
     ],
   });
   useSettings.setState({ loaded: true, layoutOnHub: true, groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
@@ -267,6 +268,25 @@ describe("moving a session between groups, against the hub", () => {
     expect(moves.asked).toEqual([{ item: { kind: "session", id: "s1" }, to: made.id, choices: { ticketGoes: true, release: false, replace: false } }]);
     expect(made.items).toEqual([]);
     expect(layoutPuts()).toEqual([]);
+  });
+
+  it("asks before an agent's row leaves a boss's group for a new one, and moves it on Move", async () => {
+    await connect();
+    render(
+      <>
+        <SidebarGroups />
+        <MoveDialog />
+      </>,
+    );
+    moveFromMenu("Scout", "New group…");
+    const dialog = await screen.findByRole("dialog", { name: "Move Scout" });
+    expect(within(dialog).getByText("It no longer answers in Acme’s rooms.")).toBeTruthy();
+    const made = hub.layout.groups.at(-1)!;
+    expect(made.items).toEqual([]);
+    expect(layoutPuts()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move to New group" }));
+    await waitFor(() => expect(layoutPuts()).toEqual([`PUT /api/desk/groups/${made.id}/items/agent%3Alocal/scout`]));
+    expect(moves.asked).toEqual([]);
   });
 
   it("moves as before, unasked, within one boss's part", async () => {

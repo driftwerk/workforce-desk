@@ -325,10 +325,10 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   const newGroup = (with_?: ItemKey) => {
     const id = newId();
-    // A session leaving a boss's group is moved into it as the hub
-    // previews it, once the group is there.
+    // A session or agent leaving a group is moved into it as any move is
+    // (previewed, or asked about when it crosses), once the group is there.
     const subject = with_ ? subjectOf(with_) : null;
-    if (with_ && subject?.kind === "session" && subject.from !== UNGROUPED) {
+    if (with_ && subject && subject.from !== UNGROUPED) {
       setEditing({ kind: "group", id });
       // The hub previews a move only to a group it has.
       void addGroup(id, NEW_GROUP, []).then((kept) => kept && placeIn(with_, id, null, () => `Moved ${nameOf(items.get(with_))} to a new group`));
