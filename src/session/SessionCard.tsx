@@ -235,7 +235,9 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
   // around it, whether it runs or not.
   const host = useRef<HTMLElement | null>(null);
   useSeenSession(sessionKey(session), host, { enabled: !useOutOfSight() });
-  const seen = <span hidden ref={(el) => void (host.current = el?.parentElement ?? null)} />;
+  // What's on screen is the nearest holder that draws a box: the session's
+  // own view lays out as `display: contents`, which is never on screen.
+  const seen = <span hidden ref={(el) => void (host.current = boxOf(el?.parentElement ?? null))} />;
   return session.live ? (
     <>
       {seen}
@@ -269,4 +271,12 @@ export function SessionBody({ session, autoFocus = true }: { session: Session; a
       </div>
     </>
   );
+}
+
+/** `el`, or its nearest ancestor that draws a box of its own: an element
+ *  laid out as `display: contents` has none, so it is never seen on screen. */
+export function boxOf(el: HTMLElement | null): HTMLElement | null {
+  let at = el;
+  while (at && getComputedStyle(at).display === "contents") at = at.parentElement;
+  return at;
 }
