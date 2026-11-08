@@ -175,7 +175,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Stop tracking…⌫"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "End session…", "Remove…⌫"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
@@ -257,6 +257,8 @@ describe("groups in the sidebar", () => {
         <LifecycleDialogs />
       </>,
     );
+    // One from another terminal: only stopped being tracked.
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, origin: "external" } } })));
     fireEvent.contextMenu(row("api-e7"), { clientX: 40, clientY: 200 });
     fireEvent.click(screen.getByRole("menuitem", { name: /^Stop tracking…/ }));
     expect(screen.getByRole("dialog", { name: "Stop tracking “api-e7”?" })).toBeTruthy();
