@@ -1,22 +1,31 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { DeskHub } from "../hub/client";
-import type { GroupMemory as Switches, MemorySettings } from "../hub/types";
+import { deskListeners } from "../hub/store";
+import type { DeskEvent, GroupMemory as Switches, MemorySettings } from "../hub/types";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
-import { providerName } from "./words";
+import { fallbackText, providerName } from "./words";
 
-/** A group's memory switches: whether its sessions are remembered, whether
- *  Desk's model reads them for notes, and whether Desk asks before handing
- *  its work to another engine. Each saves as it is switched. */
+/** A group's memory switches: whether its sessions are remembered, and
+ *  whether Desk's model reads them for notes. Each saves as it is switched.
+ *  (Whether Desk asks before handing its work on comes with handoff.) */
 export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string; name: string }; hub: DeskHub | null; onClose: () => void }) {
   const [settings, setSettings] = useState<MemorySettings | null | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
     if (!hub) return;
-    hub.memorySettings().then(setSettings, (e: unknown) => {
-      setSettings(null);
-      setProblem(plainError(e));
-    });
+    const read = () =>
+      hub.memorySettings().then(setSettings, (e: unknown) => {
+        setSettings(null);
+        setProblem(plainError(e));
+      });
+    void read();
+    // Changed elsewhere (another window, the panel's ask): read again.
+    const heard = (e: DeskEvent) => {
+      if (e.type === "setting") void read();
+    };
+    deskListeners.add(heard);
+    return () => void deskListeners.delete(heard);
   }, [hub]);
   const switches = settings?.groups.find((g) => g.id === group.id);
   const change = async (patch: Partial<Omit<Switches, "deriveDecided">>) => {
@@ -58,19 +67,13 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
             />
             <Row
               name="Let Desk's model note decisions"
-              sub={`Desk's model reads what they say to note decisions, facts and to-dos, so it's sent to ${providerName(settings.limits.provider) ?? "the model the hub notes with"}.`}
+              sub={`Desk's model reads what they say to note decisions, facts and to-dos, so it's sent to ${providerName(settings.limits.provider) ?? "the model the hub notes with"}.${settings.limits.fallbackProviders ? ` ${fallbackText}` : ""}`}
               on={switches.derive}
               disabled={!settings.limits.derive}
               onChange={(derive) => void change({ derive })}
             >
               {!settings.limits.derive && <span className="ability-sub">Noting is turned off for this Desk.</span>}
             </Row>
-            <Row
-              name="Ask before handing its work on"
-              sub="Desk asks before it continues one of its sessions in another engine."
-              on={switches.handoffAsk}
-              onChange={(handoffAsk) => void change({ handoffAsk })}
-            />
           </>
         )}
         {problem && (

@@ -1,4 +1,4 @@
-import type { MemoryIndexStatus, MemoryNote, MemoryNotes, MemorySettings, Session, SessionMemory } from "../hub/types";
+import type { GroupMemory, MemoryIndexStatus, MemoryNote, MemoryNotes, MemorySettings, Session, SessionMemory } from "../hub/types";
 
 /** A note as the hub says it. */
 export const note = (id: string, kind: MemoryNote["kind"], text: string, more: Partial<MemoryNote> = {}): MemoryNote => ({
@@ -61,6 +61,8 @@ export const remembered = (more: Partial<SessionMemory> = {}): SessionMemory => 
   memoryOn: true,
   noRecord: false,
   lastRead: "2026-11-08T10:41:00Z",
+  cleared: false,
+  switches: { paused: false, group: null },
   ...more,
 });
 
@@ -119,3 +121,6 @@ export const sessionOf = (more: Partial<Session> = {}): Session => ({
   updatedAt: "2026-11-08T08:00:00Z",
   ...more,
 });
+
+/** Acme's switches, as a session's memory carries them. */
+export const acme = (more: Partial<GroupMemory> = {}) => ({ id: "g-acme", name: "Acme", harvest: true, derive: false, handoffAsk: true, deriveDecided: false, ...more });

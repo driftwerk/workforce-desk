@@ -156,8 +156,10 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const seen = useMachineSessions((s) => s.seen);
   const [editing, setEditing] = useState<Editing>(null);
   const [menu, setMenu] = useState<Opened>(null);
-  // The group whose memory switches are open.
+  // The group whose memory switches are open, on this computer's hub,
+  // whose sidebar the groups are.
   const [memoryOf, setMemoryOf] = useState<string | null>(null);
+  const localHub = useDesk((s) => s.hub);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [dragging, setDragging] = useState<{ kind: "item" | "group"; id: string } | null>(null);
   const [said, setSaid] = useState("");
@@ -717,7 +719,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
             </Confirm>
           );
         })()}
-      {memoryOf && <GroupMemoryDialog group={{ id: memoryOf, name: groupName(memoryOf) }} hub={useDesk.getState().hub} onClose={() => setMemoryOf(null)} />}
+      {memoryOf && <GroupMemoryDialog group={{ id: memoryOf, name: groupName(memoryOf) }} hub={localHub} onClose={() => setMemoryOf(null)} />}
       {menu && (
         <Menu
           label={menu.kind === "item" ? `${nameOf(items.get(menu.key))} options` : `${groupName(menu.id)} options`}

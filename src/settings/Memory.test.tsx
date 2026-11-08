@@ -81,6 +81,15 @@ describe("Settings → Memory", () => {
     expect(limits.querySelector("input, button")).toBeNull();
   });
 
+  it("shows what loaded when another part fails, and says why", async () => {
+    const hub = fakeHub(settingsOf());
+    hub.memoryIndex.mockRejectedValue(new Error("The hub didn't answer."));
+    await show(hub);
+    expect(screen.getByRole("alert").textContent).toContain("The hub didn't answer.");
+    expect(screen.getByRole("switch", { name: "Pause remembering" })).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
   it("says so on a hub that keeps no memory settings", async () => {
     await show(fakeHub(null, null));
     expect(screen.getByText("This computer's hub doesn't keep Desk Memory's settings yet.")).toBeTruthy();
@@ -89,11 +98,11 @@ describe("Settings → Memory", () => {
 });
 
 describe("a group's memory", () => {
-  it("shows its three switches and saves each as it is switched", async () => {
+  it("shows its two switches and saves each as it is switched", async () => {
     const hub = fakeHub(settingsOf());
     render(<GroupMemoryDialog group={{ id: "g-acme", name: "Acme" }} hub={hub as unknown as DeskHub} onClose={() => {}} />);
     const dialog = await screen.findByRole("dialog", { name: "Memory for Acme" });
-    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
     expect(screen.getByRole("switch", { name: "Remember its sessions" }).getAttribute("aria-checked")).toBe("true");
     const derive = screen.getByRole("switch", { name: "Let Desk's model note decisions" });
     expect(derive.getAttribute("aria-checked")).toBe("false");
@@ -101,14 +110,21 @@ describe("a group's memory", () => {
     await act(async () => fireEvent.click(derive));
     expect(hub.changeGroupMemory).toHaveBeenCalledWith("g-acme", { derive: true });
     expect(screen.getByRole("switch", { name: "Let Desk's model note decisions" }).getAttribute("aria-checked")).toBe("true");
-    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Ask before handing its work on" })));
-    expect(hub.changeGroupMemory).toHaveBeenLastCalledWith("g-acme", { handoffAsk: false });
+    // Handing work on doesn't exist yet: nothing to ask about.
+    expect(screen.queryByRole("switch", { name: /handing its work on/ })).toBeNull();
+  });
+
+  it("names the fallback provider where the person agrees to the model reading", async () => {
+    const hub = fakeHub(settingsOf({ limits: { ...settingsOf().limits, fallbackProviders: true } }));
+    render(<GroupMemoryDialog group={{ id: "g-acme", name: "Acme" }} hub={hub as unknown as DeskHub} onClose={() => {}} />);
+    const dialog = await screen.findByRole("dialog", { name: "Memory for Acme" });
+    await waitFor(() => expect(dialog.textContent).toContain("another provider it's set up with"));
   });
 
   it("can't let the model note when noting is off for this Desk", async () => {
     const hub = fakeHub(settingsOf({ limits: { ...settingsOf().limits, derive: false } }));
     render(<GroupMemoryDialog group={{ id: "g-acme", name: "Acme" }} hub={hub as unknown as DeskHub} onClose={() => {}} />);
-    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
     expect((screen.getByRole("switch", { name: "Let Desk's model note decisions" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Noting is turned off for this Desk.")).toBeTruthy();
   });

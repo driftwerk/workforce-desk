@@ -89,16 +89,27 @@ class FakeHub implements DeskTransport {
         why: "You asked Desk to forget this conversation.",
         memoryOn: this.memoryOn,
         lastRead: null,
+        switches: { paused: this.settings.paused, group: this.settings.groups[0]! },
         notes: notes([]),
       });
     return remembered({
       remembering: !off,
       why: paused ? "Remembering is paused for every session." : !this.memoryOn ? "Remembering is off for this session." : null,
       memoryOn: this.memoryOn,
+      switches: { paused, group: acme },
       notes: notes(this.kept, {
         replaced: this.replaced,
-        ...(off
-          ? { noting: "off", reason: "memory_off", why: "Desk isn't noting decisions while it isn't remembering this session." }
+        counts: {
+          decisions: this.kept.filter((n) => n.kind === "decision").length,
+          facts: this.kept.filter((n) => n.kind === "fact").length,
+          todos: 0,
+          openTodos: 0,
+          kept: this.kept.length + this.replaced.length,
+        },
+        ...(paused
+          ? { noting: "off", reason: "paused", why: "Desk isn't noting decisions while remembering is paused for every session." }
+          : off
+          ? { noting: "off", reason: "session_off", why: "Desk isn't noting decisions while it isn't remembering this session." }
           : !acme.derive
             ? { noting: "off", reason: "group_off", why: GROUP_OFF }
             : {}),
@@ -151,6 +162,7 @@ class FakeHub implements DeskTransport {
     if (route === "GET /api/desk/memory/settings") return json(this.settings);
     if (route === "PATCH /api/desk/memory/settings") {
       this.settings = { ...this.settings, paused: sent.paused as boolean };
+      this.events?.say({ type: "setting", key: "memory.paused" });
       return json(this.settings);
     }
     const group = /^\/api\/desk\/memory\/groups\/([^/]+)$/.exec(path);
@@ -159,6 +171,7 @@ class FakeHub implements DeskTransport {
       if (!g) return json({ error: "not found" }, 404);
       const { id: _id, name: _name, ...now } = { ...g, ...sent, deriveDecided: g.deriveDecided || "derive" in sent };
       this.settings = { ...this.settings, groups: this.settings.groups.map((x) => (x === g ? { ...x, ...now } : x)) };
+      this.events?.say({ type: "setting", key: `memory.group.${g.id}` });
       return json(now);
     }
     if (route === "GET /api/desk/memory/index") return json(indexOf());
@@ -217,7 +230,10 @@ describe("Desk Memory, against the hub", () => {
     expect(hub.requests).toContain("POST /api/desk/sessions/s1/memory/derive");
     // The session's own view stays mounted beside the Memory tab.
     expect(screen.getByRole("tab", { name: "Session" }).getAttribute("aria-selected")).toBe("false");
-    expect(document.querySelector(".session-card.showing-memory .terminal-idle")).not.toBeNull();
+    const own = document.querySelector<HTMLElement>(".session-view")!;
+    expect(own.hidden).toBe(true);
+    expect(own.querySelector(".terminal-idle")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Memory" }).getAttribute("aria-controls")).toBe(screen.getByRole("tabpanel").id);
 
     // Asked once: the answer goes to Acme's switches, and notes come.
     const ask = screen.getByRole("group", { name: "Let Desk's model read Acme's sessions?" });
@@ -249,7 +265,8 @@ describe("Desk Memory, against the hub", () => {
     // Forgotten.
     fireEvent.click(screen.getByRole("button", { name: "Forget…" }));
     const dialog = screen.getByRole("dialog", { name: "Forget what Desk remembers of “atlas-api”?" });
-    expect(dialog.textContent).toContain("This removes its 48 exchanges and 2 notes from Desk.");
+    // The two held, and the one the correction replaced.
+    expect(dialog.textContent).toContain("This removes its 48 exchanges and 3 notes, and its summary, from Desk.");
     await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Forget" })));
     await waitFor(() => expect(screen.getByText("You asked Desk to forget this conversation.")).toBeTruthy());
     expect(hub.requests).toContain("DELETE /api/desk/sessions/s1/memory");
@@ -264,21 +281,23 @@ describe("Desk Memory, against the hub", () => {
     fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Memory…" }));
     const dialog = await screen.findByRole("dialog", { name: "Memory for Acme" });
-    await waitFor(() => expect(within(dialog).getAllByRole("switch")).toHaveLength(3));
+    await waitFor(() => expect(within(dialog).getAllByRole("switch")).toHaveLength(2));
     await act(async () => fireEvent.click(within(dialog).getByRole("switch", { name: "Remember its sessions" })));
     expect(hub.requests).toContain("PATCH /api/desk/memory/groups/g-acme");
     expect(hub.settings.groups[0]!.harvest).toBe(false);
     await waitFor(() => expect(within(dialog).getByRole("switch", { name: "Remember its sessions" }).getAttribute("aria-checked")).toBe("false"));
   });
 
-  it("pauses remembering in Settings, and the session's panel says so and resumes it", async () => {
+  it("pauses remembering in Settings, the open panel hears it and says so, and resumes it", async () => {
     await connect();
-    render(<Memory />);
-    const pause = await screen.findByRole("switch", { name: "Pause remembering" });
+    await memoryTab();
+    const settings = render(<Memory />);
+    const pause = await within(settings.container).findByRole("switch", { name: "Pause remembering" });
     await act(async () => fireEvent.click(pause));
     expect(hub.settings.paused).toBe(true);
-    cleanup();
-    await memoryTab();
+    // The panel, open all along, is told.
+    await waitFor(() => expect(screen.getByText("Remembering is paused for every session.")).toBeTruthy());
+    settings.unmount();
     expect(screen.getByText("Remembering is paused for every session.")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resume remembering" })));
     expect(hub.settings.paused).toBe(false);

@@ -5,9 +5,12 @@
   flex: none;
   margin: 8px 16px 0;
 }
-/* The session's own view stays mounted while Memory shows; what it asks
-   of you (an approval, its questions) still shows below. */
-.session-card.showing-memory > :not(.rpanel-head, .session-tabs, .memory-panel, .approval, .line-panel, .line-bar) {
+/* The session's own view: its children lay out as the card's own, and it
+   stays mounted, hidden, while Memory shows. */
+.session-view {
+  display: contents;
+}
+.session-view[hidden] {
   display: none;
 }
 

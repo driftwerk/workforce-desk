@@ -1,6 +1,6 @@
 import { RichMarkdown } from "@workforce/rich";
 import { OnMachine } from "../machines/OnMachine";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { backgroundLine, backgroundOf, lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
 import { useDesk, hubFor } from "../hub/store";
@@ -73,13 +73,14 @@ export function SessionCard({ session }: { session: Session }) {
   // The session's own view, or what Desk remembers of it. The session's
   // stays mounted (its terminal, its seen mark) while Memory shows.
   const [tab, setTab] = useState<"session" | "memory">("session");
+  const tabIds = useId();
   const saveGoal = () => {
     setEditingGoal(false);
     if (goal !== session.goal) hubFor(session)?.update(session.id, { goal }).catch(fail);
   };
   return (
     <SidePanel
-      className={`session-card${tab === "memory" ? " showing-memory" : ""}`}
+      className="session-card"
       label={`Session ${name}`}
       noun="this session"
       onClose={() => open(null)}
@@ -111,14 +112,34 @@ export function SessionCard({ session }: { session: Session }) {
       }
     >
       <div className="tabs session-tabs" role="tablist" aria-label={`${name}: what shows`}>
-        <button type="button" role="tab" aria-selected={tab === "session"} onClick={() => setTab("session")}>
+        <button
+          type="button"
+          role="tab"
+          id={`${tabIds}-session-tab`}
+          aria-selected={tab === "session"}
+          aria-controls={`${tabIds}-session`}
+          onClick={() => setTab("session")}
+        >
           Session
         </button>
-        <button type="button" role="tab" aria-selected={tab === "memory"} onClick={() => setTab("memory")}>
+        <button
+          type="button"
+          role="tab"
+          id={`${tabIds}-memory-tab`}
+          aria-selected={tab === "memory"}
+          aria-controls={`${tabIds}-memory`}
+          onClick={() => setTab("memory")}
+        >
           Memory
         </button>
       </div>
-      {tab === "memory" && <MemoryPanel session={session} name={name} item={sessionItem(key)} hub={hubFor(session)} />}
+      {tab === "memory" && (
+        <MemoryPanel session={session} name={name} hub={hubFor(session)} id={`${tabIds}-memory`} labelledBy={`${tabIds}-memory-tab`} />
+      )}
+      {/* The session's own view: hidden, never unmounted, while Memory
+          shows (its terminal, its seen mark). What it asks of you stays
+          below either. */}
+      <div className="session-view" role="tabpanel" id={`${tabIds}-session`} aria-labelledby={`${tabIds}-session-tab`} hidden={tab !== "session"}>
       {(places.length > 0 || loose) && <ShownIn places={places} loose={loose} onShown={() => open(null)} />}
       <div className="session-goal">
         <SessionTicketChip session={key} />
@@ -157,6 +178,7 @@ export function SessionCard({ session }: { session: Session }) {
         </label>
       )}
       <SessionBody session={session} />
+      </div>
       <Approval session={session} />
       <LinePanel session={session} />
     </SidePanel>

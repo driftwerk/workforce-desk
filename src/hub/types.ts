@@ -335,6 +335,8 @@ export type DeskEvent =
     }
   /** The sidebar's groups changed on the hub. */
   | { type: "layout"; layout: Layout }
+  /** One of the person's settings changed (`memory.paused`, `memory.group.<id>`, `memory.session.<id>`). */
+  | { type: "setting"; key: string }
   | { type: "terminal"; terminal: TerminalInfo }
   | { type: "terminalRemoved"; id: string }
   | { type: "session"; session: Session }
@@ -1287,13 +1289,20 @@ export interface ReplacedNote {
 }
 
 /** Why Desk isn't noting decisions from a session, for the panel to act on. */
-export type NotingReason = "desk_off" | "no_model" | "memory_off" | "group_off" | "day_cap" | "failing";
+export type NotingReason = "desk_off" | "no_model" | "paused" | "session_off" | "group_off" | "day_cap" | "failing";
 
 export interface MemoryNotes {
   decisions: MemoryNote[];
   facts: MemoryNote[];
   todos: MemoryNote[];
-  counts: { decisions: number; facts: number; todos: number; openTodos: number };
+  counts: {
+    decisions: number;
+    facts: number;
+    todos: number;
+    openTodos: number;
+    /** Every note kept, replaced and dropped ones too: what forgetting deletes. */
+    kept?: number;
+  };
   /** `paused`: the day's calls are spent, until tomorrow. */
   noting: "on" | "paused" | "off";
   /** Why it isn't, or what else to know, in plain words. */
@@ -1342,6 +1351,10 @@ export interface SessionMemory {
   noRecord?: boolean;
   /** When Desk last kept something it said. */
   lastRead?: string | null;
+  /** Desk no longer has the session: there is no switch to turn. */
+  cleared?: boolean;
+  /** The pause and its group's switches, as its hub has them. */
+  switches?: { paused: boolean; group: (GroupMemory & { id: string; name: string }) | null };
 }
 
 /** What the person does to a note. */
@@ -1399,6 +1412,8 @@ export interface MemorySettings {
     deriveCallsToday: number;
     /** Whose model writes the notes (`anthropic`, …); none without one. */
     provider?: string | null;
+    /** The hub may write them on another provider when that one can't. */
+    fallbackProviders?: boolean;
   };
   totals: MemoryTotals[];
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { useDesk } from "../hub/store";
-import type { MemoryIndexStatus, MemorySettings } from "../hub/types";
+import { deskListeners, useDesk } from "../hub/store";
+import type { DeskEvent, MemoryIndexStatus, MemorySettings } from "../hub/types";
 import { clock, count, providerName, thousands } from "../memory/words";
 import { plainError } from "../ui/plainError";
 
@@ -26,18 +26,30 @@ export function Memory() {
   const [rebuilding, setRebuilding] = useState(false);
   const pauseId = useId();
 
+  // Each part on its own: one that fails says why, and the other still shows.
   const load = useCallback(async () => {
     if (!hub) return;
-    try {
-      const [s, i] = await Promise.all([hub.memorySettings(), hub.memoryIndex()]);
-      setSettings(s);
-      setIndex(i);
-      setProblem(null);
-    } catch (e) {
-      setProblem(plainError(e));
-    }
+    const problems: string[] = [];
+    await Promise.all([
+      hub.memorySettings().then(setSettings, (e: unknown) => {
+        setSettings(null);
+        problems.push(plainError(e));
+      }),
+      hub.memoryIndex().then(setIndex, (e: unknown) => {
+        setIndex(null);
+        problems.push(plainError(e));
+      }),
+    ]);
+    setProblem(problems.length ? problems.join(" ") : null);
   }, [hub]);
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    void load();
+    const heard = (e: DeskEvent) => {
+      if (e.type === "setting") void load();
+    };
+    deskListeners.add(heard);
+    return () => void deskListeners.delete(heard);
+  }, [load]);
 
   const pause = async (paused: boolean) => {
     try {
@@ -83,7 +95,7 @@ export function Memory() {
       {settings === undefined ? (
         <p className="faint small">Loading…</p>
       ) : settings === null ? (
-        <p className="muted small">This computer's hub doesn't keep Desk Memory's settings yet.</p>
+        !problem && <p className="muted small">This computer's hub doesn't keep Desk Memory's settings yet.</p>
       ) : (
         <>
           <div className="ability-row">

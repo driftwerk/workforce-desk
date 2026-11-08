@@ -1,12 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFloor } from "../floor/store";
-import { useHubLayout } from "../groups/hubLayout";
+import { announce } from "../hub/store";
+import { useMachines } from "../machines/engines";
 import type { DeskHub } from "../hub/client";
 import type { MemorySettings, SessionMemory } from "../hub/types";
 import { RESTORE_WINDOW } from "./ForgetMemory";
-import { KEYWORD_ONLY, MemoryPanel, NO_RECORD } from "./MemoryPanel";
-import { indexOf, note, notes, remembered, sessionOf, settingsOf } from "./testing";
+import { KEYWORD_ONLY, MemoryPanel, NO_RECORD, UNDO_MS } from "./MemoryPanel";
+import { acme, indexOf, note, notes, remembered, sessionOf, settingsOf } from "./testing";
 import { clock } from "./words";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -17,7 +18,6 @@ type Fake = { [K in keyof DeskHub]: ReturnType<typeof vi.fn> };
 const fakeHub = (memory: SessionMemory | null, settings: MemorySettings | null = settingsOf()): Fake =>
   ({
     sessionMemory: vi.fn(async () => memory),
-    memorySettings: vi.fn(async () => settings),
     memoryIndex: vi.fn(async () => indexOf()),
     deriveMemory: vi.fn(async () => undefined),
     changeNote: vi.fn(async () => null),
@@ -28,14 +28,8 @@ const fakeHub = (memory: SessionMemory | null, settings: MemorySettings | null =
     searchMemory: vi.fn(async () => ({ hits: [], keywordOnly: false, notice: null })),
   }) as unknown as Fake;
 
-const show = async (hub: Fake, opts: { inGroup?: boolean } = {}) => {
-  useHubLayout.setState({
-    layout: {
-      groups: [{ id: "g-acme", name: "Acme", collapsed: false, items: opts.inGroup ? ["session:s1"] : [] }],
-      ungrouped: { collapsed: false, items: [] },
-    },
-  });
-  render(<MemoryPanel session={sessionOf()} name="atlas-api" item="session:s1" hub={hub as unknown as DeskHub} />);
+const show = async (hub: Fake, session = sessionOf()) => {
+  render(<MemoryPanel session={session} name="atlas-api" hub={hub as unknown as DeskHub} />);
   await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
 };
 
@@ -44,7 +38,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useHubLayout.setState({ layout: null });
+  vi.useRealTimers();
 });
 
 describe("what Desk remembers of a session", () => {
@@ -112,9 +106,34 @@ describe("what Desk remembers of a session", () => {
     await act(async () => fireEvent.submit(box.closest("form")!));
     expect(hub.changeNote).toHaveBeenLastCalledWith("f1", { action: "correct", text: "Sessions live in Redis." });
 
-    await act(async () => fireEvent.click(within(screen.getByText(/Check the logout path/).closest("li")!).getByRole("button", { name: "Drop" })));
-    expect(hub.changeNote).toHaveBeenLastCalledWith("t1", { action: "drop" });
-    expect(hub.sessionMemory.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(hub.sessionMemory.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("drops a note only after a few seconds, and Undo keeps it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const hub = fakeHub(remembered());
+    await show(hub);
+    const drop = (text: RegExp) => fireEvent.click(within(screen.getByText(text).closest("li")!).getByRole("button", { name: "Drop" }));
+    drop(/Check the logout path/);
+    expect(screen.getByText(/Dropped “Check the logout path/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Still to do (0)" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("heading", { name: "Still to do (1)" })).toBeTruthy();
+    await act(async () => void vi.advanceTimersByTime(UNDO_MS + 100));
+    expect(hub.changeNote).not.toHaveBeenCalled();
+
+    drop(/Sessions live in Postgres/);
+    await act(async () => void vi.advanceTimersByTime(UNDO_MS + 100));
+    expect(hub.changeNote).toHaveBeenCalledWith("f1", { action: "drop" });
+  });
+
+  it("drops what was waiting to be dropped when the panel closes", async () => {
+    const hub = fakeHub(remembered());
+    await show(hub);
+    fireEvent.click(within(screen.getByText(/Sessions live in Postgres/).closest("li")!).getByRole("button", { name: "Drop" }));
+    expect(hub.changeNote).not.toHaveBeenCalled();
+    cleanup();
+    expect(hub.changeNote).toHaveBeenCalledWith("f1", { action: "drop" });
   });
 
   it("shows a replaced note as replaced, with its time, and a confirmed one as confirmed", async () => {
@@ -144,7 +163,7 @@ describe("what Desk remembers of a session", () => {
   });
 
   it("while paused, says so and resumes from here", async () => {
-    const hub = fakeHub(remembered({ remembering: false, why: "Remembering is paused for every session." }), settingsOf({ paused: true }));
+    const hub = fakeHub(remembered({ remembering: false, why: "Remembering is paused for every session.", switches: { paused: true, group: null } }));
     await show(hub);
     expect(screen.getByRole("status").textContent).toContain("Remembering is paused for every session.");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resume remembering" })));
@@ -157,13 +176,16 @@ describe("what Desk remembers of a session", () => {
         noting: "off",
         reason: "group_off",
         why: "Desk doesn't note decisions, facts or to-dos from this group's sessions until you let its model read them, in the group's settings.",
+        fallbackProviders: true,
       }),
+      switches: { paused: false, group: acme() },
     });
     const hub = fakeHub(off);
-    await show(hub, { inGroup: true });
+    await show(hub);
     const ask = screen.getByRole("group", { name: "Let Desk's model read Acme's sessions?" });
     expect(within(ask).getByText("Let Desk's model read Acme's sessions to note decisions?")).toBeTruthy();
     expect(ask.textContent).toContain("sent to Anthropic");
+    expect(ask.textContent).toContain("another provider it's set up with");
     // Asked, not told twice.
     expect(screen.queryByText(/until you let its model read them/)).toBeNull();
     await act(async () => fireEvent.click(within(ask).getByRole("button", { name: "Let it read them" })));
@@ -173,11 +195,41 @@ describe("what Desk remembers of a session", () => {
   });
 
   it("once the group's answer was no, says why instead of asking again", async () => {
-    const off = remembered({ notes: notes([], { noting: "off", reason: "group_off", why: "Not for this group." }) });
-    const hub = fakeHub(off, settingsOf({ groups: [{ id: "g-acme", name: "Acme", harvest: true, derive: false, handoffAsk: true, deriveDecided: true }] }));
-    await show(hub, { inGroup: true });
+    const off = remembered({
+      notes: notes([], { noting: "off", reason: "group_off", why: "Not for this group." }),
+      switches: { paused: false, group: acme({ deriveDecided: true }) },
+    });
+    await show(fakeHub(off));
     expect(screen.queryByRole("group", { name: /Let Desk's model read/ })).toBeNull();
     expect(screen.getByText("Not for this group.")).toBeTruthy();
+  });
+
+  it("for a session on another machine, asks nothing of its group and says its settings come later", async () => {
+    useMachines.setState({ machines: [{ id: "devbox", name: "devbox" } as never] });
+    const off = remembered({
+      notes: notes([], { noting: "off", reason: "group_off", why: "Desk doesn't note … in the group's settings." }),
+      switches: { paused: false, group: acme() },
+    });
+    await show(fakeHub(off), sessionOf({ machine: "devbox" }));
+    expect(screen.queryByRole("group", { name: /Let Desk's model read/ })).toBeNull();
+    expect(screen.queryByText(/in the group's settings/)).toBeNull();
+    expect(screen.getByText(/Memory settings for devbox's sessions come later\./)).toBeTruthy();
+  });
+
+  it("reads again when a setting changes on its hub", async () => {
+    const hub = fakeHub(remembered());
+    await show(hub);
+    const before = hub.sessionMemory.mock.calls.length;
+    await act(async () => announce({ type: "setting", key: "memory.paused" }));
+    await waitFor(() => expect(hub.sessionMemory.mock.calls.length).toBe(before + 1));
+    // Another machine's setting isn't this session's.
+    await act(async () => announce({ type: "setting", key: "memory.paused", machine: "devbox" }));
+    expect(hub.sessionMemory.mock.calls.length).toBe(before + 1);
+  });
+
+  it("leaves the switch out for a session Desk no longer has", async () => {
+    await show(fakeHub(remembered({ cleared: true, memoryOn: false, remembering: false, why: "Desk no longer has this session." })));
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("says when the day's notes are spent", async () => {
@@ -216,11 +268,13 @@ describe("what Desk remembers of a session", () => {
   });
 
   it("forgets after saying exactly what goes, what stays, and the restore window", async () => {
-    const hub = fakeHub(remembered());
+    // Three held, and two replaced or dropped: all five go.
+    const m = remembered();
+    const hub = fakeHub({ ...m, notes: { ...m.notes, counts: { ...m.notes.counts, kept: 5 } } });
     await show(hub);
     fireEvent.click(screen.getByRole("button", { name: "Forget…" }));
     const dialog = screen.getByRole("dialog", { name: "Forget what Desk remembers of “atlas-api”?" });
-    expect(dialog.textContent).toContain("This removes its 48 exchanges and 3 notes from Desk.");
+    expect(dialog.textContent).toContain("This removes its 48 exchanges and 5 notes, and its summary, from Desk.");
     expect(dialog.textContent).toContain("Its cost history stays (numbers only).");
     expect(dialog.textContent).toContain(RESTORE_WINDOW);
     // The hub can't delete Claude Code's own record: not offered.

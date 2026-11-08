@@ -22,11 +22,12 @@ export function ForgetMemory({
   onForget: () => Promise<void>;
   onClose: () => void;
 }) {
-  const notes = noteCount(memory.notes);
+  // Every note it keeps goes, those replaced and dropped too.
+  const notes = memory.notes.counts.kept ?? noteCount(memory.notes) + (memory.notes.replaced?.length ?? 0);
   const what = [count(memory.counts.exchanges, "exchange"), notes > 0 ? count(notes, "note") : null].filter(Boolean).join(" and ");
   return (
     <Confirm title={`Forget what Desk remembers of “${name}”?`} action="Forget" onConfirm={onForget} onClose={onClose}>
-      <p>This removes its {what} from Desk.</p>
+      <p>This removes its {what}, and its summary, from Desk.</p>
       <p className="muted">Its cost history stays (numbers only). Desk won't remember this conversation again, and {ENGINE_TITLE[engine]}'s own record of it isn't touched.</p>
       <p className="muted">{RESTORE_WINDOW}</p>
     </Confirm>
