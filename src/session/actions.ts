@@ -12,7 +12,14 @@ export interface SessionAction {
 /** States a session is only in while its process runs (here, or in another
  *  terminal). */
 const RUNNING: ReadonlySet<SessionState> = new Set(["starting", "working", "blocked", "asking", "done", "idle"]);
-export const runs = (s: Session): boolean => s.live || RUNNING.has(s.state);
+/** Whether a session runs in another terminal: one Desk didn't start (or
+ *  one started by hand in a Desk terminal, whose hooks report it) in a
+ *  running state. One Desk started runs only while its hub holds its
+ *  process (`live`): not live, it runs nowhere, whatever state it last
+ *  reported (a Claude Code that never drew stays "starting"), so it is
+ *  resumed or removed, never only stopped being tracked. */
+export const runsElsewhere = (s: Session): boolean => !s.live && RUNNING.has(s.state) && (s.origin === "external" || !!s.terminalId);
+export const runs = (s: Session): boolean => s.live || runsElsewhere(s);
 
 /** Whether Desk can pick a session's conversation up: it isn't running
  *  anywhere, it has one (a CLI session id), and its engine resumes by id. A
@@ -47,13 +54,13 @@ export interface LifecycleAction {
  *  its terminals, whose shell is the person's), or one that has stopped and
  *  isn't closed yet. One running in another terminal ends there. */
 export const endable = (s: Session): boolean =>
-  s.origin === "desk" && !s.terminalId && s.state !== "closed" && (s.live || !RUNNING.has(s.state));
+  s.origin === "desk" && !s.terminalId && s.state !== "closed";
 
 /** Ending, removing: what a session offers in its menus and card, each
  *  asking first where it should. A session running in another terminal is
  *  only stopped being tracked: it keeps running there. */
 export function lifecycleActions(session: Session): LifecycleAction[] {
-  const elsewhere = !session.live && RUNNING.has(session.state);
+  const elsewhere = runsElsewhere(session);
   return [
     ...(endable(session) ? [{ label: "End session…" as const, run: () => endSession(session) }] : []),
     {
