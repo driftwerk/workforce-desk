@@ -250,6 +250,26 @@ describe("an answer Desk heard after it restarted mid-turn", () => {
     expect([...keptOf([vote], [mine, answer])]).toEqual(["h-v"]);
   });
 
+  it("leaves an answer the hub named after what was said during its turn until a read has it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-08T09:00:00Z"));
+    let s: ConversationState = { ...emptyConversation(), connected: true, features: new Set([FEATURES.stream, FEATURES.clientIds]) };
+    s = sent(s, "q9", Q, "r9");
+    s = fold(s, [{ type: "tool_start", turn_ref: "r9", content: "web.search: a" }]);
+    vi.setSystemTime(new Date("2026-11-08T09:10:00Z"));
+    s = fold(s, [
+      { type: "stream_start", turn_ref: "r9", id: "A9" },
+      { type: "stream_delta", turn_ref: "r9", id: "A9", content: "found it" },
+      { type: "stream_end", turn_ref: "r9", id: "A9" },
+    ]);
+    vi.useRealTimers();
+    const history = [
+      row({ id: "h-q9", from: "user", text: Q, client_id: "q9", seq: 20, at: "2026-11-08T09:00:00Z" }),
+      row({ id: "h-w9", from: "user", text: W, client_id: "w9", seq: 21, at: "2026-11-08T09:05:00Z" }),
+    ];
+    expect(shownWith(history, toShow(s.messages)).map((m) => m.id)).toEqual(["h-q9", "h-w9", "A9"]);
+  });
+
   it("stays last while it is still being written", () => {
     const s = restarted(unstamped.slice(0, 4));
     const shown = shownWith([...base, story, ...later], toShow(s.messages));

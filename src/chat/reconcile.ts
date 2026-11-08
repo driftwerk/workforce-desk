@@ -89,7 +89,14 @@ const inOrder = (kept: readonly ChatMessage[]): ChatMessage[] => {
 const answers = (m: ChatMessage): boolean =>
   m.role === "assistant" && m.status === "complete" && !!m.content.trim() && !!m.replyTo && !m.delivery;
 
-/** `live` among `kept` (in the hub's order) by time: one that is over goes
+/** Whether live `m`, not kept, goes by its own time: an answer with no id of
+ *  the hub's, which no read will name, or a turn's failure, timed as it
+ *  ended. An answer the hub named is timed from when it began, and what was
+ *  said during its turn is kept before it; it follows what was kept until a
+ *  read has it. */
+const timed = (m: ChatMessage): boolean => unnamed(m) || m.status === "error";
+
+/** `live` among `kept` (in the hub's order): one that goes by its time goes
  *  before the first kept message from well after it, since what was said
  *  after it was said after it; the rest, and one still streaming, follow
  *  what was kept, in the order they were said. */
@@ -98,16 +105,17 @@ const byTime = (kept: readonly ChatMessage[], live: readonly ChatMessage[]): Cha
   const after: ChatMessage[] = [];
   for (const m of live) {
     const t = Date.parse(m.at);
-    const at = m.status === "streaming" || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
+    const at = !timed(m) || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
     if (at < 0) after.push(m);
     else before.set(at, [...(before.get(at) ?? []), m]);
   }
   return [...kept.flatMap((k, i) => [...(before.get(i) ?? []), k]), ...after];
 };
 
-/** The conversation as shown: what the hub kept, in its order, with what is
- *  live and not yet kept by its time: after what was kept before it and
- *  before what was kept well after it, in the order it was said. Each
+/** The conversation as shown: what the hub kept, in its order, then what is
+ *  live and not yet kept, in the order it was said; an answer no read will
+ *  name, or a failure, goes by its time instead, before what was kept well
+ *  after it. Each
  *  message once, by its id, so no two are ever the same one; a live one the
  *  hub kept (by either id, or an answer with neither by its words) shows as
  *  kept. A turn's failure that a later answer replaced is marked superseded,
