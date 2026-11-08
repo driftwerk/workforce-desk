@@ -62,7 +62,7 @@ describe("who oversees a group", () => {
     });
     expect(deleteAsk("Sarah", "Acme")).toEqual({
       title: "Delete Acme?",
-      body: "Sarah stops overseeing; its sessions and agents become ungrouped.",
+      body: "Sarah stops overseeing; its sessions and agents become ungrouped, and the main boss runs its sessions from now on, with no handover note from Sarah.",
       action: "Delete Acme",
     });
   });
@@ -238,7 +238,7 @@ describe("a group's boss in the sidebar", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Delete Acme?");
-    expect(dialog.textContent).toContain("Sarah stops overseeing; its sessions and agents become ungrouped.");
+    expect(dialog.textContent).toContain("Sarah stops overseeing; its sessions and agents become ungrouped, and the main boss runs its sessions from now on, with no handover note from Sarah.");
     expect(screen.getByRole("group", { name: "Acme" })).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete Acme" }));
     await waitFor(() => expect(screen.queryByRole("group", { name: "Acme" })).toBeNull());

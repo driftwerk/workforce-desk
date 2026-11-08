@@ -81,6 +81,7 @@ import {
 import { plainError } from "../ui/plainError";
 import { GroupDot } from "./GroupChip";
 import { askMove, moveRow, type MoveSubject } from "./move";
+import { crossesBoss } from "../hub/client";
 import { useHubLayout } from "./hubLayout";
 
 const ENGINE = ENGINE_SHORT;
@@ -290,12 +291,12 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
    *  crosses from one boss to another, and kept where it was until then. */
   const placeIn = (key: ItemKey, to: string, before: ItemKey | null, say: (next: Layout) => string, focus = true) => {
     const tell = (next: Layout) => (focus ? after(key, say(next)) : setSaid(say(next)));
+    const subject = subjectOf(key);
     const layoutMove = () => {
       const next = moved(currentLayout(), present, key, to, before);
-      moveItem(present, key, to, before);
+      moveItem(present, key, to, before, refusedAsMove(subject, to));
       tell(next);
     };
-    const subject = subjectOf(key);
     if (!subject || subject.from === to) return layoutMove();
     void moveRow(subject, to, layoutMove, () => {
       // The hub put it at its new group's end: where it was dropped, then.
@@ -303,6 +304,16 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       tell(currentLayout());
     }).catch(useDesk.getState().fail);
   };
+
+  /** A sidebar change the hub refused because only a move may make it (a
+   *  boss came to one side meanwhile): never tried again, but asked about
+   *  with the move dialog. Anything else is said as before. */
+  const refusedAsMove =
+    (subject: MoveSubject | null, to: string) =>
+    (e: unknown): void => {
+      if (subject && crossesBoss(e)) askMove(subject, to);
+      else useDesk.getState().fail(e);
+    };
 
   const moveTo = (key: ItemKey, to: string) => placeIn(key, to, null, (next) => `Moved ${nameOf(items.get(key))} to ${where(next, key)}`);
 
@@ -450,12 +461,12 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
               kind: "item",
               label: "Remove from group",
               onSelect: () => {
+                const subject = subjectOf(key);
                 const layoutMove = () => {
                   const next = removed(currentLayout(), present, key);
-                  removeFromGroup(present, key);
+                  removeFromGroup(present, key, refusedAsMove(subject, UNGROUPED));
                   after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
                 };
-                const subject = subjectOf(key);
                 if (!subject) return layoutMove();
                 void moveRow(subject, UNGROUPED, layoutMove, () => after(key, `Moved ${nameOf(item)} to Ungrouped`)).catch(useDesk.getState().fail);
               },

@@ -66,7 +66,7 @@ export const overseeAsk = (agent: string, group: string) => ({
 /** What is asked before deleting `group`, which `boss` oversees. */
 export const deleteAsk = (boss: string, group: string) => ({
   title: `Delete ${group}?`,
-  body: `${boss} stops overseeing; its sessions and agents become ungrouped.`,
+  body: `${boss} stops overseeing; its sessions and agents become ungrouped, and the main boss runs its sessions from now on, with no handover note from ${boss}.`,
   action: `Delete ${group}`,
 });
 

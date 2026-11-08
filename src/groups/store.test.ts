@@ -15,8 +15,10 @@ import {
   onHub,
   removeFromGroup,
   renameGroup,
+  replaceLayout,
   useHubLayout,
 } from "./store";
+import { HubError } from "../hub/client";
 
 vi.mock("../platform", () => ({ loadSettings: vi.fn(), saveSettings: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -188,6 +190,41 @@ describe("on a hub that keeps the groups and names", () => {
     moveItem(present, "session:s1", UNGROUPED, null);
     await vi.waitFor(() => expect(hub.orderUngrouped).toHaveBeenLastCalledWith(["session:s2", "session:s1"]));
     expect(useSettings.getState().groups).toEqual([]);
+  });
+
+  it("tries a whole-layout change again when the layout changed, never when only a move may make it", async () => {
+    const hub = fakeHub();
+    vi.mocked(loadSettings).mockResolvedValue(file({ layoutOnHub: true }));
+    await useSettings.getState().load();
+    send(snapshot(hubLayout));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const replace = vi
+      .fn()
+      .mockRejectedValueOnce(new HubError(409, "The layout changed since it was read: read it again."))
+      .mockResolvedValueOnce(hubLayout);
+    Object.assign(hub, { replaceLayout: replace });
+    expect(await replaceLayout((l) => ({ ...l, groups: l.groups.map((g) => ({ ...g, name: "Again" })) }))).toBe(true);
+    expect(replace).toHaveBeenCalledTimes(2);
+
+    const refused = vi.fn().mockRejectedValue(new HubError(409, "That would put a session in a group another boss oversees.", "crosses_boss"));
+    Object.assign(hub, { replaceLayout: refused });
+    expect(await replaceLayout((l) => ({ ...l, groups: l.groups.map((g) => ({ ...g, name: "Moved" })) }))).toBe(false);
+    expect(refused).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("hands a refusal only a move may get past to its caller, not to the person's error line", async () => {
+    const hub = fakeHub();
+    vi.mocked(loadSettings).mockResolvedValue(file({ layoutOnHub: true }));
+    await useSettings.getState().load();
+    send(snapshot(hubLayout));
+    useDesk.setState({ error: null });
+    const e = new HubError(409, "That would put a session in a group another boss oversees.", "crosses_boss");
+    hub.putInGroup.mockRejectedValueOnce(e);
+    const failed = vi.fn();
+    moveItem(["session:s1", "session:s2"], "session:s2", "h1", null, failed);
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledWith(e));
+    expect(useDesk.getState().error).toBeNull();
   });
 
   it("taking an item out of a group, or deleting a group, sends Ungrouped's order", async () => {

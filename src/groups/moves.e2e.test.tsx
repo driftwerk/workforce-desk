@@ -71,6 +71,9 @@ const session = (id: string, name: string): Session =>
 class FakeHub implements DeskTransport {
   requests: string[] = [];
   events: Socket | null = null;
+  /** The next sidebar change is refused: a boss came to one side of it
+   *  since Desk looked, so only a move may make it. */
+  crossesNext = false;
   layout: Layout = {
     groups: [
       { id: "acme", name: "Acme", collapsed: false, items: ["agent:local/sarah", "agent:local/scout", "session:s1"] },
@@ -110,6 +113,10 @@ class FakeHub implements DeskTransport {
     }
     const put = /^\/api\/desk\/groups\/([^/]+)\/items\/(.+)$/.exec(path);
     if (put && method === "PUT") {
+      if (this.crossesNext) {
+        this.crossesNext = false;
+        return json({ error: "That would put a session in a group another boss oversees. Move it with the Move dialog.", code: "crosses_boss" }, 409);
+      }
       this.put(decodeURIComponent(put[2]!), put[1]!);
       return json(this.layout);
     }
@@ -287,6 +294,25 @@ describe("moving a session between groups, against the hub", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Move to New group" }));
     await waitFor(() => expect(layoutPuts()).toEqual([`PUT /api/desk/groups/${made.id}/items/agent%3Alocal/scout`]));
     expect(moves.asked).toEqual([]);
+  });
+
+  it("asks with the move dialog, never retrying, when the hub says only a move may make it", async () => {
+    await connect();
+    render(
+      <>
+        <SidebarGroups />
+        <MoveDialog />
+      </>,
+    );
+    useDesk.setState({ error: null });
+    hub.crossesNext = true;
+    moveFromMenu("notes", "Personal");
+    const dialog = await screen.findByRole("dialog", { name: "Move notes" });
+    expect(layoutPuts()).toEqual(["PUT /api/desk/groups/personal/items/session%3As2"]);
+    expect(useDesk.getState().error).toBeNull();
+    // What the hub has shows again: notes is still in Ungrouped.
+    await waitFor(() => expect(within(screen.getByRole("group", { name: "Ungrouped" })).getByText("notes")).toBeTruthy());
+    expect(within(dialog).getByRole("heading", { name: "Move notes" })).toBeTruthy();
   });
 
   it("moves as before, unasked, within one boss's part", async () => {
