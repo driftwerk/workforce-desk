@@ -126,8 +126,9 @@ export const changeLayout = (
 // order is Desk's to settle (it lists what shows there unplaced, which only
 // Desk knows), so changes that place things in it send that order.
 
-export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): void =>
-  void changeLayout(
+/** Settles with whether it was kept (once the hub has it, on a hub). */
+export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): Promise<boolean> =>
+  changeLayout(
     (l) => created(l, id, name, items),
     (h) => h.createGroup({ id, name, items: [...items] }),
   );

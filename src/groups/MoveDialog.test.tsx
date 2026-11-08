@@ -287,10 +287,17 @@ describe("moving the other kinds", () => {
     await waitFor(() => expect(hub.commits).toEqual([{ preview: "p1", choices: { ticketGoes: false, release: false, replace: false }, notes: [] }]));
   });
 
+  it("says an agent leaving a boss's group no longer answers in its rooms", () => {
+    open({ kind: "agent", agent: agent("scout", "Scout"), name: "Scout", from: "acme" }, "personal", vi.fn());
+    expect(screen.getByText("Desk oversees Scout from now on, not Sarah.")).toBeTruthy();
+    expect(screen.getByText("It no longer answers in Acme’s rooms.")).toBeTruthy();
+  });
+
   it("moves an agent's row in the sidebar, saying who oversees it from now on", async () => {
     const apply = vi.fn();
     open({ kind: "agent", agent: agent("scout", "Scout"), name: "Scout", from: "acme" }, "globex", apply);
-    expect(screen.getByText("Mia oversees Scout from now on, not Sarah. Only where it shows in the sidebar changes otherwise.")).toBeTruthy();
+    expect(screen.getByText("Mia oversees Scout from now on, not Sarah.")).toBeTruthy();
+    expect(screen.getByText("From now on it answers only in Globex’s rooms.")).toBeTruthy();
     fireEvent.click(moveButton("Globex"));
     expect(apply).toHaveBeenCalledWith("globex");
     expect(fetched).toEqual([]);

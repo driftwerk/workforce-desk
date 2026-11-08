@@ -96,12 +96,18 @@ class FakeHub implements DeskTransport {
     this.events?.say({ type: "layout", layout: this.layout } as DeskEvent);
   }
 
-  fetch = async (method: string, path: string): Promise<Response> => {
+  fetch = async (method: string, path: string, body?: { data: string | Blob }): Promise<Response> => {
     const route = `${method} ${path}`;
     this.requests.push(route);
     if (route === "GET /api/desk/manager") return json(this.manager());
     if (route === "GET /api/desk/sessions") return json([session("s1", "acme-docs"), session("s2", "notes")]);
     if (route === "GET /api/desk/layout") return json(this.layout);
+    if (route === "POST /api/desk/groups") {
+      const g = JSON.parse(String(body!.data)) as { id: string; name: string; items?: string[] };
+      this.layout = { ...this.layout, groups: [...this.layout.groups, { id: g.id, name: g.name, collapsed: false, items: g.items ?? [] }] };
+      this.events?.say({ type: "layout", layout: this.layout } as DeskEvent);
+      return json(this.layout);
+    }
     const put = /^\/api\/desk\/groups\/([^/]+)\/items\/(.+)$/.exec(path);
     if (put && method === "PUT") {
       this.put(decodeURIComponent(put[2]!), put[1]!);
@@ -242,6 +248,25 @@ describe("moving a session between groups, against the hub", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(inGroup("Acme").getByText("acme-docs")).toBeTruthy();
     expect(moves.commits).toEqual([]);
+  });
+
+  it("asks for a new group too, once the hub has the group", async () => {
+    await connect();
+    render(
+      <>
+        <SidebarGroups />
+        <MoveDialog />
+      </>,
+    );
+    moveFromMenu("acme-docs", "New group…");
+    const dialog = await screen.findByRole("dialog", { name: "Move acme-docs" });
+    await within(dialog).findByText("Desk runs acme-docs from now on.");
+    const made = hub.layout.groups.at(-1)!;
+    expect(made.name).toBe("New group");
+    expect(hub.requests.indexOf("POST /api/desk/groups")).toBeGreaterThanOrEqual(0);
+    expect(moves.asked).toEqual([{ item: { kind: "session", id: "s1" }, to: made.id, choices: { ticketGoes: true, release: false, replace: false } }]);
+    expect(made.items).toEqual([]);
+    expect(layoutPuts()).toEqual([]);
   });
 
   it("moves as before, unasked, within one boss's part", async () => {

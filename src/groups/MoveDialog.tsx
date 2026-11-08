@@ -15,7 +15,7 @@ import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { bossOfGroup, isSealed } from "./bosses";
 import { UNGROUPED } from "./model";
-import { afterMove, FIRST_CHOICES, hubGroup, itemOf, localAccount, scopeBoss, useMove, type MoveAsk } from "./move";
+import { afterMove, FIRST_CHOICES, hubGroup, itemOf, localAccount, scopeBoss, scopeOf, useMove, type MoveAsk } from "./move";
 import { useLayout } from "./store";
 
 /** How long a change of target settles before it is previewed: each
@@ -278,13 +278,21 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
     ...(subject.kind === "boss" ? [] : [UNGROUPED]),
   ];
   const shownEffects = preview?.effects.filter((e) => !ASKED.has(e.kind)) ?? [];
-  const agentEffect = (): string => {
-    if (!to) return "";
+  /** An agent's row: who oversees it, and the rooms it answers in, follow
+   *  the part of Desk its group is in (the hub's `allowed_member`). */
+  const agentEffects = (): string[] => {
+    if (!to) return [];
+    if (scopeOf(manager, subject.from) === scopeOf(manager, to)) return [`Only where ${subject.name} shows in the sidebar changes.`];
     const was = fromBoss;
-    const now = scopeBoss(manager, to);
-    if (was === now) return `Only where ${subject.name} shows in the sidebar changes.`;
-    if (!now) return `Nobody oversees ${subject.name} in ${groupName(to)}: it’s closed to everyone but you.`;
-    return `${bossName(now)} oversees ${subject.name} from now on${was ? `, not ${bossName(was)}` : ""}. Only where it shows in the sidebar changes otherwise.`;
+    const next = scopeBoss(manager, to);
+    const who = next
+      ? `${bossName(next)} oversees ${subject.name} from now on${was ? `, not ${bossName(was)}` : ""}.`
+      : `Nobody oversees ${subject.name} in ${groupName(to)}: it’s closed to everyone but you.`;
+    const rooms =
+      scopeOf(manager, to) !== UNGROUPED
+        ? `From now on it answers only in ${groupName(to)}’s rooms.`
+        : `It no longer answers in ${groupName(subject.from)}’s rooms.`;
+    return [who, rooms];
   };
   const planGoal = (item: string): string | null => {
     const id = item.startsWith("plan:") ? item.slice(5) : null;
@@ -394,7 +402,8 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
           </fieldset>
         )}
 
-        {notice && (
+        {/* A refusal the new look asks about itself says it in its own words. */}
+        {notice && !asksToReplace && !refused && (
           <p className="move-callout" role="status">
             {notice}
           </p>
@@ -405,10 +414,12 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
             <h2 className="move-legend">What happens</h2>
             {subject.kind === "agent" ? (
               <ul className="move-effects">
-                <li>
-                  <Arrow />
-                  <span>{agentEffect()}</span>
-                </li>
+                {agentEffects().map((text) => (
+                  <li key={text}>
+                    <Arrow />
+                    <span>{text}</span>
+                  </li>
+                ))}
               </ul>
             ) : loading && !preview ? (
               <p className="faint small">Looking at what this does…</p>

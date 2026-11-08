@@ -9,7 +9,6 @@ import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { useCharges } from "../crew/chargeStore";
 import type { Agent, HubAccount } from "../chat/types";
-import { HubError } from "../hub/client";
 import { movesOf, NO_CHOICES, type MoveChoices, type MoveItem, type MovePreview } from "../hub/moves";
 import { useDesk } from "../hub/store";
 import type { Manager, Ticket } from "../hub/types";
@@ -101,11 +100,17 @@ export const scopeBoss = (manager: Manager | null, group: string): string | null
   return manager?.agentId ?? null;
 };
 
+/** The part of Desk `group` is in, as the hub scopes it: the group itself
+ *  when it has a boss of its own or is sealed, else the main boss's
+ *  (`ungrouped`). */
+export const scopeOf = (manager: Manager | null, group: string): string =>
+  group !== UNGROUPED && (bossOfGroup(manager, group) || isSealed(manager, group)) ? group : UNGROUPED;
+
 /** Moves a sidebar row from `from` to `to`. A session of this computer's
  *  hub is previewed first: when that crosses from one boss to another, the
  *  dialog asks, and nothing moves unless the person says so; otherwise (or
- *  for an agent's row, a machine's session, or a hub too old to preview)
- *  `layout` makes the move in the sidebar as before. */
+ *  for an agent's row, or a machine's session) `layout` makes the move in
+ *  the sidebar as before. */
 export async function moveRow(
   subject: MoveSubject,
   to: string,
@@ -115,8 +120,8 @@ export async function moveRow(
   if (subject.from === to) return layout();
   if (subject.kind === "agent") {
     const manager = useOverview.getState().manager;
-    // The same boss on both sides: only the sidebar changes.
-    if (scopeBoss(manager, subject.from) === scopeBoss(manager, to)) return layout();
+    // Within one boss's part only the sidebar changes.
+    if (scopeOf(manager, subject.from) === scopeOf(manager, to)) return layout();
     return useMove.getState().open({ subject, to, apply: () => layout() });
   }
   const hub = localAccount();
@@ -126,10 +131,9 @@ export async function moveRow(
   let preview: MovePreview;
   try {
     preview = await movesOf(hub).preview(item, hubGroup(to), subject.kind === "session" ? FIRST_CHOICES : NO_CHOICES);
-  } catch (e) {
-    // A hub from before moves were previewed moves it as it did.
-    if (e instanceof HubError && (e.status === 404 || e.status === 405)) return layout();
-    // Nothing else is moved blind: the dialog says why.
+  } catch {
+    // Nothing is moved blind, not even by a hub too old to preview (Desk
+    // ships its own): the dialog says why.
     return useMove.getState().open({ subject, to, placed });
   }
   if (preview.effects.length === 0 && !preview.blocked) return layout();

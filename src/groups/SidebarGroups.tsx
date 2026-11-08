@@ -329,12 +329,12 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     // previews it, once the group is there.
     const subject = with_ ? subjectOf(with_) : null;
     if (with_ && subject?.kind === "session" && subject.from !== UNGROUPED) {
-      addGroup(id, NEW_GROUP, []);
       setEditing({ kind: "group", id });
-      placeIn(with_, id, null, () => `Moved ${nameOf(items.get(with_))} to a new group`);
+      // The hub previews a move only to a group it has.
+      void addGroup(id, NEW_GROUP, []).then((kept) => kept && placeIn(with_, id, null, () => `Moved ${nameOf(items.get(with_))} to a new group`));
       return;
     }
-    addGroup(id, NEW_GROUP, with_ ? [with_] : []);
+    void addGroup(id, NEW_GROUP, with_ ? [with_] : []);
     setEditing({ kind: "group", id });
     if (with_) setSaid(`Moved ${nameOf(items.get(with_))} to a new group`);
   };
