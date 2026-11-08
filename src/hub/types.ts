@@ -1276,7 +1276,7 @@ export type AssignTo = { session: string } | { agent: string } | { newSession: {
 export type BossPlanState = "proposed" | "running" | "paused" | "done" | "dropped";
 
 /** Why a plan that would run starts nothing. */
-export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss";
+export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss" | "start_failing";
 
 /** Where a plan's tickets stand. */
 export interface BossPlanProgress {
@@ -1353,7 +1353,8 @@ export interface BossPlanRevision {
   /** A change within what was approved, or of its scope. */
   change: "minor" | "scope";
   summary: string;
-  snapshot: { goal: string; tickets: PlannedTicket[] };
+  /** `parallel`: its own limit of sessions at once; none is its boss's. */
+  snapshot: { goal: string; tickets: PlannedTicket[]; parallel?: number };
 }
 
 /** A plan in full: its tickets in its order, its waves and revisions. */

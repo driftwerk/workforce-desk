@@ -97,12 +97,12 @@ const HTTP: &[Route] = &[
     route("DELETE", "/api/desk/tickets/{}/needs/{}"),
     route("POST", "/api/desk/tickets/{}/assign"),
     with_query("GET", "/api/desk/tickets/{}/history", &["before"]),
-    // A boss's plans: the list, one in full, the person's edit, approving,
-    // pausing, resuming and dropping.
+    // A boss's plans: the list, one in full, the person's edit, pausing,
+    // resuming and dropping. Approving one is the person's own (the Floor's
+    // decide, as their device), never this token's.
     with_query("GET", "/api/desk/plans", &["state", "group"]),
     route("GET", "/api/desk/plans/{}"),
     route("PATCH", "/api/desk/plans/{}"),
-    route("POST", "/api/desk/plans/{}/approve"),
     route("POST", "/api/desk/plans/{}/pause"),
     route("POST", "/api/desk/plans/{}/resume"),
     route("POST", "/api/desk/plans/{}/drop"),
@@ -573,6 +573,7 @@ mod tests {
             ("POST", "/api/desk/plans"),
             ("DELETE", "/api/desk/plans/p1"),
             ("GET", "/api/desk/plans/p1/approve"),
+            ("POST", "/api/desk/plans/p1/approve"),
             ("POST", "/api/desk/plans/p1/finish"),
             ("GET", "/api/desk/plans?token=x"),
             ("GET", "/api/desk/plans?boss=sarah"),

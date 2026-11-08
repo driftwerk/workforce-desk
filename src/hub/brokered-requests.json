@@ -562,11 +562,6 @@
   {
     "kind": "http",
     "method": "POST",
-    "path": "/api/desk/plans/p1/approve"
-  },
-  {
-    "kind": "http",
-    "method": "POST",
     "path": "/api/desk/plans/p1/pause"
   },
   {

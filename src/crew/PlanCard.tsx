@@ -146,7 +146,7 @@ function RevisionNotice({ detail, plan, revision, text }: { detail: BossPlanDeta
   );
 }
 
-type Asking = null | "approve" | "pause" | "resume" | "drop" | "save" | "engine";
+type Asking = null | "approve" | "turnDown" | "continue" | "pause" | "resume" | "drop" | "save" | "engine";
 
 function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan }) {
   const board = useBoard((s) => s.tickets);
@@ -194,7 +194,13 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
     }
   };
   const store = usePlans.getState();
-  const approve = () => void run("approve", () => store.approve(plan.id, detail.revision));
+  // Approving, turning a change down and going on are the person's own,
+  // answered as the Floor answers them.
+  const approve = () => void run("approve", () => store.decide(plan.id, detail.revision, "allow"));
+  const turnDown = () => void run("turnDown", () => store.decide(plan.id, detail.revision, "deny"));
+  const goOn = () => void run("continue", () => store.decide(plan.id, detail.revision, "allow"));
+  // Its starts kept failing: the person says whether it goes on.
+  const failing = plan.state === "paused" && plan.paused === "start_failing";
   const save = async (tickets: DraftTicket[]) => {
     const ok = await run("save", () => store.edit(plan.id, { revision: detail.revision, tickets }));
     // Refused because the plan changed: what was being edited is gone,
@@ -350,7 +356,11 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                     {boss} answers routine questions and approvals for these sessions. Force-pushes, deletes outside the folder and sends to people come to you.
                   </span>
                 )}
-                {plan.state === "paused" && plan.paused && !resumable(plan.paused) && <span className="pc-note">Paused: {pausedWhy(plan)}. It goes on by itself once that's past.</span>}
+                {plan.state === "paused" && plan.paused && !resumable(plan.paused) && (
+                  <span className="pc-note">
+                    Paused: {pausedWhy(plan)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
+                  </span>
+                )}
                 <button type="button" className="btn" disabled={busy} onClick={() => setDropping(sessionsRun ? "ask" : "stop")}>
                   Drop
                 </button>
@@ -372,6 +382,16 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                 {plan.state === "paused" && resumable(plan.paused) && (
                   <button type="button" className="btn" disabled={busy} onClick={() => void run("resume", () => store.resume(plan.id))}>
                     {asking === "resume" ? "Resuming…" : "Resume"}
+                  </button>
+                )}
+                {failing && !waitsOnYou && (
+                  <button type="button" className="btn btn-signal" disabled={busy} onClick={goOn}>
+                    {asking === "continue" ? "Going on…" : "Continue"}
+                  </button>
+                )}
+                {change && (
+                  <button type="button" className="btn" disabled={busy} onClick={turnDown}>
+                    {asking === "turnDown" ? "Turning it down…" : "Turn down"}
                   </button>
                 )}
                 {waitsOnYou && (

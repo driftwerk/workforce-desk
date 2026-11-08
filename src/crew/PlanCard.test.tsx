@@ -6,13 +6,16 @@ import { DeskHub } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import { DeskActions } from "../overview/DeskActions";
-import { PLAN, PlanHub, ticket } from "./planTesting";
+import { PLAN, PlanHub, ticket, webFor } from "./planTesting";
 import { usePlans } from "./planStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
 
 let plans: PlanHub;
+/** Each decide the card sent, as the Floor sends them. */
+let decided: unknown[];
+const allow = (revision: number) => ({ at: { kind: "plan", plan: PLAN, revision }, choice: "allow" });
 
 const transport = (h: () => PlanHub | null): DeskTransport => ({
   fetch: async (method, path, body) => {
@@ -32,6 +35,8 @@ const show = async (revision = 1) => {
 
 beforeEach(() => {
   plans = new PlanHub();
+  decided = [];
+  vi.stubGlobal("fetch", vi.fn(webFor(plans, decided)));
   plans.say = (e) => deskListeners.forEach((l) => l(e));
   useChat.setState({
     hubs: [{ id: "local", label: "This computer", url: "http://local.test", local: true, revision: "t" }],
@@ -44,6 +49,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useDesk.setState({ hub: null });
+  vi.unstubAllGlobals();
 });
 
 describe("a plan waiting for the person", () => {
@@ -68,7 +74,7 @@ describe("a plan waiting for the person", () => {
   it("runs once approved, and shows its progress as its sessions start", async () => {
     await show();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
-    expect(bodies(`POST /api/desk/plans/${PLAN}/approve`)).toEqual([{ revision: 1 }]);
+    expect(decided).toEqual([allow(1)]);
     await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
     expect(within(card()).getByText("0 of 4 done · 2 running")).toBeTruthy();
     expect(within(card()).getByRole("img", { name: "2 doing, 2 waiting" })).toBeTruthy();
@@ -88,7 +94,7 @@ describe("a plan waiting for the person", () => {
     expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
     expect(usePlans.getState().plans[PLAN]!.state).toBe("proposed");
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
-    expect(bodies(`POST /api/desk/plans/${PLAN}/approve`)).toEqual([{ revision: 1 }, { revision: 2 }]);
+    expect(decided).toEqual([allow(1), allow(2)]);
     await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
   });
 
@@ -201,7 +207,27 @@ describe("a running plan", () => {
     expect((within(card()).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(card()).getByText("Approve or turn down Sarah's change first, then edit the plan.")).toBeTruthy();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve the change" })));
-    expect(bodies(`POST /api/desk/plans/${PLAN}/approve`)).toEqual([{ revision: 2 }]);
+    expect(decided).toEqual([allow(2)]);
+  });
+
+  it("turns down a change of scope the boss proposes, and runs on as approved", async () => {
+    plans.bossAdds("Fix the flaky payment test");
+    await show(2);
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Turn down" })));
+    expect(decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "deny" }]);
+    await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
+    expect(within(card()).queryByRole("group", { name: "A change to the plan" })).toBeNull();
+    expect((within(card()).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("whose sessions keep failing to start, goes on when the person says Continue", async () => {
+    Object.assign(plans.plan, { state: "paused", paused: "start_failing", pausedWhy: "ACM-21 failed to start 3 times" });
+    await show();
+    expect(within(card()).getByText("Paused: ACM-21 failed to start 3 times. Continue tries again.")).toBeTruthy();
+    expect(within(card()).queryByRole("button", { name: "Resume" })).toBeNull();
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Continue" })));
+    expect(decided).toEqual([allow(1)]);
+    await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
   });
 });
 

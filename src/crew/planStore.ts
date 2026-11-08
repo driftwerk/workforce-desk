@@ -1,5 +1,7 @@
 import { create } from "zustand";
+import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
+import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
 import type { BossPlan, BossPlanDetail, BossPlanEdit, DeskEvent, OnPlanDrop } from "../hub/types";
 
@@ -31,7 +33,11 @@ interface PlanState {
   fetch: (id: string) => Promise<void>;
   /** A card for plan `id` at `revision` is shown; the function forgets it. */
   showCard: (id: string, revision: number) => () => void;
-  approve: (id: string, revision: number) => Promise<void>;
+  /** The person's answer to plan `id` as of `revision`, as the Floor gives
+   *  it (their device's, never Desk's own token): allow approves it (or
+   *  the change of scope waiting, or goes on after its starts kept
+   *  failing); deny turns a waiting change down. */
+  decide: (id: string, revision: number, choice: "allow" | "deny") => Promise<void>;
   edit: (id: string, edit: BossPlanEdit) => Promise<void>;
   pause: (id: string) => Promise<void>;
   resume: (id: string) => Promise<void>;
@@ -82,7 +88,7 @@ export const usePlans = create<PlanState>((set, get) => {
       const newer = e.status === 409 && now && shown !== undefined && now.revision > shown;
       const refusal: PlanRefusal = newer
         ? { text: `${now.bossName || "The boss"} changed the plan since you read it. This is revision ${now.revision}: look at it, then ask again.`, from: shown }
-        : { text: e.message };
+        : { text: e.message === "already_answered" ? "That was answered already, here or on another device." : e.message };
       set((s) => ({ refusals: { ...s.refusals, [id]: refusal } }));
       throw e;
     }
@@ -134,7 +140,13 @@ export const usePlans = create<PlanState>((set, get) => {
           return { cards: { ...s.cards, [id]: list } };
         });
     },
-    approve: (id, revision) => act(id, () => hubNow()!.approvePlan(id, revision)),
+    decide: (id, revision, choice) =>
+      act(id, async () => {
+        const local = useChat.getState().hubs.find((h) => h.local);
+        if (!local) throw new Error("This computer's hub isn't paired yet.");
+        await floorOf(local).decide({ kind: "plan", plan: id, revision }, choice);
+        return hubNow()!.plan(id);
+      }),
     edit: (id, edit) => act(id, async () => (await hubNow()!.editPlan(id, edit)).plan),
     pause: (id) => act(id, () => hubNow()!.pausePlan(id)),
     resume: (id) => act(id, () => hubNow()!.resumePlan(id)),

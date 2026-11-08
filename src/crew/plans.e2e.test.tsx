@@ -13,13 +13,12 @@ import { useBoard } from "../board/store";
 import { useChat } from "../chat/store";
 import { RightNow } from "../floor/RightNow";
 import { useFloor, watchFloor } from "../floor/store";
-import { view } from "../floor/testing";
 import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskEvent } from "../hub/types";
 import { DeskActions } from "../overview/DeskActions";
 import { useOverview } from "../overview/store";
-import { PLAN, PlanHub, ticket } from "./planTesting";
+import { PLAN, PlanHub, ticket, webFor } from "./planTesting";
 import { usePlans } from "./planStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -75,23 +74,9 @@ class FakeHub implements DeskTransport {
     return s;
   };
 
-  /** `fetch`, as paired hubs are reached (the Floor's reads and decides). */
-  web = vi.fn(async (input: string | URL, init?: RequestInit): Promise<Response> => {
-    const url = new URL(input);
-    const route = `${init?.method ?? "GET"} ${url.pathname}`;
-    if (route === "GET /api/desk/floor") {
-      const need = this.plans.need();
-      return new Response(JSON.stringify({ ...view({ needs: need ? [need] : [], counts: { working: 0, needsYou: need ? 1 : 0, doneToday: 0 } }), asOf: new Date().toISOString() }), {
-        headers: { "content-type": "application/json" },
-      });
-    }
-    if (route === "POST /api/desk/needs/decide") {
-      const body = JSON.parse(String(init?.body));
-      this.decided.push(body);
-      return this.plans.route("POST", url.pathname, body) ?? new Response(JSON.stringify({ error: "not_yours" }), { status: 403 });
-    }
-    return new Response("Not Found", { status: 404 });
-  });
+  /** `fetch`, as paired hubs are reached (the Floor's reads and decides,
+   *  and the card's approve). */
+  web = vi.fn(webFor(this.plans, this.decided));
 }
 
 let hub: FakeHub;
@@ -152,9 +137,10 @@ describe("a boss's plan, against the hub", () => {
   it("approved in the DM, runs", async () => {
     await connect();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
-    expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve")).map((r) => r.body)).toEqual([{ revision: 1 }]);
+    // As the person's device, through the Floor's decide: the hub's own
+    // plan route takes no approval from Desk's token.
+    expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
     await runs();
-    expect(hub.decided).toEqual([]);
   });
 
   it("approved on the Floor, runs", async () => {
@@ -191,7 +177,10 @@ describe("a boss's plan, against the hub", () => {
     expect(within(card()).getByRole("alert").textContent).toContain("This is revision 2: look at it, then ask again.");
     expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
-    expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve")).map((r) => r.body)).toEqual([{ revision: 1 }, { revision: 2 }]);
+    expect(hub.decided).toEqual([
+      { at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" },
+      { at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" },
+    ]);
     await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
   });
 
@@ -206,6 +195,7 @@ describe("a boss's plan, against the hub", () => {
     render(<RightNow brief={null} />);
     await waitFor(() => expect(floor().getByRole("button", { name: /^Approve “Plan change/ })).toBeTruthy());
     expect(floor().getByRole("button", { name: "Look: Sarah's plan" })).toBeTruthy();
+    expect(floor().getByRole("button", { name: /^Turn down “Plan change/ })).toBeTruthy();
     expect(floor().queryByRole("button", { name: /Approve and run/ })).toBeNull();
     await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve “Plan change/ })));
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" }]);
@@ -231,5 +221,23 @@ describe("the board's plan filter", () => {
     expect(screen.getAllByRole("button", { name: /^ACM-2\d: / })).toHaveLength(4);
     fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
     expect(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).toBeTruthy();
+  });
+});
+
+describe("a plan whose sessions keep failing to start", () => {
+  it("goes on from the Floor's Continue", async () => {
+    hub.plans.approve(1);
+    Object.assign(hub.plans.plan, { state: "paused", paused: "start_failing", pausedWhy: "ACM-21 failed to start 3 times" });
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+    render(<RightNow brief={null} />);
+    await waitFor(() => expect(floor().getByRole("button", { name: /^Continue “/ })).toBeTruthy());
+    expect(floor().queryByRole("button", { name: /^Turn down/ })).toBeNull();
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Continue “/ })));
+    expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
+    expect(hub.plans.plan.state).toBe("running");
   });
 });

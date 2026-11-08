@@ -139,7 +139,6 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   plans: (h) => Promise.all([h.plans(), h.plans({ state: "running", group: "acme" })]),
   plan: (h) => h.plan("p1"),
   editPlan: (h) => h.editPlan("p1", { revision: 2, tickets: [{ title: "Fix the flaky payment test", folder: "/w", needs: [] }] }),
-  approvePlan: (h) => h.approvePlan("p1", 2),
   pausePlan: (h) => h.pausePlan("p1"),
   resumePlan: (h) => h.resumePlan("p1"),
   dropPlan: (h) => h.dropPlan("p1", "leave"),

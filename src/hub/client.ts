@@ -618,9 +618,6 @@ export class DeskHub {
   plan = (id: string): Promise<BossPlanDetail> => this.call("GET", `/api/desk/plans/${encodeURIComponent(id)}`);
   /** The person's edit, from the revision they read: a newer one refuses it (409). */
   editPlan = (id: string, edit: BossPlanEdit): Promise<BossPlanChanged> => this.call("PATCH", `/api/desk/plans/${encodeURIComponent(id)}`, edit);
-  /** **Approve and run**, as of the revision the person read. */
-  approvePlan = (id: string, revision: number): Promise<BossPlanDetail> =>
-    this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/approve`, { revision });
   pausePlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/pause`);
   resumePlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/resume`);
   /** Drops a plan, stopping the sessions on it or leaving them as yours. */

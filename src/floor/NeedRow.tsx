@@ -54,25 +54,33 @@ const planOf = (need: Pick<FloorNeed, "answer">): string | null =>
 const PLAN = {
   proposed: { word: "Approve and run", busy: "Approving…", done: "Approved: it starts", open: "Open in chat" },
   change: { word: "Approve", busy: "Approving…", done: "Approved", open: "Look" },
+  failing: { word: "Continue", busy: "Going on…", done: "Going on", open: "Look" },
 } as const;
+const TURN_DOWN = { word: "Turn down", busy: "Turning it down…", done: "Turned down" };
 
-/** How a choice reads on `need` (`change`: a plan's need is a change to a
- *  plan already approved). */
-const wordsOf = (need: FloorNeed, choice: Choice, change = false) =>
+/** What a plan's need asks: to approve the plan, a change of scope to it,
+ *  or whether it goes on after its sessions kept failing to start. */
+type PlanAsk = keyof typeof PLAN;
+
+/** How a choice reads on `need` (`ask`: what a plan's need asks). */
+const wordsOf = (need: FloorNeed, choice: Choice, ask: PlanAsk = "proposed") =>
   planOf(need) && choice === "allow"
-    ? PLAN[change ? "change" : "proposed"]
-    : isBreaker(need) && (choice === "allow" || choice === "deny")
+    ? PLAN[ask]
+    : planOf(need) && choice === "deny"
+      ? TURN_DOWN
+      : isBreaker(need) && (choice === "allow" || choice === "deny")
       ? BREAKER[choice]
       : DECIDING[choice];
 
 /** The answers a need offers, in the order they read: Codex says its own
  *  (an escalated command offers only Allow and Cancel); the rest allow or
  *  deny. */
-const choicesOf = (need: FloorNeed): Choice[] => {
+const choicesOf = (need: FloorNeed, ask: PlanAsk = "proposed"): Choice[] => {
   if (need.answer.kind !== "decide") return [];
   const at = need.answer.at;
-  // A plan's Deny only leaves it be: Open in chat is the other answer.
-  if (at.kind === "plan") return ["allow"];
+  // A change of scope is approved or turned down; a plan's own Deny only
+  // leaves it be (Open in chat is the other answer, to drop or edit it).
+  if (at.kind === "plan") return ask === "change" ? ["allow", "deny"] : ["allow"];
   if (at.kind !== "codex") return ["allow", "deny"];
   const order: Choice[] = ["allow", "allow_for_session", "deny", "cancel"];
   return order.filter((c) => at.choices.includes(c));
@@ -117,8 +125,12 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   };
   const denied = asking?.asked?.denied ?? null;
   const plan = planOf(need);
-  // A change to a plan already approved, as the plans read say.
-  const change = usePlans((s) => (plan ? (s.plans[plan]?.approvedRevision ?? null) !== null : false));
+  // What a plan's need asks, as the plans read say.
+  const ask = usePlans((s): PlanAsk => {
+    const p = plan ? s.plans[plan] : undefined;
+    if (!p || p.approvedRevision === null) return "proposed";
+    return p.approvedRevision !== p.revision ? "change" : p.paused === "start_failing" ? "failing" : "change";
+  });
   const deciding = useFloor((s) => s.deciding[need.key]);
   const problem = useFloor((s) => s.problems[need.key]) ?? refused;
   const stale = useStaleNote(need);
@@ -148,8 +160,8 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
-          {choicesOf(need).map((choice) => {
-              const words = wordsOf(need, choice, change);
+          {choicesOf(need, ask).map((choice) => {
+              const words = wordsOf(need, choice, ask);
               const word = deciding === choice ? words.busy : words.word;
               return (
                 <button
@@ -223,13 +235,13 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
               type="button"
               className="btn"
               aria-label={
-                plan ? `${PLAN[change ? "change" : "proposed"].open}: ${name}'s plan` : need.answer.kind === "terminal" ? `Open ${name} to answer in the terminal` : `Open ${name}`
+                plan ? `${PLAN[ask].open}: ${name}'s plan` : need.answer.kind === "terminal" ? `Open ${name} to answer in the terminal` : `Open ${name}`
               }
               disabled={need.stale || !!deciding}
               title={need.answer.kind === "terminal" ? "Answer in the terminal" : stale}
               onClick={() => openTarget(target, { beside: true, reply: need.answer.kind === "terminal" })}
             >
-              {plan ? PLAN[change ? "change" : "proposed"].open : "Open"}
+              {plan ? PLAN[ask].open : "Open"}
             </button>
           )}
           {asking && (
@@ -238,7 +250,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
             </button>
           )}
           <span className="sr-only" role="status">
-            {deciding ? wordsOf(need, deciding, change).done : ""}
+            {deciding ? wordsOf(need, deciding, ask).done : ""}
           </span>
           {problem && (
             <span className="small state-blocked" role="alert">

@@ -146,6 +146,7 @@ export const PAUSED_WHY: Record<BossPlanPaused, string> = {
   boss_held: "its boss is held",
   restoring: "Desk is resuming its sessions",
   no_boss: "its group has no boss",
+  start_failing: "its sessions keep failing to start",
 };
 
 /** Why `p` is paused, after "Paused: ": the hub's own words when it says

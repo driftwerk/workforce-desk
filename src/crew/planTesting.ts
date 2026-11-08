@@ -116,12 +116,17 @@ export class PlanHub {
   /** The floor's need for it, while it waits on the person. */
   need(): Need | null {
     const p = this.plan;
-    if (p.state === "done" || p.state === "dropped" || p.approvedRevision === p.revision) return null;
+    const failing = p.state === "paused" && p.paused === "start_failing";
+    if (p.state === "done" || p.state === "dropped" || (p.approvedRevision === p.revision && !failing)) return null;
     return {
       id: `plan:${p.id}`,
       kind: "approval",
       who: { kind: "manager", id: "sarah", name: "Sarah", engine: null },
-      ask: p.approvedRevision === null ? `Approve Sarah's plan: ${p.goal}` : `Plan change: ${p.revisions.at(-1)!.summary}`,
+      ask: failing
+        ? `Sarah's plan keeps failing to start sessions: ${p.pausedWhy ?? ""}`
+        : p.approvedRevision === null
+          ? `Approve Sarah's plan: ${p.goal}`
+          : `Plan change: ${p.revisions.at(-1)!.summary}`,
       why: `${p.tickets.length} tickets.`,
       options: null,
       since: AT,
@@ -145,6 +150,12 @@ export class PlanHub {
   approve(revision: number): Response | null {
     const p = this.plan;
     if (revision !== p.revision) return json({ error: `Sarah changed the plan; look at revision ${p.revision}.` }, 409);
+    // Its starts kept failing: Continue.
+    if (p.state === "paused" && p.paused === "start_failing" && p.approvedRevision === revision) {
+      Object.assign(p, { state: "running", paused: null, pausedWhy: null });
+      this.touch();
+      return null;
+    }
     if (p.approvedRevision === null) for (const t of p.tickets) if (t.state === "backlog") this.move(t, "todo");
     p.state = "running";
     p.approvedRevision = revision;
@@ -167,8 +178,20 @@ export class PlanHub {
     p.revisions.push(this.revisionOf(p.revision, SARAH, "scope", `Added “${title}”`, next));
   }
 
+  /** The person turns down the boss's waiting change: the plan runs on as
+   *  approved. */
+  turnDown(revision: number): Response | null {
+    const p = this.plan;
+    if (revision !== p.revision || p.approvedRevision === null || p.approvedRevision === p.revision) return json({ error: "already_answered" }, 409);
+    p.revisions.pop();
+    p.revision = p.approvedRevision;
+    this.touch();
+    return null;
+  }
+
   edit(body: { revision?: number; tickets?: DraftTicket[] }): Response {
     const p = this.plan;
+    if (p.approvedRevision !== null && p.approvedRevision !== p.revision) return json({ error: "Approve or turn down Sarah's change first." }, 409);
     if (body.revision !== p.revision) return json({ error: `Sarah changed the plan; look at revision ${p.revision}.` }, 409);
     const tickets = body.tickets ?? [];
     let n = 30;
@@ -197,8 +220,10 @@ export class PlanHub {
         return json(this.plan);
       case `PATCH ${base}`:
         return this.edit(b as { revision?: number; tickets?: DraftTicket[] });
+      // The gateway's token has no one to approve as: only the person's
+      // device does, through the Floor's decide.
       case `POST ${base}/approve`:
-        return this.approve(b.revision as number) ?? json(this.plan);
+        return json({ error: "not allowed" }, 403);
       case `POST ${base}/pause`:
         if (this.plan.state !== "running" && this.plan.state !== "paused") return json({ error: "Only a running plan can be paused." }, 409);
         Object.assign(this.plan, { state: "paused", paused: "person" });
@@ -217,7 +242,12 @@ export class PlanHub {
       case "POST /api/desk/needs/decide": {
         const at = (b.at ?? {}) as { kind?: string; plan?: string; revision?: number };
         if (at.kind !== "plan" || at.plan !== PLAN) return null;
-        if (b.choice !== "allow") return new Response(null, { status: 204 });
+        if (b.choice === "deny") {
+          const p = this.plan;
+          // A proposal denied is left as it is; a waiting change is turned down.
+          if (p.approvedRevision === null) return new Response(null, { status: 204 });
+          return this.turnDown(at.revision!) ?? new Response(null, { status: 204 });
+        }
         return this.approve(at.revision!) ? json({ error: "already_answered" }, 409) : new Response(null, { status: 204 });
       }
       case "GET /api/desk/engines":
@@ -231,3 +261,29 @@ export class PlanHub {
     }
   }
 }
+
+/** `fetch` for this computer's hub at `http://local.test` as a paired hub
+ *  is reached: the Floor's read of `plans`' need, and its decide. */
+export const webFor = (plans: PlanHub, decided: unknown[] = []) =>
+  async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    const url = new URL(input);
+    const route = `${init?.method ?? "GET"} ${url.pathname}`;
+    if (route === "GET /api/desk/floor") {
+      const need = plans.need();
+      return json({
+        asOf: new Date().toISOString(),
+        needs: need ? [need] : [],
+        working: [],
+        done: [],
+        lanes: [],
+        counts: { working: 0, needsYou: need ? 1 : 0, doneToday: 0 },
+        more: { done: 0, lanes: 0 },
+      });
+    }
+    if (route === "POST /api/desk/needs/decide") {
+      const body = JSON.parse(String(init?.body));
+      decided.push(body);
+      return plans.route("POST", url.pathname, body) ?? json({ error: "not_yours" }, 403);
+    }
+    return new Response("Not Found", { status: 404 });
+  };
