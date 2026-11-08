@@ -167,7 +167,7 @@ describe("a plan's budget", () => {
   it("is shown before approving, approved as proposed, raised, or taken off", async () => {
     plans.plan.budget = cap(25);
     await show();
-    expect(within(card()).getByText("cap $25 for the whole plan")).toBeTruthy();
+    expect(within(card()).getByText("cap $25 for the whole plan, warns at 80%, pauses new starts when over")).toBeTruthy();
     const field = within(card()).getByRole("textbox", { name: "Cap the plan's spend, in dollars" }) as HTMLInputElement;
     expect(field.value).toBe("25");
     expect(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })).toBeTruthy();
@@ -182,6 +182,30 @@ describe("a plan's budget", () => {
     fireEvent.change(field, { target: { value: "40" } });
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $40" })));
     expect(decided).toEqual([{ ...allow(1), budget: cap(40) }]);
+  });
+
+  it("says all of it: a warn-only proposal and a later warning each read as they are, and can be chosen", async () => {
+    plans.plan.budget = { ...cap(25), warnAt: 0.9, onExceed: "warn" };
+    await show();
+    expect(within(card()).getByText("cap $25 for the whole plan, warns at 90%, only tells you when over")).toBeTruthy();
+    // Kept as proposed: nothing sent.
+    const over = within(card()).getByRole("combobox", { name: "When it's over" }) as HTMLSelectElement;
+    expect(over.value).toBe("warn");
+    // The person makes it pause new starts, warning earlier.
+    fireEvent.change(over, { target: { value: "pause" } });
+    fireEvent.change(within(card()).getByRole("combobox", { name: "When it warns" }), { target: { value: "0.5" } });
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })));
+    expect(decided).toEqual([{ ...allow(1), budget: { ...cap(25), warnAt: 0.5, onExceed: "pause" } }]);
+  });
+
+  it("changed only in when it warns or what it does when over, says so in a change", async () => {
+    plans.approve(1);
+    plans.plan.budget = cap(25);
+    plans.plan.revisions[0]!.snapshot.budget = cap(25);
+    plans.bossProposes("Made the budget warn later and only warn", (ts) => ts, undefined, { ...cap(25), warnAt: 0.95, onExceed: "warn" });
+    await show(2);
+    const shown = within(card()).getByRole("list", { name: "What approving it changes" });
+    expect(within(shown).getByText("Budget: $25 for the whole plan, warns at 80%, pauses new starts when over → $25 for the whole plan, warns at 95%, only tells you when over")).toBeTruthy();
   });
 
   it("as proposed, is approved without saying it again; taken off, is sent as none", async () => {
@@ -222,7 +246,7 @@ describe("a plan's budget", () => {
     plans.bossProposes("Raised the budget to $40", (ts) => ts, undefined, cap(40));
     await show(2);
     const shown = within(card()).getByRole("list", { name: "What approving it changes" });
-    expect(within(shown).getByText("Budget: $25 for the whole plan → $40 for the whole plan")).toBeTruthy();
+    expect(within(shown).getByText("Budget: $25 for the whole plan, warns at 80%, pauses new starts when over → $40 for the whole plan, warns at 80%, pauses new starts when over")).toBeTruthy();
   });
 });
 

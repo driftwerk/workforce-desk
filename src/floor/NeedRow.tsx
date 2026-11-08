@@ -17,6 +17,7 @@ import { hubFor } from "../hub/store";
 import { sessionKeyOfItem } from "./needs";
 import { usePlans } from "../crew/planStore";
 import { budgetText } from "../crew/plan";
+import type { PlanBudget } from "../hub/types";
 
 /** Focus in a row that goes moves to the list it was in. */
 const useFocusKept = () => {
@@ -139,7 +140,13 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
   // seen that revision whole on its card (Look first); going on after its
   // starts kept failing approves nothing new.
   // What the plan may spend, said before it is approved.
-  const planBudget = usePlans((s) => (plan && ask !== "failing" ? (s.plans[plan]?.budget ?? null) : null));
+  // A change's own: the revision it asks about (dropped until that is read).
+  const planBudget = usePlans((s): PlanBudget | null => {
+    if (!plan || ask === "failing") return null;
+    if (ask === "proposed") return s.plans[plan]?.budget ?? null;
+    const r = s.details[plan]?.revisions.find((x) => x.revision === revision);
+    return r?.snapshot.budget ?? null;
+  });
   const looked = usePlans((s) => (plan ? (s.seen[plan] ?? 0) >= revision : true));
   const decides = !plan || ask === "failing" || looked;
   const deciding = useFloor((s) => s.deciding[need.key]);

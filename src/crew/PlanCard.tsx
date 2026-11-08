@@ -11,6 +11,7 @@ import {
   awaiting,
   budgetText,
   capOf,
+  sameBudget,
   changesBetween,
   draftOf,
   liveCard,
@@ -168,7 +169,15 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   // boss's proposal to start with ("" is none).
   const proposedCap = plan.budget && plan.budget.unit === "usd" ? String(plan.budget.amount) : "";
   const [cap, setCap] = useState(proposedCap);
-  useEffect(() => setCap(proposedCap), [proposedCap]);
+  // When it warns and what it does when over: the proposal's, else 80% and
+  // pause new starts.
+  const [warnAt, setWarnAt] = useState(plan.budget?.warnAt ?? 0.8);
+  const [onExceed, setOnExceed] = useState<PlanBudget["onExceed"]>(plan.budget?.onExceed ?? "pause");
+  useEffect(() => {
+    setCap(proposedCap);
+    setWarnAt(plan.budget?.warnAt ?? 0.8);
+    setOnExceed(plan.budget?.onExceed ?? "pause");
+  }, [proposedCap, plan.budget?.warnAt, plan.budget?.onExceed]);
 
   const tickets = useMemo(() => liveTickets(detail, board), [detail, board]);
   const rules = useMemo(() => tickets.map(ruled), [tickets]);
@@ -197,30 +206,37 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   // Floor may approve it then, and not before.
   const changeRef = useRef<HTMLDivElement>(null);
   const ticketsRef = useRef<HTMLDivElement>(null);
+  // Its budget and Approve: seen too, so the cap is never approved unseen.
+  const footRef = useRef<HTMLDivElement>(null);
   const looking = usePlans((s) => !!s.looking[plan.id]);
   useEffect(() => {
     const el = changeRef.current ?? ticketsRef.current;
+    const foot = footRef.current;
     if (!el || stale) return;
     const id = plan.id;
     const revision = detail.revision;
     const store = usePlans.getState();
     if (looking) {
-      el.scrollIntoView?.({ block: "center" });
+      (el.closest("article") ?? el).scrollIntoView?.({ block: "center" });
       store.looked(id);
       store.saw(id, revision);
       return;
     }
     if (typeof IntersectionObserver === "undefined") return;
+    // Each part must have been on screen: what it changes, and its budget.
+    const parts = [el, ...(foot ? [foot] : [])];
+    const shown = new Set<Element>();
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries.some(inView)) {
+        for (const e of entries) if (inView(e)) shown.add(e.target);
+        if (parts.every((p) => shown.has(p))) {
           usePlans.getState().saw(id, revision);
           io.disconnect();
         }
       },
       { threshold: [0, 0.5, 1] },
     );
-    io.observe(el);
+    parts.forEach((p) => io.observe(p));
     return () => io.disconnect();
   }, [stale, plan.id, detail.revision, looking, !!change]);
   const ended = plan.state === "done" || plan.state === "dropped";
@@ -254,15 +270,16 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   // sent), another amount, or none (its budget taken off).
   const capAmount = parseAmount(cap, "usd");
   const capProblem = plan.approvedRevision === null && cap.trim() !== "" && capAmount === null ? "Say the cap in dollars, like 40." : null;
+  const typedCap = capAmount !== null ? capOf(capAmount, plan.budget, { warnAt, onExceed }) : null;
   const capSent: PlanBudget | null | undefined =
-    plan.approvedRevision !== null || cap.trim() === proposedCap
+    plan.approvedRevision !== null
       ? undefined
       : cap.trim() === ""
         ? plan.budget
           ? null
           : undefined
-        : capAmount !== null
-          ? capOf(capAmount, plan.budget)
+        : typedCap && !sameBudget(typedCap, plan.budget)
+          ? typedCap
           : undefined;
   const approvedCap = capSent === undefined ? (plan.budget ?? null) : capSent;
   const approve = () => void run("approve", () => store.decide(plan.id, detail.revision, "allow", capSent));
@@ -405,7 +422,7 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
       )}
 
       {!ended && (
-        <div className="pc-foot">
+        <div ref={footRef} className="pc-foot">
           <div className="pc-facts">
             <span className="chip">
               {now.total} ticket{now.total === 1 ? "" : "s"}
@@ -502,6 +519,23 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
                       placeholder="none"
                       onChange={(e) => setCap(e.target.value)}
                     />
+                    {cap.trim() !== "" && (
+                      <>
+                        <select className="pc-engine" aria-label="When it warns" value={warnAt} onChange={(e) => setWarnAt(Number(e.target.value))}>
+                          {[...new Set([0.5, 0.8, 0.9, warnAt])]
+                            .sort((a, b) => a - b)
+                            .map((w) => (
+                              <option key={w} value={w}>
+                                warns at {Math.round(w * 100)}%
+                              </option>
+                            ))}
+                        </select>
+                        <select className="pc-engine" aria-label="When it's over" value={onExceed} onChange={(e) => setOnExceed(e.target.value as PlanBudget["onExceed"])}>
+                          <option value="pause">pauses new starts when over</option>
+                          <option value="warn">only tells you when over</option>
+                        </select>
+                      </>
+                    )}
                   </label>
                 )}
                 {waitsOnYou && (

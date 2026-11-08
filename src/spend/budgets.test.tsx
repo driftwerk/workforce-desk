@@ -83,7 +83,7 @@ describe("budget words", () => {
     expect(scopeLabel({ kind: "agent", id: "atlas" }, null, names)).toBe("Atlas");
     expect(budgetLine(budget())).toBe("$11 a day · warns at 80% · pauses when over");
     expect(budgetLine(budget({ unit: "tokens", amount: 500_000, period: "five_hours", onExceed: "warn" }))).toBe(
-      "500k tokens a five-hour · warns at 80% · only warns",
+      "500k tokens per five hours · warns at 80% · only warns",
     );
     expect(standingText(standing(9.13, 11, "warn"))).toBe("$9.13 of $11 today · 83%");
     expect(percentOf({ used: 1.15, of: 1 })).toBe(115);

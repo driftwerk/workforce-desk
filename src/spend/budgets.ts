@@ -61,7 +61,7 @@ export const scopeLabel = (scope: BudgetScope, group: string | null, names: Name
 
 /** "A day budget of $11, warns at 80%, pauses when over". */
 export const budgetLine = (b: Pick<Budget, "period" | "unit" | "amount" | "warnAt" | "onExceed">): string =>
-  `${amountText(b.unit, b.amount)} ${b.period === "total" ? "in all" : `a ${periodWord(b.period)}`} · warns at ${Math.round(b.warnAt * 100)}% · ${
+  `${amountText(b.unit, b.amount)} ${b.period === "total" ? "in all" : b.period === "five_hours" ? "per five hours" : `a ${periodWord(b.period)}`} · warns at ${Math.round(b.warnAt * 100)}% · ${
     b.onExceed === "pause" ? "pauses when over" : "only warns"
   }`;
 

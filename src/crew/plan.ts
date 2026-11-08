@@ -4,7 +4,7 @@
 // both with a plan; Desk works them out again over the board's tickets as
 // they move, which the hub announces one ticket at a time.
 
-import { amountText, periodWord } from "../spend/budgets";
+import { amountText } from "../spend/budgets";
 import type {
   BossPlan,
   BossPlanDetail,
@@ -358,12 +358,38 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
 export const isCardText = (text: string): boolean =>
   /^[^\n]{1,80}? (proposes a plan|changed the plan|proposes a change to the plan): /.test(text.trim());
 
-/** What a plan may spend, as its card says it: "$40 for the whole plan",
- *  "$10 a day". */
-export const budgetText = (b: PlanBudget): string =>
-  b.period === "total" ? `${amountText(b.unit, b.amount)} for the whole plan` : `${amountText(b.unit, b.amount)} a ${periodWord(b.period)}`;
+/** How often a plan's budget starts again, as said after its amount. */
+const PER: Record<PlanBudget["period"], string> = {
+  total: "for the whole plan",
+  five_hours: "per five hours",
+  day: "a day",
+  week: "a week",
+  month: "a month",
+};
 
-/** A cap of `amount` dollars on a plan, from what was proposed (or over its
- *  whole run, warning at 80% and pausing when over, as the hub's default). */
-export const capOf = (amount: number, proposed: PlanBudget | null | undefined): PlanBudget =>
-  proposed && proposed.unit === "usd" ? { ...proposed, amount } : { amount, unit: "usd", period: "total", warnAt: 0.8, onExceed: "pause" };
+/** What a plan may spend, all of it: "$40 for the whole plan, warns at
+ *  80%, pauses new starts when over"; "$10 per five hours, warns at 90%,
+ *  only tells you when over". */
+export const budgetText = (b: PlanBudget): string =>
+  `${amountText(b.unit, b.amount)} ${PER[b.period]}, warns at ${Math.round(b.warnAt * 100)}%, ${
+    b.onExceed === "pause" ? "pauses new starts when over" : "only tells you when over"
+  }`;
+
+/** The person's own cap of `amount` dollars on a plan: over the proposal's
+ *  period (else the whole run), warning at `warnAt` and doing `onExceed`
+ *  over it (80% and pause unless they chose otherwise). */
+export const capOf = (
+  amount: number,
+  proposed: PlanBudget | null | undefined,
+  choice: { warnAt?: number; onExceed?: PlanBudget["onExceed"] } = {},
+): PlanBudget => ({
+  amount,
+  unit: "usd",
+  period: proposed && proposed.unit === "usd" ? proposed.period : "total",
+  warnAt: choice.warnAt ?? 0.8,
+  onExceed: choice.onExceed ?? "pause",
+});
+
+/** Whether two budgets are the same in every part. */
+export const sameBudget = (a: PlanBudget | null | undefined, b: PlanBudget | null | undefined): boolean =>
+  JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
