@@ -1,0 +1,226 @@
+/* Desk Memory: the session card's Memory tab, its Forget dialog, a group's
+   memory switches and Settings → Memory. Every colour is a theme token. */
+
+.session-tabs {
+  flex: none;
+  margin: 8px 16px 0;
+}
+/* The session's own view: its children lay out as the card's own, and it
+   stays mounted, hidden, while Memory shows. */
+.session-view {
+  display: contents;
+}
+.session-view[hidden] {
+  display: none;
+}
+
+.memory-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--text);
+}
+.memory-panel p {
+  margin: 0;
+}
+
+.memory-gist {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.memory-gist dt {
+  color: var(--muted);
+  font-size: 12px;
+  padding-top: 1px;
+}
+.memory-gist dd {
+  margin: 0;
+  min-width: 0;
+}
+.memory-when {
+  margin-left: 8px;
+}
+
+.memory-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.memory-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.memory-noted-by {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.memory-explain {
+  align-self: stretch;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+
+.memory-list h3 {
+  margin: 0 0 4px;
+}
+.memory-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-note {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.memory-bullet {
+  flex: none;
+  width: 12px;
+  color: var(--muted);
+}
+.memory-note-text {
+  min-width: 0;
+  flex: 1;
+}
+.memory-note-done .memory-note-text,
+.memory-note-replaced .memory-note-text {
+  color: var(--muted);
+}
+.memory-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.memory-correct {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.memory-correct input {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.memory-ask .muted {
+  color: inherit;
+  opacity: 0.85;
+}
+.memory-ask-q {
+  font-weight: 600;
+}
+.memory-ask-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.memory-files-toggle {
+  text-align: left;
+}
+.memory-file-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+}
+
+.memory-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.memory-remember {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-search {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-search form {
+  display: flex;
+  gap: 8px;
+}
+.memory-search input {
+  flex: 1;
+  min-width: 0;
+}
+.memory-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.memory-hits li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memory-hit-text {
+  overflow-wrap: anywhere;
+}
+
+.memory-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-limits {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
