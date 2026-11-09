@@ -14,6 +14,7 @@ import type { Engine, EngineInfo, HandoffPlace, HandoffPreview, HandoffSource, S
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useHandoff, type HandoffAsk } from "./store";
+import { runs, runsElsewhere } from "../session/actions";
 import { busyNow, defaultSource, enginesFor, tokensLine } from "./words";
 
 /** How long a change of choice settles before it is previewed again. */
@@ -47,7 +48,8 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const [engine, setEngine] = useState<Engine | null>(ask.engine ?? null);
   const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
   const [place, setPlace] = useState<HandoffPlace>("same_folder");
-  const [source, setSource] = useState<HandoffSource>(defaultSource(session));
+  // Desk can't stop one running in another terminal: it is kept.
+  const [source, setSource] = useState<HandoffSource>(runsElsewhere(session) ? "keep" : defaultSource(session));
   const [back, setBack] = useState(!!ask.back);
   const [goalOnly, setGoalOnly] = useState(false);
   const [preview, setPreview] = useState<HandoffPreview | null>(null);
@@ -181,14 +183,16 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const inTerminal = !!session.terminalId;
   const sources: { value: HandoffSource; label: string; sub: string }[] = inTerminal
     ? [{ value: "keep", label: "Keep it running", sub: "it runs in a Desk terminal: end it there when you’re done" }]
-    : !session.live
-      ? [{ value: "stop", label: "Leave it stopped", sub: "it isn’t running" }]
-      : [
-        ...(working
-          ? [{ value: "after_turn" as const, label: "Stop it after this turn", sub: "it’s in a turn now" }]
-          : [{ value: "stop" as const, label: "Stop it now", sub: "it’s idle" }]),
-        { value: "keep", label: "Keep it running", sub: "two engines will then edit one folder" },
-      ];
+    : runsElsewhere(session)
+      ? [{ value: "keep", label: "Keep it running", sub: "it runs in another terminal: end it there when you’re done" }]
+      : !runs(session)
+        ? [{ value: "stop", label: "Leave it stopped", sub: "it isn’t running" }]
+        : [
+            ...(working
+              ? [{ value: "after_turn" as const, label: "Stop it after this turn", sub: "it’s in a turn now" }]
+              : [{ value: "stop" as const, label: "Stop it now", sub: "it’s idle" }]),
+            { value: "keep", label: "Keep it running", sub: "two engines will then edit one folder" },
+          ];
 
   return (
     <Dialog

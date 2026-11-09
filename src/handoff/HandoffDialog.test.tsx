@@ -162,6 +162,17 @@ describe("continuing a session in another engine", () => {
     expect(hub.handoff).toHaveBeenCalledWith("s2", { back: true, engine: "claude", source: "stop" });
   });
 
+  it("keeps one running in another terminal, which Desk can't stop, and stops one in a turn after it", async () => {
+    use(fakeHub(), [{ ...SOURCE, live: false, origin: "external", state: "working" }]);
+    await openDialog();
+    const elsewhere = within(within(dialog()).getByRole("radiogroup", { name: "This one" })).getAllByRole("radio");
+    expect(elsewhere.map((r) => r.closest("label")!.textContent)).toEqual(["Keep it runningit runs in another terminal: end it there when you’re done"]);
+    cleanup();
+    use(fakeHub(), [{ ...SOURCE, state: "working" }]);
+    await openDialog();
+    expect((within(dialog()).getByRole("radio", { name: /Stop it after this turn/ }) as HTMLInputElement).checked).toBe(true);
+  });
+
   it("offers only Keep for a session in a Desk terminal, which the person ends", async () => {
     use(fakeHub(), [{ ...SOURCE, terminalId: "t1" }]);
     await openDialog();
