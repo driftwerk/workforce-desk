@@ -532,6 +532,10 @@ pub fn render(
     // are resumed, each in its folder. Its hub runs them and serves no
     // agents: no Desk agent, so no overseer, and a session's questions go
     // to the person.
+    // Said either way, so the hub never has to guess: a hub not told it is
+    // this computer's takes itself for a machine's, and its sessions recall
+    // nothing (on a machine every session looks ungrouped).
+    desk.push(("machine", Value::Boolean(mode == Mode::Machine)));
     if mode == Mode::Machine {
         desk.push(("restore", s("auto")));
         desk.push(("agents", Value::Boolean(false)));
@@ -690,6 +694,7 @@ mod tests {
         );
         assert_eq!(machine["desk"]["restore"].as_str(), Some("auto"));
         assert_eq!(machine["desk"]["agents"].as_bool(), Some(false));
+        assert_eq!(machine["desk"]["machine"].as_bool(), Some(true));
         assert_eq!(
             machine["desk"]["forget_agents"].as_array().unwrap(),
             &vec![Value::String(DESK_AGENT.into())]
@@ -710,6 +715,11 @@ mod tests {
             desktop["desk"].get("agents").is_none(),
             "the hub's own default: on"
         );
+        assert_eq!(
+            desktop["desk"]["machine"].as_bool(),
+            Some(false),
+            "this computer's, said"
+        );
         let agents = desktop["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["id"].as_str(), Some(DESK_AGENT));
@@ -719,6 +729,7 @@ mod tests {
         desk.remove("restore");
         desk.remove("agents");
         desk.remove("forget_agents");
+        desk.insert("machine".into(), Value::Boolean(false));
         let mut desktop_on_the_same_paths: Table = toml::from_str(&render(
             &paths,
             &ports(),
