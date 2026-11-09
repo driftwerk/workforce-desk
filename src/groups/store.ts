@@ -5,7 +5,7 @@
 // it hands over what it kept itself. Against a hub that can't keep them,
 // Desk's settings hold them, as before.
 
-import { HubError, type DeskHub } from "../hub/client";
+import { crossesBoss, HubError, type DeskHub } from "../hub/client";
 import { deskListeners, hubOf, useDesk } from "../hub/store";
 import { LOCAL, splitKey } from "../hub/machines";
 import type { DeskEvent, Session } from "../hub/types";
@@ -126,8 +126,9 @@ export const changeLayout = (
 // order is Desk's to settle (it lists what shows there unplaced, which only
 // Desk knows), so changes that place things in it send that order.
 
-export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): void =>
-  void changeLayout(
+/** Settles with whether it was kept (once the hub has it, on a hub). */
+export const newGroup = (id: string, name: string, items: readonly ItemKey[] = []): Promise<boolean> =>
+  changeLayout(
     (l) => created(l, id, name, items),
     (h) => h.createGroup({ id, name, items: [...items] }),
   );
@@ -180,16 +181,18 @@ export const moveGroup = (id: string, before: string | null): void =>
 
 /** Any session, this computer's or a machine's (`session:<machine>/<id>`),
  *  and any agent can be in any group. */
-export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null): void =>
+export const moveItem = (present: readonly ItemKey[], key: ItemKey, to: string, before: ItemKey | null, failed: OnFailure = false): void =>
   void changeLayout(
     (l) => moved(l, present, key, to, before),
     (h, next) => (to === UNGROUPED ? h.orderUngrouped(next.ungrouped.items) : h.putInGroup(to, key, before)),
+    failed,
   );
 
-export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey): void =>
+export const removeFromGroup = (present: readonly ItemKey[], key: ItemKey, failed: OnFailure = false): void =>
   void changeLayout(
     (l) => removed(l, present, key),
     (h, next) => h.orderUngrouped(next.ungrouped.items),
+    failed,
   );
 
 export const dropItem = (present: readonly ItemKey[], dragged: string, drop: Drop): void =>
@@ -217,7 +220,9 @@ export const replaceLayout = (change: (layout: Layout) => Layout | null): Promis
         try {
           return await h.replaceLayout(next, fresh);
         } catch (e) {
-          if (!(e instanceof HubError && e.status === 409) || tries >= REPLACE_TRIES) throw e;
+          // Only a layout that changed meanwhile is tried again; one that
+          // would take a session to another boss never is.
+          if (!(e instanceof HubError && e.status === 409) || crossesBoss(e) || tries >= REPLACE_TRIES) throw e;
         }
       }
     },

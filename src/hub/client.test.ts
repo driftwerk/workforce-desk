@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DeskHub, HubError } from "./client";
+import { crossesBoss, DeskHub, HubError } from "./client";
 import { direct } from "./transport";
 
 const hub = new DeskHub(direct({ url: "http://127.0.0.1:1", token: "t" }));
@@ -43,6 +43,19 @@ describe("a hub's refusals", () => {
   it("reads JSON refusals of the other routes the same way", async () => {
     refuse(400, JSON.stringify({ error: "That name is taken." }));
     expect((await caught(hub.renameAgent("scout", "Atlas")))?.message).toBe("That name is taken.");
+  });
+
+  it("tells a change only a move may make from a layout that changed, by the hub's code", async () => {
+    const words = "That would put a session in a group another boss oversees. Move it with the Move dialog, which shows what moves and lets you write the new boss's note.";
+    refuse(409, JSON.stringify({ error: words, code: "crosses_boss" }));
+    const e = await caught(hub.putInGroup("acme", "session:s1", null));
+    expect(e?.message).toBe(words);
+    expect(e?.code).toBe("crosses_boss");
+    expect(crossesBoss(e)).toBe(true);
+    refuse(409, JSON.stringify({ error: "The layout changed since it was read: read it again." }));
+    const other = await caught(hub.putInGroup("acme", "session:s1", null));
+    expect(other?.code).toBeUndefined();
+    expect(crossesBoss(other)).toBe(false);
   });
 
   it("takes a plain-text body as it is", async () => {

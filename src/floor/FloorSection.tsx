@@ -4,7 +4,7 @@
 // marked whose it is, and how many are done today. Collapsed, a section
 // keeps its needs in view.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { SessionTicketChip } from "../board/TicketChip";
@@ -13,6 +13,10 @@ import { useCharge } from "../crew/chargeStore";
 import { ENGINE_TITLE } from "../engines/engines";
 import { GroupDot } from "../groups/GroupChip";
 import { useLayout } from "../groups/store";
+import { useHubLayout } from "../groups/hubLayout";
+import { askMove, sessionSubject } from "../groups/move";
+import { below, MoreIcon } from "../groups/rows";
+import { Menu } from "../ui/Menu";
 import type { BossView, PlanProgress } from "../hub/types";
 import { localKey, openLocalDm } from "../overview/people";
 import { useSessionName } from "../groups/names";
@@ -190,13 +194,16 @@ function WorkTile({ work, now, chip }: { work: FloorWork; now: number; chip: { i
   );
   return (
     <article className={`fsec-tile ${work.stale ? "floor-stale" : ""}`} aria-label={name} title={stale}>
-      {target ? (
-        <button type="button" className="fsec-tile-head" onClick={() => openTarget(target, { beside: true })}>
-          {head}
-        </button>
-      ) : (
-        <div className="fsec-tile-head">{head}</div>
-      )}
+      <div className="fsec-tile-top">
+        {target ? (
+          <button type="button" className="fsec-tile-head" onClick={() => openTarget(target, { beside: true })}>
+            {head}
+          </button>
+        ) : (
+          <div className="fsec-tile-head">{head}</div>
+        )}
+        {work.local && key && <TileMenu session={key} name={name} />}
+      </div>
       {text && <p className="fsec-tile-gist">{text}</p>}
       <div className="fsec-tile-foot">
         {work.who.engine && work.who.kind === "session" && <span className="chip">{ENGINE_TITLE[work.who.engine]}</span>}
@@ -273,13 +280,16 @@ export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; n
   );
   return (
     <article className={`fsec-tile fsec-tile-${item.look}`} aria-label={name}>
-      {target ? (
-        <button type="button" className="fsec-tile-head" onClick={() => openTarget(target, { beside: true })}>
-          {head}
-        </button>
-      ) : (
-        <div className="fsec-tile-head">{head}</div>
-      )}
+      <div className="fsec-tile-top">
+        {target ? (
+          <button type="button" className="fsec-tile-head" onClick={() => openTarget(target, { beside: true })}>
+            {head}
+          </button>
+        ) : (
+          <div className="fsec-tile-head">{head}</div>
+        )}
+        {item.who.kind === "session" && <TileMenu session={item.who.id} name={name} />}
+      </div>
       <span className={`small state-${state.tone}`}>{state.text}</span>
       {item.text && <p className="fsec-tile-gist">{item.text}</p>}
       <div className="fsec-tile-foot">
@@ -453,5 +463,40 @@ function Needs({
         })}
       </div>
     </div>
+  );
+}
+
+/** A tile's options, for one of this computer's sessions: moving it to
+ *  another group, as the hub previews it. */
+function TileMenu({ session, name }: { session: string; name: string }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const kept = useHubLayout((s) => s.layout !== null);
+  if (!kept) return null;
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="icon-btn-sm fsec-tile-more"
+        aria-label={`${name} options`}
+        aria-haspopup="menu"
+        aria-expanded={!!at}
+        onClick={(e) => setAt(below(e.currentTarget))}
+      >
+        <MoreIcon />
+      </button>
+      {at && (
+        <Menu
+          label={`${name} options`}
+          at={at}
+          entries={[{ kind: "item", label: "Move to group…", onSelect: () => askMove(sessionSubject(session, name)) }]}
+          onClose={(refocus) => {
+            if (refocus) button.current?.focus();
+            setAt(null);
+          }}
+        />
+      )}
+    </>
   );
 }

@@ -80,6 +80,9 @@ import {
 } from "./bosses";
 import { plainError } from "../ui/plainError";
 import { GroupDot } from "./GroupChip";
+import { askMove, moveRow, type MoveSubject } from "./move";
+import { crossesBoss } from "../hub/client";
+import { useHubLayout } from "./hubLayout";
 
 const ENGINE = ENGINE_SHORT;
 
@@ -160,6 +163,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   // whose sidebar the groups are.
   const [memoryOf, setMemoryOf] = useState<string | null>(null);
   const localHub = useDesk((s) => s.hub);
+  // Moves the hub previews need the hub to keep the groups.
+  const keptOnHub = useHubLayout((s) => s.layout !== null);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [dragging, setDragging] = useState<{ kind: "item" | "group"; id: string } | null>(null);
   const [said, setSaid] = useState("");
@@ -267,19 +272,56 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     return g ? `${g.name}, ${g.items.indexOf(key) + 1} of ${g.items.length}` : "";
   };
 
-  const moveTo = (key: ItemKey, to: string) => {
-    const next = moved(currentLayout(), present, key, to, null);
-    moveItem(present, key, to, null);
-    after(key, `Moved ${nameOf(items.get(key))} to ${where(next, key)}`);
+  /** The group `key` is in now. */
+  const groupOf = (key: ItemKey): string => resolve(currentLayout(), present).find((g) => g.items.includes(key))?.id ?? UNGROUPED;
+
+  /** What the move dialog moves for a row: a session of this computer's
+   *  hub, or an agent's row; a machine's session only rearranges the
+   *  sidebar. */
+  const subjectOf = (key: ItemKey): MoveSubject | null => {
+    const item = items.get(key);
+    if (!item || item.kind === "away") return null;
+    const from = groupOf(key);
+    if (item.kind === "agent") return { kind: "agent", agent: item.agent, name: nameOf(item), from };
+    return machineOf(item.session) === LOCAL ? { kind: "session", id: item.session.id, name: nameOf(item), from } : null;
   };
+
+  /** Puts `key` in group `to` before `before`. Into another group, a
+   *  session is moved as the hub previews it: asked about first when that
+   *  crosses from one boss to another, and kept where it was until then. */
+  const placeIn = (key: ItemKey, to: string, before: ItemKey | null, say: (next: Layout) => string, focus = true) => {
+    const tell = (next: Layout) => (focus ? after(key, say(next)) : setSaid(say(next)));
+    const subject = subjectOf(key);
+    const layoutMove = () => {
+      const next = moved(currentLayout(), present, key, to, before);
+      moveItem(present, key, to, before, refusedAsMove(subject, to));
+      tell(next);
+    };
+    if (!subject || subject.from === to) return layoutMove();
+    void moveRow(subject, to, layoutMove, () => {
+      // The hub put it at its new group's end: where it was dropped, then.
+      if (before) moveItem(present, key, to, before);
+      tell(currentLayout());
+    }).catch(useDesk.getState().fail);
+  };
+
+  /** A sidebar change the hub refused because only a move may make it (a
+   *  boss came to one side meanwhile): never tried again, but asked about
+   *  with the move dialog. Anything else is said as before. */
+  const refusedAsMove =
+    (subject: MoveSubject | null, to: string) =>
+    (e: unknown): void => {
+      if (subject && crossesBoss(e)) askMove(subject, to);
+      else useDesk.getState().fail(e);
+    };
+
+  const moveTo = (key: ItemKey, to: string) => placeIn(key, to, null, (next) => `Moved ${nameOf(items.get(key))} to ${where(next, key)}`);
 
   const nudge = (key: ItemKey, by: -1 | 1) => {
     const now = currentLayout();
     const t = nudgeTarget(now, present, key, by);
     if (!t) return setSaid(by < 0 ? "Already at the top" : "Already at the bottom");
-    const next = moved(now, present, key, t.to, t.before);
-    moveItem(present, key, t.to, t.before);
-    after(key, `${nameOf(items.get(key))}: ${where(next, key)}`);
+    placeIn(key, t.to, t.before, (next) => `${nameOf(items.get(key))}: ${where(next, key)}`);
   };
 
   const nudgeGroupBy = (id: string, by: -1 | 1) => {
@@ -294,7 +336,16 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   const newGroup = (with_?: ItemKey) => {
     const id = newId();
-    addGroup(id, NEW_GROUP, with_ ? [with_] : []);
+    // A session or agent leaving a group is moved into it as any move is
+    // (previewed, or asked about when it crosses), once the group is there.
+    const subject = with_ ? subjectOf(with_) : null;
+    if (with_ && subject && subject.from !== UNGROUPED) {
+      setEditing({ kind: "group", id });
+      // The hub previews a move only to a group it has.
+      void addGroup(id, NEW_GROUP, []).then((kept) => kept && placeIn(with_, id, null, () => `Moved ${nameOf(items.get(with_))} to a new group`));
+      return;
+    }
+    void addGroup(id, NEW_GROUP, with_ ? [with_] : []);
     setEditing({ kind: "group", id });
     if (with_) setSaid(`Moved ${nameOf(items.get(with_))} to a new group`);
   };
@@ -326,8 +377,11 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     await overseeGroup(useDesk.getState().hub, agent.id, group, agent);
     setSaid(overseeSaid(agent.name, groupName(group), left && left !== group ? groupName(left) : null, !!managerId));
   };
-  /** Asks first only when the main overseer saw what's in the group. */
+  /** Asks first only when the main overseer saw what's in the group. A boss
+   *  of another group moves, as the hub previews it. */
   const oversee = (agent: Agent, group: string) => {
+    const bossOf = groupOfBoss(manager, agent.id);
+    if (keptOnHub && bossOf && bossOf !== group) return askMove({ kind: "boss", id: agent.id, name: agent.name, from: bossOf }, group);
     if (asksBeforeOverseeing(manager, group)) return setAsking({ kind: "oversee", agent, group });
     overseeNow(agent, group).catch(useDesk.getState().fail);
   };
@@ -407,9 +461,14 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
               kind: "item",
               label: "Remove from group",
               onSelect: () => {
-                const next = removed(currentLayout(), present, key);
-                removeFromGroup(present, key);
-                after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
+                const subject = subjectOf(key);
+                const layoutMove = () => {
+                  const next = removed(currentLayout(), present, key);
+                  removeFromGroup(present, key, refusedAsMove(subject, UNGROUPED));
+                  after(key, `Moved ${nameOf(item)} to ${where(next, key)}`);
+                };
+                if (!subject) return layoutMove();
+                void moveRow(subject, UNGROUPED, layoutMove, () => after(key, `Moved ${nameOf(item)} to Ungrouped`)).catch(useDesk.getState().fail);
               },
             },
           ]
@@ -421,6 +480,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         ...targets.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => moveTo(key, g.id) })),
         ...(targets.length ? [{ kind: "separator" as const }] : []),
         { kind: "item", label: "New group…", onSelect: () => newGroup(key) },
+        ...(subjectOf(key) && keptOnHub
+          ? [{ kind: "item" as const, label: "See what moves first…", onSelect: () => askMove(subjectOf(key)!) }]
+          : []),
       ],
     };
     // Its machine can't be reached: it can only be moved.
@@ -575,6 +637,10 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         setTimeout(() => (justDragged.current = false), 0);
         if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
         if (!s || !d) return;
+        if (d.kind === "item") {
+          const key = end(s).id;
+          return placeIn(key, d.group, d.before, (next) => `Moved ${nameOf(items.get(key))} to ${where(next, key)}`, false);
+        }
         dropItem(present, end(s).id, d);
       }}
     >

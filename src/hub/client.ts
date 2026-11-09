@@ -194,10 +194,20 @@ export class HubError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The hub's own name for the refusal, when it gives one. */
+    readonly code?: string,
   ) {
     super(message);
   }
 }
+
+/** The hub's code for a change only a move may make: the sidebar's own
+ *  routes would put a session in another boss's group. Never retried; the
+ *  person is asked with the move dialog instead. */
+export const CROSSES_BOSS = "crosses_boss";
+
+/** Whether `e` is the hub refusing a change only a move may make. */
+export const crossesBoss = (e: unknown): boolean => e instanceof HubError && e.status === 409 && e.code === CROSSES_BOSS;
 
 /** What a hub said when it refused: its JSON `error` when it gives one,
  *  else a plain-text body as written (never JSON or a web page), else the
@@ -205,16 +215,18 @@ export class HubError extends Error {
 export const refusal = async (res: Response): Promise<HubError> => {
   const text = (await res.text().catch(() => "")).trim();
   let message = text.startsWith("<") ? "" : text;
+  let code: string | undefined;
   try {
     const body: unknown = JSON.parse(text);
     if (body && typeof body === "object") {
-      const error = (body as { error?: unknown }).error;
+      const { error, code: c } = body as { error?: unknown; code?: unknown };
       message = typeof error === "string" && error.trim() ? error : "";
+      if (typeof c === "string" && c) code = c;
     }
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "The hub refused that.");
+  return new HubError(res.status, message || res.statusText || "The hub refused that.", code);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,

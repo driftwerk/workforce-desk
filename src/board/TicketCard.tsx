@@ -1,8 +1,11 @@
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { ChargeBadge } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
 import { lookOf } from "../floor/background";
 import { useSessionName } from "../groups/names";
+import { useHubLayout } from "../groups/hubLayout";
+import { askMove, ticketSubject } from "../groups/move";
+import { Menu } from "../ui/Menu";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
@@ -99,11 +102,23 @@ export function TicketCard({
         : working
           ? "board-card-working"
           : "";
+  // Its right-click menu: moving it to another group's board.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const movable = useHubLayout((s) => s.layout !== null);
   return (
+    <>
     <button
       ref={buttonRef}
       type="button"
       className={`floor-item board-card ${look}`}
+      onContextMenu={
+        movable
+          ? (e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY });
+            }
+          : undefined
+      }
       aria-label={`${t.key ?? "Ticket"}: ${t.title}`}
       aria-roledescription="ticket"
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
@@ -137,5 +152,14 @@ export function TicketCard({
       {needs && !settled && <span className={blocked ? "floor-item-what state-blocked" : "floor-item-what"}>{blocked ? needs.replace(/^needs/, "Blocked by") : needs}</span>}
       {theirs && <Maker who={t.createdBy} />}
     </button>
+      {menu && (
+        <Menu
+          label={`${t.key ?? "Ticket"} options`}
+          at={menu}
+          entries={[{ kind: "item", label: "Move to group…", onSelect: () => askMove(ticketSubject(t)) }]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </>
   );
 }

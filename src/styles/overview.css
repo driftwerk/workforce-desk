@@ -587,6 +587,19 @@
 button.fsec-tile-head {
   cursor: pointer;
 }
+.fsec-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.fsec-tile-top .fsec-tile-head {
+  flex: 1;
+}
+.fsec-tile-more {
+  flex: none;
+  color: var(--muted);
+}
 .fsec-tile-title {
   font-weight: 600;
   font-size: 14px;

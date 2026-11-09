@@ -5,6 +5,10 @@ import { HubError } from "../hub/client";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMemberRef } from "../hub/types";
 import { useUi } from "../shell/ui";
+import { useHubLayout } from "../groups/hubLayout";
+import { askMove } from "../groups/move";
+import { UNGROUPED } from "../groups/model";
+import { useLayout } from "../groups/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { NOTIFY_LEVELS, setLevel, useLevel } from "../unread/prefs";
 import { DeleteRoom } from "./DeleteRoom";
@@ -46,6 +50,9 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
   const [adding, setAdding] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const movable = useHubLayout((s) => s.layout !== null);
+  const groups = useLayout().groups;
+  const groupName = (room.group && groups.find((g) => g.id === room.group)?.name) || "Ungrouped";
   useEffect(() => {
     if (rename) field.current?.select();
   }, [rename]);
@@ -162,6 +169,22 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
         </div>
         <span className="faint small">Removing someone stops their answer first, and drops what was queued for them. They stay in your crew.</span>
       </section>
+
+      {movable && (
+        <section className="field" aria-label="Group">
+          <span className="details-row">
+            <span>Group · {groupName}</span>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => askMove({ kind: "room", id: room.id, name: room.name, from: room.group ?? UNGROUPED })}
+            >
+              Move to group…
+            </button>
+          </span>
+          <span className="faint small">A room keeps its conversation, so it moves only between groups the same boss oversees.</span>
+        </section>
+      )}
 
       <section className="field" role="radiogroup" aria-label="Notifications">
         <span>Notifications</span>

@@ -7,7 +7,8 @@ import { agentKey } from "../chat/types";
 import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
-import { keyOf, machineOf, sessionKey, splitKey } from "../hub/machines";
+import { keyOf, LOCAL, machineOf, sessionKey, splitKey } from "../hub/machines";
+import { askMove, canMove, sessionSubject } from "../groups/move";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
@@ -672,6 +673,10 @@ function usePaneMenu(
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    // This computer's session moves between groups as the hub previews it.
+    ...(session && machineOf(session) === LOCAL && canMove()
+      ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(sessionSubject(session.id, names[session.id] ?? session.displayName ?? session.name)) }]
+      : []),
     ...swap,
     ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
     ...charge.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
