@@ -170,6 +170,8 @@ for t in $targets; do
     ort=
     if [ "$t" = x86_64-apple-darwin ]; then
       ort=${ORT_X86_64:-$cache/onnxruntime-x86_64}
+      # As old a macOS as its ONNX Runtime (onnxruntime.sh) and Desk.
+      export MACOSX_DEPLOYMENT_TARGET=13.0
     elif [ "${ORT_FROM_SOURCE:-}" = 1 ]; then
       ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
     fi

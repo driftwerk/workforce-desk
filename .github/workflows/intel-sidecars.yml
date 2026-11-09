@@ -108,8 +108,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: scripts/build-sidecars.sh
 
+      # Nothing in ONNX Runtime may need a newer macOS than Desk's 13.0.
+      - name: Check ONNX Runtime's minimum macOS
+        run: |
+          versions=$(find ~/Library/Caches/desk-build/onnxruntime-x86_64/Release -name '*.a' -exec otool -l {} + |
+            awk '$1 == "minos" { print $2 }' | sort -u)
+          echo "ONNX Runtime's objects target macOS: $versions"
+          newer=$(echo "$versions" | awk -F. '$1 > 13 || ($1 == 13 && $2 > 0)')
+          [ -z "$newer" ] || { echo "::error::built for macOS $newer, newer than 13.0"; exit 1; }
+
       - name: Run the memory store (Rosetta)
         working-directory: desk/src-tauri/binaries
         run: |
           file "Desk Memory-x86_64-apple-darwin"
+          otool -l "Desk Memory-x86_64-apple-darwin" | awk '$1 == "minos"'
           arch -x86_64 "./Desk Memory-x86_64-apple-darwin" --help
