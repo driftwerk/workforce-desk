@@ -175,7 +175,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "End session…", "Remove…⌫"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Continue in…", "End session…", "Remove…⌫"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });

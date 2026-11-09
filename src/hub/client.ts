@@ -60,6 +60,10 @@ import type {
   TerminalInfo,
   UnreadSummary,
   GroupMemory,
+  HandedOff,
+  HandoffAsk,
+  HandoffPreview,
+  LineageView,
   MemoryIndexStatus,
   MemoryNote,
   MemorySearch,
@@ -762,6 +766,28 @@ export class DeskHub {
     return this.t.socket(`/api/desk/sessions/${id}/pty`);
   }
 
+  // ── Continue in another engine ──────────────────────────────────────────
+
+  /** What continuing session `id` as `ask` asks would give it: the brief,
+   *  what it holds and leaves out, and who receives it. `derive` has Desk
+   *  note what it hasn't of the session first (a model call, waited on up
+   *  to 45 s): only the dialog's first look asks it, never a prefetch. */
+  handoffPreview = (id: string, ask: Pick<HandoffAsk, "engine" | "account" | "place" | "back" | "goalOnly">, derive = false): Promise<HandoffPreview> => {
+    const params = new URLSearchParams();
+    if (ask.engine) params.set("engine", ask.engine);
+    if (ask.account !== undefined) params.set("account", ask.account ?? "own");
+    if (ask.place) params.set("place", ask.place);
+    if (ask.back) params.set("back", "true");
+    if (ask.goalOnly) params.set("goalOnly", "true");
+    if (derive) params.set("derive", "1");
+    const q = params.toString();
+    return this.call("GET", `/api/desk/sessions/${encodeURIComponent(id)}/handoff${q ? `?${q}` : ""}`);
+  };
+  /** Continues session `id` in another engine, or hands its work back. */
+  handoff = (id: string, ask: HandoffAsk): Promise<HandedOff> => this.call("POST", `/api/desk/sessions/${encodeURIComponent(id)}/handoff`, ask);
+  /** Session `id`'s place in its work: where it came from and went. */
+  lineage = (id: string): Promise<LineageView> => this.call("GET", `/api/desk/sessions/${encodeURIComponent(id)}/lineage`);
+
   // ── Desk Memory: what it remembers of sessions ─────────────────────────
 
   /** What Desk remembers of a session; null when it remembers nothing of it,
@@ -774,8 +800,11 @@ export class DeskHub {
       throw e;
     }
   };
-  /** Forgets what Desk remembers of a session; it is never remembered again. */
-  forgetMemory = (id: string): Promise<void> => this.call("DELETE", `/api/desk/sessions/${encodeURIComponent(id)}/memory`);
+  /** Forgets what Desk remembers of a session; it is never remembered again.
+   *  What the person should know of it, if anything: the sessions its work
+   *  was handed on to may still hold what they read. */
+  forgetMemory = async (id: string): Promise<string | null> =>
+    (await this.call<{ notice?: string } | undefined>("DELETE", `/api/desk/sessions/${encodeURIComponent(id)}/memory`))?.notice ?? null;
   /** Turns a session's own remembering on or off: what the person should
    *  know of it, if anything (some of what it said last may not be kept). */
   rememberSession = async (id: string, on: boolean): Promise<string | null> =>

@@ -15,6 +15,9 @@ import { GroupDot } from "../groups/GroupChip";
 import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove, sessionSubject } from "../groups/move";
+import { askHandoff } from "../handoff/store";
+import { SwapIcon } from "../handoff/LineageChips";
+import { continuedFrom, fromShort } from "../handoff/words";
 import { below, MoreIcon } from "../groups/rows";
 import { Menu } from "../ui/Menu";
 import type { BossView, PlanProgress } from "../hub/types";
@@ -207,6 +210,12 @@ function WorkTile({ work, now, chip }: { work: FloorWork; now: number; chip: { i
       {text && <p className="fsec-tile-gist">{text}</p>}
       <div className="fsec-tile-foot">
         {work.who.engine && work.who.kind === "session" && <span className="chip">{ENGINE_TITLE[work.who.engine]}</span>}
+        {work.continued && (
+          <span className="chip lineage-chip" title={`${continuedFrom(work.continued)}: the session it was handed from is folded under this one`}>
+            <SwapIcon />
+            {fromShort(work.continued)}
+          </span>
+        )}
         {key && <SessionTicketChip session={key} />}
         {chip && (
           <span className="chip chip-group" title={`In ${chip.name}`}>
@@ -236,6 +245,7 @@ function DoneToday({ done, desk }: { done: readonly FloorWork[]; desk: readonly 
           {done.map((w) => (
             <FloorRow key={w.key} item={w} look={w.outcome === "failed" ? "failed" : "done"} time={`ended ${w.endedAt ? clock(w.endedAt) : ""}`}>
               {w.gist?.now ?? w.what}
+              {w.continued && <span className="faint"> · {continuedFrom(w.continued)}</span>}
             </FloorRow>
           ))}
           {desk.length > 0 && (
@@ -467,12 +477,12 @@ function Needs({
 }
 
 /** A tile's options, for one of this computer's sessions: moving it to
- *  another group, as the hub previews it. */
+ *  another group, as the hub previews it (where the hub keeps the groups),
+ *  and continuing it in another engine. */
 function TileMenu({ session, name }: { session: string; name: string }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const kept = useHubLayout((s) => s.layout !== null);
-  if (!kept) return null;
   return (
     <>
       <button
@@ -490,7 +500,10 @@ function TileMenu({ session, name }: { session: string; name: string }) {
         <Menu
           label={`${name} options`}
           at={at}
-          entries={[{ kind: "item", label: "Move to group…", onSelect: () => askMove(sessionSubject(session, name)) }]}
+          entries={[
+            ...(kept ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(sessionSubject(session, name)) }] : []),
+            { kind: "item", label: "Continue in…", onSelect: () => askHandoff({ id: session }) },
+          ]}
           onClose={(refocus) => {
             if (refocus) button.current?.focus();
             setAt(null);

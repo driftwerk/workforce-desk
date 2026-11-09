@@ -9,6 +9,8 @@ import { useSessionName, useSessionNames } from "../groups/names";
 import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
 import { keyOf, LOCAL, machineOf, sessionKey, splitKey } from "../hub/machines";
 import { askMove, canMove, sessionSubject } from "../groups/move";
+import { canHandOff } from "../handoff/LineageChips";
+import { askHandoff } from "../handoff/store";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
@@ -677,6 +679,7 @@ function usePaneMenu(
     ...(session && machineOf(session) === LOCAL && canMove()
       ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(sessionSubject(session.id, names[session.id] ?? session.displayName ?? session.name)) }]
       : []),
+    ...(session && canHandOff(session) ? [{ kind: "item" as const, label: "Continue in…", onSelect: () => askHandoff({ id: session.id }) }] : []),
     ...swap,
     ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
     ...charge.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),

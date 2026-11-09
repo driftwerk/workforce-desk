@@ -357,6 +357,31 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/sessions/s1/handoff"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/s1/handoff?engine=codex&account=own&place=new_worktree&derive=1"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/s1/handoff?engine=claude&account=a1&back=true&goalOnly=true"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/handoff"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/sessions/s1/lineage"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/agents/a/memory/summary"
   },
   {

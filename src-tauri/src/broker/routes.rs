@@ -159,6 +159,16 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/memory/settings"),
     route("PATCH", "/api/desk/memory/settings"),
     route("PATCH", "/api/desk/memory/groups/{}"),
+    // Continuing a session in another engine: the preview (its brief, what
+    // it holds and who receives it), the handoff or hand back, and where a
+    // session's work came from and went.
+    with_query(
+        "GET",
+        "/api/desk/sessions/{}/handoff",
+        &["engine", "account", "place", "back", "goalOnly", "derive"],
+    ),
+    route("POST", "/api/desk/sessions/{}/handoff"),
+    route("GET", "/api/desk/sessions/{}/lineage"),
     // The vault: which keys there are, and setting one. Never a key's value.
     route("GET", "/api/vault"),
     Route {

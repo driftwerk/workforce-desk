@@ -364,4 +364,19 @@ describe("what Desk remembers of a session", () => {
     expect(hub.forgetMemory).toHaveBeenCalledWith("s1");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  it("says what the hub says of a forget whose work went on elsewhere before the dialog closes", async () => {
+    const notice = "acme-api-codex was handed this work; its own conversation may still hold what it read.";
+    const hub = fakeHub(remembered());
+    hub.forgetMemory.mockResolvedValue(notice);
+    // Once forgotten, nothing is remembered: the dialog stays to say it.
+    hub.sessionMemory.mockResolvedValueOnce(remembered()).mockResolvedValue(null);
+    await show(hub);
+    fireEvent.click(screen.getByRole("button", { name: "Forget…" }));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Forget" })));
+    const told = await screen.findByRole("dialog", { name: "Desk forgot “atlas-api”" });
+    expect(within(told).getByRole("status").textContent).toBe(notice);
+    fireEvent.click(within(told).getAllByRole("button", { name: "Close" }).at(-1)!);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });

@@ -312,4 +312,27 @@ describe("the ledger", () => {
     await act(async () => {});
     expect(screen.getByText("No calls today.")).toBeTruthy();
   });
+
+  it("sums a piece of work handed across engines as one row, by work", async () => {
+    const totals = (usd: number) => ({ tokens: { input: 2000, output: 1000, cacheRead: 0, cacheWrite: 0 }, usd, calls: 6, unpricedCalls: 0, unpricedModels: [], billing: [] });
+    const spend = vi.fn(async () => ({
+      from: "2026-11-09T00:00:00Z",
+      to: "2026-11-09T12:00:00Z",
+      by: "work",
+      total: totals(7.1),
+      rows: [{ key: "s-2", label: "acme-api", session: "s-2", engine: null, folder: "/dev/acme-api", totals: totals(4.1) }],
+      more: 0,
+    }));
+    const lineage = vi.fn(async () => ({ work: "s-1", from: { session: "s-1", name: "acme-api", engine: "claude", at: "2026-11-09T10:42:00Z" }, handedTo: null, sessions: ["s-1", "s-2"] }));
+    useDesk.setState({
+      hub: { ledger: vi.fn(async () => ({ rows: [], next: null })), spend, lineage } as unknown as DeskHub,
+      sessions: { "s-2": { id: "s-2", name: "acme-api", engine: "codex" } as Session },
+    });
+    render(<LedgerPanel />);
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "By work" })));
+    expect(spend).toHaveBeenCalledWith("day", "work", 100);
+    expect(screen.getByText("$4.10")).toBeTruthy();
+    expect(await screen.findByText(/across Claude Code and Codex · 3k tokens/)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Session" })).toBeNull();
+  });
 });

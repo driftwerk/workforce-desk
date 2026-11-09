@@ -105,6 +105,14 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   identityRevisions: (h) => h.identityRevisions("a", "SOUL.md"),
   identityRevision: (h) => h.identityRevision("a", "SOUL.md", 3),
   restoreIdentityRevision: (h) => h.restoreIdentityRevision("a", "SOUL.md", 3),
+  handoffPreview: (h) =>
+    Promise.all([
+      h.handoffPreview("s1", {}),
+      h.handoffPreview("s1", { engine: "codex", account: null, place: "new_worktree" }, true),
+      h.handoffPreview("s1", { engine: "claude", account: "a1", back: true, goalOnly: true }),
+    ]),
+  handoff: (h) => h.handoff("s1", { engine: "codex", source: "stop", egressConfirmed: true }),
+  lineage: (h) => h.lineage("s1"),
   memorySummary: (h) => h.memorySummary("a"),
   agentHeartbeat: (h) => h.agentHeartbeat("a"),
   agentConfig: (h) => h.agentConfig("a"),
