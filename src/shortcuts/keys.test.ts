@@ -46,12 +46,13 @@ describe("shortcut keys on macOS", () => {
       searchRoom: "Primary+F",
       searchRooms: "Primary+Shift+F",
       unread: "Primary+Shift+U",
+      searchMemory: "Primary+K",
       board: "Primary+B",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "board"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -196,6 +197,7 @@ describe("shortcut keys on Windows and Linux", () => {
       searchRoom: "Primary+F",
       searchRooms: "Primary+Shift+F",
       unread: "Primary+Shift+U",
+      searchMemory: "Primary+K",
       board: "Primary+B",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
@@ -203,7 +205,7 @@ describe("shortcut keys on Windows and Linux", () => {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "board"] as const)
+      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const)
         expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }
@@ -264,7 +266,8 @@ describe("shortcut keys on Windows and Linux", () => {
   it("refuse keys that would be another shortcut's in a terminal", () => {
     const d = defaultShortcuts("linux");
     expect(clash(d, "fillPane", "Control+Shift+T", "linux")).toBe("In a terminal, Ctrl+Shift+T is already New terminal — choose another");
-    expect(clash(d, "newSession", "Control+K", "linux")).toBe("In a terminal, Ctrl+Shift+K is already Ask anyone — choose another");
+    expect(clash(d, "newSession", "Control+K", "linux")).toBe("Ctrl+K is already Search what Desk remembers — choose another");
+    expect(clash({ ...d, searchMemory: "Control+Alt+K" }, "newSession", "Control+K", "linux")).toBe("In a terminal, Ctrl+Shift+K is already Ask anyone — choose another");
     expect(clash(defaultShortcuts("macos"), "fillPane", "Shift+Super+T", "macos")).toBeNull();
     expect(resolve({ fillPane: "Control+Shift+T" }, "linux").chosen).toEqual({});
   });

@@ -305,7 +305,11 @@ describe("what Desk remembers of a session", () => {
   it("turns remembering off for this session", async () => {
     const hub = fakeHub(remembered());
     await show(hub);
-    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Remember" })));
+    const remember = screen.getByRole("switch", { name: "Remember" });
+    expect(document.getElementById(remember.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Off, Desk keeps nothing new from it, but you can still search what it kept before.",
+    );
+    await act(async () => fireEvent.click(remember));
     expect(hub.rememberSession).toHaveBeenCalledWith("s1", false);
   });
 

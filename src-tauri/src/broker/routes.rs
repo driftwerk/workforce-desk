@@ -620,6 +620,7 @@ mod tests {
             ("PATCH", "/api/desk/memory/groups/g/x"),
             ("GET", "/api/desk/memory/search?q=a&token=x"),
             ("GET", "/api/desk/memory/search?q=a&reader=overseer"),
+            ("GET", "/api/desk/memory/search?q=a&since=2026-11-01"),
             ("GET", "/api/desk/sessions/s1/memory?q=a"),
             ("GET", "/api/desk/spend?period=a#b"),
             ("GET", "/api/desk/spend?period=a b"),
@@ -713,8 +714,16 @@ mod tests {
             got.query.as_deref(),
             Some("q=the+cookie&session=s1&group=g&kind=decisions&limit=20")
         );
-        // A machine's hub takes the same.
+        // A machine's hub takes the same, and the composer's /recall search
+        // of a session's own group there.
         assert!(machine_http("PATCH", "/api/desk/memory/groups/g-acme").is_ok());
+        assert!(
+            machine_http(
+                "GET",
+                "/api/desk/memory/search?q=cookie&group=g-acme&limit=20"
+            )
+            .is_ok()
+        );
     }
 
     #[test]

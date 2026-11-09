@@ -48,6 +48,7 @@ import { useTerminalColors } from "../theme/hubColors";
 import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { QuickAsk } from "./QuickAsk";
+import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
@@ -106,6 +107,7 @@ export function App() {
   // New session's sheet, with the group it was started from, if any.
   const [newSession, setNewSession] = useState<{ group?: string } | null>(null);
   const [asking, setAsking] = useState(false);
+  const [recalling, setRecalling] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [newCrew, setNewCrew] = useState(false);
   const rooms = useDesk((s) => s.rooms);
@@ -258,6 +260,7 @@ export function App() {
   useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
   useAppShortcut("searchRoom", () => searchHere(true), true, { fromFields: false });
   useAppShortcut("searchRooms", () => searchHere(false), true, { fromFields: false });
+  useAppShortcut("searchMemory", () => setRecalling((on) => !on), true, { fromFields: false });
   useAppShortcut("unread", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setInbox(true);
@@ -392,6 +395,7 @@ export function App() {
       )}
       {newSession && <NewSession group={newSession.group} onClose={() => setNewSession(null)} />}
       {asking && <QuickAsk onClose={() => setAsking(false)} />}
+      {recalling && <SearchMemory onClose={() => setRecalling(false)} />}
       {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
       <OpenRoomDetails />
       <MoveDialog />
