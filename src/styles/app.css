@@ -1709,9 +1709,10 @@ button.thread-bar:hover {
   background: var(--raised);
   border: 1px solid var(--border);
 }
-/* The hub-down banner floats at the top: below the notice while one shows. */
+/* The hub-down banner floats at the top: below the notice while one shows,
+   however many lines it takes (measured into --update-band-bottom). */
 .app:has(.update-notice) .hub-down {
-  top: 96px;
+  top: calc(var(--update-band-bottom, 82px) + 12px);
 }
 .update-notice-text {
   flex: 1 1 280px;

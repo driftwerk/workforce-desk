@@ -679,13 +679,6 @@ async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<Stri
         .map_err(text)
 }
 
-/// When this run of Desk started, in ms since the epoch.
-static STARTED: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-});
-
 /// How this install of Desk updates, from its running program.
 fn how_here(app: &App) -> updates::How {
     let Ok(exe) = std::env::current_exe() else {
@@ -723,20 +716,17 @@ fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<upda
         how_here(&app),
         endpoint.as_deref(),
         sessions_kept(&app),
-        *STARTED,
     ))
 }
 
 /// The update found by the last check, and its download once made. The
 /// page never holds the updater itself: every step is gated here.
 #[derive(Default)]
-struct PendingUpdate(Mutex<Option<Found>>);
-
-/// An update found, and its bytes once downloaded.
-type Found = (tauri_plugin_updater::Update, Option<Arc<Vec<u8>>>);
+struct PendingUpdate(Mutex<updates::Held<tauri_plugin_updater::Update>>);
 
 /// Looks for a new version: its version, or none. A development build, or
-/// one whose program an update couldn't replace, never looks.
+/// one whose program an update couldn't replace, never looks. A newer
+/// version than the one held replaces it, and its download.
 #[tauri::command]
 async fn update_check(
     handle: tauri::AppHandle,
@@ -754,17 +744,12 @@ async fn update_check(
         .check()
         .await
         .map_err(text)?;
-    let mut held = pending.0.lock().map_err(text)?;
-    let Some(update) = found else {
-        *held = None;
-        return Ok(None);
-    };
-    let version = update.version.clone();
-    // The same version found again keeps its download.
-    if held.as_ref().is_none_or(|(u, _)| u.version != version) {
-        *held = Some((update, None));
-    }
-    Ok(Some(version))
+    let version = found.as_ref().map(|u| u.version.clone());
+    pending.0.lock().map_err(text)?.found(found.map(|u| {
+        let v = u.version.clone();
+        (u, v)
+    }));
+    Ok(version)
 }
 
 /// Downloads the version the last check found (its signature is checked
@@ -778,40 +763,39 @@ async fn update_download(
     if how != updates::How::Itself {
         return Err(refuse_update(how));
     }
-    let update = {
+    let (update, version) = {
         let held = pending.0.lock().map_err(text)?;
-        match held.as_ref() {
-            Some((_, Some(_))) => return Ok(()),
-            Some((u, None)) => u.clone(),
+        match held.to_download() {
+            Some(found) => found,
+            None if held.has() => return Ok(()),
             None => return Err("Desk hasn't found an update to download".into()),
         }
     };
     let bytes = update.download(|_, _| {}, || {}).await.map_err(text)?;
-    if let Some((u, b)) = pending.0.lock().map_err(text)?.as_mut()
-        && u.version == update.version
-    {
-        *b = Some(Arc::new(bytes));
-    }
+    pending.0.lock().map_err(text)?.downloaded(&version, bytes);
     Ok(())
 }
 
-/// Installs the downloaded version and restarts into it. Refused, and the
-/// reason logged, unless this install updates itself: on macOS, only a
-/// program inside a `.app` bundle, since the updater replaces whatever
-/// folder it takes for the bundle.
+/// Installs the downloaded `version`, the one the page offered, and
+/// restarts into it: refused unless it is the newest found. Refused too,
+/// and the reason logged, unless this install updates itself: on macOS,
+/// only a program inside a `.app` bundle, since the updater replaces
+/// whatever folder it takes for the bundle.
 #[tauri::command]
 async fn update_install(
     handle: tauri::AppHandle,
     app: State<'_, App>,
     pending: State<'_, PendingUpdate>,
+    version: String,
 ) -> CommandResult<()> {
     let how = how_here(&app);
     if how != updates::How::Itself {
         return Err(refuse_update(how));
     }
-    let (update, bytes) = match pending.0.lock().map_err(text)?.as_ref() {
-        Some((u, Some(b))) => (u.clone(), b.clone()),
-        _ => return Err("Desk hasn't downloaded an update to install".into()),
+    let Some((update, bytes)) = pending.0.lock().map_err(text)?.to_install(&version) else {
+        return Err(format!(
+            "Desk {version} isn't the newest version downloaded: check for updates again"
+        ));
     };
     tracing::info!(version = %update.version, "installing the update, then restarting");
     tauri::async_runtime::spawn_blocking(move || update.install(bytes.as_slice()))
@@ -873,7 +857,6 @@ fn init_logging(paths: &Paths) {
 }
 
 pub fn run() {
-    std::sync::LazyLock::force(&STARTED);
     // A workspace build can give reqwest rustls without a crypto provider
     // (postgresql_embedded asks for that); every client shares this one.
     let _ = rustls::crypto::ring::default_provider().install_default();

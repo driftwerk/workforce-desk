@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { advance } from "../unread/reads";
 import { useSeenWhole } from "../unread/seen";
 import { useSessionNames } from "../groups/names";
@@ -16,9 +16,9 @@ export function useUpdateChecks() {
   const check = useUpdates((s) => s.check);
   useEffect(() => {
     if (!inApp) return;
-    const run = (launch: boolean) => void check({ launch }).catch((e: unknown) => console.warn("update check:", e));
-    run(true);
-    const every = setInterval(() => run(false), CHECK_EVERY_MS);
+    const run = () => void check().catch((e: unknown) => console.warn("update check:", e));
+    run();
+    const every = setInterval(run, CHECK_EVERY_MS);
     return () => clearInterval(every);
   }, [check]);
 }
@@ -38,6 +38,27 @@ export function useRestartWhenIdle() {
     if (waiting && phase === "ready" && working === 0) void restart(live.map((s) => s.id)).catch(fail);
     // The sessions current at this render.
   }, [waiting, phase, working]);
+}
+
+/** Says where the band ends (`--update-band-bottom` on the page), for the
+ *  hub-down banner, which floats at the top, to sit below it however many
+ *  lines it takes. */
+function useBandBottom(band: RefObject<HTMLDivElement | null>, showing: string | null) {
+  useLayoutEffect(() => {
+    const el = band.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty("--update-band-bottom", `${Math.ceil(el.getBoundingClientRect().bottom)}px`);
+    measure();
+    window.addEventListener("resize", measure);
+    const o = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    o?.observe(el);
+    return () => {
+      window.removeEventListener("resize", measure);
+      o?.disconnect();
+      root.style.removeProperty("--update-band-bottom");
+    };
+  }, [band, showing]);
 }
 
 const list = (names: string[]): string =>
@@ -61,9 +82,9 @@ export function whatHappens(live: Session[], kept: boolean): string {
 /** "Desk … is ready" once a new version is downloaded, in the stage's
  *  flow (it covers nothing), with what the restart does to the sessions.
  *  Update now, When idle (once none is working), or Later (hidden for this
- *  version until the next check or start). */
+ *  version until a newer one is out, or the person checks). */
 export function UpdateNotice() {
-  const { state, waiting, wait, restart, postpone, later, started, sessionsKept } = useUpdates();
+  const { state, waiting, wait, restart, postpone, probe, later, sessionsKept } = useUpdates();
   // This computer's: a machine updates on its own.
   const sessions = useDesk((s) => localSessions(s.sessions));
   const names = useSessionNames();
@@ -86,7 +107,10 @@ export function UpdateNotice() {
     void restart(live.map((s) => s.id)).catch(fail);
   };
 
-  const postponed = (state.phase === "ready" || state.phase === "available") && isPostponed(later, state.version, started);
+  const postponed = (state.phase === "ready" || state.phase === "available") && isPostponed(later, state.version);
+  const showing =
+    postponed || !["ready", "installing", "available"].includes(state.phase) ? null : `${state.phase} ${"version" in state ? state.version : ""}`;
+  useBandBottom(notice, showing);
   if (postponed) return null;
   const laterButton = (
     <button
@@ -103,7 +127,7 @@ export function UpdateNotice() {
 
   if (state.phase === "available")
     return (
-      <div className="update-notice" role="status">
+      <div ref={notice} className="update-notice" role="status">
         <span className="update-notice-text">A new version of Desk is out: Desk {state.version}.</span>
         <span className="update-notice-actions">
           {laterButton}
@@ -117,8 +141,6 @@ export function UpdateNotice() {
     );
   if (state.phase !== "ready" && state.phase !== "installing") return null;
   const installing = state.phase === "installing";
-  // Sessions the restart would stop while they work: asked first.
-  const interrupts = !sessionsKept && working.length > 0;
   return (
     <>
       <div ref={notice} className="update-notice" role="status">
@@ -155,7 +177,10 @@ export function UpdateNotice() {
                 When idle
               </button>
             )}
-            <button type="button" className="btn btn-sm btn-signal" onClick={() => (interrupts ? setAsking(true) : go())}>
+            <button type="button" className="btn btn-sm btn-signal" onClick={() =>
+                // Whether the holder keeps them now, not as of the last check.
+                void probe().then((kept) => (!kept && working.length > 0 ? setAsking(true) : go()))
+              }>
               Update now
             </button>
           </span>

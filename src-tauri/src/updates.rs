@@ -56,9 +56,6 @@ pub struct Updating {
     /// Whether this computer's sessions are kept by the PTY holder, and so
     /// keep running while Desk restarts.
     pub sessions_kept: bool,
-    /// When this run of Desk started (ms since the epoch): what the page
-    /// tells a reload from a restart by.
-    pub started: u64,
 }
 
 /// The releases page an updater endpoint
@@ -69,7 +66,7 @@ pub fn download_page(endpoint: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub fn updating(how: How, endpoint: Option<&str>, sessions_kept: bool, started: u64) -> Updating {
+pub fn updating(how: How, endpoint: Option<&str>, sessions_kept: bool) -> Updating {
     Updating {
         how: match how {
             How::Itself => "itself",
@@ -82,7 +79,70 @@ pub fn updating(how: How, endpoint: Option<&str>, sessions_kept: bool, started: 
         },
         download: endpoint.and_then(download_page),
         sessions_kept,
-        started,
+    }
+}
+
+/// The newest update found and its download once made, `U` being the
+/// updater's update (anything with a version in tests). A newer version
+/// found replaces it and drops the bytes of the older, so an install only
+/// ever has the newest version's bytes.
+#[derive(Debug)]
+pub struct Held<U> {
+    found: Option<Found<U>>,
+}
+
+/// An update found, its version, and its bytes once downloaded.
+type Found<U> = (U, String, Option<std::sync::Arc<Vec<u8>>>);
+
+impl<U> Default for Held<U> {
+    fn default() -> Self {
+        Self { found: None }
+    }
+}
+
+impl<U: Clone> Held<U> {
+    /// What a check found: `None` when there's no newer version. The same
+    /// version found again keeps its download.
+    pub fn found(&mut self, update: Option<(U, String)>) {
+        match update {
+            None => self.found = None,
+            Some((u, version)) => {
+                if self.found.as_ref().is_none_or(|(_, v, _)| *v != version) {
+                    self.found = Some((u, version, None));
+                }
+            }
+        }
+    }
+
+    /// The update to download, with its version: none when there's none, or
+    /// it's downloaded already.
+    pub fn to_download(&self) -> Option<(U, String)> {
+        match &self.found {
+            Some((u, v, None)) => Some((u.clone(), v.clone())),
+            _ => None,
+        }
+    }
+
+    pub fn has(&self) -> bool {
+        self.found.is_some()
+    }
+
+    /// Keeps the bytes of `version`, unless a newer one was found meanwhile.
+    pub fn downloaded(&mut self, version: &str, bytes: Vec<u8>) {
+        if let Some((_, v, b)) = self.found.as_mut()
+            && v == version
+        {
+            *b = Some(std::sync::Arc::new(bytes));
+        }
+    }
+
+    /// The update and its bytes to install for `version`, the one the page
+    /// offered: none unless it is the newest found and downloaded.
+    pub fn to_install(&self, version: &str) -> Option<(U, std::sync::Arc<Vec<u8>>)> {
+        match &self.found {
+            Some((u, v, Some(b))) if v == version => Some((u.clone(), b.clone())),
+            _ => None,
+        }
     }
 }
 
@@ -137,7 +197,7 @@ mod tests {
             ),
             How::Never(_)
         ));
-        let u = updating(on("macos", dev, &Install::Development), None, true, 7);
+        let u = updating(on("macos", dev, &Install::Development), None, true);
         assert_eq!(u.how, "never");
         assert!(u.never_because.is_some());
     }
@@ -190,7 +250,7 @@ mod tests {
         let endpoint =
             "https://github.com/driftwerk/workforce-desk/releases/latest/download/latest.json";
         assert_eq!(
-            updating(How::Package, Some(endpoint), false, 1),
+            updating(How::Package, Some(endpoint), false),
             Updating {
                 how: "package",
                 never_because: None,
@@ -198,11 +258,35 @@ mod tests {
                     "https://github.com/driftwerk/workforce-desk/releases/latest".into()
                 ),
                 sessions_kept: false,
-                started: 1,
             }
         );
-        assert_eq!(updating(How::Itself, None, true, 1).how, "itself");
+        assert_eq!(updating(How::Itself, None, true).how, "itself");
         assert_eq!(download_page("https://example.com/feed.json"), None);
+    }
+
+    #[test]
+    fn only_the_newest_version_found_is_installed() {
+        let mut held = Held::<&str>::default();
+        held.found(Some(("u1", "0.2.1".into())));
+        assert_eq!(held.to_download(), Some(("u1", "0.2.1".into())));
+        held.downloaded("0.2.1", vec![1]);
+        assert_eq!(held.to_download(), None);
+        assert!(held.to_install("0.2.1").is_some());
+        // Found again: its download is kept.
+        held.found(Some(("u1", "0.2.1".into())));
+        assert!(held.to_install("0.2.1").is_some());
+        // A newer one drops the older bytes: nothing installs until it is
+        // downloaded, and never the older version.
+        held.found(Some(("u2", "0.2.2".into())));
+        assert!(held.to_install("0.2.1").is_none());
+        assert!(held.to_install("0.2.2").is_none());
+        // The older download finishing late is dropped.
+        held.downloaded("0.2.1", vec![1]);
+        assert!(held.to_install("0.2.2").is_none());
+        held.downloaded("0.2.2", vec![2]);
+        assert_eq!(held.to_install("0.2.2").unwrap().1.as_slice(), &[2]);
+        held.found(None);
+        assert!(!held.has());
     }
 
     #[test]

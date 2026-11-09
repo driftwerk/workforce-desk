@@ -135,7 +135,7 @@ export function Help() {
   const checkNow = async () => {
     setChecked("Checking…");
     try {
-      await check();
+      await check({ asked: true });
       const s = useUpdates.getState().state;
       setChecked(s.phase === "idle" ? "Desk is up to date." : null);
     } catch (e) {

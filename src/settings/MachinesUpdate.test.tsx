@@ -24,7 +24,7 @@ vi.mock("../platform", () => ({
   machineHome: vi.fn(async () => "/home/dev"),
   inApp: true,
   openUrl: vi.fn(),
-  updating: vi.fn(async () => ({ how: "itself", neverBecause: null, download: null, sessionsKept: true, started: 1 })),
+  updating: vi.fn(async () => ({ how: "itself", neverBecause: null, download: null, sessionsKept: true })),
   updateCheck: vi.fn(async () => null),
   updateDownload: vi.fn(),
   updateInstall: vi.fn(),
@@ -66,7 +66,7 @@ beforeEach(() => {
   useHost.setState(DEFAULT_HOST);
   noEngines();
   useDesk.setState({ sessions: { "hel-1/s": { id: "s", machine: "hel-1", cwd: "/w", updatedAt: "" } as never } });
-  useUpdates.setState({ state: { phase: "idle" }, waiting: false, later: null, started: 1, sessionsKept: true });
+  useUpdates.setState({ state: { phase: "idle" }, waiting: false, later: null, sessionsKept: true });
   localStorage.clear();
   useMachines.setState({
     listed: true,
@@ -174,6 +174,9 @@ it("names the machines that follow when Desk is ready to restart, and says their
   render(<UpdateNotice />);
   expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 is ready.");
   expect(screen.getByRole("status").textContent).toContain("devbox and hel-1 update to match after.");
+  const { updating } = await import("../platform");
+  vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, sessionsKept: false });
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+  await act(async () => {});
   expect(screen.getByRole("dialog").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
 });

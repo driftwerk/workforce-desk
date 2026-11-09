@@ -369,8 +369,6 @@ export interface Updating {
   /** This computer's sessions are in the PTY holder: they keep running
    *  while Desk restarts. */
   sessionsKept: boolean;
-  /** When this run of Desk started (ms since the epoch). */
-  started: number;
 }
 export const updating = (): Promise<Updating> => invoke("updating");
 /** The version a new check finds, or null; always null for `never`. */
@@ -379,7 +377,7 @@ export const updateCheck = (): Promise<string | null> => invoke("update_check");
 export const updateDownload = (): Promise<void> => invoke("update_download");
 /** Installs the download and restarts into it; refused natively unless
  *  this install updates itself. */
-export const updateInstall = (): Promise<void> => invoke("update_install");
+export const updateInstall = (version: string): Promise<void> => invoke("update_install", { version });
 
 /** Why Desk can't run in WSL here, or in one distro (see crates/desk-wsl). */
 export type WslProblem =

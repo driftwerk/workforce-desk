@@ -14,11 +14,11 @@ export type UpdatePhase =
   | { phase: "ready"; version: string }
   | { phase: "installing"; version: string };
 
-/** "Later" on a version: hidden for the rest of this run of Desk (`started`)
- *  until the next check. */
+/** "Later" on a version: hidden until a newer version is out, through
+ *  restarts and the checks every few hours. Asking for a check (Help's
+ *  Check for updates) shows it again. */
 export interface Later {
   version: string;
-  started: number;
 }
 
 const LATER_KEY = "desk.update.later";
@@ -26,7 +26,7 @@ const LATER_KEY = "desk.update.later";
 const readLater = (): Later | null => {
   try {
     const v = JSON.parse(localStorage.getItem(LATER_KEY) ?? "null") as Later | null;
-    return v && typeof v.version === "string" && typeof v.started === "number" ? v : null;
+    return v && typeof v.version === "string" ? { version: v.version } : null;
   } catch {
     return null;
   }
@@ -46,20 +46,20 @@ interface Updates {
   /** Restart as soon as no session is working. */
   waiting: boolean;
   /** This computer's sessions keep running through the restart (the PTY
-   *  holder has them), as of the last check. */
+   *  holder has them), as last asked. */
   sessionsKept: boolean;
-  /** When this run of Desk started, as of the last check. */
-  started: number | null;
   /** Why this install never updates (a development build), once checked. */
   never: string | null;
   later: Later | null;
-  /** Looks for a new version and downloads it. `launch`: the check as Desk
-   *  (or its page) starts, which keeps a Later from this same run; any
-   *  other check ends it. */
-  check: (opts?: { launch?: boolean }) => Promise<void>;
+  /** Looks for a new version, also while one is ready or out (a newer one
+   *  replaces it, and is downloaded), and downloads it. `asked`: the
+   *  person asked for this check, which shows a version put off. */
+  check: (opts?: { asked?: boolean }) => Promise<void>;
   wait: (on: boolean) => void;
-  /** Hides the notice for this version until the next check or start. */
+  /** Hides the notice for this version until a newer one is out. */
   postpone: () => void;
+  /** Asks again whether the PTY holder keeps the sessions; what it says. */
+  probe: () => Promise<boolean>;
   /** Keeps `resume` to pick up after the restart, installs and restarts. */
   restart: (resume: string[]) => Promise<void>;
 }
@@ -72,34 +72,45 @@ export const isWorking = (s: Session): boolean => s.live && ["starting", "workin
 export const cantResume = (s: Session): boolean => s.caps?.resume === "none";
 
 /** Whether the notice for `version` is put off. */
-export const isPostponed = (later: Later | null, version: string, started: number | null): boolean =>
-  !!later && later.version === version && later.started === started;
+export const isPostponed = (later: Later | null, version: string): boolean => !!later && later.version === version;
+
+const shown = (state: UpdatePhase): string | null =>
+  state.phase === "ready" || state.phase === "available" ? state.version : null;
 
 export const useUpdates = create<Updates>((set, get) => ({
   state: { phase: "idle" },
   waiting: false,
   sessionsKept: false,
-  started: null,
   never: null,
   later: readLater(),
   check: async (opts) => {
-    if (!opts?.launch && get().later) {
+    if (opts?.asked && get().later) {
       keepLater(null);
       set({ later: null });
     }
-    if (get().state.phase !== "idle") return;
+    const phase = get().state.phase;
+    if (phase === "downloading" || phase === "installing") return;
     // Asked first: a development build never looks.
     const how = await updating();
-    set({ sessionsKept: how.sessionsKept, started: how.started, never: how.how === "never" ? (how.neverBecause ?? "") : null });
-    // A Later from an earlier run of Desk is over.
+    set({ sessionsKept: how.sessionsKept, never: how.how === "never" ? (how.neverBecause ?? "") : null });
+    if (how.how === "never") return;
+    const version = await updateCheck();
+    // Something else began meanwhile (a restart, another check).
+    const now = get().state;
+    if (now.phase === "downloading" || now.phase === "installing") return;
+    if (!version) {
+      // None newer than this Desk: what was offered is gone too (the native
+      // side let it go).
+      if (now.phase !== "idle") set({ state: { phase: "idle" }, waiting: false });
+      return;
+    }
+    if (shown(now) === version) return;
+    // A version put off is over once a newer one is out.
     const later = get().later;
-    if (later && later.started !== how.started) {
+    if (later && later.version !== version) {
       keepLater(null);
       set({ later: null });
     }
-    if (how.how === "never") return;
-    const version = await updateCheck();
-    if (!version) return;
     if (how.how === "package") {
       set({ state: { phase: "available", version, download: how.download } });
       return;
@@ -109,27 +120,39 @@ export const useUpdates = create<Updates>((set, get) => ({
       await updateDownload();
       set({ state: { phase: "ready", version } });
     } catch (e) {
-      set({ state: { phase: "idle" } });
+      set({ state: { phase: "idle" }, waiting: false });
       throw e;
     }
   },
   wait: (waiting) => set({ waiting }),
   postpone: () => {
-    const { state, started } = get();
-    if (state.phase !== "ready" && state.phase !== "available") return;
-    if (started === null) return;
-    const later = { version: state.version, started };
+    const version = shown(get().state);
+    if (!version) return;
+    const later = { version };
     keepLater(later);
     set({ later, waiting: false });
+  },
+  probe: async () => {
+    try {
+      const { sessionsKept } = await updating();
+      set({ sessionsKept });
+      return sessionsKept;
+    } catch {
+      return get().sessionsKept;
+    }
   },
   restart: async (resume) => {
     const { state } = get();
     if (state.phase !== "ready") return;
+    // As it is now, not as of the last check.
+    await get().probe();
+    if (get().state !== state) return;
     set({ state: { phase: "installing", version: state.version }, waiting: false });
     try {
       if (resume.length) await resumeLater(resume);
-      // Restarts into the new version once installed.
-      await updateInstall();
+      // Installs this version (refused unless it's the newest downloaded)
+      // and restarts into it.
+      await updateInstall(state.version);
     } catch (e) {
       set({ state: { phase: "ready", version: state.version } });
       throw e;
