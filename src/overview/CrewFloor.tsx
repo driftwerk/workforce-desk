@@ -5,7 +5,7 @@ import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
 import { FloorSection, SealedNotes, useSections } from "../floor/FloorSection";
-import { totals, type DeskItem } from "../floor/sections";
+import { handedOn, totals, type DeskItem } from "../floor/sections";
 import { plain } from "../ui/plain";
 import { NeedsJump } from "../floor/NeedsJump";
 import { RestoreBanner } from "../floor/RestoreBanner";
@@ -120,7 +120,16 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const merged = useMerged();
   const needs = useNeedCounts();
   const now = useMinute();
-  const all = floorGroups(overview, sortedSessions(sessions), onFloor ? needs : null, localId);
+  // A session whose work went on in another is folded under that one's tile,
+  // unless it waits on you: one left running that asks keeps its own.
+  const folded = handedOn(merged);
+  const waits = (s: Session) => needs.has(sessionItem(s.id)) || s.state === "blocked" || s.state === "asking";
+  const all = floorGroups(
+    overview,
+    sortedSessions(sessions).filter((s) => !folded.has(s.id) || waits(s)),
+    onFloor ? needs : null,
+    localId,
+  );
   // Desk's own lists, kept while they're the same, so the sections are.
   const deskKey = JSON.stringify(onFloor ? deskItems(all, localId) : null);
   const desk = useMemo(() => (JSON.parse(deskKey) as DeskItem[] | null) ?? undefined, [deskKey]);

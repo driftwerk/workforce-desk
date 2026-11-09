@@ -6,6 +6,8 @@ import type { MemoryIndexStatus, MemoryNote, MemoryNotes, MemorySearch, Session,
 import { LOCAL, useMachines } from "../machines/engines";
 import { plainError } from "../ui/plainError";
 import { ForgetMemory } from "./ForgetMemory";
+import { canHandOff } from "../handoff/LineageChips";
+import { askHandoff } from "../handoff/store";
 import { useFloor } from "../floor/store";
 import { useSessionGist } from "./gist";
 import { changedFiles, clock, fallbackText, notedByDeskText, providerName, rememberedLine, replacedOf, shortFile } from "./words";
@@ -48,7 +50,9 @@ export function MemoryPanel({
 }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [forgetting, setForgetting] = useState(false);
+  // What it remembered as Forget… was asked: the dialog keeps saying it
+  // while the panel reads what's left, and shows what the hub says after.
+  const [forgetting, setForgetting] = useState<SessionMemory | null>(null);
   const gist = useSessionGist(session.id);
   const machine = machineOf(session);
   // Never its id: a machine Desk can't name is "this machine".
@@ -154,9 +158,14 @@ export function MemoryPanel({
             <p className="small muted">{rememberedLine(m)}</p>
             {m.notice && <p className="small faint">{m.notice}</p>}
             <div className="memory-actions">
+              {canHandOff(session) && (
+                <button type="button" className="btn" onClick={() => askHandoff({ id: session.id })}>
+                  Continue in…
+                </button>
+              )}
               <SearchThisWork hub={hub!} session={session.id} index={loaded.index} />
               {m.counts.exchanges + (m.notes.counts.kept ?? m.notes.counts.decisions + m.notes.counts.facts + m.notes.counts.todos) > 0 && (
-                <button type="button" className="btn" onClick={() => setForgetting(true)}>
+                <button type="button" className="btn" onClick={() => setForgetting(m)}>
                   Forget…
                 </button>
               )}
@@ -165,21 +174,22 @@ export function MemoryPanel({
               )}
             </div>
           </footer>
-          {forgetting && (
-            <ForgetMemory
-              name={name}
-              memory={m}
-              engine={session.engine}
-              onForget={async () => {
-                await hub!.forgetMemory(session.id);
-                // Its summary went with it: the Floor is read again for it.
-                const floor = useFloor.getState();
-                await Promise.all([load(), ...Object.keys(floor.hubs).map((h) => floor.load(h))]);
-              }}
-              onClose={() => setForgetting(false)}
-            />
-          )}
         </>
+      )}
+      {forgetting && (
+        <ForgetMemory
+          name={name}
+          memory={forgetting}
+          engine={session.engine}
+          onForget={async () => {
+            const notice = await hub!.forgetMemory(session.id);
+            // Its summary went with it: the Floor is read again for it.
+            const floor = useFloor.getState();
+            await Promise.all([load(), ...Object.keys(floor.hubs).map((h) => floor.load(h))]);
+            return notice;
+          }}
+          onClose={() => setForgetting(null)}
+        />
       )}
     </section>
   );

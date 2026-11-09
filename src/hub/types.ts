@@ -547,7 +547,9 @@ export interface SpendRow {
   totals: SpendTotals;
 }
 
-export type SpendBy = "session" | "project" | "day" | "engine" | "account";
+/** `work`: one row per piece of work, a session and every session it was
+ *  handed on to, named as it goes on now. */
+export type SpendBy = "session" | "project" | "day" | "engine" | "account" | "work";
 export type SpendPeriod = "five_hours" | "day" | "week" | "month";
 
 export interface SpendView {
@@ -1122,6 +1124,19 @@ export interface Work {
   /** As on `Need`. */
   group?: string | null;
   boss?: string | null;
+  /** The session's work was handed to it from another: where from, and
+   *  when. The session it left is folded under this tile. Absent for work
+   *  that wasn't handed on, and from older hubs. */
+  continued?: Continued | null;
+}
+
+/** Where the work a session's tile shows came from. */
+export interface Continued {
+  /** The session it was handed from. */
+  from: string;
+  /** That session's engine, when the hub still has it. */
+  engine: Engine | null;
+  at: string;
 }
 
 /** What an agent or session is for (`purpose`) and what it is doing or did
@@ -1675,4 +1690,106 @@ export interface MemorySearch {
   /** Only keywords were matched: the search index isn't ready. */
   keywordOnly: boolean;
   notice: string | null;
+}
+
+// ── Continue in another engine (handoff) ─────────────────────────────────
+
+/** Where the session that continues the work runs. */
+export type HandoffPlace = "same_folder" | "new_worktree";
+
+/** What becomes of the session the work leaves: stopped now, stopped once
+ *  its turn ends, or left running. */
+export type HandoffSource = "stop" | "after_turn" | "keep";
+
+/** What a handoff is asked as: the body of `POST …/handoff`, whose keys the
+ *  hub takes exactly (any other is refused). `account` absent is the
+ *  engine's default; null, the CLI's own sign-in. */
+export interface HandoffAsk {
+  engine?: Engine;
+  account?: string | null;
+  place?: HandoffPlace;
+  source?: HandoffSource;
+  back?: boolean;
+  goalOnly?: boolean;
+  egressConfirmed?: boolean;
+}
+
+/** What a brief holds, and of how many. */
+export interface Included {
+  goal: boolean;
+  decisions: number;
+  ofDecisions: number;
+  todos: number;
+  ofTodos: number;
+  facts: number;
+  ofFacts: number;
+  exchanges: number;
+  ofExchanges: number;
+  files: number;
+  ofFiles: number;
+  /** Exchanges left out because they read as instructions to a model. */
+  flaggedLeftOut: number;
+  /** Exchanges left out because they were kept in another group. */
+  elsewhereLeftOut: number;
+  /** Exchanges given cut short to fit. */
+  cut: number;
+  tokens: number;
+}
+
+/** One step of a work's lineage. */
+export interface Hop {
+  session: string;
+  name: string;
+  engine: Engine;
+  at: string | null;
+}
+
+/** A session's place in its work: where it came from and went. */
+export interface LineageView {
+  /** The work's first session. */
+  work: string;
+  from: Hop | null;
+  handedTo: Hop | null;
+  /** Every session of the work, the first first. */
+  sessions: string[];
+}
+
+/** What a handoff would give, before the person confirms it. */
+export interface HandoffPreview {
+  engine: Engine;
+  content: "brief" | "goal_only";
+  /** The brief as the target would read it. */
+  brief: string;
+  included: Included;
+  /** "Codex gets: …", in the person's words. */
+  gets: string;
+  leavesOut: string | null;
+  tokens: number;
+  budget: number;
+  vendor: string | null;
+  /** "The brief goes to OpenAI, through Codex." */
+  egress: string;
+  /** The source's group asks the person to confirm each handoff. */
+  ask: boolean;
+  /** The target can search the rest of the work. */
+  search: boolean;
+  /** Said when it can't: "Only the brief goes across." */
+  onlyBrief: string | null;
+  /** Desk's notes of the source weren't ready in time. */
+  notesPending: boolean;
+  /** A hand back is offered: resume the session the work came from. */
+  back: Hop | null;
+  lineage: LineageView;
+}
+
+/** A handoff made. */
+export interface HandedOff {
+  /** The session the work continues in. */
+  session: Session;
+  included: Included;
+  /** "Handed over: …", as the target's card says it. */
+  said: string;
+  egress: string;
+  /** What didn't follow the work, in plain words. */
+  notes: string[];
 }

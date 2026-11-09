@@ -34,6 +34,8 @@ import { SubjectHistory } from "../board/History";
 import { keyOf, machineOf, sessionKey } from "../hub/machines";
 import { sessionContent } from "../grids/engine";
 import { MemoryPanel } from "../memory/MemoryPanel";
+import { LineageChips, canHandOff } from "../handoff/LineageChips";
+import { askHandoff } from "../handoff/store";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -102,6 +104,11 @@ export function SessionCard({ session }: { session: Session }) {
               {a.label}
             </button>
           ))}
+          {canHandOff(session) && (
+            <button type="button" className="link" onClick={() => askHandoff({ id: session.id })}>
+              Continue in…
+            </button>
+          )}
           {!places.length && !loose && <PutInGrid content={sessionContent(key)} label="Put this session in a grid" onShown={() => open(null)} />}
           {lifecycle.map((a) => (
             <button key={a.label} type="button" className="link" onClick={a.run}>
@@ -166,6 +173,7 @@ export function SessionCard({ session }: { session: Session }) {
           {history ? "Hide history" : "History"}
         </button>
       </div>
+      <LineageChips session={session} />
       {history && <SubjectHistory subject={session.id} machine={machine} label={`What ${name} did`} />}
       <SpendStrip sessionId={key} />
       <BreakerBanner sessionId={key} />

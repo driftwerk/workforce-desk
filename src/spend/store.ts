@@ -18,9 +18,14 @@ interface SpendState {
   supported: boolean | null;
   failed: boolean;
   load: () => Promise<void>;
+  /** This week's spend by piece of work (a session and every session it was
+   *  handed on to), read only once a card shows a handed-on work; null from
+   *  a hub that doesn't sum by work. */
+  work: SpendView | null | undefined;
+  loadWork: () => Promise<void>;
 }
 
-export const useSpend = create<SpendState>((set) => ({
+export const useSpend = create<SpendState>((set, get) => ({
   views: {},
   supported: null,
   failed: false,
@@ -32,6 +37,19 @@ export const useSpend = create<SpendState>((set) => ({
       set({ views: { day, week }, supported: day !== null, failed: false });
     } catch {
       set({ failed: true });
+    }
+    // Read again with the rest, once something asked for it.
+    if (get().work !== undefined) void get().loadWork();
+  },
+  work: undefined,
+  loadWork: async () => {
+    const hub = useDesk.getState().hub;
+    if (!hub) return;
+    try {
+      set({ work: await hub.spend("week", "work", LIMIT) });
+    } catch {
+      // An older hub refuses `by=work`: nothing is said of the work's total.
+      set({ work: null });
     }
   },
 }));

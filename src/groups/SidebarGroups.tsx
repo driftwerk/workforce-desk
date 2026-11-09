@@ -63,6 +63,8 @@ import { MachineTag } from "../machines/OnMachine";
 import { offlineWord } from "../machines/words";
 import { useMachineSessions, type Seen } from "./machines";
 import { lifecycleActions, sessionActions } from "../session/actions";
+import { canHandOff } from "../handoff/LineageChips";
+import { askHandoff } from "../handoff/store";
 import { askLifecycle } from "../session/lifecycle";
 import { Confirm } from "../ui/Confirm";
 import type { GroupBoss } from "../hub/types";
@@ -516,6 +518,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       ...(item.kind === "session"
         ? [
             ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+            ...(canHandOff(item.session) ? [{ kind: "item" as const, label: "Continue in…", onSelect: () => askHandoff({ id: item.session.id }) }] : []),
             ...(here ? chargeChoices(item.session, useCharges.getState().bySession[item.session.id], boss) : []).map(
               (c): MenuEntry => ({
                 kind: "item",

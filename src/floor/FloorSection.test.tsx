@@ -12,6 +12,7 @@ import type { FloorNeed, FloorWork } from "./merge";
 import { NeedsJump } from "./NeedsJump";
 import { MAIN, floorSections, sealedSection, sectionDomId, type Section } from "./sections";
 import { NOW, agent, approval, at, need, session, work } from "./testing";
+import { clock } from "./time";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -304,5 +305,35 @@ describe("the jump bar, for someone who asked for less motion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Acme: 1 needs you" }));
     expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
     vi.unstubAllGlobals();
+  });
+});
+
+describe("a piece of work handed to another engine", () => {
+  it("is one tile, saying where it came from, and its options offer continuing it elsewhere", () => {
+    const out = floorSections(
+      {
+        needs: [],
+        working: [
+          fw(
+            work({ ...session("s-api", "acme-api"), engine: "codex" }, {
+              group: "acme",
+              boss: "sarah",
+              continued: { from: "s-old-api", engine: "claude", at: at(18) },
+            }),
+          ),
+        ],
+        done: [],
+      },
+      { bosses: [DESK, SARAH], sealed: [], plans: [] },
+      layout,
+    );
+    if (out.kind !== "sections") throw new Error("flat");
+    render(<FloorSection section={out.sections.find((s) => s.id === "acme")!} now={NOW} />);
+    const tile = screen.getByRole("article", { name: "acme-api" });
+    expect(within(tile).getByText(`from Claude Code · ${clock(at(18))}`)).toBeTruthy();
+    expect(within(tile).getByTitle(/^continued from Claude Code/)).toBeTruthy();
+    expect(within(tile).getByText("Codex")).toBeTruthy();
+    fireEvent.click(within(tile).getByRole("button", { name: "acme-api options" }));
+    expect(screen.getByRole("menuitem", { name: "Continue in…" })).toBeTruthy();
   });
 });

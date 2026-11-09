@@ -272,3 +272,10 @@ export const sectionName = (s: Pick<Section, "group" | "boss">): string => s.gro
 /** A section's id as an element's id. */
 export const sectionDomId = (id: string): string =>
   `floor-section-${id.replace(/[^A-Za-z0-9-]/g, (c) => `_${c.codePointAt(0)!.toString(16)}_`)}`;
+
+/** This computer's sessions whose work went on in another (a handoff), as
+ *  the hub's floor says it: the tile of the session it went on in names
+ *  them (`continued.from`). Desk folds them under that tile, never showing
+ *  them on their own, even while one still finishes its turn. */
+export const handedOn = (floor: Pick<Merged, "working" | "done">): Set<string> =>
+  new Set([...floor.working, ...floor.done].flatMap((w) => (w.local && w.continued ? [w.continued.from] : [])));
