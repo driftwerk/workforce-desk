@@ -50,7 +50,20 @@ export const inTerminal = (target: EventTarget | null): boolean => target instan
  *  breadcrumb back, and the other columns fold into tabs. Nothing moves in
  *  the tree as it does — the main area and each column keep their place and
  *  are only shown or stowed — so a session's terminal carries on. */
-export function Stage({ main, mainKey, mainName, panels }: { main: ReactNode; mainKey: string; mainName: string; panels: OpenPanel[] }) {
+export function Stage({
+  main,
+  mainKey,
+  mainName,
+  panels,
+  notice,
+}: {
+  main: ReactNode;
+  mainKey: string;
+  mainName: string;
+  panels: OpenPanel[];
+  /** A band above everything in the stage, in its flow (the update notice). */
+  notice?: ReactNode;
+}) {
   const row = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
   const kept = useUi((s) => s.panelWidths);
@@ -120,6 +133,7 @@ export function Stage({ main, mainKey, mainName, panels }: { main: ReactNode; ma
   return (
     <MainHiddenContext.Provider value={focused}>
       <div className={`stage ${focused ? "stage-focused" : ""}`}>
+        {notice}
         {focused && (
           <div className="stage-crumbs">
             <button type="button" className="crumb" aria-label={`Back to ${mainName}`} title="Back (Esc)" onClick={() => useUi.getState().unfocusPanel()}>

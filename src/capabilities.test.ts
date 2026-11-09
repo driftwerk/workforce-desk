@@ -202,6 +202,10 @@ describe("each window's capabilities", () => {
     for (const c of commandsOf(capability("grid"))) expect(all).toContain(c);
   });
 
+  it("let no window reach the updater itself: Desk's native side checks, downloads and installs, and refuses a development build", () => {
+    for (const name of ["main", "grid"] as const) expect([...identifiers(capability(name))].filter((p) => p.startsWith("updater:"))).toEqual([]);
+  });
+
   it("let no window send requests itself, only through Desk's native side", () => {
     for (const name of ["main", "grid"] as const) {
       const ids = capability(name).permissions.map((p) => (typeof p === "string" ? p : p.identifier));

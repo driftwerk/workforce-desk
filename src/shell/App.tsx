@@ -371,6 +371,7 @@ export function App() {
             mainKey={mainKey}
             mainName={mainName}
             panels={panels}
+            notice={<UpdateNotice />}
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
@@ -394,7 +395,6 @@ export function App() {
       <MoveDialog />
       <LifecycleDialogs />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
-      <UpdateNotice />
       <HubDownBanner down={hubDown} />
       {error && (
         <div className="toast toast-error" role="alert">

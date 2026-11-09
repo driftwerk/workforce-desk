@@ -1,9 +1,7 @@
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
 import type { DeskEvent, Session } from "../hub/types";
 import { deskListeners, useDesk, localSessions } from "../hub/store";
-import { resumeLater, takeResume, updating } from "../platform";
+import { resumeLater, takeResume, updateCheck, updateDownload, updateInstall, updating } from "../platform";
 
 /** How often Desk looks for a new version while it runs. */
 export const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -16,55 +14,124 @@ export type UpdatePhase =
   | { phase: "ready"; version: string }
   | { phase: "installing"; version: string };
 
+/** "Later" on a version: hidden for the rest of this run of Desk (`started`)
+ *  until the next check. */
+export interface Later {
+  version: string;
+  started: number;
+}
+
+const LATER_KEY = "desk.update.later";
+
+const readLater = (): Later | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(LATER_KEY) ?? "null") as Later | null;
+    return v && typeof v.version === "string" && typeof v.started === "number" ? v : null;
+  } catch {
+    return null;
+  }
+};
+
+const keepLater = (later: Later | null) => {
+  try {
+    if (later) localStorage.setItem(LATER_KEY, JSON.stringify(later));
+    else localStorage.removeItem(LATER_KEY);
+  } catch {
+    // Without storage, Later lasts until the page reloads.
+  }
+};
+
 interface Updates {
   state: UpdatePhase;
   /** Restart as soon as no session is working. */
   waiting: boolean;
-  update: Update | null;
-  check: () => Promise<void>;
+  /** This computer's sessions keep running through the restart (the PTY
+   *  holder has them), as of the last check. */
+  sessionsKept: boolean;
+  /** When this run of Desk started, as of the last check. */
+  started: number | null;
+  /** Why this install never updates (a development build), once checked. */
+  never: string | null;
+  later: Later | null;
+  /** Looks for a new version and downloads it. `launch`: the check as Desk
+   *  (or its page) starts, which keeps a Later from this same run; any
+   *  other check ends it. */
+  check: (opts?: { launch?: boolean }) => Promise<void>;
   wait: (on: boolean) => void;
-  /** Installs, keeps `resume` to pick up after the restart, and restarts. */
+  /** Hides the notice for this version until the next check or start. */
+  postpone: () => void;
+  /** Keeps `resume` to pick up after the restart, installs and restarts. */
   restart: (resume: string[]) => Promise<void>;
 }
 
-/** A session whose CLI is running: it stops for the restart. */
+/** A session whose CLI is running. */
 export const isLive = (s: Session): boolean => s.live;
 /** One mid-task: worth waiting for. */
 export const isWorking = (s: Session): boolean => s.live && ["starting", "working", "blocked"].includes(s.state);
+/** One that can't be resumed if its CLI stops. */
+export const cantResume = (s: Session): boolean => s.caps?.resume === "none";
+
+/** Whether the notice for `version` is put off. */
+export const isPostponed = (later: Later | null, version: string, started: number | null): boolean =>
+  !!later && later.version === version && later.started === started;
 
 export const useUpdates = create<Updates>((set, get) => ({
   state: { phase: "idle" },
   waiting: false,
-  update: null,
-  check: async () => {
+  sessionsKept: false,
+  started: null,
+  never: null,
+  later: readLater(),
+  check: async (opts) => {
+    if (!opts?.launch && get().later) {
+      keepLater(null);
+      set({ later: null });
+    }
     if (get().state.phase !== "idle") return;
-    const update = await check();
-    if (!update) return;
+    // Asked first: a development build never looks.
     const how = await updating();
-    if (!how.byItself) {
-      set({ state: { phase: "available", version: update.version, download: how.download } });
+    set({ sessionsKept: how.sessionsKept, started: how.started, never: how.how === "never" ? (how.neverBecause ?? "") : null });
+    // A Later from an earlier run of Desk is over.
+    const later = get().later;
+    if (later && later.started !== how.started) {
+      keepLater(null);
+      set({ later: null });
+    }
+    if (how.how === "never") return;
+    const version = await updateCheck();
+    if (!version) return;
+    if (how.how === "package") {
+      set({ state: { phase: "available", version, download: how.download } });
       return;
     }
-    set({ update, state: { phase: "downloading", version: update.version } });
+    set({ state: { phase: "downloading", version } });
     try {
-      await update.download();
-      set({ state: { phase: "ready", version: update.version } });
+      await updateDownload();
+      set({ state: { phase: "ready", version } });
     } catch (e) {
-      set({ update: null, state: { phase: "idle" } });
+      set({ state: { phase: "idle" } });
       throw e;
     }
   },
   wait: (waiting) => set({ waiting }),
+  postpone: () => {
+    const { state, started } = get();
+    if (state.phase !== "ready" && state.phase !== "available") return;
+    if (started === null) return;
+    const later = { version: state.version, started };
+    keepLater(later);
+    set({ later, waiting: false });
+  },
   restart: async (resume) => {
-    const { update, state } = get();
-    if (!update || state.phase !== "ready") return;
-    set({ state: { phase: "installing", version: update.version }, waiting: false });
+    const { state } = get();
+    if (state.phase !== "ready") return;
+    set({ state: { phase: "installing", version: state.version }, waiting: false });
     try {
       if (resume.length) await resumeLater(resume);
-      await update.install();
-      await relaunch();
+      // Restarts into the new version once installed.
+      await updateInstall();
     } catch (e) {
-      set({ state: { phase: "ready", version: update.version } });
+      set({ state: { phase: "ready", version: state.version } });
       throw e;
     }
   },

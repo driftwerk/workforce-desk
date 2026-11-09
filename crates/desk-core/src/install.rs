@@ -63,6 +63,41 @@ impl Install {
     }
 }
 
+/// Whether `exe` is the program of a macOS app bundle,
+/// `<Name>.app/Contents/MacOS/<program>`: the only shape an update may
+/// replace on macOS. The updater takes whatever two folders up from the
+/// program's folder as the bundle, so anything else (a development build
+/// in `target/debug`) would have that folder's contents replaced.
+pub fn in_mac_bundle(exe: &Path) -> bool {
+    let mut up = exe.ancestors().skip(1);
+    let (Some(macos), Some(contents), Some(app)) = (up.next(), up.next(), up.next()) else {
+        return false;
+    };
+    macos.file_name().is_some_and(|n| n == "MacOS")
+        && contents.file_name().is_some_and(|n| n == "Contents")
+        && app.extension().is_some_and(|e| e == "app")
+        && app.file_stem().is_some_and(|n| !n.is_empty())
+}
+
+/// Whether `exe` runs straight from a build's output folder
+/// (`target/debug`, `target/release`, `target/<triple>/debug`): a build,
+/// never an install.
+pub fn in_build_folder(exe: &Path) -> bool {
+    let Some(dir) = exe.parent() else {
+        return false;
+    };
+    if !dir
+        .file_name()
+        .is_some_and(|n| n == "debug" || n == "release")
+    {
+        return false;
+    }
+    dir.ancestors()
+        .skip(1)
+        .take(2)
+        .any(|a| a.file_name().is_some_and(|n| n == "target"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +161,55 @@ mod tests {
             Install::of(&exe, &BTreeMap::new(), &paths),
             Install::Versioned { bin: paths.bin() }
         );
+    }
+
+    #[test]
+    fn only_a_program_inside_an_app_bundle_is_in_one() {
+        for exe in [
+            "/Applications/Desk.app/Contents/MacOS/desk",
+            "/Users/ana/Applications/Desk.app/Contents/MacOS/desk",
+            "/Users/ana/src/desk/target/release/bundle/macos/Desk.app/Contents/MacOS/desk",
+        ] {
+            assert!(in_mac_bundle(Path::new(exe)), "{exe}");
+        }
+        for exe in [
+            // A development build: what an update emptied on 11/09.
+            "/Users/ana/src/desk/target/debug/desk",
+            "/Users/ana/src/desk/target/release/desk",
+            // A bundle's other programs, and look-alikes.
+            "/Applications/Desk.app/Contents/Resources/desk",
+            "/Applications/Desk.app/Contents/MacOS/helpers/desk",
+            "/Applications/Desk/Contents/MacOS/desk",
+            "/Applications/.app/Contents/MacOS/desk",
+            "/tmp/x.app/Contents/MacOS.bak/desk",
+            "Contents/MacOS/desk",
+            "desk",
+            "",
+        ] {
+            assert!(!in_mac_bundle(Path::new(exe)), "{exe}");
+        }
+    }
+
+    #[test]
+    fn a_program_in_a_build_folder_is_a_build() {
+        for exe in [
+            "/Users/ana/src/desk/target/debug/desk",
+            "/Users/ana/src/desk/target/release/desk",
+            "/home/ana/src/desk/target/x86_64-unknown-linux-gnu/release/desk",
+            "C:/src/desk/target/debug/desk.exe",
+        ] {
+            assert!(in_build_folder(Path::new(exe)), "{exe}");
+        }
+        for exe in [
+            "/Applications/Desk.app/Contents/MacOS/desk",
+            "/usr/bin/desk",
+            "/home/ana/release/desk",
+            "/home/ana/target/desk",
+            "C:/Program Files/Desk/desk.exe",
+            "desk",
+        ] {
+            assert!(!in_build_folder(Path::new(exe)), "{exe}");
+        }
     }
 
     #[test]

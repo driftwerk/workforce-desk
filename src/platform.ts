@@ -359,11 +359,27 @@ export const removeDeskData = (everything: boolean): Promise<void> => invoke("da
 
 /** How this install gets a new version: by itself, or (a package) through
  *  the system's package manager, with a page to download one by hand. */
+/** How this install of Desk gets a new version, as its native side
+ *  decides it: `never` for a development build, or one whose program an
+ *  update couldn't replace (not inside a `.app` bundle on macOS). */
 export interface Updating {
-  byItself: boolean;
+  how: "itself" | "package" | "never";
+  neverBecause: string | null;
   download: string | null;
+  /** This computer's sessions are in the PTY holder: they keep running
+   *  while Desk restarts. */
+  sessionsKept: boolean;
+  /** When this run of Desk started (ms since the epoch). */
+  started: number;
 }
 export const updating = (): Promise<Updating> => invoke("updating");
+/** The version a new check finds, or null; always null for `never`. */
+export const updateCheck = (): Promise<string | null> => invoke("update_check");
+/** Downloads what the last check found; refused unless it updates itself. */
+export const updateDownload = (): Promise<void> => invoke("update_download");
+/** Installs the download and restarts into it; refused natively unless
+ *  this install updates itself. */
+export const updateInstall = (): Promise<void> => invoke("update_install");
 
 /** Why Desk can't run in WSL here, or in one distro (see crates/desk-wsl). */
 export type WslProblem =
