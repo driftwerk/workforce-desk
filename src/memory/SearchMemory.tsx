@@ -7,7 +7,18 @@ import { openTarget } from "../shell/navigate";
 import { useModal } from "../ui/Dialog";
 import { listboxKey } from "../ui/listbox";
 import { plainError } from "../ui/plainError";
-import { KIND_FILTERS, MIN_QUERY, hitLine, hitText, searchNotice, sessionOf, useMemorySearch, whenOf, type MemoryFilters, type MemoryKindFilter } from "./search";
+import {
+  KIND_FILTERS,
+  MIN_QUERY,
+  hitLine,
+  hitText,
+  searchNotice,
+  sessionOf,
+  useMemorySearch,
+  whenOf,
+  type MemoryFilters,
+  type MemoryKindFilter,
+} from "./search";
 import { HIT_KIND, shortFile } from "./words";
 
 /** The groups a search may be narrowed to, as the hub knows them: each of
@@ -54,7 +65,11 @@ export function SearchFilters({
       </label>
       <label>
         <span className="faint">Kind</span>
-        <select className="pc-engine" value={filters.kind ?? ""} onChange={(e) => onChange({ ...filters, kind: (e.target.value || undefined) as MemoryKindFilter | undefined })}>
+        <select
+          className="pc-engine"
+          value={filters.kind ?? ""}
+          onChange={(e) => onChange({ ...filters, kind: (e.target.value || undefined) as MemoryKindFilter | undefined })}
+        >
           <option value="">All</option>
           {KIND_FILTERS.map((k) => (
             <option key={k.value} value={k.value}>

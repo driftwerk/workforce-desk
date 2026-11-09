@@ -27,7 +27,9 @@ export function Composer({ session }: { session: Session }) {
   // Its memory is on the machine it runs on, searched within its own group
   // to begin with: the person widens it if they mean to.
   const hub = hubFor(session);
-  const [filters, setFilters] = useState<MemoryFilters>(() => ({ group: session.group?.id ?? "ungrouped" }));
+  const [filters, setFilters] = useState<MemoryFilters>(() => ({
+    group: session.group?.id ?? "ungrouped",
+  }));
   const found = useMemorySearch(recall === null ? null : hub, recall ?? "", filters);
   const hits = found.found?.hits ?? [];
   useEffect(() => setActive(0), [found.found]);
@@ -48,63 +50,100 @@ export function Composer({ session }: { session: Session }) {
     setBusy(false);
   };
   return (
-    <form
-      className="line-composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void send("queue");
-      }}
-    >
-      {recall !== null && <Recall hub={hub} q={recall} state={found} hits={hits} active={active} setActive={setActive} filters={filters} setFilters={setFilters} onPick={quote} />}
-      <textarea
-        rows={1}
-        value={text}
-        placeholder={`Message ${name} — /recall to search what Desk remembers`}
-        aria-label={`Message ${name}`}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-          if (recall !== null) {
-            // Enter picks a hit, never sends `/recall …` to the session.
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (hits[active]) quote(hits[active]);
+    <>
+      {recall !== null && (
+        <Recall
+          hub={hub}
+          session={session}
+          q={recall}
+          state={found}
+          hits={hits}
+          active={active}
+          setActive={setActive}
+          filters={filters}
+          setFilters={setFilters}
+          onPick={quote}
+        />
+      )}
+      <form
+        className="line-composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send("queue");
+        }}
+      >
+        <textarea
+          rows={1}
+          value={text}
+          placeholder={`Message ${name} — /recall to search what Desk remembers`}
+          aria-label={`Message ${name}`}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (recall !== null) {
+              // Enter picks a hit, never sends `/recall …` to the session.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (hits[active]) quote(hits[active]);
+                return;
+              }
+              if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Escape") {
+                listboxKey(
+                  e,
+                  hits.length,
+                  active,
+                  {
+                    move: setActive,
+                    choose: () => undefined,
+                    close: () => setText(""),
+                  },
+                  { typing: true },
+                );
+              }
               return;
             }
-            if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Escape") {
-              listboxKey(e, hits.length, active, { move: setActive, choose: () => undefined, close: () => setText("") }, { typing: true });
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send(e.metaKey && steer ? "now" : "queue");
             }
-            return;
-          }
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            void send(e.metaKey && steer ? "now" : "queue");
-          }
-        }}
-      />
-      <span className="line-composer-buttons">
-        {steer && (
-          <button type="button" className="btn btn-sm" disabled={busy || !text.trim() || recall !== null} title={`Into ${name}’s turn now (⌘↩)`} onClick={() => void send("now")}>
-            {steer.label}
+          }}
+        />
+        <span className="line-composer-buttons">
+          {steer && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy || !text.trim() || recall !== null}
+              title={`Into ${name}’s turn now (⌘↩)`}
+              onClick={() => void send("now")}
+            >
+              {steer.label}
+            </button>
+          )}
+          <button
+            type="submit"
+            className="btn btn-signal btn-sm"
+            disabled={busy || !text.trim() || recall !== null}
+            title={working ? `It goes in once ${name}’s turn ends` : undefined}
+          >
+            {working ? "Send when done" : "Send"}
           </button>
-        )}
-        <button type="submit" className="btn btn-signal btn-sm" disabled={busy || !text.trim() || recall !== null} title={working ? `It goes in once ${name}’s turn ends` : undefined}>
-          {working ? "Send when done" : "Send"}
-        </button>
-      </span>
-      {problem && (
-        <span className="small state-blocked line-composer-problem" role="alert">
-          {problem}
         </span>
-      )}
-    </form>
+        {problem && (
+          <span className="small state-blocked line-composer-problem" role="alert">
+            {problem}
+          </span>
+        )}
+      </form>
+    </>
   );
 }
 
-/** `/recall`'s hits, over the composer: ↑ ↓ choose, Enter or a click quotes
+/** `/recall`'s hits, just above the composer: ↑ ↓ choose, Enter or a click quotes
  *  one into the message, Esc clears it. */
 function Recall({
   hub,
+  session,
   q,
   state,
   hits,
@@ -115,6 +154,7 @@ function Recall({
   onPick,
 }: {
   hub: DeskHub | null;
+  session: Session;
   q: string;
   state: ReturnType<typeof useMemorySearch>;
   hits: MemoryHit[];
@@ -125,12 +165,18 @@ function Recall({
   onPick: (h: MemoryHit) => void;
 }) {
   const listId = useId();
-  const groups = useMemoryGroups(hub);
+  const known = useMemoryGroups(hub);
+  // The session's own group is always there to pick, even before (or
+  // without) the hub's list.
+  const own = session.group;
+  const groups = own && !known.some((g) => g.id === own.id) ? [own, ...known] : known;
   const notice = searchNotice(state.found);
   return (
-    <div className="mention-menu memory-recall" aria-label="Recall from what Desk remembers">
+    <div className="memory-recall" role="group" aria-label="Recall from what Desk remembers">
       <div className="memory-recall-head">
-        <span className="small faint">{q.length < MIN_QUERY ? "Type what to recall: /recall the cookie decision" : "Pick one to quote it in your message"}</span>
+        <span className="small faint">
+          {q.length < MIN_QUERY ? "Type what to recall: /recall the cookie decision" : "Pick one to quote it in your message"}
+        </span>
         <SearchFilters groups={groups} filters={filters} onChange={setFilters} />
       </div>
       {notice && (

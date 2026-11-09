@@ -58,18 +58,17 @@ export const sessionOf = (h: MemoryHit): string => {
 };
 
 /** "Decision · atlas-api (Claude Code) · Acme · today 10:12". */
-export const hitLine = (h: MemoryHit, now = new Date()): string =>
-  [HIT_KIND[h.kind], sessionOf(h), h.groupName, whenOf(h.at, now)].filter(Boolean).join(" · ");
+export const hitLine = (h: MemoryHit, now = new Date()): string => [HIT_KIND[h.kind], sessionOf(h), h.groupName, whenOf(h.at, now)].filter(Boolean).join(" · ");
 
 /** A conversation's ask and answer, or a note's text, in one line. */
-export const hitText = (h: MemoryHit): string =>
-  (h.kind === "exchange" || h.kind === "compaction") && h.ask ? `“${h.ask}” … ${h.answer}` : h.answer;
+export const hitText = (h: MemoryHit): string => ((h.kind === "exchange" || h.kind === "compaction") && h.ask ? `“${h.ask}” … ${h.answer}` : h.answer);
 
 /** What a hit adds to a message: a quote of it, saying where it's from.
  *  Plain words only: no ids. */
 export const quoteOf = (h: MemoryHit, now = new Date()): string => {
   const from = `${HIT_KIND[h.kind]} from ${sessionOf(h)}, ${whenOf(h.at, now)}${h.notedByDesk && !h.confirmed ? " (noted by Desk, may be wrong)" : ""}:`;
-  const said = h.kind === "exchange" || h.kind === "compaction" ? [h.ask && `Asked: ${h.ask}`, h.answer && `Answered: ${h.answer}`].filter(Boolean).join("\n") : h.answer;
+  const said =
+    h.kind === "exchange" || h.kind === "compaction" ? [h.ask && `Asked: ${h.ask}`, h.answer && `Answered: ${h.answer}`].filter(Boolean).join("\n") : h.answer;
   return [from, ...said.split("\n")].map((l) => `> ${l}`.trimEnd()).join("\n");
 };
 

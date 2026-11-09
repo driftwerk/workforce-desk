@@ -121,7 +121,13 @@ describe("Search what Desk remembers (⌘K)", () => {
     const { box } = await palette();
     const group = screen.getByRole("combobox", { name: "Group" }) as HTMLSelectElement;
     expect([...group.options].map((o) => o.text)).toEqual(["All", "Acme", "Globex", "Ungrouped"]);
-    expect([...(screen.getByRole("combobox", { name: "Kind" }) as HTMLSelectElement).options].map((o) => o.text)).toEqual(["All", "Decisions", "To-dos", "Facts", "Conversations"]);
+    expect([...(screen.getByRole("combobox", { name: "Kind" }) as HTMLSelectElement).options].map((o) => o.text)).toEqual([
+      "All",
+      "Decisions",
+      "To-dos",
+      "Facts",
+      "Conversations",
+    ]);
     type(box, "cookie");
     fireEvent.change(group, { target: { value: "g-globex" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Kind" }), { target: { value: "decisions" } });
@@ -176,7 +182,21 @@ describe("Search what Desk remembers (⌘K)", () => {
 
   it("reads a conversation in full from the session's memory, and says when Desk no longer has its session", async () => {
     hub.sessionMemory.mockResolvedValueOnce({
-      exchanges: [{ seq: 3, at: exchange.at, ended: null, asker: "person", ask: "Why does logout leave the cookie?", answer: "It cleared the server session only. The cookie is now cleared too.", files: ["/work/acme-api/src/auth/logout.ts"], commands: [], errors: [], compaction: false, redacted: 0 }],
+      exchanges: [
+        {
+          seq: 3,
+          at: exchange.at,
+          ended: null,
+          asker: "person",
+          ask: "Why does logout leave the cookie?",
+          answer: "It cleared the server session only. The cookie is now cleared too.",
+          files: ["/work/acme-api/src/auth/logout.ts"],
+          commands: [],
+          errors: [],
+          compaction: false,
+          redacted: 0,
+        },
+      ],
     } as never);
     const { box } = await palette();
     type(box, "cookie");
@@ -217,6 +237,16 @@ describe("the composer's /recall", () => {
     expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
   });
 
+  it("names the session's own group even when the hub lists none", async () => {
+    hub.memorySettings.mockResolvedValueOnce(null as never);
+    const box = await composer();
+    type(box, "/recall cookie");
+    await settle();
+    const group = screen.getByRole("combobox", { name: "Group" }) as HTMLSelectElement;
+    expect(group.value).toBe("g-acme");
+    expect(group.selectedOptions[0]!.text).toBe("Acme");
+  });
+
   it("quotes the hit chosen into the message, never sending /recall", async () => {
     const box = await composer();
     type(box, "/recall cookie");
@@ -225,7 +255,9 @@ describe("the composer's /recall", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(hub.postLine).not.toHaveBeenCalled();
     expect(box.value).toBe(`${quoteOf(exchange)}\n\n`);
-    expect(box.value).toBe("> Conversation from acme-api (Codex), yesterday:\n> Asked: Why does logout leave the cookie?\n> Answered: It cleared the server session only.\n\n");
+    expect(box.value).toBe(
+      "> Conversation from acme-api (Codex), yesterday:\n> Asked: Why does logout leave the cookie?\n> Answered: It cleared the server session only.\n\n",
+    );
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
@@ -239,7 +271,9 @@ describe("the composer's /recall", () => {
 
   it("marks a note Desk wrote as one that may be wrong, with no ids", () => {
     const q = quoteOf(hit(), NOW);
-    expect(q).toBe("> Decision from acme-web (Claude Code), today 10:12 (noted by Desk, may be wrong):\n> Keep the session token in a secure cookie, not browser storage.");
+    expect(q).toBe(
+      "> Decision from acme-web (Claude Code), today 10:12 (noted by Desk, may be wrong):\n> Keep the session token in a secure cookie, not browser storage.",
+    );
     expect(q).not.toMatch(/s1|g-acme/);
     expect(whenOf("2026-11-01T09:00:00", NOW)).toBe("1 Nov");
   });
