@@ -1694,23 +1694,36 @@ button.thread-bar:hover {
 
 /* ── Updates ────────────────────────────────────────────────────────────── */
 
+/* In the stage's flow, above the main area and its panels: it covers
+   nothing (the theme button, the title bar's drag strip), and goes with
+   Later. Clear of the macOS drag strip as the sidebar is. */
 .update-notice {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-  max-width: 420px;
+  flex: none;
+  margin: 30px 16px 0 16px;
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   align-items: center;
   padding: 10px 12px 10px 16px;
   border-radius: 14px;
   background: var(--raised);
   border: 1px solid var(--border);
-  z-index: 20;
 }
-.update-notice > span {
-  flex: 1;
+/* The hub-down banner floats at the top: below the notice while one shows,
+   however many lines it takes (measured into --update-band-bottom). */
+.app:has(.update-notice) .hub-down {
+  top: calc(var(--update-band-bottom, 82px) + 12px);
+}
+.update-notice-text {
+  flex: 1 1 280px;
   min-width: 0;
+}
+.update-notice-actions {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-left: auto;
 }
 .update-sessions {
   margin: 0;

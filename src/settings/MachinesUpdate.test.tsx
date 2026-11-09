@@ -16,8 +16,6 @@ import { useUpdates } from "../updates/store";
 import { Machines } from "./Machines";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
-vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn(async () => null) }));
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn(async () => "0.2.1") }));
 vi.mock("../platform", () => ({
   machinesList: vi.fn(async () => []),
@@ -26,7 +24,10 @@ vi.mock("../platform", () => ({
   machineHome: vi.fn(async () => "/home/dev"),
   inApp: true,
   openUrl: vi.fn(),
-  updating: vi.fn(async () => ({ byItself: true, download: null })),
+  updating: vi.fn(async () => ({ how: "itself", neverBecause: null, download: null, sessionsKept: true })),
+  updateCheck: vi.fn(async () => null),
+  updateDownload: vi.fn(),
+  updateInstall: vi.fn(),
   resumeLater: vi.fn(),
   takeResume: vi.fn(async () => []),
 }));
@@ -65,7 +66,7 @@ beforeEach(() => {
   useHost.setState(DEFAULT_HOST);
   noEngines();
   useDesk.setState({ sessions: { "hel-1/s": { id: "s", machine: "hel-1", cwd: "/w", updatedAt: "" } as never } });
-  useUpdates.setState({ state: { phase: "idle" }, waiting: false, update: null });
+  useUpdates.setState({ state: { phase: "idle" }, waiting: false, later: null, sessionsKept: true });
   localStorage.clear();
   useMachines.setState({
     listed: true,
@@ -168,10 +169,14 @@ it("says once that Desk updated and what its machines do about it", async () => 
 });
 
 it("names the machines that follow when Desk is ready to restart, and says their sessions don't stop", async () => {
-  useUpdates.setState({ state: { phase: "ready", version: "0.2.1" } });
-  useDesk.setState({ sessions: { a: { id: "a", live: true, state: "idle", name: "acme-api", cwd: "/w" } as never } });
+  useUpdates.setState({ state: { phase: "ready", version: "0.2.1" }, sessionsKept: false });
+  useDesk.setState({ sessions: { a: { id: "a", live: true, state: "working", name: "acme-api", cwd: "/w" } as never } });
   render(<UpdateNotice />);
-  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 is ready. devbox and hel-1 update to match after.");
-  fireEvent.click(screen.getByRole("button", { name: "Restart to update" }));
+  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 is ready.");
+  expect(screen.getByRole("status").textContent).toContain("devbox and hel-1 update to match after.");
+  const { updating } = await import("../platform");
+  vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, sessionsKept: false });
+  fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+  await act(async () => {});
   expect(screen.getByRole("dialog").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
 });

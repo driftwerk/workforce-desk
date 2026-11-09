@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { advance } from "../unread/reads";
 import { useSeenWhole } from "../unread/seen";
 import { useSessionNames } from "../groups/names";
@@ -6,10 +6,12 @@ import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useMachines } from "../hub/engines";
-import { CHECK_EVERY_MS, isLive, isWorking, useUpdates } from "./store";
+import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
+import type { Session } from "../hub/types";
 
 /** Looks for a new version on launch and every few hours; downloads it in
- *  the background. Quiet when there's none or this computer is offline. */
+ *  the background. Quiet when there's none, this computer is offline, or
+ *  this is a development build (its native side never looks). */
 export function useUpdateChecks() {
   const check = useUpdates((s) => s.check);
   useEffect(() => {
@@ -21,14 +23,68 @@ export function useUpdateChecks() {
   }, [check]);
 }
 
+/** "When idle": restarts into the update once no session on this computer
+ *  is working. Called once from the shell, so it runs whichever view is
+ *  open (Settings included), not only while the notice shows. */
+export function useRestartWhenIdle() {
+  const waiting = useUpdates((s) => s.waiting);
+  const phase = useUpdates((s) => s.state.phase);
+  const restart = useUpdates((s) => s.restart);
+  const sessions = useDesk((s) => localSessions(s.sessions));
+  const fail = useDesk((s) => s.fail);
+  const live = Object.values(sessions).filter(isLive);
+  const working = live.filter(isWorking).length;
+  useEffect(() => {
+    if (waiting && phase === "ready" && working === 0) void restart(live.map((s) => s.id)).catch(fail);
+    // The sessions current at this render.
+  }, [waiting, phase, working]);
+}
+
+/** Says where the band ends (`--update-band-bottom` on the page), for the
+ *  hub-down banner, which floats at the top, to sit below it however many
+ *  lines it takes. */
+function useBandBottom(band: RefObject<HTMLDivElement | null>, showing: string | null) {
+  useLayoutEffect(() => {
+    const el = band.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty("--update-band-bottom", `${Math.ceil(el.getBoundingClientRect().bottom)}px`);
+    measure();
+    window.addEventListener("resize", measure);
+    const o = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    o?.observe(el);
+    return () => {
+      window.removeEventListener("resize", measure);
+      o?.disconnect();
+      root.style.removeProperty("--update-band-bottom");
+    };
+  }, [band, showing]);
+}
+
 const list = (names: string[]): string =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
-/** "Restart to update" once a new version is downloaded. Sessions that are
- *  running stop for the restart and are resumed right after it; the person
- *  can instead have Desk wait until none is working. */
+const sessionsWord = (n: number): string => (n === 1 ? "1 session" : `${n} sessions`);
+
+/** What restarting into the update does to this computer's sessions, said
+ *  before anything happens. Kept by the PTY holder, they run on; without
+ *  it, each stops and is resumed after, unless its CLI can't be. */
+export function whatHappens(live: Session[], kept: boolean): string {
+  if (live.length === 0) return "Desk restarts to update.";
+  if (kept) return "Desk restarts to update. Your sessions keep running and are picked up again.";
+  const lost = live.filter(cantResume).length;
+  const stop = `Desk restarts to update. ${sessionsWord(live.length)} ${live.length === 1 ? "stops" : "stop"} for the restart`;
+  if (lost === 0) return `${stop} and ${live.length === 1 ? "picks" : "pick"} up where ${live.length === 1 ? "it" : "they"} left off after it.`;
+  if (lost === live.length) return `${stop} and can’t be picked up again.`;
+  return `${stop}: ${lost} of them can’t be picked up again, the rest pick up where they left off.`;
+}
+
+/** "Desk … is ready" once a new version is downloaded, in the stage's
+ *  flow (it covers nothing), with what the restart does to the sessions.
+ *  Update now, When idle (once none is working), or Later (hidden for this
+ *  version until a newer one is out, or the person checks). */
 export function UpdateNotice() {
-  const { state, waiting, wait, restart } = useUpdates();
+  const { state, waiting, wait, restart, postpone, probe, later, sessionsKept } = useUpdates();
   // This computer's: a machine updates on its own.
   const sessions = useDesk((s) => localSessions(s.sessions));
   const names = useSessionNames();
@@ -51,20 +107,36 @@ export function UpdateNotice() {
     void restart(live.map((s) => s.id)).catch(fail);
   };
 
-  useEffect(() => {
-    if (waiting && state.phase === "ready" && working.length === 0) go();
-    // `go` reads the sessions current at this render.
-  }, [waiting, state.phase, working.length]);
+  const postponed = (state.phase === "ready" || state.phase === "available") && isPostponed(later, state.version);
+  const showing =
+    postponed || !["ready", "installing", "available"].includes(state.phase) ? null : `${state.phase} ${"version" in state ? state.version : ""}`;
+  useBandBottom(notice, showing);
+  if (postponed) return null;
+  const laterButton = (
+    <button
+      type="button"
+      className="link small"
+      onClick={() => {
+        acted();
+        postpone();
+      }}
+    >
+      Later
+    </button>
+  );
 
   if (state.phase === "available")
     return (
-      <div className="update-notice" role="status">
-        <span>A new version of Desk is out: Desk {state.version}.</span>
-        {state.download && (
-          <button type="button" className="btn btn-signal" onClick={() => openUrl(state.download!)}>
-            Download
-          </button>
-        )}
+      <div ref={notice} className="update-notice" role="status">
+        <span className="update-notice-text">A new version of Desk is out: Desk {state.version}.</span>
+        <span className="update-notice-actions">
+          {laterButton}
+          {state.download && (
+            <button type="button" className="btn btn-sm btn-signal" onClick={() => openUrl(state.download!)}>
+              Download
+            </button>
+          )}
+        </span>
       </div>
     );
   if (state.phase !== "ready" && state.phase !== "installing") return null;
@@ -72,23 +144,46 @@ export function UpdateNotice() {
   return (
     <>
       <div ref={notice} className="update-notice" role="status">
-        <span>
-          {installing
-            ? `Updating to Desk ${state.version}…`
-            : waiting
-              ? `Desk ${state.version} installs when your sessions finish.`
-              : `Desk ${state.version} is ready.`}
-          {!installing && machines.length > 0 && ` ${list(machines)} ${machines.length === 1 ? "updates" : "update"} to match after.`}
+        <span className="update-notice-text">
+          {installing ? (
+            `Updating to Desk ${state.version}…`
+          ) : (
+            <>
+              <b>{waiting ? `Desk ${state.version} installs when your sessions finish.` : `Desk ${state.version} is ready.`}</b>{" "}
+              {whatHappens(live, sessionsKept)}
+              {machines.length > 0 && ` ${list(machines)} ${machines.length === 1 ? "updates" : "update"} to match after.`}
+            </>
+          )}
         </span>
-        {!installing && waiting && (
-          <button type="button" className="link small" onClick={() => wait(false)}>
-            Don’t wait
-          </button>
-        )}
         {!installing && (
-          <button type="button" className="btn btn-signal" onClick={() => (live.length ? setAsking(true) : go())}>
-            Restart to update
-          </button>
+          <span className="update-notice-actions">
+            {waiting ? (
+              <button type="button" className="link small" onClick={() => wait(false)}>
+                Don’t wait
+              </button>
+            ) : (
+              laterButton
+            )}
+            {!waiting && working.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                title="Restarts once no session is working"
+                onClick={() => {
+                  acted();
+                  wait(true);
+                }}
+              >
+                When idle
+              </button>
+            )}
+            <button type="button" className="btn btn-sm btn-signal" onClick={() =>
+                // Whether the holder keeps them now, not as of the last check.
+                void probe().then((kept) => (!kept && working.length > 0 ? setAsking(true) : go()))
+              }>
+              Update now
+            </button>
+          </span>
         )}
       </div>
       {asking && (
@@ -98,25 +193,24 @@ export function UpdateNotice() {
             <header className="dialog-head">
               <span className="dialog-title">
                 <h1 id={id} className="display-lg">
-                  Restart to update
+                  Update now
                 </h1>
-                <p>
-                  {working.length > 0
-                    ? `${list(working.map((s) => names[s.id] ?? s.name))} ${working.length === 1 ? "is" : "are"} working right now.`
-                    : "Your sessions are open but idle."}
-                </p>
+                <p>{`${list(working.map((s) => names[s.id] ?? s.name))} ${working.length === 1 ? "is" : "are"} working right now.`}</p>
               </span>
               <CloseButton onClose={() => setAsking(false)} />
             </header>
           )}
         >
           <div className="dialog-scroll">
-            <p className="muted">These stop for the restart and pick up where they left off as soon as Desk is back:</p>
+            <p className="muted">{whatHappens(live, sessionsKept)}</p>
             <ul className="update-sessions">
               {live.map((s) => (
                 <li key={s.id}>
                   <span className="mono">{names[s.id] ?? s.name}</span>
-                  <span className="faint small">{s.goal || s.lastPrompt || s.cwd}</span>
+                  <span className="faint small">
+                    {cantResume(s) ? "Can’t be picked up again. " : ""}
+                    {s.goal || s.lastPrompt || s.cwd}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -126,20 +220,18 @@ export function UpdateNotice() {
           </div>
           <div className="dialog-foot">
             <span className="dialog-foot-note" />
-            {working.length > 0 && (
-              <button
-                type="button"
-                className="btn"
-                data-autofocus
-                onClick={() => {
-                  acted();
-                  wait(true);
-                  setAsking(false);
-                }}
-              >
-                Restart when they finish
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn"
+              data-autofocus
+              onClick={() => {
+                acted();
+                wait(true);
+                setAsking(false);
+              }}
+            >
+              Restart when they finish
+            </button>
             <button
               type="button"
               className="btn btn-signal"

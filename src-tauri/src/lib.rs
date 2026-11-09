@@ -679,19 +679,141 @@ async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<Stri
         .map_err(text)
 }
 
+/// How this install of Desk updates, from its running program.
+fn how_here(app: &App) -> updates::How {
+    let Ok(exe) = std::env::current_exe() else {
+        return updates::How::Never("Desk couldn't tell where its program is");
+    };
+    let exe = exe.canonicalize().unwrap_or(exe);
+    let env = std::env::vars().collect();
+    let install = desk_core::install::Install::of(&exe, &env, &app.paths);
+    updates::how(&exe, &install, cfg!(debug_assertions), std::env::consts::OS)
+}
+
+/// Whether this computer's sessions are in the PTY holder, which keeps
+/// them running while Desk restarts.
+fn sessions_kept(app: &App) -> bool {
+    #[cfg(unix)]
+    if let Some(b) = &app.backend
+        && matches!(b.host, Host::Native)
+    {
+        return desk_core::holder::answers(&b.paths.pty_socket());
+    }
+    let _ = app;
+    false
+}
+
 /// How this install of Desk gets a new version.
 #[tauri::command]
 fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<updates::Updating> {
-    let exe = std::env::current_exe().map_err(text)?;
-    let env = std::env::vars().collect();
-    let install = desk_core::install::Install::of(&exe, &env, &app.paths);
     let endpoint = handle
         .config()
         .plugins
         .0
         .get("updater")
         .and_then(|u| u["endpoints"][0].as_str().map(str::to_string));
-    Ok(updates::updating(&install, endpoint.as_deref()))
+    Ok(updates::updating(
+        how_here(&app),
+        endpoint.as_deref(),
+        sessions_kept(&app),
+    ))
+}
+
+/// The update found by the last check, and its download once made. The
+/// page never holds the updater itself: every step is gated here.
+#[derive(Default)]
+struct PendingUpdate(Mutex<updates::Held<tauri_plugin_updater::Update>>);
+
+/// Looks for a new version: its version, or none. A development build, or
+/// one whose program an update couldn't replace, never looks. A newer
+/// version than the one held replaces it, and its download.
+#[tauri::command]
+async fn update_check(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    pending: State<'_, PendingUpdate>,
+) -> CommandResult<Option<String>> {
+    use tauri_plugin_updater::UpdaterExt;
+    if let updates::How::Never(why) = how_here(&app) {
+        tracing::info!("not checking for updates: {why}");
+        return Ok(None);
+    }
+    let found = handle
+        .updater()
+        .map_err(text)?
+        .check()
+        .await
+        .map_err(text)?;
+    let version = found.as_ref().map(|u| u.version.clone());
+    pending.0.lock().map_err(text)?.found(found.map(|u| {
+        let v = u.version.clone();
+        (u, v)
+    }));
+    Ok(version)
+}
+
+/// Downloads the version the last check found (its signature is checked
+/// as it installs), for an install that updates itself.
+#[tauri::command]
+async fn update_download(
+    app: State<'_, App>,
+    pending: State<'_, PendingUpdate>,
+) -> CommandResult<()> {
+    let how = how_here(&app);
+    if how != updates::How::Itself {
+        return Err(refuse_update(how));
+    }
+    let (update, version) = {
+        let held = pending.0.lock().map_err(text)?;
+        match held.to_download() {
+            Some(found) => found,
+            None if held.has() => return Ok(()),
+            None => return Err("Desk hasn't found an update to download".into()),
+        }
+    };
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(text)?;
+    pending.0.lock().map_err(text)?.downloaded(&version, bytes);
+    Ok(())
+}
+
+/// Installs the downloaded `version`, the one the page offered, and
+/// restarts into it: refused unless it is the newest found. Refused too,
+/// and the reason logged, unless this install updates itself: on macOS,
+/// only a program inside a `.app` bundle, since the updater replaces
+/// whatever folder it takes for the bundle.
+#[tauri::command]
+async fn update_install(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    pending: State<'_, PendingUpdate>,
+    version: String,
+) -> CommandResult<()> {
+    let how = how_here(&app);
+    if how != updates::How::Itself {
+        return Err(refuse_update(how));
+    }
+    let Some((update, bytes)) = pending.0.lock().map_err(text)?.to_install(&version) else {
+        return Err(format!(
+            "Desk {version} isn't the newest version downloaded: check for updates again"
+        ));
+    };
+    tracing::info!(version = %update.version, "installing the update, then restarting");
+    tauri::async_runtime::spawn_blocking(move || update.install(bytes.as_slice()))
+        .await
+        .map_err(text)?
+        .map_err(text)?;
+    handle.restart()
+}
+
+/// Why an update isn't installed here, logged.
+fn refuse_update(how: updates::How) -> String {
+    let why = match how {
+        updates::How::Never(why) => why,
+        updates::How::Package => "the system's package manager updates this install",
+        updates::How::Itself => "",
+    };
+    tracing::warn!("refusing to install an update: {why}");
+    format!("Desk doesn't install updates here: {why}.")
 }
 
 #[tauri::command]
@@ -778,6 +900,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(tuple::Tuple::default())
+        .manage(PendingUpdate::default())
         .manage(logins::Logins::default())
         .manage(logins::install::Installs::default())
         .manage(Frames::default())
@@ -959,6 +1082,9 @@ pub fn run() {
             report_save,
             data_remove,
             updating,
+            update_check,
+            update_download,
+            update_install,
             resume_later,
             resume_take,
             desk_state_load,

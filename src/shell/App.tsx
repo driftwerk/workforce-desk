@@ -56,7 +56,7 @@ import { useSetup } from "../setup/store";
 import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
-import { UpdateNotice, useUpdateChecks } from "../updates/UpdateNotice";
+import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
 
 /** Stops the answer nearest: in the open room, the open thread's when focus
  *  is in it, else the room's newest live one; else the open DM's turn. */
@@ -131,6 +131,7 @@ export function App() {
   useTuple(tupleOn);
   useVoice(useSettings((s) => s.voice));
   useUpdateChecks();
+  useRestartWhenIdle();
 
   useEffect(() => {
     applyTheme(theme);
@@ -371,6 +372,7 @@ export function App() {
             mainKey={mainKey}
             mainName={mainName}
             panels={panels}
+            notice={<UpdateNotice />}
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
@@ -394,7 +396,6 @@ export function App() {
       <MoveDialog />
       <LifecycleDialogs />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
-      <UpdateNotice />
       <HubDownBanner down={hubDown} />
       {error && (
         <div className="toast toast-error" role="alert">

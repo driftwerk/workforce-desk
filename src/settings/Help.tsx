@@ -110,6 +110,7 @@ export function Help() {
   const [removing, setRemoving] = useState(false);
   const update = useUpdates((s) => s.state);
   const check = useUpdates((s) => s.check);
+  const never = useUpdates((s) => s.never);
   const [checked, setChecked] = useState<string | null>(null);
 
   useEffect(() => {
@@ -134,7 +135,7 @@ export function Help() {
   const checkNow = async () => {
     setChecked("Checking…");
     try {
-      await check();
+      await check({ asked: true });
       const s = useUpdates.getState().state;
       setChecked(s.phase === "idle" ? "Desk is up to date." : null);
     } catch (e) {
@@ -156,7 +157,9 @@ export function Help() {
                 ? `Downloading Desk ${update.version}…`
                 : update.phase === "ready"
                   ? `Desk ${update.version} is ready — restart to update.`
-                  : (checked ?? "Desk updates itself.")}
+                  : never !== null
+                    ? `This Desk doesn’t look for updates: ${never || "it isn’t an install"}.`
+                    : (checked ?? "Desk updates itself.")}
           </span>
         </span>
         <button type="button" className="btn" disabled={!inApp || update.phase !== "idle"} onClick={() => void checkNow()}>

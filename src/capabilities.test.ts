@@ -98,7 +98,6 @@ const PLUGIN_PERMISSIONS: Record<string, Record<string, string>> = {
   },
   "@tauri-apps/plugin-global-shortcut": { register: "global-shortcut:allow-register", unregister: "global-shortcut:allow-unregister" },
   "@tauri-apps/plugin-process": { relaunch: "process:allow-restart", exit: "process:allow-exit" },
-  "@tauri-apps/plugin-updater": { check: "updater:default" },
 };
 
 const PLUGIN_IMPORT = /import\s*\{([^}]*)\}\s*from\s*"(@tauri-apps\/plugin-[a-z-]+)"/g;
@@ -200,6 +199,10 @@ describe("each window's capabilities", () => {
     expect(all.length).toBeGreaterThan(50);
     expect([...commandsOf(capability("main"))].sort()).toEqual([...all].sort());
     for (const c of commandsOf(capability("grid"))) expect(all).toContain(c);
+  });
+
+  it("let no window reach the updater itself: Desk's native side checks, downloads and installs, and refuses a development build", () => {
+    for (const name of ["main", "grid"] as const) expect([...identifiers(capability(name))].filter((p) => p.startsWith("updater:"))).toEqual([]);
   });
 
   it("let no window send requests itself, only through Desk's native side", () => {

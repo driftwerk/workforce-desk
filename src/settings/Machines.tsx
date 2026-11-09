@@ -46,7 +46,7 @@ export function CheckForUpdates() {
   const check = async () => {
     setSaid(null);
     try {
-      await useUpdates.getState().check();
+      await useUpdates.getState().check({ asked: true });
       if (useUpdates.getState().state.phase === "idle") setSaid("This Desk is up to date for now.");
     } catch (e) {
       setSaid(plainError(e));
