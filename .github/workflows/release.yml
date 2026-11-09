@@ -504,11 +504,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          config=$(jq -n --arg endpoint "$ENDPOINT" '{plugins: {updater: {endpoints: [$endpoint]}}}')
+          # One line: npx's Windows shim passes an argument only up to its
+          # first newline, so jq's pretty-printed JSON would reach tauri as `{`.
+          config=$(jq -cn --arg endpoint "$ENDPOINT" '{plugins: {updater: {endpoints: [$endpoint]}}}')
           if [ "$SIGNING" = true ]; then
             cargo install --locked trusted-signing-cli
             sign="trusted-signing-cli -e $TRUSTED_SIGNING_ENDPOINT -a $TRUSTED_SIGNING_ACCOUNT -c $TRUSTED_SIGNING_PROFILE -d Desk %1"
-            config=$(jq --arg sign "$sign" '.bundle.windows.signCommand = $sign' <<<"$config")
+            config=$(jq -c --arg sign "$sign" '.bundle.windows.signCommand = $sign' <<<"$config")
           fi
           npx tauri build --bundles nsis,msi --config "$config"
 
