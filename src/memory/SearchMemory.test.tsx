@@ -7,11 +7,14 @@ import { lined } from "../line/testing";
 import { KEYWORDS_ONLY, DEBOUNCE_MS, quoteOf, recallQuery, whenOf } from "./search";
 import { SearchMemory } from "./SearchMemory";
 import { settingsOf } from "./testing";
+import { clock } from "./words";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
 
 const NOW = new Date("2026-11-08T12:00:00");
+/** 10:12 as this machine's locale writes it. */
+const AT = clock(new Date("2026-11-08T10:12:00").toISOString(), NOW);
 
 const hit = (more: Partial<MemoryHit> = {}): MemoryHit => ({
   session: "s1",
@@ -110,7 +113,7 @@ describe("Search what Desk remembers (⌘K)", () => {
     type(box, "cookie");
     await settle();
     const [first, second] = found();
-    expect(within(first!).getByText("Decision · acme-web (Claude Code) · Acme · today 10:12")).toBeTruthy();
+    expect(within(first!).getByText(`Decision · acme-web (Claude Code) · Acme · today ${AT}`)).toBeTruthy();
     expect(within(first!).getByText("Keep the session token in a secure cookie, not browser storage.")).toBeTruthy();
     expect(within(second!).getByText("Conversation · acme-api (Codex) · Acme · yesterday")).toBeTruthy();
     expect(within(second!).getByText("“Why does logout leave the cookie?” … It cleared the server session only.")).toBeTruthy();
@@ -232,7 +235,7 @@ describe("the composer's /recall", () => {
     await settle();
     expect(hub.searchMemory).toHaveBeenCalledWith({ q: "cookie", group: "g-acme", kind: undefined, limit: 20 });
     expect(found()).toHaveLength(2);
-    expect(screen.getByText("Decision · acme-web (Claude Code) · Acme · today 10:12")).toBeTruthy();
+    expect(screen.getByText(`Decision · acme-web (Claude Code) · Acme · today ${AT}`)).toBeTruthy();
     expect((screen.getByRole("combobox", { name: "Group" }) as HTMLSelectElement).value).toBe("g-acme");
     expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
   });
@@ -272,9 +275,10 @@ describe("the composer's /recall", () => {
   it("marks a note Desk wrote as one that may be wrong, with no ids", () => {
     const q = quoteOf(hit(), NOW);
     expect(q).toBe(
-      "> Decision from acme-web (Claude Code), today 10:12 (noted by Desk, may be wrong):\n> Keep the session token in a secure cookie, not browser storage.",
+      `> Decision from acme-web (Claude Code), today ${AT} (noted by Desk, may be wrong):\n> Keep the session token in a secure cookie, not browser storage.`,
     );
     expect(q).not.toMatch(/s1|g-acme/);
-    expect(whenOf("2026-11-01T09:00:00", NOW)).toBe("1 Nov");
+    expect(whenOf("2026-11-01T09:00:00", NOW)).toBe(clock("2026-11-01T09:00:00", NOW));
+    expect(whenOf("2026-11-07T09:00:00", NOW)).toBe("yesterday");
   });
 });
