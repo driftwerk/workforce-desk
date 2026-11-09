@@ -26,7 +26,12 @@ dir=${1:?usage: onnxruntime.sh DIR}
 case "$(uname -s)" in
   Darwin)
     arch=x86_64
-    platform=(--osx_arch x86_64 --apple_deploy_target 13.0)
+    # The oldest macOS Desk runs on (tauri.macos.conf.json). build.py passes
+    # --apple_deploy_target to CMake only for framework builds, so CMake gets
+    # it too; without it everything targets the SDK's macOS.
+    export MACOSX_DEPLOYMENT_TARGET=13.0
+    platform=(--osx_arch x86_64 --apple_deploy_target "$MACOSX_DEPLOYMENT_TARGET"
+      --cmake_extra_defines "CMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET")
     cache=$HOME/Library/Caches/desk-build
     ;;
   *)
@@ -41,7 +46,9 @@ src=${ORT_SOURCE_CACHE:-$cache/onnxruntime-$VERSION}
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 
-if [ -f "$dir/.built-$COMMIT" ]; then
+# A build for another macOS is built again.
+built="$dir/.built-$COMMIT${MACOSX_DEPLOYMENT_TARGET:+-macos$MACOSX_DEPLOYMENT_TARGET}"
+if [ -f "$built" ]; then
   say "ONNX Runtime $VERSION for $arch already built in $dir"
   exit 0
 fi
@@ -76,5 +83,5 @@ PATH="$tools/venv/bin:$PATH" python3 "$src/tools/ci_build/build.py" \
   --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF
 # ort links re2 too, which ONNX Runtime's own targets don't always build.
 PATH="$tools/venv/bin:$PATH" cmake --build "$dir/Release" --target re2
-touch "$dir/.built-$COMMIT"
+touch "$built"
 say "ONNX Runtime $VERSION for $arch in $dir"
