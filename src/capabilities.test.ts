@@ -98,7 +98,6 @@ const PLUGIN_PERMISSIONS: Record<string, Record<string, string>> = {
   },
   "@tauri-apps/plugin-global-shortcut": { register: "global-shortcut:allow-register", unregister: "global-shortcut:allow-unregister" },
   "@tauri-apps/plugin-process": { relaunch: "process:allow-restart", exit: "process:allow-exit" },
-  "@tauri-apps/plugin-updater": { check: "updater:default" },
 };
 
 const PLUGIN_IMPORT = /import\s*\{([^}]*)\}\s*from\s*"(@tauri-apps\/plugin-[a-z-]+)"/g;
