@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstallProgress } from "../platform";
 import { PlanSignIn } from "../floor/PlanCards";
@@ -45,7 +45,7 @@ describe("a Claude Code install that stopped", () => {
     expect(screen.getByRole("status").textContent).toContain("The download stalled. On a VPN, try with it off.");
     expect(screen.getByText("Run it in Ubuntu (WSL).")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
-    expect(writeText).toHaveBeenCalledWith("curl -fsSL https://claude.ai/install.sh | bash");
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("curl -fsSL https://claude.ai/install.sh | bash"));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
   });
 
@@ -53,5 +53,13 @@ describe("a Claude Code install that stopped", () => {
     render(<PlanSignIn kind="claude" />);
     act(() => push("claude", { state: "failed", message: "Claude Code's installer stopped: Unsupported architecture" }));
     expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
+  });
+
+  it("says so when the clipboard won't take it", async () => {
+    writeText.mockRejectedValueOnce(new Error("denied"));
+    render(<PlanSignIn kind="claude" />);
+    act(() => push("claude", { state: "failed", message: "x", command: "curl -fsSL https://claude.ai/install.sh | bash" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    expect(await screen.findByText("Couldn’t copy, select and copy it")).toBeTruthy();
   });
 });

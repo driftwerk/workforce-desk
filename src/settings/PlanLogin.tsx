@@ -130,24 +130,29 @@ export function ReopenLink({ login }: { login: PlanLoginState }) {
 /** After an install that stopped: the installer's command to run by hand,
  *  with where to run it. */
 export function CopyInstall({ login }: { login: PlanLoginState }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"yes" | "no" | null>(null);
+  const code = useRef<HTMLElement>(null);
   if (!login.manual) return null;
   const { command, hint } = login.manual;
+  const copy = () =>
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(command))
+      .then(() => setCopied("yes"))
+      .catch(() => {
+        // No clipboard here: leave the command selected to copy by hand.
+        if (code.current) window.getSelection()?.selectAllChildren(code.current);
+        setCopied("no");
+      })
+      .finally(() => setTimeout(() => setCopied(null), 3000));
   return (
     <span className="install-manual">
-      <code className="mono small">{command}</code>
-      <button
-        type="button"
-        className="btn btn-sm"
-        onClick={() =>
-          void navigator.clipboard?.writeText(command).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          })
-        }
-      >
-        {copied ? "Copied" : "Copy command"}
+      <code ref={code} className="mono small">
+        {command}
+      </code>
+      <button type="button" className="btn btn-sm" onClick={() => void copy()}>
+        {copied === "yes" ? "Copied" : "Copy command"}
       </button>
+      {copied === "no" && <span className="small state-blocked">Couldn’t copy, select and copy it</span>}
       {hint && <span className="small muted">{hint}</span>}
     </span>
   );

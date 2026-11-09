@@ -30,7 +30,7 @@ arch=$(uname -m)
 case "$arch" in x86_64|amd64) arch=x64;; arm64|aarch64) arch=arm64;; esac
 if [ "$(uname -s)" = Darwin ]; then plat=darwin-$arch; else
   plat=linux-$arch
-  if [ -f /lib/libc.musl-x86_64.so.1 ] || [ -f /lib/libc.musl-aarch64.so.1 ] || ldd /bin/ls 2>&1 | grep -q musl; then plat=$plat-musl; fi
+  if [ -f /lib/libc.musl-x86_64.so.1 ] || [ -f /lib/libc.musl-aarch64.so.1 ] || $t ldd /bin/ls 2>&1 | grep -q musl; then plat=$plat-musl; fi
 fi
 url=$base/latest
 v=$(curl -fsSL --max-time 15 "$url" 2>/dev/null) && [ -n "$v" ] && url=$base/$v/$plat/claude"#,
@@ -48,11 +48,12 @@ v=$(curl -fsSL --max-time 15 "$url" 2>/dev/null) && [ -n "$v" ] && url=$base/$v/
 impl Target {
     pub fn script(&self) -> String {
         format!(
-            r#"{}
+            r#"t=; command -v timeout >/dev/null 2>&1 && t="timeout 10"
+{}
 out=$(curl -sS -o /dev/null -w '\nSTATS %{{http_code}} %{{size_download}} %{{speed_download}}' --max-time 20 -r 0-1048575 "$url" 2>&1)
 echo "RC $?"
 printf '%s\n' "$out"
-echo "FREE $(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{{print $4}}')"
+echo "FREE $($t df -Pk "$HOME" 2>/dev/null | awk 'NR==2{{print $4}}')"
 echo "HOME $HOME"
 "#,
             self.prelude
@@ -60,11 +61,21 @@ echo "HOME $HOME"
     }
 }
 
+/// The script as one line of plain characters that runs it in bash, so it
+/// reaches a shell the same way whatever quoting `wsl.exe` or a Windows
+/// command line would do to newlines and quotes.
+pub fn wrapped(script: &str) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(script);
+    format!("echo {b64} | base64 -d | bash")
+}
+
 /// Whether an installer's last line is about fetching its download, so the
 /// probe is worth running.
 pub fn is_download_failure(last: &str) -> bool {
     let l = last.to_lowercase();
-    ["download failed", "checksum", "curl:", "failed to download"]
+    // Anthropic's installer says these two; curl itself says the third.
+    ["download failed", "checksum verification failed", "curl: ("]
         .iter()
         .any(|s| l.contains(s))
 }
@@ -263,10 +274,28 @@ mod tests {
     }
 
     #[test]
+    fn the_script_travels_as_one_line_of_plain_characters() {
+        let w = wrapped(&Plan::Claude.target().script());
+        assert!(
+            w.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+/= |-".contains(c))
+        );
+        assert!(w.starts_with("echo ") && w.ends_with("| base64 -d | bash"));
+    }
+
+    #[test]
+    fn slow_tools_in_the_script_are_capped() {
+        let s = Plan::Claude.target().script();
+        assert!(s.contains("$t df -Pk") && s.contains("$t ldd"));
+    }
+
+    #[test]
     fn only_download_lines_trigger_a_probe() {
         assert!(is_download_failure("Download failed"));
         assert!(is_download_failure("Checksum verification failed"));
+        assert!(is_download_failure("curl: (56) Recv failure"));
         assert!(!is_download_failure("Unsupported architecture"));
+        assert!(!is_download_failure("Could not verify checksum tool"));
     }
 
     #[test]

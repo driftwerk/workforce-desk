@@ -11,7 +11,7 @@ use desk_core::host::Host;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::{Plan, cli, probe, scan};
+use super::{Plan, cli, deadline, probe, scan};
 
 impl Plan {
     /// The CLI a plan signs in with.
@@ -104,6 +104,12 @@ fn failure(plan: Plan, code: Option<i32>, last: &str) -> String {
     }
 }
 
+/// How long one run of an installer may take before it is stopped.
+const INSTALL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// How long the probe may take: its own curl has a 20 s cap, but a hung
+/// shell must not hold the install up.
+const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(45);
+
 #[derive(Default)]
 pub struct Installs {
     running: Arc<Mutex<Vec<Plan>>>,
@@ -141,7 +147,7 @@ impl Installs {
         };
         let running = Arc::clone(&self.running);
         std::thread::spawn(move || {
-            let mut outcome = drain(child, &report);
+            let mut outcome = drain(child, &report, INSTALL_DEADLINE);
             // A download that failed is looked into where the installer
             // ran, and tried once more when nothing there is wrong.
             let mut retried = false;
@@ -155,7 +161,7 @@ impl Installs {
                     });
                     match spawn(&backend, plan) {
                         Ok(child) => {
-                            outcome = drain(child, &report);
+                            outcome = drain(child, &report, INSTALL_DEADLINE);
                             continue;
                         }
                         Err(e) => {
@@ -170,8 +176,14 @@ impl Installs {
                 break;
             }
             running.lock().expect("installs").retain(|p| *p != plan);
-            let by_hand = !outcome.ok() && probe::is_download_failure(&outcome.last);
+            let by_hand =
+                !outcome.ok() && (outcome.timed_out || probe::is_download_failure(&outcome.last));
             let mut progress = match &outcome.status {
+                _ if outcome.timed_out => Progress::failed(format!(
+                    "{}'s installer didn't finish within {} minutes.",
+                    plan.cli_name(),
+                    INSTALL_DEADLINE.as_secs() / 60
+                )),
                 Ok(s) if s.success() && installed(&backend, plan) => Progress::Done,
                 Ok(s) if s.success() => Progress::failed(format!(
                     "{} installed, but Desk can't find it. Open a new terminal, run `{} --version`, then try again.",
@@ -202,7 +214,9 @@ fn script(plan: Plan) -> String {
 
 fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
     let c = cli::installer(backend, &script(plan))?;
-    Ok(c.command()
+    let mut command = c.command();
+    deadline::isolate(&mut command);
+    Ok(command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -213,6 +227,8 @@ fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
 struct Outcome {
     status: Result<std::process::ExitStatus, String>,
     last: String,
+    /// Stopped for taking too long.
+    timed_out: bool,
 }
 
 impl Outcome {
@@ -224,6 +240,7 @@ impl Outcome {
         Outcome {
             status: Err(e),
             last: String::new(),
+            timed_out: false,
         }
     }
 }
@@ -232,6 +249,7 @@ impl Outcome {
 fn drain(
     mut child: std::process::Child,
     report: &(impl Fn(Progress) + Clone + Send + 'static),
+    limit: std::time::Duration,
 ) -> Outcome {
     let last = Arc::new(Mutex::new(String::new()));
     let mut readers = Vec::new();
@@ -261,25 +279,28 @@ fn drain(
             }
         }));
     }
-    let status = child.wait().map_err(|e| e.to_string());
+    let (status, timed_out) = deadline::wait(&mut child, limit);
+    let status = status.map_err(|e| e.to_string());
     for r in readers {
         let _ = r.join();
     }
     let last = last.lock().expect("last").clone();
-    Outcome { status, last }
+    Outcome {
+        status,
+        last,
+        timed_out,
+    }
 }
 
 /// Looks into a failed download where the installer ran.
 fn diagnose(backend: &Backend, plan: Plan) -> probe::Diagnosis {
     let target = plan.target();
-    let ran = cli::installer(backend, &target.script())
-        .and_then(|c| Ok(c.command().stdin(Stdio::null()).output()?));
+    let ran = cli::installer(backend, &probe::wrapped(&target.script()))
+        .ok()
+        .and_then(|c| deadline::capture(c.command(), PROBE_DEADLINE));
     match ran {
-        Ok(out) => probe::diagnose(
-            &probe::parse(&String::from_utf8_lossy(&out.stdout)),
-            target.host,
-        ),
-        Err(_) => probe::Diagnosis::Unknown,
+        Some(out) => probe::diagnose(&probe::parse(&out), target.host),
+        None => probe::Diagnosis::Unknown,
     }
 }
 
@@ -334,5 +355,26 @@ mod tests {
         );
         let v = serde_json::to_value(Progress::failed("x".into())).unwrap();
         assert!(v.get("command").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_installer_that_never_ends_is_stopped_and_said() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "echo working; sleep 30"]);
+        deadline::isolate(&mut command);
+        let child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let start = std::time::Instant::now();
+        let out = drain(
+            child,
+            &|_: Progress| {},
+            std::time::Duration::from_millis(500),
+        );
+        assert!(out.timed_out && !out.ok());
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
     }
 }
