@@ -1,4 +1,4 @@
-import type { KeptExchange, MemoryNote, MemoryNotes, ReplacedNote, SessionMemory } from "../hub/types";
+import type { KeptExchange, MemoryHit, MemoryNote, MemoryNotes, ReplacedNote, SessionMemory } from "../hub/types";
 
 /** `n` with a space between each three digits, as Desk writes numbers. */
 export const thousands = (n: number): string => String(Math.trunc(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
@@ -80,3 +80,12 @@ export const noteCount = (n: MemoryNotes): number => n.counts.decisions + n.coun
 
 /** A kind's notes another replaced, latest first. */
 export const replacedOf = (n: MemoryNotes, kind: MemoryNote["kind"]): ReplacedNote[] => (n.replaced ?? []).filter((r) => r.kind === kind);
+
+/** What each kind of search hit is called. */
+export const HIT_KIND: Record<MemoryHit["kind"], string> = {
+  exchange: "Conversation",
+  compaction: "Summary",
+  decision: "Decision",
+  fact: "Fact",
+  todo: "To do",
+};

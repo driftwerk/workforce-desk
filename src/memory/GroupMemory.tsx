@@ -62,7 +62,7 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
           <>
             <Row
               name="Remember its sessions"
-              sub="Desk keeps what they say, with secrets hidden, to search and to pick up later. Off, nothing they say meanwhile is kept."
+              sub="Desk keeps what they say, with secrets hidden, to search and to pick up later. Off, Desk keeps nothing new from them, but you can still search what it kept before."
               on={switches.harvest}
               onChange={(harvest) => void change({ harvest })}
             />

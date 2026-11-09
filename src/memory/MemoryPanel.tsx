@@ -10,7 +10,7 @@ import { canHandOff } from "../handoff/LineageChips";
 import { askHandoff } from "../handoff/store";
 import { useFloor } from "../floor/store";
 import { useSessionGist } from "./gist";
-import { changedFiles, clock, fallbackText, notedByDeskText, providerName, rememberedLine, replacedOf, shortFile } from "./words";
+import { HIT_KIND, changedFiles, clock, fallbackText, notedByDeskText, providerName, rememberedLine, replacedOf, shortFile } from "./words";
 
 /** What the panel says when the engine keeps no record Desk can read. */
 export const NO_RECORD = "Desk can't read this session's conversation, so it remembers only what it's for.";
@@ -490,14 +490,23 @@ function Files({ files }: { files: string[] }) {
   );
 }
 
+/** What the session's Remember switch means. */
+export const REMEMBER_SUB = "Off, Desk keeps nothing new from it, but you can still search what it kept before.";
+
 function RememberSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   const id = useId();
+  const sub = useId();
   return (
     <span className="memory-remember">
-      <span id={id} className="small">
-        Remember
+      <span className="memory-remember-text">
+        <span id={id} className="small">
+          Remember
+        </span>
+        <span id={sub} className="small faint">
+          {REMEMBER_SUB}
+        </span>
       </span>
-      <button type="button" role="switch" className="switch" aria-checked={on} aria-labelledby={id} onClick={() => onChange(!on)}>
+      <button type="button" role="switch" className="switch" aria-checked={on} aria-labelledby={id} aria-describedby={sub} onClick={() => onChange(!on)}>
         <span className="switch-knob" />
       </button>
     </span>
@@ -559,11 +568,3 @@ function SearchThisWork({ hub, session, index }: { hub: DeskHub; session: string
     </div>
   );
 }
-
-const HIT_KIND: Record<MemorySearch["hits"][number]["kind"], string> = {
-  exchange: "Conversation",
-  compaction: "Summary",
-  decision: "Decision",
-  fact: "Fact",
-  todo: "To do",
-};

@@ -224,3 +224,129 @@
   gap: 4px;
   color: var(--muted);
 }
+
+.memory-remember-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  max-width: 260px;
+}
+
+/* ── Search what Desk remembers (⌘K) and the composer's /recall ─────────── */
+
+.memory-palette {
+  width: min(640px, calc(100vw - 32px));
+  max-height: 72vh;
+  overflow: hidden;
+  gap: 10px;
+}
+.memory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.memory-filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-filters select {
+  max-width: 200px;
+  font-family: inherit;
+}
+.memory-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.memory-result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-width: 0;
+}
+.memory-result[aria-selected="true"] {
+  background: var(--sunken);
+}
+.memory-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.memory-result-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-result-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.memory-read {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  margin: -4px;
+}
+.memory-read-body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-read-body dd {
+  margin: 0 0 8px;
+}
+.memory-read-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Above the composer, in the line's own column: it gives way to the
+   thread, never pushing the composer out of sight. */
+.memory-recall {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.memory-recall-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+}
+.memory-palette p,
+.memory-recall p {
+  margin: 0;
+}
+.memory-recall p {
+  padding: 0 4px;
+}

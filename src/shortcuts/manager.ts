@@ -79,27 +79,34 @@ const isField = (target: Element): boolean =>
 export const allowedFrom = (target: EventTarget | null): boolean =>
   !inTerminal(target) && (!(target instanceof Element) || !isField(target) || target.closest("[data-composer]") !== null);
 
+/** Whether a shortcut that opens from any composer may act on a key pressed
+ *  at `target`: never in a terminal; in a field only when it is a composer
+ *  (a room's, a DM's or a session's line). */
+export const allowedFromComposers = (target: EventTarget | null): boolean =>
+  !inTerminal(target) && (!(target instanceof Element) || !isField(target) || target.closest("[data-composer], [data-line-composer]") !== null);
+
 /** Runs `onPress` when shortcut `id`'s keys are pressed while Desk is in
  *  front — in a terminal pane, the keys it takes there — unless `enabled`
  *  is false or a shortcut is being recorded. With
  *  `fromFields: false`, keys pressed in a terminal or a field other than a
- *  room composer are left to it. */
-export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true, opts?: { fromFields: false }) {
+ *  room composer are left to it; with `"composers"`, a session's line
+ *  composer takes it too. */
+export function useAppShortcut(id: ShortcutId, onPress: () => void, enabled = true, opts?: { fromFields: false | "composers" }) {
   const handler = useRef(onPress);
   handler.current = onPress;
   const keys = useSettings((s) => s.keys[id]);
   const recording = useShortcuts((s) => s.recording);
-  const guarded = opts?.fromFields === false;
+  const guard = opts?.fromFields === false ? allowedFrom : opts?.fromFields === "composers" ? allowedFromComposers : null;
   useEffect(() => {
     if (!enabled || recording) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat || !matches(e, inTerminal(e.target) ? terminalKeys(keys) : keys) || (guarded && !allowedFrom(e.target))) return;
+      if (e.repeat || !matches(e, inTerminal(e.target) ? terminalKeys(keys) : keys) || (guard && !guard(e.target))) return;
       e.preventDefault();
       handler.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keys, enabled, recording, guarded]);
+  }, [keys, enabled, recording, guard]);
 }
 
 /** Waits for every queued register and unregister (tests). */
