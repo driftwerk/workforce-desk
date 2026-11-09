@@ -260,7 +260,7 @@ export function App() {
   useAppShortcut("jumpNew", jumpNearest, true, { fromFields: false });
   useAppShortcut("searchRoom", () => searchHere(true), true, { fromFields: false });
   useAppShortcut("searchRooms", () => searchHere(false), true, { fromFields: false });
-  useAppShortcut("searchMemory", () => setRecalling((on) => !on), true, { fromFields: false });
+  useAppShortcut("searchMemory", () => setRecalling((on) => !on), true, { fromFields: "composers" });
   useAppShortcut("unread", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setInbox(true);

@@ -83,13 +83,16 @@ export function SearchFilters({
 }
 
 /** One hit, as a list shows it: what it is, where from and when, and what
- *  it says. */
-export function HitRow({ hit }: { hit: MemoryHit }) {
+ *  it says; marked when it's from another group than the one written to. */
+export function HitRow({ hit, otherGroup = false }: { hit: MemoryHit; otherGroup?: boolean }) {
   return (
     <>
-      <span className="faint small memory-result-line">
-        {hitLine(hit)}
-        {hit.superseded && " · replaced"}
+      <span className="memory-result-head">
+        {otherGroup && <span className="chip chip-group small">{hit.groupName ?? "Ungrouped"} · another group</span>}
+        <span className="faint small memory-result-line">
+          {hitLine(hit)}
+          {hit.superseded && " · replaced"}
+        </span>
       </span>
       <span className="memory-result-text">{hitText(hit)}</span>
     </>

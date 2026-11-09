@@ -2,9 +2,10 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { MemoryHit, MemorySearch } from "../hub/types";
-import { Composer } from "../line/Composer";
+import { Composer, NO_MACHINE_RECALL } from "../line/Composer";
+import { allowedFromComposers } from "../shortcuts/manager";
 import { lined } from "../line/testing";
-import { KEYWORDS_ONLY, DEBOUNCE_MS, quoteOf, recallQuery, whenOf } from "./search";
+import { KEYWORDS_ONLY, DEBOUNCE_MS, putQuote, quoteOf, recallAt, recallQuery, whenOf } from "./search";
 import { SearchMemory } from "./SearchMemory";
 import { settingsOf } from "./testing";
 import { clock } from "./words";
@@ -229,6 +230,60 @@ describe("the composer's /recall", () => {
     expect(recallQuery("please /recall it")).toBeNull();
   });
 
+  it("finds /recall on the caret's line anywhere in the draft, and puts the quote in its place", () => {
+    const draft = "Before you merge:\n/recall cookie\nthen tidy up.";
+    expect(recallAt(draft, draft.indexOf("cookie"))).toEqual({ q: "cookie", from: 18, to: 32 });
+    expect(recallAt(draft, 3)).toBeNull();
+    expect(recallAt(draft, draft.length)).toBeNull();
+    const put = putQuote(draft, recallAt(draft, 20)!, "> A quote");
+    expect(put.text).toBe("Before you merge:\n> A quote\n\nthen tidy up.");
+    expect(put.text.slice(put.caret)).toBe("then tidy up.");
+  });
+
+  it("quotes a hit at the /recall line and keeps the rest of the draft", async () => {
+    const box = await composer();
+    const draft = "Before you merge:\n/recall cookie\nthen tidy up.";
+    fireEvent.change(box, { target: { value: draft } });
+    box.setSelectionRange(25, 25);
+    fireEvent.select(box);
+    await settle();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box.value).toBe(`Before you merge:\n${quoteOf(hit())}\n\nthen tidy up.`);
+    expect(hub.postLine).not.toHaveBeenCalled();
+  });
+
+  it("marks hits from another group, names that group in their quote, and says where a quote goes once widened", async () => {
+    answer = { hits: [hit({ session: "s3", name: "globex-billing", group: "g-globex", groupName: "Globex", kind: "fact", answer: "Invoices use the v2 API key." })], keywordOnly: false, notice: null };
+    const box = await composer();
+    type(box, "/recall invoices");
+    await settle();
+    expect(screen.queryByText(/Quoting sends it to/)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Group" }), { target: { value: "" } });
+    await settle();
+    expect(screen.getByText("Quoting sends it to acme-web in Acme.")).toBeTruthy();
+    expect(within(found()[0]!).getByText("Globex · another group")).toBeTruthy();
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box.value.split("\n")[0]).toBe(`> Fact from globex-billing (Claude Code) in Globex, today ${AT} (noted by Desk, may be wrong):`);
+  });
+
+  it("doesn't mark hits from the session's own group", async () => {
+    const box = await composer();
+    type(box, "/recall cookie");
+    await settle();
+    expect(screen.queryByText(/another group/)).toBeNull();
+  });
+
+  it("isn't offered on a machine's session, and says why when typed there", async () => {
+    useDesk.setState({ sessions: { s1: lined({ machine: "devbox", group: { id: "g-acme", name: "Acme" } }) } });
+    const box = await composer();
+    expect(box.placeholder).toBe("Message acme-web");
+    type(box, "/recall cookie");
+    await settle();
+    expect(screen.getByText(NO_MACHINE_RECALL)).toBeTruthy();
+    expect(hub.searchMemory).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", true);
+  });
+
   it("shows the same hits inline, in the session's own group to begin with", async () => {
     const box = await composer();
     type(box, "/recall cookie");
@@ -280,5 +335,25 @@ describe("the composer's /recall", () => {
     expect(q).not.toMatch(/s1|g-acme/);
     expect(whenOf("2026-11-01T09:00:00", NOW)).toBe(clock("2026-11-01T09:00:00", NOW));
     expect(whenOf("2026-11-07T09:00:00", NOW)).toBe("yesterday");
+  });
+});
+
+describe("⌘K's reach", () => {
+  it("opens from any composer, never from other fields or a terminal", () => {
+    const html = (h: string) => {
+      const d = document.createElement("div");
+      d.innerHTML = h;
+      document.body.append(d);
+      return d;
+    };
+    const line = html('<form data-line-composer=""><textarea></textarea></form>');
+    const room = html('<form data-composer=""><textarea></textarea></form>');
+    const other = html("<input />");
+    const term = html('<div data-terminal=""><textarea></textarea></div>');
+    expect(allowedFromComposers(line.querySelector("textarea"))).toBe(true);
+    expect(allowedFromComposers(room.querySelector("textarea"))).toBe(true);
+    expect(allowedFromComposers(other.querySelector("input"))).toBe(false);
+    expect(allowedFromComposers(term.querySelector("textarea"))).toBe(false);
+    expect(allowedFromComposers(document.body)).toBe(true);
   });
 });

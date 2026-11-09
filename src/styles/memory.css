@@ -277,6 +277,12 @@
 .memory-result[aria-selected="true"] {
   background: var(--sunken);
 }
+.memory-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .memory-result-line {
   overflow: hidden;
   text-overflow: ellipsis;

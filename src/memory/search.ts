@@ -63,19 +63,49 @@ export const hitLine = (h: MemoryHit, now = new Date()): string => [HIT_KIND[h.k
 /** A conversation's ask and answer, or a note's text, in one line. */
 export const hitText = (h: MemoryHit): string => ((h.kind === "exchange" || h.kind === "compaction") && h.ask ? `“${h.ask}” … ${h.answer}` : h.answer);
 
-/** What a hit adds to a message: a quote of it, saying where it's from.
- *  Plain words only: no ids. */
-export const quoteOf = (h: MemoryHit, now = new Date()): string => {
-  const from = `${HIT_KIND[h.kind]} from ${sessionOf(h)}, ${whenOf(h.at, now)}${h.notedByDesk && !h.confirmed ? " (noted by Desk, may be wrong)" : ""}:`;
+/** What a hit adds to a message: a quote of it, saying where it's from,
+ *  and naming its group when that's another one than the session's being
+ *  written to. Plain words only: no ids. */
+export const quoteOf = (h: MemoryHit, now = new Date(), { otherGroup = false } = {}): string => {
+  const where = otherGroup ? ` in ${h.groupName ?? "Ungrouped"}` : "";
+  const from = `${HIT_KIND[h.kind]} from ${sessionOf(h)}${where}, ${whenOf(h.at, now)}${h.notedByDesk && !h.confirmed ? " (noted by Desk, may be wrong)" : ""}:`;
   const said =
     h.kind === "exchange" || h.kind === "compaction" ? [h.ask && `Asked: ${h.ask}`, h.answer && `Answered: ${h.answer}`].filter(Boolean).join("\n") : h.answer;
   return [from, ...said.split("\n")].map((l) => `> ${l}`.trimEnd()).join("\n");
 };
 
+/** A `/recall` line: its words, and where the line starts and ends. */
+export interface RecallAt {
+  q: string;
+  from: number;
+  to: number;
+}
+
+const RECALL_LINE = /^\s*\/recall(?:\s+(.*))?$/;
+
+/** The `/recall` on the line the caret is on, wherever in the draft that
+ *  line is; null when the caret's line isn't one. */
+export const recallAt = (text: string, caret: number = text.length): RecallAt | null => {
+  const at = Math.max(0, Math.min(caret, text.length));
+  const from = text.lastIndexOf("\n", at - 1) + 1;
+  const end = text.indexOf("\n", at);
+  const to = end === -1 ? text.length : end;
+  const m = RECALL_LINE.exec(text.slice(from, to));
+  return m ? { q: (m[1] ?? "").trim(), from, to } : null;
+};
+
 /** `/recall cookie` → "cookie"; null for anything else. */
-export const recallQuery = (text: string): string | null => {
-  const m = /^\/recall(?:\s+([\s\S]*))?$/.exec(text.trimStart());
-  return m ? (m[1] ?? "").trim() : null;
+export const recallQuery = (text: string): string | null => recallAt(text.trim(), text.trim().length)?.q ?? null;
+
+/** Whether any line of the draft is a `/recall`: such a draft isn't sent. */
+export const hasRecall = (text: string): boolean => text.split("\n").some((l) => RECALL_LINE.test(l));
+
+/** The draft with the `/recall` line at `r` put back as `quote`, the rest
+ *  kept; and where the caret goes after it. */
+export const putQuote = (text: string, r: RecallAt, quote: string): { text: string; caret: number } => {
+  const before = text.slice(0, r.from);
+  const inserted = `${quote}\n\n`;
+  return { text: before + inserted + text.slice(r.to).replace(/^\n/, ""), caret: before.length + inserted.length };
 };
 
 export interface SearchState {
