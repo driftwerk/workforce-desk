@@ -91,6 +91,8 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     progress,
     status,
     failed: progress?.state === "failed" || install?.state === "failed",
+    /** What to run in a terminal by hand when the install stopped. */
+    manual: install?.state === "failed" && install.command ? { command: install.command, hint: install.hint } : null,
     busy,
     installing,
     /** False when the plan's CLI isn't on this computer yet. */
@@ -122,6 +124,32 @@ export function ReopenLink({ login }: { login: PlanLoginState }) {
         Open it again
       </button>
     </>
+  );
+}
+
+/** After an install that stopped: the installer's command to run by hand,
+ *  with where to run it. */
+export function CopyInstall({ login }: { login: PlanLoginState }) {
+  const [copied, setCopied] = useState(false);
+  if (!login.manual) return null;
+  const { command, hint } = login.manual;
+  return (
+    <span className="install-manual">
+      <code className="mono small">{command}</code>
+      <button
+        type="button"
+        className="btn btn-sm"
+        onClick={() =>
+          void navigator.clipboard?.writeText(command).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+        }
+      >
+        {copied ? "Copied" : "Copy command"}
+      </button>
+      {hint && <span className="small muted">{hint}</span>}
+    </span>
   );
 }
 

@@ -6,7 +6,7 @@ import { useDesk } from "../hub/store";
 import { BrainDialog } from "../providers/BrainDialog";
 import { ConnectForm } from "../providers/ConnectForm";
 import { useProviderList, useProviders } from "../providers/store";
-import { CLI_NAME, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
+import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
 
 const SECTIONS: { group: ProviderGroup; label: string }[] = [
@@ -217,6 +217,7 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
               </>
             ))}
           {provider.connect.kind === "login" && <ReopenLink login={login} />}
+          {provider.connect.kind === "login" && <CopyInstall login={login} />}
         </span>
       </span>
       {action}

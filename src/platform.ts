@@ -338,7 +338,11 @@ export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
  *  nothing or can't be read. */
 export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
 
-export type InstallProgress = { state: "running"; line: string } | { state: "done" } | { state: "failed"; message: string };
+export type InstallProgress =
+  | { state: "running"; line: string }
+  | { state: "done" }
+  /** `command` is what to run in a terminal by hand; `hint` says where. */
+  | { state: "failed"; message: string; command?: string; hint?: string };
 
 /** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
 export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });

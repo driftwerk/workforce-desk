@@ -1083,6 +1083,21 @@ legend.set-label {
   border-radius: var(--radius-sm);
   background: var(--surface);
 }
+.install-manual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-width: 0;
+}
+.install-manual code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
 .machine-key {
   display: block;
   overflow-wrap: anywhere;

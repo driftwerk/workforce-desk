@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { accountOfCard, sessionsText, useAccounts } from "../engines/accounts";
 import type { PlanKind, PlanWindow } from "../hub/types";
-import { CLI_NAME, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
+import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
 import { ask, usePlans } from "./store";
 import { clock, dayClock, durationOf } from "./time";
 import { fullness, nextChange, pace, projection, windowNow, type PlanCard } from "./usage";
@@ -166,6 +166,7 @@ export function PlanSignIn({ kind }: { kind: PlanKind }) {
         <span className={`small ${login.failed ? "state-blocked" : "muted"}`} role="status">
           {login.status}
           <ReopenLink login={login} />
+          <CopyInstall login={login} />
         </span>
       )}
     </>

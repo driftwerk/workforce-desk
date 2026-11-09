@@ -7,10 +7,11 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use desk_core::backend::Backend;
+use desk_core::host::Host;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::{Plan, cli, scan};
+use super::{Plan, cli, probe, scan};
 
 impl Plan {
     /// The CLI a plan signs in with.
@@ -47,9 +48,29 @@ pub fn installed(backend: &Backend, plan: Plan) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Progress {
-    Running { line: String },
+    Running {
+        line: String,
+    },
     Done,
-    Failed { message: String },
+    /// `command` is what the person can run in a terminal themselves, and
+    /// `hint` where to run it.
+    Failed {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
+    },
+}
+
+impl Progress {
+    fn failed(message: String) -> Self {
+        Progress::Failed {
+            message,
+            command: None,
+            hint: None,
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -105,15 +126,7 @@ impl Installs {
                 let _ = app.emit("cli-install", Event { plan, progress });
             }
         };
-        let script = format!("set -o pipefail; {}", plan.installer());
-        let spawned = cli::installer(&backend, &script).and_then(|c| {
-            Ok(c.command()
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?)
-        });
-        let mut child = match spawned {
+        let child = match spawn(&backend, plan) {
             Ok(c) => c,
             Err(e) => {
                 self.running
@@ -126,60 +139,147 @@ impl Installs {
                 ));
             }
         };
-        let last = Arc::new(Mutex::new(String::new()));
-        let mut readers = Vec::new();
-        for stream in [
-            child
-                .stdout
-                .take()
-                .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-            child
-                .stderr
-                .take()
-                .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let (report, last) = (report.clone(), Arc::clone(&last));
-            readers.push(std::thread::spawn(move || {
-                for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                    let line = scan::plain(&line);
-                    let line = line.lines().last().unwrap_or("").trim().to_string();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    *last.lock().expect("last") = line.clone();
-                    report(Progress::Running { line });
-                }
-            }));
-        }
         let running = Arc::clone(&self.running);
         std::thread::spawn(move || {
-            let status = child.wait();
-            for r in readers {
-                let _ = r.join();
+            let mut outcome = drain(child, &report);
+            // A download that failed is looked into where the installer
+            // ran, and tried once more when nothing there is wrong.
+            let mut retried = false;
+            let mut cause = None;
+            while !outcome.ok() && probe::is_download_failure(&outcome.last) {
+                let found = diagnose(&backend, plan);
+                if found == probe::Diagnosis::Healthy && !retried {
+                    retried = true;
+                    report(Progress::Running {
+                        line: "Trying again…".into(),
+                    });
+                    match spawn(&backend, plan) {
+                        Ok(child) => {
+                            outcome = drain(child, &report);
+                            continue;
+                        }
+                        Err(e) => {
+                            outcome = Outcome::error(e.to_string());
+                            break;
+                        }
+                    }
+                }
+                if let probe::Diagnosis::Cause(message) = found {
+                    cause = Some(message);
+                }
+                break;
             }
             running.lock().expect("installs").retain(|p| *p != plan);
-            let last = last.lock().expect("last").clone();
-            report(match status {
+            let by_hand = !outcome.ok() && probe::is_download_failure(&outcome.last);
+            let mut progress = match &outcome.status {
                 Ok(s) if s.success() && installed(&backend, plan) => Progress::Done,
-                Ok(s) if s.success() => Progress::Failed {
-                    message: format!(
-                        "{} installed, but Desk can't find it. Open a new terminal, run `{} --version`, then try again.",
-                        plan.cli_name(),
-                        plan.program()
-                    ),
-                },
-                Ok(s) => Progress::Failed {
-                    message: failure(plan, s.code(), &last),
-                },
-                Err(e) => Progress::Failed {
-                    message: failure(plan, None, &e.to_string()),
-                },
-            });
+                Ok(s) if s.success() => Progress::failed(format!(
+                    "{} installed, but Desk can't find it. Open a new terminal, run `{} --version`, then try again.",
+                    plan.cli_name(),
+                    plan.program()
+                )),
+                Ok(s) => Progress::failed(
+                    cause.unwrap_or_else(|| failure(plan, s.code(), &outcome.last)),
+                ),
+                Err(e) => Progress::failed(failure(plan, None, e)),
+            };
+            if let (true, Progress::Failed { command, hint, .. }) = (by_hand, &mut progress) {
+                *command = Some(plan.installer().to_string());
+                *hint = match &backend.host {
+                    Host::Wsl(w) => Some(format!("Run it in {} (WSL).", w.distro)),
+                    _ => None,
+                };
+            }
+            report(progress);
         });
         Ok(())
+    }
+}
+
+fn script(plan: Plan) -> String {
+    format!("set -o pipefail; {}", plan.installer())
+}
+
+fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
+    let c = cli::installer(backend, &script(plan))?;
+    Ok(c.command()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?)
+}
+
+/// How one run of the installer ended, and the last thing it printed.
+struct Outcome {
+    status: Result<std::process::ExitStatus, String>,
+    last: String,
+}
+
+impl Outcome {
+    fn ok(&self) -> bool {
+        self.status.as_ref().is_ok_and(|s| s.success())
+    }
+
+    fn error(e: String) -> Self {
+        Outcome {
+            status: Err(e),
+            last: String::new(),
+        }
+    }
+}
+
+/// Passes the installer's output on line by line until it ends.
+fn drain(
+    mut child: std::process::Child,
+    report: &(impl Fn(Progress) + Clone + Send + 'static),
+) -> Outcome {
+    let last = Arc::new(Mutex::new(String::new()));
+    let mut readers = Vec::new();
+    for stream in [
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let (report, last) = (report.clone(), Arc::clone(&last));
+        readers.push(std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                let line = scan::plain(&line);
+                let line = line.lines().last().unwrap_or("").trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                *last.lock().expect("last") = line.clone();
+                report(Progress::Running { line });
+            }
+        }));
+    }
+    let status = child.wait().map_err(|e| e.to_string());
+    for r in readers {
+        let _ = r.join();
+    }
+    let last = last.lock().expect("last").clone();
+    Outcome { status, last }
+}
+
+/// Looks into a failed download where the installer ran.
+fn diagnose(backend: &Backend, plan: Plan) -> probe::Diagnosis {
+    let target = plan.target();
+    let ran = cli::installer(backend, &target.script())
+        .and_then(|c| Ok(c.command().stdin(Stdio::null()).output()?));
+    match ran {
+        Ok(out) => probe::diagnose(
+            &probe::parse(&String::from_utf8_lossy(&out.stdout)),
+            target.host,
+        ),
+        Err(_) => probe::Diagnosis::Unknown,
     }
 }
 
@@ -217,5 +317,22 @@ mod tests {
                 .installer()
                 .contains("https://chatgpt.com/codex/install.sh")
         );
+    }
+
+    #[test]
+    fn a_failed_install_carries_the_command_to_run_by_hand() {
+        let p = Progress::Failed {
+            message: "The download stalled.".into(),
+            command: Some(Plan::Claude.installer().into()),
+            hint: Some("Run it in Ubuntu (WSL).".into()),
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        assert_eq!(v["state"], "failed");
+        assert_eq!(
+            v["command"],
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        let v = serde_json::to_value(Progress::failed("x".into())).unwrap();
+        assert!(v.get("command").is_none());
     }
 }
