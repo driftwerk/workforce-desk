@@ -167,16 +167,17 @@ for t in $targets; do
   (
     cd "$vellev"
     rustup target add "$t" >/dev/null
+    ort=
     if [ "$t" = x86_64-apple-darwin ]; then
       ort=${ORT_X86_64:-$cache/onnxruntime-x86_64}
-      "$root/scripts/onnxruntime.sh" "$ort"
-      export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
     elif [ "${ORT_FROM_SOURCE:-}" = 1 ]; then
       ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
+    fi
+    if [ -n "$ort" ]; then
       "$root/scripts/onnxruntime.sh" "$ort"
       export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
       # ONNX Runtime 1.28's model packages are a library of their own, which
-      # this ort doesn't link.
+      # this ort doesn't link (its list of ONNX Runtime's libraries is fixed).
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=$ort/Release/model_package/libmodel_package.a"
     fi
     CARGO_TARGET_DIR="$vellev_target" cargo build --release --locked -p vellev --target "$t"
