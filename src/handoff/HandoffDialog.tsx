@@ -146,6 +146,12 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askedKey, back || engines !== undefined]);
 
+  // The person's yes is for one vendor through one engine, as previewed: any
+  // change of what is asked, or of who the preview says receives it, asks
+  // again.
+  const receiver = preview ? `${preview.engine}:${preview.vendor ?? ""}` : "";
+  useEffect(() => setConfirmed(false), [askedKey, receiver]);
+
   // ── Continuing ─────────────────────────────────────────────────────────
   const asks = !!preview?.ask || mustConfirm;
   const canGo = !!preview && !loading && !busy && (!asks || confirmed);

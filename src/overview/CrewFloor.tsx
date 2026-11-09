@@ -120,11 +120,13 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const merged = useMerged();
   const needs = useNeedCounts();
   const now = useMinute();
-  // A session whose work went on in another is folded under that one's tile.
+  // A session whose work went on in another is folded under that one's tile,
+  // unless it waits on you: one left running that asks keeps its own.
   const folded = handedOn(merged);
+  const waits = (s: Session) => needs.has(sessionItem(s.id)) || s.state === "blocked" || s.state === "asking";
   const all = floorGroups(
     overview,
-    sortedSessions(sessions).filter((s) => !folded.has(s.id)),
+    sortedSessions(sessions).filter((s) => !folded.has(s.id) || waits(s)),
     onFloor ? needs : null,
     localId,
   );

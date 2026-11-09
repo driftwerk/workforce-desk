@@ -111,6 +111,18 @@ describe("continuing a session in another engine", () => {
     expect(hub.handoff).toHaveBeenCalledWith("s1", expect.objectContaining({ engine: "codex", egressConfirmed: true }));
   });
 
+  it("asks for the yes again once another engine, and so another vendor, is chosen", async () => {
+    use(fakeHub(async (q) => (q.engine === "claude" ? previewOf({ ask: true, engine: "claude", vendor: "Anthropic", egress: "The brief goes to Anthropic, through Claude Code." }) : previewOf({ ask: true }))));
+    await openDialog();
+    fireEvent.click(await within(dialog()).findByRole("checkbox", { name: /Send this brief to OpenAI/ }));
+    expect(button("Continue in Codex").disabled).toBe(false);
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "Claude Code" }));
+    const yes = (await within(dialog()).findByRole("checkbox", { name: /Send this brief to Anthropic/ })) as HTMLInputElement;
+    expect(yes.checked).toBe(false);
+    expect(button("Continue in Claude Code").disabled).toBe(true);
+    expect(hub.handoff).not.toHaveBeenCalled();
+  });
+
   it("asks for the yes when the hub says the group started asking after the preview", async () => {
     use(fakeHub());
     hub.handoff.mockRejectedValueOnce(new HubError(409, "The brief goes to OpenAI, through Codex. This group asks before each handoff: confirm it to go on."));

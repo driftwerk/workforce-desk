@@ -353,6 +353,18 @@ describe("the Floor by group, across hubs", () => {
     expect(within(section("Acme")).getByText("Working · 1")).toBeTruthy();
   });
 
+  it("keeps the tile of a session whose work went on elsewhere while it waits on you", async () => {
+    // Left running, acme-api is blocked: it still needs the person.
+    transport.sessions = [...transport.sessions, live("s-api", "acme-api", { state: "blocked" })];
+    transport.layout = { ...transport.layout, groups: transport.layout.groups.map((g) => (g.id === "acme" ? { ...g, items: [...g.items, "session:s-api"] } : g)) };
+    const f = localFloor();
+    f.working = f.working.map((w) => (w.who.id === "s-web" ? { ...w, continued: { from: "s-api", engine: "claude", at: at(9) } } : w));
+    hubs.local = fakeHub({ floor: f });
+    vi.stubGlobal("fetch", fakeFetch(hubs));
+    await floor();
+    expect(within(section("Acme")).getByRole("article", { name: "acme-api" })).toBeTruthy();
+  });
+
   it("filters Activity by the group each event happened in, so a moved session's past stays there", async () => {
     const ev = (id: string, group: string | undefined, min: number): ActivityEvent => ({
       id,
