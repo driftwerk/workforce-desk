@@ -5,7 +5,9 @@
 //! page.
 
 mod cli;
+mod deadline;
 pub mod install;
+mod probe;
 mod scan;
 
 use std::collections::HashMap;

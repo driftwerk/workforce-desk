@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { PLAN_OF, type Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
-import { PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
+import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
 import { useProviders } from "./store";
 
 /** What connecting `provider` takes: its own sign-in for a plan, else its
@@ -42,6 +42,7 @@ function PlanConnect({ provider, onConnected, onCancel }: { provider: Provider; 
         <p className={`small ${login.failed ? "state-blocked" : "muted"}`} role="status">
           {login.status ?? provider.connect.hint}
           <ReopenLink login={login} />
+          <CopyInstall login={login} />
         </p>
       )}
       <div className="connect-actions">
