@@ -23,6 +23,23 @@ export function useUpdateChecks() {
   }, [check]);
 }
 
+/** "When idle": restarts into the update once no session on this computer
+ *  is working. Called once from the shell, so it runs whichever view is
+ *  open (Settings included), not only while the notice shows. */
+export function useRestartWhenIdle() {
+  const waiting = useUpdates((s) => s.waiting);
+  const phase = useUpdates((s) => s.state.phase);
+  const restart = useUpdates((s) => s.restart);
+  const sessions = useDesk((s) => localSessions(s.sessions));
+  const fail = useDesk((s) => s.fail);
+  const live = Object.values(sessions).filter(isLive);
+  const working = live.filter(isWorking).length;
+  useEffect(() => {
+    if (waiting && phase === "ready" && working === 0) void restart(live.map((s) => s.id)).catch(fail);
+    // The sessions current at this render.
+  }, [waiting, phase, working]);
+}
+
 const list = (names: string[]): string =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
@@ -68,11 +85,6 @@ export function UpdateNotice() {
     acted();
     void restart(live.map((s) => s.id)).catch(fail);
   };
-
-  useEffect(() => {
-    if (waiting && state.phase === "ready" && working.length === 0) go();
-    // `go` reads the sessions current at this render.
-  }, [waiting, state.phase, working.length]);
 
   const postponed = (state.phase === "ready" || state.phase === "available") && isPostponed(later, state.version, started);
   if (postponed) return null;

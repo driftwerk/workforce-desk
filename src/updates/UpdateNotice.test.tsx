@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import * as platform from "../platform";
-import { UpdateNotice } from "./UpdateNotice";
+import { UpdateNotice, useRestartWhenIdle } from "./UpdateNotice";
 import { useUpdates } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -84,12 +84,21 @@ it("says how many sessions stop, and which can't be picked up again, without the
   expect(platform.updateInstall).not.toHaveBeenCalled();
 });
 
-it("waits for no session to be working on When idle", async () => {
+/** The shell: the notice, and the restart When idle waits for, which
+ *  runs whatever view is open. */
+function Shell({ notice = true }: { notice?: boolean }) {
+  useRestartWhenIdle();
+  return notice ? <UpdateNotice /> : null;
+}
+
+it("waits for no session to be working on When idle, with or without the notice on screen", async () => {
   await ready();
-  render(<UpdateNotice />);
+  const { rerender } = render(<Shell />);
   fireEvent.click(screen.getByRole("button", { name: "When idle" }));
   expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 installs when your sessions finish.");
   expect(platform.updateInstall).not.toHaveBeenCalled();
+  // Settings open: the stage, and the notice with it, is gone.
+  rerender(<Shell notice={false} />);
   act(() => useDesk.setState({ sessions: { a: session("a", "idle") } }));
   await act(async () => {});
   expect(platform.updateInstall).toHaveBeenCalledTimes(1);
