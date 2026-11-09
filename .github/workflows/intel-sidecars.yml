@@ -1,0 +1,125 @@
+# The Intel Mac sidecars built the way the release builds them, without a
+# release: on pull requests that change how vellev's ONNX Runtime is built or
+# linked for x86_64-apple-darwin, and by hand:
+#
+#   gh workflow run intel-sidecars.yml --ref <branch>
+name: Intel sidecars
+
+on:
+  pull_request:
+    paths:
+      - scripts/onnxruntime.sh
+      - scripts/build-sidecars.sh
+      - vellev.ref
+      - .github/workflows/intel-sidecars.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SHERPA_ONNX_ARCHIVE_DIR: ${{ github.workspace }}/sherpa-onnx
+
+jobs:
+  intel:
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out Desk
+        uses: actions/checkout@v7
+        with:
+          path: desk
+
+      - name: Read the refs
+        id: refs
+        run: |
+          echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+          echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out vellev at vellev.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/vellev
+          ref: ${{ steps.refs.outputs.vellev }}
+          path: vellev
+          token: ${{ secrets.VELLEV_REPO_TOKEN || github.token }}
+
+      - name: Check out the hub at hub.ref
+        uses: actions/checkout@v7
+        with:
+          repository: driftwerk/workforce
+          ref: ${{ steps.refs.outputs.hub }}
+          path: workforce-public-desk
+          token: ${{ secrets.HUB_REPO_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      # The same cache as the release's, saved as soon as ONNX Runtime is
+      # built so a failure later still keeps it.
+      - name: Restore ONNX Runtime for Intel
+        id: ort
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+
+      - name: Build ONNX Runtime for Intel
+        working-directory: desk
+        run: scripts/onnxruntime.sh ~/Library/Caches/desk-build/onnxruntime-x86_64
+
+      - name: Save ONNX Runtime for Intel
+        if: steps.ort.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desk -> target
+            workforce-public-desk -> target
+            vellev -> target
+          key: intel-hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
+          cache-on-failure: true
+
+      - name: Read the sherpa-onnx version
+        id: sherpa
+        run: echo "version=$(desk/scripts/sherpa-onnx.sh version)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.SHERPA_ONNX_ARCHIVE_DIR }}
+          key: sherpa-onnx-${{ steps.sherpa.outputs.version }}-${{ runner.os }}-x86_64-darwin
+
+      - name: Speech libraries
+        working-directory: desk
+        run: scripts/sherpa-onnx.sh prepare --release x86_64-apple-darwin
+
+      - name: Build the helper, hub and memory store (x86_64)
+        working-directory: desk
+        env:
+          TARGETS: x86_64-apple-darwin
+          HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
+          VELLEV_SOURCE: ${{ github.workspace }}/vellev
+          MIN_FREE_GB: "12"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/build-sidecars.sh
+
+      # Nothing in ONNX Runtime may need a newer macOS than Desk's 13.0.
+      - name: Check ONNX Runtime's minimum macOS
+        run: |
+          versions=$(find ~/Library/Caches/desk-build/onnxruntime-x86_64/Release -name '*.a' -exec otool -l {} + |
+            awk '$1 == "minos" { print $2 }' | sort -u)
+          echo "ONNX Runtime's objects target macOS: $versions"
+          newer=$(echo "$versions" | awk -F. '$1 > 13 || ($1 == 13 && $2 > 0)')
+          [ -z "$newer" ] || { echo "::error::built for macOS $newer, newer than 13.0"; exit 1; }
+
+      - name: Run the memory store (Rosetta)
+        working-directory: desk/src-tauri/binaries
+        run: |
+          file "Desk Memory-x86_64-apple-darwin"
+          otool -l "Desk Memory-x86_64-apple-darwin" | awk '$1 == "minos"'
+          arch -x86_64 "./Desk Memory-x86_64-apple-darwin" --help
