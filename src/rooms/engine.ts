@@ -583,8 +583,8 @@ const deletedRooms = (): ReadonlySet<string> => {
  *  its ask's, by the id it was saved under or the room message it answers,
  *  else one on from that message (a drained copy may come before Desk knows
  *  the ask's reply, or after the ask is gone). A notice the agent posted
- *  itself: its latest ask's there, else its latest post's. Anything else is
- *  at the last, so it starts none. */
+ *  itself: the highest of its asks under way there, else its latest post's.
+ *  Anything else is at the last, so it starts none. */
 export const hopOf = (
   hubId: string,
   agentId: string,
@@ -594,9 +594,11 @@ export const hopOf = (
   const mine = [...asks.values()].filter((a) => a.member.hub === hubId && a.member.agent === agentId && a.roomId === at.roomId);
   const timeline = useDesk.getState().timelines[at.roomId] ?? [];
   if (at.notice) {
-    const latest = mine.at(-1) ?? null;
+    // Said in the turn running for it: the highest hand-off among its asks
+    // under way, else its latest post's there.
+    const running = mine.filter((a) => a.state === "sent" || a.state === "settling" || a.state === "sending");
     const posted = [...timeline].reverse().find((m) => m.author === `${hubId}/${agentId}` && m.id !== messageId);
-    return latest?.hop ?? posted?.hop ?? MAX_HOPS;
+    return running.length ? Math.max(...running.map((a) => a.hop)) : (posted?.hop ?? MAX_HOPS);
   }
   const ask = mine.find((a) => a.replyId === messageId) ?? (at.inReplyTo ? mine.find((a) => a.message === at.inReplyTo) : undefined);
   if (ask) return ask.hop;
