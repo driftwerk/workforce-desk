@@ -60,6 +60,7 @@ const hub = {
   ),
   sessionMemory: vi.fn(async () => null),
   postLine: vi.fn(),
+  typing: vi.fn(async () => undefined),
 };
 
 const settle = async (ms = DEBOUNCE_MS) => {
