@@ -15,11 +15,16 @@ import type { EngineInfo } from "../hub/types";
 import {
   MAX_CHECKINS_PER_HOUR,
   MAX_WORK_TURNS_PER_HOUR,
+  fullMissing,
   oversightOf,
+  parseBudget,
   parseCheckins,
+  parseHold,
   parseParallel,
   parseMinutes,
+  parseRepo,
   parseTime,
+  parseWorkflow,
   readable,
   setAgentOversight,
   type Oversight,
@@ -37,6 +42,20 @@ const LEVELS: { id: OversightLevel; name: string; desc: string }[] = [
   { id: "watch", name: "Watch", desc: "Answers “what’s everyone doing?” and tells you when something needs you." },
   { id: "suggest", name: "Suggest", desc: "Also proposes what to do. Nothing happens until you say yes." },
   { id: "act", name: "Act", desc: "Handles the routine itself, within the rules below, and tells you what it did." },
+  { id: "full", name: "Act fully", desc: "Merges, tags, releases and runs your named workflows in the repos you name, under a daily budget." },
+];
+
+/** What always stays with you, at every level, Act fully included: the
+ *  hub's never-list, by heading. */
+const ALWAYS_YOURS = [
+  "Reading or exporting secrets and credentials",
+  "Publishing to a package registry",
+  "Force-pushing or rewriting history",
+  "Deleting branches, tags or releases on the remote",
+  "Deleting anything outside the session’s folder",
+  "Changing its own settings, level or budget",
+  "Spending or moving money",
+  "New ways out, sign-ins, and sessions that don’t ask",
 ];
 
 type Change = (o: Oversight) => Oversight;
@@ -66,9 +85,25 @@ const fieldsOf = (o: Oversight, was?: Record<Field, Typed>): Record<Field, Typed
   checkins: typed(String(o.maxCheckinsPerDay)),
   parallel: typed(String(o.work.parallel)),
   turns: typed(String(o.work.maxTurnsPerHour)),
+  hold: typed(String(o.wake.holdMinutes)),
+  budget: typed(o.full.budgetUsdPerDay === null ? (was?.budget.text ?? "") : String(o.full.budgetUsdPerDay)),
+  repo: was?.repo ?? typed(""),
+  workflow: was?.workflow ?? typed(""),
 });
 
-type Field = "waiting" | "quiet" | "morning" | "evening" | "hourly" | "checkins" | "parallel" | "turns";
+type Field =
+  | "waiting"
+  | "quiet"
+  | "morning"
+  | "evening"
+  | "hourly"
+  | "checkins"
+  | "parallel"
+  | "turns"
+  | "hold"
+  | "budget"
+  | "repo"
+  | "workflow";
 
 /** An agent's Settings section for overseeing the crew: on or off (one
  *  agent at a time), how much it does on its own, what it keeps track of,
@@ -181,6 +216,25 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     const r = parseCheckins(text, MAX_WORK_TURNS_PER_HOUR);
     return "problem" in r ? r.problem : { ...o, work: { ...o.work, maxTurnsPerHour: r.value } };
   };
+  const setHold = (o: Oversight, text: string) => {
+    const r = parseHold(text);
+    return "problem" in r ? r.problem : { ...o, wake: { ...o.wake, holdMinutes: r.value } };
+  };
+  const setBudget = (o: Oversight, text: string) => {
+    const r = parseBudget(text);
+    return "problem" in r ? r.problem : { ...o, full: { ...o.full, budgetUsdPerDay: r.value } };
+  };
+  /** Adds what's typed to a list once it can be used; the field empties. */
+  const add = (f: "repo" | "workflow") => {
+    if (!o || !fields) return;
+    const list = f === "repo" ? o.full.repos : o.full.workflows;
+    const r = f === "repo" ? parseRepo(fields[f].text, list) : parseWorkflow(fields[f].text, list);
+    if ("problem" in r) return setFields({ ...fields, [f]: { ...fields[f], problem: r.problem } });
+    setFields({ ...fields, [f]: typed("") });
+    update((x) => ({ ...x, full: { ...x.full, [f === "repo" ? "repos" : "workflows"]: [...list, r.value] } }));
+  };
+  const remove = (f: "repos" | "workflows", item: string) =>
+    update((x) => ({ ...x, full: { ...x.full, [f]: x.full[f].filter((i) => i !== item) } }));
   /** Turning a row with a field on uses what's typed in it, if it can. */
   const turnOn = (f: Field, apply: (o: Oversight, text: string) => Oversight | string, off: Change) => (on: boolean) => {
     if (!o || !fields) return;
@@ -201,6 +255,11 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   };
 
   const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
+  // The level the hub runs it at now: Act until Act fully is in force.
+  const running =
+    manager?.agentId === agent.id ? manager.level : (manager?.bosses?.find((b) => b.agentId === agent.id)?.level ?? null);
+  const missing = o ? fullMissing(o) : [];
+  const acts = o?.level === "act" || o?.level === "full";
   const takeOn = TAKE_ON(name);
   const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
 
@@ -249,7 +308,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
         <>
           <div className="oversee-part">
             <h3>How much {name} does on its own</h3>
-            <div className="oversee-levels" role="radiogroup" aria-label="How much it does on its own">
+            <div className="oversee-levels oversee-levels-4" role="radiogroup" aria-label="How much it does on its own">
               {LEVELS.map((l, i) => (
                 <button
                   key={l.id}
@@ -349,6 +408,23 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 checked={o.wake.onMessage}
                 onChange={(v) => update((x) => ({ ...x, wake: { ...x.wake, onMessage: v } }))}
               />
+              <div className="oversee-row">
+                <span className="oversee-check">
+                  <span className="oversee-check-text">
+                    <b>Hold for you after you type</b>
+                    <span className="oversee-sub">A session {name} runs stays yours this long after your last keystroke or message in it</span>
+                  </span>
+                </span>
+                <Num
+                  problemId={`${ids}-hold`}
+                  label="Hold minutes"
+                  value={fields.hold}
+                  onChange={(t) => setField("hold", t)}
+                  onCommit={() => commit("hold", setHold)}
+                  unit="min"
+                />
+                {fields.hold.problem && <Problem id={`${ids}-hold`} text={fields.hold.problem} />}
+              </div>
               <Check
                 label="Morning summary at"
                 checked={o.summaries.morning !== ""}
@@ -414,7 +490,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 ? `At Watch, ${name} runs no sessions. Set it to Suggest or Act to hand it work.`
                 : o.level === "suggest"
                   ? `At Suggest, each session ${name} would start or answer for comes to you to say yes to first.`
-                  : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving.`}
+                  : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving for ${o.wake.holdMinutes === 1 ? "a minute" : `${o.wake.holdMinutes} minutes`} after your last keystroke.`}
             </span>
             <div className="oversee-card">
               <Check
@@ -477,7 +553,110 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             {fields.turns.problem && <Problem id={`${ids}-turns`} text={fields.turns.problem} />}
           </div>
 
-          {o.level === "act" && (
+          {o.level === "full" && (
+            <div className="oversee-part">
+              <h3>Where {name} acts fully</h3>
+              {missing.length > 0 ? (
+                <p className="small state-blocked" role="status">
+                  Acting as Act until repos and a budget are set.
+                </p>
+              ) : (
+                running === "act" && (
+                  <p className="small state-blocked" role="status">
+                    Acting as Act for now: the hub says Act fully isn’t in force. Today’s spend has reached the daily budget, or
+                    hasn’t been read yet.
+                  </p>
+                )
+              )}
+              <div className="oversee-card">
+                <div className="oversee-row oversee-list">
+                  <span className="oversee-check-text">
+                    <b>Repos</b>
+                    <span className="oversee-sub">owner/name on GitHub, a repo’s address, or a folder on this computer</span>
+                  </span>
+                  {o.full.repos.length > 0 && (
+                    <ul className="oversee-items" aria-label="Repos">
+                      {o.full.repos.map((r) => (
+                        <li key={r}>
+                          <span className="mono">{r}</span>
+                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${r}`} onClick={() => remove("repos", r)}>
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <AddItem
+                    label="Add a repo"
+                    placeholder="acme/acme-web"
+                    problemId={`${ids}-repo`}
+                    value={fields.repo}
+                    onChange={(t) => setField("repo", t)}
+                    onAdd={() => add("repo")}
+                  />
+                </div>
+                <div className="oversee-row">
+                  <span className="oversee-check">
+                    <span className="oversee-check-text">
+                      <b>Daily budget</b>
+                      <span className="oversee-sub">Required. Its sessions’ spend in its scope and its own model use, in a day</span>
+                    </span>
+                  </span>
+                  <Num
+                    problemId={`${ids}-budget`}
+                    label="Daily budget in US dollars"
+                    value={fields.budget}
+                    onChange={(t) => setField("budget", t)}
+                    onCommit={() => commit("budget", setBudget)}
+                    unit="USD a day"
+                  />
+                  {fields.budget.problem && <Problem id={`${ids}-budget`} text={fields.budget.problem} />}
+                </div>
+                <div className="oversee-row oversee-list">
+                  <span className="oversee-check-text">
+                    <b>Workflows</b>
+                    <span className="oversee-sub">
+                      Deploys and promotions run only through these GitHub workflows, by file name, on the default branch
+                    </span>
+                  </span>
+                  {o.full.workflows.length > 0 && (
+                    <ul className="oversee-items" aria-label="Workflows">
+                      {o.full.workflows.map((w) => (
+                        <li key={w}>
+                          <span className="mono">{w}</span>
+                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${w}`} onClick={() => remove("workflows", w)}>
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <AddItem
+                    label="Add a workflow"
+                    placeholder="deploy.yml"
+                    problemId={`${ids}-workflow`}
+                    value={fields.workflow}
+                    onChange={(t) => setField("workflow", t)}
+                    onAdd={() => add("workflow")}
+                  />
+                </div>
+              </div>
+              <span className="oversee-sub">
+                In those repos {name} may merge pull requests, push the default branch when it sends nothing new, tag and release
+                the default branch as GitHub has it, and run the workflows above. Deploy tools and release scripts stay yours.
+              </span>
+              <div className="oversee-never">
+                <b>Always yours, at every level</b>
+                <ul>
+                  {ALWAYS_YOURS.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {acts && (
             <div className="oversee-part">
               <h3>What {name} may do without asking</h3>
               <div className="oversee-card">
@@ -659,6 +838,50 @@ function Check({
       </label>
       {children}
       {problem?.text && <Problem id={problem.id} text={problem.text} />}
+    </div>
+  );
+}
+
+/** A text field and Add: Enter adds too; what's wrong with what's typed is
+ *  said under it. */
+function AddItem({
+  label,
+  placeholder,
+  problemId,
+  value,
+  onChange,
+  onAdd,
+}: {
+  label: string;
+  placeholder: string;
+  problemId: string;
+  value: Typed;
+  onChange: (text: string) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="field oversee-add">
+      <div className="field-row">
+        <input
+          className="mono"
+          aria-label={label}
+          placeholder={placeholder}
+          value={value.text}
+          aria-invalid={value.problem ? true : undefined}
+          aria-describedby={value.problem ? problemId : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+        />
+        <button type="button" className="btn btn-ghost btn-sm" disabled={!value.text.trim()} onClick={onAdd}>
+          Add
+        </button>
+      </div>
+      {value.problem && <Problem id={problemId} text={value.problem} />}
     </div>
   );
 }

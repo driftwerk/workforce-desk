@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { parse } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
@@ -108,12 +108,116 @@ describe("Oversees the crew", () => {
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "suggest"\n`);
     expect(screen.getByRole("radio", { name: /Suggest/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByRole("heading", { name: "What Ledger may do without asking" })).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Act/ })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act ?Handles/ })));
     expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
     expect(screen.getByText(/Ledger always asks you first before pushing code/)).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Hand out work/ })));
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Crew in your workspaces/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { hand_out_work: true }, track: { workspaces: true } }));
+  });
+
+  it("offers Act fully after Act, acting as Act until repos and a budget are set, and says what stays yours", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    // The hub runs it at Act until Act fully is in force.
+    (hub.manager as ReturnType<typeof vi.fn>).mockImplementation(() => Promise.resolve({ agentId: "ledger", level: "act" }));
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
+    const levels = within(screen.getByRole("radiogroup", { name: "How much it does on its own" }))
+      .getAllByRole("radio")
+      .map((r) => r.querySelector("b")?.textContent);
+    expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully"]);
+    expect(screen.getByText("Merges, tags, releases and runs your named workflows in the repos you name, under a daily budget.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Where Ledger acts fully" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
+    await waitFor(() => expect(oversight()).toMatchObject({ level: "full" }));
+    expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
+    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+    // Act's own rules hold at Act fully too.
+    expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
+    expect(screen.getByText("Always yours, at every level")).toBeTruthy();
+    expect(screen.getByText("Publishing to a package registry")).toBeTruthy();
+    expect(screen.getByText(/Deploys and promotions run only through these GitHub workflows/)).toBeTruthy();
+
+    // Repos: checked as the hub takes them, added and removed.
+    const repo = screen.getByRole("textbox", { name: "Add a repo" });
+    fireEvent.change(repo, { target: { value: "acme" } });
+    fireEvent.keyDown(repo, { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toBe("Name a repo as owner/name, its address, or a folder like ~/dev/acme-web.");
+    expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1);
+    fireEvent.change(repo, { target: { value: "acme/acme-web" } });
+    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"] } }));
+    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+
+    // The budget is required, in the hub's words when it's wrong.
+    const budget = screen.getByRole("textbox", { name: "Daily budget in US dollars" });
+    fireEvent.change(budget, { target: { value: "0" } });
+    fireEvent.blur(budget);
+    expect(screen.getByRole("alert").textContent).toBe("Its daily budget must be an amount in dollars above 0 and up to 10000.");
+    fireEvent.change(budget, { target: { value: "25" } });
+    await act(async () => fireEvent.keyDown(budget, { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"], budget_usd_per_day: 25 } }));
+    expect(screen.queryByText("Acting as Act until repos and a budget are set.")).toBeNull();
+    // Set, but the hub still runs it at Act: it says so.
+    expect(screen.getByText(/the hub says Act fully isn’t in force/)).toBeTruthy();
+
+    // Workflows: plain file names only.
+    const workflow = screen.getByRole("textbox", { name: "Add a workflow" });
+    for (const bad of [".github/workflows/deploy.yml", "123.yml", "deploy"]) {
+      fireEvent.change(workflow, { target: { value: bad } });
+      fireEvent.keyDown(workflow, { key: "Enter" });
+      expect(screen.getByRole("alert").textContent).toBe("The workflows it may run must be a list of up to 20 file names like deploy.yml.");
+    }
+    fireEvent.change(workflow, { target: { value: "deploy.yml" } });
+    await act(async () => fireEvent.keyDown(workflow, { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { workflows: ["deploy.yml"] } }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove acme/acme-web" })));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: [] } }));
+    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+  });
+
+  it("says nothing of acting as Act once the hub runs it at Act fully", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
+    const hub = fakeHub();
+    (hub.manager as ReturnType<typeof vi.fn>).mockImplementation(() => Promise.resolve({ agentId: "ledger", level: "full" }));
+    show(
+      hub,
+      `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 25\nworkflows = ["deploy.yml"]\n`,
+    );
+    expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
+    expect(screen.queryByText(/Acting as Act/)).toBeNull();
+    expect(screen.getByRole("list", { name: "Repos" }).textContent).toContain("acme/acme-web");
+    expect(screen.getByRole("list", { name: "Workflows" }).textContent).toContain("deploy.yml");
+    expect((screen.getByRole("textbox", { name: "Daily budget in US dollars" }) as HTMLInputElement).value).toBe("25");
+  });
+
+  it("shows the hub's own refusal when it won't save", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    (hub.saveAgentConfig as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.reject(new Error("That change couldn’t be saved. How much the overseer does on its own must be watch, suggest, act or full.")),
+    );
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
+    expect(await screen.findByText(/must be watch, suggest, act or full/)).toBeTruthy();
+  });
+
+  it("holds a session for you 2 minutes after you type unless you say, 1 to 60", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
+    const hold = screen.getByRole("textbox", { name: "Hold minutes" }) as HTMLInputElement;
+    expect(hold.value).toBe("2");
+    expect(screen.getByText(/you’re driving for 2 minutes after your last keystroke/)).toBeTruthy();
+    fireEvent.change(hold, { target: { value: "61" } });
+    fireEvent.blur(hold);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "How long your typing in a session keeps it yours must be a whole number of minutes from 1 to 60.",
+    );
+    expect(hub.saveAgentConfig).not.toHaveBeenCalled();
+    fireEvent.change(hold, { target: { value: "5" } });
+    await act(async () => fireEvent.keyDown(hold, { key: "Enter" }));
+    await waitFor(() => expect(oversight()).toMatchObject({ wake: { hold_minutes: 5 } }));
   });
 
   it("says in plain words what's wrong with a number or time, and saves it once it's right", async () => {
