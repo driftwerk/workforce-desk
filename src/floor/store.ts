@@ -4,7 +4,7 @@ import { useChat } from "../chat/store";
 import { useAccounts } from "../engines/accounts";
 import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
-import { deskListeners } from "../hub/store";
+import { deskListeners, useDesk } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
 import type { DeskEvent, FloorView, LineAsked, Need, UsageView } from "../hub/types";
 import { useLine } from "../line/store";
@@ -12,7 +12,7 @@ import { usePlans as useBossPlans } from "../crew/planStore";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { useWatching, watched } from "../unread/watching";
-import { stillNeeds, useNeedsSeen } from "../unread/needsSeen";
+import { answeredInRoom, stillNeeds, useNeedsDismissed, useNeedsSeen, yourPosts } from "../unread/needsSeen";
 import { merged, type Merged } from "./merge";
 import { countsByItem } from "./needs";
 import { nextLocalMidnight, startOfLocalDay } from "./time";
@@ -320,13 +320,17 @@ export const useMerged = (): Merged => {
   const seen = useNeedsSeen((s) => s.seen);
   const w = useWatching();
   const asked = useLine((s) => s.asked);
+  const gone = useNeedsDismissed((s) => s.gone);
+  const posts = useDesk((s) => yourPosts(s.timelines));
   return useMemo(() => {
     const all = merged(hubs, list);
-    const needs = all.needs.filter((n) => stillNeeds(n, seen, (key) => watched(w, key)) && !lineSettled(n, asked, NOT_WAITING));
+    const needs = all.needs.filter(
+      (n) => stillNeeds(n, seen, (key) => watched(w, key)) && !lineSettled(n, asked, NOT_WAITING) && !gone.has(n.key) && !answeredInRoom(n, posts),
+    );
     const wentAhead = all.wentAhead.filter((n) => !lineSettled(n, asked, CLOSED));
     if (needs.length === all.needs.length && wentAhead.length === all.wentAhead.length) return all;
     return { ...all, needs, wentAhead, counts: { ...all.counts, needsYou: needs.length } };
-  }, [hubs, list, seen, w, asked]);
+  }, [hubs, list, seen, w, asked, gone, posts]);
 };
 
 /** Where a question on this computer's lines no longer waits on you, and
