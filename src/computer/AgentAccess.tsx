@@ -5,7 +5,9 @@ import { useDesk } from "../hub/store";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { useUi } from "../shell/ui";
 import { plainError } from "../ui/plainError";
-import { ASKING, LEVELS, askingOf, levelOf, setLevel, type Asking, type Level } from "./access";
+import { tilde } from "../machines/folders";
+import { backendHome, pickFolder } from "../platform";
+import { ASKING, LEVELS, addFolder, askingOf, levelOf, setLevel, setWorksIn, worksInOf, type Asking, type Level } from "./access";
 import { ActivityList, EMPTY_ACTIVITY, GrantList } from "./Lists";
 import "../styles/computer.css";
 
@@ -135,6 +137,8 @@ export function AgentAccess({ agent }: { agent: Agent }) {
           </div>
         </section>
 
+        <WorksIn agent={agent} />
+
         <section className="agent-section" aria-labelledby="computer-grants-head">
           <div className="ability-head">
             <h2 id="computer-grants-head">Allowed for {agent.name}</h2>
@@ -171,5 +175,84 @@ export function AgentAccess({ agent }: { agent: Agent }) {
         </section>
       </div>
     </div>
+  );
+}
+
+/** The folders the person gives the agent to work in beside its own: a repo
+ *  cloned into a folder, say. Picked with the folder picker, listed, and
+ *  removed one at a time; only the person changes them. */
+function WorksIn({ agent }: { agent: Agent }) {
+  const hub = useDesk((s) => s.hub);
+  const key = agentKey(agent);
+  const config = useAgentConfigs((s) => s.configs[key]);
+  const [home, setHome] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    backendHome()
+      .then((h) => live && setHome(h))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  const folders = config === undefined ? null : worksInOf(config);
+
+  const write = async (change: (folders: string[]) => string[]) => {
+    if (!hub) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      useAgentConfigs.getState().put(key, await setWorksIn(hub, agent.id, change));
+    } catch (e) {
+      setProblem(plainError(e));
+    }
+    setBusy(false);
+  };
+  const add = async () => {
+    const picked = await pickFolder();
+    if (!picked || !folders) return;
+    const next = addFolder(folders, picked, home);
+    if (next.problem) return setProblem(next.problem);
+    void write((now) => addFolder(now, picked, home).folders);
+  };
+
+  return (
+    <section className="agent-section" aria-labelledby="computer-works-in-head">
+      <div className="ability-head">
+        <h2 id="computer-works-in-head">Works in</h2>
+        <button type="button" className="btn btn-ghost" disabled={folders === null || busy} onClick={() => void add()}>
+          Add a folder…
+        </button>
+      </div>
+      <p className="small faint">
+        Folders or repos {agent.name} reads, changes and runs in beside its own, at every level. Coding work starts in the first. Deleting there asks you first.
+      </p>
+      {folders === null ? (
+        <p className="small faint">Reading…</p>
+      ) : folders.length === 0 ? (
+        <p className="pane-empty small">Only its own folder. Add a folder or a cloned repo for it to work in.</p>
+      ) : (
+        <ul className="computer-list" aria-label={`Folders ${agent.name} works in`}>
+          {folders.map((f, i) => (
+            <li key={f} className="computer-row">
+              <span className="computer-row-text">
+                <span className="mono">{tilde(f, home)}</span>
+                {i === 0 && <span className="small faint">Coding work starts here</span>}
+              </span>
+              <button type="button" className="btn btn-ghost" disabled={busy} aria-label={`Remove ${tilde(f, home)}`} onClick={() => void write((now) => now.filter((x) => x !== f))}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {problem && (
+        <p className="small state-blocked" role="alert">
+          {problem}
+        </p>
+      )}
+    </section>
   );
 }

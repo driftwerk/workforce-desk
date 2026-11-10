@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "dialog:allow-open",
     "dialog:allow-save",
     "fs:allow-write-file",
     {
@@ -43,6 +44,7 @@
     "allow-hub-fetch",
     "allow-hub-socket-open",
     "allow-host-info",
+    "allow-pick-folder",
     "allow-settings-load",
     "allow-settings-save",
     "allow-themes-list",

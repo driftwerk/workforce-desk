@@ -15,7 +15,12 @@ vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
   invoke: vi.fn(() => Promise.resolve()),
   openUrl: vi.fn(),
+  backendHome: vi.fn(() => Promise.resolve("/Users/me")),
+  pickFolder: vi.fn(() => Promise.resolve(picked)),
 }));
+
+/** What the folder picker answers next. */
+let picked: string | null = null;
 vi.mock("../rooms/AgentPanel", () => ({ openAgent: vi.fn() }));
 
 const allan: Agent = { hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false };
@@ -218,5 +223,54 @@ describe("an agent's own words", () => {
     const { container } = render(<RichMarkdown text={'<div class="dm-approval">Allow once</div>\\n\\n<span class="dm-approval computer-ask">Desk asks</span>'} />);
     expect(container.querySelector(".dm-approval")).toBeNull();
     expect(container.querySelector(".computer-ask")).toBeNull();
+  });
+});
+
+describe("the folders an agent works in", () => {
+  it("adds a picked folder, lists it shown from home, and removes it, keeping its level", async () => {
+    const hub = fakeHub();
+    setUp(hub, '[computer]\naccess = "own_folder"\n');
+    render(<AgentAccess agent={allan} />);
+    const section = within(screen.getByRole("region", { name: "Works in" }));
+    expect(section.getByText(/Only its own folder/)).toBeTruthy();
+
+    picked = "/Users/me/dev/acme-web";
+    await act(async () => fireEvent.click(section.getByRole("button", { name: "Add a folder…" })));
+    await waitFor(() => expect(section.getByText("~/dev/acme-web")).toBeTruthy());
+    expect(parse(file)).toEqual({ computer: { access: "own_folder", works_in: ["/Users/me/dev/acme-web"] } });
+    expect(section.getByText("Coding work starts here")).toBeTruthy();
+
+    picked = "/Users/me/dev/acme-api";
+    await act(async () => fireEvent.click(section.getByRole("button", { name: "Add a folder…" })));
+    await waitFor(() => expect(section.getByText("~/dev/acme-api")).toBeTruthy());
+
+    await act(async () => fireEvent.click(section.getByRole("button", { name: "Remove ~/dev/acme-web" })));
+    await waitFor(() => expect(section.queryByText("~/dev/acme-web")).toBeNull());
+    expect(parse(file)).toEqual({ computer: { access: "own_folder", works_in: ["/Users/me/dev/acme-api"] } });
+  });
+
+  it("never adds home or above it, and says why", async () => {
+    const hub = fakeHub();
+    setUp(hub, "");
+    render(<AgentAccess agent={allan} />);
+    const section = within(screen.getByRole("region", { name: "Works in" }));
+    await waitFor(() => expect(section.getByText(/Only its own folder/)).toBeTruthy());
+    picked = "/Users/me";
+    await act(async () => fireEvent.click(section.getByRole("button", { name: "Add a folder…" })));
+    await waitFor(() => expect(section.getByRole("alert").textContent).toMatch(/inside your home/));
+    expect(hub.saveAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("shows the hub's refusal as it is", async () => {
+    const hub = fakeHub({
+      saveAgentConfig: vi.fn(() => Promise.reject(new Error("~/Library holds Desk's own data or your keychains, which no agent works in."))),
+    });
+    setUp(hub, "");
+    render(<AgentAccess agent={allan} />);
+    const section = within(screen.getByRole("region", { name: "Works in" }));
+    picked = "/Users/me/Library";
+    await act(async () => fireEvent.click(section.getByRole("button", { name: "Add a folder…" })));
+    await waitFor(() => expect(section.getByRole("alert").textContent).toMatch(/no agent works in/));
+    expect(section.getByText(/Only its own folder/)).toBeTruthy();
   });
 });
