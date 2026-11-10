@@ -54,22 +54,36 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
   const [removing, setRemoving] = useState<RoomMemberRef | null>(null);
   const [deleting, setDeleting] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const addToggle = useRef<HTMLButtonElement>(null);
+  const members = useRef<HTMLDivElement>(null);
   const movable = useHubLayout((s) => s.layout !== null);
   const groups = useLayout().groups;
   const groupName = (room.group && groups.find((g) => g.id === room.group)?.name) || "Ungrouped";
   useEffect(() => {
     if (rename) field.current?.select();
   }, [rename]);
+  // A member removed takes their row, and the focus on it, away: it goes to
+  // the first remaining remove button, else to Add someone, never out of the
+  // dialog (where Escape and Tab would stop working).
+  const memberCount = room.members.length;
+  useEffect(() => {
+    const at = document.activeElement;
+    if (at && at !== document.body && at.isConnected) return;
+    (members.current?.querySelector<HTMLElement>(".room-member-remove") ?? addToggle.current)?.focus();
+  }, [memberCount, removing]);
 
   const renamed = name.trim() !== "" && name.trim() !== room.name;
   const kept = (r: Room) => useDesk.setState((s) => ({ rooms: { ...s.rooms, [r.id]: r } }));
-  const update = async (patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null }) => {
-    if (!hub) return;
+  /** Whether the hub took it. */
+  const update = async (patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null }): Promise<boolean> => {
+    if (!hub) return false;
     setProblem(null);
     try {
       kept(await hub.updateRoom(room.id, patch));
+      return true;
     } catch (e) {
       setProblem(e instanceof HubError && e.status === 409 ? `There’s already a room called ${patch.name ?? name}.` : e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
   const add = async () => {
@@ -77,6 +91,8 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
       const [h = "", ...rest] = k.split("/");
       return { hub: h, agent: rest.join("/") };
     });
+    // Add to the room goes with the picker: the focus goes back to its toggle.
+    addToggle.current?.focus();
     setAdding(null);
     if (more.length) await update({ members: [...room.members, ...more] });
   };
@@ -102,7 +118,8 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
           className="move-field"
           onSubmit={(e) => {
             e.preventDefault();
-            if (renamed) void update({ name: name.trim() });
+            // Save goes once it's saved: the focus stays in the name.
+            if (renamed) void update({ name: name.trim() }).then((ok) => ok && field.current?.focus());
           }}
         >
           <label className="move-legend" htmlFor={`${ids}-name`}>
@@ -145,7 +162,7 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
             <h2 className="move-legend">
               Members · {room.members.length}
             </h2>
-            <button type="button" className="btn btn-ghost btn-sm" aria-expanded={!!adding} onClick={() => setAdding(adding ? null : [])}>
+            <button ref={addToggle} type="button" className="btn btn-ghost btn-sm" aria-expanded={!!adding} onClick={() => setAdding(adding ? null : [])}>
               {adding ? "Cancel" : "Add someone"}
             </button>
           </div>
@@ -161,7 +178,7 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
               </button>
             </div>
           )}
-          <div className="move-opts" role="radiogroup" aria-label="Lead">
+          <div ref={members} className="move-opts" role="radiogroup" aria-label="Lead">
             {room.members.map((m) => {
               const key = memberKey(m);
               const a = author(key);
@@ -221,10 +238,9 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
               <button
                 type="button"
                 className="btn btn-sm"
-                aria-label="Move to group…"
                 onClick={() => askMove({ kind: "room", id: room.id, name: room.name, from: room.group ?? UNGROUPED })}
               >
-                Move…
+                Move to group…
               </button>
             </div>
           </section>

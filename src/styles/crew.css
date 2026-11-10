@@ -384,7 +384,7 @@
 .room-member-name .chip {
   padding: 0 7px;
 }
-.move-opt-main > span {
+.room-settings .move-opt-main > span {
   overflow-wrap: anywhere;
 }
 .room-member-remove:hover {
