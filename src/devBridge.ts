@@ -257,7 +257,7 @@ const fixtures: Fixture[] = [
       { id: "gpt-6-astra", name: "GPT-6 Astra", description: "Most capable — for hard, long-running work", default: false, fast: "2x speed, increased usage" },
       {
         id: "gpt-6.1-terra",
-        name: "GPT-6.1-Terra",
+        name: "GPT-6.1 Terra",
         description: "Fast, efficient model for everyday coding.",
         default: false,
         fast: "1.5x speed",

@@ -419,7 +419,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             <div className="oversee-card">
               <Check
                 label="Always work in real sessions"
-                sub={`${name} does all coding in sessions you can watch, type into and take over, never on its own. It still reads and searches, and helpers only look things up`}
+                sub={`${name} does all coding in sessions you can watch, type into and take over: no edits to code, builds or shell commands of its own. It still reads, searches and keeps its own notes, and helpers only look things up. Workflow coding steps and pilot rounds still run as before`}
                 checked={o.work.preferSessions}
                 onChange={(v) => update((x) => ({ ...x, work: { ...x.work, preferSessions: v } }))}
               />

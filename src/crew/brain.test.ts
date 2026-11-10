@@ -78,8 +78,10 @@ describe("Fast mode", () => {
   });
 
   it("says plainly when the faster tier uses the plan sooner", () => {
-    expect(fastLine("2x speed, increased usage")).toBe("Asks the plan for its faster tier (2x speed, increased usage), which uses up your plan’s limits sooner.");
-    expect(fastLine("1.5x speed")).toBe("Asks the plan for its faster tier (1.5x speed).");
+    expect(fastLine("2x speed, increased usage")).toBe(
+      "Asks for Fast (2x speed, increased usage); the plan may not give it, and where it does, it uses up your plan’s limits sooner.",
+    );
+    expect(fastLine("1.5x speed")).toBe("Asks for Fast (1.5x speed); the plan may not give it.");
   });
 });
 
