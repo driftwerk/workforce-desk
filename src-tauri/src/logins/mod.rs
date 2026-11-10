@@ -69,6 +69,8 @@ enum Running {
         stdin: ChildStdin,
         child: Arc<Mutex<Child>>,
         backend: Backend,
+        /// Names its pidfile inside WSL.
+        attempt: String,
     },
     Chatgpt {
         child: Arc<Mutex<Child>>,
@@ -90,10 +92,16 @@ impl Running {
                 stdin,
                 child,
                 backend,
+                attempt,
             } => {
                 drop(stdin);
                 deadline::kill_tree(&mut child.lock().expect("child"));
-                cli::stop_sign_in(&backend, Plan::Claude.program(), CLAUDE_MARKER);
+                cli::stop_sign_in(
+                    &backend,
+                    Plan::Claude.program(),
+                    CLAUDE_MARKER,
+                    Some(&attempt),
+                );
             }
             Running::Chatgpt { child } => deadline::kill_tree(&mut child.lock().expect("child")),
         }
@@ -317,7 +325,8 @@ impl Logins {
         open: Open,
         id: u64,
     ) -> eyre::Result<Running> {
-        let cli = cli::wsl_sign_in(&backend, Plan::Claude.program(), &["setup-token"])
+        let attempt = format!("{}-{id}", std::process::id());
+        let cli = cli::wsl_sign_in(&backend, Plan::Claude.program(), &["setup-token"], &attempt)
             .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         let mut command = cli.command();
         deadline::isolate(&mut command);
@@ -341,17 +350,18 @@ impl Logins {
             scan::plain(&String::from_utf8_lossy(&out))
         });
         let child = Arc::new(Mutex::new(child));
-        let (waiting, slots, b) = (
+        let (waiting, slots, b, mine) = (
             Arc::clone(&child),
             Arc::clone(&self.running),
             backend.clone(),
+            attempt.clone(),
         );
         std::thread::spawn(move || {
             let read = follow_claude(&mut stdout, &report, Some(&open));
             let done = read.is_ok();
             if done {
                 deadline::kill_tree(&mut waiting.lock().expect("child"));
-                cli::stop_sign_in(&b, Plan::Claude.program(), CLAUDE_MARKER);
+                cli::stop_sign_in(&b, Plan::Claude.program(), CLAUDE_MARKER, Some(&mine));
             }
             // stdout closed: the program has ended or is about to.
             loop {
@@ -372,6 +382,7 @@ impl Logins {
             stdin,
             child,
             backend,
+            attempt,
         })
     }
 
@@ -483,7 +494,7 @@ impl Logins {
             && !wsl_ended
             && let Some(backend) = backend
         {
-            cli::stop_sign_in(backend, Plan::Claude.program(), CLAUDE_MARKER);
+            cli::stop_sign_in(backend, Plan::Claude.program(), CLAUDE_MARKER, None);
         }
     }
 }

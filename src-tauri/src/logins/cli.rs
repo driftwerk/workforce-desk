@@ -110,10 +110,11 @@ pub fn installed(backend: &Backend, program: &str) -> bool {
     }
 }
 
-/// Where a sign-in run inside WSL keeps its Linux process id, so Cancel,
-/// the next attempt and the next Desk can end it.
-fn sign_in_pidfile(w: &Wsl, program: &str) -> String {
-    format!("{}/{program}-sign-in.pid", w.root())
+/// Where one sign-in attempt inside WSL keeps its Linux process id, so
+/// Cancel, the next attempt and the next Desk can end it. Each attempt has
+/// its own, so ending a stale one never ends the one after it.
+fn sign_in_pidfile(w: &Wsl, program: &str, attempt: &str) -> String {
+    format!("{}/{program}-sign-in-{attempt}.pid", w.root())
 }
 
 /// The script that runs `program args…` inside WSL for a sign-in.
@@ -124,10 +125,11 @@ fn sign_in_pidfile(w: &Wsl, program: &str) -> String {
 /// terminal where its cursor is and waits for the answer before it lets
 /// `wsl.exe` start, so a sign-in through one stalled until Desk closed.
 ///
-/// `BROWSER=true` makes the CLI's own attempt to open a browser a no-op:
-/// Desk opens the page on Windows itself. The shell writes its pid (which
-/// `exec` hands to `script`) where [`stop_sign_in`] finds it.
-fn sign_in_script(w: &Wsl, program: &str, args: &[&str]) -> String {
+/// `BROWSER=true` makes the CLI's own attempt to open a browser a no-op
+/// (Claude Code still prints the page, 3 s later): Desk opens the page on
+/// Windows itself. The shell writes its pid (which `exec` hands to
+/// `script`) where [`stop_sign_in`] finds it.
+fn sign_in_script(w: &Wsl, program: &str, args: &[&str], attempt: &str) -> String {
     let words: Vec<String> = std::iter::once(program)
         .chain(args.iter().copied())
         .map(quote)
@@ -143,27 +145,38 @@ fn sign_in_script(w: &Wsl, program: &str, args: &[&str]) -> String {
          exec script -q -e -f -c {inner} /dev/null",
         distro = w.distro.replace(['"', '\\', '$', '`'], ""),
         root = quote(&w.root()),
-        pidfile = quote(&sign_in_pidfile(w, program)),
+        pidfile = quote(&sign_in_pidfile(w, program, attempt)),
         inner = quote(&inner),
     ))
 }
 
-/// The script that ends a sign-in [`sign_in_script`] started, if one is
-/// still running: only the process its pidfile names, and only while that
-/// is still the sign-in (a pid reused since is left alone).
-fn stop_script(w: &Wsl, program: &str, marker: &str) -> String {
+/// The script that ends sign-ins [`sign_in_script`] started that are still
+/// running: `attempt`'s, or with none every one's. Only the processes their
+/// pidfiles name, and only while each is still a sign-in (`marker` in its
+/// command line; a pid reused since is left alone).
+fn stop_script(w: &Wsl, program: &str, marker: &str, attempt: Option<&str>) -> String {
+    let files = match attempt {
+        Some(a) => quote(&sign_in_pidfile(w, program, a)),
+        None => format!(
+            "{}/{}*.pid",
+            quote(&w.root()),
+            quote(&format!("{program}-sign-in-"))
+        ),
+    };
     format!(
-        "f={f}; p=$(cat \"$f\" 2>/dev/null); rm -f \"$f\"; \
-         case \"$p\" in ''|*[!0-9]*) exit 0;; esac; \
-         grep -qaF -- {m} /proc/\"$p\"/cmdline 2>/dev/null || exit 0; \
-         pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; exit 0",
-        f = quote(&sign_in_pidfile(w, program)),
+        "for f in {files}; do [ -e \"$f\" ] || continue; \
+         p=$(cat \"$f\" 2>/dev/null); rm -f \"$f\"; \
+         case \"$p\" in ''|*[!0-9]*) continue;; esac; \
+         grep -qaF -- {m} /proc/\"$p\"/cmdline 2>/dev/null || continue; \
+         pkill -TERM -P \"$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; \
+         done; exit 0",
         m = quote(marker),
     )
 }
 
-/// `program args…` for a sign-in inside WSL; see [`sign_in_script`].
-pub fn wsl_sign_in(backend: &Backend, program: &str, args: &[&str]) -> Result<Cli> {
+/// `program args…` for sign-in `attempt` inside WSL; see
+/// [`sign_in_script`].
+pub fn wsl_sign_in(backend: &Backend, program: &str, args: &[&str], attempt: &str) -> Result<Cli> {
     let Host::Wsl(w) = &backend.host else {
         eyre::bail!("not a WSL backend");
     };
@@ -173,21 +186,22 @@ pub fn wsl_sign_in(backend: &Backend, program: &str, args: &[&str]) -> Result<Cl
     Ok(Cli {
         invocation: backend
             .host
-            .login_invocation(&sign_in_script(w, program, args)),
+            .login_invocation(&sign_in_script(w, program, args, attempt)),
         env: None,
         cwd: None,
     })
 }
 
-/// Ends the Linux side of a sign-in inside WSL that [`wsl_sign_in`]
-/// started (this Desk's, or one a Desk closed earlier left running), so a
-/// stale one can't take the browser's answer. Nothing outside WSL.
-pub fn stop_sign_in(backend: &Backend, program: &str, marker: &str) {
+/// Ends the Linux side of sign-ins inside WSL that [`wsl_sign_in`] started:
+/// `attempt`'s, or with none every one still running (this Desk's, or ones
+/// a Desk closed earlier left behind), so a stale one can't take the
+/// browser's answer. Nothing outside WSL.
+pub fn stop_sign_in(backend: &Backend, program: &str, marker: &str, attempt: Option<&str>) {
     if let Host::Wsl(w) = &backend.host {
         let _ = deadline::succeeds(
             backend
                 .host
-                .login_invocation(&stop_script(w, program, marker))
+                .login_invocation(&stop_script(w, program, marker, attempt))
                 .command(),
             WSL_CHECK,
         );
@@ -355,9 +369,11 @@ mod tests {
         let Host::Wsl(w) = wsl().host else {
             unreachable!()
         };
-        let script = sign_in_script(&w, "claude", &["setup-token"]);
+        let script = sign_in_script(&w, "claude", &["setup-token"], "41-7");
         assert!(script.starts_with("PATH=\"$PATH:$HOME/.local/bin\"; "));
-        assert!(script.contains("echo $$ >'/home/sarah/.local/share/Desk/claude-sign-in.pid'"));
+        assert!(
+            script.contains("echo $$ >'/home/sarah/.local/share/Desk/claude-sign-in-41-7.pid'")
+        );
         assert!(script.contains("BROWSER=true; export BROWSER;"));
         assert!(script.contains(
             r#"exec script -q -e -f -c 'stty cols 1000 rows 50 2>/dev/null; exec '\''claude'\'' '\''setup-token'\''' /dev/null"#
@@ -377,8 +393,16 @@ mod tests {
         let Host::Wsl(w) = wsl().host else {
             unreachable!()
         };
-        let stop = stop_script(&w, "claude", "setup-token");
-        assert!(stop.starts_with("f='/home/sarah/.local/share/Desk/claude-sign-in.pid';"));
+        let one = stop_script(&w, "claude", "setup-token", Some("41-7"));
+        assert!(
+            one.starts_with("for f in '/home/sarah/.local/share/Desk/claude-sign-in-41-7.pid'; do")
+        );
+        let every = stop_script(&w, "claude", "setup-token", None);
+        assert!(
+            every
+                .starts_with("for f in '/home/sarah/.local/share/Desk'/'claude-sign-in-'*.pid; do")
+        );
+        let stop = one;
         assert!(stop.contains(r#"grep -qaF -- 'setup-token' /proc/"$p"/cmdline"#));
         assert!(stop.contains(r#"pkill -TERM -P "$p""#));
     }
@@ -453,7 +477,7 @@ mod tests {
                 return;
             }
             let (_dir, w) = home(FAKE);
-            let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"]))
+            let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"], "1-0"))
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -463,7 +487,8 @@ mod tests {
             let mut stdout = child.stdout.take().unwrap();
             let text = read_until(&mut stdout, "Paste code");
             assert!(text.contains("cols=1000 browser=true"), "{text}");
-            let pid = std::fs::read_to_string(format!("{}/claude-sign-in.pid", w.root())).unwrap();
+            let pid =
+                std::fs::read_to_string(format!("{}/claude-sign-in-1-0.pid", w.root())).unwrap();
             assert_eq!(pid.trim(), child.id().to_string());
             stdin.write_all(b"abc\r").unwrap();
             stdin.flush().unwrap();
@@ -473,34 +498,63 @@ mod tests {
         }
 
         #[test]
-        fn a_sign_in_left_waiting_is_ended_through_its_pidfile() {
+        fn ending_one_attempt_leaves_the_next_and_a_sweep_ends_every_one() {
             if !has_script() {
                 eprintln!("no util-linux script here; skipped");
                 return;
             }
             let (_dir, w) = home(FAKE);
-            let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"]))
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-                .unwrap();
-            let mut stdout = child.stdout.take().unwrap();
-            read_until(&mut stdout, "Paste code");
-            // A pidfile naming something else is left alone.
-            let pidfile = format!("{}/claude-sign-in.pid", w.root());
-            let real = std::fs::read_to_string(&pidfile).unwrap();
-            std::fs::write(&pidfile, "1\n").unwrap();
-            let stop = stop_script(&w, "claude", "setup-token");
-            assert!(sh(&w, &stop).status().unwrap().success());
+            let waiting = |attempt: &str| {
+                let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"], attempt))
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap();
+                let mut stdout = child.stdout.take().unwrap();
+                read_until(&mut stdout, "Paste code");
+                (child, stdout)
+            };
+            let stop = |attempt: Option<&str>| {
+                assert!(
+                    sh(&w, &stop_script(&w, "claude", "setup-token", attempt))
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            };
+            let ended = |child: &mut std::process::Child| {
+                let start = Instant::now();
+                while child.try_wait().unwrap().is_none() {
+                    if start.elapsed() > Duration::from_secs(10) {
+                        return false;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                true
+            };
+            let (mut a, _a_out) = waiting("1-1");
+            let (mut b, _b_out) = waiting("1-2");
+            // A pidfile naming something that isn't a sign-in is left alone.
+            let other = format!("{}/claude-sign-in-9-9.pid", w.root());
+            std::fs::write(&other, "1\n").unwrap();
+            stop(Some("9-9"));
+            stop(Some("1-1"));
+            assert!(ended(&mut a));
             std::thread::sleep(Duration::from_millis(300));
-            assert!(child.try_wait().unwrap().is_none());
-            std::fs::write(&pidfile, real).unwrap();
-            let start = Instant::now();
-            assert!(sh(&w, &stop).status().unwrap().success());
-            let _ = child.wait();
-            assert!(start.elapsed() < Duration::from_secs(10));
-            assert!(!std::path::Path::new(&pidfile).exists());
+            assert!(
+                b.try_wait().unwrap().is_none(),
+                "the next attempt was ended too"
+            );
+            stop(None);
+            assert!(ended(&mut b));
+            assert!(
+                std::fs::read_dir(w.root()).unwrap().all(|e| !e
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".pid"))
+            );
         }
     }
 
