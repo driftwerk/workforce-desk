@@ -18,6 +18,7 @@ import { ImageBudget } from "../shell/RemoteImage";
 import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
+import { commandMarkdown } from "../chat/commands";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -101,6 +102,8 @@ export const Message = memo(function Message({
   answered,
   chips,
   onSubmitForm,
+  onRetry,
+  onRemove,
 }: {
   message: ChatMessage;
   author: string;
@@ -125,6 +128,10 @@ export const Message = memo(function Message({
   chips?: ReactNode;
   /** Resolves true once the answer is on its way; false unlocks the form. */
   onSubmitForm: (summary: string, values: Record<string, unknown>) => boolean | Promise<boolean>;
+  /** Sends a message that wasn't delivered again. */
+  onRetry?: (id: string) => void;
+  /** Takes a message that wasn't delivered away. */
+  onRemove?: (id: string) => void;
 }) {
   const host = useMemo<RichHost>(
     () => ({
@@ -140,8 +147,12 @@ export const Message = memo(function Message({
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
   const badge = message.delivery && DELIVERY_BADGES[message.delivery];
   const cardText = message.role === "assistant" && !!message.desk?.plan && isCardText(message.content);
+  const command = !!message.command && !relayed;
   return (
-    <article className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}`} data-message-id={message.id}>
+    <article
+      className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}${command ? " msg-command" : ""}${message.undelivered ? " msg-undelivered" : ""}`}
+      data-message-id={message.id}
+    >
       {you ? <YouMark hub={youOn} /> : fromOverseer || !authorKey ? <Mark name={fromOverseer ? relayed.overseer : author} /> : <AgentMark agent={authorKey} name={author} />}
       <div className="msg-body">
         <span className="msg-head">
@@ -154,6 +165,13 @@ export const Message = memo(function Message({
             </>
           )}
           {badge && <span className="chip msg-delivery">{badge}</span>}{" "}
+          {command && (
+            <>
+              <span className="chip msg-command-chip" title="The hub answered this itself. It isn’t kept in the conversation, so it shows only here.">
+                {you ? "Command" : "Only here"}
+              </span>{" "}
+            </>
+          )}
           <span className="faint small" title={fullTime(message.at)}>
             {home ? `${home} · ` : ""}
             {time(message.at)}
@@ -170,6 +188,10 @@ export const Message = memo(function Message({
           </details>
         ) : message.status === "error" ? (
           <TurnError raw={message.content} />
+        ) : message.role !== "assistant" && command ? (
+          <p className="msg-text">
+            <code className="msg-command-text">{message.content.trim()}</code>
+          </p>
         ) : message.role !== "assistant" ? (
           <p className="msg-text">
             <Linked text={relayed?.text ?? message.content} />
@@ -178,7 +200,7 @@ export const Message = memo(function Message({
           <RichHostProvider host={host}>
             <div className="msg-text rich">
               <ImageBudget>
-                <RichMarkdown text={message.content} streaming={message.status === "streaming"} />
+                <RichMarkdown text={command ? commandMarkdown(message.content) : message.content} streaming={message.status === "streaming"} />
               </ImageBudget>
             </div>
           </RichHostProvider>
@@ -192,6 +214,21 @@ export const Message = memo(function Message({
           </details>
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
+        {message.undelivered && you && (
+          <p className="msg-undelivered-note small" role="status">
+            <span className="state-blocked">Not delivered</span>
+            {onRetry && (
+              <button type="button" className="link small" onClick={() => onRetry(message.id)}>
+                Retry
+              </button>
+            )}
+            {onRemove && (
+              <button type="button" className="link small" onClick={() => onRemove(message.id)}>
+                Remove
+              </button>
+            )}
+          </p>
+        )}
         {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={cardText ? message.content : undefined} />}
         {message.delivery === "approval" && message.requestId && origin && (
           <RoutedApproval hubId={origin.hub} requestId={message.requestId} />

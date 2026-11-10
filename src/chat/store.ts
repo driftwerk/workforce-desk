@@ -80,6 +80,11 @@ interface ChatStore {
    *  copy shows give way to it. */
   refreshHistory: (key: string) => Promise<void>;
   send: (key: string, content: string, opts?: SendOptions) => boolean;
+  /** Sends a message that wasn't delivered again, in its place's stead;
+   *  false if it couldn't be sent. */
+  retry: (key: string, id: string) => boolean;
+  /** Takes away a message that wasn't delivered. */
+  discard: (key: string, id: string) => void;
   /** Says `content` to an agent without opening their DM (connecting first
    *  if need be); false if it couldn't be sent. */
   sendTo: (key: string, content: string) => Promise<boolean>;
@@ -350,12 +355,15 @@ const ensure = (key: string): boolean => {
     void useChat
       .getState()
       .refreshHistory(key)
-      .finally(() =>
+      .finally(() => {
+        // Its turn over and read, a message the hub kept no copy of (a
+        // refusal, a command on a hub that doesn't say so) is settled here.
+        live.get(key)?.unkeep(settled.flatMap((t) => (t.clientId ? [t.clientId] : [])));
         settled.forEach((t) => {
           settling.delete(t.ref);
           live.get(key)?.forget(t.ref);
-        }),
-      );
+        });
+      });
   });
   convo.onQueued = (ticket, outcome) => settleQueued(key, ticket, outcome);
   live.set(key, convo);
@@ -563,6 +571,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,
+  retry: (key, id) => {
+    const m = get().conversations[key]?.messages.find((x) => x.id === id && x.undelivered);
+    if (!m || !get().send(key, m.content, m.attachments?.length ? { attachments: m.attachments } : {})) return false;
+    live.get(key)?.remove(id);
+    return true;
+  },
+  discard: (key, id) => live.get(key)?.remove(id),
   answerPrompt: (key, requestId, choice) => live.get(key)?.answer(requestId, choice) ?? false,
   sendTo: (key, content) =>
     new Promise((resolve) => {
