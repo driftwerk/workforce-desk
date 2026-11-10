@@ -227,7 +227,7 @@ function WorksIn({ agent }: { agent: Agent }) {
         </button>
       </div>
       <p className="small faint">
-        Folders or repos {agent.name} reads, changes and runs in beside its own, at every level. Coding work starts in the first. Deleting there asks you first.
+        Folders or repos already cloned that {agent.name} reads and changes beside its own, at every level, and runs commands in at Full access. Coding work starts in the first. Deleting there asks you first.
       </p>
       {folders === null ? (
         <p className="small faint">Reading…</p>
