@@ -1,4 +1,4 @@
-import type { Agent, DeskLine, HubAccount } from "../chat/types";
+import type { Agent, DeskLine, DeskMember, HubAccount } from "../chat/types";
 import type { Room, RoomMessage } from "../hub/types";
 import { resolveMentions } from "./mentions";
 import { byTime } from "./time";
@@ -56,34 +56,72 @@ const clip = (text: string, max: number): string => [...text.trim()].slice(0, ma
 
 const utf8 = new TextEncoder();
 
-/** The thread lines a member is asked with: what was said in the thread
- *  (or the main timeline) since the member last spoke there, and the
- *  thread's first message when that's further back, newest kept within
- *  the bounds. `exclude` is the message being asked; `nameOf` says who
- *  wrote a message. */
+/** One line of a name, whoever chose it: no line breaks or control
+ *  characters to start a line of its own, clipped. */
+export const defang = (name: string, max = NAME_CHARS): string =>
+  clip(name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\s]+/g, " "), max);
+
+/** How many members a room turn names. */
+export const ROSTER_MAX = 24;
+
+/** A room's members as a turn names them, each name made safe. */
+export const rosterOf = (members: readonly DeskMember[]): DeskMember[] =>
+  members.slice(0, ROSTER_MAX).map((m) => ({ name: defang(m.name), hub: defang(m.hub), lead: m.lead }));
+
+/** The room's members, in Desk's words, as one line for a hub that takes no
+ *  roster: who is there, that @name reaches them, and whose the room is. */
+export const rosterLine = (members: readonly DeskMember[]): DeskLine => ({
+  from: "Desk",
+  text: clip(
+    `In this room: ${rosterOf(members)
+      .map((m) => `${m.name} (${m.hub}${m.lead ? ", lead" : ""})`)
+      .join(", ")}. @name reaches any of them; the person decides who is in the room.`,
+    LINE_CHARS,
+  ),
+});
+
+const sizeOf = (l: DeskLine) => utf8.encode(l.from).length + 2 + utf8.encode(l.text).length;
+
+/** The lines a member is asked with: the newest said in the thread (or the
+ *  main timeline), whoever said them, other agents and the member included,
+ *  and the thread's first message when that's further back, within the
+ *  hub's bounds. A member keeps no copy of these (its conversation keeps
+ *  only what it was asked), so each ask carries them again, never only
+ *  those since it last spoke: an answer it gave alongside another's would
+ *  hide the other's from it for good. `exclude` is the message being asked;
+ *  `nameOf` says who wrote a message; `last` (the roster, on a hub that
+ *  takes none) goes after them, within the same bounds. */
 export const contextFor = (
   timeline: readonly RoomMessage[],
-  member: string,
   threadId: string | null,
   exclude: string | null,
   nameOf: (author: string) => string,
+  last?: DeskLine,
 ): DeskLine[] => {
   const here = timeline
-    .filter((m) => (m.threadId ?? null) === threadId && m.id !== exclude)
+    .filter((m) => (m.threadId ?? null) === threadId && m.id !== exclude && m.id !== threadId)
     .sort(byTime);
-  const last = here.map((m) => m.author).lastIndexOf(member);
-  const window = here.slice(last + 1);
   const root = threadId ? timeline.find((m) => m.id === threadId && m.id !== exclude) : undefined;
   const line = (m: RoomMessage): DeskLine => ({ from: clip(nameOf(m.author), NAME_CHARS), text: clip(m.content, LINE_CHARS) });
-  const size = (l: DeskLine) => utf8.encode(l.from).length + 2 + utf8.encode(l.text).length;
-  const lines = window.map(line).filter((l) => l.text);
+  const lines = here.map(line).filter((l) => l.text);
   const first = root && line(root).text ? line(root) : null;
-  const budget = { lines: CONTEXT_LINES - (first ? 1 : 0), bytes: CONTEXT_BYTES - (first ? size(first) : 0) };
+  const fixed = [first, last].filter((l): l is DeskLine => !!l);
+  const budget = { lines: CONTEXT_LINES - fixed.length, bytes: CONTEXT_BYTES - fixed.reduce((n, l) => n + sizeOf(l), 0) };
   const kept: DeskLine[] = [];
   for (const l of [...lines].reverse()) {
-    if (kept.length >= budget.lines || budget.bytes < size(l)) break;
-    budget.bytes -= size(l);
+    if (kept.length >= budget.lines || budget.bytes < sizeOf(l)) break;
+    budget.bytes -= sizeOf(l);
     kept.unshift(l);
   }
-  return first ? [first, ...kept] : kept;
+  return [...(first ? [first] : []), ...kept, ...(last ? [last] : [])];
 };
+
+/** How many of the room's lines go with a message to a hub that takes no
+ *  structured turns: its conversation keeps each message whole, lines and
+ *  all, so only a few. */
+export const LEGACY_LINES = 6;
+
+/** What a hub that takes no structured turns is sent: the room's newest
+ *  lines and its members, each as the room says it, then the message. */
+export const legacyAsk = (room: string, from: string, text: string, lines: readonly DeskLine[]): string =>
+  [...lines.slice(-LEGACY_LINES).map((l) => relay(room, l.from, l.text)), relay(room, from, text)].join("\n");

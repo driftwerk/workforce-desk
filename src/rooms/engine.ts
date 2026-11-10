@@ -1,7 +1,7 @@
 import { BUSY, Conversation, type ConversationState, type Turn } from "../chat/conversation";
 import { readConversation } from "../chat/history";
 import { useChat } from "../chat/store";
-import { FEATURES, type Attachment, type DeskSpeaker, type DeskTurn, type HubAccount, type PermissionChoice } from "../chat/types";
+import { FEATURES, type Attachment, type DeskMember, type DeskSpeaker, type DeskTurn, type HubAccount, type PermissionChoice } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
 import { useDesk, type RoomDraft } from "../hub/store";
 import type { Room, RoomMemberRef, RoomMessage } from "../hub/types";
@@ -12,7 +12,7 @@ import { uploadAll } from "../attachments/upload";
 import { backoff } from "../hub/socket";
 import { resolveMentions } from "./mentions";
 import { ROOMS_PREFIX } from "./order";
-import { addressees, contextFor, MAX_HOPS, memberKey, memberOf, relay, roomChannel } from "./routing";
+import { addressees, contextFor, legacyAsk, MAX_HOPS, memberKey, memberOf, rosterLine, rosterOf, roomChannel } from "./routing";
 import { newestRun, ofPlace, placeKey } from "./window";
 import { firstLine, notifyPlace, QUICK_MS, type Notice } from "../unread/notices";
 
@@ -81,6 +81,15 @@ const hubFor = (id: string): HubAccount | undefined => useChat.getState().hubs.f
 
 const displayName = (m: RoomMemberRef): string =>
   useChat.getState().roster.find((a) => a.hubId === m.hub && a.id === m.agent)?.name ?? m.agent;
+
+/** A room's members as its turns name them: each by name and workspace,
+ *  and which leads. */
+const membersOf = (room: Room): DeskMember[] =>
+  room.members.map((m) => ({
+    name: displayName(m),
+    hub: hubFor(m.hub)?.label ?? m.hub,
+    lead: room.defaultMember === memberKey(m),
+  }));
 
 /** Who wrote a room message, as the members are told it. */
 const nameOf = (author: string): string => {
@@ -219,15 +228,21 @@ function send(a: Ask) {
     const here = useDesk.getState().rooms[a.roomId];
     const line = here && lineFor(here, a.member);
     if (!here || !line) return gone();
+    // Who is in the room: the hub's own words where it takes them, else a
+    // line of the room's from Desk.
+    const members = membersOf(here);
+    const named = !!line.convo.current.features?.has(FEATURES.roster);
+    const context = contextFor(placeSoFar(here.id, a.threadId), a.threadId, a.message, nameOf, named ? undefined : rosterLine(members));
     const turn: DeskTurn = {
       place: { kind: "room", room: here.id, name: here.name, ...(a.threadId ? { thread: a.threadId } : {}) },
       speaker: a.speaker,
       hop: a.hop,
-      context: contextFor(placeSoFar(here.id, a.threadId), memberKey(a.member), a.threadId, a.message, nameOf),
+      context,
       message: a.message,
       spoken: false,
+      ...(named ? { members: rosterOf(members) } : {}),
     };
-    const sent = line.convo.send(a.text, { turn, legacy: relay(here.slug, from, a.text), attachments: a.attachments });
+    const sent = line.convo.send(a.text, { turn, legacy: legacyAsk(here.slug, from, a.text, context), attachments: a.attachments });
     if (sent) {
       a.state = "sent";
       a.sentAt = Date.now();

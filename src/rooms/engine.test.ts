@@ -60,6 +60,9 @@ const json = (body: unknown, status = 200) =>
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 /** Opens the member's conversation as a hub offering `features` would. */
+/** The room's members, as a hub that takes no roster is told them. */
+const ROSTER_LINE = { from: "Desk", text: "In this room: Allan (Driftwerk, lead), Scout (Local). @name reaches any of them; the person decides who is in the room." };
+
 const connect = async (agent: string, features: string[] = ALL) => {
   await vi.waitFor(() => expect(FakeSocket.find("/ws", agent, CHANNEL)).toBeDefined());
   const s = FakeSocket.find("/ws", agent, CHANNEL)!;
@@ -172,11 +175,27 @@ describe("asking a room's members", () => {
         context: [
           { from: "Kingsley", text: "Cut 0.9 today?" },
           { from: "Scout (agent)", text: "CI is green" },
+          ROSTER_LINE,
         ],
       },
     });
     expect(typeof chat.turn_ref).toBe("string");
     expect(drafts()).toMatchObject([{ member: "dw/allan", threadId: "root", state: "live" }]);
+  });
+
+  it("names the room's members to a hub that takes them, in place of Desk's line", async () => {
+    useDesk.setState({
+      timelines: { [ROOM_ID]: [{ id: "r1", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "CI is green", hop: 0, createdAt: "2" }] },
+    });
+    await say(room, "@allan anything blocking?", null);
+    const allan = await connect("allan", [...ALL, "desk.roster"]);
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    const desk = allan.chats[0]!.desk as { context: unknown[]; members: unknown[] };
+    expect(desk.members).toEqual([
+      { name: "Allan", hub: "Driftwerk", lead: true },
+      { name: "Scout", hub: "Local", lead: false },
+    ]);
+    expect(desk.context).toEqual([{ from: "Scout (agent)", text: "CI is green" }]);
   });
 
   it("tells an ask only the newest unbroken run of its place, never across a gap", async () => {
@@ -193,7 +212,7 @@ describe("asking a room's members", () => {
     await say(room, "@allan which?", null);
     const allan = await connect("allan");
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
-    expect((allan.chats[0]!.desk as { context: unknown[] }).context).toEqual([{ from: "Scout (agent)", text: "After it" }]);
+    expect((allan.chats[0]!.desk as { context: unknown[] }).context).toEqual([{ from: "Scout (agent)", text: "After it" }, ROSTER_LINE]);
   });
 
   it("answers a form in a thread to the agent that posted it, there, and its answer lands in the thread", async () => {
@@ -299,7 +318,7 @@ describe("asking a room's members", () => {
     await say(room, "what is left?", null);
     const allan = await connect("allan", []);
     await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
-    expect(allan.chats[0]).toMatchObject({ content: "[#release] you: what is left?" });
+    expect(allan.chats[0]).toMatchObject({ content: `[#release] Desk: ${ROSTER_LINE.text}\n[#release] you: what is left?` });
     expect(allan.chats[0]!.desk).toBeUndefined();
     allan.receive({ type: "message", content: "Two PRs." });
     await vi.waitFor(() => expect(posts).toHaveLength(2));

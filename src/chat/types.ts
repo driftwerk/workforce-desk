@@ -166,6 +166,10 @@ export const FEATURES = {
    *  each kept row's place in the archive: a live message is known by its
    *  id alone. A hub without it is matched by words (./legacy.ts). */
   clientIds: "desk.client_ids",
+  /** A room turn may name the room's members (`members`), which the hub
+   *  tells the agent in its own words. A hub without it is told them as a
+   *  line of the room's, from Desk. */
+  roster: "desk.roster",
 } as const;
 
 export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "plan" | "other";
@@ -196,6 +200,17 @@ export interface DeskTurn {
   /** Said rather than typed: how the answer comes back, and the voice that
    *  reads it when it's heard. The hub turns this into how the agent talks. */
   voice?: DeskVoice;
+  /** Who is in the room, for a hub that takes them (`desk.roster`). */
+  members?: DeskMember[];
+}
+
+/** A room's member, as a room turn names them. */
+export interface DeskMember {
+  name: string;
+  /** The workspace it is on, by the name Desk shows. */
+  hub: string;
+  /** The room's lead: who answers what names no one. */
+  lead: boolean;
 }
 
 /** How a spoken turn is answered: aloud, in `speech` (the voice Desk will
