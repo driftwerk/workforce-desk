@@ -45,7 +45,7 @@ import { DmVoiceBar, DmVoiceControls } from "../voice/DmVoice";
 import { useDmPresence } from "../voice/dms";
 import { after } from "./time";
 
-const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act" };
+const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act", full: "Act fully" };
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 

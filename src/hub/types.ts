@@ -898,7 +898,9 @@ export interface Overview {
   items: OverviewItem[];
 }
 
-export type OversightLevel = "watch" | "suggest" | "act";
+/** `full` is Act fully: Act, and shipping in the repos the person names
+ *  (an older hub knows only the first three). */
+export type OversightLevel = "watch" | "suggest" | "act" | "full";
 
 /** The agent overseeing the crew, if any. */
 export interface Manager {
@@ -1043,6 +1045,9 @@ export interface ChargeView {
   since: string;
   /** Set once it was let go: it no longer runs it. */
   releasedAt: string | null;
+  /** How long, in minutes, the person's last input keeps the wheel theirs
+   *  (unpinned); an older hub doesn't say. */
+  holdMinutes?: number;
 }
 
 // ── The floor: open needs, work, today's lanes, plan usage ───────────────

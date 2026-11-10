@@ -914,6 +914,75 @@ button.fsec-tile-head {
 .oversee-cap .oversee-num {
   vertical-align: middle;
 }
+/* Four levels, Act fully the fourth: two by two. */
+.oversee-levels-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* A row holding a list (Act fully's repos, its workflows) and Add. */
+.oversee-list {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.oversee-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.oversee-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 8px;
+  background: var(--sunken);
+  min-width: 0;
+}
+.oversee-items .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.oversee-add .field-row input {
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.oversee-add .oversee-problem {
+  text-align: left;
+}
+/* What always stays with the person, Act fully or not. */
+.oversee-never {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.oversee-never b {
+  color: var(--text);
+  font-weight: 600;
+}
+.oversee-never ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 18px;
+}
+@media (max-width: 760px) {
+  .oversee-levels-4,
+  .oversee-never ul {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .dm-question {
   flex-direction: column;
   align-items: stretch;

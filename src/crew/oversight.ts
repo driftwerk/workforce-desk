@@ -19,6 +19,9 @@ export interface Oversight {
     /** A session's message to it on Desk's line gets a turn of its own;
      *  off, sessions' questions go to you. */
     onMessage: boolean;
+    /** How long your last keystroke or message in a session it runs keeps
+     *  that session yours (`hold_minutes`). */
+    holdMinutes: number;
   };
   /** Local times like "09:00"; "" is off. */
   summaries: { morning: string; evening: string };
@@ -44,6 +47,18 @@ export interface Oversight {
   };
   /** How it runs sessions for you (`[oversight.work]`). */
   work: Work;
+  /** `[oversight.full]`: where, and on what budget, Act fully ships. */
+  full: Full;
+}
+
+/** Act fully's repos, workflows and daily budget. */
+export interface Full {
+  /** owner/name (GitHub's), a repo's address, or a local folder. */
+  repos: string[];
+  /** Plain workflow file names it may run (`deploy.yml`). */
+  workflows: string[];
+  /** Dollars a day; null until set. */
+  budgetUsdPerDay: number | null;
 }
 
 /** Which sessions it takes on: only those it starts and you hand it, or
@@ -67,13 +82,20 @@ export interface Work {
 export const MAX_PARALLEL = 12;
 /** The most turns an hour it may spend on its sessions, as the hub allows. */
 export const MAX_WORK_TURNS_PER_HOUR = 600;
+/** How long your typing keeps a session yours, by default and at most. */
+export const HOLD_MINUTES = 2;
+export const MAX_HOLD_MINUTES = 60;
+/** Act fully's limits, as the hub takes them. */
+export const MAX_FULL_REPOS = 50;
+export const MAX_FULL_WORKFLOWS = 20;
+export const MAX_FULL_BUDGET_USD = 10_000;
 
 export const DEFAULT_OVERSIGHT: Oversight = {
   enabled: false,
   group: null,
   level: "watch",
   track: { crew: true, deskSessions: true, externalSessions: true, workspaces: false },
-  wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true, onMessage: true },
+  wake: { waitingMinutes: 5, quietMinutes: 30, onFinish: true, onFailure: true, onMessage: true, holdMinutes: HOLD_MINUTES },
   summaries: { morning: "09:00", evening: "" },
   maxCheckinsPerHour: 6,
   maxCheckinsPerDay: 100,
@@ -88,9 +110,10 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     answerSessions: true,
   },
   work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
+  full: { repos: [], workflows: [], budgetUsdPerDay: null },
 };
 
-const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act"];
+const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act", "full"];
 
 type Doc = Record<string, unknown>;
 
@@ -133,6 +156,9 @@ export const oversightOf = (source: string): Oversight => {
   const summaries = table(o.summaries);
   const act = table(o.act);
   const work = table(o.work);
+  const full = table(o.full);
+  const strings = (v: unknown, ok: (s: string) => boolean): string[] =>
+    Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(ok))] : [];
   return {
     enabled: bool(o.enabled, d.enabled),
     group: typeof o.group === "string" && o.group.trim() ? o.group : d.group,
@@ -149,6 +175,7 @@ export const oversightOf = (source: string): Oversight => {
       onFinish: bool(wake.on_finish, d.wake.onFinish),
       onFailure: bool(wake.on_failure, d.wake.onFailure),
       onMessage: bool(wake.on_message, d.wake.onMessage),
+      holdMinutes: within(wake.hold_minutes, 1, MAX_HOLD_MINUTES, d.wake.holdMinutes),
     },
     summaries: { morning: time(summaries.morning, d.summaries.morning), evening: time(summaries.evening, d.summaries.evening) },
     maxCheckinsPerHour: count(o.max_checkins_per_hour, d.maxCheckinsPerHour) || d.maxCheckinsPerHour,
@@ -169,6 +196,14 @@ export const oversightOf = (source: string): Oversight => {
       takeOn: work.take_on === "handed" || work.take_on === "all" ? work.take_on : d.work.takeOn,
       engine: typeof work.engine === "string" && ENGINE_WORD.test(work.engine.trim()) ? work.engine.trim() : d.work.engine,
       maxTurnsPerHour: within(work.max_turns_per_hour, 1, MAX_WORK_TURNS_PER_HOUR, d.work.maxTurnsPerHour),
+    },
+    full: {
+      repos: strings(full.repos, (r) => r !== "" && r.length <= 500),
+      workflows: strings(full.workflows, (w) => !("problem" in parseWorkflow(w))),
+      budgetUsdPerDay:
+        typeof full.budget_usd_per_day === "number" && full.budget_usd_per_day > 0 && full.budget_usd_per_day <= MAX_FULL_BUDGET_USD
+          ? full.budget_usd_per_day
+          : null,
     },
   };
 };
@@ -198,6 +233,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       on_finish: o.wake.onFinish,
       on_failure: o.wake.onFailure,
       on_message: o.wake.onMessage,
+      hold_minutes: Math.min(MAX_HOLD_MINUTES, Math.max(1, Math.round(o.wake.holdMinutes))),
     },
     summaries: { ...table(was.summaries), morning: o.summaries.morning, evening: o.summaries.evening },
     max_checkins_per_hour: o.maxCheckinsPerHour,
@@ -222,6 +258,18 @@ export const withOversight = (source: string, o: Oversight): string => {
       max_turns_per_hour: Math.min(MAX_WORK_TURNS_PER_HOUR, Math.max(1, Math.round(o.work.maxTurnsPerHour))),
     },
   };
+  // Act fully's table: written once anything of it is set, kept as it is
+  // otherwise (a budget never set stays absent).
+  const { budget_usd_per_day: _budget, ...wasFull } = table(was.full);
+  const anyFull = o.full.repos.length > 0 || o.full.workflows.length > 0 || o.full.budgetUsdPerDay !== null || "full" in was;
+  if (anyFull) {
+    (doc.oversight as Doc).full = {
+      ...wasFull,
+      repos: o.full.repos,
+      workflows: o.full.workflows,
+      ...(o.full.budgetUsdPerDay !== null ? { budget_usd_per_day: o.full.budgetUsdPerDay } : {}),
+    };
+  }
   return stringify(doc) + "\n";
 };
 
@@ -263,6 +311,58 @@ export const parseParallel = (typed: string): { value: number } | { problem: str
     return { problem: `How many sessions it may run at once must be a whole number from 1 to ${MAX_PARALLEL}.` };
   return { value: Number(t) };
 };
+
+/** How long your typing keeps a session yours, as typed: 1 to 60 minutes,
+ *  or why not (the hub's words). */
+export const parseHold = (typed: string): { value: number } | { problem: string } => {
+  const t = typed.trim();
+  if (!/^\d+$/.test(t) || Number(t) < 1 || Number(t) > MAX_HOLD_MINUTES)
+    return { problem: `How long your typing in a session keeps it yours must be a whole number of minutes from 1 to ${MAX_HOLD_MINUTES}.` };
+  return { value: Number(t) };
+};
+
+/** A daily budget as typed ("25", "7.50"): dollars above 0, up to the
+ *  hub's most, or why not (the hub's words). */
+export const parseBudget = (typed: string): { value: number } | { problem: string } => {
+  const t = typed.trim().replace(/^\$/, "");
+  const n = /^\d+(\.\d{1,2})?$/.test(t) ? Number(t) : NaN;
+  if (!(n > 0) || n > MAX_FULL_BUDGET_USD)
+    return { problem: `Its daily budget must be an amount in dollars above 0 and up to ${MAX_FULL_BUDGET_USD}.` };
+  return { value: n };
+};
+
+/** A repo as typed: owner/name (GitHub's), a repo's address
+ *  (`git@host:owner/name.git`, `https://host/owner/name`), or a local
+ *  folder (`~/dev/acme-web`, `/Users/…`); or why not. */
+export const parseRepo = (typed: string, have: string[] = []): { value: string } | { problem: string } => {
+  const t = typed.trim();
+  const ownerName = /^[\w.-]+\/[\w.-]+$/;
+  const address = /^(?:[a-z][a-z0-9+.-]*:\/\/[^\s/]+\/|[\w.-]+@[\w.-]+:|[\w-]+(?:\.[\w-]+)+\/)[\w.-]+\/[\w./-]+$/i;
+  const folder = /^(?:~\/|\/)\S/;
+  if (!t || t.length > 500 || !(ownerName.test(t) || address.test(t) || folder.test(t)))
+    return { problem: "Name a repo as owner/name, its address, or a folder like ~/dev/acme-web." };
+  if (have.includes(t)) return { problem: "That repo is already named." };
+  if (have.length >= MAX_FULL_REPOS) return { problem: `Up to ${MAX_FULL_REPOS} repos.` };
+  return { value: t };
+};
+
+/** A workflow as typed: a plain file name like deploy.yml, as the hub
+ *  takes it (no folder, not a number), or why not (the hub's words). */
+export const parseWorkflow = (typed: string, have: string[] = []): { value: string } | { problem: string } => {
+  const t = typed.trim();
+  const stem = /^(.+)\.ya?ml$/.exec(t)?.[1];
+  const ok = t.length <= 200 && /^[A-Za-z0-9._-]+$/.test(t) && stem !== undefined && !stem.startsWith(".") && !/^\d+$/.test(stem);
+  if (!ok) return { problem: `The workflows it may run must be a list of up to ${MAX_FULL_WORKFLOWS} file names like deploy.yml.` };
+  if (have.includes(t)) return { problem: "That workflow is already named." };
+  if (have.length >= MAX_FULL_WORKFLOWS) return { problem: `Up to ${MAX_FULL_WORKFLOWS} workflows.` };
+  return { value: t };
+};
+
+/** What Act fully still needs before it's in force: repos, a budget. */
+export const fullMissing = (o: Oversight): ("repos" | "budget")[] => [
+  ...(o.full.repos.length === 0 ? (["repos"] as const) : []),
+  ...(o.full.budgetUsdPerDay === null ? (["budget"] as const) : []),
+];
 
 /** Writes `change` of the agent's oversight into its config as it is now
  *  (read fresh, so nothing else in it is lost); answers with the config as

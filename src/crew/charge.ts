@@ -13,9 +13,15 @@ export interface Boss {
   level: OversightLevel | null;
 }
 
-/** How long the person's wheel lasts with no input from them and the
- *  session idle, as the hub counts it. */
-export const QUIET_MINUTES = 10;
+/** How long the person's wheel lasts after their last input, as the hub
+ *  counts it when it doesn't say (`ChargeView.holdMinutes`). */
+export const HOLD_MINUTES = 2;
+
+/** "2 quiet minutes", "1 quiet minute": how long the hold lasts. */
+export const quietFor = (c: ChargeView): string => {
+  const n = c.holdMinutes ?? HOLD_MINUTES;
+  return n === 1 ? "1 quiet minute" : `${n} quiet minutes`;
+};
 
 /** What a boss is called: its name, or, where Desk doesn't know it,
  *  "Your overseer" starting a sentence and "your overseer" within one. */
@@ -39,7 +45,7 @@ export const wheelText = (c: ChargeView): string => {
     case "boss":
       return `${called(c.bossName, true)} runs this session. Typing in it, prompting it or writing to it makes you the driver.`;
     case "person":
-      return `${called(c.bossName, true)}’s messages to it wait while you drive. ${called(c.bossName, true)} has it back after ${QUIET_MINUTES} quiet minutes.`;
+      return `${called(c.bossName, true)}’s messages to it wait while you drive. ${called(c.bossName, true)} has it back after ${quietFor(c)}.`;
     case "person_pinned":
       return `${called(c.bossName, true)}’s messages to it wait until you hand it back.`;
   }
@@ -80,8 +86,7 @@ export interface ChargeChoice {
  *  Hand back while you drive, and Release. */
 export const chargeChoices = (s: Session, c: ChargeView | null | undefined, boss: Boss | null): ChargeChoice[] => {
   if (c && !c.releasedAt) {
-    // While you drive unpinned, I'll drive keeps it yours past the quiet
-    // minutes.
+    // While you drive unpinned, I'll drive keeps it yours past the hold.
     return [
       ...(c.wheel !== "person_pinned" ? [{ verb: "drive" as const, label: "I’ll drive" }] : []),
       ...(driving(c) ? [{ verb: "handBack" as const, label: "Hand back" }] : []),
