@@ -127,6 +127,39 @@ it("starts Codex with Approve for me only when asked, and only where the hub off
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", approveForMe: true }));
 });
 
+it("starts Codex in Fast mode only when asked, saying it uses the plan sooner, and only where the hub offers it", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-4" }));
+  const caps = terminalCaps("terminal");
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: { terminal: { ...caps.terminal!, fast: true } } }),
+  ]);
+  useDesk.setState({ hub: { start, engines } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole("radio", { name: "Fast" })).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  expect(screen.getByRole("radio", { name: "Standard" }).getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByText(/uses up your plan’s limits sooner/)).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "Fast" }));
+  expect(screen.getByText(/uses up your plan’s limits sooner/)).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: true }));
+});
+
+it("starts Codex at the usual speed unless Fast is chosen", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-5" }));
+  const caps = terminalCaps("terminal");
+  const engines = vi.fn(async () => [engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: { terminal: { ...caps.terminal!, fast: true } } })]);
+  useDesk.setState({ hub: { start, engines } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: undefined }));
+});
+
 const account = (id: string, name: string, isDefault = false): EngineAccount => ({
   id,
   engine: "claude",

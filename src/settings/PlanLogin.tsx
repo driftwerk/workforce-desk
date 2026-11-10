@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import {
   cancelLogin,
@@ -23,6 +23,8 @@ export const CLI_NAME: Record<PlanName, string> = { claude: "Claude Code", chatg
 export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void) {
   const fail = useDesk((s) => s.fail);
   const [progress, setProgress] = useState<LoginProgress | null>(null);
+  // The sign-in page, kept while the sign-in waits for a code too.
+  const [url, setUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   // Null until known; anything Desk can't check counts as installed, so
   // sign-in says what's wrong itself.
@@ -58,6 +60,10 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
       onLoginProgress((p, next) => {
         if (p !== plan) return;
         setProgress(next);
+        if (next.state === "browser") setUrl(next.url);
+        else if (next.state !== "needs-code") setUrl(null);
+        // The pasted code is kept no longer than the sign-in.
+        if (next.state === "done" || next.state === "failed") setCode("");
         if (next.state === "done") connectedRef.current();
       }),
     );
@@ -74,7 +80,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
       case "browser":
         return "Finish signing in in your browser.";
       case "needs-code":
-        return "Paste the code the page shows you.";
+        return "Finish signing in in your browser. If the page shows a code, paste it here.";
       case "saving":
         return "Connecting…";
       case "done":
@@ -89,6 +95,8 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
   return {
     plan,
     progress,
+    /** The sign-in page while the sign-in waits on it. */
+    url: busy ? url : null,
     status,
     failed: progress?.state === "failed" || install?.state === "failed",
     /** What to run in a terminal by hand when the install stopped. */
@@ -106,40 +114,45 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     code,
     setCode,
     start: () => plan && startLogin(plan).catch(fail),
-    cancel: () => plan && void cancelLogin(plan).then(() => setProgress(null)),
+    cancel: () =>
+      plan &&
+      void cancelLogin(plan).then(() => {
+        setProgress(null);
+        setUrl(null);
+        setCode("");
+      }, fail),
     send: () => plan && sendLoginCode(plan, code).then(() => setCode(""), fail),
   };
 }
 
 export type PlanLoginState = ReturnType<typeof usePlanLogin>;
 
-/** "Open it again" while the browser page is open. */
+/** While the sign-in waits on its page: the page's address with a Copy
+ *  button (to open it in another browser), and "Open it again". */
 export function ReopenLink({ login }: { login: PlanLoginState }) {
-  if (login.progress?.state !== "browser") return null;
-  const url = login.progress.url;
+  const url = login.url;
+  if (!url) return null;
   return (
     <>
       {" "}
       <button type="button" className="link small" onClick={() => openUrl(url)}>
         Open it again
       </button>
+      <CopyText text={url} label="Copy link" />
     </>
   );
 }
 
-/** After an install that stopped: the installer's command to run by hand,
- *  with where to run it. */
-export function CopyInstall({ login }: { login: PlanLoginState }) {
+/** `text` in code type with a Copy button; where the clipboard won't take
+ *  it, the text is left selected to copy by hand. */
+function CopyText({ text, label, children }: { text: string; label: string; children?: ReactNode }) {
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   const code = useRef<HTMLElement>(null);
-  if (!login.manual) return null;
-  const { command, hint } = login.manual;
   const copy = () =>
     Promise.resolve()
-      .then(() => navigator.clipboard.writeText(command))
+      .then(() => navigator.clipboard.writeText(text))
       .then(() => setCopied("yes"))
       .catch(() => {
-        // No clipboard here: leave the command selected to copy by hand.
         if (code.current) window.getSelection()?.selectAllChildren(code.current);
         setCopied("no");
       })
@@ -147,14 +160,26 @@ export function CopyInstall({ login }: { login: PlanLoginState }) {
   return (
     <span className="install-manual">
       <code ref={code} className="mono small">
-        {command}
+        {text}
       </code>
       <button type="button" className="btn btn-sm" onClick={() => void copy()}>
-        {copied === "yes" ? "Copied" : "Copy command"}
+        {copied === "yes" ? "Copied" : label}
       </button>
       {copied === "no" && <span className="small state-blocked">Couldn’t copy, select and copy it</span>}
-      {hint && <span className="small muted">{hint}</span>}
+      {children}
     </span>
+  );
+}
+
+/** After an install that stopped: the installer's command to run by hand,
+ *  with where to run it. */
+export function CopyInstall({ login }: { login: PlanLoginState }) {
+  if (!login.manual) return null;
+  const { command, hint } = login.manual;
+  return (
+    <CopyText text={command} label="Copy command">
+      {hint && <span className="small muted">{hint}</span>}
+    </CopyText>
   );
 }
 
@@ -173,6 +198,9 @@ export function PlanLoginAction({ login, label, signal = true }: { login: PlanLo
         />
         <button type="button" className="btn btn-signal" disabled={!login.code.trim()} onClick={() => void login.send()}>
           Send
+        </button>
+        <button type="button" className="btn" onClick={login.cancel}>
+          Cancel
         </button>
       </span>
     );

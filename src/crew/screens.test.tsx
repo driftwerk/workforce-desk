@@ -129,6 +129,38 @@ describe("How they think", () => {
     expect(onUse).toHaveBeenCalledWith({ provider: "claude-code", model: "quick" });
   });
 
+  it("offers Fast only on a model whose plan has a faster tier, worded as the plan words it", async () => {
+    useDesk.setState({ hub: fakeHub() });
+    const chatgpt = plan("chatgpt", "ChatGPT plan", true);
+    useProviders.setState({
+      providers: [
+        {
+          ...chatgpt,
+          models: [
+            { id: "sol", name: "Sol", description: "", default: true, fast: "2x speed, increased usage" },
+            { id: "nova", name: "Nova", description: "Released since", default: false, fast: "1.5x speed" },
+            { id: "luna", name: "Luna", description: "", default: false },
+          ],
+        },
+      ],
+    });
+    const onUse = vi.fn();
+    render(<BrainDialog title="How Ledger thinks" who="Ledger" initial={{ provider: "chatgpt", model: "sol" }} onUse={onUse} onClose={() => {}} />);
+    expect(screen.getByRole("radio", { name: "Standard" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("radio", { name: "Fast" }));
+    expect(
+      screen.getByText("Asks for Fast (2x speed, increased usage); the plan may not give it, and where it does, it uses up your plan’s limits sooner."),
+    ).toBeTruthy();
+    expect(screen.getByText("Ledger will use Sol on your ChatGPT plan · Medium effort · Fast")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));
+    expect(screen.getByText("Asks for Fast (1.5x speed); the plan may not give it.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Luna/ }));
+    expect(screen.queryByRole("radiogroup", { name: "Speed" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this" })));
+    expect(onUse).toHaveBeenCalledWith({ provider: "chatgpt", model: "nova", effort: "medium" });
+  });
+
   it("closes on Escape without the key reaching anything underneath", () => {
     useDesk.setState({ hub: fakeHub() });
     const onClose = vi.fn();

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { brainSummary, isDefaultModel, resolveBrain, type Brain } from "../crew/brain";
-import { defaultEffort, effortLine, effortName, effortsFor, GROUPS, type Provider } from "../hub/providers";
+import { defaultEffort, effortLine, effortName, effortsFor, fastLine, fastOf, GROUPS, type Provider } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { ConnectForm } from "./ConnectForm";
@@ -172,6 +172,7 @@ function Choices({ provider, brain, pick }: { provider: Provider; brain: Brain; 
   const efforts = effortsFor(provider, brain.model);
   const effort = brain.effort && efforts.includes(brain.effort) ? brain.effort : defaultEffort(provider, brain.model);
   const effortIndex = effort ? efforts.indexOf(effort) : -1;
+  const fast = fastOf(provider, brain.model);
   return (
     <>
       <div className="field-stack">
@@ -223,6 +224,35 @@ function Choices({ provider, brain, pick }: { provider: Provider; brain: Brain; 
           <span className="muted">{effortLine(provider, effort, brain.model)}</span>
         </div>
       )}
+      {fast && (
+        <div className="field-stack">
+          <span className="field-label" id="brain-speed">
+            Speed
+          </span>
+          <div className="effort-seg" role="radiogroup" aria-labelledby="brain-speed">
+            {SPEEDS.map(({ on, label }) => (
+              <button
+                key={label}
+                type="button"
+                role="radio"
+                aria-checked={!!brain.fast === on}
+                tabIndex={!!brain.fast === on ? 0 : -1}
+                onClick={() => pick({ fast: on })}
+                onKeyDown={(ev) => radioKeys(ev, SPEEDS, brain.fast ? 1 : 0, (next) => pick({ fast: next.on }))}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="muted">{brain.fast ? fastLine(fast) : "Replies at the plan’s usual speed. The default."}</span>
+        </div>
+      )}
     </>
   );
 }
+
+/** The speeds a model with a faster tier runs at: its usual one, or Fast. */
+const SPEEDS = [
+  { on: false, label: "Standard" },
+  { on: true, label: "Fast" },
+];

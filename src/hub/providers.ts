@@ -33,6 +33,10 @@ export interface ProviderModel {
   efforts?: string[];
   /** This model's own default effort, over the provider's. */
   defaultEffort?: string | null;
+  /** How the plan words this model's faster tier ("2x speed, increased
+   *  usage"), when it has one an agent can ask for; absent when it hasn't,
+   *  or the hub couldn't ask the plan. */
+  fast?: string;
 }
 
 export interface Provider {
@@ -67,6 +71,21 @@ export const EFFORTS: Record<string, { name: string; short: string; long: string
 };
 
 export const effortName = (e: string): string => EFFORTS[e]?.name ?? e;
+
+/** How `model`'s faster tier is worded, when it has one. */
+export const fastOf = (p: Provider | undefined, model: string | undefined): string | undefined =>
+  model === undefined ? undefined : p?.models.find((m) => m.id === model)?.fast;
+
+/** The line under an agent's Fast mode switch: the plan's own words for
+ *  its faster tier, that the plan may not give it to an agent (its calls
+ *  aren't Codex's), and, where the words say so, that it uses the plan's
+ *  limits sooner. */
+export const fastLine = (fast: string): string => {
+  const said = fast.replace(/\.$/, "");
+  return /usage|limit|credit/i.test(fast)
+    ? `Asks for Fast (${said}); the plan may not give it, and where it does, it uses up your plan’s limits sooner.`
+    : `Asks for Fast (${said}); the plan may not give it.`;
+};
 
 /** The one-liner under the effort control, saying so when it's the
  *  default for that model. */
