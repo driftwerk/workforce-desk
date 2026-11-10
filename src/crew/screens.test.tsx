@@ -148,10 +148,10 @@ describe("How they think", () => {
     render(<BrainDialog title="How Ledger thinks" who="Ledger" initial={{ provider: "chatgpt", model: "sol" }} onUse={onUse} onClose={() => {}} />);
     expect(screen.getByRole("radio", { name: "Standard" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: "Fast" }));
-    expect(screen.getByText(/2x speed, increased usage: replies come faster, and they use up your plan’s limits sooner/)).toBeTruthy();
+    expect(screen.getByText("Asks the plan for its faster tier (2x speed, increased usage), which uses up your plan’s limits sooner.")).toBeTruthy();
     expect(screen.getByText("Ledger will use Sol on your ChatGPT plan · Medium effort · Fast")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));
-    expect(screen.getByText("1.5x speed: replies come faster.")).toBeTruthy();
+    expect(screen.getByText("Asks the plan for its faster tier (1.5x speed).")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Luna/ }));
     expect(screen.queryByRole("radiogroup", { name: "Speed" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));

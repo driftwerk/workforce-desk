@@ -76,14 +76,14 @@ export const effortName = (e: string): string => EFFORTS[e]?.name ?? e;
 export const fastOf = (p: Provider | undefined, model: string | undefined): string | undefined =>
   model === undefined ? undefined : p?.models.find((m) => m.id === model)?.fast;
 
-/** The line under the Fast mode switch: the plan's own words for it, and,
- *  where they say so, that it uses the plan's limits faster. */
+/** The line under the Fast mode switch: the plan's own words for its
+ *  faster tier, and, where they say so, that it uses the plan's limits
+ *  sooner. */
 export const fastLine = (fast: string): string => {
   const said = fast.replace(/\.$/, "");
-  const sooner = /usage|limit|credit/i.test(fast);
-  return sooner
-    ? `${said[0]!.toUpperCase()}${said.slice(1)}: replies come faster, and they use up your plan’s limits sooner.`
-    : `${said[0]!.toUpperCase()}${said.slice(1)}: replies come faster.`;
+  return /usage|limit|credit/i.test(fast)
+    ? `Asks the plan for its faster tier (${said}), which uses up your plan’s limits sooner.`
+    : `Asks the plan for its faster tier (${said}).`;
 };
 
 /** The one-liner under the effort control, saying so when it's the
