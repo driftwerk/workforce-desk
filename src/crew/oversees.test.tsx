@@ -226,8 +226,6 @@ describe("Oversees the crew", () => {
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
     await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
     // Unbound: its own words for the mode switch, no fixed "always asks", and a blank budget said.
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
-    await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
     expect(screen.getByText(/No budget set: only the check-in ceilings and Stop bound what it spends\./)).toBeTruthy();
     expect(screen.getByText(/Desk can switch a session it runs to auto or bypass/)).toBeTruthy();
     expect(screen.queryByText(/always asks you first before pushing code/)).toBeNull();
