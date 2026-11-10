@@ -22,6 +22,7 @@ import { RoomMarks } from "../unread/RoomMarks";
 import { Marks, useTotal } from "../unread/Marks";
 import { needsYou } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
+import { NEW_CREW_LINE, NEW_SESSION_LINE } from "./newLines";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
 
@@ -274,13 +275,13 @@ export function Sidebar({
       </div>
       <div className="side-foot">
         <div className="side-actions">
-          <button type="button" className="btn side-btn" onClick={() => onNewSession()} aria-label="New session">
+          <button type="button" className="btn side-btn" onClick={() => onNewSession()} aria-label="New session" title={NEW_SESSION_LINE}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <path d="M7 2v10M2 7h10" />
             </svg>
             <span className="side-btn-label">New session</span> <kbd>{shortcutLabel(keys.newSession)}</kbd>
           </button>
-          <button type="button" className="btn side-btn" onClick={onNewCrew}>
+          <button type="button" className="btn side-btn" onClick={onNewCrew} title={NEW_CREW_LINE}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
               <circle cx="5.5" cy="4.5" r="2.5" />
               <path d="M1 12.5c.4-2.4 2.2-3.8 4.5-3.8s4.1 1.4 4.5 3.8M11 4v4M9 6h4" />
