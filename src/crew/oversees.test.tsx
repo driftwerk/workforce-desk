@@ -191,6 +191,44 @@ describe("Oversees the crew", () => {
     expect((screen.getByRole("textbox", { name: "Daily budget in US dollars" }) as HTMLInputElement).value).toBe("25");
   });
 
+  it("offers Anywhere: lists greyed, budget optional, and saves it with the permission-mode switch", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nworkflows = ["deploy.yml"]\n`);
+    const anywhere = screen.getByRole("checkbox", { name: /Anywhere/ }) as HTMLInputElement;
+    expect(anywhere.checked).toBe(false);
+    expect(screen.getByText("Not limited to the repos, folders and workflows listed")).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/Required\./)).toBeTruthy();
+    await act(async () => fireEvent.click(anywhere));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { anywhere: true } }));
+    expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Add a workflow" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Remove acme/acme-web" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("The repos and workflows below don’t apply while Anywhere is on.")).toBeTruthy();
+    expect(screen.getByText(/Optional \(blank: no budget\)/)).toBeTruthy();
+    expect(screen.queryByText(/Acting as Act until/)).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
+    await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: true }, full: { anywhere: true } }));
+  });
+
+  it("says there are no limits only when Act fully, Anywhere and every act switch are on", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
+    const hub = fakeHub();
+    const acts = `nudge = true\nresume_restart = true\nread_only_approvals = true\nhand_out_work = true\ninterrupt = true\nmessage_agents = true\nmessage_terminal_sessions = true\nanswer_sessions = true\nhand_off = true\nset_mode = true\n`;
+    const line = /^No limits: Desk acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\.$/;
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.act]\n${acts}[oversight.full]\nanywhere = true\n`);
+    expect(screen.getByText(line)).toBeTruthy();
+    // Any one switch off, and it goes.
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
+    await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: false } }));
+    expect(screen.queryByText(line)).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
+    await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
+    expect(screen.queryByText(line)).toBeNull();
+  });
+
   it("shows the hub's own refusal when it won't save", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     const hub = fakeHub();

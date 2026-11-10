@@ -16,6 +16,7 @@ import {
   MAX_CHECKINS_PER_HOUR,
   MAX_WORK_TURNS_PER_HOUR,
   fullMissing,
+  isUnbound,
   oversightOf,
   parseBudget,
   parseCheckins,
@@ -259,6 +260,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const running =
     manager?.agentId === agent.id ? manager.level : (manager?.bosses?.find((b) => b.agentId === agent.id)?.level ?? null);
   const missing = o ? fullMissing(o) : [];
+  const unbound = o ? isUnbound(o) : false;
   const acts = o?.level === "act" || o?.level === "full";
   const takeOn = TAKE_ON(name);
   const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
@@ -569,17 +571,30 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 )
               )}
               <div className="oversee-card">
+                <Check
+                  label="Anywhere"
+                  sub="Not limited to the repos, folders and workflows listed"
+                  checked={o.full.anywhere}
+                  onChange={(v) => update((x) => ({ ...x, full: { ...x.full, anywhere: v } }))}
+                />
+                {o.full.anywhere && (
+                  <div className="oversee-row">
+                    <span className="oversee-sub" role="note">
+                      The repos and workflows below don’t apply while Anywhere is on.
+                    </span>
+                  </div>
+                )}
                 <div className="oversee-row oversee-list">
                   <span className="oversee-check-text">
                     <b>Repos</b>
                     <span className="oversee-sub">owner/name on GitHub, a repo’s address, or a folder on this computer</span>
                   </span>
                   {o.full.repos.length > 0 && (
-                    <ul className="oversee-items" aria-label="Repos">
+                    <ul className="oversee-items" aria-label="Repos" aria-disabled={o.full.anywhere || undefined}>
                       {o.full.repos.map((r) => (
                         <li key={r}>
                           <span className="mono">{r}</span>
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${r}`} onClick={() => remove("repos", r)}>
+                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${r}`} disabled={o.full.anywhere} onClick={() => remove("repos", r)}>
                             Remove
                           </button>
                         </li>
@@ -593,13 +608,16 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                     value={fields.repo}
                     onChange={(t) => setField("repo", t)}
                     onAdd={() => add("repo")}
+                    disabled={o.full.anywhere}
                   />
                 </div>
                 <div className="oversee-row">
                   <span className="oversee-check">
                     <span className="oversee-check-text">
                       <b>Daily budget</b>
-                      <span className="oversee-sub">Required. Its sessions’ spend in its scope and its own model use, in a day</span>
+                      <span className="oversee-sub">
+                        {o.full.anywhere ? "Optional (blank: no budget)" : "Required"}. Its sessions’ spend in its scope and its own model use, in a day
+                      </span>
                     </span>
                   </span>
                   <Num
@@ -620,11 +638,11 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                     </span>
                   </span>
                   {o.full.workflows.length > 0 && (
-                    <ul className="oversee-items" aria-label="Workflows">
+                    <ul className="oversee-items" aria-label="Workflows" aria-disabled={o.full.anywhere || undefined}>
                       {o.full.workflows.map((w) => (
                         <li key={w}>
                           <span className="mono">{w}</span>
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${w}`} onClick={() => remove("workflows", w)}>
+                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${w}`} disabled={o.full.anywhere} onClick={() => remove("workflows", w)}>
                             Remove
                           </button>
                         </li>
@@ -638,6 +656,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                     value={fields.workflow}
                     onChange={(t) => setField("workflow", t)}
                     onAdd={() => add("workflow")}
+                    disabled={o.full.anywhere}
                   />
                 </div>
               </div>
@@ -708,7 +727,19 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   checked={o.act.messageTerminalSessions}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageTerminalSessions: v } }))}
                 />
+                <Check
+                  label="Change sessions’ permission mode"
+                  sub="Switch a running session between default, accept edits and plan; never to a mode that skips asking"
+                  checked={o.act.setMode}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, setMode: v } }))}
+                />
               </div>
+              {unbound && (
+                <p className="small state-blocked" role="status">
+                  No limits: Desk acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
+                  activity log remain.
+                </p>
+              )}
               <span className="oversee-sub">
                 {name} always asks you first before pushing code, deleting anything, or sending messages outside Desk. Everything it
                 does shows in Activity with its reason.
@@ -851,6 +882,7 @@ function AddItem({
   value,
   onChange,
   onAdd,
+  disabled = false,
 }: {
   label: string;
   placeholder: string;
@@ -858,6 +890,7 @@ function AddItem({
   value: Typed;
   onChange: (text: string) => void;
   onAdd: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="field oversee-add">
@@ -867,17 +900,18 @@ function AddItem({
           aria-label={label}
           placeholder={placeholder}
           value={value.text}
+          disabled={disabled}
           aria-invalid={value.problem ? true : undefined}
           aria-describedby={value.problem ? problemId : undefined}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && !disabled) {
               e.preventDefault();
               onAdd();
             }
           }}
         />
-        <button type="button" className="btn btn-ghost btn-sm" disabled={!value.text.trim()} onClick={onAdd}>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={disabled || !value.text.trim()} onClick={onAdd}>
           Add
         </button>
       </div>
