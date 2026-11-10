@@ -2,7 +2,7 @@ import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import type { Provider } from "../hub/providers";
 import { fallbackProviders } from "../providers/store";
-import { defaultEffort, effortLine, effortsFor } from "../hub/providers";
+import { defaultEffort, effortLine, effortsFor, fastLine } from "../hub/providers";
 import {
   brainOf,
   brainSummary,
@@ -44,6 +44,43 @@ const BEDROCK = provider("bedrock", {
     { id: "claude-opus", name: "Opus", description: "", default: true, provider: "bedrock:anthropic" },
     { id: "deepseek", name: "DeepSeek", description: "", default: false, provider: "bedrock:deepseek" },
   ],
+});
+
+const FAST_PLAN = provider("chatgpt", {
+  models: [
+    { id: "sol", name: "Sol", description: "", default: true, fast: "2x speed, increased usage" },
+    { id: "luna", name: "Luna", description: "", default: false },
+  ],
+});
+
+describe("Fast mode", () => {
+  it("is written as [llm] fast and read back, and dropped when off", () => {
+    const brain = resolveBrain({ provider: "chatgpt", model: "sol", fast: true }, FAST_PLAN);
+    expect(brain.fast).toBe(true);
+    const toml = withBrain("[llm]\nprovider = \"chatgpt\"\n", brain);
+    expect(llmOf(toml)?.fast).toBe(true);
+    expect(brainOf(toml, [FAST_PLAN])).toEqual(brain);
+    const off = withBrain(toml, { ...brain, fast: false });
+    expect(llmOf(off)?.fast).toBeUndefined();
+  });
+
+  it("goes with a model that has no faster tier, and stays where the hub couldn't ask the plan", () => {
+    expect(resolveBrain({ provider: "chatgpt", model: "luna", fast: true }, FAST_PLAN).fast).toBeUndefined();
+    const unknown = provider("chatgpt");
+    expect(resolveBrain({ provider: "chatgpt", model: "chatgpt-mid", fast: true }, unknown).fast).toBe(true);
+  });
+
+  it("is said in the summary only for a model that has it", () => {
+    const sol = resolveBrain({ provider: "chatgpt", model: "sol", fast: true }, FAST_PLAN);
+    expect(brainSummary("Ledger", sol, FAST_PLAN)).toBe("Ledger will use Sol on your chatgpt · Medium effort · Fast");
+    const luna = { ...resolveBrain({ provider: "chatgpt", model: "luna" }, FAST_PLAN), fast: true };
+    expect(brainSummary("Ledger", luna, FAST_PLAN)).not.toContain("Fast");
+  });
+
+  it("says plainly when the faster tier uses the plan sooner", () => {
+    expect(fastLine("2x speed, increased usage")).toBe("2x speed, increased usage: replies come faster, and they use up your plan’s limits sooner.");
+    expect(fastLine("1.5x speed")).toBe("1.5x speed: replies come faster.");
+  });
 });
 
 describe("a provider whose models run under another name", () => {
