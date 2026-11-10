@@ -90,6 +90,55 @@ export async function setLevel(hub: DeskHub, id: string, level: Level, asks?: As
   return toml;
 }
 
+/** The folders the agent works in beside its own (`[computer] works_in`),
+ *  as its `config.toml` says. */
+export const worksInOf = (source: string): string[] => {
+  try {
+    const list = table(table(source.trim() ? parse(source) : {}).computer).works_in;
+    return Array.isArray(list) ? list.filter((f): f is string => typeof f === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+/** The config with `folders` as the ones the agent works in (none: the key
+ *  goes), everything else in it kept. */
+export const withWorksIn = (source: string, folders: string[]): string => {
+  const doc = (source.trim() ? parse(source) : {}) as Doc;
+  const computer: Doc = { ...table(doc.computer) };
+  if (folders.length) computer.works_in = folders;
+  else delete computer.works_in;
+  if (Object.keys(computer).length) doc.computer = computer;
+  else delete doc.computer;
+  return stringify(doc).trim() + "\n";
+};
+
+/** Writes the folders the agent works in into its config as it is now;
+ *  answers with the config as written. The hub refuses a folder no agent may
+ *  work in, in words Desk shows as they are. */
+export async function setWorksIn(hub: DeskHub, id: string, change: (folders: string[]) => string[]): Promise<string> {
+  const source = await hub.agentConfig(id);
+  if (source.trim()) {
+    try {
+      parse(source);
+    } catch {
+      throw new Error("Their settings file has a mistake in it, so Desk won’t change it.");
+    }
+  }
+  const toml = withWorksIn(source, change(worksInOf(source)));
+  await hub.saveAgentConfig(id, toml);
+  return toml;
+}
+
+/** `folder` added to `folders`, once; and why it can't be, in a line. */
+export const addFolder = (folders: string[], folder: string, home: string | null): { folders: string[]; problem: string | null } => {
+  const f = folder.replace(/\/+$/, "") || "/";
+  if (f === "/" || (home && (f === home || home.startsWith(`${f}/`)))) {
+    return { folders, problem: "Choose a folder inside your home, not your home itself or above it." };
+  }
+  return { folders: folders.includes(f) ? folders : [...folders, f], problem: null };
+};
+
 const ABILITY: Record<ComputerGrant["ability"], string> = {
   write: "change files",
   delete: "delete files",

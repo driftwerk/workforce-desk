@@ -129,7 +129,7 @@ export function BrainDialog({
             <div className="connect-form">
               <div className="dialog-title">
                 <h2 className="display-md">Connect {provider.name}</h2>
-                {provider.connect.kind !== "login" && provider.connect.hint && <p>{provider.connect.hint}</p>}
+                {provider.connect.kind !== "login" && provider.connect.hint && !provider.connect.ways?.length && <p>{provider.connect.hint}</p>}
               </div>
               <ConnectForm
                 key={provider.id}

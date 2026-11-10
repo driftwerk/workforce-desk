@@ -11,6 +11,7 @@ import { BrainCard } from "./BrainCard";
 import { newAgentBrain, type Brain } from "./brain";
 import { createLocalAgent, setAgentVoice } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
+import { NEW_CREW_LINE } from "../shell/newLines";
 
 /** A new agent on this computer: a name and what they're for, with how they
  *  think and sound starting on Desk's defaults. */
@@ -60,6 +61,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
               <h1 id={id} className="display-lg">
                 New crew member
               </h1>
+              <p>{NEW_CREW_LINE}</p>
               <p>A name and a job is all they need. The rest starts on sensible defaults — change any of it now or later.</p>
             </span>
           </header>
