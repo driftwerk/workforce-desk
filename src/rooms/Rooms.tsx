@@ -8,6 +8,7 @@ import { PromptCard } from "../chat/Approvals";
 import { AgentAccess } from "../computer/AgentAccess";
 import { withHistory } from "../chat/legacy";
 import { onceEach, shownWith } from "../chat/reconcile";
+import { useCommandMenu, useHubCommands } from "../chat/commands";
 import { isRunning, useChat } from "../chat/store";
 import { useDesk, localSessions } from "../hub/store";
 import { RoomView } from "./RoomView";
@@ -193,6 +194,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       !!activeAgent && send(activeAgent, formAnswer(summary, values)),
     [activeAgent, send],
   );
+  const retrySend = useChat((s) => s.retry);
+  const discardSend = useChat((s) => s.discard);
+  const retry = useCallback((id: string) => void (activeAgent && retrySend(activeAgent, id)), [activeAgent, retrySend]);
+  const discard = useCallback((id: string) => activeAgent && discardSend(activeAgent, id), [activeAgent, discardSend]);
 
   // What every message is shown with, kept the same while it is, so a
   // message renders again only when it changes.
@@ -374,6 +379,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 sentOn={sentOn}
                 origin={origin}
                 onSubmitForm={submitForm}
+                onRetry={retry}
+                onRemove={discard}
               />
             ))}
             {convo.prompts.map((p) => (
@@ -464,6 +471,8 @@ function DmComposer({
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
   const emoji = useEmojiInput({ field: composer, value: draft, setValue: setDraft });
+  const commands = useCommandMenu({ field: composer, value: draft, setValue: setDraft, commands: useHubCommands(hub) });
+  const listing = commands.open ? commands : emoji.open ? emoji : null;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -499,6 +508,7 @@ function DmComposer({
       <DmVoiceBar agent={to} name={agent.name} />
       <form className="composer composer-files" onSubmit={submit} data-composer="">
         <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
+        {commands.menu}
         {emoji.menu}
         <AttachButton onFiles={files.add} disabled={sending} />
         <textarea
@@ -506,8 +516,8 @@ function DmComposer({
           rows={1}
           value={draft}
           placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
-          {...(emoji.open
-            ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": emoji.listId, "aria-activedescendant": emoji.activeId }
+          {...(listing
+            ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": listing.listId, "aria-activedescendant": listing.activeId }
             : {})}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -518,6 +528,7 @@ function DmComposer({
           onKeyDown={(e) => {
             // Keys that pick or end an IME composition are the input method's.
             if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (commands.onKeyDown(e)) return;
             if (emoji.onKeyDown(e)) return;
             if (e.key === "Enter" && !e.shiftKey) submit(e);
             // Esc stops the agent, as Stop does; with nothing running it's

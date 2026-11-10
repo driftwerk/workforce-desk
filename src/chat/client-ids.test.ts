@@ -22,6 +22,9 @@ vi.mock("./conversation", async (original) => ({
       this.dropped.push(ids);
     }
     place() {}
+    unkeep() {}
+    remove() {}
+    restore() {}
     cancel() {}
     close() {}
   },

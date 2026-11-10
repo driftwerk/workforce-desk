@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { shownText } from "../chat/commands";
 import { useShallow } from "zustand/react/shallow";
 import { useChat } from "../chat/store";
 import type { Queue, Queued } from "../chat/queue";
@@ -42,7 +43,7 @@ function QueuedRow({ to, item, name, busy }: { to: string; item: Queued; name: s
   );
   const [editing, setEditing] = useState<string | null>(null);
   const files = item.attachments ?? [];
-  const label = item.text.trim() || files.map((f) => f.filename).join(", ");
+  const label = shownText(item.text.trim()) || files.map((f) => f.filename).join(", ");
   const start = () => {
     // Nothing goes while you edit: what's sent is what you save.
     editingQueued(to, item.id);
@@ -57,7 +58,7 @@ function QueuedRow({ to, item, name, busy }: { to: string; item: Queued; name: s
   return (
     <li className="queued" aria-busy={item.sending ? true : undefined}>
       {editing === null ? (
-        <span className="queued-text" title={item.text}>
+        <span className="queued-text" title={shownText(item.text)}>
           {label}
         </span>
       ) : (
