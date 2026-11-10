@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import type { FloorNeed } from "../floor/merge";
+import type { RoomMessage } from "../hub/types";
+import { deskState } from "../restore/boot";
+import { instant } from "../rooms/time";
 import { useWatching, watched } from "./watching";
 
 // An agent's question asked in its DM is a reply like any other there: with
@@ -49,3 +52,62 @@ export function noteSeen(listed: readonly FloorNeed[], answered: (hubId: string)
   if (changed) useNeedsSeen.setState({ seen: next });
   return changed;
 }
+
+// A question an agent asked in a room is answered by whatever you post in
+// that room (or thread) after it, to anyone; and any need can be set aside
+// as not needed. Dismissed needs are kept with Desk's state, like seen ones.
+
+/** Where dismissed needs are kept with Desk's state. */
+export const NEEDS_DISMISSED_KEY = "unread.needs.dismissed";
+
+/** The needs set aside as not needed, by need key. */
+export const useNeedsDismissed = create<{ gone: ReadonlySet<string> }>(() => ({ gone: new Set() }));
+
+/** Sets `key` aside: it waits on no badge, Floor row or Unread row. */
+export function dismissNeed(key: string): void {
+  const gone = new Set(useNeedsDismissed.getState().gone).add(key);
+  useNeedsDismissed.setState({ gone });
+  deskState.set(NEEDS_DISMISSED_KEY, [...gone]);
+}
+
+/** Dismissed needs a hub that answered no longer lists are let go. Says
+ *  whether anything changed. */
+export function noteDismissed(listed: readonly FloorNeed[], answered: (hubId: string) => boolean): boolean {
+  const was = useNeedsDismissed.getState().gone;
+  const keys = new Set(listed.map((n) => n.key));
+  const next = new Set([...was].filter((k) => keys.has(k) || !answered(k.slice(0, k.indexOf("/")))));
+  if (next.size === was.size) return false;
+  useNeedsDismissed.setState({ gone: next });
+  return true;
+}
+
+/** When you last posted in each room (by room id) and thread (`room/thread`). */
+export type YourPosts = Readonly<Record<string, string>>;
+
+let postsOf: { from: unknown; posts: YourPosts } | null = null;
+/** `timelines`' newest post of yours per room and thread, worked out once
+ *  per change of the timelines. */
+export const yourPosts = (timelines: Readonly<Record<string, readonly RoomMessage[]>>): YourPosts => {
+  if (postsOf?.from === timelines) return postsOf.posts;
+  const posts: Record<string, string> = {};
+  const note = (key: string, at: string) => {
+    if (!posts[key] || instant(at) > instant(posts[key]!)) posts[key] = at;
+  };
+  for (const [room, messages] of Object.entries(timelines))
+    for (const m of messages) {
+      if (m.author !== "you") continue;
+      note(room, m.createdAt);
+      if (m.threadId) note(`${room}/${m.threadId}`, m.createdAt);
+    }
+  postsOf = { from: timelines, posts };
+  return posts;
+};
+
+/** Whether `n`, an agent's question in a room or thread, has been answered
+ *  by a post of yours there since it was asked. A DM's needs a message in
+ *  that DM, which the hub settles. */
+export const answeredInRoom = (n: Pick<FloorNeed, "kind" | "place" | "who" | "since">, posts: YourPosts): boolean => {
+  if (n.kind !== "question" || n.who.kind !== "agent" || n.place.kind !== "room") return false;
+  const last = posts[n.place.thread ? `${n.place.room}/${n.place.thread}` : n.place.room];
+  return !!last && instant(last) > instant(n.since);
+};

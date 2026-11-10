@@ -19,6 +19,7 @@ const hub = {
     Promise.resolve(msg({ id: `posted-${when}`, from: YOU, to: S1, kind: "tell", text, asked: null, delivery: when === "now" ? "delivered" : "queued" })),
   ),
   editLine: vi.fn(() => Promise.resolve()),
+  typing: vi.fn(() => Promise.resolve()),
   takeBackLine: vi.fn(() => Promise.resolve()),
   answerLine: vi.fn((id: string, text: string) => Promise.resolve(msg({ id: `answer-${id}`, from: YOU, to: S1, kind: "answer", text, asked: null, inReplyTo: id }))),
 };
@@ -116,6 +117,9 @@ describe("a session's line", () => {
     fireEvent.change(box, { target: { value: "then the docs" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send when done" })));
     expect(hub.postLine).toHaveBeenLastCalledWith("s1", "then the docs", "queue");
+    // Typing the drafts told the hub once, throttled.
+    expect(hub.typing).toHaveBeenCalledTimes(1);
+    expect(hub.typing).toHaveBeenCalledWith("s1");
     expect(screen.getByText("then the docs")).toBeTruthy();
   });
 
