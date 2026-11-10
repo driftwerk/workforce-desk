@@ -140,6 +140,21 @@ export interface ChatMessage {
   steps?: Step[];
   /** A turn's failure that a later answer has replaced: shown folded away. */
   superseded?: boolean;
+  /** A command the hub answered itself (`/status`, `cmd: help`, an unknown
+   *  `/word`), or its answer: shown as a command, kept nowhere, and so
+   *  shown only here, settled. */
+  command?: boolean;
+  /** A live message whose turn is over and that the hub kept no copy of (a
+   *  command, a refusal): it goes by its place among what was kept, never
+   *  waiting on a copy that won't come. */
+  unkept?: boolean;
+  /** A message you sent that the hub never said it had: not confirmed in
+   *  time, or lost with the connection. Offered again or taken away. */
+  undelivered?: boolean;
+  /** The client id of the next message sent from here after it: a live
+   *  message no read will name goes before that one once it is kept,
+   *  whatever the clocks say. */
+  before?: string;
 }
 
 // ── Desk as a surface of the hub (mirrors the hub's `workforce_core::desk`) ──
@@ -322,4 +337,7 @@ export interface ServerMessage {
   kind?: DeliveryKind;
   place?: DeskPlace;
   spoken?: boolean;
+  /** On `turn_end`: the turn was a command the hub answered itself, and
+   *  neither its message nor its answer is kept. */
+  command?: boolean;
 }
