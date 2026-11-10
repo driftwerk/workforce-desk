@@ -64,6 +64,7 @@ import { boardSyncOf, issueUrl, looksLikeToken, pausedWords, syncHubId, syncStat
 import { useDesk } from "../hub/store";
 import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
+import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
@@ -314,6 +315,23 @@ describe("the board, synced", () => {
     await waitFor(() => expect(leftFilter).toHaveBeenCalledWith(left.id, true));
     await waitFor(() => expect(screen.queryByRole("region", { name: /Left the filter/ })).toBeNull());
     expect(within(screen.getByRole("region", { name: "To do" })).getByText("ACME-455")).toBeTruthy();
+  });
+
+  it("opens a ticket's issue and its PRs only at https addresses", () => {
+    const t = ticket(7, {
+      key: "ACME-7",
+      external: ext("ACME-7"),
+      links: [
+        { kind: "pr", number: 12, url: "https://github.com/acme/web/pull/12" },
+        { kind: "pr", number: 13, url: "javascript:alert(1)" },
+      ],
+    });
+    useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
+    useBoard.setState({ boards: { [ACME.id]: synced() }, tickets: { [t.id]: t }, open: t.id });
+    render(<OpenTicket />);
+    expect(screen.getByRole("button", { name: "Open in Jira" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "github.com/acme/web/pull/12" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /alert/ })).toBeNull();
   });
 
   it("offers linking from the board's menu, and unlinking once linked", async () => {

@@ -235,6 +235,9 @@ impl HubIo {
         if !here.local {
             return Err("Desk gives a hub's token only to this computer's hub.".into());
         }
+        // The address the local hub will keep it under, checked as the local
+        // hub checks it, before anything is minted.
+        sync_hub_url_ok(&there.base)?;
         let url = there.base.as_str().trim_end_matches('/').to_string();
         let (meta, bytes) = self.fetch(remote, "POST", MINT_PATH, None).await?;
         if !(200..300).contains(&meta.status) {
@@ -244,13 +247,17 @@ impl HubIo {
                     .unwrap_or_else(|| format!("{name} didn't make a token ({}).", meta.status)),
             });
         }
-        let token = serde_json::from_slice::<serde_json::Value>(&bytes)
-            .ok()
-            .and_then(|v| {
-                v.get("token")?
-                    .as_str()
-                    .map(|t| zeroize::Zeroizing::new(t.to_string()))
-            });
+        let minted = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+        // Its id, to revoke it by if this computer's hub can't keep it.
+        let token_id = minted
+            .as_ref()
+            .and_then(|v| v.get("id")?.as_str().map(str::to_string))
+            .filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        let token = minted.and_then(|v| {
+            v.get("token")?
+                .as_str()
+                .map(|t| zeroize::Zeroizing::new(t.to_string()))
+        });
         drop(zeroize::Zeroizing::new(bytes));
         let Some(token) = token else {
             return Ok(Minted::NotAllowed {
@@ -265,22 +272,41 @@ impl HubIo {
             .map_err(|e| e.to_string())?,
         );
         drop(token);
-        let (meta, answer) = self
+        let kept = self
             .fetch(
                 local,
                 "PUT",
                 &format!("/api/desk/sync-hubs/{id}"),
                 Some(("application/json".into(), body.to_vec())),
             )
-            .await?;
-        if !(200..300).contains(&meta.status) {
-            return Err(words_of(&answer).unwrap_or_else(|| {
-                format!(
-                    "This computer's hub didn't keep {name}'s token ({}).",
-                    meta.status
-                )
-            }));
-        }
+            .await;
+        let answer = match kept {
+            Ok((meta, answer)) if (200..300).contains(&meta.status) => answer,
+            failed => {
+                let reason = match failed {
+                    Ok((meta, answer)) => {
+                        words_of(&answer).unwrap_or_else(|| format!("it answered {}", meta.status))
+                    }
+                    Err(e) => e,
+                };
+                // Not left live on the remote hub, unkept: revoked there with
+                // the device token, as far as that hub lets it.
+                if let Some(token_id) = token_id {
+                    let _ = self
+                        .fetch(
+                            remote,
+                            "DELETE",
+                            &format!("/api/me/remote-mcp-tokens/{token_id}"),
+                            None,
+                        )
+                        .await;
+                }
+                let reason = reason.trim().trim_end_matches('.');
+                return Err(format!(
+                    "{name} made a token but this computer's hub couldn't keep it: {reason}. The board needs a new token."
+                ));
+            }
+        };
         let offers = serde_json::from_slice::<serde_json::Value>(&answer)
             .ok()
             .and_then(|v| v.get("offers").cloned())
@@ -302,6 +328,26 @@ pub enum Minted {
     /// The hub didn't make one (its admin hasn't allowed it, or it is an
     /// older hub): its words.
     NotAllowed { status: u16, error: String },
+}
+
+/// Whether `base` is an address the local hub keeps a sync hub at, as its
+/// `check_hub_url` says: `https://`, or `http://` to this computer only,
+/// with no credentials, query or fragment.
+fn sync_hub_url_ok(base: &Url) -> Result<(), String> {
+    let local = matches!(base.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    let ok = (base.scheme() == "https" || (base.scheme() == "http" && local))
+        && base.host_str().is_some()
+        && base.username().is_empty()
+        && base.password().is_none()
+        && base.query().is_none()
+        && base.fragment().is_none();
+    match ok {
+        true => Ok(()),
+        false => Err(format!(
+            "{:?} isn't a hub's address, like https://atlas.example.",
+            base.as_str().trim_end_matches('/')
+        )),
+    }
 }
 
 /// Whether `id` can name a sync hub on the local hub: lowercase letters,
@@ -866,6 +912,75 @@ mod tests {
             body,
             serde_json::json!({ "name": "Atlas", "url": remote, "token": "wfr_SENTINEL_MINTED_0123456789" })
         );
+    }
+
+    /// A token this computer's hub couldn't keep is revoked on the hub that
+    /// made it, with the device token, and the page is told plainly.
+    #[tokio::test]
+    async fn a_minted_token_this_computer_s_hub_cant_keep_is_revoked() {
+        let (remote, mut remote_seen) = hub(vec![
+            status(
+                "201 Created",
+                r#"{"id":"0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6","label":"Desk on Sam's Mac","token":"wfr_SENTINEL-unkept-token-here","expires_at":"2027-02-01T00:00:00Z","connect":{}}"#,
+            ),
+            status("204 No Content", ""),
+        ])
+        .await;
+        let (local, _local_seen) = hub(vec![status(
+            "500 Internal Server Error",
+            r#"{"error":"Desk couldn't keep the token. Try again."}"#,
+        )])
+        .await;
+        let io = io_for(vec![
+            account("local", &local, true, "LOCAL-DEVICE"),
+            account("atlas", &remote, false, "ATLAS-DEVICE"),
+        ]);
+        let e = io
+            .mint_for_sync("atlas", "local", "atlas", "Atlas")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e,
+            "Atlas made a token but this computer's hub couldn't keep it: Desk couldn't keep the token. Try again. The board needs a new token."
+        );
+        assert!(!e.contains("SENTINEL"));
+        let _mint = remote_seen.recv().await.unwrap();
+        let revoke = remote_seen.recv().await.unwrap();
+        assert!(
+            revoke.starts_with(
+                "DELETE /api/me/remote-mcp-tokens/0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6 HTTP/1.1"
+            ),
+            "{revoke}"
+        );
+        assert!(
+            revoke
+                .to_ascii_lowercase()
+                .contains("authorization: bearer atlas-device")
+        );
+    }
+
+    /// A hub's address is checked as the local hub checks one, before
+    /// anything is minted.
+    #[test]
+    fn a_sync_hub_s_address_is_checked_as_the_local_hub_checks_it() {
+        for ok in [
+            "https://atlas.acme.example/",
+            "http://127.0.0.1:8080/",
+            "http://localhost:9/",
+            "http://[::1]:9/",
+        ] {
+            assert!(sync_hub_url_ok(&Url::parse(ok).unwrap()).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://atlas.acme.example/",
+            "https://sam:pw@atlas.acme.example/",
+            "https://atlas.acme.example/?x=1",
+            "https://atlas.acme.example/#x",
+            "ftp://atlas.acme.example/",
+        ] {
+            let e = sync_hub_url_ok(&Url::parse(bad).unwrap()).unwrap_err();
+            assert!(e.contains("isn't a hub's address"), "{bad}: {e}");
+        }
     }
 
     /// A hub that doesn't let devices mint says so; nothing reaches this

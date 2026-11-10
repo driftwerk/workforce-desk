@@ -614,7 +614,7 @@ function LinkRow({ link: l }: { link: TicketLink }) {
       return (
         <div className="ticket-link">
           <span className="chip chip-live">PR #{l.number}</span>
-          {l.url && (
+          {/^https:\/\//i.test(l.url) && (
             <button type="button" className="link ticket-link-url" onClick={() => void openUrl(l.url)}>
               {l.url.replace(/^https?:\/\//, "")}
             </button>
