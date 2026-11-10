@@ -213,7 +213,7 @@ describe("Oversees the crew", () => {
     const hub = fakeHub();
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
     expect(screen.getByRole("heading", { name: "How Ledger works" })).toBeTruthy();
-    expect((screen.getByRole("checkbox", { name: /Prefer real sessions/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /Always work in real sessions/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("radio", { name: /Only what I hand it/ }).getAttribute("aria-checked")).toBe("true");
     const parallel = screen.getByRole("textbox", { name: "Sessions at once" }) as HTMLInputElement;
     expect(parallel.value).toBe("4");
@@ -230,7 +230,7 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ work: { parallel: 6 } }));
 
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Every session it can/ })));
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Prefer real sessions/ })));
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Always work in real sessions/ })));
     await act(async () => fireEvent.change(engine, { target: { value: "codex" } }));
     const turns = screen.getByRole("textbox", { name: "Work turns an hour" });
     fireEvent.change(turns, { target: { value: "90" } });

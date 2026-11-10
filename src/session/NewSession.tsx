@@ -39,6 +39,12 @@ export const groupSays = (group: string, startedIn: string, name: string, machin
   return `It shows in ${group === UNGROUPED ? "Ungrouped" : name}${tag}.`;
 };
 
+/** What Fast mode does, as OpenAI's catalogue words it: Codex asks
+ *  ChatGPT's faster tier (1.5x to 2x speed) on models that have one, and on
+ *  most of them it uses more of the plan. */
+const FAST_NOTE =
+  "Codex asks ChatGPT for its faster tier where your model has one: up to twice the speed, and on most models it uses up your plan’s limits sooner.";
+
 export function NewSession({
   onClose,
   group: given,
@@ -77,6 +83,7 @@ export function NewSession({
   const [worktree, setWorktree] = useState("");
   const [approvals, setApprovals] = useState<"desk" | "terminal">("desk");
   const [approveForMe, setApproveForMe] = useState(false);
+  const [fast, setFast] = useState(false);
   const [busy, setBusy] = useState(false);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   const accountStore = accountsOn(runOn);
@@ -101,6 +108,7 @@ export function NewSession({
   const caps = defaultCaps(engines?.find((e) => e.engine === engine));
   const inDesk = answersInDesk(engine, caps);
   const canApproveForMe = !!caps?.approveForMe;
+  const canRunFast = !!caps?.fast;
   // A machine's accounts are its own: its sessions start on one of them.
   const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
   const missing = engines?.filter((e) => e.installed === false).map((e) => e.title) ?? [];
@@ -134,6 +142,7 @@ export function NewSession({
         goal,
         approvals: inDesk ? approvals : undefined,
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
+        fast: canRunFast && fast ? true : undefined,
         account: accounts.length > 0 ? accountOfChoice(account) : undefined,
         worktree: worktree.trim() || undefined,
         env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
@@ -293,6 +302,20 @@ export function NewSession({
             {approveForMe && (
               <p className="muted small">Codex’s own reviewer answers what it asks, inside the workspace sandbox. You can still stop its turn.</p>
             )}
+          </div>
+        )}
+        {canRunFast && (
+          <div className="field">
+            <span>Speed</span>
+            <div className="seg" role="radiogroup" aria-label="Speed">
+              <button type="button" role="radio" aria-checked={!fast} onClick={() => setFast(false)}>
+                Standard
+              </button>
+              <button type="button" role="radio" aria-checked={fast} onClick={() => setFast(true)}>
+                Fast
+              </button>
+            </div>
+            {fast && <p className="muted small">{FAST_NOTE}</p>}
           </div>
         )}
         <footer className="sheet-foot">

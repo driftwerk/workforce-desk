@@ -418,8 +418,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             </span>
             <div className="oversee-card">
               <Check
-                label="Prefer real sessions"
-                sub={`${name} starts sessions you can watch, type into and take over. Helpers only for quick read-only lookups`}
+                label="Always work in real sessions"
+                sub={`${name} does all coding in sessions you can watch, type into and take over: no edits to code, builds or shell commands of its own. It still reads, searches and keeps its own notes, and helpers only look things up. Workflow coding steps and pilot rounds still run as before`}
                 checked={o.work.preferSessions}
                 onChange={(v) => update((x) => ({ ...x, work: { ...x.work, preferSessions: v } }))}
               />

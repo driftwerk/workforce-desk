@@ -209,7 +209,22 @@ impl Installs {
 }
 
 fn script(plan: Plan) -> String {
-    format!("set -o pipefail; {}", plan.installer())
+    format!(
+        "{}set -o pipefail; {}",
+        clear_dead_link(plan),
+        plan.installer()
+    )
+}
+
+/// A `~/.local/bin/<cli>` link whose target is gone (an uninstall that
+/// left it behind) stops the installer putting its own there: removed
+/// first, and said. Only a dangling link at that one path.
+fn clear_dead_link(plan: Plan) -> String {
+    let at = format!("$HOME/.local/bin/{}", plan.program());
+    format!(
+        "if [ -L \"{at}\" ] && [ ! -e \"{at}\" ]; then rm -f \"{at}\" && echo \"Removed a broken link at ~/.local/bin/{}\"; fi; ",
+        plan.program()
+    )
 }
 
 fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
@@ -355,6 +370,47 @@ mod tests {
         );
         let v = serde_json::to_value(Progress::failed("x".into())).unwrap();
         assert!(v.get("command").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_link_where_the_cli_goes_is_removed_and_nothing_else() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let run = || {
+            std::process::Command::new("/bin/bash")
+                .args(["-c", &clear_dead_link(Plan::Claude)])
+                .env("HOME", home.path())
+                .output()
+                .unwrap()
+        };
+        // Dangling: removed, and said.
+        symlink(home.path().join("gone"), bin.join("claude")).unwrap();
+        let out = run();
+        assert!(out.status.success());
+        assert!(std::fs::symlink_metadata(bin.join("claude")).is_err());
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Removed a broken link at ~/.local/bin/claude"
+        );
+        // A link that works, and a real file, are kept, silently.
+        std::fs::write(home.path().join("real"), "x").unwrap();
+        symlink(home.path().join("real"), bin.join("claude")).unwrap();
+        assert!(run().stdout.is_empty());
+        assert!(bin.join("claude").exists());
+        std::fs::remove_file(bin.join("claude")).unwrap();
+        std::fs::write(bin.join("claude"), "x").unwrap();
+        assert!(run().stdout.is_empty());
+        assert!(bin.join("claude").exists());
+        // Nothing there: nothing done.
+        std::fs::remove_file(bin.join("claude")).unwrap();
+        assert!(run().status.success());
+        assert!(
+            script(Plan::Claude)
+                .ends_with("set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash")
+        );
     }
 
     #[cfg(unix)]

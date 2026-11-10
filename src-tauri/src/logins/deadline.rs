@@ -17,8 +17,9 @@ pub fn isolate(command: &mut Command) {
     let _ = command;
 }
 
-/// Kills the child and what it started (on Windows that includes what
-/// `wsl.exe` runs inside Linux).
+/// Kills the child and what it started. On Windows that is the Windows
+/// process tree only: what `wsl.exe` runs inside Linux isn't part of it and
+/// is ended inside WSL (see `cli::stop_sign_in`).
 pub fn kill_tree(child: &mut Child) {
     let pid = child.id().to_string();
     #[cfg(unix)]
@@ -56,6 +57,24 @@ pub fn wait(
             return (child.wait(), true);
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Whether `command` ran and succeeded within `deadline`, with nothing
+/// connected to its stdin, stdout or stderr.
+pub fn succeeds(mut command: Command, deadline: Duration) -> bool {
+    isolate(&mut command);
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    match wait(&mut child, deadline) {
+        (Ok(status), false) => status.success(),
+        _ => false,
     }
 }
 
@@ -102,10 +121,45 @@ mod tests {
     }
 
     #[test]
+    fn success_is_said_only_for_a_command_that_ends_well_in_time() {
+        assert!(succeeds(sh("exit 0"), Duration::from_secs(10)));
+        assert!(!succeeds(sh("exit 3"), Duration::from_secs(10)));
+        assert!(!succeeds(sh("sleep 30"), Duration::from_millis(300)));
+    }
+
+    #[test]
     fn a_command_that_ends_in_time_gives_its_output() {
         assert_eq!(
             capture(sh("echo hi"), Duration::from_secs(10)).as_deref(),
             Some("hi\n")
         );
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// `cmd` starts `ping`, which holds the output pipe: killing the tree
+    /// ends both, so the pipe closes at once instead of in 30 s.
+    #[test]
+    fn killing_the_tree_ends_what_the_child_started() {
+        use std::os::windows::process::CommandExt;
+        let mut child = Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1"])
+            .creation_flags(0x0800_0000)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        let start = Instant::now();
+        kill_tree(&mut child);
+        let _ = child.wait();
+        let mut sink = Vec::new();
+        let _ = stdout.read_to_end(&mut sink);
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 }
