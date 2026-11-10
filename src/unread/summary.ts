@@ -9,7 +9,7 @@ import { deskState } from "../restore/boot";
 import { shareFocus } from "./focus";
 import { merged } from "../floor/merge";
 import { useFloor } from "../floor/store";
-import { NEEDS_SEEN_KEY, noteSeen, seenFrom, useNeedsSeen } from "./needsSeen";
+import { NEEDS_DISMISSED_KEY, NEEDS_SEEN_KEY, noteDismissed, noteSeen, seenFrom, useNeedsDismissed, useNeedsSeen } from "./needsSeen";
 import { useWatching } from "./watching";
 import { noticesFrom } from "./notices";
 import { checkInDmRead, dmPointsFrom, flushPending, heard, heardOn, loadLocal, onDmWritten, restoreKeptDms, useReads } from "./reads";
@@ -275,14 +275,21 @@ function watchNeedsSeen(): () => void {
   const heard = deskState.subscribe(NEEDS_SEEN_KEY, (key, value) => {
     if (key === NEEDS_SEEN_KEY) useNeedsSeen.setState({ seen: seenFrom(value) });
   });
+  useNeedsDismissed.setState({ gone: seenFrom(deskState.get(NEEDS_DISMISSED_KEY)) });
+  const heardGone = deskState.subscribe(NEEDS_DISMISSED_KEY, (key, value) => {
+    if (key === NEEDS_DISMISSED_KEY) useNeedsDismissed.setState({ gone: seenFrom(value) });
+  });
   const note = () => {
-    // Nothing seen and nothing on screen: nothing to note, or to let go.
-    if (!useNeedsSeen.getState().seen.size && !Object.keys(useWatching.getState().on).length) return;
+    const gone = useNeedsDismissed.getState().gone.size;
+    // Nothing seen, dismissed or on screen: nothing to note, or to let go.
+    if (!useNeedsSeen.getState().seen.size && !gone && !Object.keys(useWatching.getState().on).length) return;
     const hubs = useFloor.getState().hubs;
-    if (noteSeen(merged(hubs, useChat.getState().hubs).needs, (hub) => hubs[hub]?.state === "ready"))
-      deskState.set(NEEDS_SEEN_KEY, [...useNeedsSeen.getState().seen]);
+    const all = merged(hubs, useChat.getState().hubs).needs;
+    const ready = (hub: string) => hubs[hub]?.state === "ready";
+    if (noteSeen(all, ready)) deskState.set(NEEDS_SEEN_KEY, [...useNeedsSeen.getState().seen]);
+    if (noteDismissed(all, ready)) deskState.set(NEEDS_DISMISSED_KEY, [...useNeedsDismissed.getState().gone]);
   };
-  const stops = [useFloor.subscribe(note), useWatching.subscribe(note), heard];
+  const stops = [useFloor.subscribe(note), useWatching.subscribe(note), heard, heardGone];
   return () => stops.forEach((stop) => stop());
 }
 

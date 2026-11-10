@@ -2,7 +2,7 @@
  *  "99+" past 99. */
 export function Badge({ count, says }: { count: number; says: string }) {
   return (
-    <span className="badge">
+    <span className="badge" title={says}>
       <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
       <span className="sr-only">{says}</span>
     </span>
