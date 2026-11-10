@@ -1,4 +1,6 @@
+import { RichMarkdown } from "@workforce/rich";
 import { Actions } from "../chat/Actions";
+import type { Advice } from "../hub/types";
 import { StatusLine, ToolChips, useNow } from "../chat/WorkingRow";
 import type { RoomDraft } from "../hub/store";
 import { progressOf, secsLabel, type Progress as Shown } from "./progress";
@@ -9,18 +11,61 @@ export function Steps({ steps, live }: { steps: Shown["steps"]; live?: boolean }
   return <Actions items={steps} live={live}>{(shown, first) => <StepList steps={shown} first={first} />}</Actions>;
 }
 
+type Shown1 = Shown["steps"][number];
+
+/** A step's dot, its tool and how it went. */
+function StepRow({ s }: { s: Shown1 }) {
+  return (
+    <>
+      <span className="prog-dot" aria-hidden="true">
+        {s.state === "failed" || s.state === "unfinished" ? "×" : ""}
+      </span>
+      <span className="mono">{s.name}</span>
+      {s.advice?.model && <span className="chip step-advice-model">{s.advice.model}</span>}
+      <span className="faint small">{s.state === "unfinished" ? "unfinished" : s.state === "failed" ? `failed ${secsLabel(s.secs)}` : secsLabel(s.secs)}</span>
+    </>
+  );
+}
+
+/** An advisor call, opened to what the agent asked and what it was told:
+ *  the question as plain text, the answer as an agent's words are drawn. */
+function AdviceStep({ s, advice }: { s: Shown1; advice: Advice }) {
+  return (
+    <details className="step-advice">
+      <summary className={`prog-step prog-${s.state}`}>
+        <StepRow s={s} />
+      </summary>
+      <div className="step-advice-body">
+        <p className="step-advice-label small">Asked</p>
+        {advice.question ? <p className="step-advice-question">{advice.question}</p> : <p className="muted small">A general review, with no question.</p>}
+        <p className="step-advice-label small">{advice.unavailable ? "No advice" : "Answered"}</p>
+        {advice.unavailable ? (
+          <p className="muted small">{advice.answer}</p>
+        ) : (
+          <div className="msg-text rich">
+            <RichMarkdown text={advice.answer} />
+          </div>
+        )}
+        {advice.clipped && <p className="faint small">Cut short here; the agent has the whole answer.</p>}
+      </div>
+    </details>
+  );
+}
+
 function StepList({ steps, first }: { steps: Shown["steps"]; first: number }) {
   return (
     <ol className="prog-steps">
-      {steps.map((s, i) => (
-        <li key={first + i} className={`prog-step prog-${s.state}`}>
-          <span className="prog-dot" aria-hidden="true">
-            {s.state === "failed" || s.state === "unfinished" ? "×" : ""}
-          </span>
-          <span className="mono">{s.name}</span>
-          <span className="faint small">{s.state === "unfinished" ? "unfinished" : s.state === "failed" ? `failed ${secsLabel(s.secs)}` : secsLabel(s.secs)}</span>
-        </li>
-      ))}
+      {steps.map((s, i) =>
+        s.advice ? (
+          <li key={first + i}>
+            <AdviceStep s={s} advice={s.advice} />
+          </li>
+        ) : (
+          <li key={first + i} className={`prog-step prog-${s.state}`}>
+            <StepRow s={s} />
+          </li>
+        ),
+      )}
     </ol>
   );
 }

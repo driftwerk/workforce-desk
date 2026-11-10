@@ -290,15 +290,13 @@ impl HubIo {
                     Err(e) => e,
                 };
                 // Not left live on the remote hub, unkept: revoked there with
-                // the device token, as far as that hub lets it.
+                // the device token, on the device-only route that revokes
+                // only what this device minted. (A hub older than it
+                // answers 404 or 405; the token then lasts until this
+                // device mints again, which replaces it, or is unpaired.)
                 if let Some(token_id) = token_id {
                     let _ = self
-                        .fetch(
-                            remote,
-                            "DELETE",
-                            &format!("/api/me/remote-mcp-tokens/{token_id}"),
-                            None,
-                        )
+                        .fetch(remote, "DELETE", &format!("{MINT_PATH}/{token_id}"), None)
                         .await;
                 }
                 let reason = reason.trim().trim_end_matches('.');
@@ -948,7 +946,7 @@ mod tests {
         let revoke = remote_seen.recv().await.unwrap();
         assert!(
             revoke.starts_with(
-                "DELETE /api/me/remote-mcp-tokens/0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6 HTTP/1.1"
+                "DELETE /api/me/remote-mcp-tokens/desk/0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6 HTTP/1.1"
             ),
             "{revoke}"
         );
