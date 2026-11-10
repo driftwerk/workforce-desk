@@ -636,6 +636,9 @@ export class DeskHub {
     this.call(needs ? "PUT" : "DELETE", `/api/desk/tickets/${encodeURIComponent(id)}/needs/${encodeURIComponent(other)}`);
   /** Gives a ticket to a session, an agent or a new session, as you. */
   assignTicket = (id: string, to: AssignTo): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/assign`, { to });
+  /** A ticket on its board's Left-the-filter shelf: kept here, unsynced
+   *  for good, or dropped (its issue is never touched). */
+  leftFilter = (id: string, keep: boolean): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/left-filter`, { keep });
   /** A boss's plans with where their tickets stand; null from a hub
    *  without plans (an older one). */
   plans = async (q: { state?: BossPlanState; group?: string } = {}): Promise<BossPlan[] | null> => {

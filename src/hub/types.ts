@@ -914,7 +914,9 @@ export interface Overview {
   items: OverviewItem[];
 }
 
-export type OversightLevel = "watch" | "suggest" | "act";
+/** `full` is Act fully: Act, and shipping in the repos the person names
+ *  (an older hub knows only the first three). */
+export type OversightLevel = "watch" | "suggest" | "act" | "full";
 
 /** The agent overseeing the crew, if any. */
 export interface Manager {
@@ -1059,6 +1061,9 @@ export interface ChargeView {
   since: string;
   /** Set once it was let go: it no longer runs it. */
   releasedAt: string | null;
+  /** How long, in minutes, the person's last input keeps the wheel theirs
+   *  (unpinned); an older hub doesn't say. */
+  holdMinutes?: number;
 }
 
 // ── The floor: open needs, work, today's lanes, plan usage ───────────────
@@ -1324,9 +1329,110 @@ export interface Board {
   name: string;
   /** Its sidebar group; null is ungrouped. */
   group: string | null;
+  /** Null exactly when it is synced: its tickets take their issues' keys. */
   prefix: string | null;
+  /** Its link to a Jira project or a Linear team; absent from an older hub. */
+  sync?: BoardSync | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Sync with Linear or Jira (the hub's `board::Sync`) ──────────────────
+
+export type SyncSystem = "jira" | "linear";
+
+/** How a board reaches its Jira or Linear: through a linked hub (its id in
+ *  the local hub's sync hubs), or with this computer's own keys. */
+export type SyncVia = { kind: "hub"; hub: string } | { kind: "thisHub" };
+
+/** Which of the target's issues a board imports and keeps in sync. */
+export type SyncFilter = { kind: "assignedToMe" } | { kind: "currentCycle" } | { kind: "label"; value: string } | { kind: "query"; value: string };
+
+/** Why a synced board isn't syncing; local edits wait. */
+export type SyncPaused =
+  | { kind: "byYou" }
+  | { kind: "hubOffline"; since: string }
+  | { kind: "hubUnpaired" }
+  | { kind: "noToken" }
+  | { kind: "missing"; tools: string[] }
+  | { kind: "refused"; reason: string }
+  | { kind: "leftGroup" };
+
+/** A board's link: one Jira project or one Linear team, through one hub. */
+export interface BoardSync {
+  link: string;
+  system: SyncSystem;
+  /** The Jira project's key, or the Linear team's. */
+  target: string;
+  targetId?: string;
+  via: SyncVia;
+  person: string;
+  filter: SyncFilter;
+  me?: string;
+  /** The remote state each column moves an issue to. */
+  states: Partial<Record<TicketState, string>>;
+  group?: string | null;
+  cursor?: string | null;
+  paused?: SyncPaused | null;
+  pulledAt?: string | null;
+  backoffUntil?: string | null;
+  failures?: number;
+  /** What it last couldn't do, in the hub's words. */
+  problem?: string | null;
+}
+
+/** A ticket's Jira or Linear issue. `synced`: false once it left the
+ *  import filter, or the board was unlinked. */
+export interface TicketExternal {
+  system: SyncSystem;
+  key: string;
+  id?: string;
+  url: string;
+  remoteUpdatedAt: string;
+  synced: boolean;
+  link: string;
+  madeHere?: boolean;
+  kept?: boolean;
+  /** Its text read as instructions to a model when it was pulled. */
+  flagged?: boolean;
+}
+
+/** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */
+export interface SyncHub {
+  id: string;
+  name: string;
+  url: string;
+  /** Whether the person's token for it is kept; never the token. */
+  hasToken: boolean;
+}
+
+/** Which systems a hub offers its tools for, as it said when its token was
+ *  tried; null when no new token was given. */
+export type SyncOffers = { jira: boolean; linear: boolean } | null;
+
+/** What `POST /api/desk/boards/link/check` found. */
+export interface LinkCheck {
+  offered: boolean;
+  /** Linear: the hub's teams. */
+  teams?: { id: string; key: string; name: string }[];
+  /** The states an issue in the target can be in. */
+  states?: string[];
+  /** The state map the dialog starts from. */
+  prefill?: Partial<Record<TicketState, string>>;
+  /** How many issues the filter matched (of the first page). */
+  matches?: number;
+  matchesAtLeast?: boolean;
+}
+
+/** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */
+export interface LinkBoard {
+  system: SyncSystem;
+  target: string;
+  targetId?: string;
+  via: SyncVia;
+  filter: SyncFilter;
+  me?: string;
+  states: Partial<Record<TicketState, string>>;
 }
 
 /** What a ticket points at. */
@@ -1367,6 +1473,13 @@ export interface Ticket {
   /** Done for 3 days, or Dropped: on the settled shelf. */
   settled: boolean;
   snoozed: boolean;
+  /** Its Jira or Linear issue, on a synced board. */
+  external?: TicketExternal | null;
+  /** Its issue left the board's import filter: on the Left-the-filter
+   *  shelf, for the person to keep or drop. */
+  leftFilter?: boolean;
+  /** What stops its change going out to its issue, in plain words. */
+  pushProblem?: string | null;
 }
 
 export interface NewTicket {
