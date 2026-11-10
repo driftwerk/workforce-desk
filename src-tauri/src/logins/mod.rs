@@ -77,9 +77,6 @@ enum Running {
     },
 }
 
-/// What `claude setup-token`'s Linux process is found by when it's ended.
-const CLAUDE_MARKER: &str = "setup-token";
-
 impl Running {
     /// Ends the sign-in: the program, what it started, and inside WSL the
     /// Linux side too, which isn't in Windows' process tree.
@@ -96,12 +93,7 @@ impl Running {
             } => {
                 drop(stdin);
                 deadline::kill_tree(&mut child.lock().expect("child"));
-                cli::stop_sign_in(
-                    &backend,
-                    Plan::Claude.program(),
-                    CLAUDE_MARKER,
-                    Some(&attempt),
-                );
+                cli::stop_sign_in(&backend, Plan::Claude.program(), Some(&attempt));
             }
             Running::Chatgpt { child } => deadline::kill_tree(&mut child.lock().expect("child")),
         }
@@ -176,6 +168,18 @@ fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
     Ok(())
 }
 
+/// The screen up to the code prompt: what follows it may echo the code the
+/// person pasted, which no message repeats.
+fn before_code(text: &str) -> &str {
+    let lower = text.to_lowercase();
+    match lower.find("paste code") {
+        // Lowercasing can move byte offsets; cut only on a boundary.
+        Some(i) if text.is_char_boundary(i) => &text[..i],
+        Some(_) => "",
+        None => text,
+    }
+}
+
 fn tail(text: &str) -> String {
     let lines: Vec<&str> = text
         .lines()
@@ -233,7 +237,10 @@ fn conclude_claude(backend: &Backend, report: &Report, read: Result<String, Stri
             });
         }
         Err(text) => report(Progress::Failed {
-            message: format!("Claude sign-in ended without a token. {}", tail(&text)),
+            message: format!(
+                "Claude sign-in ended without a token. {}",
+                tail(before_code(&text))
+            ),
         }),
     }
 }
@@ -361,7 +368,7 @@ impl Logins {
             let done = read.is_ok();
             if done {
                 deadline::kill_tree(&mut waiting.lock().expect("child"));
-                cli::stop_sign_in(&b, Plan::Claude.program(), CLAUDE_MARKER, Some(&mine));
+                cli::stop_sign_in(&b, Plan::Claude.program(), Some(&mine));
             }
             // stdout closed: the program has ended or is about to.
             loop {
@@ -494,8 +501,26 @@ impl Logins {
             && !wsl_ended
             && let Some(backend) = backend
         {
-            cli::stop_sign_in(backend, Plan::Claude.program(), CLAUDE_MARKER, None);
+            cli::stop_sign_in(backend, Plan::Claude.program(), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failure_never_repeats_what_followed_the_code_prompt() {
+        let screen = "Opening browser\nhttps://claude.ai/oauth\nPaste code here if prompted > abc#secret\nOAuth error: invalid code";
+        let said = tail(before_code(screen));
+        assert!(!said.contains("abc#secret"), "{said}");
+        assert!(!said.contains("Paste code"), "{said}");
+        assert_eq!(said, "Opening browser https://claude.ai/oauth");
+        assert_eq!(
+            tail(before_code("Error: not logged in")),
+            "Error: not logged in"
+        );
     }
 }
 
