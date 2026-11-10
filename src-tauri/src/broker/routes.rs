@@ -76,6 +76,8 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/sessions/{}/charge"),
     route("DELETE", "/api/desk/sessions/{}/charge"),
     route("PATCH", "/api/desk/sessions/{}/charge"),
+    // You're typing a draft to it: your draft holds its wheel.
+    route("POST", "/api/desk/sessions/{}/typing"),
     // The board: boards, tickets, moves, needs, assignment and history.
     route("GET", "/api/desk/boards"),
     route("POST", "/api/desk/boards"),

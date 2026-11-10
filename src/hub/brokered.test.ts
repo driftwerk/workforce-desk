@@ -130,6 +130,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   handTo: (h) => Promise.all([h.handTo("s1"), h.handTo("s1", "sarah")]),
   releaseCharge: (h) => h.releaseCharge("s1"),
   setWheel: (h) => Promise.all([h.setWheel("s1", "person_pinned"), h.setWheel("s1", "boss")]),
+  typing: (h) => h.typing("s1"),
   boards: (h) => h.boards(),
   createBoard: (h) => h.createBoard({ name: "Acme" }),
   updateBoard: (h) => h.updateBoard("b1", { name: "Acme web" }),
