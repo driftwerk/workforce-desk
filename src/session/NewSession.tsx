@@ -15,6 +15,7 @@ import { homeWithin, onMachine } from "../machines/folders";
 import { nameOfMachine } from "../machines/words";
 import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
+import { NEW_SESSION_LINE } from "../shell/newLines";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
 
@@ -162,7 +163,10 @@ export function NewSession({
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="sheet" onSubmit={submit} aria-label="New session">
-        <h2 className="display-md">New session</h2>
+        <div className="dialog-title">
+          <h2 className="display-md">New session</h2>
+          <p className="small">{NEW_SESSION_LINE}</p>
+        </div>
         <RunOn
           value={runOn}
           onChange={(m) => {
