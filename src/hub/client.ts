@@ -556,6 +556,16 @@ export class DeskHub {
   /** Your message to a session: at its turn's end, or `now` into it. */
   postLine = (id: string, text: string, when: "queue" | "now"): Promise<LineMessage> =>
     this.call("POST", `/api/desk/sessions/${encodeURIComponent(id)}/line`, { text, when });
+  /** You're typing a draft to a session in Desk's composer: it counts as
+   *  your input there, so its boss doesn't answer underneath you. Quiet on a
+   *  hub without the route (an older one). */
+  typing = async (sessionId: string): Promise<void> => {
+    try {
+      await this.call("POST", `/api/desk/sessions/${encodeURIComponent(sessionId)}/typing`);
+    } catch {
+      // An older hub: your draft counts once sent, as before.
+    }
+  };
   /** Changes a message of yours that hasn't gone out. */
   editLine = (id: string, text: string): Promise<void> => this.call("PATCH", `/api/desk/line/${encodeURIComponent(id)}`, { text });
   /** Takes back a message of yours that hasn't gone out. */
