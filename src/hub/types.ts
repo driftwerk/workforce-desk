@@ -160,6 +160,8 @@ export interface Session {
   group?: { id: string; name: string } | null;
   /** Background work still running after its turn ended; absent from older hubs. */
   background?: Background | null;
+  /** Present only while it runs in a non-asking mode an unbound boss set. */
+  mode?: "auto" | "bypassPermissions";
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
   createdAt: string;

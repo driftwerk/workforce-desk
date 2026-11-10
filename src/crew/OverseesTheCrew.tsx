@@ -735,7 +735,11 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Change sessions’ permission mode"
-                  sub="Switch a running session between default, accept edits and plan; never to a mode that skips asking"
+                  sub={
+                    unbound
+                      ? "Desk can switch a session it runs to auto or bypass, and it goes back to its own mode when unbound ends or you resume it"
+                      : "Switch a running session between manual, accept edits and plan"
+                  }
                   checked={o.act.setMode}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, setMode: v } }))}
                 />
@@ -744,11 +748,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 <p className="small state-blocked" role="status">
                   No limits: Desk acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
                   activity log remain.
+                  {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}
                 </p>
               )}
               <span className="oversee-sub">
-                {name} always asks you first before pushing code, deleting anything, or sending messages outside Desk. Everything it
-                does shows in Activity with its reason.
+                {!unbound && `${name} always asks you first before pushing code, deleting anything, or sending messages outside Desk. `}
+                Everything it does shows in Activity with its reason.
               </span>
             </div>
           )}

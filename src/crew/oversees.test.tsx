@@ -216,7 +216,7 @@ describe("Oversees the crew", () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
     const hub = fakeHub();
     const acts = `nudge = true\nresume_restart = true\nread_only_approvals = true\nhand_out_work = true\ninterrupt = true\nmessage_agents = true\nmessage_terminal_sessions = true\nanswer_sessions = true\nhand_off = true\nset_mode = true\n`;
-    const line = /^No limits: Desk acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\.$/;
+    const line = /^No limits: Desk acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\./;
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.act]\n${acts}[oversight.full]\nanywhere = true\n`);
     expect(screen.getByText(line)).toBeTruthy();
     // Any one switch off, and it goes.
@@ -225,14 +225,32 @@ describe("Oversees the crew", () => {
     expect(screen.queryByText(line)).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
     await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
-    expect(screen.queryByText(line)).toBeNull();
-    // Continuing sessions in another engine is one of them, and saves as hand_off.
+    // Unbound: its own words for the mode switch, no fixed "always asks", and a blank budget said.
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
     await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
+    expect(screen.getByText(/No budget set: only the check-in ceilings and Stop bound what it spends\./)).toBeTruthy();
+    expect(screen.getByText(/Desk can switch a session it runs to auto or bypass/)).toBeTruthy();
+    expect(screen.queryByText(/always asks you first before pushing code/)).toBeNull();
+    expect(screen.getByText(/Everything it does shows in Activity/)).toBeTruthy();
+    // Not unbound: the plain switch text and the fixed line.
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
+    await waitFor(() => expect(screen.queryByText(line)).toBeNull());
+    expect(screen.getByText("Switch a running session between manual, accept edits and plan")).toBeTruthy();
+    expect(screen.getByText(/Ledger always asks you first before pushing code/)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
+    await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
+    // Continuing sessions in another engine is one of them, and saves as hand_off.
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Continue sessions in another engine/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ act: { hand_off: false } }));
     expect(screen.queryByText(line)).toBeNull();
+  });
+
+  it("keeps the no-limits line as it is when a budget is set", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
+    const acts = `nudge = true\nresume_restart = true\nread_only_approvals = true\nhand_out_work = true\ninterrupt = true\nmessage_agents = true\nmessage_terminal_sessions = true\nanswer_sessions = true\nhand_off = true\nset_mode = true\n`;
+    show(fakeHub(), `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.act]\n${acts}[oversight.full]\nanywhere = true\nbudget_usd_per_day = 25\n`);
+    expect(screen.getByText(/^No limits: /)).toBeTruthy();
+    expect(screen.queryByText(/No budget set/)).toBeNull();
   });
 
   it("shows the hub's own refusal when it won't save", async () => {
