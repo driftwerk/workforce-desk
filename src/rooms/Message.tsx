@@ -13,6 +13,7 @@ import { AgentMark, Mark, YouMark } from "../ui/Mark";
 import type { Step } from "../hub/types";
 import { stepsOf } from "./progress";
 import { Steps } from "./ProgressCard";
+import { ToolChips } from "../chat/WorkingRow";
 import { ImageBudget } from "../shell/RemoteImage";
 import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
@@ -159,15 +160,7 @@ export const Message = memo(function Message({
           </span>
           {chips}
         </span>
-        {message.tools.length > 0 && (
-          <span className="msg-tools">
-            {message.tools.map((t, i) => (
-              <span key={i} className={`chip ${t.done ? "" : "chip-live"}`}>
-                {t.name}
-              </span>
-            ))}
-          </span>
-        )}
+        <ToolChips tools={message.tools} live={message.status === "streaming"} />
         {/* A plan card says all its own header does, and shows it while it can't;
             anything else the boss said with it (its closing summary) stays. */}
         {!message.content.trim() || cardText ? null : message.status === "error" && message.superseded ? (

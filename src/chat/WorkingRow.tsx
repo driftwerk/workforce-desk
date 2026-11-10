@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentMark } from "../ui/Mark";
 import { statusOf, type Working } from "./conversation";
+import { Actions } from "./Actions";
 import type { ToolCall } from "./types";
 
 /** Now, a second at a time: what a status line's timer counts from. */
@@ -29,16 +30,19 @@ export function StatusLine({ working }: { working: Working }) {
   );
 }
 
-export function ToolChips({ tools }: { tools: ToolCall[] }) {
-  if (!tools.length) return null;
+export function ToolChips({ tools, live = true }: { tools: ToolCall[]; live?: boolean }) {
   return (
-    <span className="msg-tools">
-      {tools.map((t, i) => (
-        <span key={i} className={`chip ${t.done ? "" : "chip-live"}`}>
-          {t.name}
+    <Actions items={tools} live={live}>
+      {(shown, first) => (
+        <span className="msg-tools">
+          {shown.map((t, i) => (
+            <span key={first + i} className={`chip ${t.done ? "" : "chip-live"}`}>
+              {t.name}
+            </span>
+          ))}
         </span>
-      ))}
-    </span>
+      )}
+    </Actions>
   );
 }
 
