@@ -18,7 +18,7 @@ import { ImageBudget } from "../shell/RemoteImage";
 import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
-import { commandMarkdown } from "../chat/commands";
+import { commandMarkdown, shownText } from "../chat/commands";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -190,11 +190,11 @@ export const Message = memo(function Message({
           <TurnError raw={message.content} />
         ) : message.role !== "assistant" && command ? (
           <p className="msg-text">
-            <code className="msg-command-text">{message.content.trim()}</code>
+            <code className="msg-command-text">{shownText(message.content.trim())}</code>
           </p>
         ) : message.role !== "assistant" ? (
           <p className="msg-text">
-            <Linked text={relayed?.text ?? message.content} />
+            <Linked text={relayed?.text ?? (message.role === "user" ? shownText(message.content) : message.content)} />
           </p>
         ) : (
           <RichHostProvider host={host}>

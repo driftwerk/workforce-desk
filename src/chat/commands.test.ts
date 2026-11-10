@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeSocket } from "../testing/sockets";
 import { Conversation, RECONNECT_GRACE_MS, toShow, UNCONFIRMED_MS } from "./conversation";
 import { keptOf, shownWith } from "./reconcile";
-import { commandMarkdown, matching, type HubCommand } from "./commands";
+import { commandMarkdown, matching, shownText, type HubCommand } from "./commands";
+import { useChat } from "./store";
+import { setDevToken } from "../hub/devTokens";
 import { FEATURES, type ChatMessage, type DeskTurn, type HubAccount } from "./types";
 
 // What you send in a DM never sits waiting at the bottom of it: a command the
@@ -202,5 +204,80 @@ describe("a command's answer", () => {
     );
     expect(commandMarkdown("2 * 3 * 4")).toBe("2 * 3 * 4");
     expect(commandMarkdown("**already**")).toBe("**already**");
+  });
+});
+
+describe("a follow-up the hub took into the running turn", () => {
+  for (const stamped of [true, false]) {
+    it(`is delivered, however long that turn runs on (${stamped ? "the hub names it" : "an older hub"})`, async () => {
+      const { c, socket } = await open();
+      const a = say(c, socket, "deploy it");
+      socket.receive({ type: "typing", turn_ref: a.ref, id: "ra" });
+      const b = say(c, socket, "and tag it");
+      socket.receive({ type: "injected", content: "Follow-up absorbed into active run", ...(stamped ? { turn_ref: b.ref } : {}) });
+      expect(c.current.taken).toEqual([b.ref]);
+      for (let i = 0; i < 8; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        socket.receive({ type: "tool_start", content: "exec.run: deploy", turn_ref: a.ref, id: "ra" });
+      }
+      const asked = c.current.messages.find((m) => m.clientId === b.clientId)!;
+      expect(asked.undelivered).toBeUndefined();
+    });
+  }
+});
+
+describe("a turn whose answer came", () => {
+  it("is never taken as lost with the hub, nor a command whose answer came", async () => {
+    const { c, socket } = await open();
+    const asked = say(c, socket, "summarise it");
+    socket.receive({ type: "stream_start", turn_ref: asked.ref, id: "r1" });
+    socket.receive({ type: "stream_delta", content: "Done: three fixes.", turn_ref: asked.ref, id: "r1" });
+    const cmd = say(c, socket, "/status");
+    socket.receive({ type: "message", content: "Model: x", turn_ref: cmd.ref, id: "r2" });
+    socket.receive({ type: "turn_end", turn_ref: cmd.ref, command: true });
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const again = FakeSocket.find("/ws", "atlas")!;
+    await Promise.resolve();
+    await wait(again, RECONNECT_GRACE_MS + 1_000);
+    expect(c.current.messages.filter((m) => m.undelivered)).toEqual([]);
+  });
+});
+
+describe("sending again", () => {
+  it("goes under the message's own id, and takes its place", async () => {
+    vi.stubGlobal("WebSocket", FakeSocket);
+    setDevToken("dw", "tok");
+    useChat.setState({
+      hubs: [hub],
+      roster: [{ hubId: "dw", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false }],
+    });
+    useChat.getState().openDm("dw/atlas");
+    const socket = FakeSocket.find("/ws", "atlas")!;
+    await Promise.resolve();
+    socket.receive({ type: "connected", session_id: "s1", features });
+    expect(useChat.getState().send("dw/atlas", "deploy it")).toBe(true);
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const again = FakeSocket.find("/ws", "atlas")!;
+    await Promise.resolve();
+    const lost = useChat.getState().conversations["dw/atlas"]!.messages.find((m) => m.undelivered)!;
+    expect(lost.content).toBe("deploy it");
+    expect(useChat.getState().retry("dw/atlas", lost.id)).toBe(true);
+    const [first] = socket.chats as { desk: { message: string } }[];
+    const [resent] = again.chats as { desk: { message: string } }[];
+    expect(resent!.desk.message).toBe(first!.desk.message);
+    const shown = useChat.getState().conversations["dw/atlas"]!.messages;
+    expect(shown.map((m) => [m.content, !!m.undelivered])).toEqual([["deploy it", false]]);
+    useChat.getState().forget("dw/atlas");
+  });
+});
+
+describe("a secret sent as a command", () => {
+  it("shows with its value hidden", () => {
+    expect(shownText("/secret datadog_key abc 123")).toBe("/secret datadog_key ••••••");
+    expect(shownText("Cmd: secret token s3cr3t")).toBe("Cmd: secret token ••••••");
+    expect(shownText("/secret")).toBe("/secret");
+    expect(shownText("what's my secret plan")).toBe("what's my secret plan");
   });
 });

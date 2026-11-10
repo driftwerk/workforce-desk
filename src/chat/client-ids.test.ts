@@ -24,6 +24,7 @@ vi.mock("./conversation", async (original) => ({
     place() {}
     unkeep() {}
     remove() {}
+    restore() {}
     cancel() {}
     close() {}
   },

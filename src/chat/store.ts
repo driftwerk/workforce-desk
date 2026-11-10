@@ -120,6 +120,9 @@ interface ChatStore {
 export interface SendOptions {
   voice?: DeskVoice;
   attachments?: Attachment[];
+  /** The client id to send it under: a message sent again keeps its own,
+   *  so a hub that has it already takes it once. */
+  message?: string;
 }
 
 /** A turn in your DM with an agent. */
@@ -570,11 +573,19 @@ export const useChat = create<ChatStore>((set, get) => ({
     settleLive(key, page.messages, { began: started, seen: new Set(was.messages.map((m) => m.id)) });
   },
   send: (key, content, opts = {}) =>
-    (live.get(key)?.send(content, { turn: dmTurn(opts.voice), attachments: opts.attachments }) ?? false) !== false,
+    (live.get(key)?.send(content, {
+      turn: { ...dmTurn(opts.voice), ...(opts.message ? { message: opts.message } : {}) },
+      attachments: opts.attachments,
+    }) ?? false) !== false,
   retry: (key, id) => {
     const m = get().conversations[key]?.messages.find((x) => x.id === id && x.undelivered);
-    if (!m || !get().send(key, m.content, m.attachments?.length ? { attachments: m.attachments } : {})) return false;
+    if (!m) return false;
+    // Taken away first: the message sent again is the same one, by its id.
     live.get(key)?.remove(id);
+    const again = { ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.clientId ? { message: m.clientId } : {}) };
+    if (get().send(key, m.content, again)) return true;
+    live.get(key)?.restore(m);
+    return false;
     return true;
   },
   discard: (key, id) => live.get(key)?.remove(id),

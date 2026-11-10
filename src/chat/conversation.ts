@@ -87,6 +87,8 @@ export interface ConversationState {
   /** The ids of live messages given up for the hub's kept copy: a frame
    *  that comes for one later is for what the kept copy already shows. */
   settled?: ReadonlySet<string>;
+  /** The turns the hub took into a running turn, by ref: they got there. */
+  taken?: readonly string[];
 }
 
 export const emptyConversation = (): ConversationState => ({
@@ -237,6 +239,19 @@ const streams = (s: ConversationState): boolean => !!s.features?.has(FEATURES.st
 /** Folds one server message into the conversation. Pure, so it is tested
  *  without a socket. */
 export const reduce = (s: ConversationState, msg: ServerMessage): ConversationState => {
+  // A follow-up the hub took into the running turn got there, though its
+  // own turn says nothing more (rooms and voice count it as absorbed, never
+  // heard). An older hub doesn't say whose; it is the oldest unheard.
+  if (msg.type === "injected") {
+    const taken = s.taken ?? [];
+    const ref = msg.turn_ref ?? Object.values(s.turns).find((t) => t.state === "live" && !t.acked && !taken.includes(t.ref))?.ref;
+    const { turn_ref: _named, ...frame } = msg;
+    const folded = fold(s, frame, Date.now());
+    const clientId = ref ? s.turns[ref]?.clientId : undefined;
+    return ref
+      ? { ...folded, taken: [...taken, ref].slice(-SETTLED_KEPT), messages: heard(folded.messages, clientId, frame) }
+      : folded;
+  }
   // A late frame of an answer the hub's kept copy already shows: what it
   // would write is there, and an answer made of it would show it twice.
   if (msg.id && s.settled?.has(msg.id) && INTO_ANSWER.has(msg.type)) return s;
@@ -581,11 +596,20 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
   }
 };
 
+/** Whether turn `t` got there, whatever came after: its answer came, or it
+ *  was a command the hub answered. */
+const answered = (s: ConversationState, t: Turn): boolean =>
+  !!t.text.trim() ||
+  !!s.taken?.includes(t.ref) ||
+  s.messages.some(
+    (m) => (m.role === "assistant" && m.turnRef === t.ref && !!m.content.trim()) || (!!m.command && !!t.clientId && m.clientId === t.clientId),
+  );
+
 /** `s` with the messages turns `refs` were asked with not delivered: the
  *  hub never said it had them. Their turns wait, stalled, in case a frame of
  *  one comes late after all; nothing shows as sending for them. */
 export const undelivered = (s: ConversationState, refs: readonly string[]): ConversationState => {
-  const turns = refs.flatMap((r) => (s.turns[r] ? [s.turns[r]!] : []));
+  const turns = refs.flatMap((r) => (s.turns[r] && !answered(s, s.turns[r]!) ? [s.turns[r]!] : []));
   if (!turns.length) return s;
   const asked = new Set(turns.flatMap((t) => (t.clientId ? [t.clientId] : [])));
   const stalled = Object.fromEntries(turns.map((t) => [t.ref, { ...t, working: null, state: "stalled" as const }]));
@@ -892,7 +916,7 @@ export class Conversation {
     const stalled = Object.values(this.state.turns).filter((t) => t.state === "stalled" && t.acked);
     if (!stalled.length) return;
     const shown = new Set(this.state.messages.flatMap((m) => (m.role === "user" && m.clientId ? [m.clientId] : [])));
-    const lost = stalled.filter((t) => t.clientId && shown.has(t.clientId)).map((t) => t.ref);
+    const lost = stalled.filter((t) => t.clientId && shown.has(t.clientId) && !answered(this.state, t)).map((t) => t.ref);
     const over = stalled.filter((t) => !lost.includes(t.ref));
     const s = undelivered(this.state, lost);
     this.set({ ...s, turns: { ...s.turns, ...Object.fromEntries(over.map((t) => [t.ref, { ...t, working: null, state: "ended" as const }])) } });
@@ -909,6 +933,12 @@ export class Conversation {
         m.role === "user" && m.clientId && ids.has(m.clientId) && !m.undelivered ? { ...m, unkept: true } : m,
       ),
     });
+  }
+
+  /** Puts back a message taken away (one that couldn't be sent again). */
+  restore(m: ChatMessage) {
+    if (this.state.messages.some((x) => x.id === m.id)) return;
+    this.set({ ...this.state, messages: [...this.state.messages, m] });
   }
 
   /** Takes a live message away (one not delivered, which you removed). */

@@ -101,6 +101,12 @@ export const commandMarkdown = (text: string): string =>
     )
     .join("  \n");
 
+/** A message as it shows: a `/secret <name> <value>` (or `cmd: secret …`)
+ *  with its value hidden, wherever the message is shown. What is sent is
+ *  untouched. */
+export const shownText = (text: string): string =>
+  text.replace(/^(\s*(?:\/|cmd:\s*)secret\s+\S+\s+)\S[\s\S]*$/i, (_, head: string) => `${head}••••••`);
+
 /** What a summary says, without the hub's code marks. */
 const plain = (summary: string) => summary.replace(/`/g, "");
 
