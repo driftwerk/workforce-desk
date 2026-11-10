@@ -66,7 +66,7 @@ export const ROSTER_MAX = 24;
 
 /** A room's members as a turn names them, each name made safe. */
 export const rosterOf = (members: readonly DeskMember[]): DeskMember[] =>
-  members.slice(0, ROSTER_MAX).map((m) => ({ name: defang(m.name), hub: defang(m.hub), lead: m.lead }));
+  members.slice(0, ROSTER_MAX).map((m) => ({ name: defang(m.name), hub: defang(m.hub), lead: m.lead, ...(m.asked ? { asked: true } : {}) }));
 
 /** The room's members, in Desk's words, as one line for a hub that takes no
  *  roster: who is there, that @name reaches them, and whose the room is. */
@@ -74,8 +74,10 @@ export const rosterLine = (members: readonly DeskMember[]): DeskLine => ({
   from: "Desk",
   text: clip(
     `In this room: ${rosterOf(members)
-      .map((m) => `${m.name} (${m.hub}${m.lead ? ", lead" : ""})`)
-      .join(", ")}. @name reaches any of them; the person decides who is in the room.`,
+      .map((m) => `${m.name} (${m.hub}${m.lead ? ", lead" : ""}${m.asked ? ", also asked this" : ""})`)
+      .join(", ")}. @name reaches any of them; the person decides who is in the room.${
+      members.some((m) => m.asked) ? " Whoever was also asked this is answering alongside you: their answer isn't here yet." : ""
+    }`,
     LINE_CHARS,
   ),
 });

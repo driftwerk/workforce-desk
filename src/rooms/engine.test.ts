@@ -16,7 +16,7 @@ vi.mock("../shell/notify", () => ({ notify: async (n: { title: string; body: str
 const { useChat } = await import("../chat/store");
 const { emptyConversation } = await import("../chat/conversation");
 const { useDesk } = await import("../hub/store");
-const { say, answerForm, prune, closeRoom, retry, stop, cancelAsk, stopAll, stopTarget, askAgain, postToRoom, removeMember, RECONNECT_GRACE_MS } =
+const { say, answerForm, prune, closeRoom, retry, stop, cancelAsk, stopAll, stopTarget, askAgain, postToRoom, removeMember, RECONNECT_GRACE_MS, hopOf } =
   await import("./engine");
 const { MAX_HOPS } = await import("./routing");
 
@@ -303,6 +303,45 @@ describe("asking a room's members", () => {
     expect(posts.find((p) => p.delivery === "reminder")).toMatchObject({ hop: 0, source: "dw/allan/d1" });
     await flush();
     expect(FakeSocket.find("/ws", "scout", CHANNEL)).toBeUndefined();
+  });
+
+  it("hands on what an agent posted itself in the room, as it does an answer", async () => {
+    await say(room, "@allan check the build", null);
+    const allan = await connect("allan");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    keep("allan", { id: "n1", from: "agent", text: "@scout, can you see this one?", mark: { room: ROOM_ID, delivery: "notice" } });
+    answer(allan, allan.chats[0]!.turn_ref as string, "m1", "Asked Scout.");
+    await vi.waitFor(() => expect(posts.some((p) => p.delivery === "notice")).toBe(true));
+    expect(posts.find((p) => p.delivery === "notice")).toMatchObject({ author: "dw/allan", hop: 0 });
+    const scout = await connect("scout");
+    await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
+    expect(scout.chats[0]).toMatchObject({ content: "@scout, can you see this one?", desk: { hop: 1, speaker: { kind: "agent", name: "Allan" } } });
+  });
+
+  it("knows a drained answer's hand-off by what it answers, though Desk no longer knows the ask", () => {
+    useDesk.setState({
+      timelines: {
+        [ROOM_ID]: [
+          { id: "q1", roomId: ROOM_ID, threadId: null, author: "you", content: "@allan status?", hop: 0, createdAt: "1" },
+          { id: "q2", roomId: ROOM_ID, threadId: null, author: "local/scout", content: "@allan over to you", hop: 1, createdAt: "2" },
+        ],
+      },
+    });
+    expect(hopOf("dw", "allan", "a1", { roomId: ROOM_ID, inReplyTo: "q1", notice: false })).toBe(0);
+    expect(hopOf("dw", "allan", "a2", { roomId: ROOM_ID, inReplyTo: "q2", notice: false })).toBe(2);
+    expect(hopOf("dw", "allan", "a3", { roomId: ROOM_ID, notice: false })).toBe(MAX_HOPS);
+  });
+
+  it("tells each member asked by one message who else it asked", async () => {
+    await say(room, "@allan @scout who's around?", null);
+    const allan = await connect("allan");
+    const scout = await connect("scout");
+    await vi.waitFor(() => expect(allan.chats).toHaveLength(1));
+    await vi.waitFor(() => expect(scout.chats).toHaveLength(1));
+    const rosterOf = (s: FakeSocket) => (s.chats[0]!.desk as { context: { from: string; text: string }[] }).context.at(-1)!.text;
+    expect(rosterOf(allan)).toContain("Scout (Local, also asked this)");
+    expect(rosterOf(allan)).toContain("answering alongside you");
+    expect(rosterOf(scout)).toContain("Allan (Driftwerk, lead, also asked this)");
   });
 
   it("posts what was streamed, keyed by its id, on a hub that keeps no conversations for Desk", async () => {

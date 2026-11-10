@@ -211,6 +211,9 @@ export interface DeskMember {
   hub: string;
   /** The room's lead: who answers what names no one. */
   lead: boolean;
+  /** Asked the same message, answering alongside: its answer to it isn't
+   *  there to read yet. */
+  asked?: boolean;
 }
 
 /** How a spoken turn is answered: aloud, in `speech` (the voice Desk will

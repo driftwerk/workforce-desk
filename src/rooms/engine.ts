@@ -82,14 +82,20 @@ const hubFor = (id: string): HubAccount | undefined => useChat.getState().hubs.f
 const displayName = (m: RoomMemberRef): string =>
   useChat.getState().roster.find((a) => a.hubId === m.hub && a.id === m.agent)?.name ?? m.agent;
 
-/** A room's members as its turns name them: each by name and workspace,
- *  and which leads. */
-const membersOf = (room: Room): DeskMember[] =>
-  room.members.map((m) => ({
+/** A room's members as ask `a`'s turn names them: each by name and
+ *  workspace, which leads, and who else its message asked. */
+const membersOf = (room: Room, a: Ask): DeskMember[] => {
+  // Who else this message asked: they answer alongside, unseen till done.
+  const alongside = new Set(
+    [...asks.values()].filter((x) => x.roomId === a.roomId && x.message === a.message && x.id !== a.id).map((x) => memberKey(x.member)),
+  );
+  return room.members.map((m) => ({
     name: displayName(m),
     hub: hubFor(m.hub)?.label ?? m.hub,
     lead: room.defaultMember === memberKey(m),
+    ...(alongside.has(memberKey(m)) ? { asked: true } : {}),
   }));
+};
 
 /** Who wrote a room message, as the members are told it. */
 const nameOf = (author: string): string => {
@@ -230,7 +236,7 @@ function send(a: Ask) {
     if (!here || !line) return gone();
     // Who is in the room: the hub's own words where it takes them, else a
     // line of the room's from Desk.
-    const members = membersOf(here);
+    const members = membersOf(here, a);
     const named = !!line.convo.current.features?.has(FEATURES.roster);
     const context = contextFor(placeSoFar(here.id, a.threadId), a.threadId, a.message, nameOf, named ? undefined : rosterLine(members));
     const turn: DeskTurn = {
@@ -573,10 +579,30 @@ const deletedRooms = (): ReadonlySet<string> => {
   return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 };
 
-/** The hand-off the answer saved as `messageId` is at: its ask's, while
- *  Desk knows it, else the last, so an answer it can't place starts none. */
-const hopOf = (hubId: string, agentId: string, messageId: string): number =>
-  [...asks.values()].find((a) => a.member.hub === hubId && a.member.agent === agentId && a.replyId === messageId)?.hop ?? MAX_HOPS;
+/** The hand-off a message `hubId/agentId` said in a room is at. An answer:
+ *  its ask's, by the id it was saved under or the room message it answers,
+ *  else one on from that message (a drained copy may come before Desk knows
+ *  the ask's reply, or after the ask is gone). A notice the agent posted
+ *  itself: its latest ask's there, else its latest post's. Anything else is
+ *  at the last, so it starts none. */
+export const hopOf = (
+  hubId: string,
+  agentId: string,
+  messageId: string,
+  at: { roomId: string; inReplyTo?: string; notice: boolean },
+): number => {
+  const mine = [...asks.values()].filter((a) => a.member.hub === hubId && a.member.agent === agentId && a.roomId === at.roomId);
+  const timeline = useDesk.getState().timelines[at.roomId] ?? [];
+  if (at.notice) {
+    const latest = mine.at(-1) ?? null;
+    const posted = [...timeline].reverse().find((m) => m.author === `${hubId}/${agentId}` && m.id !== messageId);
+    return latest?.hop ?? posted?.hop ?? MAX_HOPS;
+  }
+  const ask = mine.find((a) => a.replyId === messageId) ?? (at.inReplyTo ? mine.find((a) => a.message === at.inReplyTo) : undefined);
+  if (ask) return ask.hop;
+  const asked = at.inReplyTo ? timeline.find((m) => m.id === at.inReplyTo) : undefined;
+  return asked ? (asked.author === "you" ? 0 : asked.hop + 1) : MAX_HOPS;
+};
 
 const roomOfHub = (): DeskHub => {
   const hub = useDesk.getState().hub;

@@ -110,6 +110,17 @@ describe("draining a conversation", () => {
     expect(cursors.get(key)).toBe("d1");
   });
 
+  it("hands on what an agent posted itself, at its hand-off, as it does an answer", async () => {
+    const asked: unknown[] = [];
+    const { d, posted, replied } = drainer([said("n1", { room: MINE, delivery: "notice" }, "agent", "@scout can you see this one?")], {
+      hopOf: (...args) => (asked.push(args), 1),
+    });
+    await d.drain(hub, "allan", channel);
+    expect(asked).toEqual([["dw", "allan", "n1", { roomId: MINE, notice: true }]]);
+    expect(posted[0]).toMatchObject({ content: "@scout can you see this one?", hop: 1, delivery: "notice" });
+    expect(replied).toEqual(["@scout can you see this one?"]);
+  });
+
   it("moves its cursor only past what was posted, and tries the rest again next time", async () => {
     let fail = true;
     const { d, cursors, deps } = drainer([said("a1", { room: MINE }), said("a2", { room: MINE })]);
