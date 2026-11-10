@@ -5,7 +5,7 @@ import { placeKey, type Place } from "./places";
 // has nothing unread in it, whatever arrives while it stays. Each window
 // keeps its own; one shown in another window is read through its point.
 // A place you mark unread while it shows is left unread until it's shown
-// again.
+// again, or you click, focus or type in it.
 
 interface WatchingState {
   /** Places on screen here, by place key: how many views show each. */
@@ -36,7 +36,8 @@ export const hold = (place: Place): void =>
     return s.on[key] ? { held: { ...s.held, [key]: true } } : s;
   });
 
-/** `key` went out of sight: it reads as usual when it's shown again. */
+/** `key` went out of sight, or was clicked, focused or typed in: it reads
+ *  as usual (when it's shown again, for the first). */
 export const release = (key: string): void =>
   useWatching.setState((s) => {
     if (!s.held[key]) return s;

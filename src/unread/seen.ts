@@ -175,7 +175,7 @@ export function useSeenWhole(place: Place | null, point: ReadPoint | null, ref: 
  *  typed in, and read again whenever `newest` moves while it stays. With
  *  `upToNow`, a place whose changes carry no times of their own (a session)
  *  is read through now as well. One marked unread while it shows is left so
- *  until it goes out of sight. */
+ *  until it goes out of sight, or until you click, focus or type in it. */
 export function useOnScreen(
   place: Place | null,
   ref: RefObject<HTMLElement | null>,
@@ -231,7 +231,12 @@ export function useOnScreen(
     );
     io.observe(el);
     const attended = () => look(false);
-    const touched = () => look(true);
+    // Clicking, focusing or typing in a place is looking at it again: it
+    // lets go of a Mark unread made while it showed, and reads at once.
+    const touched = () => {
+      release(key);
+      look(true);
+    };
     window.addEventListener("focus", attended);
     window.addEventListener("blur", attended);
     document.addEventListener("visibilitychange", attended);

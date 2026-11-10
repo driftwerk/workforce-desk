@@ -308,7 +308,7 @@ async function checkInRead(place: Place, point: ReadPoint): Promise<void> {
 }
 
 /** `place` is unread again from just after `point`: on screen here, it
- *  stays so until it's shown again. */
+ *  stays so until it's shown again or you click, focus or type in it. */
 export const markUnread = (place: Place, point: ReadPoint): Promise<void> => {
   hold(place);
   shown(place, point, "set");
