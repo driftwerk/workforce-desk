@@ -62,6 +62,8 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
         setProgress(next);
         if (next.state === "browser") setUrl(next.url);
         else if (next.state !== "needs-code") setUrl(null);
+        // The pasted code is kept no longer than the sign-in.
+        if (next.state === "done" || next.state === "failed") setCode("");
         if (next.state === "done") connectedRef.current();
       }),
     );
@@ -117,6 +119,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
       void cancelLogin(plan).then(() => {
         setProgress(null);
         setUrl(null);
+        setCode("");
       }, fail),
     send: () => plan && sendLoginCode(plan, code).then(() => setCode(""), fail),
   };

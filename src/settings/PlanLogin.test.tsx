@@ -97,6 +97,15 @@ describe("a Claude sign-in waiting on its page", () => {
     expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
   });
 
+  it("keeps a typed code no longer than the sign-in", () => {
+    render(<PlanSignIn kind="claude" />);
+    act(() => progress("claude", { state: "needs-code" }));
+    fireEvent.change(screen.getByLabelText("Code from the sign-in page"), { target: { value: "abc#123" } });
+    act(() => progress("claude", { state: "failed", message: "Claude sign-in ended without a token." }));
+    act(() => progress("claude", { state: "needs-code" }));
+    expect((screen.getByLabelText("Code from the sign-in page") as HTMLInputElement).value).toBe("");
+  });
+
   it("drops the address once the sign-in is over", () => {
     render(<PlanSignIn kind="claude" />);
     act(() => progress("claude", { state: "browser", url: URL }));
