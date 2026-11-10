@@ -1,5 +1,5 @@
 import type { RoomDraft } from "../hub/store";
-import type { Step } from "../hub/types";
+import type { Advice, Step } from "../hub/types";
 
 // What an answer on its way has done so far: a few tools as chips while
 // it's short, a list of steps with their times once it runs long, and what
@@ -17,7 +17,7 @@ export interface Progress {
    *  the answer's state or its steps do. */
   status: string;
   waiting: boolean;
-  steps: { name: string; state: StepState; secs: number | null }[];
+  steps: { name: string; state: StepState; secs: number | null; advice?: Advice }[];
 }
 
 /** A draft shows its steps as a list after this long, or past this many tools. */
@@ -66,7 +66,7 @@ export const progressOf = (d: RoomDraft, now: number, asked = false): Progress =
 
 /** A posted message's steps, for its disclosure. */
 export const stepsOf = (steps: readonly Step[]): Progress["steps"] =>
-  steps.map((s) => ({ name: s.tool, state: s.ok ? "done" : "failed", secs: s.ms / 1000 }));
+  steps.map((s) => ({ name: s.tool, state: s.ok ? "done" : "failed", secs: s.ms / 1000, ...(s.advice ? { advice: s.advice } : {}) }));
 
 /** "1.2s", "4m 10s"; nothing without a time. */
 export const secsLabel = (secs: number | null): string => (secs === null ? "" : secs < 10 ? `${secs.toFixed(1)}s` : elapsed(secs * 1000));

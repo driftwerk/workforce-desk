@@ -2425,6 +2425,46 @@ button.thread-bar:hover {
 .prog-unfinished .prog-dot {
   background: var(--blocked);
 }
+/* An advisor call in a turn's steps, opened to what it asked and was told. */
+.step-advice > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.step-advice > summary::-webkit-details-marker {
+  display: none;
+}
+.step-advice > summary::after {
+  content: "›";
+  color: var(--faint);
+  transition: transform 0.12s ease;
+}
+.step-advice[open] > summary::after {
+  transform: rotate(90deg);
+}
+.step-advice-model {
+  font-size: 11px;
+}
+.step-advice-body {
+  margin: 6px 0 4px 20px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.step-advice-label {
+  margin: 4px 0 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+.step-advice-question {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.step-advice-body .msg-text {
+  overflow-wrap: anywhere;
+}
 .msg-steps {
   padding: 6px 10px;
   border: 1px solid var(--border);

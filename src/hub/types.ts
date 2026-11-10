@@ -315,6 +315,22 @@ export interface Step {
   tool: string;
   ok: boolean;
   ms: number;
+  /** For a call of the advisor: what it was asked and said (its secrets
+   *  hidden by the hub, each part clipped). */
+  advice?: Advice;
+}
+
+/** What an agent asked its advisor and what the advisor answered. */
+export interface Advice {
+  /** The question the agent sent; absent for a review with none. */
+  question?: string;
+  /** The answer (markdown), or why there was none. */
+  answer: string;
+  model?: string;
+  /** The answer says why there was no advice. */
+  unavailable?: boolean;
+  /** The answer was longer than a step keeps. */
+  clipped?: boolean;
 }
 
 /** A room message to keep. */
