@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { TYPING_EVERY_MS, typingPinger } from "./typing";
+import { pingTyping, TYPING_EVERY_MS, typingPinger } from "./typing";
 
 describe("typing in a session's composer", () => {
+  it("is quiet with a hub that can't be told, throws, or refuses", async () => {
+    expect(() => pingTyping({}, "s1")).not.toThrow();
+    expect(() => pingTyping(null, "s1")).not.toThrow();
+    expect(() =>
+      pingTyping(
+        {
+          typing: () => {
+            throw new Error("no");
+          },
+        },
+        "s1",
+      ),
+    ).not.toThrow();
+    pingTyping({ typing: () => Promise.reject(new Error("refused")) }, "s1");
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
   it("tells the hub at most every 20 seconds per session, and never for an empty draft", () => {
     let t = 0;
     const sent: string[] = [];

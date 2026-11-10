@@ -9,7 +9,7 @@ import { HitRow, SearchFilters, useMemoryGroups } from "../memory/SearchMemory";
 import { steerOf } from "./rows";
 import { useLine } from "./store";
 import { LOCAL, machineOf } from "../hub/machines";
-import { typingPinger } from "./typing";
+import { pingTyping, typingPinger } from "./typing";
 
 /** Said when `/recall` is typed to a session on another machine. */
 export const NO_MACHINE_RECALL = "Search on machines comes with group grants.";
@@ -120,7 +120,7 @@ export function Composer({ session }: { session: Session }) {
             setText(e.target.value);
             follow(e.currentTarget);
             if (hub) {
-              pinger.current ??= typingPinger((id) => void hub.typing(id));
+              pinger.current ??= typingPinger((id) => pingTyping(hub, id));
               pinger.current(session.id, e.target.value);
             }
           }}
