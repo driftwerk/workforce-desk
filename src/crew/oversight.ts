@@ -44,8 +44,7 @@ export interface Oversight {
     /** Answer what sessions ask it on Desk's line; anything that pushes,
      *  deletes or sends still comes to you, with its draft. */
     answerSessions: boolean;
-    /** Hand a session's work on (`hand_off`); Desk shows no switch for it,
-     *  but reads it to know when nothing limits the overseer. */
+    /** Continue a session in another engine (`hand_off`). */
     handOff: boolean;
     /** Change a running session's permission mode (default, accept edits
      *  or plan only). */
@@ -262,9 +261,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       message_agents: o.act.messageAgents,
       message_terminal_sessions: o.act.messageTerminalSessions,
       answer_sessions: o.act.answerSessions,
-      // Written once on, or where the file already has it (the hub's
-      // default stays where nothing was ever set).
-      ...(o.act.handOff || "hand_off" in table(was.act) ? { hand_off: o.act.handOff } : {}),
+      hand_off: o.act.handOff,
       set_mode: o.act.setMode,
     },
     work: {

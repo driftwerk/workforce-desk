@@ -227,6 +227,12 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
     expect(screen.queryByText(line)).toBeNull();
+    // Continuing sessions in another engine is one of them, and saves as hand_off.
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
+    await waitFor(() => expect(screen.queryByText(line)).not.toBeNull());
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Continue sessions in another engine/ })));
+    await waitFor(() => expect(oversight()).toMatchObject({ act: { hand_off: false } }));
+    expect(screen.queryByText(line)).toBeNull();
   });
 
   it("shows the hub's own refusal when it won't save", async () => {

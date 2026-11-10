@@ -174,6 +174,7 @@ wake = { waiting_minutes = 2.5 }
         message_agents: false,
         message_terminal_sessions: false,
         answer_sessions: true,
+        hand_off: false,
         set_mode: false,
       },
       work: { prefer_sessions: true, parallel: 4, take_on: "handed", engine: "claude", max_turns_per_hour: 60 },
@@ -328,8 +329,8 @@ describe("checking what's typed, in plain words", () => {
     const written = parse(withOversight(CONFIG, on)) as { oversight: { act: Record<string, unknown>; full: Record<string, unknown> } };
     expect(written.oversight.full).toEqual({ anywhere: true, repos: [], workflows: [] });
     expect(written.oversight.act.set_mode).toBe(true);
-    // hand_off is kept as the file has it, and not invented.
-    expect("hand_off" in written.oversight.act).toBe(false);
+    expect(written.oversight.act.hand_off).toBe(false);
+    expect((parse(withOversight(CONFIG, { ...on, act: { ...on.act, handOff: true } })) as { oversight: { act: Record<string, unknown> } }).oversight.act.hand_off).toBe(true);
     const kept = parse(withOversight(`[oversight.act]\nhand_off = true\n`, oversightOf(`[oversight.act]\nhand_off = true\n`))) as {
       oversight: { act: Record<string, unknown> };
     };

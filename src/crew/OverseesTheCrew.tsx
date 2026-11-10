@@ -728,6 +728,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, messageTerminalSessions: v } }))}
                 />
                 <Check
+                  label="Continue sessions in another engine"
+                  sub="Suggested for you to say yes to; unbound, Desk does it itself, and the session’s brief goes to that engine’s vendor"
+                  checked={o.act.handOff}
+                  onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOff: v } }))}
+                />
+                <Check
                   label="Change sessions’ permission mode"
                   sub="Switch a running session between default, accept edits and plan; never to a mode that skips asking"
                   checked={o.act.setMode}
