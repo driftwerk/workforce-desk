@@ -199,6 +199,135 @@ impl HubIo {
         self.paired.forget();
         self.legacy.clear();
     }
+
+    /// Mints a token for board sync on paired hub `remote` (named `name`)
+    /// with this Desk's device token there, and hands it to hub `local`,
+    /// this computer's, as its sync hub `id`. The token goes from one hub to
+    /// the other here and nowhere else: what the page is told never holds
+    /// it. A hub that doesn't let devices mint says so in its words, and the
+    /// page asks the person to paste one made there instead.
+    pub async fn mint_for_sync(
+        &self,
+        remote: &str,
+        local: &str,
+        id: &str,
+        name: &str,
+    ) -> Result<Minted, String> {
+        if !sync_hub_id_ok(id) {
+            return Err(format!("{id:?} can't name a hub."));
+        }
+        if crate::hubs::machine_of(remote).is_some() {
+            return Err("A machine's hub doesn't sync boards for others.".into());
+        }
+        let there = self
+            .paired
+            .reach_async(remote)
+            .await
+            .map_err(|e| e.to_string())?;
+        if there.local {
+            return Err("This computer's hub syncs with its own keys, not a token.".into());
+        }
+        let here = self
+            .paired
+            .reach_async(local)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !here.local {
+            return Err("Desk gives a hub's token only to this computer's hub.".into());
+        }
+        let url = there.base.as_str().trim_end_matches('/').to_string();
+        let (meta, bytes) = self.fetch(remote, "POST", MINT_PATH, None).await?;
+        if !(200..300).contains(&meta.status) {
+            return Ok(Minted::NotAllowed {
+                status: meta.status,
+                error: words_of(&bytes)
+                    .unwrap_or_else(|| format!("{name} didn't make a token ({}).", meta.status)),
+            });
+        }
+        let token = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .and_then(|v| {
+                v.get("token")?
+                    .as_str()
+                    .map(|t| zeroize::Zeroizing::new(t.to_string()))
+            });
+        drop(zeroize::Zeroizing::new(bytes));
+        let Some(token) = token else {
+            return Ok(Minted::NotAllowed {
+                status: meta.status,
+                error: format!("{name} didn't make a token Desk can use."),
+            });
+        };
+        let body = zeroize::Zeroizing::new(
+            serde_json::to_vec(
+                &serde_json::json!({ "name": name, "url": url, "token": token.as_str() }),
+            )
+            .map_err(|e| e.to_string())?,
+        );
+        drop(token);
+        let (meta, answer) = self
+            .fetch(
+                local,
+                "PUT",
+                &format!("/api/desk/sync-hubs/{id}"),
+                Some(("application/json".into(), body.to_vec())),
+            )
+            .await?;
+        if !(200..300).contains(&meta.status) {
+            return Err(words_of(&answer).unwrap_or_else(|| {
+                format!(
+                    "This computer's hub didn't keep {name}'s token ({}).",
+                    meta.status
+                )
+            }));
+        }
+        let offers = serde_json::from_slice::<serde_json::Value>(&answer)
+            .ok()
+            .and_then(|v| v.get("offers").cloned())
+            .unwrap_or(serde_json::Value::Null);
+        Ok(Minted::Kept { offers })
+    }
+}
+
+/// The route a paired Desk mints its own board-sync token on (BH10).
+const MINT_PATH: &str = "/api/me/remote-mcp-tokens/desk";
+
+/// What minting a board-sync token did, as the page is told of it: never
+/// the token.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Minted {
+    /// Kept on this computer's hub; what the hub offers, as it said.
+    Kept { offers: serde_json::Value },
+    /// The hub didn't make one (its admin hasn't allowed it, or it is an
+    /// older hub): its words.
+    NotAllowed { status: u16, error: String },
+}
+
+/// Whether `id` can name a sync hub on the local hub: lowercase letters,
+/// digits and dashes, at most 40, not starting with a dash.
+fn sync_hub_id_ok(id: &str) -> bool {
+    (1..=40).contains(&id.len())
+        && !id.starts_with('-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// A hub's words for a refusal: its JSON `error`, else short plain text.
+fn words_of(body: &[u8]) -> Option<String> {
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) {
+        return v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(str::to_string);
+    }
+    let text = String::from_utf8_lossy(body);
+    let text = text.trim();
+    (!text.is_empty() && !text.starts_with('<') && text.chars().count() <= 300)
+        .then(|| text.to_string())
 }
 
 /// `target`'s path and query.
@@ -286,6 +415,19 @@ pub async fn hub_fetch(
     };
     let (meta, bytes) = io.fetch(&hub, &method, &path, body).await?;
     Ok(tauri::ipc::Response::new(framed(&meta, &bytes)))
+}
+
+/// Mints a board-sync token on paired hub `remote` and hands it to the
+/// local hub `local` as its sync hub `id` ([`HubIo::mint_for_sync`]).
+#[tauri::command]
+pub async fn board_sync_mint(
+    io: tauri::State<'_, HubIo>,
+    remote: String,
+    local: String,
+    id: String,
+    name: String,
+) -> CommandResult<Minted> {
+    io.mint_for_sync(&remote, &local, &id, &name).await
 }
 
 /// Opens socket `path` on paired hub `hub`; its frames, and then its
@@ -655,6 +797,141 @@ mod tests {
                 .is_err(),
             "nothing was sent"
         );
+    }
+
+    fn status(line: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// A minted token goes from the remote hub to this computer's, with the
+    /// remote's address, and what the page is told never holds it.
+    #[tokio::test]
+    async fn a_minted_token_goes_to_this_computer_s_hub_and_never_to_the_page() {
+        let (remote, mut remote_seen) = hub(vec![status(
+            "201 Created",
+            r#"{"id":"t1","label":"Desk on Sam's Mac","token":"wfr_SENTINEL_MINTED_0123456789","expires_at":"2027-02-01T00:00:00Z","connect":{}}"#,
+        )])
+        .await;
+        let (local, mut local_seen) = hub(vec![ok(
+            "application/json",
+            r#"{"id":"atlas","name":"Atlas","url":"x","offers":{"jira":true,"linear":false}}"#,
+        )])
+        .await;
+        let io = io_for(vec![
+            account("local", &local, true, "LOCAL-DEVICE"),
+            account("atlas", &remote, false, "ATLAS-DEVICE"),
+        ]);
+        let minted = io
+            .mint_for_sync("atlas", "local", "atlas", "Atlas")
+            .await
+            .unwrap();
+        assert_eq!(
+            minted,
+            Minted::Kept {
+                offers: serde_json::json!({ "jira": true, "linear": false })
+            }
+        );
+        let told = serde_json::to_string(&minted).unwrap();
+        assert!(!told.contains("SENTINEL"), "{told}");
+        assert_eq!(
+            told,
+            r#"{"kind":"kept","offers":{"jira":true,"linear":false}}"#
+        );
+        let asked = remote_seen.recv().await.unwrap();
+        assert!(
+            asked.starts_with("POST /api/me/remote-mcp-tokens/desk HTTP/1.1"),
+            "{asked}"
+        );
+        assert!(
+            asked
+                .to_ascii_lowercase()
+                .contains("authorization: bearer atlas-device")
+        );
+        assert!(!asked.contains("LOCAL-DEVICE"));
+        let kept = local_seen.recv().await.unwrap();
+        assert!(
+            kept.starts_with("PUT /api/desk/sync-hubs/atlas HTTP/1.1"),
+            "{kept}"
+        );
+        assert!(
+            kept.to_ascii_lowercase()
+                .contains("authorization: bearer local-device")
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(kept.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({ "name": "Atlas", "url": remote, "token": "wfr_SENTINEL_MINTED_0123456789" })
+        );
+    }
+
+    /// A hub that doesn't let devices mint says so; nothing reaches this
+    /// computer's hub, and the page is told the hub's words.
+    #[tokio::test]
+    async fn a_hub_that_doesnt_let_devices_mint_is_said_and_nothing_is_kept() {
+        let words = "this hub's admin hasn't let paired devices make remote MCP tokens (`[remote_mcp] allow_device_tokens`)";
+        let (remote, _seen) = hub(vec![status(
+            "403 Forbidden",
+            &serde_json::json!({ "error": words }).to_string(),
+        )])
+        .await;
+        let (local, mut local_seen) = hub(vec![ok("application/json", "{}")]).await;
+        let io = io_for(vec![
+            account("local", &local, true, "l"),
+            account("atlas", &remote, false, "a"),
+        ]);
+        assert_eq!(
+            io.mint_for_sync("atlas", "local", "atlas", "Atlas")
+                .await
+                .unwrap(),
+            Minted::NotAllowed {
+                status: 403,
+                error: words.into()
+            }
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), local_seen.recv())
+                .await
+                .is_err(),
+            "nothing was kept"
+        );
+    }
+
+    /// Only a remote hub mints, only this computer's keeps, and only under
+    /// a name the local hub takes: anything else asks no one.
+    #[tokio::test]
+    async fn a_mint_goes_only_from_a_remote_hub_to_this_computer_s() {
+        let (remote, mut seen) = hub(vec![ok("application/json", "{}")]).await;
+        let (local, mut local_seen) = hub(vec![ok("application/json", "{}")]).await;
+        let io = io_for(vec![
+            account("local", &local, true, "l"),
+            account("atlas", &remote, false, "a"),
+        ]);
+        for (remote, local, id) in [
+            ("local", "local", "atlas"),
+            ("atlas", "atlas", "atlas"),
+            ("machine:devbox", "local", "atlas"),
+            ("elsewhere", "local", "atlas"),
+            ("atlas", "local", "Atlas"),
+            ("atlas", "local", "../vault"),
+            ("atlas", "local", ""),
+        ] {
+            assert!(
+                io.mint_for_sync(remote, local, id, "Atlas").await.is_err(),
+                "{remote} {local} {id}"
+            );
+        }
+        for rx in [&mut seen, &mut local_seen] {
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), rx.recv())
+                    .await
+                    .is_err(),
+                "nothing was sent"
+            );
+        }
     }
 
     #[tokio::test]

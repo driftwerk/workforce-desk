@@ -98,6 +98,8 @@ const HTTP: &[Route] = &[
     route("PUT", "/api/desk/tickets/{}/needs/{}"),
     route("DELETE", "/api/desk/tickets/{}/needs/{}"),
     route("POST", "/api/desk/tickets/{}/assign"),
+    // Keep or drop a ticket whose issue left its board's import filter.
+    route("POST", "/api/desk/tickets/{}/left-filter"),
     with_query("GET", "/api/desk/tickets/{}/history", &["before"]),
     // A boss's plans: the list, one in full, the person's edit, pausing,
     // resuming and dropping. Approving one is the person's own (the Floor's
@@ -599,6 +601,21 @@ mod tests {
             ("GET", "/api/desk/tickets/t1?q=a"),
             ("GET", "/api/desk/history?subject=s1&limit=500"),
             ("GET", "/api/desk/boards/b1/tickets?token=x"),
+            ("GET", "/api/desk/tickets/t1/left-filter"),
+            ("PUT", "/api/desk/tickets/t1/left-filter"),
+            ("POST", "/api/desk/tickets/t1/left-filter?keep=true"),
+            ("POST", "/api/desk/tickets/t1/left-filter/x"),
+            // A board's sync is the person's: never the hub's token, which
+            // the hub refuses for it anyway (the page asks as the person).
+            ("GET", "/api/desk/sync-hubs"),
+            ("PUT", "/api/desk/sync-hubs/atlas"),
+            ("DELETE", "/api/desk/sync-hubs/atlas"),
+            ("POST", "/api/desk/boards/link/check"),
+            ("PUT", "/api/desk/boards/b1/link"),
+            ("DELETE", "/api/desk/boards/b1/link"),
+            ("POST", "/api/desk/boards/b1/pause"),
+            ("POST", "/api/desk/boards/b1/sync"),
+            ("POST", "/api/me/remote-mcp-tokens/desk"),
             // Plans, the wrong way: a boss proposes and changes its plans
             // with its crew tools, never through the page.
             ("POST", "/api/desk/plans"),

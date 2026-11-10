@@ -20,6 +20,7 @@ import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
 import { useBoard } from "./store";
 import { Assignee } from "./TicketCard";
+import { issueUrl, SYSTEM_TITLE } from "../hub/boardSync";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -266,6 +267,12 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
           </h2>
         )}
         {t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
+        {t.external && <IssueLine ticket={t} />}
+        {t.pushProblem && (
+          <p className="small state-blocked ticket-push-problem" role="status">
+            {t.pushProblem}
+          </p>
+        )}
         {conflict && (
           <div className="ticket-conflict" role="alert">
             <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
@@ -636,4 +643,26 @@ function LinkRow({ link: l }: { link: TicketLink }) {
     case "message":
       return null;
   }
+}
+
+/** Where a synced ticket's words come from: its Jira or Linear issue, and
+ *  whether it still syncs. Its title and description are that issue's,
+ *  shown as plain text. */
+function IssueLine({ ticket: t }: { ticket: Ticket }) {
+  const e = t.external!;
+  const url = issueUrl(t);
+  const title = SYSTEM_TITLE[e.system];
+  return (
+    <p className="small muted ticket-issue">
+      <span>
+        {title} issue <span className="mono">{e.key}</span>
+        {!e.synced ? (e.kept ? ", kept here and no longer synced" : ", no longer synced") : ""}
+      </span>
+      {url && (
+        <button type="button" className="link small" onClick={() => openUrl(url)}>
+          Open in {title}
+        </button>
+      )}
+    </p>
+  );
 }
