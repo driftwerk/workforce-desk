@@ -69,8 +69,10 @@ export interface DrainDeps {
   dm: (hub: HubAccount, agentId: string, messages: HubMessage[]) => void;
   /** An agent's answer was posted into a room for the first time. */
   replied: (room: Room, hub: HubAccount, agentId: string, posted: RoomMessage, said: HubMessage) => void;
-  /** The hand-off an answer is at, as far as Desk knows. */
-  hopOf: (hubId: string, agentId: string, messageId: string) => number;
+  /** The hand-off a message an agent said in `roomId` is at, as far as Desk
+   *  knows: an answer by the ask it answers (`inReplyTo`, the room message
+   *  it was asked with); a notice it posted itself by its latest ask there. */
+  hopOf: (hubId: string, agentId: string, messageId: string, at: { roomId: string; inReplyTo?: string; notice: boolean }) => number;
   rooms: () => Record<string, Room>;
   deleted: () => ReadonlySet<string>;
   cursors: { get: (key: string) => string | undefined; set: (key: string, id: string) => void; remove: (key: string) => void };
@@ -213,11 +215,15 @@ export class Drainer {
   private async post(hub: HubAccount, agentId: string, p: Extract<Placement, { kind: "room" }>): Promise<void> {
     const said = p.message;
     const delivery = said.mark?.delivery;
+    // What the agent posted itself (messaging.send) is it speaking in the
+    // room, as an answer is: whoever it mentions is asked, a hop on.
+    const notice = delivery === "notice";
+    const inReplyTo = said.mark?.in_reply_to;
     const { message, created } = await this.deps.post(p.room.id, {
       author: `${hub.id}/${agentId}`,
       content: said.text ?? said.content ?? "",
       threadId: p.threadId,
-      hop: delivery ? 0 : this.deps.hopOf(hub.id, agentId, said.id),
+      hop: delivery && !notice ? 0 : this.deps.hopOf(hub.id, agentId, said.id, { roomId: p.room.id, ...(inReplyTo ? { inReplyTo } : {}), notice }),
       attachments: (said.attachments ?? []).map((a) => ({ ...a, hub: hub.id, agent: agentId })),
       source: p.source,
       ...(delivery ? { delivery } : {}),
@@ -225,6 +231,6 @@ export class Drainer {
       ...(said.mark?.in_reply_to ? { inReplyTo: said.mark.in_reply_to } : {}),
       ...(said.mark?.steps?.length && !delivery ? { steps: said.mark.steps } : {}),
     });
-    if (created && !delivery) this.deps.replied(p.room, hub, agentId, message, said);
+    if (created && (!delivery || notice)) this.deps.replied(p.room, hub, agentId, message, said);
   }
 }

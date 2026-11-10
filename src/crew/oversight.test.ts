@@ -1,6 +1,20 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OVERSIGHT, oversightOf, parseCheckins, parseMinutes, parseParallel, parseTime, readable, withOversight } from "./oversight";
+import {
+  DEFAULT_OVERSIGHT,
+  fullMissing,
+  oversightOf,
+  parseBudget,
+  parseCheckins,
+  parseHold,
+  parseMinutes,
+  parseParallel,
+  parseRepo,
+  parseTime,
+  parseWorkflow,
+  readable,
+  withOversight,
+} from "./oversight";
 
 const CONFIG = `[llm]
 provider = "claude-code"
@@ -11,6 +25,58 @@ charts = true
 `;
 
 describe("[oversight] in an agent's config", () => {
+  it("reads and writes Act fully's repos, workflows and budget, and the hold, as the hub does", () => {
+    const o = oversightOf(
+      `${CONFIG}\n[oversight]\nenabled = true\nlevel = "full"\nwake = { hold_minutes = 5 }\n[oversight.full]\nrepos = ["acme/acme-web", " ~/dev/globex-api ", "acme/acme-web"]\nworkflows = ["deploy.yml", "123.yml", ".github/workflows/x.yml"]\nbudget_usd_per_day = 25\n`,
+    );
+    expect(o.level).toBe("full");
+    expect(o.wake.holdMinutes).toBe(5);
+    expect(o.full).toEqual({ repos: ["acme/acme-web", "~/dev/globex-api"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 });
+    expect(fullMissing(o)).toEqual([]);
+    const written = parse(withOversight(CONFIG, { ...o, full: { ...o.full, budgetUsdPerDay: 7.5 } })) as {
+      oversight: { level: string; wake: { hold_minutes: number }; full: Record<string, unknown> };
+    };
+    expect(written.oversight.level).toBe("full");
+    expect(written.oversight.wake.hold_minutes).toBe(5);
+    expect(written.oversight.full).toEqual({ repos: ["acme/acme-web", "~/dev/globex-api"], workflows: ["deploy.yml"], budget_usd_per_day: 7.5 });
+    // Nothing of Act fully set: no table written; a budget never set stays absent.
+    expect("full" in (parse(withOversight(CONFIG, DEFAULT_OVERSIGHT)) as { oversight: object }).oversight).toBe(false);
+    const noBudget = { ...DEFAULT_OVERSIGHT, level: "full" as const, full: { repos: ["acme/acme-web"], workflows: [], budgetUsdPerDay: null } };
+    expect((parse(withOversight(CONFIG, noBudget)) as { oversight: { full: object } }).oversight.full).toEqual({ repos: ["acme/acme-web"], workflows: [] });
+    expect(fullMissing(noBudget)).toEqual(["budget"]);
+    expect(fullMissing({ ...DEFAULT_OVERSIGHT, level: "full" })).toEqual(["repos", "budget"]);
+    // What the hub would refuse reads as the defaults.
+    const bad = oversightOf(`[oversight]\nwake = { hold_minutes = 61 }\n[oversight.full]\nbudget_usd_per_day = 0\n`);
+    expect(bad.wake.holdMinutes).toBe(2);
+    expect(bad.full.budgetUsdPerDay).toBeNull();
+  });
+
+  it("checks repos, workflows, a budget and the hold as typed, in the hub's words", () => {
+    for (const ok of ["acme/acme-web", "git@github.com:acme/acme-web.git", "https://github.com/acme/acme-web", "gitlab.com/acme/acme-web", "~/dev/acme-web", "/Users/sam/dev/acme-web"]) {
+      expect(parseRepo(ok), ok).toEqual({ value: ok });
+    }
+    for (const bad of ["acme", "", "acme web/x", "https://github.com/acme"]) {
+      expect("problem" in parseRepo(bad), bad).toBe(true);
+    }
+    expect(parseRepo("acme/acme-web", ["acme/acme-web"])).toEqual({ problem: "That repo is already named." });
+    expect(parseWorkflow("deploy.yml")).toEqual({ value: "deploy.yml" });
+    expect(parseWorkflow("promote.yaml")).toEqual({ value: "promote.yaml" });
+    for (const bad of ["deploy", "123.yml", ".yml", "..yml", "a b.yml", "ci/deploy.yml", "deploy.yml.txt"]) {
+      expect(parseWorkflow(bad), bad).toEqual({ problem: "The workflows it may run must be a list of up to 20 file names like deploy.yml." });
+    }
+    expect(parseBudget("25")).toEqual({ value: 25 });
+    expect(parseBudget("$7.50")).toEqual({ value: 7.5 });
+    for (const bad of ["0", "-5", "10001", "ten", "1.234"]) {
+      expect(parseBudget(bad), bad).toEqual({ problem: "Its daily budget must be an amount in dollars above 0 and up to 10000." });
+    }
+    expect(parseHold("2")).toEqual({ value: 2 });
+    for (const bad of ["0", "61", "1.5", ""]) {
+      expect(parseHold(bad), bad).toEqual({
+        problem: "How long your typing in a session keeps it yours must be a whole number of minutes from 1 to 60.",
+      });
+    }
+  });
+
   it("is off with the defaults when the file says nothing", () => {
     expect(oversightOf(CONFIG)).toEqual(DEFAULT_OVERSIGHT);
     expect(oversightOf("")).toEqual(DEFAULT_OVERSIGHT);
@@ -33,7 +99,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
       group: null,
       level: "act",
       track: { crew: true, deskSessions: false, externalSessions: true, workspaces: true },
-      wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true, onMessage: false },
+      wake: { waitingMinutes: 10, quietMinutes: 0, onFinish: false, onFailure: true, onMessage: false, holdMinutes: 2 },
       summaries: { morning: "08:30", evening: "" },
       maxCheckinsPerHour: 3,
       maxCheckinsPerDay: 12,
@@ -48,6 +114,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         answerSessions: false,
       },
       work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
+      full: { repos: [], workflows: [], budgetUsdPerDay: null },
     });
   });
 
@@ -91,7 +158,7 @@ wake = { waiting_minutes = 2.5 }
       enabled: true,
       level: "suggest",
       track: { crew: true, desk_sessions: true, external_sessions: true, workspaces: false },
-      wake: { coalesce_seconds: 60, waiting_minutes: 5, quiet_minutes: 30, on_finish: true, on_failure: true, on_message: true },
+      wake: { coalesce_seconds: 60, waiting_minutes: 5, quiet_minutes: 30, on_finish: true, on_failure: true, on_message: true, hold_minutes: 2 },
       summaries: { morning: "09:00", evening: "18:00" },
       max_checkins_per_hour: 6,
       max_checkins_per_day: 100,

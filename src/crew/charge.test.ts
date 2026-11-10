@@ -32,7 +32,9 @@ describe("a session a boss runs", () => {
 
   it("says who has the wheel, and when it comes back, in a sentence", () => {
     expect(wheelText(charge())).toBe("Sarah runs this session. Typing in it, prompting it or writing to it makes you the driver.");
-    expect(wheelText(charge({ wheel: "person" }))).toBe("Sarah’s messages to it wait while you drive. Sarah has it back after 10 quiet minutes.");
+    expect(wheelText(charge({ wheel: "person" }))).toBe("Sarah’s messages to it wait while you drive. Sarah has it back after 2 quiet minutes.");
+    expect(wheelText(charge({ wheel: "person", holdMinutes: 5 }))).toBe("Sarah’s messages to it wait while you drive. Sarah has it back after 5 quiet minutes.");
+    expect(wheelText(charge({ wheel: "person", holdMinutes: 1 }))).toBe("Sarah’s messages to it wait while you drive. Sarah has it back after 1 quiet minute.");
     expect(wheelText(charge({ wheel: "person_pinned" }))).toBe("Sarah’s messages to it wait until you hand it back.");
     expect(howText(charge({ how: "started" }))).toBe("Sarah started it");
     expect(howText(charge())).toBe("You handed it to Sarah");
