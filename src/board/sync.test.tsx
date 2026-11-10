@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, issueUrl, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
+import { boardSyncOf, issueUrl, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -349,6 +349,14 @@ describe("board sync's words and checks", () => {
     expect(targetOk("jira", "ACME_WEB")).toBe(true);
     expect(targetOk("linear", "ACME_WEB")).toBe(false);
     expect(targetOk("jira", "acme")).toBe(false);
+  });
+
+  it("takes a pasted token as the local hub does: wfr_, letters, digits, _ and -, longer than 20", () => {
+    expect(looksLikeToken("wfr_Xk3_9-aZq0PLm2vB7cNw4Rt")).toBe(true);
+    expect(looksLikeToken("  wfr_Xk3_9-aZq0PLm2vB7cNw4Rt\n")).toBe(true);
+    expect(looksLikeToken("wfr_short_but_17ch")).toBe(false);
+    expect(looksLikeToken("wfr_Xk3+9/aZq0PLm2vB7cNw4Rt=")).toBe(false);
+    expect(looksLikeToken("wfp_Xk3_9-aZq0PLm2vB7cNw4Rt")).toBe(false);
   });
 
   it("opens only an issue's https address", () => {

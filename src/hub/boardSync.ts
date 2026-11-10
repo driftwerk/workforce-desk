@@ -86,8 +86,9 @@ export const syncHubId = (pairedId: string): string => {
   return slug || "hub";
 };
 
-/** Whether `s` can be pasted as a hub's token: `wfr_`, then something. */
-export const looksLikeToken = (s: string): boolean => /^wfr_[A-Za-z0-9_-]{8,}$/.test(s.trim());
+/** Whether `s` can be pasted as a hub's token, as the local hub takes one:
+ *  `wfr_`, letters, digits, `_` and `-`, longer than 20 and shorter than 200. */
+export const looksLikeToken = (s: string): boolean => /^wfr_[A-Za-z0-9_-]{17,195}$/.test(s.trim());
 
 /** Whether `target` can be `system`'s project or team key, as the hub
  *  checks it: a capital, then capitals or digits (and `_` on Jira); up to

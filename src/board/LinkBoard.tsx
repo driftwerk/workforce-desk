@@ -366,6 +366,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   );
 }
 
+/** Hubs that said they don't let Desk make a token, this session, with
+ *  their words: the person pastes one there instead of being asked again. */
+const notMinting = new Map<string, string>();
+
 /** The key "This computer" goes by among the hubs. */
 const THIS = "this-computer";
 
@@ -450,8 +454,9 @@ function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick
  *  shown, kept here or read back. */
 export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; again: boolean; onKept?: () => void }) {
   const ids = useId();
-  const [phase, setPhase] = useState<"minting" | "paste" | "saving">("minting");
-  const [why, setWhy] = useState<string | null>(null);
+  const refusedBefore = notMinting.get(choice.id);
+  const [phase, setPhase] = useState<"minting" | "made" | "paste" | "saving">(refusedBefore === undefined ? "minting" : "paste");
+  const [why, setWhy] = useState<string | null>(refusedBefore ?? null);
   const [problem, setProblem] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const tried = useRef(false);
@@ -461,9 +466,11 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
     onKept?.();
   };
 
-  // Made at once where the hub allows it: one try per opening.
+  // Made at once where the hub allows it: one try per opening, and none
+  // again this session on a hub that said it doesn't let Desk make one.
+  // (A hub keeps one such token per device: a new one replaces the last.)
   useEffect(() => {
-    if (tried.current) return;
+    if (tried.current || phase !== "minting") return;
     tried.current = true;
     const local = localHubRef();
     if (!local) {
@@ -472,8 +479,11 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
     }
     mintSyncToken(choice.paired, local.id, choice.id, choice.name)
       .then((m) => {
-        if (m.kind === "kept") kept();
-        else {
+        if (m.kind === "kept") {
+          setPhase("made");
+          kept();
+        } else {
+          if (m.kind === "notAllowed") notMinting.set(choice.id, m.error);
           setWhy(m.kind === "notAllowed" ? m.error : null);
           setPhase("paste");
         }
@@ -482,6 +492,7 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
         setProblem(saidOf(e));
         setPhase("paste");
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choice]);
 
   const send = async (e: React.FormEvent) => {
@@ -502,10 +513,10 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
     }
   };
 
-  if (phase === "minting")
+  if (phase === "minting" || phase === "made")
     return (
       <p className="move-callout" role="status">
-        Making a token for your board sync on {choice.name}…
+        {phase === "minting" ? `Making a token for your board sync on ${choice.name}…` : `${choice.name} made a token for your board sync; asking it what it offers…`}
       </p>
     );
   return (
