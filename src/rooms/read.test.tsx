@@ -23,7 +23,7 @@ const { useDesk } = await import("../hub/store");
 const { useUi } = await import("../shell/ui");
 const { Timeline } = await import("./Timeline");
 const { Rooms } = await import("./Rooms");
-const { useReads } = await import("../unread/reads");
+const { useReads, markUnread } = await import("../unread/reads");
 const { useUnread } = await import("../unread/summary");
 const { useRoomMarker, useUnreadDms } = await import("../unread/Marks");
 const { useWatching } = await import("../unread/watching");
@@ -204,6 +204,48 @@ describe("a room on screen", () => {
     expect(marker).toEqual({ count: 0, dot: true });
     act(() => summary([{ roomId: "r1", main: unread(0, four[3]!, four[1]!), threads: [{ parent, unread: unread(1, reply, reply) }] }]));
     expect(marker).toEqual({ count: 0, dot: false });
+  });
+});
+
+describe("a room marked unread while it shows", () => {
+  /** Reads the room, then marks it unread from `from`, as a message's bar does. */
+  const markedAfterRead = (place: { kind: "room"; room: string } | { kind: "thread"; room: string; thread: string }, from: RoomMessage) => {
+    showAll();
+    wait(SEEN_MS);
+    act(() => void markUnread(place, readTo(from)));
+  };
+
+  it("stays unread while you only look at it, and reads at once when you click into it", () => {
+    const { container } = roomShown();
+    markedAfterRead({ kind: "room", room: "r1" }, four[1]!);
+    act(() => summary([{ roomId: "r1", main: unread(2, four[3]!, four[2]!), threads: [] }]));
+    wait(SEEN_MS * 2);
+    expect(marker).toEqual({ count: 0, dot: true });
+    expect(useReads.getState().local["room:r1"]).toEqual(readTo(four[1]!));
+    fireEvent.pointerDown(container.querySelector(".room-scroll")!);
+    expect(marker).toEqual({ count: 0, dot: false });
+    expect(useReads.getState().local["room:r1"]).toEqual(readTo(four[3]!));
+    expect(placed("room:r1").at(-1)).toEqual(readTo(four[3]!));
+  });
+
+  it("is read when you focus or type in it", () => {
+    const { container } = roomShown();
+    markedAfterRead({ kind: "room", room: "r1" }, four[1]!);
+    fireEvent.keyDown(container.querySelector(".room-scroll")!, { key: "ArrowDown" });
+    expect(useReads.getState().local["room:r1"]).toEqual(readTo(four[3]!));
+  });
+
+  it("reads a thread the same way", () => {
+    const parent = four[0]!;
+    const reply = msg("r", 6, { threadId: parent.id });
+    const place = { kind: "thread", room: "r1", thread: parent.id } as const;
+    useDesk.setState({ timelines: { r1: [...four, reply] } });
+    useReads.setState({ local: { "room:r1": readTo(four[3]!), [`thread:r1/${parent.id}`]: readTo(parent) } });
+    const { container } = render(<Timeline room={room} thread={parent.id} />);
+    markedAfterRead(place, parent);
+    expect(useReads.getState().local[`thread:r1/${parent.id}`]).toEqual(readTo(parent));
+    fireEvent.pointerDown(container.querySelector(".room-scroll")!);
+    expect(useReads.getState().local[`thread:r1/${parent.id}`]).toEqual(readTo(reply));
   });
 });
 
