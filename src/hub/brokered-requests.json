@@ -481,6 +481,11 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/sessions/s1/typing"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/boards"
   },
