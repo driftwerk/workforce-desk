@@ -234,7 +234,12 @@ const fixtures: Fixture[] = [
     description: "Your Pro or Max subscription",
     connected: true,
     connect: { kind: "login", fields: [], hint: "Sign in with your Claude account. Desk keeps the login on this computer." },
-    models: claudeModels(),
+    // The aliases, then what the plan's CLI lists that no alias reaches.
+    models: [
+      ...claudeModels(),
+      { id: "claude-opus-4-8", name: "Opus 4.8", description: "Best for everyday, complex tasks", default: false },
+      { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "Fastest for quick answers", default: false, efforts: [], defaultEffort: null },
+    ],
     efforts: CLAUDE_EFFORTS,
     defaultEffort: "medium",
   },
@@ -245,10 +250,19 @@ const fixtures: Fixture[] = [
     description: "Your Plus or Pro subscription",
     connected: false,
     connect: { kind: "login", fields: [], hint: "Sign in with your ChatGPT account. Desk keeps the login on this computer." },
+    // As the plan lists them now: a model released since Desk was, and
+    // each faster tier worded as OpenAI's catalogue words it.
     models: [
-      { id: "gpt-6-astra", name: "GPT-6 Astra", description: "Most capable — for hard, long-running work", default: false },
-      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", description: "Strong all-rounder", default: true },
-      { id: "gpt-6-sol", name: "GPT-6 Sol", description: "The previous Sol", default: false },
+      { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", description: "Strong all-rounder", default: true, fast: "2x speed, increased usage" },
+      { id: "gpt-6-astra", name: "GPT-6 Astra", description: "Most capable — for hard, long-running work", default: false, fast: "2x speed, increased usage" },
+      {
+        id: "gpt-6.1-terra",
+        name: "GPT-6.1 Terra",
+        description: "Fast, efficient model for everyday coding.",
+        default: false,
+        fast: "1.5x speed",
+      },
+      { id: "gpt-6-sol", name: "GPT-6 Sol", description: "The previous Sol", default: false, fast: "1.5x speed" },
       { id: "gpt-6-luna", name: "GPT-6 Luna", description: "Quickest, for light chores", default: false },
     ],
     efforts: OPENAI_EFFORTS,

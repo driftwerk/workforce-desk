@@ -45,6 +45,7 @@ const where = (s: Session): string => {
     withAccount(ENGINE[s.engine], s),
     switchingText(s),
     s.approveForMe && "Approve for me",
+    s.fast && "Fast",
     s.branch ? `branch ${s.branch}` : homeShort(s.cwd),
     background && backgroundLine(background),
   ]
