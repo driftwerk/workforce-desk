@@ -144,6 +144,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   moveTicket: (h) => h.moveTicket("t1", { state: "doing", before: "t2" }),
   needTicket: (h) => Promise.all([h.needTicket("t1", "t2", true), h.needTicket("t1", "t2", false)]),
   assignTicket: (h) => h.assignTicket("t1", { session: "s1" }),
+  leftFilter: (h) => h.leftFilter("t1", true),
   ticketHistory: (h) => Promise.all([h.ticketHistory("t1"), h.ticketHistory("t1", "e1")]),
   plans: (h) => Promise.all([h.plans(), h.plans({ state: "running", group: "acme" })]),
   plan: (h) => h.plan("p1"),

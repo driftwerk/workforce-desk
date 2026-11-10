@@ -561,6 +561,11 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/tickets/t1/left-filter"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/tickets/t1/history"
   },

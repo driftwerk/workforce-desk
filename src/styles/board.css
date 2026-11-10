@@ -491,3 +491,177 @@ button.ticket-chip:hover {
   color: var(--signal-soft-text);
   border-color: transparent;
 }
+
+/* ── Sync with Linear or Jira ───────────────────────────────────────────── */
+
+/* A synced board's sync, under its header: what it's linked to, its chip,
+   Pause or Resume and Sync now. Wraps on a narrow window. */
+.board-sync {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 28px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  flex: none;
+}
+.board-sync-chip {
+  flex: none;
+  font-family: var(--font-ui);
+}
+.board-sync-synced {
+  border-color: var(--done);
+  color: var(--done);
+}
+.board-sync-paused {
+  border-style: dashed;
+}
+.board-sync-problem {
+  border-color: var(--blocked);
+  color: var(--blocked);
+  background: var(--blocked-soft);
+}
+.board-sync-words {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.board-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The Left-the-filter shelf: tickets whose issues stopped matching. */
+.board-left {
+  margin: 14px 28px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+}
+.board-left-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.board-left-head h2 {
+  margin: 0;
+}
+.board-left-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.board-left-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.board-left-open {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
+  color: var(--text);
+}
+.board-left-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.board-left-actions {
+  display: flex;
+  gap: 6px;
+}
+.board-push-problem {
+  overflow-wrap: anywhere;
+}
+.ticket-issue {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.ticket-push-problem {
+  margin: 0;
+}
+
+/* The link dialog: laid out as Move's (.move-*), with what's its own. */
+.sync-select {
+  width: 100%;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
+}
+.sync-query {
+  min-height: 72px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.sync-matches b {
+  color: var(--text);
+}
+.sync-states {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+.sync-state {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sync-state > span {
+  font-size: 12px;
+  color: var(--faint);
+}
+.sync-token {
+  align-items: stretch;
+}
+.sync-token-field input {
+  width: 100%;
+}
+.sync-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .sync-states {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .board-sync,
+  .board-left {
+    margin-inline: 16px;
+    padding-inline: 12px;
+  }
+  .board-sync {
+    margin-inline: 0;
+    padding-inline: 16px;
+  }
+}
+.sync-token p:not(.sync-token-why),
+.sync-token-field input {
+  color: var(--text);
+}

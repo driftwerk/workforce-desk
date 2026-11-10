@@ -11,7 +11,11 @@ import { useDesk, localSessions } from "../hub/store";
 import type { Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
+import { leftFilterOf } from "../hub/boardSync";
 import { BoardDialog, DeleteBoard } from "./BoardDialogs";
+import { LinkBoardDialog, NewTokenDialog } from "./LinkBoard";
+import { LeftFilterShelf, SyncBar, UnlinkBoard } from "./SyncBar";
+import { localSync, syncChoices, useSyncHubs } from "./syncStore";
 import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
@@ -61,12 +65,30 @@ export function Board() {
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<"new" | "rename" | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [newToken, setNewToken] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [said, setSaid] = useState("");
   const menuButton = useRef<HTMLButtonElement>(null);
   const cards = useRef(new Map<string, HTMLElement>());
 
   const mine = useMemo(() => (board ? Object.values(all).filter((t) => t.board === board.id) : []), [all, board]);
+  // Issues that left the import filter wait on their own shelf, not in a
+  // column, until the person keeps or drops them.
+  const left = useMemo(() => leftFilterOf(mine), [mine]);
+  const onBoard = useMemo(() => (left.length ? mine.filter((t) => !left.includes(t)) : mine), [mine, left]);
+  // A synced board is synced at once when it's shown, and its hub's name
+  // read for what its sync bar says.
+  const synced = !!board?.sync;
+  useEffect(() => {
+    if (!board || !synced) return;
+    void useSyncHubs.getState().load();
+    void localSync()?.syncNow(board.id).catch(() => {});
+  }, [board?.id, synced]);
+  const pairedHubs = useChat((s) => s.hubs);
+  const keptHubs = useSyncHubs((s) => s.hubs);
+  const tokenFor = board?.sync?.via.kind === "hub" ? syncChoices(pairedHubs, keptHubs).find((c) => board.sync?.via.kind === "hub" && c.id === board.sync.via.hub) : undefined;
   // The boss's plans on this board, each read in full for its tickets.
   const plansAll = usePlans((s) => s.plans);
   const details = usePlans((s) => s.details);
@@ -80,8 +102,8 @@ export function Board() {
   const planTickets = useMemo(() => (plan ? new Set([...ticketPlans].filter(([, p]) => p === plan).map(([t]) => t)) : null), [plan, ticketPlans]);
   const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.goal])), [plans]);
   const planChips = useMemo(() => new Map([...ticketPlans].map(([t, p]) => [t, planNames.get(p) ?? ""])), [ticketPlans, planNames]);
-  const cols = useMemo(() => columns(mine, { filter, q, now, waiting, plan: planTickets }), [mine, filter, q, now, waiting, planTickets]);
-  const counts = useMemo(() => columns(mine, { filter: "all", q: "", now, waiting }), [mine, now, waiting]);
+  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets }), [onBoard, filter, q, now, waiting, planTickets]);
+  const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
   const waitingCount = mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length;
 
   const states = useMemo(() => statesOf(all), [all]);
@@ -171,20 +193,24 @@ export function Board() {
     { kind: "item", label: "New board…", onSelect: () => setNaming("new") },
     { kind: "item", label: "Rename board…", onSelect: () => setNaming("rename") },
     { kind: "item", label: "Delete board…", onSelect: () => setDeleting(true) },
+    { kind: "separator" },
+    board.sync
+      ? { kind: "item", label: `Unlink from ${board.sync.system === "jira" ? "Jira" : "Linear"}…`, onSelect: () => setUnlinking(true) }
+      : { kind: "item", label: "Link to Jira or Linear…", onSelect: () => setLinking(true) },
   ];
 
   return (
     <main className="board" aria-label="Board">
       <header className="board-head">
         <h1 className="display">{/board$/i.test(board.name) ? board.name : `${board.name} board`}</h1>
-        <span className="floor-time">{[board.prefix, boss?.name ? `run by ${boss.name}` : null].filter(Boolean).join(" · ")}</span>
+        <span className="floor-time">{[board.prefix ?? board.sync?.target, boss?.name ? `run by ${boss.name}` : null].filter(Boolean).join(" · ")}</span>
         <button
           ref={menuButton}
           type="button"
           className="icon-btn-sm"
           aria-label="Boards"
           aria-haspopup="menu"
-          title="Other boards, rename, delete"
+          title="Other boards, rename, delete, link to Jira or Linear"
           onClick={(e) => setMenu(below(e.currentTarget))}
         >
           <MoreIcon />
@@ -215,7 +241,7 @@ export function Board() {
           id="board-search"
           className="board-search"
           value={q}
-          placeholder={`Search or ${board.prefix ?? "ACM"}-12`}
+          placeholder={`Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") openTyped();
@@ -229,6 +255,8 @@ export function Board() {
           New ticket
         </button>
       </header>
+      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor ? () => setNewToken(true) : undefined} />}
+      <LeftFilterShelf board={board} tickets={left} />
       <States.Provider value={states}>
       <Plans.Provider value={planChips}>
       <Columns
@@ -261,6 +289,9 @@ export function Board() {
       {adding && <NewTicket board={board} onClose={() => setAdding(false)} />}
       {naming && <BoardDialog board={naming === "rename" ? board : undefined} onClose={() => setNaming(null)} />}
       {deleting && <DeleteBoard board={board} count={mine.length} onClose={() => setDeleting(false)} />}
+      {linking && <LinkBoardDialog board={board} tickets={mine.length} onClose={() => setLinking(false)} />}
+      {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
+      {newToken && tokenFor && <NewTokenDialog choice={tokenFor} onClose={() => setNewToken(false)} />}
     </main>
   );
 }

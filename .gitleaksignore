@@ -1,3 +1,7 @@
 # A test fixture in a commit already pushed: a damaged bundle whose value
 # reads to gitleaks as an API key (crates/desk-core/src/vault.rs).
 088db7780fffa9ffd504a653a4c087ed7c9674ef:crates/desk-core/src/vault.rs:generic-api-key:841
+# A test fixture: the made-up token a hub mints in hub_io's mint tests
+# (src-tauri/src/hub_io.rs), never a real one.
+7f38fac403572615186c7f5bf4c9d3933de4e879:src-tauri/src/hub_io.rs:generic-api-key:815
+7f38fac403572615186c7f5bf4c9d3933de4e879:src-tauri/src/hub_io.rs:generic-api-key:867

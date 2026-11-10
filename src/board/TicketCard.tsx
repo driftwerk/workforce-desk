@@ -9,7 +9,9 @@ import { Menu } from "../ui/Menu";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
+import { SYSTEM_TITLE } from "../hub/boardSync";
 import { blockers, needsLine } from "./board";
+import { useBoard } from "./store";
 import type { TicketState } from "../hub/types";
 
 /** Who has a ticket, as a card or the ticket's panel says it: their dot,
@@ -105,6 +107,11 @@ export function TicketCard({
   // Its right-click menu: moving it to another group's board.
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const movable = useHubLayout((s) => s.layout !== null);
+  // A synced board's ticket shows its issue's key; one made here waits for
+  // its key until it is created there.
+  const system = useBoard((s) => s.boards[t.board]?.sync?.system ?? null);
+  const ext = t.external ?? null;
+  const keyShown = t.key ?? (system ? `Not on ${SYSTEM_TITLE[system]} yet` : null);
   return (
     <>
     <button
@@ -127,7 +134,9 @@ export function TicketCard({
       onKeyDown={onKeyDown}
     >
       <span className="board-card-head">
-        <span className="mono board-key">{t.key}</span>
+        <span className={t.key ? "mono board-key" : "board-key"} title={ext ? `${SYSTEM_TITLE[ext.system]} issue ${ext.key}${ext.synced ? "" : ", no longer synced"}` : undefined}>
+          {keyShown}
+        </span>
         {t.pinned && <span className="board-pinned">Pinned</span>}
         {t.state === "dropped" && <span className="faint small">Dropped</span>}
         {written && !theirs && <By who={t.createdBy} />}
@@ -151,6 +160,7 @@ export function TicketCard({
       )}
       {needs && !settled && <span className={blocked ? "floor-item-what state-blocked" : "floor-item-what"}>{blocked ? needs.replace(/^needs/, "Blocked by") : needs}</span>}
       {theirs && <Maker who={t.createdBy} />}
+      {t.pushProblem && !settled && <span className="floor-item-what state-blocked board-push-problem">{t.pushProblem}</span>}
     </button>
       {menu && (
         <Menu
