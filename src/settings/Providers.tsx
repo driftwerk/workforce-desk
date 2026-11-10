@@ -119,7 +119,8 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
       <div className="prov-row prov-row-open">
         <span className="prov-text">
           <b>{provider.name}</b>
-          <span>{provider.connect.hint ?? provider.description}</span>
+          {/* With ways to choose, the form says each one's hint. */}
+          <span>{provider.connect.ways?.length ? provider.description : (provider.connect.hint ?? provider.description)}</span>
         </span>
         <ConnectForm provider={provider} submitLabel="Save and connect" onConnected={() => setOpen(false)} onCancel={() => setOpen(false)} />
       </div>

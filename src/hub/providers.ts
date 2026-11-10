@@ -11,6 +11,17 @@ export interface ProviderField {
   required?: boolean;
   /** A whole file's worth, like a service-account key. */
   multiline?: boolean;
+  /** What the field starts with (the `default` AWS profile). */
+  initial?: string;
+}
+
+/** One of the ways a provider connects, when it has more than one (keys,
+ *  or an AWS profile): only the chosen way's fields are sent. */
+export interface ProviderWay {
+  id: string;
+  label: string;
+  fields: ProviderField[];
+  hint?: string;
 }
 
 export interface ProviderConnect {
@@ -19,6 +30,8 @@ export interface ProviderConnect {
   kind: "login" | "fields" | "probe";
   fields: ProviderField[];
   hint?: string;
+  /** The ways to choose between; absent with one. */
+  ways?: ProviderWay[];
 }
 
 export interface ProviderModel {

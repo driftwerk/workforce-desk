@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { PLAN_OF, type Provider } from "../hub/providers";
+import { PLAN_OF, type Provider, type ProviderField } from "../hub/providers";
+import { radioKeys } from "../ui/Dialog";
 import { useDesk } from "../hub/store";
 import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
 import { useProviders } from "./store";
@@ -72,11 +73,18 @@ function FieldsConnect({
 }) {
   const hub = useDesk((s) => s.hub);
   const connect = useProviders((s) => s.connect);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const ways = provider.connect.ways ?? [];
+  const [wayId, setWayId] = useState(ways[0]?.id);
+  const way = ways.find((w) => w.id === wayId);
+  const shownFields: ProviderField[] = way?.fields ?? provider.connect.fields;
+  const hint = way?.hint ?? provider.connect.hint;
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(ways.flatMap((w) => w.fields).filter((f) => f.initial).map((f) => [f.name, f.initial!])),
+  );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const probe = provider.connect.kind === "probe";
-  const required = provider.connect.fields.filter((f) => f.required ?? !/optional/i.test(f.label));
+  const required = shownFields.filter((f) => f.required ?? !/optional/i.test(f.label));
   const ready = probe || required.every((f) => values[f.name]?.trim());
 
   const submit = async (e: React.FormEvent) => {
@@ -85,7 +93,14 @@ function FieldsConnect({
     setBusy(true);
     setProblem(null);
     try {
-      const fields = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+      // Only what the chosen way takes: a field typed under the other stays here.
+      const taken = new Set(shownFields.map((f) => f.name));
+      const fields = Object.fromEntries(
+        Object.entries(values)
+          .filter(([k]) => taken.has(k))
+          .map(([k, v]) => [k, v.trim()])
+          .filter(([, v]) => v),
+      );
       const next = await connect(hub, provider.id, fields);
       if (next.connected) onConnected?.(next);
       else setProblem(next.connect.hint ?? `Desk couldn’t find ${provider.name}.`);
@@ -98,7 +113,28 @@ function FieldsConnect({
 
   return (
     <form className="connect-form" onSubmit={submit} aria-label={`Connect ${provider.name}`}>
-      {provider.connect.fields.map((f, i) => (
+      {ways.length > 1 && (
+        <div className="seg" role="radiogroup" aria-label={`How ${provider.name} connects`}>
+          {ways.map((w, i) => (
+            <button
+              key={w.id}
+              type="button"
+              role="radio"
+              aria-checked={w.id === wayId}
+              tabIndex={w.id === wayId ? 0 : -1}
+              onClick={() => {
+                setWayId(w.id);
+                setProblem(null);
+              }}
+              onKeyDown={(e) => radioKeys(e, ways, i, (next) => setWayId(next.id))}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {ways.length > 1 && hint && <p className="small muted">{hint}</p>}
+      {shownFields.map((f, i) => (
         <label key={f.name} className="field-stack">
           <span className="field-label">{f.label}</span>
           {f.multiline ? (
