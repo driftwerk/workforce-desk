@@ -189,7 +189,8 @@ describe("the link dialog", () => {
     fireEvent.change(key, { target: { value: "acme" } });
     expect((key as HTMLInputElement).value).toBe("ACME");
     await screen.findByText("12 issues", undefined, { timeout: 2000 });
-    expect((screen.getByLabelText("Review moves its issue to") as HTMLSelectElement).value).toBe("In Review");
+    // The map is prefilled once the hub's states are in.
+    await waitFor(() => expect((screen.getByLabelText("Review moves its issue to") as HTMLSelectElement).value).toBe("In Review"));
     // A label: counted again.
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A label" }));
     fireEvent.change(screen.getByPlaceholderText("desk"), { target: { value: "desk" } });
