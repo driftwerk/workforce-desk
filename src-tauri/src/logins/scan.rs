@@ -41,6 +41,19 @@ pub fn sign_in_url(text: &str) -> Option<String> {
         .map(|w| w.trim_end_matches(['.', ',', ')']).to_string())
 }
 
+/// Whether Desk may open `url` in the browser itself: Claude's own sign-in
+/// pages, over https, and nothing else a CLI might print.
+pub fn opens_itself(url: &str) -> bool {
+    let Ok(u) = url::Url::parse(url) else {
+        return false;
+    };
+    let host = u.host_str().unwrap_or("");
+    u.scheme() == "https"
+        && ["claude.ai", "claude.com", "anthropic.com"]
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
 /// Whether the CLI is waiting for a code from the browser page.
 pub fn wants_code(text: &str) -> bool {
     let lower = text.to_lowercase();
@@ -76,6 +89,36 @@ mod tests {
             sign_in_url(&text).as_deref(),
             Some("https://claude.ai/oauth/authorize?code=true&client_id=abc")
         );
+    }
+
+    #[test]
+    fn setup_tokens_screen_gives_its_url_and_asks_for_the_code() {
+        // As Claude Code 2.1 draws it: the link as a terminal hyperlink,
+        // then the prompt.
+        let raw = "\x1b[2mBrowser didn't open? Use the url below to sign in \x1b[22m\r\n\
+                   \x1b]8;;https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=x\x1b\\\
+                   \x1b[2mhttps://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=x\x1b[22m\
+                   \x1b]8;;\x1b\\\r\n\r\nPaste code here if prompted > ";
+        let text = plain(raw);
+        let url = sign_in_url(&text).unwrap();
+        assert_eq!(
+            url,
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=x"
+        );
+        assert!(opens_itself(&url));
+        assert!(wants_code(&text));
+    }
+
+    #[test]
+    fn desk_opens_only_claudes_own_pages_itself() {
+        assert!(opens_itself("https://claude.ai/oauth/authorize?x=1"));
+        assert!(opens_itself(
+            "https://platform.claude.com/oauth/code/success"
+        ));
+        assert!(!opens_itself("http://claude.ai/oauth"));
+        assert!(!opens_itself("https://claude.ai.example.com/"));
+        assert!(!opens_itself("https://evilclaude.ai/"));
+        assert!(!opens_itself("file:///etc/passwd"));
     }
 
     #[test]

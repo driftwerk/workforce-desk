@@ -307,8 +307,8 @@ describe("Right now's needs, answered in place", () => {
     render(<RightNow brief={null} />);
     expect(needRows().map(actions)).toEqual([
       ["Allow “Run npm test?” for acme-web", "Deny “Run npm test?” for acme-web", "Open acme-web"],
-      ["Reply to Scout…", "Open Scout"],
-      ["Open repo to answer in the terminal"],
+      ["Reply to Scout…", "Open Scout", "Dismiss “Main or release?” from Scout: not needed"],
+      ["Open repo to answer in the terminal", "Dismiss “Run rm -rf build?” from repo: not needed"],
       ["Allow this command for this session and continue: keychain-check", "Reply to keychain-check…", "Open keychain-check", "Dismiss what keychain-check asked"],
     ]);
     // What the buttons show stays short; the row says whose it is.

@@ -311,6 +311,97 @@
   }
 }
 
+/* ── A room's settings ──────────────────────────────────────────────────── */
+
+/* The dialog lays out as Move's (.move-*); these are its own parts. */
+.room-name {
+  display: flex;
+  gap: 8px;
+}
+.room-name input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  padding: 9px 12px;
+  outline: none;
+}
+.room-name input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.room-settings .move-field > .move-opt-sub {
+  margin-top: -2px;
+}
+.room-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.room-section-head .move-legend {
+  margin: 0;
+}
+.room-adding {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.room-adding .quick-list {
+  align-self: stretch;
+}
+.room-member {
+  padding: 0 6px 0 0;
+}
+.room-member-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 10px 12px;
+  cursor: pointer;
+}
+.room-member-pick input {
+  accent-color: var(--signal);
+  margin: 0;
+  flex: none;
+}
+.room-member-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.room-member-name .chip {
+  padding: 0 7px;
+}
+.room-settings .move-opt-main > span {
+  overflow-wrap: anywhere;
+}
+.room-member-remove:hover {
+  color: var(--ansi-red);
+}
+/* As wide as a member's mark, so the names line up. */
+.room-settings .move-opt-mark {
+  width: 30px;
+  height: 30px;
+}
+.room-static {
+  cursor: default;
+}
+.room-static .btn {
+  flex: none;
+}
+
 /* ── Continue in another engine ─────────────────────────────────────────── */
 
 /* The dialog lays out as Move's (.move-*); these are its own parts. */

@@ -20,7 +20,7 @@ export function Marks({ badge }: { badge: Marked }) {
   if (badge.count > 0) return <Badge count={badge.count} says={needsYou(badge.count)} />;
   if (badge.dot)
     return (
-      <span className="side-dot">
+      <span className="side-dot" title="unread">
         <span className="sr-only">unread</span>
       </span>
     );

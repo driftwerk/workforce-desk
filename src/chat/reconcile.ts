@@ -9,7 +9,8 @@
 // frames named no id, or whose turn's end said it wasn't kept under the id it
 // streamed with. That one is known by what it says; and a live message the
 // hub kept no copy of goes by its own time among what it kept, never below
-// what was said after it.
+// what was said after it: nor below a message sent from here after it, which
+// it goes before once that one is kept.
 import { LOCAL_ID } from "./history";
 import type { ChatMessage } from "./types";
 
@@ -113,7 +114,7 @@ const answers = (m: ChatMessage): boolean =>
  *  ended. An answer the hub named is timed from when it began, and what was
  *  said during its turn is kept before it; it follows what was kept until a
  *  read has it. */
-const timed = (m: ChatMessage): boolean => unnamed(m) || m.status === "error";
+const timed = (m: ChatMessage): boolean => unnamed(m) || m.status === "error" || !!m.unkept || !!m.undelivered;
 
 /** `live` among `kept` (in the hub's order): one that goes by its time goes
  *  before the first kept message from well after it, since what was said
@@ -124,7 +125,10 @@ const byTime = (kept: readonly ChatMessage[], live: readonly ChatMessage[]): Cha
   const after: ChatMessage[] = [];
   for (const m of live) {
     const t = Date.parse(m.at);
-    let at = !timed(m) || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
+    // Before the message sent from here next, once that one is kept: what
+    // was said first was said first, however near in time the two were.
+    const next = m.before ? kept.findIndex((k) => k.clientId === m.before) : -1;
+    let at = next >= 0 ? next : !timed(m) || Number.isNaN(t) ? -1 : kept.findIndex((k) => Date.parse(k.at) > t + SKEW_MS);
     // Never before the question it answers, whatever the clocks say.
     const asked = m.replyTo ? kept.findIndex((k) => k.clientId === m.replyTo) : -1;
     if (at >= 0 && asked >= at) at = asked + 1 < kept.length ? asked + 1 : -1;

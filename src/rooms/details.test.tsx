@@ -59,6 +59,17 @@ afterEach(cleanup);
 const details = () => render(<RoomDetails room={room} rename={false} onClose={() => {}} />);
 
 describe("a room's details", () => {
+  it("offers Save only once the name changes, and Escape puts it back", () => {
+    details();
+    const name = screen.getByLabelText("Name");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    fireEvent.change(name, { target: { value: "Atlas release" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+    fireEvent.keyDown(name, { key: "Escape" });
+    expect((name as HTMLInputElement).value).toBe("Atlas launch");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
   it("renames it, and says so when another room has that name", async () => {
     details();
     const name = screen.getByLabelText("Name");
@@ -84,9 +95,16 @@ describe("a room's details", () => {
     await vi.waitFor(() => expect(patches).toEqual([{ defaultMember: "dw/sarah" }, { defaultMember: null }]));
   });
 
-  it("removes a member through the engine, which stops their answer first", async () => {
+  it("asks before removing a member, then removes them through the engine, which stops their answer first", async () => {
     details();
     fireEvent.click(screen.getByRole("button", { name: "Remove Allan" }));
+    expect(removed).toEqual([]);
+    const ask = screen.getByRole("dialog", { name: "Remove Allan?" });
+    fireEvent.click(within(ask).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Remove Allan?" })).toBeNull();
+    expect(removed).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Allan" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Remove Allan?" })).getByRole("button", { name: "Remove" }));
     await vi.waitFor(() => expect(removed).toEqual([{ hub: "local", agent: "allan" }]));
   });
 

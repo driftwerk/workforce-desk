@@ -266,9 +266,15 @@ fn login_code(
     logins.code(plan, &code)
 }
 
+/// Off the main thread: inside WSL, ending a sign-in runs `wsl.exe`.
 #[tauri::command]
-fn login_cancel(logins: State<'_, logins::Logins>, plan: logins::Plan) {
-    logins.cancel(plan);
+async fn login_cancel(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+    let backend = app.state::<App>().backend().ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<logins::Logins>().cancel(plan, backend.as_ref())
+    })
+    .await
+    .map_err(text)
 }
 
 /// Where Desk Helper stands, as Settings → Help shows it. Registers it

@@ -20,6 +20,7 @@ import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { RoomMarks } from "../unread/RoomMarks";
 import { Marks, useTotal } from "../unread/Marks";
+import { needsYou } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
 
 const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
@@ -37,7 +38,7 @@ function UnreadRow() {
       type="button"
       className={`side-unread${on ? " on" : ""}`}
       aria-current={on ? "true" : undefined}
-      title={`Unread (${shortcutLabel(keys.unread)})`}
+      title={`Unread (${shortcutLabel(keys.unread)})${total.count ? `: ${needsYou(total.count)}` : total.dot ? ": something new" : ""}`}
       onClick={() => setInbox(true)}
     >
       <span className="gi-name">Unread</span>

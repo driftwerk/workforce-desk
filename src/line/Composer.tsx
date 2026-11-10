@@ -9,6 +9,7 @@ import { HitRow, SearchFilters, useMemoryGroups } from "../memory/SearchMemory";
 import { steerOf } from "./rows";
 import { useLine } from "./store";
 import { LOCAL, machineOf } from "../hub/machines";
+import { pingTyping, typingPinger } from "./typing";
 
 /** Said when `/recall` is typed to a session on another machine. */
 export const NO_MACHINE_RECALL = "Search on machines comes with group grants.";
@@ -25,6 +26,8 @@ export function Composer({ session }: { session: Session }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
+  // Your draft counts as your input to the session while you type it.
+  const pinger = useRef<ReturnType<typeof typingPinger> | null>(null);
   const placeCaret = useRef<number | null>(null);
   const name = session.displayName ?? session.name;
   const steer = steerOf(session);
@@ -116,6 +119,10 @@ export function Composer({ session }: { session: Session }) {
           onChange={(e) => {
             setText(e.target.value);
             follow(e.currentTarget);
+            if (hub) {
+              pinger.current ??= typingPinger((id) => pingTyping(hub, id));
+              pinger.current(session.id, e.target.value);
+            }
           }}
           onSelect={(e) => follow(e.currentTarget)}
           onKeyDown={(e) => {

@@ -87,6 +87,8 @@ export interface ConversationState {
   /** The ids of live messages given up for the hub's kept copy: a frame
    *  that comes for one later is for what the kept copy already shows. */
   settled?: ReadonlySet<string>;
+  /** The turns the hub took into a running turn, by ref: they got there. */
+  taken?: readonly string[];
 }
 
 export const emptyConversation = (): ConversationState => ({
@@ -237,14 +239,30 @@ const streams = (s: ConversationState): boolean => !!s.features?.has(FEATURES.st
 /** Folds one server message into the conversation. Pure, so it is tested
  *  without a socket. */
 export const reduce = (s: ConversationState, msg: ServerMessage): ConversationState => {
+  // A follow-up the hub took into the running turn got there, though its
+  // own turn says nothing more (rooms and voice count it as absorbed, never
+  // heard). An older hub doesn't say whose; it is the oldest unheard.
+  if (msg.type === "injected") {
+    const taken = s.taken ?? [];
+    const ref = msg.turn_ref ?? Object.values(s.turns).find((t) => t.state === "live" && !t.acked && !taken.includes(t.ref))?.ref;
+    const { turn_ref: _named, ...frame } = msg;
+    const folded = fold(s, frame, Date.now());
+    const clientId = ref ? s.turns[ref]?.clientId : undefined;
+    return ref
+      ? { ...folded, taken: [...taken, ref].slice(-SETTLED_KEPT), messages: heard(folded.messages, clientId, frame) }
+      : folded;
+  }
   // A late frame of an answer the hub's kept copy already shows: what it
   // would write is there, and an answer made of it would show it twice.
   if (msg.id && s.settled?.has(msg.id) && INTO_ANSWER.has(msg.type)) return s;
   const now = Date.now();
   const folded = fold(s, msg, now);
+  const clientId = msg.turn_ref ? s.turns[msg.turn_ref]?.clientId : undefined;
   const next = {
     ...folded,
-    messages: msg.turn_ref ? ofTurn(asked(s.messages, folded.messages, s.turns[msg.turn_ref]?.clientId), msg.turn_ref, msg) : folded.messages,
+    messages: msg.turn_ref
+      ? heard(ofTurn(asked(s.messages, folded.messages, clientId), msg.turn_ref, msg, clientId), clientId, msg)
+      : folded.messages,
     turns: msg.turn_ref ? foldTurn(folded.turns, msg.turn_ref, msg, now) : folded.turns,
     prompts: foldPrompts(folded.prompts, msg),
   };
@@ -264,6 +282,19 @@ const asked = (before: ChatMessage[], after: ChatMessage[], clientId: string | u
   return after.map((m) => (m.role !== "user" && !m.replyTo && !had.has(m.id) ? { ...m, replyTo: clientId } : m));
 };
 
+/** `messages` with the message asked as `clientId` marked as the hub's
+ *  latest frame of its turn says: refused as busy, it didn't get there;
+ *  any other frame of it means it did, however late. */
+const heard = (messages: ChatMessage[], clientId: string | undefined, msg: ServerMessage): ChatMessage[] => {
+  if (!clientId) return messages;
+  const refused = msg.type === "error" && (msg.error ?? msg.content) === BUSY;
+  const i = messages.findIndex((m) => m.role === "user" && m.clientId === clientId);
+  const m = messages[i];
+  if (!m || !!m.undelivered === refused) return messages;
+  const { undelivered: _was, ...rest } = m;
+  return [...messages.slice(0, i), refused ? { ...m, undelivered: true } : rest, ...messages.slice(i + 1)];
+};
+
 /** The frames that write into an answer. */
 const INTO_ANSWER: ReadonlySet<string> = new Set([
   "stream_start",
@@ -281,7 +312,15 @@ const INTO_ANSWER: ReadonlySet<string> = new Set([
  *  of it names by id says which turn it answers; and at the turn's end, the id
  *  it was kept under is the answer's, or, kept under none the hub said, it is
  *  known by its words. */
-const ofTurn = (messages: ChatMessage[], ref: string, msg: ServerMessage): ChatMessage[] => {
+const ofTurn = (messages: ChatMessage[], ref: string, msg: ServerMessage, clientId?: string): ChatMessage[] => {
+  // A command the hub answered itself: it and what it said are kept
+  // nowhere, so they are settled here, as a command.
+  if (msg.type === "turn_end" && msg.command)
+    return messages.map((m) =>
+      (m.role === "user" ? !!clientId && m.clientId === clientId : m.turnRef === ref || (!!clientId && m.replyTo === clientId))
+        ? { ...m, command: true, unkept: true, ...(m.role === "user" ? {} : { byWords: false }) }
+        : m,
+    );
   if (msg.type !== "turn_end")
     return msg.id && messages.some((m) => m.id === msg.id && m.role === "assistant" && m.turnRef !== ref)
       ? update(messages, msg.id, (m) => ({ ...m, turnRef: ref }))
@@ -557,6 +596,41 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
   }
 };
 
+/** Whether turn `t` got there, whatever came after: its answer came, or it
+ *  was a command the hub answered. */
+const answered = (s: ConversationState, t: Turn): boolean =>
+  !!t.text.trim() ||
+  !!s.taken?.includes(t.ref) ||
+  s.messages.some(
+    (m) => (m.role === "assistant" && m.turnRef === t.ref && !!m.content.trim()) || (!!m.command && !!t.clientId && m.clientId === t.clientId),
+  );
+
+/** `s` with the messages turns `refs` were asked with not delivered: the
+ *  hub never said it had them. Their turns wait, stalled, in case a frame of
+ *  one comes late after all; nothing shows as sending for them. */
+export const undelivered = (s: ConversationState, refs: readonly string[]): ConversationState => {
+  const turns = refs.flatMap((r) => (s.turns[r] && !answered(s, s.turns[r]!) ? [s.turns[r]!] : []));
+  if (!turns.length) return s;
+  const asked = new Set(turns.flatMap((t) => (t.clientId ? [t.clientId] : [])));
+  const stalled = Object.fromEntries(turns.map((t) => [t.ref, { ...t, working: null, state: "stalled" as const }]));
+  const nextTurns = { ...s.turns, ...stalled };
+  const going = Object.values(nextTurns).some((t) => t.state === "live");
+  return {
+    ...s,
+    messages: s.messages.map((m) => (m.role === "user" && m.clientId && asked.has(m.clientId) ? { ...m, undelivered: true } : m)),
+    turns: nextTurns,
+    ...(s.working?.phase === "sending" && !going ? { working: null } : {}),
+  };
+};
+
+/** How long a message sent may go with no word of it from the hub before
+ *  it shows as not delivered. */
+export const UNCONFIRMED_MS = 60_000;
+
+/** How long after the socket is back a turn it left running may take to say
+ *  it still is (a snapshot) before it's taken as lost with the hub. */
+export const RECONNECT_GRACE_MS = 15_000;
+
 /** The conversation once its socket has dropped: nothing is running that
  *  Desk can see, and its turns wait to hear whether they still are. */
 export const disconnected = (s: ConversationState): ConversationState => ({
@@ -662,6 +736,11 @@ export class Conversation {
   /** Told what became of each queued send, by its ticket. One that didn't
    *  get there is no longer shown as said. */
   onQueued?: (ticket: string, outcome: QueuedOutcome) => void;
+  /** Each sent turn's wait for the hub's first word of it, by ref. */
+  private unconfirmed = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The look, after a reconnect, for turns the hub no longer runs. */
+  private recheck: ReturnType<typeof setTimeout> | undefined;
+  private opened = false;
 
   constructor(
     readonly hub: HubAccount,
@@ -695,6 +774,13 @@ export class Conversation {
       this.retry = 0;
       this.set({ ...this.state, connected: true });
       this.alive = keepAlive(ws);
+      // Back after a drop: a turn left running says so in a snapshot, or
+      // the hub has lost it (it restarted).
+      if (this.opened) {
+        clearTimeout(this.recheck);
+        this.recheck = setTimeout(() => this.lostWithHub(), RECONNECT_GRACE_MS);
+      }
+      this.opened = true;
     };
     ws.onmessage = (e) => {
       this.alive?.heard();
@@ -711,7 +797,9 @@ export class Conversation {
       // Whether the hub took what was still on its way can't be known now:
       // it goes back to the queue rather than be lost.
       this.unsend([...this.waiting.keys()], "lost");
-      this.set(disconnected(this.state));
+      // What the hub never said it had is not delivered: it may come yet.
+      const unheard = Object.values(this.state.turns).filter((t) => t.state === "live" && !t.acked).map((t) => t.ref);
+      this.set(disconnected(undelivered(this.state, unheard)));
       if (!this.closed) this.timer = setTimeout(() => this.open(), backoff(this.retry++));
     };
   }
@@ -750,9 +838,16 @@ export class Conversation {
       ...(clientId ? { clientId } : {}),
     };
     if (ask.queued) this.waiting.set(ask.queued, { ref: turnRef, shown: said.id });
+    // Unheard of a minute on, it isn't delivered. A queued send is the
+    // queue's to take back.
+    else if (turnRef) this.unconfirmed.set(turnRef, setTimeout(() => this.expire(turnRef), UNCONFIRMED_MS));
+    // What was said before it goes before it, once it's kept.
+    const earlier = clientId
+      ? this.state.messages.map((m) => (m.status !== "streaming" && !m.before ? { ...m, before: clientId } : m))
+      : this.state.messages;
     this.set({
       ...this.state,
-      messages: [...this.state.messages, said],
+      messages: [...earlier, said],
       working: { since: now, at: now, phase: "sending", step: "Sending" },
       turns: turnRef ? { ...this.state.turns, [turnRef]: { ...newTurn(turnRef, now), ...(clientId ? { clientId } : {}) } } : this.state.turns,
     });
@@ -804,6 +899,52 @@ export class Conversation {
       ...(placeholder ? { working: null } : {}),
     });
     for (const w of gone) this.onQueued?.(w.ticket, outcome);
+  }
+
+  /** Turn `ref`'s minute is up: unheard of, its message isn't delivered. */
+  private expire(ref: string) {
+    this.unconfirmed.delete(ref);
+    const t = this.state.turns[ref];
+    if (t && t.state === "live" && !t.acked) this.set(undelivered(this.state, [ref]));
+  }
+
+  /** After a reconnect's grace: a turn still stalled that no snapshot picked
+   *  up is gone with the hub. Its message, kept, gives way to what the hub
+   *  kept (the turn is taken as ended); not kept, it wasn't delivered. */
+  private lostWithHub() {
+    if (!this.state.connected) return;
+    const stalled = Object.values(this.state.turns).filter((t) => t.state === "stalled" && t.acked);
+    if (!stalled.length) return;
+    const shown = new Set(this.state.messages.flatMap((m) => (m.role === "user" && m.clientId ? [m.clientId] : [])));
+    const lost = stalled.filter((t) => t.clientId && shown.has(t.clientId) && !answered(this.state, t)).map((t) => t.ref);
+    const over = stalled.filter((t) => !lost.includes(t.ref));
+    const s = undelivered(this.state, lost);
+    this.set({ ...s, turns: { ...s.turns, ...Object.fromEntries(over.map((t) => [t.ref, { ...t, working: null, state: "ended" as const }])) } });
+  }
+
+  /** Marks the messages asked as `clientIds`, their turns over and no copy
+   *  of them kept, as kept nowhere: they go by their place, settled. */
+  unkeep(clientIds: readonly string[]) {
+    const ids = new Set(clientIds);
+    if (!this.state.messages.some((m) => m.role === "user" && m.clientId && ids.has(m.clientId) && !m.unkept && !m.undelivered)) return;
+    this.set({
+      ...this.state,
+      messages: this.state.messages.map((m) =>
+        m.role === "user" && m.clientId && ids.has(m.clientId) && !m.undelivered ? { ...m, unkept: true } : m,
+      ),
+    });
+  }
+
+  /** Puts back a message taken away (one that couldn't be sent again). */
+  restore(m: ChatMessage) {
+    if (this.state.messages.some((x) => x.id === m.id)) return;
+    this.set({ ...this.state, messages: [...this.state.messages, m] });
+  }
+
+  /** Takes a live message away (one not delivered, which you removed). */
+  remove(id: string) {
+    if (!this.state.messages.some((m) => m.id === id)) return;
+    this.set({ ...this.state, messages: this.state.messages.filter((m) => m.id !== id) });
   }
 
   /** Takes turn `ref` as ended: its answer finished and the hub never said
@@ -865,6 +1006,9 @@ export class Conversation {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
+    clearTimeout(this.recheck);
+    for (const t of this.unconfirmed.values()) clearTimeout(t);
+    this.unconfirmed.clear();
     this.alive?.stop();
     detach(this.ws);
   }

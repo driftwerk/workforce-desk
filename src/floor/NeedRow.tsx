@@ -6,6 +6,7 @@ import { allowLabel } from "../session/Approval";
 import { openTarget } from "../shell/navigate";
 import { OptionChips } from "../ui/OptionChips";
 import { dismissQuestions } from "../line/LinePanel";
+import { dismissNeed } from "../unread/needsSeen";
 import { useLinePanel } from "../line/panel";
 import { plainError } from "../ui/plainError";
 import type { FloorNeed } from "./merge";
@@ -271,6 +272,17 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
           {asking && (
             <button type="button" className="btn" aria-label={`Dismiss what ${name} asked`} disabled={need.stale || acting} onClick={act("dismissAsked")}>
               Dismiss
+            </button>
+          )}
+          {!line && !asking && need.answer.kind !== "decide" && (
+            <button
+              type="button"
+              className="btn"
+              aria-label={`Dismiss “${need.ask}” from ${name}: not needed`}
+              title="Set this aside: nothing is sent"
+              onClick={() => dismissNeed(need.key)}
+            >
+              Not needed
             </button>
           )}
           <span className="sr-only" role="status">

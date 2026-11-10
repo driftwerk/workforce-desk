@@ -1104,6 +1104,14 @@ button {
 .mention-option[aria-selected="true"] {
   background: var(--sunken);
 }
+.command-menu .command-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.command-menu .command-args {
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
 .composer textarea {
   flex: 1;
   border: 0;
@@ -1560,6 +1568,33 @@ button.thread-bar:hover {
   color: var(--signal-soft-text);
   background: var(--signal-soft);
   border-color: transparent;
+}
+
+/* A command the hub answered itself, and its answer: kept nowhere, so they
+   read as an aside, dashed. */
+.msg-command-chip {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  border-style: dashed;
+}
+.msg-command-text {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+
+/* A message the hub never said it had. */
+.msg-undelivered .msg-text {
+  opacity: 0.7;
+}
+.msg-undelivered-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
 }
 .draft-note {
   display: inline-flex;
@@ -2835,37 +2870,6 @@ button.urow-open {
   text-decoration: underline;
   text-underline-offset: 4px;
 }
-.details-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: space-between;
-}
-.details-row > input {
-  flex: 1;
-}
-.details-members {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.details-member {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.details-member-name {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-.details-level {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
 .ev-link {
   border: 0;
   background: none;

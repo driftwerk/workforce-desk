@@ -11,6 +11,8 @@ export interface Brain {
   /** What the config names to run `model`, when that isn't `provider`
    *  (Bedrock's `bedrock:anthropic`). */
   runsOn?: string;
+  /** Ask the plan's faster tier (`[llm] fast`), where the model has one. */
+  fast?: boolean;
 }
 
 /** Desk's saved default for new agents: unset parts mean that provider's
@@ -19,6 +21,7 @@ export interface BrainChoice {
   provider: string;
   model?: string;
   effort?: string;
+  fast?: boolean;
 }
 
 /** What older agents' configs name instead of a model. */
@@ -54,7 +57,12 @@ export const resolveBrain = (choice: BrainChoice, provider: Provider | undefined
   if (!provider) return { provider: choice.provider, model: choice.model ?? "standard", effort: choice.effort };
   const model = provider.models.some((m) => m.id === choice.model) ? choice.model! : (defaultModel(provider)?.id ?? choice.model ?? "standard");
   const effort = choice.effort && effortsFor(provider, model).includes(choice.effort) ? choice.effort : defaultEffort(provider, model);
-  return withRunsOn(effort ? { provider: provider.id, model, effort } : { provider: provider.id, model }, provider);
+  // Fast stays on where the model has a faster tier, and where the hub
+  // couldn't ask the plan which have one (nothing to say it hasn't).
+  const tiersKnown = provider.models.some((m) => m.fast);
+  const fast = !!choice.fast && (!tiersKnown || !!provider.models.find((m) => m.id === model)?.fast);
+  const brain: Brain = effort ? { provider: provider.id, model, effort } : { provider: provider.id, model };
+  return withRunsOn(fast ? { ...brain, fast } : brain, provider);
 };
 
 /** Where new agents start: the saved default, else the first connected
@@ -95,7 +103,8 @@ export const brainOf = (
       : typeof llm.effort === "string"
         ? llm.effort
         : defaultEffort(provider, model);
-  const brain: Brain = effort ? { provider: providerId, model, effort } : { provider: providerId, model };
+  const base: Brain = effort ? { provider: providerId, model, effort } : { provider: providerId, model };
+  const brain: Brain = llm.fast === true ? { ...base, fast: true } : base;
   return provider ? withRunsOn(brain, provider) : brain;
 };
 
@@ -106,6 +115,8 @@ export const withBrain = (source: string, brain: Brain): string => {
   const llm: Doc = { ...((doc.llm ?? {}) as Doc), provider: brain.runsOn ?? brain.provider, default_model: brain.model };
   if (brain.effort) llm.effort = brain.effort;
   else delete llm.effort;
+  if (brain.fast) llm.fast = true;
+  else delete llm.fast;
   doc.llm = llm;
   return stringify(doc) + "\n";
 };
@@ -141,13 +152,16 @@ export const modelName = (p: Provider | undefined, model: string): string => mod
 
 export const effortShort = (effort: string): string => EFFORTS[effort]?.short ?? "";
 
+/** Whether the brain asks a faster tier its model has. */
+const runsFast = (brain: Brain, p: Provider | undefined): boolean => !!brain.fast && !!modelOf(p, brain.model)?.fast;
+
 /** "Sonnet 5.5 · Medium effort" */
 export const brainLine = (brain: Brain, p: Provider | undefined): string =>
-  [modelName(p, brain.model), brain.effort && `${effortName(brain.effort)} effort`].filter(Boolean).join(" · ");
+  [modelName(p, brain.model), brain.effort && `${effortName(brain.effort)} effort`, runsFast(brain, p) && "Fast"].filter(Boolean).join(" · ");
 
 /** "Sonnet 5.5 on your Claude plan · Medium effort" */
 export const brainOn = (brain: Brain, p: Provider | undefined): string =>
-  `${modelName(p, brain.model)} on your ${p?.name ?? brain.provider}${brain.effort ? ` · ${effortName(brain.effort)} effort` : ""}`;
+  `${modelName(p, brain.model)} on your ${p?.name ?? brain.provider}${brain.effort ? ` · ${effortName(brain.effort)} effort` : ""}${runsFast(brain, p) ? " · Fast" : ""}`;
 
 /** "Ledger will use Sonnet 5.5 on your Claude plan · Medium effort" */
 export const brainSummary = (who: string, brain: Brain, p: Provider | undefined): string => `${who} will use ${brainOn(brain, p)}`;
