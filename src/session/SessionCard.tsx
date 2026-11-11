@@ -94,6 +94,7 @@ export function SessionCard({ session }: { session: Session }) {
             <span className="mono">{name}</span>
             <OnMachine machine={machineOf(session)} />
             <GroupChip item={sessionItem(key)} />
+            {session.mode && <span className="chip">{session.mode === "auto" ? "Auto mode (set by Desk)" : "Bypass mode (set by Desk)"}</span>}
             <span className="faint small">{where(session)}</span>
           </span>
         </>

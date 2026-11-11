@@ -44,6 +44,11 @@ export interface Oversight {
     /** Answer what sessions ask it on Desk's line; anything that pushes,
      *  deletes or sends still comes to you, with its draft. */
     answerSessions: boolean;
+    /** Continue a session in another engine (`hand_off`). */
+    handOff: boolean;
+    /** Change a running session's permission mode (default, accept edits
+     *  or plan only). */
+    setMode: boolean;
   };
   /** How it runs sessions for you (`[oversight.work]`). */
   work: Work;
@@ -53,6 +58,9 @@ export interface Oversight {
 
 /** Act fully's repos, workflows and daily budget. */
 export interface Full {
+  /** Not limited to the repos, folders and workflows listed; the budget
+   *  stays optional. */
+  anywhere: boolean;
   /** owner/name (GitHub's), a repo's address, or a local folder. */
   repos: string[];
   /** Plain workflow file names it may run (`deploy.yml`). */
@@ -108,9 +116,11 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     messageAgents: false,
     messageTerminalSessions: false,
     answerSessions: true,
+    handOff: false,
+    setMode: false,
   },
   work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
-  full: { repos: [], workflows: [], budgetUsdPerDay: null },
+  full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null },
 };
 
 const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act", "full"];
@@ -189,6 +199,8 @@ export const oversightOf = (source: string): Oversight => {
       messageAgents: bool(act.message_agents, d.act.messageAgents),
       messageTerminalSessions: bool(act.message_terminal_sessions, d.act.messageTerminalSessions),
       answerSessions: bool(act.answer_sessions, d.act.answerSessions),
+      handOff: bool(act.hand_off, d.act.handOff),
+      setMode: bool(act.set_mode, d.act.setMode),
     },
     work: {
       preferSessions: bool(work.prefer_sessions, d.work.preferSessions),
@@ -198,6 +210,7 @@ export const oversightOf = (source: string): Oversight => {
       maxTurnsPerHour: within(work.max_turns_per_hour, 1, MAX_WORK_TURNS_PER_HOUR, d.work.maxTurnsPerHour),
     },
     full: {
+      anywhere: bool(full.anywhere, d.full.anywhere),
       repos: strings(full.repos, (r) => r !== "" && r.length <= 500),
       workflows: strings(full.workflows, (w) => !("problem" in parseWorkflow(w))),
       budgetUsdPerDay:
@@ -248,6 +261,8 @@ export const withOversight = (source: string, o: Oversight): string => {
       message_agents: o.act.messageAgents,
       message_terminal_sessions: o.act.messageTerminalSessions,
       answer_sessions: o.act.answerSessions,
+      hand_off: o.act.handOff,
+      set_mode: o.act.setMode,
     },
     work: {
       ...table(was.work),
@@ -261,10 +276,11 @@ export const withOversight = (source: string, o: Oversight): string => {
   // Act fully's table: written once anything of it is set, kept as it is
   // otherwise (a budget never set stays absent).
   const { budget_usd_per_day: _budget, ...wasFull } = table(was.full);
-  const anyFull = o.full.repos.length > 0 || o.full.workflows.length > 0 || o.full.budgetUsdPerDay !== null || "full" in was;
+  const anyFull = o.full.anywhere || o.full.repos.length > 0 || o.full.workflows.length > 0 || o.full.budgetUsdPerDay !== null || "full" in was;
   if (anyFull) {
     (doc.oversight as Doc).full = {
       ...wasFull,
+      anywhere: o.full.anywhere,
       repos: o.full.repos,
       workflows: o.full.workflows,
       ...(o.full.budgetUsdPerDay !== null ? { budget_usd_per_day: o.full.budgetUsdPerDay } : {}),
@@ -358,11 +374,19 @@ export const parseWorkflow = (typed: string, have: string[] = []): { value: stri
   return { value: t };
 };
 
-/** What Act fully still needs before it's in force: repos, a budget. */
-export const fullMissing = (o: Oversight): ("repos" | "budget")[] => [
-  ...(o.full.repos.length === 0 ? (["repos"] as const) : []),
-  ...(o.full.budgetUsdPerDay === null ? (["budget"] as const) : []),
-];
+/** What Act fully still needs before it's in force: repos, a budget;
+ *  nothing while it's Anywhere. */
+export const fullMissing = (o: Oversight): ("repos" | "budget")[] =>
+  o.full.anywhere
+    ? []
+    : [
+        ...(o.full.repos.length === 0 ? (["repos"] as const) : []),
+        ...(o.full.budgetUsdPerDay === null ? (["budget"] as const) : []),
+      ];
+
+/** Nothing limits it: Act fully, every act switch on, and Anywhere. */
+export const isUnbound = (o: Oversight): boolean =>
+  o.level === "full" && o.full.anywhere && Object.values(o.act).every((on) => on);
 
 /** Writes `change` of the agent's oversight into its config as it is now
  *  (read fresh, so nothing else in it is lost); answers with the config as

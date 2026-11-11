@@ -160,6 +160,8 @@ export interface Session {
   group?: { id: string; name: string } | null;
   /** Background work still running after its turn ended; absent from older hubs. */
   background?: Background | null;
+  /** Present only while it runs in a non-asking mode an unbound boss set. */
+  mode?: "auto" | "bypassPermissions";
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
   createdAt: string;
@@ -996,7 +998,10 @@ export type LineWait =
   | "asking"
   /** The person has the wheel of a session a boss runs: the boss's
    *  messages wait until it is handed back. */
-  | "person_driving";
+  | "person_driving"
+  /** It still runs in auto or bypass mode from a boss no longer unbound
+   *  over it: Desk starts it again in its own mode first. */
+  | "mode_ending";
 
 /** One message on a session's line. */
 /** An ask's headline, and its details when it has any. */
@@ -1241,6 +1246,9 @@ export interface BossView {
   /** Its group's budget, the furthest along: none for the main boss, and
    *  for a group with no budget of its own. */
   spend?: Standing | null;
+  /** True only while it is unbound in force: false once its budget is
+   *  spent; absent from older hubs. */
+  unbound?: boolean;
 }
 
 export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";
