@@ -188,6 +188,9 @@ describe("each window's capabilities", () => {
       "machine_add",
       "machine_remove",
       "machine_share_accounts",
+      // Minting a board's sync token: the Board view's header, in the main
+      // window only (a grid's board panes have none; see board/chrome.tsx).
+      "board_sync_mint",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);

@@ -1,5 +1,5 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { useChat } from "../chat/store";
 import { useBoss } from "../crew/chargeStore";
 import { plansOn, usePlans } from "../crew/planStore";
@@ -8,16 +8,14 @@ import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
 import { PLUGINS, SENSORS, DragChip, MoreIcon, below, type Operation } from "../groups/rows";
 import { useDesk, localSessions } from "../hub/store";
-import type { Ticket, TicketState } from "../hub/types";
+import type { Board as BoardT, Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { leftFilterOf, syncStatus } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
-import { BoardActionDialog, boardEntries, type BoardAction } from "./boardActions";
-import { NewTokenDialog } from "./LinkBoard";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
-import { hubNameOf, localSync, syncChoices, useSyncHubs } from "./syncStore";
-import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
+import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
+import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
@@ -57,6 +55,17 @@ const TicketOpener = createContext<(id: string) => void>((id) => useBoard.getSta
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
+/** What the Board view's header offers beyond the board itself: the
+ *  board's menu (rename, delete, link to Jira or Linear) with its dialogs,
+ *  and minting a sync token. Handed in by Desk's main window (see
+ *  board/chrome.tsx), so a grid's own window, whose board panes have no
+ *  such header, never reaches what mints a token. */
+export interface BoardChrome {
+  entries: (board: BoardT, act: (a: BoardAction) => void) => MenuEntry[];
+  Action: ComponentType<{ board: BoardT; action: BoardAction; onClose: () => void }>;
+  NewToken: ComponentType<{ choice: SyncChoice; onClose: () => void }>;
+}
+
 /** A board shown in a grid's pane: which one, and its filter, which the
  *  pane's header shows. */
 export interface BoardInPane {
@@ -72,7 +81,7 @@ export interface BoardInPane {
  *  `pane`, that board in a grid's pane: under the pane's header, which has
  *  its name and filter, its columns alone (and its sync while that has a
  *  problem); a narrow pane shows a column at a time, a short one counts. */
-export function Board({ pane }: { pane?: BoardInPane } = {}) {
+export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChrome } = {}) {
   const supported = useBoard((s) => s.supported);
   const board = useBoard((s) => (pane ? (s.boards[pane.board] ?? null) : shownBoard(s)));
   const boards = useBoard((s) => s.boards);
@@ -218,7 +227,7 @@ export function Board({ pane }: { pane?: BoardInPane } = {}) {
       .map((b) => ({ kind: "item" as const, label: b.name, checked: b.id === board.id, onSelect: () => useBoard.getState().show(b.id) })),
     { kind: "separator" },
     { kind: "item", label: "New board…", onSelect: () => setNaming(true) },
-    ...boardEntries(board, setActing),
+    ...(chrome?.entries(board, setActing) ?? []),
   ];
 
   const columnsShown = (
@@ -315,7 +324,7 @@ export function Board({ pane }: { pane?: BoardInPane } = {}) {
           New ticket
         </button>
       </header>
-      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor ? () => setNewToken(true) : undefined} />}
+      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf board={board} tickets={left} />
       {columnsShown}
       {live}
@@ -332,8 +341,8 @@ export function Board({ pane }: { pane?: BoardInPane } = {}) {
       )}
       {adding && <NewTicket board={board} onClose={() => setAdding(false)} />}
       {naming && <BoardDialog onClose={() => setNaming(false)} />}
-      {acting && <BoardActionDialog board={board} action={acting} onClose={() => setActing(null)} />}
-      {newToken && tokenFor && <NewTokenDialog choice={tokenFor} onClose={() => setNewToken(false)} />}
+      {acting && chrome && <chrome.Action board={board} action={acting} onClose={() => setActing(null)} />}
+      {newToken && tokenFor && chrome && <chrome.NewToken choice={tokenFor} onClose={() => setNewToken(false)} />}
     </main>
   );
 }
@@ -487,7 +496,7 @@ function BoardShort({ counts, waiting }: { counts: Column[]; waiting: number }) 
 
 /** A board in a pane says its sync in the pane's header while it's well;
  *  here, only once it isn't (paused, or a problem), with what to do. */
-function PaneSync({ board, now }: { board: NonNullable<ReturnType<typeof shownBoard>>; now: number }) {
+function PaneSync({ board, now }: { board: BoardT; now: number }) {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
   if (!board.sync || syncStatus(board, hubNameOf(board.sync.via, kept, paired))?.kind === "synced") return null;

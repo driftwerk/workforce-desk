@@ -64,6 +64,7 @@ import { boardSyncOf, issueUrl, looksLikeToken, pausedWords, syncHubId, syncStat
 import { useDesk } from "../hub/store";
 import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
+import { BOARD_CHROME } from "./chrome";
 import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
@@ -333,7 +334,7 @@ describe("the board, synced", () => {
   const show = (b: BoardT, tickets: Ticket[]) => {
     useBoard.setState({ boards: { [b.id]: b }, tickets: Object.fromEntries(tickets.map((t) => [t.id, t])), supported: true, shown: b.id });
     useSyncHubs.setState({ hubs: kept });
-    return render(<Board />);
+    return render(<Board chrome={BOARD_CHROME} />);
   };
 
   it("shows synced, with the issues' keys, a push problem on its card, and syncs on opening", async () => {
