@@ -84,6 +84,7 @@ pub const COMMANDS: &[&str] = &[
     "backend_home",
     "pick_folder",
     "programs_under",
+    "repo_facts",
     "grid_window_open",
     "grid_window_close",
     "grid_windows_open",
