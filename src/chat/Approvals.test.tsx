@@ -121,4 +121,25 @@ describe("Desk's own card for a call on this computer", () => {
     );
     expect(screen.getByRole("button", { name: "Always allow writes to linear" })).toBeTruthy();
   });
+
+  it("for Sign in for me, names the site, waits for I'm signed in, and offers Cancel", () => {
+    const onAnswer = vi.fn(() => true);
+    render(
+      <PromptCard
+        prompt={ask({
+          facts: { effect: "sign_in", connector: "browser:https://shop.example", why: "Waits while you sign in. Desk never sees your password" },
+        })}
+        onAnswer={onAnswer}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Sign in for me" });
+    expect(card.textContent).toContain("Sign in to shop.example");
+    expect(card.textContent).toContain("Desk never sees your password");
+    expect(card.textContent).not.toContain("the agent's own words");
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "I’m signed in" }));
+    expect(onAnswer).toHaveBeenLastCalledWith("allow_once");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onAnswer).toHaveBeenLastCalledWith("deny_once");
+  });
 });
