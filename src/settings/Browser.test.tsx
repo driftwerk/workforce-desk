@@ -108,13 +108,21 @@ it("Connect my Chrome copies Chrome's page, opens Chrome natively, and says Read
   // No chrome:// address goes to the link opener.
   expect(opened).toEqual([]);
   const guide = screen.getByRole("group", { name: "Connect my Chrome" });
-  expect(guide.textContent).toContain("paste and press Return");
+  expect(guide.textContent).toContain("paste this address and press Return (Desk copied it)");
   expect(guide.textContent).toContain("Allow remote debugging for this browser instance");
   on = true;
   await act(async () => vi.advanceTimersByTime(2100));
   expect(screen.queryByRole("group", { name: "Connect my Chrome" })).toBeNull();
   expect(screen.getByText(/^Ready\./)).toBeTruthy();
   vi.useRealTimers();
+});
+
+it("doesn't say it copied the address when the clipboard refused", async () => {
+  await show(api(view(), [], { openChrome: vi.fn(async () => undefined), copy: async () => Promise.reject(new Error("no clipboard")) }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Connect my Chrome" })));
+  const guide = screen.getByRole("group", { name: "Connect my Chrome" });
+  expect(guide.textContent).not.toContain("copied");
+  expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
 });
 
 it("says when Chrome isn't installed and where to get it", async () => {

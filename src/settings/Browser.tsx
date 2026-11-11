@@ -78,6 +78,8 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   /** The guide to Chrome's switch is open, and what opening Chrome said. */
   const [connecting, setConnecting] = useState(false);
   const [noChrome, setNoChrome] = useState<string | null>(null);
+  /** Whether the address is on the clipboard: said only when it is. */
+  const [copied, setCopied] = useState(false);
 
   const shown = (v: BrowserSettingsView) => {
     setView(v);
@@ -113,7 +115,13 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
     return () => clearInterval(t);
   }, [connecting, api]);
 
-  const copy = (text: string) => (api?.copy ?? ((t: string) => navigator.clipboard.writeText(t)))(text).catch(() => undefined);
+  const copy = (text: string): Promise<void> =>
+    Promise.resolve()
+      .then(() => (api?.copy ?? ((t: string) => navigator.clipboard.writeText(t)))(text))
+      .then(
+        () => setCopied(true),
+        () => setCopied(false),
+      );
   const connect = async () => {
     setNoChrome(null);
     await copy(TURN_ON);
@@ -217,10 +225,10 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
                   <p className="small">Chrome is open. Two steps there, once:</p>
                   <ol className="browser-connect-steps small">
                     <li>
-                      Click Chrome’s address bar, paste and press Return. Desk copied the address:{" "}
+                      Click Chrome’s address bar, paste this address and press Return{copied ? " (Desk copied it)" : ""}:{" "}
                       <span className="chip">{TURN_ON}</span>{" "}
                       <button type="button" className="link small" onClick={() => void copy(TURN_ON)}>
-                        Copy again
+                        {copied ? "Copy again" : "Copy"}
                       </button>
                     </li>
                     <li>Tick “Allow remote debugging for this browser instance”.</li>
