@@ -220,7 +220,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "max"];
 const OPENAI_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 const claudeModels = (prefix = "claude-"): Fixture["models"] => [
-  { id: `${prefix}fable-5-1`, name: "Fable 5.1", description: "Most capable — for hard, long-running work", default: false },
+  { id: `${prefix}fable-5-2`, name: "Fable 5.2", description: "Most capable — for hard, long-running work", default: false },
   { id: `${prefix}opus-5-5`, name: "Opus 5.5", description: "Deep reasoning and careful writing", default: false },
   { id: `${prefix}sonnet-5-5`, name: "Sonnet 5.5", description: "Fast and strong — the everyday choice", default: true },
   { id: `${prefix}haiku-5-5`, name: "Haiku 5.5", description: "Quickest, for light chores", default: false },
