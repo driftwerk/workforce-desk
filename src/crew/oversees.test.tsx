@@ -127,12 +127,15 @@ describe("Oversees the crew", () => {
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "suggest"\n`);
     expect(screen.getByRole("radio", { name: /Suggest/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByRole("heading", { name: "What Ledger may do without asking" })).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act ?Handles/ })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act ?Does the work/ })));
     expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
     expect(screen.getByText(/Ledger always asks you first before pushing code/)).toBeTruthy();
+    // Act starts sessions by default; turned off, starts come to you.
+    expect(screen.queryByText(/With “Hand out work” off/)).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Hand out work/ })));
+    expect(screen.getByText(/With “Hand out work” off, each session it would start comes to you/)).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Crew in your workspaces/ })));
-    await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { hand_out_work: true }, track: { workspaces: true } }));
+    await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { hand_out_work: false }, track: { workspaces: true } }));
   });
 
   it("offers Act fully after Act, acting as Act until repos and a budget are set, and says what stays yours", async () => {

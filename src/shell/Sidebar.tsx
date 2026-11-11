@@ -2,6 +2,9 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { workspaces } from "../chat/types";
 import { GridsSection } from "../grids/Grids";
+import { roomContent } from "../grids/engine";
+import { InGridRow, openFromRow, putInGrid } from "../grids/putIn";
+import { roomItem } from "../grids/where";
 import { SortList, SortRow } from "../groups/rows";
 import { arranged, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
 import { DeleteRoom } from "../rooms/DeleteRoom";
@@ -178,82 +181,91 @@ export function Sidebar({
       </div>
       <div className="side-mid">
         <div ref={middle} className="side-scroll">
-          {view === "grids" ? (
-            <GridsSection />
-          ) : (
-            <SideSection id="rooms" label="Rooms" newLabel="New room" onNew={onNewRoom} badge={roomsBadge}>
-              <span id={roomHint} className="sr-only">
-                Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
-              </span>
-              <SortList
-                label="Rooms"
-                type="room"
-                ids={rooms.map((r) => r.id)}
-                chip={(id) => roomsById[id]?.name}
-                onDragStart={() => setRoomMenu(null)}
-                justDragged={roomDragged}
-                onMove={(id, before) => {
-                  moveRoom(id, before);
-                  sayRoom(id);
-                }}
-                row={(id, lineBefore) => {
-                  const r = roomsById[id]!;
-                  return (
-                    <SortRow
-                      key={id}
-                      id={id}
-                      type="room"
-                      lineBefore={lineBefore}
-                      on={view === "rooms" && activeRoom === id}
-                      name={r.name}
-                      title="Drag to reorder"
-                      describedBy={roomHint}
-                      more={`${r.name} options`}
-                      register={(el) => (el ? roomRows.current.set(id, el) : roomRows.current.delete(id))}
-                      onOpen={() => !roomDragged.current && void openRoom(id)}
-                      onNudge={(by) => nudgeRoomBy(id, by)}
-                      onMenu={(at, from) => setRoomMenu({ id, at, from })}
-                    >
-                      <RoomMarks room={r} />
-                    </SortRow>
-                  );
+          {view === "grids" && <GridsSection />}
+          <SideSection id="rooms" label="Rooms" newLabel="New room" onNew={onNewRoom} badge={roomsBadge}>
+            <span id={roomHint} className="sr-only">
+              Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
+            </span>
+            <SortList
+              label="Rooms"
+              type="room"
+              ids={rooms.map((r) => r.id)}
+              chip={(id) => roomsById[id]?.name}
+              toGrid={(id) => (roomsById[id] ? { content: roomContent(id), name: roomsById[id]!.name } : null)}
+              onDragStart={() => setRoomMenu(null)}
+              justDragged={roomDragged}
+              onMove={(id, before) => {
+                moveRoom(id, before);
+                sayRoom(id);
+              }}
+              row={(id, lineBefore) => {
+                const r = roomsById[id]!;
+                return (
+                  <InGridRow
+                    key={id}
+                    item={roomItem(id)}
+                    row={(mark, markId) => (
+                      <SortRow
+                        id={id}
+                        type="room"
+                        lineBefore={lineBefore}
+                        on={view === "rooms" && activeRoom === id}
+                        name={r.name}
+                        title={view === "grids" ? "Drag onto a pane, or to reorder" : "Drag to reorder"}
+                        describedBy={markId ? `${roomHint} ${markId}` : roomHint}
+                        more={`${r.name} options`}
+                        register={(el) => (el ? roomRows.current.set(id, el) : roomRows.current.delete(id))}
+                        onOpen={() => !roomDragged.current && openFromRow(roomContent(id), () => void openRoom(id))}
+                        onNudge={(by) => nudgeRoomBy(id, by)}
+                        onMenu={(at, from) => setRoomMenu({ id, at, from })}
+                      >
+                        {mark}
+                        <RoomMarks room={r} />
+                      </SortRow>
+                    )}
+                  />
+                );
+              }}
+            />
+            <span className="sr-only" aria-live="polite">
+              {roomSaid}
+            </span>
+            {roomMenu && roomsById[roomMenu.id] && (
+              <Menu
+                label={`${roomsById[roomMenu.id]!.name} options`}
+                at={roomMenu.at}
+                entries={[
+                  { kind: "item", label: "Open", onSelect: () => void openRoom(roomMenu.id) },
+                  putInGrid(roomContent(roomMenu.id)),
+                  { kind: "separator" },
+                  { kind: "item", label: "Details…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: false }) },
+                  { kind: "item", label: "Rename…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: true }) },
+                  { kind: "item", label: "Mark all read", onSelect: () => void markRoomRead(roomMenu.id).catch(useDesk.getState().fail) },
+                  {
+                    kind: "item",
+                    label: "Notifications",
+                    submenu: NOTIFY_LEVELS.map((l) => ({
+                      kind: "item" as const,
+                      label: `${levelOf({ kind: "room", room: roomMenu.id }) === l.id ? "✓ " : ""}${l.label}`,
+                      onSelect: () => setLevel({ kind: "room", room: roomMenu.id }, l.id),
+                    })),
+                  },
+                  { kind: "separator" },
+                  { kind: "item", label: "Delete room…", onSelect: () => setDeletingRoom(roomMenu.id) },
+                ]}
+                onClose={(refocus) => {
+                  if (refocus) roomMenu.from?.focus();
+                  setRoomMenu(null);
                 }}
               />
-              <span className="sr-only" aria-live="polite">
-                {roomSaid}
-              </span>
-              {roomMenu && roomsById[roomMenu.id] && (
-                <Menu
-                  label={`${roomsById[roomMenu.id]!.name} options`}
-                  at={roomMenu.at}
-                  entries={[
-                    { kind: "item", label: "Details…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: false }) },
-                    { kind: "item", label: "Rename…", onSelect: () => useUi.getState().setRoomDetails({ room: roomMenu.id, rename: true }) },
-                    { kind: "item", label: "Mark all read", onSelect: () => void markRoomRead(roomMenu.id).catch(useDesk.getState().fail) },
-                    {
-                      kind: "item",
-                      label: "Notifications",
-                      submenu: NOTIFY_LEVELS.map((l) => ({
-                        kind: "item" as const,
-                        label: `${levelOf({ kind: "room", room: roomMenu.id }) === l.id ? "✓ " : ""}${l.label}`,
-                        onSelect: () => setLevel({ kind: "room", room: roomMenu.id }, l.id),
-                      })),
-                    },
-                    { kind: "separator" },
-                    { kind: "item", label: "Delete room…", onSelect: () => setDeletingRoom(roomMenu.id) },
-                  ]}
-                  onClose={(refocus) => {
-                    if (refocus) roomMenu.from?.focus();
-                    setRoomMenu(null);
-                  }}
-                />
-              )}
-            </SideSection>
-          )}
+            )}
+          </SideSection>
           {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
           <BoardsSection />
           <SidebarGroups onNewSession={onNewSession} />
-          {view === "grids" && <p className="faint small side-hint">Drag a session or agent from here onto a pane. Hold ⇧ to drop it in the next free place.</p>}
+          {view === "grids" && (
+            <p className="faint small side-hint">Drag a room, board, session or agent from here onto a pane. Hold ⇧ to drop it in the next free place.</p>
+          )}
         </div>
         <span className="side-fade side-fade-top" aria-hidden="true" />
         <span className="side-fade side-fade-bottom" aria-hidden="true" />
