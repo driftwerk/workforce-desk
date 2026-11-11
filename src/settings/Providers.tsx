@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CopyDetails, ProblemNote } from "../ui/ProblemNote";
 import { useChat } from "../chat/store";
 import { brainOn, newAgentBrain } from "../crew/brain";
@@ -9,6 +9,7 @@ import { ConnectForm } from "../providers/ConnectForm";
 import { useProviderList, useProviders } from "../providers/store";
 import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
+import { accountsOf, freeName, useAccounts } from "../engines/accounts";
 
 const SECTIONS: { group: ProviderGroup; label: string }[] = [
   { group: "plan", label: "Your plans" },
@@ -29,6 +30,10 @@ export function Providers() {
   const set = useSettings((s) => s.set);
   const roster = useChat((s) => s.roster);
   const [choosing, setChoosing] = useState(false);
+  // The accounts a Claude sign-in here can go to (see ProviderRow).
+  useEffect(() => {
+    if (hub) void useAccounts.getState().load();
+  }, [hub]);
 
   const start = newAgentBrain(saved, providers);
   const startOn = providers.find((p) => p.id === start.provider);
@@ -101,7 +106,21 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const login = usePlanLogin(provider.connect.kind === "login" ? PLAN_OF[provider.id] : undefined, () => hub && void load(hub));
+  const plan = provider.connect.kind === "login" ? PLAN_OF[provider.id] : undefined;
+  // One Claude sign-in serves coding sessions too, as an account of
+  // Engines: on by default while there's no account yet.
+  const claudeAccounts = accountsOf(useAccounts((s) => s.accounts), "claude");
+  const keepsAccounts = useAccounts((s) => s.supported !== false && s.store !== null);
+  const [forSessions, setForSessions] = useState<boolean | null>(null);
+  const sessionsToo = plan === "claude" && keepsAccounts && (forSessions ?? claudeAccounts.length === 0);
+  const login = usePlanLogin(
+    plan,
+    (account) => {
+      if (hub) void load(hub);
+      if (account) void useAccounts.getState().load();
+    },
+    () => ({ agents: true, account: sessionsToo ? { name: freeName(claudeAccounts), makeDefault: claudeAccounts.length === 0 } : null }),
+  );
 
   const run = async (work: () => Promise<unknown>) => {
     setBusy(true);
@@ -225,6 +244,11 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
           {provider.connect.kind === "login" && <ReopenLink login={login} />}
           {provider.connect.kind === "login" && <CopyInstall login={login} />}
         </span>
+        )}
+        {plan === "claude" && keepsAccounts && (!provider.connected || fallback) && !login.busy && (
+          <label className="prov-also small">
+            <input type="checkbox" checked={sessionsToo} onChange={(e) => setForSessions(e.target.checked)} /> Use this for coding sessions too
+          </label>
         )}
       </span>
       {action}

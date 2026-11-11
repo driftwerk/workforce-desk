@@ -150,7 +150,7 @@ describe("on a machine whose Claude Code was never signed in", () => {
   it("says so plainly, and starts nothing, when none of its accounts can sign in", async () => {
     await onDevbox(false);
     expect(screen.getByRole("alert").textContent).toBe(
-      "Claude Code isn’t signed in on devbox, and none of its accounts there can sign in. Add an account again in Settings → Engines, then start the session.",
+      "Claude Code isn’t signed in on devbox, and none of its accounts there can sign in. Sign one in again in Settings → Engines, then start the session.",
     );
     const start = screen.getByRole("button", { name: /^Start/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
@@ -239,4 +239,53 @@ it("won't start in a folder the machine says isn't there, and puts the engine be
   // The engine, as chips, comes after the folder.
   const engines = screen.getByRole("radiogroup", { name: "Engine" });
   expect(folder.compareDocumentPosition(engines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+describe("with nothing to start a session on", () => {
+  const onDevboxWith = async (engines: EngineInfo[], over: Record<string, unknown> = {}) => {
+    const enginesNow = vi.fn(async () => engines);
+    withEngine("devbox", {
+      start: machineStart,
+      engines: vi.fn(async () => engines),
+      enginesNow,
+      accounts: vi.fn(async () => ({ accounts: [], store: "Desk's private file", signIns: [] })),
+      ...over,
+    } as unknown as DeskHub);
+    const n = fakeNative({ transport: vi.fn(() => foldersTransport({ home: "/home/dev", folders: [] }, [])) });
+    render(<NewSession onClose={() => {}} native={n.native} />);
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
+    await act(async () => {});
+    return { n, enginesNow };
+  };
+
+  it("never shows a blank engine row: says neither is installed, installs them in place, and Start waits", async () => {
+    const none = [
+      engine({ engine: "claude", title: "Claude Code", installed: false }),
+      engine({ engine: "codex", title: "Codex", installed: false }),
+    ];
+    const { n, enginesNow } = await onDevboxWith(none);
+    const fix = screen.getByRole("group", { name: "Nothing to start a session with" });
+    expect(fix.textContent).toContain("Neither Claude Code nor Codex is installed on devbox");
+    expect((screen.getByRole("button", { name: /^Start/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fireEvent.click(within(fix).getByRole("button", { name: "Install Claude Code" })));
+    expect(n.fake.retryEngines).toHaveBeenCalledWith("devbox");
+    enginesNow.mockResolvedValue([engine({ engine: "claude", title: "Claude Code", signIn: { state: "in", via: "plan", who: null, plan: "max" } }), engine({ engine: "codex", title: "Codex" })]);
+    await act(async () => n.emit({ machine: "devbox", step: "engines", state: "done" }));
+    await act(async () => {});
+    expect(screen.queryByRole("group", { name: "Nothing to start a session with" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "Claude Code" })).toBeTruthy();
+  });
+
+  it("says Claude Code there was never signed in, signs it in in place, and Start waits until it is", async () => {
+    const addAccount = vi.fn(async () => ({ kind: "signIn", signIn: { id: "si-1", engine: "claude", name: "Claude", state: "starting" } }));
+    await onDevboxWith([engine({ engine: "claude", title: "Claude Code", signIn: { state: "out" }, caps: { terminal: { accounts: "token", notes: [] } as never } })], {
+      addAccount,
+      cancelSignIn: vi.fn(async () => {}),
+    });
+    const fix = screen.getByRole("group", { name: "Claude Code isn’t signed in" });
+    expect(fix.textContent).toContain("a session would stop at its sign-in");
+    expect((screen.getByRole("button", { name: /^Start/ }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fireEvent.click(within(fix).getByRole("button", { name: "Sign in to Claude…" })));
+    expect(addAccount).toHaveBeenCalledWith({ engine: "claude", name: "Claude", makeDefault: true, remote: true });
+  });
 });
