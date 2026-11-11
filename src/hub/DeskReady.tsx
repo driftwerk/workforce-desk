@@ -148,6 +148,7 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
   const [stuck, setStuck] = useState<{ reason: string | null } | null>(null);
   const [tries, setTries] = useState(0);
   const last = useRef<HelperStatus | null>(null);
+  const reached = useRef<HelperStage | null>(null);
 
   useEffect(() => {
     if (connected || noLocal) {
@@ -155,7 +156,9 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
       setStage(null);
       setStatus(null);
       setStuck(null);
+      setTries(0);
       last.current = null;
+      reached.current = null;
       return;
     }
     let live = true;
@@ -165,24 +168,32 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
       last.current = s;
       setStatus(s);
     };
+    // Stuck only once a whole wait passes without the helper getting any
+    // further: a slow first start that is still moving is getting ready.
+    const waitFrom = (at: HelperStage | null) =>
+      later(START_WAIT_MS, () => {
+        if (reached.current !== at) return waitFrom(reached.current);
+        void helperLastReason()
+          .catch(() => null)
+          .then((reason) => live && setStuck({ reason }));
+      });
     const start = () => {
       setStuck(null);
       startHelper()
         .then((s) => {
           if (!live) return;
           settle(s);
-          if (!blocks(s))
-            later(START_WAIT_MS, () =>
-              void helperLastReason()
-                .catch(() => null)
-                .then((reason) => live && setStuck({ reason })),
-            );
+          if (!blocks(s)) waitFrom(reached.current);
         })
         .catch((e: unknown) => live && settle({ state: "failed", message: messageOf(e) }));
     };
     const readProgress = () =>
       void helperProgress()
-        .then((s) => live && setStage(s))
+        .then((s) => {
+          if (!live) return;
+          reached.current = s;
+          setStage(s);
+        })
         .catch(() => undefined);
     // Turned on in Login Items (seen when Desk comes forward, or on the next
     // look): started now, no reopening.

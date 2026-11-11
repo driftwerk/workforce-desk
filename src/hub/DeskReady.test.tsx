@@ -93,6 +93,25 @@ describe("Desk getting ready", () => {
   });
 });
 
+it("keeps getting ready while a slow first start is still moving", async () => {
+  const steps = ["starting", "database", "services", "connecting"] as const;
+  let at = 0;
+  platform.helperProgress.mockImplementation(async () => steps[Math.min(at, 3)]);
+  render(<Wired />);
+  await tick(FIRST_WAIT_MS + 100);
+  expect(platform.startHelper).toHaveBeenCalledTimes(1);
+  // A step further every wait: never "stopped".
+  for (const _ of [1, 2, 3]) {
+    at += 1;
+    await tick(START_WAIT_MS);
+    expect(screen.queryByText(/stopped and didn’t start again/)).toBeNull();
+  }
+  expect(screen.getByText("Getting Desk ready…")).toBeTruthy();
+  // Then nothing moves for a whole wait: now it says so.
+  await tick(START_WAIT_MS * 2);
+  expect(screen.getByText("Desk’s helper stopped and didn’t start again")).toBeTruthy();
+});
+
 describe("Desk's helper stops", () => {
   beforeEach(() => useDesk.setState({ connected: true, answered: true }));
 
