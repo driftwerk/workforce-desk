@@ -665,7 +665,8 @@ body.gsplitting-h * {
   .gpane-k-board .gpane-meta,
   .gpane-k-floor .gpane-meta {
     display: inline;
-    flex: 0 1 auto;
+    /* It gives way before the name does. */
+    flex: 0 100 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
