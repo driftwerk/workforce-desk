@@ -1243,6 +1243,9 @@ export interface BossView {
   /** Its group's budget, the furthest along: none for the main boss, and
    *  for a group with no budget of its own. */
   spend?: Standing | null;
+  /** True only while it is unbound in force: false once its budget is
+   *  spent; absent from older hubs. */
+  unbound?: boolean;
 }
 
 export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";

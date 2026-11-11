@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
 import type { OversightLevel } from "../hub/types";
+import { useFloor } from "../floor/store";
 import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
@@ -261,6 +262,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     manager?.agentId === agent.id ? manager.level : (manager?.bosses?.find((b) => b.agentId === agent.id)?.level ?? null);
   const missing = o ? fullMissing(o) : [];
   const unbound = o ? isUnbound(o) : false;
+  // What the hub says of it now: undefined while no boss view is at hand.
+  const live = useFloor((s) => s.hubs[agent.hubId]?.floor?.bosses?.find((b) => b.agent === agent.id));
+  const inForce = live ? live.unbound === true : undefined;
   const acts = o?.level === "act" || o?.level === "full";
   const takeOn = TAKE_ON(name);
   const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
@@ -737,18 +741,25 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   label="Change sessions’ permission mode"
                   sub={
                     unbound
-                      ? "Desk can switch a session it runs to auto or bypass, and it goes back to its own mode when unbound ends or you resume it"
+                      ? "Desk can switch a session it runs to auto or bypass. It goes back to its own mode, started again in place between turns, as soon as unbound ends, the session is released or handed to another boss, or you resume it"
                       : "Switch a running session between manual, accept edits and plan"
                   }
                   checked={o.act.setMode}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, setMode: v } }))}
                 />
               </div>
-              {unbound && (
+              {unbound && inForce !== false && (
                 <p className="small state-blocked" role="status">
+                  {inForce && <b>Unbound now. </b>}
                   No limits: Desk acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
                   activity log remain.
-                  {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}
+                  {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}{" "}
+                  It waits while you type into a session it runs, for {o.wake.holdMinutes} minutes after your last keystroke.
+                </p>
+              )}
+              {unbound && inForce === false && (
+                <p className="small state-blocked" role="status">
+                  Unbound is set, but not in force now (for example, today’s budget is spent): Desk acts within Act fully’s limits.
                 </p>
               )}
               <span className="oversee-sub">
