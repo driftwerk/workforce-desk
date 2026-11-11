@@ -17,6 +17,9 @@ export const COLUMNS: readonly { state: Exclude<TicketState, "dropped">; title: 
   { state: "done", title: "Done" },
 ];
 
+/** What a board's menu can do, each with a dialog of its own. */
+export type BoardAction = "rename" | "delete" | "link" | "unlink";
+
 export const STATE_TITLE: Record<TicketState, string> = {
   backlog: "Backlog",
   todo: "To do",

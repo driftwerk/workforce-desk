@@ -43,6 +43,7 @@ import { Board } from "../board/BoardView";
 import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
+import { BOARD_CHROME } from "../board/chrome";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
@@ -392,7 +393,7 @@ export function App() {
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (
-                  <Board />
+                  <Board chrome={BOARD_CHROME} />
                 ) : (
                   <Rooms />
                 )}
