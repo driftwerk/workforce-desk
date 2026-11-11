@@ -24,6 +24,7 @@ import { needsLine, paragraphOf, refreshed, type Held } from "./summary";
 import { besideOf } from "./target";
 import { clock } from "./time";
 import { ImageBudget } from "../shell/RemoteImage";
+import { BrowserPill } from "../browser/BrowserPill";
 
 /** The clock the floor's times are said against, moving every minute. */
 export const useMinute = (): number => {
@@ -201,6 +202,7 @@ export function BriefCard({
           <span className="faint small">overseeing your crew · updated {clock(brief.at)}</span>
           {unread && <span className="chip msg-delivery brief-new">New</span>}
         </span>
+        <BrowserPill agent={managerId} place="card" />
         <div className="brief-text rich">
           <ImageBudget>
             <RichMarkdown text={brief.text} />

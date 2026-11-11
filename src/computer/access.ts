@@ -185,4 +185,5 @@ export const KINDS: { id: string; label: string; kinds: string[] }[] = [
   { id: "files", label: "Files", kinds: ["read", "write", "delete"] },
   { id: "commands", label: "Commands", kinds: ["exec", "session"] },
   { id: "connectors", label: "Connectors", kinds: ["connector"] },
+  { id: "browser", label: "Browser", kinds: ["browser"] },
 ];
