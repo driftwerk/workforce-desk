@@ -91,3 +91,21 @@ it("shows no choice for a provider with one way", () => {
   expect(screen.queryByRole("radiogroup")).toBeNull();
   expect(screen.getByLabelText("Access key ID")).toBeTruthy();
 });
+
+it("checks the keys before Connected, and gives the provider's reason in place when they're refused", async () => {
+  let refuse: (e: Error) => void = () => {};
+  const connect = vi.fn(() => new Promise<Provider>((_, reject) => (refuse = reject)));
+  act(() => useProviders.setState({ connect } as never));
+  const connected = vi.fn();
+  render(<ConnectForm provider={bedrock} submitLabel="Connect" onConnected={connected} />);
+  fireEvent.change(screen.getByLabelText("Access key ID"), { target: { value: "AKIA" } });
+  fireEvent.change(screen.getByLabelText("Secret access key"), { target: { value: "wrong" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+  expect(await screen.findByRole("button", { name: "Checking…" })).toBeTruthy();
+  await act(async () =>
+    refuse(new Error("AWS didn't accept those keys. Check the access key ID and the secret access key were both copied whole.")),
+  );
+  expect(screen.getByRole("alert").textContent).toMatch(/^AWS didn't accept those keys/);
+  expect(connected).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
+});

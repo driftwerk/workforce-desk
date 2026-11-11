@@ -175,7 +175,7 @@ function FieldsConnect({
           </button>
         )}
         <button type="submit" className="btn btn-signal" disabled={busy || !ready}>
-          {busy ? (probe ? "Looking…" : "Connecting…") : submitLabel}
+          {busy ? (probe ? "Looking…" : "Checking…") : submitLabel}
         </button>
         {note && <span className="small faint">{note}</span>}
       </div>

@@ -544,6 +544,11 @@ export class DeskHub {
   /** Vault paths (never values) on this hub. */
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;
   saveVault = (path: string, value: string): Promise<void> => this.call("POST", `/api/vault/${path}`, { value });
+  /** Tries a voice key (`fish_audio`, `elevenlabs`, `openai`, `soniox`,
+   *  `gemini`) with the smallest call its provider takes, and keeps it only
+   *  if the provider takes it; a refusal says why in the person's words. */
+  saveVoiceKey = (provider: string, key: string): Promise<void> =>
+    this.call("POST", `/api/desk/voice/keys/${encodeURIComponent(provider)}`, { key });
 
   /** The local agents themselves, created and configured on the person's behalf. */
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
+import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { plainError } from "../ui/plainError";
 import { AddVoiceById } from "./AddVoiceById";
 import { addCustomVoice, removeCustomVoice, useSettings } from "./store";
 import {
   describeVoice,
+  keyName,
   providerById,
   sampleLine,
   tryVoice,
@@ -16,6 +19,14 @@ import {
 
 const LIVE = new Set(["gpt-live", "gemini-live"]);
 
+/** Where the Gemini key agents think with also talks: Gemini Live uses it
+ *  when Voices has none of its own. */
+const GEMINI_KEY = "speech/gemini/api_key";
+
+/** Why a key wasn't kept, as the person reads it: the provider's reason the
+ *  hub put in words, never a status code. */
+const keyRefusal = (e: unknown): string => (e instanceof HubError && e.status === 400 ? e.message : plainError(e));
+
 /** Every voice provider: its key, recommended models and voices to try and
  *  use. Agents use the default voice unless they have their own. */
 export function Voices() {
@@ -23,11 +34,20 @@ export function Voices() {
   const { defaultVoice, customVoices, set } = useSettings();
   const [selected, setSelected] = useState(defaultVoice.provider);
   const [have, setHave] = useState<string[]>([]);
+  const [geminiProvider, setGeminiProvider] = useState(false);
   const provider = providerById(selected) ?? VOICE_PROVIDERS[0]!;
 
   useEffect(() => {
     hub?.vaultPaths().then(setHave).catch(fail);
+    hub
+      ?.providers()
+      .then((ps) => setGeminiProvider(ps.some((p) => p.id === "gemini" && p.connected)))
+      .catch(() => setGeminiProvider(false));
   }, [hub, fail]);
+  /** Where a provider's key comes from: Voices' own, the Gemini provider's,
+   *  or none yet. */
+  const keyOf = (p: VoiceProvider): KeyFrom =>
+    !p.keyPath ? "none-needed" : have.includes(p.keyPath) ? "own" : p.keyPath === GEMINI_KEY && geminiProvider ? "provider" : null;
 
   return (
     <div className="voices">
@@ -45,8 +65,8 @@ export function Voices() {
                 ? "default"
                 : !p.keyPath
                   ? "this computer"
-                  : have.includes(p.keyPath)
-                    ? "key saved"
+                  : keyOf(p)
+                    ? "connected"
                     : ""}
             </span>
           </button>
@@ -55,7 +75,7 @@ export function Voices() {
       <ProviderDetail
         key={provider.id}
         provider={provider}
-        hasKey={!provider.keyPath || have.includes(provider.keyPath)}
+        keyFrom={keyOf(provider)}
         onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
         isLive={LIVE.has(provider.id)}
         defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
@@ -66,9 +86,12 @@ export function Voices() {
   );
 }
 
+/** Where a voice provider's key comes from. */
+type KeyFrom = "own" | "provider" | "none-needed" | null;
+
 function ProviderDetail({
   provider,
-  hasKey,
+  keyFrom,
   onKeySaved,
   isLive,
   defaultVoiceLabel,
@@ -76,17 +99,19 @@ function ProviderDetail({
   currentDefault,
 }: {
   provider: VoiceProvider;
-  hasKey: boolean;
+  keyFrom: KeyFrom;
   onKeySaved: () => void;
   isLive: boolean;
   defaultVoiceLabel: string;
   onUse: (voice: string, model: string | undefined) => void;
   currentDefault: string | undefined;
 }) {
-  const { hub, fail } = useDesk();
+  const hub = useDesk((s) => s.hub);
   const [voices, setVoices] = useState<VoiceChoice[]>([]);
   const [model, setModel] = useState(provider.models[0]?.id);
   const [key, setKey] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [keyProblem, setKeyProblem] = useState<string | null>(null);
   const [trying, setTrying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -99,14 +124,19 @@ function ProviderDetail({
       .catch((e: unknown) => setProblem(String(e)));
   }, [provider]);
 
+  // Tried by the provider before it's kept: "connected" means it answered.
   const saveKey = async () => {
     if (!hub || !provider.keyPath || !key.trim()) return;
+    setChecking(true);
+    setKeyProblem(null);
     try {
-      await hub.saveVault(provider.keyPath, key.trim());
+      await hub.saveVoiceKey(keyName(provider.keyPath), key.trim());
       setKey("");
       onKeySaved();
     } catch (e) {
-      fail(e);
+      setKeyProblem(keyRefusal(e));
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -124,19 +154,31 @@ function ProviderDetail({
 
       {provider.keyPath && (
         <div className="field">
-          <span>API key {hasKey && <span className="state-done">· saved</span>}</span>
+          <span>
+            API key {keyFrom === "own" && <span className="state-done">· connected</span>}
+            {keyFrom === "provider" && <span className="state-done">· connected with your Gemini key from Providers</span>}
+          </span>
           <span className="field-row">
             <input
               type="password"
               value={key}
               autoComplete="off"
-              placeholder={hasKey ? "Replace the saved key" : "Paste your key"}
-              onChange={(e) => setKey(e.target.value)}
+              aria-label={`${provider.name} API key`}
+              placeholder={keyFrom === "own" ? "Replace the key" : keyFrom === "provider" ? "Or paste another key" : "Paste your key"}
+              onChange={(e) => {
+                setKey(e.target.value);
+                setKeyProblem(null);
+              }}
             />
-            <button type="button" className="btn btn-signal" disabled={!key.trim()} onClick={() => void saveKey()}>
-              Save
+            <button type="button" className="btn btn-signal" disabled={!key.trim() || checking} onClick={() => void saveKey()}>
+              {checking ? "Checking…" : "Save"}
             </button>
           </span>
+          {keyProblem && (
+            <span className="small state-blocked" role="alert">
+              {keyProblem}
+            </span>
+          )}
         </div>
       )}
 
