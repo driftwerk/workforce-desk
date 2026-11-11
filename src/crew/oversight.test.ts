@@ -169,7 +169,7 @@ wake = { waiting_minutes = 2.5 }
         nudge: true,
         resume_restart: true,
         read_only_approvals: false,
-        hand_out_work: false,
+        hand_out_work: true,
         interrupt: false,
         message_agents: false,
         message_terminal_sessions: false,

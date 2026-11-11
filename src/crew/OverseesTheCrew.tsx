@@ -43,7 +43,7 @@ const TAKE_ON = (name: string): { id: TakeOn; name: string; desc: string }[] => 
 const LEVELS: { id: OversightLevel; name: string; desc: string }[] = [
   { id: "watch", name: "Watch", desc: "Answers “what’s everyone doing?” and tells you when something needs you." },
   { id: "suggest", name: "Suggest", desc: "Also proposes what to do. Nothing happens until you say yes." },
-  { id: "act", name: "Act", desc: "Handles the routine itself, within the rules below, and tells you what it did." },
+  { id: "act", name: "Act", desc: "Does the work itself, within the switches below: starts and runs sessions, nudges, answers, and tells you what it did. What a switch keeps off comes to you to say yes to." },
   { id: "full", name: "Act fully", desc: "Merges, tags, releases and runs your named workflows in the repos you name, under a daily budget." },
 ];
 
@@ -496,7 +496,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 ? `At Watch, ${name} runs no sessions. Set it to Suggest or Act to hand it work.`
                 : o.level === "suggest"
                   ? `At Suggest, each session ${name} would start or answer for comes to you to say yes to first.`
-                  : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving for ${o.wake.holdMinutes === 1 ? "a minute" : `${o.wake.holdMinutes} minutes`} after your last keystroke.`}
+                  : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving for ${o.wake.holdMinutes === 1 ? "a minute" : `${o.wake.holdMinutes} minutes`} after your last keystroke.${o.act.handOutWork ? "" : " With “Hand out work” off, each session it would start comes to you to say yes to first."}`}
             </span>
             <div className="oversee-card">
               <Check
@@ -703,7 +703,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Hand out work"
-                  sub="Start sessions for the crew"
+                  sub="Start sessions and hand tickets to them without asking. Off, each session it would start comes to you to say yes to"
                   checked={o.act.handOutWork}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOutWork: v } }))}
                 />
