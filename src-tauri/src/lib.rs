@@ -1,6 +1,7 @@
 mod attachments;
 mod badge;
 mod broker;
+mod chrome;
 #[cfg(test)]
 mod commands;
 mod drops;
@@ -20,6 +21,7 @@ mod navigation;
 mod pair_gate;
 mod paired;
 mod remote_images;
+mod repos;
 mod reread;
 mod state;
 mod support;
@@ -193,6 +195,15 @@ fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
         return Err("Desk hasn't written its log on this computer yet.".into());
     }
     tauri_plugin_opener::reveal_item_in_dir(&log).map_err(text)
+}
+
+/// Opens the person's Chrome, or brings it forward, for "Connect my
+/// Chrome" (see `chrome.rs`).
+#[tauri::command]
+async fn open_chrome() -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(chrome::open)
+        .await
+        .map_err(text)?
 }
 
 #[tauri::command]
@@ -687,6 +698,19 @@ async fn machine_home(
         .map_err(text)?
 }
 
+/// The repositories of the folders Desk's sessions run in, with their
+/// remotes and workflows: what Act fully's setup suggests.
+#[tauri::command]
+async fn repo_facts(
+    app: State<'_, App>,
+    folders: Vec<String>,
+) -> CommandResult<Vec<repos::RepoFacts>> {
+    let backend = app.backend()?;
+    tauri::async_runtime::spawn_blocking(move || repos::repo_facts(&backend.host, &folders))
+        .await
+        .map_err(text)
+}
+
 /// What's running in a terminal whose shell is `pid`, shell first.
 #[tauri::command]
 async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<String>> {
@@ -1067,6 +1091,7 @@ pub fn run() {
             machine_setup::machine_uninstall,
             machine_setup::machine_cancel_uninstall,
             machine_reveal_log,
+            open_chrome,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,
@@ -1119,6 +1144,7 @@ pub fn run() {
             backend_home,
             pick_folder,
             programs_under,
+            repo_facts,
             grid_window_open,
             grid_window_close,
             grid_windows_open,
