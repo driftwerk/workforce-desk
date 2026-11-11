@@ -27,6 +27,13 @@ const MainHiddenContext = createContext(false);
  *  holds stays mounted, but shouldn't answer keys. */
 export const useMainHidden = (): boolean => useContext(MainHiddenContext);
 
+/** What's under it is out of sight while `hidden`, though still mounted (a
+ *  grid's pane while another fills the grid): nothing in it is read. */
+export function OutOfSight({ hidden, children }: { hidden: boolean; children: ReactNode }) {
+  const already = useContext(MainHiddenContext);
+  return <MainHiddenContext.Provider value={already || hidden}>{children}</MainHiddenContext.Provider>;
+}
+
 /** Whether the column this is in is docked as a tab: still mounted, out
  *  of sight. */
 export const useStowed = (): boolean => useContext(SlotContext)?.docked ?? false;

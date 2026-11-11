@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { linkedTo, SYSTEM_TITLE, syncStatus } from "../hub/boardSync";
@@ -123,6 +123,8 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
 export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Ticket[] }) {
   const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState<string | null>(null);
+  // Its own, as a grid can show more than one board.
+  const titleId = useId();
   if (!tickets.length) return null;
   const system = board.sync ? SYSTEM_TITLE[board.sync.system] : "the remote";
   const decide = async (t: Ticket, keep: boolean) => {
@@ -138,9 +140,9 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
     }
   };
   return (
-    <section className="board-left" aria-labelledby="board-left-title">
+    <section className="board-left" aria-labelledby={titleId}>
       <div className="board-left-head">
-        <h2 id="board-left-title" className="ov-label muted">
+        <h2 id={titleId} className="ov-label muted">
           Left the filter · {tickets.length}
         </h2>
         <span className="move-opt-sub">These issues no longer match what the board imports. Keep one here, unsynced, or drop it; {system} is never changed.</span>

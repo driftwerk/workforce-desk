@@ -17,13 +17,13 @@ const copy = (text: string, what: string) =>
 
 /** Does action `id` on room message `m`, shown in `thread` (null: the main
  *  timeline). `markUnread` is the timeline's own. */
-export function runAction(id: ActionId, room: Room, m: RoomMessage, ctx: { thread: string | null; name: string; markUnread: () => void }): void {
+export function runAction(id: ActionId, room: Room, m: RoomMessage, ctx: { thread: string | null; name: string; markUnread: () => void; openThread?: (room: string, thread: string) => void }): void {
   const fail = (e: unknown) => useDesk.getState().fail(e);
   const member = memberOf(m.author);
   switch (id) {
     case "thread":
       if (m.copyOf) return openTarget({ kind: "room", roomId: room.id, threadId: null, messageId: m.copyOf });
-      return useUi.getState().setRoomThread(room.id, m.id);
+      return ctx.openThread ? ctx.openThread(room.id, m.id) : useUi.getState().setRoomThread(room.id, m.id);
     case "copyText":
       return copy(m.content, "text");
     case "copyLink":

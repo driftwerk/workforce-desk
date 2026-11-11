@@ -20,6 +20,7 @@ import { useEmojiInput } from "../emoji/useEmojiInput";
 import { SidePanel } from "../panels/Stage";
 import { useFocusRequest } from "../shell/focus";
 import { inRoom } from "../unread/badges";
+import { useInPane } from "./inPane";
 
 /** Files dropped anywhere on a room or thread go with its next message. */
 type Files = ReturnType<typeof usePendingFiles>;
@@ -265,61 +266,72 @@ export function RoomView({ room }: { room: Room }) {
   }, [room.id, thread, connected, openThread]);
 
   const author = useAuthor();
+  // In a grid's pane, under the pane's own header: the timeline and the
+  // composer alone.
+  const inPane = useInPane();
+  const Root = inPane ? "div" : "main";
 
   return (
-    <main className="room drop-target" aria-label={`Room ${room.name}`} {...drop.handlers} onKeyDown={(e) => shiftEscape(e, room.id, null)}>
-      <header className="room-head">
-        <span className="room-title">
-          <span className="room-title-row">
-            <h1 className="display-lg">
-              <button
-                type="button"
-                className="room-name-btn"
-                title="Room details"
-                onClick={() => useUi.getState().setRoomDetails({ room: room.id, rename: false })}
-              >
-                {room.name}
-              </button>
-            </h1>
-            <span className="member-stack">
-              {room.members.map((m) => (
-                <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
-              ))}
+    <Root
+      className={`room ${inPane ? "room-in-pane" : ""} drop-target`}
+      aria-label={`Room ${room.name}`}
+      {...drop.handlers}
+      onKeyDown={(e) => shiftEscape(e, room.id, null)}
+    >
+      {!inPane && (
+        <header className="room-head">
+          <span className="room-title">
+            <span className="room-title-row">
+              <h1 className="display-lg">
+                <button
+                  type="button"
+                  className="room-name-btn"
+                  title="Room details"
+                  onClick={() => useUi.getState().setRoomDetails({ room: room.id, rename: false })}
+                >
+                  {room.name}
+                </button>
+              </h1>
+              <span className="member-stack">
+                {room.members.map((m) => (
+                  <AgentMark key={memberKey(m)} agent={memberKey(m)} name={author(memberKey(m)).name} size="sm" />
+                ))}
+              </span>
+            </span>
+            <span className="faint small">
+              {room.members.map((m) => `@${author(memberKey(m)).name}`).join(" ") || "No members yet"}
+              {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
             </span>
           </span>
-          <span className="faint small">
-            {room.members.map((m) => `@${author(memberKey(m)).name}`).join(" ") || "No members yet"}
-            {room.defaultMember ? ` · unaddressed messages go to @${author(room.defaultMember).name}` : ""}
-          </span>
-        </span>
-        <span className="room-head-actions">
-          {liveCount >= 2 && (
-            <button type="button" className="btn btn-ghost" onClick={() => stopAll(room.id)}>
-              Stop all ({liveCount})
+          <span className="room-head-actions">
+            {liveCount >= 2 && (
+              <button type="button" className="btn btn-ghost" onClick={() => stopAll(room.id)}>
+                Stop all ({liveCount})
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-btn-sm"
+              aria-label="Search this room"
+              title="Search this room"
+              onClick={() => useUi.getState().setSearch(`in:#${room.slug} `)}
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5" />
+                <path d="M10.5 10.5L14 14" />
+              </svg>
             </button>
-          )}
-          <button
-            type="button"
-            className="icon-btn-sm"
-            aria-label="Search this room"
-            title="Search this room"
-            onClick={() => useUi.getState().setSearch(`in:#${room.slug} `)}
-          >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.5" />
-              <path d="M10.5 10.5L14 14" />
-            </svg>
-          </button>
-        </span>
-      </header>
+          </span>
+        </header>
+      )}
       <Timeline room={room} thread={null} />
       <Composer
         room={room}
         threadId={null}
-        placeholder={`Message ${room.name} — @ someone to ask them, or to bring them in`}
+        placeholder={inPane ? `Message ${room.name}` : `Message ${room.name} — @ someone to ask them, or to bring them in`}
         files={files}
       />
       {drop.dragging && <DropOverlay to={room.name} />}
-    </main>
+    </Root>
   );
 }

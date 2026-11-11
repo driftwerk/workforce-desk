@@ -3,10 +3,11 @@
 // header's count stays the total; each need is shown once, in its section.
 
 import { sectionDomId, sectionName, type Section } from "./sections";
+import { useFloorIds } from "./scope";
 
 /** Takes the Floor to a section and its first need. */
-const jumpTo = (id: string) => {
-  const el = document.getElementById(sectionDomId(id));
+const jumpTo = (prefix: string, id: string) => {
+  const el = document.getElementById(prefix + sectionDomId(id));
   if (!el) return;
   const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   el.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
@@ -15,6 +16,7 @@ const jumpTo = (id: string) => {
 
 export function NeedsJump({ sections }: { sections: readonly Section[] }) {
   const needing = sections.filter((s) => s.needs.length > 0);
+  const prefix = useFloorIds();
   if (needing.length === 0) return null;
   return (
     <nav className="needs-jump" aria-label="Needs you, by group">
@@ -22,7 +24,7 @@ export function NeedsJump({ sections }: { sections: readonly Section[] }) {
       {needing.map((s) => {
         const name = sectionName(s);
         return (
-          <button key={s.id} type="button" className="needs-jump-to" aria-label={`${name}: ${s.needs.length} need${s.needs.length === 1 ? "s" : ""} you`} onClick={() => jumpTo(s.id)}>
+          <button key={s.id} type="button" className="needs-jump-to" aria-label={`${name}: ${s.needs.length} need${s.needs.length === 1 ? "s" : ""} you`} onClick={() => jumpTo(prefix, s.id)}>
             {name} <b>{s.needs.length}</b>
           </button>
         );

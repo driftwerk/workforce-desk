@@ -82,3 +82,25 @@ describe("where an item is shown", () => {
     expect(shownAt(useGrids.getState(), sessions, "session:s1")).toMatchObject({ gridId: MAIN_GRID, content: sess("s1") });
   });
 });
+
+describe("a room, a board or the Floor, as a sidebar item", () => {
+  it("is named by its kind and id, and found in every grid it is in", () => {
+    const room: PaneContent = { kind: "room", room: "r1" };
+    expect(itemOf({}, room)).toBe("room:r1");
+    expect(itemOf({}, { kind: "board", board: "b1" })).toBe("board:b1");
+    expect(itemOf({}, { kind: "floor" })).toBe("floor:");
+    expect(itemOf({}, { kind: "floor", group: "g1" })).toBe("floor:g1");
+    expect(itemOf({}, { kind: "chart" } as unknown as PaneContent)).toBeNull();
+
+    deliver(MAIN_GRID, room);
+    const other = createGrid();
+    layOut(other, "halves");
+    deliver(other, room);
+    deliver(other, { kind: "floor", group: "g1" });
+    expect(placesOf(useGrids.getState(), {}, "room:r1").map((p) => p.gridId)).toEqual([MAIN_GRID, other]);
+    expect(placesOf(useGrids.getState(), {}, "floor:g1").map((p) => p.gridId)).toEqual([other]);
+    // The Floor of everything isn't one group's.
+    expect(placesOf(useGrids.getState(), {}, "floor:")).toEqual([]);
+    expect(shownAt(useGrids.getState(), {}, "room:r1")?.gridId).toBe(other);
+  });
+});
