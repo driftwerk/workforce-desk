@@ -32,7 +32,7 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
-import { BoardChips, BoardPaneBody, FloorMeta, FloorPaneBody, KindIcon, RoomPaneBody, RoomPaneMarks, setPaneFilter, usePaneFilter, useViewLabel, type ViewLabel } from "./kinds";
+import { BoardChips, BoardPaneBody, FloorMeta, FloorPaneBody, FloorPaneScope, KindIcon, RoomPaneBody, RoomPaneMarks, setPaneFilter, usePaneFilter, useViewLabel, type ViewLabel } from "./kinds";
 import { FILTERS } from "../board/board";
 import { findContent, knownContent, parkedOrder, sessionContent, sessionKeyIn, STEPS, terminalContent, terminalKeyIn, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
@@ -317,7 +317,7 @@ export function GridPane({
   const box = useRef<HTMLElement | null>(null);
   const hidden = useOutOfSight();
   useSeenSession(pane.content?.kind === "terminal" ? label.tracked?.id : null, box, { enabled: !hidden && fill !== "hidden" });
-  return (
+  const shown = (
     <section
       ref={box}
       className={`gpane ${pane.content ? `gpane-k-${pane.content.kind}` : ""} ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
@@ -346,7 +346,7 @@ export function GridPane({
               {label.meta}
             </span>
           )}
-          {pane.content?.kind === "floor" && !label.view?.gone && <FloorMeta group={pane.content.group ?? null} id={`${said}-meta`} />}
+          {pane.content?.kind === "floor" && !label.view?.gone && <FloorMeta id={`${said}-meta`} />}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
           {pane.content?.kind === "session" && <SessionTicketChip session={pane.content.sessionId} className="gpane-ticket" />}
           <ChargeBadge charge={charge} className="gpane-badge" />
@@ -440,6 +440,8 @@ export function GridPane({
       {dialog}
     </section>
   );
+  // A Floor pane reads the Floor once, for its header and its body.
+  return pane.content?.kind === "floor" ? <FloorPaneScope group={pane.content.group ?? null}>{shown}</FloorPaneScope> : shown;
 }
 
 /** A pane being dragged: its name, following the pointer. */

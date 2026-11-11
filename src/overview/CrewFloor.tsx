@@ -151,16 +151,30 @@ export function useCrewFloor(overview: Overview) {
   return { all, groups, sections, sectioned, counts, onFloor };
 }
 
+/** What `useCrewFloor` worked out: read once for a Floor's header and its
+ *  column. */
+export type CrewFloorRead = ReturnType<typeof useCrewFloor>;
+
 /** The Floor's main column: what needs you and what's happening, the plans,
  *  Spend and Today, then the sections and Desk's own groups of tiles. The
  *  Floor view's, and a grid pane's (`scrollKey` null: its own scroll, not
  *  the Floor's kept one; one group's under `FloorScope`). */
-export function FloorColumn({ overview, scrollKey = "floor", className = "crew-floor-main" }: { overview: Overview; scrollKey?: string | null; className?: string }) {
+export function FloorColumn({
+  overview,
+  read,
+  scrollKey = "floor",
+  className = "crew-floor-main",
+}: {
+  overview: Overview;
+  read: CrewFloorRead;
+  scrollKey?: string | null;
+  className?: string;
+}) {
   const manager = useOverview((s) => s.manager);
   const managerAgent = useLocalAgent(manager?.agentId);
   const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
   const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
-  const { groups, sections, sectioned, onFloor } = useCrewFloor(overview);
+  const { groups, sections, sectioned, onFloor } = read;
   const now = useMinute();
   const scroller = useSavedScroll<HTMLDivElement>(scrollKey);
   const scope = useFloorScope();
@@ -218,7 +232,8 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const manager = useOverview((s) => s.manager);
   const managerAgent = useLocalAgent(manager?.agentId);
   const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
-  const { sections, counts } = useCrewFloor(overview);
+  const read = useCrewFloor(overview);
+  const { sections, counts } = read;
   const activityOpen = useUi((s) => s.activityOpen);
   const tab = useRef<HTMLButtonElement>(null);
   const railClose = useRef<HTMLButtonElement>(null);
@@ -254,7 +269,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
         </button>
       </header>
       <div className="crew-floor-body">
-        <FloorColumn overview={overview} />
+        <FloorColumn overview={overview} read={read} />
         {activitySupport !== "no" &&
           (activityOpen ? (
             <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={() => showActivity(false)} />

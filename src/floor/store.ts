@@ -297,6 +297,9 @@ const unheard = (): string[] => {
   });
 };
 
+/** Reads the floor now, of the hubs whose links don't keep it. */
+export const tickFloor = (): void => ask(unheard());
+
 /** Reads the floor every minute while `on`, of the hubs whose links don't
  *  keep it. */
 export const useFloorTick = (on: boolean): void => {

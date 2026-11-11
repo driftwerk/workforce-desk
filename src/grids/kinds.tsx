@@ -3,19 +3,21 @@
 // board with its filters and drag, the Floor's main column), shown under the
 // pane's own header, which says what it is.
 
-import { useEffect, useId, useMemo } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, type ReactNode } from "react";
 import { create } from "zustand";
-import { Board } from "../board/BoardView";
+import { Board, NARROW_PX } from "../board/BoardView";
 import { FILTERS, type BoardFilter } from "../board/board";
 import { useBoard } from "../board/store";
 import { hubNameOf, useSyncHubs } from "../board/syncStore";
 import { useChat } from "../chat/store";
 import { useFloorReads } from "../floor/Floor";
 import { FloorIds, FloorScope } from "../floor/scope";
-import { useLayout } from "../groups/store";
+import { layoutSettled, useLayout } from "../groups/store";
+import { useHubLayout } from "../groups/hubLayout";
+import { useSettings } from "../settings/store";
 import { SYSTEM_TITLE, syncStatus } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
-import { useCrewFloor, FloorColumn } from "../overview/CrewFloor";
+import { useCrewFloor, FloorColumn, type CrewFloorRead } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
 import { RoomPaneContext, type RoomPane } from "../rooms/inPane";
 import { useAuthor } from "../rooms/names";
@@ -31,7 +33,7 @@ export type ViewKind = "room" | "board" | "floor";
 /** Below this width (px) a board's pane shows a column at a time, and the
  *  Floor's plan meters fold to a line each (grids.css, kept in step by
  *  kinds.test.tsx). */
-export const NARROW_PANE = 520;
+export const NARROW_PANE = NARROW_PX;
 /** Below this height (px) a board's pane shows its counts, and the Floor's
  *  how many are working, need you and are done. */
 export const SHORT_PANE = 240;
@@ -93,6 +95,7 @@ export function useViewLabel(content: PaneContent | null): ViewLabel | null {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
   const groups = useLayout().groups;
+  const settled = useLayoutSettled();
   if (content?.kind === "room") {
     if (!room) return { kind: "room", name: "Room", meta: roomsLoaded ? "no longer on the hub" : "", gone: roomsLoaded };
     const members = room.members.map((m) => author(memberKey(m)).name);
@@ -112,10 +115,21 @@ export function useViewLabel(content: PaneContent | null): ViewLabel | null {
     if (!content.group) return { kind: "floor", name: "Floor", meta: "", gone: false };
     const g = groups.find((x) => x.id === content.group);
     // Joined so a name cut short in a narrow header keeps its space.
-    return g ? { kind: "floor", name: `Floor ›\u00a0${g.name}`, meta: "", gone: false } : { kind: "floor", name: "Floor ›\u00a0a removed group", meta: "", gone: true };
+    if (g) return { kind: "floor", name: `Floor ›\u00a0${g.name}`, meta: "", gone: false };
+    // The groups not read yet: no "removed group" for a moment.
+    return settled ? { kind: "floor", name: "Floor ›\u00a0a removed group", meta: "", gone: true } : { kind: "floor", name: "Floor", meta: "", gone: false };
   }
   return null;
 }
+
+/** Whether the sidebar's groups are known for sure (see `layoutSettled`):
+ *  until then a group's Floor isn't said to be of a removed group. */
+const useLayoutSettled = (): boolean => {
+  useHubLayout((s) => s.kept);
+  useHubLayout((s) => s.layout);
+  useSettings((s) => s.loaded);
+  return layoutSettled();
+};
 
 // ── Each kind's header extras ──────────────────────────────────────────────
 
@@ -127,6 +141,15 @@ const filterKey = (gridId: string, paneId: string) => `${gridId}/${paneId}`;
 
 export const setPaneFilter = (gridId: string, paneId: string, f: BoardFilter): void =>
   usePaneFilters.setState({ [filterKey(gridId, paneId)]: f });
+
+/** A pane's filter is forgotten: it closed, or shows another board. */
+export const clearPaneFilter = (gridId: string, paneId: string): void =>
+  usePaneFilters.setState((s) => {
+    const key = filterKey(gridId, paneId);
+    if (!(key in s)) return s;
+    const { [key]: _gone, ...rest } = s;
+    return rest;
+  }, true);
 
 export const usePaneFilter = (gridId: string, paneId: string): BoardFilter => usePaneFilters((s) => s[filterKey(gridId, paneId)] ?? "all");
 
@@ -149,19 +172,32 @@ export function RoomPaneMarks({ room }: { room: string }) {
   return <Marks badge={useRoomMarker(room)} />;
 }
 
-/** "3 working · 1 needs you · 4 done today", of the Floor a pane shows. */
-export function FloorMeta({ group, id }: { group: string | null; id?: string }) {
+/** What a Floor pane reads, once for its header, its column and its short
+ *  counts (none until the overview is read). */
+const FloorRead = createContext<CrewFloorRead | null>(null);
+
+/** Around a Floor pane, header and all: its group's scope, the Floor's
+ *  reads (one for every Floor shown; see `useFloorReads`), and what it
+ *  shows, worked out once. */
+export function FloorPaneScope({ group, children }: { group: string | null; children: ReactNode }) {
+  useFloorReads();
   const overview = useOverview((s) => s.overview);
-  if (!overview) return null;
   return (
     <FloorScope.Provider value={group}>
-      <FloorCountsLine overview={overview} id={id} />
+      {overview ? <ReadFloor overview={overview}>{children}</ReadFloor> : children}
     </FloorScope.Provider>
   );
 }
 
-function FloorCountsLine({ overview, id }: { overview: Overview; id?: string }) {
-  const { counts } = useCrewFloor(overview);
+function ReadFloor({ overview, children }: { overview: Overview; children: ReactNode }) {
+  return <FloorRead.Provider value={useCrewFloor(overview)}>{children}</FloorRead.Provider>;
+}
+
+/** "3 working · 1 needs you · 4 done today", of the Floor a pane shows. */
+export function FloorMeta({ id }: { id?: string }) {
+  const read = useContext(FloorRead);
+  if (!read) return null;
+  const { counts } = read;
   return (
     <span id={id} className="gpane-meta">
       {counts.working} working ·{" "}
@@ -208,6 +244,8 @@ export function RoomPaneBody({ room: id }: { room: string }) {
 /** A board in a pane, with the filter its header shows. */
 export function BoardPaneBody({ gridId, paneId, board }: { gridId: string; paneId: string; board: string }) {
   const filter = usePaneFilter(gridId, paneId);
+  // Its filter goes with it: when the pane closes, or shows another board.
+  useEffect(() => () => clearPaneFilter(gridId, paneId), [gridId, paneId, board]);
   const pane = useMemo(
     () => ({
       board,
@@ -223,10 +261,18 @@ export function BoardPaneBody({ gridId, paneId, board }: { gridId: string; paneI
 /** The Floor's main column in a pane: everything's, or one group's. A
  *  short pane says how many are working, need you and are done. */
 export function FloorPaneBody({ group }: { group: string | null }) {
-  useFloorReads();
   const overview = useOverview((s) => s.overview);
+  const read = useContext(FloorRead);
   const groups = useLayout().groups;
+  const settled = useLayoutSettled();
   const ids = useId();
+  if (group && !groups.some((g) => g.id === group) && !settled) {
+    return (
+      <div className="pane-note">
+        <p className="muted small">Reading the Floor…</p>
+      </div>
+    );
+  }
   if (group && !groups.some((g) => g.id === group)) {
     return (
       <div className="pane-note">
@@ -234,7 +280,7 @@ export function FloorPaneBody({ group }: { group: string | null }) {
       </div>
     );
   }
-  if (!overview) {
+  if (!overview || !read) {
     return (
       <div className="pane-note">
         <p className="muted small">Reading the Floor…</p>
@@ -242,18 +288,15 @@ export function FloorPaneBody({ group }: { group: string | null }) {
     );
   }
   return (
-    <FloorScope.Provider value={group}>
-      <FloorIds.Provider value={`${ids}-`}>
-        <FloorColumn overview={overview} scrollKey={null} className="crew-floor-main floor-in-pane" />
-        <FloorShort overview={overview} />
-      </FloorIds.Provider>
-    </FloorScope.Provider>
+    <FloorIds.Provider value={`${ids}-`}>
+      <FloorColumn overview={overview} read={read} scrollKey={null} className="crew-floor-main floor-in-pane" />
+      <FloorShort counts={read.counts} />
+    </FloorIds.Provider>
   );
 }
 
 /** The Floor in a short pane: its counts, each with its dot. */
-function FloorShort({ overview }: { overview: Overview }) {
-  const { counts } = useCrewFloor(overview);
+function FloorShort({ counts }: { counts: CrewFloorRead["counts"] }) {
   return (
     <ul className="floor-short" aria-label="Counts">
       <li>

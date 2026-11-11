@@ -28,6 +28,7 @@ const { useBoard } = await import("../board/store");
 const { useFloor } = await import("../floor/store");
 const { useOverview } = await import("../overview/store");
 const { useSettings } = await import("../settings/store");
+const { useHubLayout } = await import("../groups/hubLayout");
 const { useReads } = await import("../unread/reads");
 const { useUnread } = await import("../unread/summary");
 const { useWatching } = await import("../unread/watching");
@@ -335,8 +336,16 @@ describe("the Floor in a pane", () => {
     expect(within(counts).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["1 working", "1 needs you", "0 done"]);
   });
 
-  it("of a group since removed says so", () => {
+  it("of a group since removed says so, once the sidebar's groups are known for sure", () => {
+    useSettings.setState({ loaded: false });
+    useHubLayout.setState({ layout: null, kept: null });
     grid("halves", { kind: "floor", group: "g-gone" });
+    // Not known yet: no "removed group" for a moment.
+    expect(within(pane("Floor")).getByText("Reading the Floor…")).toBeTruthy();
+    act(() => {
+      useSettings.setState({ loaded: true });
+      useHubLayout.setState({ kept: false });
+    });
     expect(within(pane("Floor ›\u00a0a removed group")).getByText(/no longer in the sidebar/)).toBeTruthy();
   });
 });
@@ -427,5 +436,45 @@ describe("a synced board in a pane", () => {
     fireEvent.click(within(show).getByRole("button", { name: "Unassigned" }));
     expect(within(p).getByText("No one's")).toBeTruthy();
     expect(within(p).queryByText("Dana's")).toBeNull();
+  });
+});
+
+describe("a board pane's filter", () => {
+  it("goes when the pane shows another board, or closes", async () => {
+    const { usePaneFilters } = await import("./kinds");
+    const { replacePane, closePane } = await import("./store");
+    grid("halves", acme);
+    const id = useGrids.getState().grids[MAIN_GRID]!.panes.find((p) => p.content?.kind === "board")!.id;
+    fireEvent.click(within(within(pane("Acme")).getByRole("group", { name: "Show" })).getByRole("button", { name: "Pinned" }));
+    expect(usePaneFilters.getState()[`${MAIN_GRID}/${id}`]).toBe("pinned");
+    act(() => replacePane(MAIN_GRID, id, docs));
+    expect(usePaneFilters.getState()[`${MAIN_GRID}/${id}`]).toBeUndefined();
+    expect(within(within(pane("Docs site")).getByRole("group", { name: "Show" })).getByRole("button", { name: "Everyone" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(within(pane("Docs site")).getByRole("group", { name: "Show" })).getByRole("button", { name: "Pinned" }));
+    act(() => closePane(MAIN_GRID, id));
+    expect(usePaneFilters.getState()[`${MAIN_GRID}/${id}`]).toBeUndefined();
+  });
+});
+
+describe("a board pane's column tabs", () => {
+  it("are there only while the pane is narrow, so hidden tabs take no drops", () => {
+    let width = 800;
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: () => void) {
+          observers.push(() => this.cb());
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ width, height: 400, top: 0, left: 0, right: width, bottom: 400, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect);
+    grid("halves", acme);
+    expect(within(pane("Acme")).queryByRole("tablist", { name: "Column" })).toBeNull();
+    width = NARROW_PANE - 1;
+    act(() => observers.forEach((o) => o()));
+    expect(within(pane("Acme")).getByRole("tablist", { name: "Column" })).toBeTruthy();
   });
 });

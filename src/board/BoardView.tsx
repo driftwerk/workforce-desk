@@ -45,6 +45,25 @@ export const useWaiting = (): ((t: Ticket) => boolean) => {
  *  for a card (it goes beside that card). */
 export const columnDroppedOn = (id: string): TicketState | null => (id.startsWith("col:") || id.startsWith("tab:") ? (id.slice(4) as TicketState) : null);
 
+/** Below this width (px) a board's pane shows a column at a time (kept in
+ *  step with grids.css's container query, by grids/kinds.test.tsx). */
+export const NARROW_PX = 520;
+
+/** Whether `el` is under NARROW_PX wide, as it resizes; while it can't be
+ *  measured (no ResizeObserver), it's taken as narrow. */
+const useNarrow = (el: HTMLElement | null): boolean => {
+  const [narrow, setNarrow] = useState(true);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setNarrow(el.getBoundingClientRect().width < NARROW_PX);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return narrow;
+};
+
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
 /** The plan each ticket is in, by its goal, for the board's cards. */
@@ -96,6 +115,10 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // Ids of its own: a grid can show more than one board.
   const uid = useId();
   const searchId = `${uid}-search`;
+  // A pane under NARROW_PX wide shows a column at a time, with tabs: only
+  // then are the tabs there (and take drops).
+  const [paneRoot, setPaneRoot] = useState<HTMLDivElement | null>(null);
+  const narrow = useNarrow(paneRoot);
   const [q, setQ] = useState("");
   const [shelfOpen, setShelfOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -255,7 +278,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             onCardKey={onCardKey}
             register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
             ids={uid}
-            tabs={!!pane}
+            tabs={!!pane && narrow}
           />
         </TicketOpener.Provider>
       </Plans.Provider>
@@ -269,7 +292,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   if (pane)
     return (
-      <div className="board board-in-pane" aria-label={`Board ${board.name}`}>
+      <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
         {board.sync && <PaneSync board={board} now={now} />}
         <LeftFilterShelf board={board} tickets={left} />
         {columnsShown}

@@ -1,16 +1,15 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { watchFloor } from "../floor/store";
-import { hearElsewhere } from "../grids/elsewhere";
+import { hearElsewhere } from "./elsewhere";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { focusMainWindow, hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -233,8 +232,8 @@ export function App() {
     useSettings((s) => (s.loaded ? s.keys.ask : null)),
     (e) => {
       if (e.state !== "Pressed") return;
-      const w = getCurrentWindow();
-      void w.show().then(() => w.setFocus());
+      // Shown and focused by Desk's native side: the page may not do it.
+      void focusMainWindow().catch(() => undefined);
       setAsking(true);
     },
   );
