@@ -8,7 +8,7 @@ import { useBoard } from "./store";
 
 /** A new board (its name, and the prefix its keys start with), or a
  *  board's new name and prefix. */
-export function BoardDialog({ board, onClose }: { board?: Board; onClose: () => void }) {
+export function BoardDialog({ board, onClose, onMade }: { board?: Board; onClose: () => void; /** A new board was made (and is shown). */ onMade?: (b: Board) => void }) {
   const [name, setName] = useState(board?.name ?? "");
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
   const [busy, setBusy] = useState(false);
@@ -27,7 +27,7 @@ export function BoardDialog({ board, onClose }: { board?: Board; onClose: () => 
         if (!hub) throw new Error("This computer's hub isn't running.");
         const changed = await hub.updateBoard(board.id, { name: name.trim(), ...(p && p !== board.prefix ? { prefix: p } : {}) });
         useBoard.setState((s) => ({ boards: { ...s.boards, [changed.id]: changed } }));
-      } else await useBoard.getState().createBoard(name.trim(), p || undefined);
+      } else onMade?.(await useBoard.getState().createBoard(name.trim(), p || undefined));
       onClose();
     } catch (err) {
       setProblem(plainError(err));

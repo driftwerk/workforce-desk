@@ -167,7 +167,9 @@ describe("the link dialog", () => {
     fireEvent.click(via().getByRole("radio", { name: /^Globex/ }));
     const field = (await screen.findByLabelText("Globex’s token for you")) as HTMLInputElement;
     expect(field.type).toBe("password");
-    expect(screen.getByText(/hasn't let paired devices make remote MCP tokens/)).toBeTruthy();
+    // Plain words, never the hub's config key.
+    expect(screen.getByText(/Globex doesn’t let Desk make this token itself yet — its admin can turn that on, or make a token on Globex and paste it here\./)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/allow_device_tokens|remote MCP tokens/);
     // A refused token: the hub's words, and the field empty again.
     fireEvent.change(field, { target: { value: "wfr_notthetokenatall0000" } });
     fireEvent.click(screen.getByRole("button", { name: "Use this token" }));
@@ -180,6 +182,35 @@ describe("the link dialog", () => {
     const put = native.asked.filter((a) => a.method === "PUT" && a.path === "/api/desk/sync-hubs/hub-globex-example");
     expect(put.at(-1)!.body).toEqual({ name: "Globex", url: GLOBEX.url, token: SECRET });
     expect(sealed()).not.toContain("SENTINEL");
+  });
+
+  it("asks the hub again each time the link opens, and on Try again: an admin may have allowed it since", async () => {
+    const mints = () => native.commands.filter((c) => c.cmd === "board_sync_mint").length;
+    const open = async () => {
+      const r = render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("Jira");
+      await waitFor(() => expect(via().getByText(/Needs a token/)).toBeTruthy());
+      fireEvent.click(via().getByRole("radio", { name: /^Globex/ }));
+      return r;
+    };
+    const first = await open();
+    await screen.findByRole("button", { name: "Try again" });
+    expect(mints()).toBe(1);
+    first.unmount();
+    // Opened again: asked again, not remembered as refused.
+    await open();
+    await screen.findByRole("button", { name: "Try again" });
+    expect(mints()).toBe(2);
+    // The admin turns it on; Try again makes it, and the paste box goes.
+    native.mint = () => {
+      kept = [...kept, { id: "hub-globex-example", name: "Globex", url: GLOBEX.url, hasToken: true }];
+      offers["hub-globex-example"] = true;
+      return { kind: "kept", offers: { jira: true, linear: false } };
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(within(via().getByText("Globex").closest("label")!).getByText("Offers its Jira tools to you")).toBeTruthy());
+    expect(mints()).toBe(3);
+    expect(document.querySelector('input[type="password"]')).toBeNull();
   });
 
   it("checks the filter live, prefills the state map, and links with what was chosen", async () => {
@@ -306,6 +337,57 @@ describe("the link dialog", () => {
     // An older hub, which can't count without the id, gets asked for it.
     fireEvent.click(imports.getByRole("radio", { name: "Assigned to me" }));
     expect(screen.queryByLabelText("Your Linear member id")).toBeNull();
+  });
+
+  it("says by the Link button what it still waits on, first thing first", async () => {
+    let matching: { status: number; body: unknown } = { status: 200, body: { offered: true, states: ["Todo", "Done"], matches: 4, matchesAtLeast: false } };
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear") {
+        if (!body.target) return { status: 200, body: { offered: true, teams: [{ id: "6f1c0a2e-1b2c", key: "ATL", name: "Atlas core" }] } };
+        // A hub that can't say who the person is.
+        if (matching.status === 200) return { ...matching, body: { ...(matching.body as object), me: null, meWhy: "Atlas uses a shared Linear key, so it can't say who you are." } };
+        return matching;
+      }
+      return localRoutes(method, path, body);
+    };
+    const note = () => document.querySelector(".move-foot .dialog-foot-note")!.textContent;
+    const button = () => screen.getByRole("button", { name: /^Link/ }) as HTMLButtonElement;
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    expect(note()).toBe("Pick Jira or Linear.");
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    expect(note()).toBe("Pick where Linear is reached through.");
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    await waitFor(() => expect(note()).toBe("Pick a team."));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Linear team"), { target: { value: "6f1c0a2e-1b2c" } });
+    // The whole team needs no id: it waits only on the count.
+    expect(note()).toBe("Waiting for the match count…");
+    await waitFor(() => expect(button().disabled).toBe(false), { timeout: 2000 });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "Assigned to me" }));
+    expect(note()).toBe("Enter your Linear member id.");
+    // The field says what an id is, and that the hub can't say who you are.
+    expect(screen.getByText(/not your name or email\. Atlas can’t say who you are on Linear, so Desk asks once\./)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Your Linear member id"), { target: { value: "Sam Lee" } });
+    expect(screen.getByText(/That isn’t a Linear id/)).toBeTruthy();
+    expect(note()).toBe("Enter your Linear member id.");
+    fireEvent.change(screen.getByLabelText("Your Linear member id"), { target: { value: "0b9e7c1a-55aa-4e0f-9d1b-3c2f8a6e4d10" } });
+    expect(note()).toBe("Waiting for the match count…");
+    await waitFor(() => expect(button().disabled).toBe(false), { timeout: 2000 });
+    expect(note()).toBe("");
+    // A failed check: its words, by the button.
+    matching = { status: 422, body: { error: "Linear says that team is archived." } };
+    fireEvent.change(screen.getByLabelText("Your Linear member id"), { target: { value: "0b9e7c1a-55aa-4e0f-9d1b-3c2f8a6e4d11" } });
+    await waitFor(() => expect(note()).toBe("The match check failed: Linear says that team is archived."), { timeout: 2000 });
+    expect(button().disabled).toBe(true);
+    cleanup();
+    render(<LinkBoardDialog board={ACME} tickets={2} onClose={() => {}} />);
+    expect(note()).toBe(`Linking needs an empty board: ${ACME.name} has tickets.`);
+    // No hub on this computer: said, not waited on.
+    cleanup();
+    useChat.setState({ hubs: [ATLAS] as never });
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    expect(note()).toBe("This computer’s hub isn’t running, so nothing can be checked or linked yet.");
   });
 });
 

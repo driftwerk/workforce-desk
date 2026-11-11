@@ -932,6 +932,12 @@ button.fsec-tile-head {
   flex-direction: column;
   gap: 4px;
 }
+.oversee-items[aria-disabled] {
+  opacity: 0.5;
+}
+.oversee-add:has(input:disabled) {
+  opacity: 0.5;
+}
 .oversee-items li {
   display: flex;
   align-items: center;

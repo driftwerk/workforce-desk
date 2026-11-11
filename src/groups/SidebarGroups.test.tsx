@@ -14,6 +14,7 @@ import { createGrid, deleteGrid, deliver, layOut, setActive, setFocus, startGrid
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
 import { HOVER_MS, SidebarGroups } from "./SidebarGroups";
+import { setSectionOpen, useSections } from "../shell/SideSection";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useMachines } from "../hub/engines";
 import { useMachineSessions } from "./machines";
@@ -54,6 +55,7 @@ const lastSaved = () => (saves().at(-1)?.[1] as { settings: Record<string, unkno
 
 beforeEach(() => {
   vi.mocked(invoke).mockClear();
+  setSectionOpen("groups", true);
   useChat.setState({
     hubs: [
       { id: "local", label: "This computer", url: "", local: true, revision: "" },
@@ -426,6 +428,15 @@ describe("sessions and agents in grids", () => {
       act(() => setFocus(MAIN_GRID, paneOf(MAIN_GRID, "s2")));
       act(() => setFocus(MAIN_GRID, paneOf(MAIN_GRID, "s1")));
       expect(useSettings.getState().groups.find((g) => g.id === "acme")!.collapsed).toBe(false);
+    });
+
+    it("opens a closed Groups section too, so its row shows", () => {
+      setSectionOpen("groups", false);
+      layOut(MAIN_GRID, "halves");
+      deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+      groups();
+      expect(useSections.getState().closed.groups).toBeUndefined();
+      expect(lit()).toEqual(["api-e7"]);
     });
 
     it("points out its panes in the grid shown once the pointer rests on it", () => {

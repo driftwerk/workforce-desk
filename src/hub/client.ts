@@ -135,13 +135,48 @@ export interface ComputerActivityRow {
   id: string;
   at: string;
   agent: string;
-  kind: "read" | "write" | "delete" | "exec" | "session" | "connector";
+  kind: "read" | "write" | "delete" | "exec" | "session" | "connector" | "browser";
   doing: string;
   folder: string | null;
   tool: string;
   decided_by: "rule" | "grant" | "session" | "person" | "classifier";
   outcome: { outcome: "ran" | "refused" | "allowed" | "declined" | "not_answered" | "unattended" };
   reason: string | null;
+  /** A browser's row: the page, what it pressed or typed into, which
+   *  browser, and the screenshot kept of the page after. */
+  arguments?: { url?: string; target?: string | null; backend?: BrowserBackend; screenshot?: string | null };
+}
+
+/** Which browser: Desk's own, or the person's Chrome. */
+export type BrowserBackend = "desk" | "chrome";
+
+/** Which browsers Desk uses. */
+export type BrowserUses = "off" | "desk" | "chrome" | "both";
+
+/** Desk's browser settings, as the person set them. */
+export interface BrowserSettings {
+  use: BrowserUses;
+  /** Show Desk's own browser on screen; unset, as the hub is set up. */
+  show?: boolean;
+  /** The sites the person's Chrome may (`allow`) and may never (`block`) go to. */
+  sites: { allow: string[]; block: string[] };
+}
+
+/** The settings and how the person's Chrome stands. */
+export interface BrowserSettingsView {
+  settings: BrowserSettings;
+  chrome: { available: boolean; connected: boolean; min_version: number; turn_on: string };
+}
+
+/** A browser open now. */
+export interface BrowserLive {
+  agent: string;
+  user: string;
+  session: string | null;
+  url: string;
+  host: string | null;
+  backend: BrowserBackend;
+  idle_secs: number;
 }
 
 export interface ComputerActivityPage {
@@ -482,6 +517,20 @@ export class DeskHub {
     if (f.before) q.set("before", f.before);
     const qs = q.toString();
     return this.call("GET", `/api/desk/computer/activity${qs ? `?${qs}` : ""}`);
+  };
+  /** Desk's browser settings and the person's Chrome's standing. */
+  browserSettings = (): Promise<BrowserSettingsView> => this.call("GET", "/api/desk/browser/settings");
+  setBrowserSettings = (s: BrowserSettings): Promise<BrowserSettingsView> => this.call("PUT", "/api/desk/browser/settings", s);
+  /** The browsers open now. */
+  browserLive = async (): Promise<BrowserLive[]> => (await this.call<{ live: BrowserLive[] }>("GET", "/api/desk/browser")).live;
+  /** Stop: the turns using the browser end, it closes, and its session allowances go. */
+  stopBrowser = (agent?: string): Promise<{ closed: number; turns_stopped: number; allowances_dropped: number }> =>
+    this.call("POST", "/api/desk/browser/stop", agent ? { agent } : {});
+  /** A screenshot a browser's activity row names. */
+  browserShot = async (file: string): Promise<Blob> => {
+    const res = await this.t.fetch("GET", `/api/desk/browser/shots/${encodeURIComponent(file)}`);
+    if (!res.ok) throw await refusal(res);
+    return res.blob();
   };
   /** Whether macOS lets agents read other apps' files here. */
   diskAccess = async (): Promise<DiskAccess> => (await this.call<{ state: DiskAccess }>("GET", "/api/desk/computer/disk-access")).state;

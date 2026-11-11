@@ -208,6 +208,12 @@ const HTTP: &[Route] = &[
         &["agent", "kind", "before"],
     ),
     route("GET", "/api/desk/computer/disk-access"),
+    // Desk's browser: its settings, which are open, Stop, and screenshots.
+    route("GET", "/api/desk/browser/settings"),
+    route("PUT", "/api/desk/browser/settings"),
+    route("GET", "/api/desk/browser"),
+    route("POST", "/api/desk/browser/stop"),
+    route("GET", "/api/desk/browser/shots/{}"),
     // The providers agents think with.
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),

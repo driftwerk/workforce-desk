@@ -133,6 +133,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const knownMe = notMe ? null : heard ? heard.me : undefined;
   const meNeeded = system === "linear" && filterKind === "assignedToMe" && knownMe === null;
   const filterReady = !!filter && (!meNeeded || linearId(me.trim()));
+  const meBad = !!me.trim() && !linearId(me.trim());
   const checkKey = JSON.stringify([system, viaKey, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
@@ -179,6 +180,26 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
   const hasTickets = tickets > 0;
   const canLink = !hasTickets && !!system && !!via && offered && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
+  /** Why Link can't be pressed yet: the first thing missing, in plain words. */
+  const waitingOn: { words: string; failed: boolean } | null = (() => {
+    if (busy) return null;
+    if (hasTickets) return { words: `Linking needs an empty board: ${board.name} has tickets.`, failed: true };
+    if (!system) return { words: "Pick Jira or Linear.", failed: false };
+    if (!localSync()) return { words: "This computer’s hub isn’t running, so nothing can be checked or linked yet.", failed: true };
+    if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
+    if (!offered) {
+      if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
+      if (probe.state === "needsToken") return { words: `${viaName} needs a token first.`, failed: false };
+      if (probe.state === "no") return { words: probe.noToken ? `${viaName} needs a new token.` : probe.error, failed: true };
+    }
+    if (!targetGood) return { words: system === "linear" ? "Pick a team." : "Enter the Jira project key.", failed: false };
+    if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
+    if (!now) return { words: "Waiting for the match count…", failed: false };
+    if (!now.ok) return { words: `The match check failed: ${now.error}`, failed: true };
+    if (now.check.matches === undefined) return { words: "Waiting for the match count…", failed: false };
+    return null;
+  })();
+  const footNote = problem ? { words: problem, failed: true } : waitingOn;
   const link = async () => {
     const sync = localSync();
     if (!canLink || !sync || !system || !via || !filter) return;
@@ -332,9 +353,22 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
               <>
                 <label className="field">
                   <span>Your Linear member id</span>
-                  <input className="mono" value={me} onChange={(e) => setMe(e.target.value)} placeholder="From Linear: Settings → Account → copy your id" spellCheck={false} autoComplete="off" />
+                  <input
+                    className="mono"
+                    value={me}
+                    onChange={(e) => setMe(e.target.value)}
+                    placeholder="2f8c1d3a-9b1e-4c7a-…"
+                    spellCheck={false}
+                    autoComplete="off"
+                    aria-invalid={meBad}
+                    aria-describedby={`${ids}-me`}
+                  />
                 </label>
-                <span className="move-opt-sub">{viaName} can’t say who you are on Linear, so Desk asks once.</span>
+                <span id={`${ids}-me`} className={`move-opt-sub${meBad ? " state-blocked" : ""}`}>
+                  {meBad
+                    ? "That isn’t a Linear id: it’s a long code of letters a–f, digits and dashes, not your name or email."
+                    : `The long code Linear knows you by (its API calls it your user id), not your name or email. ${viaName} can’t say who you are on Linear, so Desk asks once.`}
+                </span>
               </>
             )}
             {filterKind === "label" && (
@@ -413,8 +447,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         )}
       </div>
       <footer className="dialog-foot move-foot">
-        <span className="dialog-foot-note state-blocked" role={problem ? "alert" : undefined}>
-          {problem}
+        <span className={`dialog-foot-note${footNote?.failed ? " state-blocked" : ""}`} role={problem ? "alert" : "status"}>
+          {footNote?.words}
         </span>
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel
@@ -426,10 +460,6 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     </Dialog>
   );
 }
-
-/** Hubs that said they don't let Desk make a token, this session, with
- *  their words: the person pastes one there instead of being asked again. */
-const notMinting = new Map<string, string>();
 
 /** The key "This computer" goes by among the hubs. */
 const THIS = "this-computer";
@@ -527,37 +557,41 @@ function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick
  *  shown, kept here or read back. */
 export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; again: boolean; onKept?: () => void }) {
   const ids = useId();
-  const refusedBefore = notMinting.get(choice.id);
-  const [phase, setPhase] = useState<"minting" | "made" | "paste" | "saving">(refusedBefore === undefined ? "minting" : "paste");
-  const [why, setWhy] = useState<string | null>(refusedBefore ?? null);
+  const [phase, setPhase] = useState<"minting" | "made" | "paste" | "saving">("minting");
+  /** The hub said it doesn't let Desk make one (its admin can change that). */
+  const [refused, setRefused] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
-  const tried = useRef(false);
+  /** Bumped by Try again: the hub is asked once more. */
+  const [asks, setAsks] = useState(0);
+  const asked = useRef(-1);
 
   const kept = () => {
     void useSyncHubs.getState().load();
     onKept?.();
   };
 
-  // Made at once where the hub allows it: one try per opening, and none
-  // again this session on a hub that said it doesn't let Desk make one.
-  // (A hub keeps one such token per device: a new one replaces the last.)
+  // Made at once where the hub allows it: asked each time the panel opens
+  // (its admin may have allowed it since) and again on Try again; a refusal
+  // is never remembered past this panel. (A hub keeps one such token per
+  // device: a new one replaces the last.)
   useEffect(() => {
-    if (tried.current || phase !== "minting") return;
-    tried.current = true;
+    if (asked.current === asks) return;
+    asked.current = asks;
     const local = localHubRef();
     if (!local) {
       setPhase("paste");
       return;
     }
+    setPhase("minting");
+    setProblem(null);
     mintSyncToken(choice.paired, local.id, choice.id, choice.name)
       .then((m) => {
         if (m.kind === "kept") {
           setPhase("made");
           kept();
         } else {
-          if (m.kind === "notAllowed") notMinting.set(choice.id, m.error);
-          setWhy(m.kind === "notAllowed" ? m.error : null);
+          setRefused(m.kind === "notAllowed");
           setPhase("paste");
         }
       })
@@ -566,7 +600,7 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
         setPhase("paste");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choice]);
+  }, [choice, asks]);
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -596,10 +630,11 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
     <form className="move-ask sync-token" onSubmit={(e) => void send(e)} aria-label={`A token for ${choice.name}`}>
       <p>
         {again ? `${choice.name} refused the token it had. ` : ""}
-        {why ? `${choice.name} doesn’t let Desk make a token itself: paste one made there.` : `Paste a token made on ${choice.name}.`}{" "}
+        {refused
+          ? `${choice.name} doesn’t let Desk make this token itself yet — its admin can turn that on, or make a token on ${choice.name} and paste it here.`
+          : `Paste a token made on ${choice.name}.`}{" "}
         <span className="muted">Desk sends it to this computer’s hub once, and never shows it again.</span>
       </p>
-      {why && <p className="move-opt-sub sync-token-why">{why}</p>}
       <label className="field sync-token-field">
         <span>{choice.name}’s token for you</span>
         <input
@@ -621,6 +656,11 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
         </p>
       )}
       <span className="sync-token-actions">
+        {refused && (
+          <button type="button" className="btn btn-sm" disabled={phase === "saving"} onClick={() => setAsks((n) => n + 1)}>
+            Try again
+          </button>
+        )}
         <button type="button" className="btn btn-sm" onClick={() => openUrl(`${choice.url.replace(/\/+$/, "")}/my-settings`)}>
           Open {choice.name}’s token page
         </button>

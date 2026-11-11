@@ -140,3 +140,17 @@ describe("a session Desk started that isn't running", () => {
     expect(screen.getByText(/Running in another terminal/)).toBeTruthy();
   });
 });
+
+describe("a session's card says when Desk set a non-asking mode", () => {
+  it("shows a chip for auto and for bypass, and none otherwise", () => {
+    const { unmount } = card();
+    expect(screen.queryByText(/set by Desk\)/)).toBeNull();
+    unmount();
+    for (const [mode, text] of [["auto", "Auto mode (set by Desk)"], ["bypassPermissions", "Bypass mode (set by Desk)"]] as const) {
+      useDesk.setState({ sessions: { s1: session({ mode }) } });
+      const r = card();
+      expect(screen.getByText(text)).toBeTruthy();
+      r.unmount();
+    }
+  });
+});

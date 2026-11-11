@@ -12,9 +12,10 @@ import type { Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { leftFilterOf } from "../hub/boardSync";
-import { BoardDialog, DeleteBoard } from "./BoardDialogs";
-import { LinkBoardDialog, NewTokenDialog } from "./LinkBoard";
-import { LeftFilterShelf, SyncBar, UnlinkBoard } from "./SyncBar";
+import { BoardDialog } from "./BoardDialogs";
+import { BoardActionDialog, boardEntries, type BoardAction } from "./boardActions";
+import { NewTokenDialog } from "./LinkBoard";
+import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { localSync, syncChoices, useSyncHubs } from "./syncStore";
 import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
@@ -63,10 +64,8 @@ export function Board() {
   const [q, setQ] = useState("");
   const [shelfOpen, setShelfOpen] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [naming, setNaming] = useState<"new" | "rename" | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [linking, setLinking] = useState(false);
-  const [unlinking, setUnlinking] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [acting, setActing] = useState<BoardAction | null>(null);
   const [newToken, setNewToken] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [said, setSaid] = useState("");
@@ -183,12 +182,12 @@ export function Board() {
             Tickets are work you hand to sessions and agents: each has a key like ACM-12, what it needs first, and its history. Sessions can move their own tickets as they go.
           </p>
           <div>
-            <button type="button" className="btn btn-signal" onClick={() => setNaming("new")}>
+            <button type="button" className="btn btn-signal" onClick={() => setNaming(true)}>
               Make a board
             </button>
           </div>
         </section>
-        {naming && <BoardDialog onClose={() => setNaming(null)} />}
+        {naming && <BoardDialog onClose={() => setNaming(false)} />}
       </main>
     );
 
@@ -197,13 +196,8 @@ export function Board() {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((b) => ({ kind: "item" as const, label: b.name, checked: b.id === board.id, onSelect: () => useBoard.getState().show(b.id) })),
     { kind: "separator" },
-    { kind: "item", label: "New board…", onSelect: () => setNaming("new") },
-    { kind: "item", label: "Rename board…", onSelect: () => setNaming("rename") },
-    { kind: "item", label: "Delete board…", onSelect: () => setDeleting(true) },
-    { kind: "separator" },
-    board.sync
-      ? { kind: "item", label: `Unlink from ${board.sync.system === "jira" ? "Jira" : "Linear"}…`, onSelect: () => setUnlinking(true) }
-      : { kind: "item", label: "Link to Jira or Linear…", onSelect: () => setLinking(true) },
+    { kind: "item", label: "New board…", onSelect: () => setNaming(true) },
+    ...boardEntries(board, setActing),
   ];
 
   return (
@@ -294,10 +288,8 @@ export function Board() {
         />
       )}
       {adding && <NewTicket board={board} onClose={() => setAdding(false)} />}
-      {naming && <BoardDialog board={naming === "rename" ? board : undefined} onClose={() => setNaming(null)} />}
-      {deleting && <DeleteBoard board={board} count={mine.length} onClose={() => setDeleting(false)} />}
-      {linking && <LinkBoardDialog board={board} tickets={mine.length} onClose={() => setLinking(false)} />}
-      {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
+      {naming && <BoardDialog onClose={() => setNaming(false)} />}
+      {acting && <BoardActionDialog board={board} action={acting} onClose={() => setActing(null)} />}
       {newToken && tokenFor && <NewTokenDialog choice={tokenFor} onClose={() => setNewToken(false)} />}
     </main>
   );
