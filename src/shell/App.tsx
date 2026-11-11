@@ -8,8 +8,11 @@ import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
+import { ProblemNote } from "../ui/ProblemNote";
+import { setStarter } from "../ui/problem";
+import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { focusMainWindow, hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -54,7 +57,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
-import { useUi } from "./ui";
+import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
@@ -119,6 +122,21 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   const hubDown = useHubDown();
+  // A grid's window asks for Settings here, the only window that has them.
+  useEffect(
+    () =>
+      subscribe(
+        listen<{ section: SettingsSection }>("open-settings", (e) => {
+          useUi.getState().openSettings(e.payload.section);
+          void focusMainWindow().catch(() => undefined);
+        }),
+      ),
+    [],
+  );
+  useEffect(() => {
+    setStarter(startLocalHelper);
+    return () => setStarter(null);
+  }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
   useAppBadge();
@@ -412,11 +430,8 @@ export function App() {
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (
-        <div className="toast toast-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="link" onClick={clearError}>
-            Dismiss
-          </button>
+        <div className="toast toast-error toast-problem" role="alert">
+          <ProblemNote problem={error} onDone={clearError} />
         </div>
       )}
     </div>

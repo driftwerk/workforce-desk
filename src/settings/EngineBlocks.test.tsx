@@ -277,7 +277,7 @@ it("stops Codex's sign-in on its hub when its page won't open here", async () =>
   await act(async () => fireEvent.click(within(screen.getByRole("listitem", { name: "Codex" })).getByRole("button", { name: "Sign in…" })));
   await tick();
   expect(e.hub.cancelEngineSignIn).toHaveBeenCalledWith("cx-1");
-  expect(screen.getByRole("alert").textContent).toBe("That isn't ChatGPT's sign-in page.");
+  expect(screen.getByRole("alert").textContent).toContain("That isn't ChatGPT's sign-in page.");
 });
 
 it("stops Codex's sign-in when its page doesn't open in 30 s, or its code runs out after 15 minutes", async () => {
@@ -288,7 +288,7 @@ it("stops Codex's sign-in when its page doesn't open in 30 s, or its code runs o
   await tick(OPEN_WITHIN_MS - 1000);
   expect(screen.getByText("Opening ChatGPT’s sign-in page…")).toBeTruthy();
   await tick(1000);
-  expect(within(codex()).getByRole("alert").textContent).toBe("ChatGPT’s sign-in page didn’t open within 30 s: Codex on devbox didn’t answer.");
+  expect(within(codex()).getByRole("alert").textContent).toContain("ChatGPT’s sign-in page didn’t open within 30 s: Codex on devbox didn’t answer.");
   expect(e.hub.cancelEngineSignIn).toHaveBeenCalledWith("cx-1");
 
   e.state.codex = { id: "cx-1", engine: "codex", state: "device", url: "https://auth.openai.com/codex/device", code: "K7QF-2M9D" };
@@ -296,7 +296,7 @@ it("stops Codex's sign-in when its page doesn't open in 30 s, or its code runs o
   await tick();
   expect(screen.getByText("K7QF-2M9D")).toBeTruthy();
   await tick(CODE_WITHIN_MS);
-  expect(within(codex()).getByRole("alert").textContent).toBe("The code ran out after 15 minutes, so Desk stopped the sign-in.");
+  expect(within(codex()).getByRole("alert").textContent).toContain("The code ran out after 15 minutes, so Desk stopped the sign-in.");
   expect(e.hub.cancelEngineSignIn).toHaveBeenCalledTimes(2);
 });
 

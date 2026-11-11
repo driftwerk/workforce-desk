@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { CloseButton, Dialog } from "./Dialog";
 import { plainError } from "./plainError";
+import { CopyDetails } from "./ProblemNote";
 
 /** Asks before something that can't be undone: `action` runs on the red
  *  button (the signal's for `tone="signal"`), and the dialog stays open,
@@ -55,7 +56,10 @@ export function Confirm({
     >
       <div className="dialog-body confirm-body">{children}</div>
       <footer className="dialog-foot">
-        <span className="dialog-foot-note state-blocked">{problem}</span>
+        <span className="dialog-foot-note state-blocked">
+          {problem}
+          <CopyDetails text={problem} />
+        </span>
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel
         </button>
