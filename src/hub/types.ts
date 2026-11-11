@@ -998,7 +998,10 @@ export type LineWait =
   | "asking"
   /** The person has the wheel of a session a boss runs: the boss's
    *  messages wait until it is handed back. */
-  | "person_driving";
+  | "person_driving"
+  /** It still runs in auto or bypass mode from a boss no longer unbound
+   *  over it: Desk starts it again in its own mode first. */
+  | "mode_ending";
 
 /** One message on a session's line. */
 /** An ask's headline, and its details when it has any. */
