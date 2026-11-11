@@ -862,3 +862,130 @@ body.gsplitting-h * {
 .gpane-k-room .room-in-pane {
   height: 100%;
 }
+
+/* ── An empty pane's picker: what goes in it ────────────────────────────── */
+
+.gpane-picking {
+  overflow: auto;
+  padding: 8px;
+}
+.gpick {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: 0 12px 32px var(--shadow);
+  text-align: left;
+}
+.gpick-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.gpick-search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--text);
+  font: 400 13.5px var(--font-ui);
+  outline: none;
+}
+.gpick-search:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.gpick-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 8px;
+}
+.gpick-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--font-ui);
+  cursor: pointer;
+}
+.gpick-tab[aria-selected="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+.gpick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin-top: 4px;
+  overflow-y: auto;
+}
+.gpick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: 500 13.5px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.gpick-row:hover:not(:disabled),
+.gpick-row:focus-visible {
+  background: var(--signal-soft);
+  outline: none;
+}
+.gpick-row:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.gpick-mono .gpick-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.gpick-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gpick-meta {
+  flex: none;
+  max-width: 50%;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gpick-none {
+  margin: 6px 10px;
+}
+.gpick p {
+  max-width: none;
+}
+.gpick-foot {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}

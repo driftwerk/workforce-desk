@@ -15,6 +15,9 @@ import { BoardDialog } from "./BoardDialogs";
 import { useWaiting } from "./BoardView";
 import { arrangedBoards, moveBoard, nudgeBoard, useBoardOrder } from "./order";
 import { shownBoard, useBoard } from "./store";
+import { boardContent } from "../grids/engine";
+import { InGridRow, putInGrid } from "../grids/putIn";
+import { boardItem } from "../grids/where";
 
 /** Each board's tickets waiting on you, as its Waiting filter counts them. */
 const useWaitingByBoard = (): ReadonlyMap<string, number> => {
@@ -39,6 +42,7 @@ export function BoardsSection() {
   const order = useBoardOrder((s) => s.order);
   const shown = useBoard((s) => shownBoard(s)?.id ?? null);
   const onBoard = useDesk((s) => s.view === "board");
+  const inGrids = useDesk((s) => s.view === "grids");
   const waiting = useWaitingByBoard();
   const [making, setMaking] = useState(false);
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -87,6 +91,7 @@ export function BoardsSection() {
           type="board"
           ids={list.map((b) => b.id)}
           chip={(id) => boards[id]?.name}
+          toGrid={(id) => (boards[id] ? { content: boardContent(id), name: boards[id]!.name } : null)}
           onDragStart={() => setMenu(null)}
           justDragged={dragged}
           onMove={(id, before) => {
@@ -96,23 +101,29 @@ export function BoardsSection() {
           row={(id, lineBefore) => {
             const b = boards[id]!;
             return (
-              <SortRow
+              <InGridRow
                 key={id}
-                id={id}
-                type="board"
-                lineBefore={lineBefore}
-                on={onBoard && shown === id}
-                name={b.name}
-                title="Drag to reorder"
-                describedBy={hint}
-                more={`${b.name} options`}
-                register={(el) => (el ? rows.current.set(id, el) : rows.current.delete(id))}
-                onOpen={() => open(id)}
-                onNudge={(by) => nudge(id, by)}
-                onMenu={(at, from) => setMenu({ id, at, from })}
-              >
-                <Marks badge={badgeOf(waiting.get(id))} />
-              </SortRow>
+                item={boardItem(id)}
+                row={(mark, markId) => (
+                  <SortRow
+                    id={id}
+                    type="board"
+                    lineBefore={lineBefore}
+                    on={onBoard && shown === id}
+                    name={b.name}
+                    title={inGrids ? "Drag onto a pane, or to reorder" : "Drag to reorder"}
+                    describedBy={markId ? `${hint} ${markId}` : hint}
+                    more={`${b.name} options`}
+                    register={(el) => (el ? rows.current.set(id, el) : rows.current.delete(id))}
+                    onOpen={() => open(id)}
+                    onNudge={(by) => nudge(id, by)}
+                    onMenu={(at, from) => setMenu({ id, at, from })}
+                  >
+                    {mark}
+                    <Marks badge={badgeOf(waiting.get(id))} />
+                  </SortRow>
+                )}
+              />
             );
           }}
         />
@@ -123,7 +134,12 @@ export function BoardsSection() {
           <Menu
             label={`${menuBoard.name} options`}
             at={menu.at}
-            entries={boardEntries(menuBoard, (action) => setActing({ id: menuBoard.id, action }))}
+            entries={[
+              { kind: "item", label: "Open", onSelect: () => open(menuBoard.id) },
+              putInGrid(boardContent(menuBoard.id)),
+              { kind: "separator" },
+              ...boardEntries(menuBoard, (action) => setActing({ id: menuBoard.id, action })),
+            ]}
             onClose={(refocus) => {
               if (refocus) menu.from?.focus();
               setMenu(null);

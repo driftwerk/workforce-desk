@@ -8,6 +8,8 @@ import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
 import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
 import { addToGrid as placeInGrid } from "../grids/windows";
+import { putInGrid } from "../grids/putIn";
+import { floorContent } from "../grids/engine";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -576,6 +578,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       : [
           ...starting(id),
           ...choosing(id),
+          // The group's Floor: what its sessions and agents need and do.
+          putInGrid(floorContent(id), "its Floor"),
           { kind: "item", label: "Memory…", onSelect: () => setMemoryOf(id) },
           { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
           { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },

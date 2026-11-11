@@ -2193,6 +2193,10 @@ button.thread-bar:hover {
 .menu-label {
   flex: 1;
 }
+.menu-hint {
+  color: var(--faint);
+  font-weight: 400;
+}
 .menu-kbd {
   font-family: var(--font-mono);
   font-size: 11px;
