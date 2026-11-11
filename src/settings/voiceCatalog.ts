@@ -35,14 +35,20 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
     blurb: "Natural cloud voices at a fraction of ElevenLabs’ price.",
     keyPath: "speech/fish_audio/api_key",
     customIds: "The id in a voice’s address on fish.audio — yours, or any public voice.",
-    models: [{ id: "s1", name: "S1", note: "Fish Audio’s current model" }],
+    // Fish Audio bills per model, not per voice (docs.fish.audio pricing): every
+    // public voice below speaks on the free model, and the others cost money.
+    models: [
+      { id: "s2.1-pro-free", name: "S2.1 Pro · free", note: "Free. Subject to Fish Audio’s fair use; it may use requests to improve its models" },
+      { id: "s2.1-pro", name: "S2.1 Pro · paid", note: "Paid: $15 per million bytes of text on your Fish Audio account" },
+      { id: "s1", name: "S1 · paid", note: "Paid, and Fish Audio retires it on 31 December 2026" },
+    ],
     voices: [
       { id: "802e3bc2b27e49c2995d23ef70e6ac89", name: "Energetic Male", description: "Clear, professional American accent" },
       { id: "933563129e564b19a115bedd57b7406a", name: "Sarah", description: "Soft, conversational female voice" },
       { id: "bf322df2096a46f18c579d0baa36f41d", name: "Adrian", description: "Deep, measured male narrator" },
       { id: "536d3a5e000945adb7038665781a4aca", name: "Ethan", description: "Calm, authoritative male explainer" },
       { id: "b347db033a6549378b48d00acb0d06cd", name: "Selene", description: "Soft, gentle female voice" },
-      { id: "8ef4a238714b45718ce04243307c57a7", name: "E-girl", description: "Warm, soothing female voice" },
+      { id: "9a9cf47702da476aa4629e2506d4a857", name: "Hannah", description: "Confident, clear female voice" },
       { id: "f772ea09ebe04f66bd3e4a2be1e17329", name: "Alex", description: "Expressive male narrator" },
       { id: "5e79e8f5d2b345f98baa8c83c947532d", name: "Paddington", description: "Deep, resonant British narrator" },
     ],
