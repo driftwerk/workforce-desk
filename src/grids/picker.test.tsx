@@ -28,7 +28,7 @@ const { GridCanvas } = await import("./GridView");
 const { MAIN_GRID } = await import("./model");
 const { createGrid, deliver, layOut, startGrids, useGrids } = await import("./store");
 const { putInGrid, whereInGrid, InGridRow, openFromRow } = await import("./putIn");
-const { roomItem, boardItem } = await import("./where");
+const { roomItem, boardItem, floorItem } = await import("./where");
 const { ACME } = await import("../board/testing");
 const { hub } = await import("../floor/testing");
 type GridStorage = import("./storage").GridStorage;
@@ -180,14 +180,20 @@ describe("Put in a grid ›, from a room's, a board's or a group's row", () => {
       <>
         <InGridRow item={roomItem("r1")} row={(mark, id) => <span data-testid="r1" aria-describedby={id ?? undefined}>{mark}</span>} />
         <InGridRow item={boardItem(ACME.id)} row={(mark, id) => <span data-testid="board" aria-describedby={id ?? undefined}>{mark}</span>} />
+        <InGridRow item={floorItem("g-platform")} row={(mark, id) => <span data-testid="group" aria-describedby={id ?? undefined}>{mark}</span>} />
       </>,
     );
     const r1 = screen.getByTestId("r1");
     expect(document.getElementById(r1.getAttribute("aria-describedby")!)?.textContent).toBe("In grid Main");
     expect(screen.getByTestId("board").getAttribute("aria-describedby")).toBeNull();
     act(() => deliver(MAIN_GRID, { kind: "board", board: ACME.id }));
+    // A group's row is marked while its Floor is in a grid.
     const board = screen.getByTestId("board");
     expect(document.getElementById(board.getAttribute("aria-describedby")!)?.textContent).toBe("In grid Main");
+    expect(screen.getByTestId("group").getAttribute("aria-describedby")).toBeNull();
+    act(() => deliver(MAIN_GRID, { kind: "floor", group: "g-platform" }));
+    const group = screen.getByTestId("group");
+    expect(document.getElementById(group.getAttribute("aria-describedby")!)?.textContent).toBe("In grid Main");
   });
 });
 

@@ -8,7 +8,8 @@ import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
 import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
 import { addToGrid as placeInGrid } from "../grids/windows";
-import { putInGrid } from "../grids/putIn";
+import { putInGrid, useInGridMark } from "../grids/putIn";
+import { floorItem } from "../grids/where";
 import { floorContent } from "../grids/engine";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { sortedSessions, useDesk } from "../hub/store";
@@ -859,6 +860,8 @@ function GroupSection({
   useDroppable({ id, type: "group", accept: GROUP_ACCEPTS, element: section, collisionPriority: 1 });
   const open = !group.collapsed;
   const listId = useId();
+  // Its Floor in a grid: the row says so, as a room's or a board's does.
+  const floorMark = useInGridMark(floorItem(group.id));
   return (
     <>
       {dropBefore && <div className="drop-line drop-line-group" aria-hidden="true" />}
@@ -896,7 +899,7 @@ function GroupSection({
               className={`grp-toggle ${noted ? "grp-toggle-bossed" : ""}`}
               aria-expanded={open}
               aria-controls={open ? listId : undefined}
-              aria-describedby={fixed ? undefined : hint}
+              aria-describedby={fixed ? undefined : [hint, floorMark.id].filter(Boolean).join(" ")}
               onClick={onToggle}
               onDoubleClick={(e) => {
                 e.preventDefault();
@@ -927,6 +930,7 @@ function GroupSection({
               </span>
               {!fixed && <GroupDot id={group.id} />}
               <span className="grp-name">{group.name}</span>
+              {!fixed && floorMark.mark}
               {noted ? (
                 // Shown at the header's end; said here, with its name.
                 <span className="sr-only">
