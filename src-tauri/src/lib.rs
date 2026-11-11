@@ -1,6 +1,7 @@
 mod attachments;
 mod badge;
 mod broker;
+mod chrome;
 #[cfg(test)]
 mod commands;
 mod drops;
@@ -193,6 +194,15 @@ fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
         return Err("Desk hasn't written its log on this computer yet.".into());
     }
     tauri_plugin_opener::reveal_item_in_dir(&log).map_err(text)
+}
+
+/// Opens the person's Chrome, or brings it forward, for "Connect my
+/// Chrome" (see `chrome.rs`).
+#[tauri::command]
+async fn open_chrome() -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(chrome::open)
+        .await
+        .map_err(text)?
 }
 
 #[tauri::command]
@@ -1067,6 +1077,7 @@ pub fn run() {
             machine_setup::machine_uninstall,
             machine_setup::machine_cancel_uninstall,
             machine_reveal_log,
+            open_chrome,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,
