@@ -27,7 +27,7 @@ const { useOverview } = await import("../overview/store");
 const { GridCanvas } = await import("./GridView");
 const { MAIN_GRID } = await import("./model");
 const { createGrid, deliver, layOut, startGrids, useGrids } = await import("./store");
-const { putInGrid, whereInGrid, InGridRow } = await import("./putIn");
+const { putInGrid, whereInGrid, InGridRow, openFromRow } = await import("./putIn");
 const { roomItem, boardItem } = await import("./where");
 const { ACME } = await import("../board/testing");
 const { hub } = await import("../floor/testing");
@@ -188,5 +188,34 @@ describe("Put in a grid ›, from a room's, a board's or a group's row", () => {
     act(() => deliver(MAIN_GRID, { kind: "board", board: ACME.id }));
     const board = screen.getByTestId("board");
     expect(document.getElementById(board.getAttribute("aria-describedby")!)?.textContent).toBe("In grid Main");
+  });
+});
+
+describe("a room's or a board's row, clicked", () => {
+  it("in the Grids view, shows it where a grid has it; else opens it as always", () => {
+    const other = createGrid();
+    deliver(other, { kind: "board", board: ACME.id });
+    useGrids.setState({ active: MAIN_GRID });
+    const open = vi.fn();
+    openFromRow({ kind: "board", board: ACME.id }, open);
+    expect(open).not.toHaveBeenCalled();
+    expect(useGrids.getState().active).toBe(other);
+    // In no grid: opened.
+    openFromRow({ kind: "room", room: "r1" }, open);
+    expect(open).toHaveBeenCalledTimes(1);
+    // Outside the Grids view, a row opens its own view, grid or not.
+    useDesk.setState({ view: "rooms" });
+    openFromRow({ kind: "board", board: ACME.id }, open);
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the picker in a small pane, in grids.css", () => {
+  it("drops its card, title and footnote below 320px high, so the list keeps the room", async () => {
+    const fs = (await import("node:fs" as string)) as { readFileSync: (path: string, enc: "utf8") => string };
+    const cwd = (globalThis as unknown as { process: { cwd: () => string } }).process.cwd();
+    const css = fs.readFileSync(`${cwd}/src/styles/grids.css`, "utf8");
+    expect(css).toMatch(/\.gpane-vacant \.gpane-body \{\s*container: gpane \/ size;/);
+    expect(css).toMatch(/@container gpane \(max-height: 320px\) \{[\s\S]*?\.gpick-title,\s*\.gpick-foot \{\s*display: none;/);
   });
 });

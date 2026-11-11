@@ -7,7 +7,16 @@ import type { MenuEntry } from "../ui/Menu";
 import { findContent, laidOut, type PaneContent } from "./engine";
 import { InGrid, inGridSays, useGridNames } from "./InGrid";
 import { useGrids } from "./store";
-import { addToGrid } from "./windows";
+import { addToGrid, reveal } from "./windows";
+import { useDesk } from "../hub/store";
+
+/** A room's or a board's row, clicked: in the Grids view, where a grid
+ *  shows it, it's shown there (as a session's row does); else `open`, as
+ *  always. */
+export const openFromRow = (content: PaneContent, open: () => void): void => {
+  if (useDesk.getState().view === "grids" && reveal(content)) return;
+  open();
+};
 
 /** Where `content` would go in a grid with `panes`: its first empty pane, a
  *  pane of its own beside the largest, or where it already is. */

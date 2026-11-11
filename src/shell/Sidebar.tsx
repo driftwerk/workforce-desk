@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { workspaces } from "../chat/types";
 import { GridsSection } from "../grids/Grids";
 import { roomContent } from "../grids/engine";
-import { InGridRow, putInGrid } from "../grids/putIn";
+import { InGridRow, openFromRow, putInGrid } from "../grids/putIn";
 import { roomItem } from "../grids/where";
 import { SortList, SortRow } from "../groups/rows";
 import { arranged, moveRoom, nudgeRoom, useRoomOrder } from "../rooms/order";
@@ -215,7 +215,7 @@ export function Sidebar({
                         describedBy={markId ? `${roomHint} ${markId}` : roomHint}
                         more={`${r.name} options`}
                         register={(el) => (el ? roomRows.current.set(id, el) : roomRows.current.delete(id))}
-                        onOpen={() => !roomDragged.current && void openRoom(id)}
+                        onOpen={() => !roomDragged.current && openFromRow(roomContent(id), () => void openRoom(id))}
                         onNudge={(by) => nudgeRoomBy(id, by)}
                         onMenu={(at, from) => setRoomMenu({ id, at, from })}
                       >

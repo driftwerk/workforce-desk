@@ -866,6 +866,9 @@ body.gsplitting-h * {
 /* ── An empty pane's picker: what goes in it ────────────────────────────── */
 
 .gpane-picking {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: auto;
   padding: 8px;
 }
@@ -888,6 +891,7 @@ body.gsplitting-h * {
   font-weight: 700;
 }
 .gpick-search {
+  flex: none;
   box-sizing: border-box;
   width: 100%;
   height: 36px;
@@ -904,6 +908,7 @@ body.gsplitting-h * {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .gpick-tabs {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -988,4 +993,37 @@ body.gsplitting-h * {
   margin: 12px 0 0;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+/* In a small pane, the picker is the pane: no card around it, its tabs on
+   one line, so the list keeps the room. */
+.gpane-vacant .gpane-body {
+  container: gpane / size;
+}
+@container gpane (max-height: 320px) {
+  .gpane-picking {
+    align-items: stretch;
+    padding: 0;
+  }
+  .gpick {
+    width: 100%;
+    height: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .gpick-title,
+  .gpick-foot {
+    display: none;
+  }
+  .gpick-tabs {
+    flex: none;
+    flex-wrap: nowrap;
+    margin: 8px 0 4px;
+    overflow-x: auto;
+  }
+  .gpick-tab {
+    flex: none;
+  }
 }

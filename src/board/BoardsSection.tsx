@@ -16,7 +16,7 @@ import { useWaiting } from "./BoardView";
 import { arrangedBoards, moveBoard, nudgeBoard, useBoardOrder } from "./order";
 import { shownBoard, useBoard } from "./store";
 import { boardContent } from "../grids/engine";
-import { InGridRow, putInGrid } from "../grids/putIn";
+import { InGridRow, openFromRow, putInGrid } from "../grids/putIn";
 import { boardItem } from "../grids/where";
 
 /** Each board's tickets waiting on you, as its Waiting filter counts them. */
@@ -66,8 +66,10 @@ export function BoardsSection() {
   if (supported === false) return null;
   const open = (id: string) => {
     if (dragged.current) return;
-    useBoard.getState().show(id);
-    useDesk.getState().setView("board");
+    openFromRow(boardContent(id), () => {
+      useBoard.getState().show(id);
+      useDesk.getState().setView("board");
+    });
   };
   const sayWhere = (id: string) => {
     const ids = arrangedBoards(useBoard.getState().boards, useBoardOrder.getState().order).map((b) => b.id);
