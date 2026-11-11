@@ -703,7 +703,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Hand out work"
-                  sub="Start sessions and hand tickets to them without asking. Off, each session it would start comes to you to say yes to"
+                  sub="Start sessions and hand tickets to them without asking"
                   checked={o.act.handOutWork}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOutWork: v } }))}
                 />
