@@ -50,10 +50,12 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    - notarizes and staples the app, then builds, signs, notarizes and staples
      the disk image
    - writes the macOS updater artifact: `Desk.app.tar.gz` and its `.sig`
-4. Beside it, the `linux-x86_64` job builds the Linux desktop app on Ubuntu
-   22.04 (glibc 2.35):
+4. After the `backend` job (step 5), the `linux-x86_64` job builds the Linux
+   desktop app on Ubuntu 22.04 (glibc 2.35):
    - the three sidecars under their Linux names (`desk-helper`,
-     `desk-agents`, `desk-memory`), with ort's own ONNX Runtime;
+     `desk-agents`, `desk-memory`) are the `backend-linux-x86_64`
+     artifact's, not built again: ort's own ONNX Runtime, which a build on
+     22.04 would link, needs glibc 2.38 and fails to link there;
    - `Desk_<version>_amd64.AppImage` with its updater `.sig`, and
      `Desk_<version>_amd64.deb`.
 5. The `backend` job (`backend-build.yml`) builds the Linux backend alone,
