@@ -40,7 +40,7 @@ import { SessionCard } from "../session/SessionCard";
 import { LedgerPanel } from "../spend/Ledger";
 import { Board } from "../board/BoardView";
 import { BrowserPill } from "../browser/BrowserPill";
-import { useBrowserWatch } from "../browser/store";
+import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
@@ -162,8 +162,8 @@ export function App() {
 
   // Agents on this computer still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);
-  // Which browsers are open, for "Desk is using the browser".
-  useBrowserWatch(desk);
+  // Which browsers are open, for "Desk is using the browser", asked as the person.
+  useBrowserWatch(useLocalBrowser());
   const localIds = useChat((s) =>
     s.roster
       .filter((a) => s.hubs.some((h) => h.local && h.id === a.hubId))

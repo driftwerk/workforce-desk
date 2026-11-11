@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { HubError, type BrowserBackend, type BrowserLive, type DeskHub } from "../hub/client";
+import { useChat } from "../chat/store";
+import { browserOf, type BrowserOf } from "../hub/browser";
+import { HubError, type BrowserBackend, type BrowserLive } from "../hub/client";
 import { plainError } from "../ui/plainError";
 
 /** How often Desk asks the hub which browsers are open. */
@@ -16,10 +18,10 @@ interface BrowserState {
   supported: boolean;
   stopping: boolean;
   problem: string | null;
-  read: (hub: DeskHub) => Promise<void>;
+  read: (browser: BrowserOf) => Promise<void>;
   /** Stop: the turns using the browser end, it closes, and its session
    *  allowances go; one agent's, or every one. */
-  stop: (hub: DeskHub, agent?: string) => Promise<void>;
+  stop: (browser: BrowserOf, agent?: string) => Promise<void>;
 }
 
 export const useBrowser = create<BrowserState>((set, get) => ({
@@ -27,36 +29,45 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   supported: true,
   stopping: false,
   problem: null,
-  read: async (hub) => {
+  read: async (browser) => {
     try {
-      set({ live: await hub.browserLive() });
+      set({ live: await browser.live() });
     } catch (e) {
       if (e instanceof HubError && e.status === 404) set({ supported: false, live: [] });
     }
   },
-  stop: async (hub, agent) => {
+  stop: async (browser, agent) => {
     set({ stopping: true, problem: null });
     try {
-      await hub.stopBrowser(agent);
+      await browser.stop(agent);
       set({ live: get().live.filter((l) => agent && l.agent !== agent) });
     } catch (e) {
       set({ problem: plainError(e) });
     }
     set({ stopping: false });
-    await get().read(hub);
+    await get().read(browser);
   },
 }));
 
+/** Desk's browser on this computer's hub, as the person; null until the
+ *  hub is known. */
+export function useLocalBrowser(): BrowserOf | null {
+  const local = useChat((s) => s.hubs.find((h) => h.local));
+  const id = local?.id;
+  const url = local?.url;
+  return useMemo(() => (local ? browserOf(local) : null), [id, url]);
+}
+
 /** Keeps `useBrowser` in step with the hub while Desk is open. */
-export function useBrowserWatch(hub: DeskHub | null): void {
+export function useBrowserWatch(browser: BrowserOf | null): void {
   useEffect(() => {
-    if (!hub) return;
+    if (!browser) return;
     useBrowser.setState({ supported: true });
     const tick = () => {
-      if (useBrowser.getState().supported) void useBrowser.getState().read(hub);
+      if (useBrowser.getState().supported) void useBrowser.getState().read(browser);
     };
     tick();
     const t = setInterval(tick, POLL_MS);
     return () => clearInterval(t);
-  }, [hub]);
+  }, [browser]);
 }
