@@ -661,7 +661,7 @@ button.ticket-chip:hover {
     padding-inline: 16px;
   }
 }
-.sync-token p:not(.sync-token-why),
+.sync-token p,
 .sync-token-field input {
   color: var(--text);
 }

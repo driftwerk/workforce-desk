@@ -16,6 +16,7 @@ import { deskState, restoreBeforeRender } from "./restore/boot";
 import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
 import { followRooms, roomOrder, ROOMS_PREFIX } from "./rooms/order";
+import { boardOrder } from "./board/order";
 import { App } from "./shell/App";
 import { loadHost } from "./shell/host";
 import { DeskRichHost } from "./shell/richHost";
@@ -41,7 +42,7 @@ function Ready() {
   return null;
 }
 
-// Grids, the rooms' order, how far each conversation has been drained and
+// Grids, the rooms' order (and the boards', under the sidebar's), how far each conversation has been drained and
 // the machines' sessions in the sidebar are kept with the rest of what Desk
 // restores.
 void deskState.register(GRID_PREFIX);
@@ -58,7 +59,7 @@ const grid = detachedGrid();
 // too, so every screen words itself for it from the start.
 // The theme too: the window first shows in the one chosen.
 void Promise.all([
-  restoreBeforeRender(grid ? [] : [mainUi, roomOrder, machineSessions]),
+  restoreBeforeRender(grid ? [] : [mainUi, roomOrder, boardOrder, machineSessions]),
   loadHost().catch(() => undefined),
   paintSavedTheme().catch(() => undefined),
 ]).then(() => {

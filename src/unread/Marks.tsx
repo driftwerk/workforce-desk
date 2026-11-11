@@ -3,7 +3,7 @@ import type { FloorNeed } from "../floor/merge";
 import { useFloor, useNeeds } from "../floor/store";
 import { useDesk, type RoomDraft } from "../hub/store";
 import { Badge, needsYou } from "../ui/Badge";
-import { badgeOfRoom, dmsNotHere, inRoom, notHere, pastPoints, roomNotHere, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
+import { badgeOfGroup, badgeOfRoom, dmsNotHere, inRoom, notHere, pastPoints, roomNotHere, totalOf, type Badge as Marked, type BadgeData, type RoomMarker } from "./badges";
 import { useReads } from "./reads";
 import { useUnread } from "./summary";
 import { useWatching, watched } from "./watching";
@@ -86,6 +86,23 @@ export const useRoomMarker = (room: string): RoomMarker => {
   const needs = useNeeds();
   const hasFloor = useHasFloor();
   return badgeOfRoom(summary, drafts, inRoom(needs, room), hasFloor);
+};
+
+/** The rooms' badges together, each as its row's (`useRoomMarker`): what
+ *  the Rooms header shows while it's closed. */
+export const useRoomsBadge = (rooms: readonly string[]): Marked => {
+  const counted = useUnread((s) => s.local?.rooms);
+  const points = useReads((s) => s.local);
+  const here = useHere();
+  const drafts = useDesk((s) => s.roomDrafts);
+  const needs = useNeeds();
+  const hasFloor = useHasFloor();
+  return badgeOfGroup(
+    rooms.map((room) => {
+      const c = counted?.find((r) => r.roomId === room);
+      return badgeOfRoom(c && roomNotHere(c, points, here), drafts[room] ?? NO_DRAFTS, inRoom(needs, room), hasFloor);
+    }),
+  );
 };
 
 /** The version of Desk ready to restart into while it's unread: its
