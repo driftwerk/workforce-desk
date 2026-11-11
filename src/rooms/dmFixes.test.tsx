@@ -11,6 +11,14 @@ import { Draft } from "./Draft";
 import { MemberPicker } from "./MemberPicker";
 import { NotShared, savingShared, ShareAsk } from "./share";
 
+// The sign-in a failed answer offers listens for its installer: nothing to hear here.
+vi.mock("../platform", async (real) => ({
+  ...(await real<typeof import("../platform")>()),
+  onInstallProgress: vi.fn(() => Promise.resolve(() => {})),
+  onLoginProgress: vi.fn(() => Promise.resolve(() => {})),
+  cliInstalled: vi.fn(() => Promise.resolve(true)),
+}));
+
 const room = (id: string, name: string): Room => ({ id, name, slug: name.toLowerCase(), members: [], defaultMember: null }) as unknown as Room;
 
 beforeEach(() => {
