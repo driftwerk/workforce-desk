@@ -49,6 +49,9 @@ export const boardSyncOf = (hub: HubRef) => ({
   /** Take it: the ticket's issue, which no one has there, is assigned to
    *  the person, as themselves, through the route its board syncs by. */
   take: (ticket: string): Promise<Ticket> => deskCall(hub, "POST", `/api/desk/tickets/${encodeURIComponent(ticket)}/take`),
+  /** Asks the hub again who the person is on the board's Jira or Linear,
+   *  and keeps its answer: the board as it now is. */
+  recheckMe: (board: string): Promise<Board> => deskCall(hub, "POST", `/api/desk/boards/${encodeURIComponent(board)}/me`),
   /** Asks for a pass at once; the hub answers 202 and runs it. */
   syncNow: async (board: string): Promise<void> => {
     const res = await pairedHub(hub).fetch("POST", `/api/desk/boards/${encodeURIComponent(board)}/sync`);
@@ -142,10 +145,10 @@ export const syncStatus = (b: Board, hub: string): SyncStatus | null => {
 export const linkedTo = (b: Board, hub: string): string | null =>
   b.sync ? `${SYSTEM_TITLE[b.sync.system]} ${b.sync.target}${b.sync.via.kind === "hub" ? ` via ${hub}` : " with this computer's keys"}` : null;
 
-/** Whether a ticket can be taken there: synced, no one has its issue, and
- *  it isn't finished. */
+/** Whether a ticket can be taken there: the hub vouches for who the
+ *  person is, it is synced, no one has its issue, and it isn't finished. */
 export const takeable = (b: Board | undefined, t: Ticket): boolean =>
-  !!b?.sync && !b.sync.paused && !!t.external?.synced && !t.external.kept && t.external.assignee === null && t.state !== "done" && t.state !== "dropped";
+  !!b?.sync && !b.sync.paused && b.sync.meSource === "vouched" && !!t.external?.synced && !t.external.kept && t.external.assignee === null && t.state !== "done" && t.state !== "dropped";
 
 /** The tickets on a board's Left-the-filter shelf. */
 export const leftFilterOf = (tickets: readonly Ticket[]): Ticket[] => tickets.filter((t) => t.leftFilter && t.state !== "dropped");

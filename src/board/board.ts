@@ -41,7 +41,7 @@ export const isMine = (t: Pick<Ticket, "assignee" | "external">, me: string | nu
 
 /** Whether no one has a ticket: no one there (on a synced board) and no
  *  one here. */
-export const isUnassigned = (t: Pick<Ticket, "assignee" | "external">): boolean => !t.assignee && !t.external?.assignee;
+export const isUnassigned = (t: Pick<Ticket, "assignee" | "external">): boolean => !t.assignee && (t.external ? t.external.assignee === null : true);
 
 /** The board's quick filters: whose tickets (everyone's, yours, no one's),
  *  then what waits on you and what's pinned. */

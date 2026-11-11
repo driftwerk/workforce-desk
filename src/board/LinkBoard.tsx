@@ -67,7 +67,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [me, setMe] = useState("");
   /** Who the hub says the person is on the target's system (null: it
    *  can't say), by the system, hub and target it was asked for. */
-  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null } | null>(null);
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string } | null>(null);
+  /** The person said the hub's answer isn't them: it isn't kept. */
+  const [notMe, setNotMe] = useState(false);
+  /** Bumped to ask the hub again. */
+  const [asked, setAsked] = useState(0);
   const [checked, setChecked] = useState<{ key: string; result: Checked } | null>(null);
   const [states, setStates] = useState<Partial<Record<TicketState, string>>>({});
   const prefilledFor = useRef<string | null>(null);
@@ -125,10 +129,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // Who the person is there comes from the hub; only where it can't say is
   // a Linear member id asked for, for "assigned to me".
   const meKey = `${system}:${viaKey}:${targetKey}`;
-  const knownMe = heardMe?.key === meKey ? heardMe.me : undefined;
+  const heard = heardMe?.key === meKey ? heardMe : null;
+  const knownMe = notMe ? null : heard ? heard.me : undefined;
   const meNeeded = system === "linear" && filterKind === "assignedToMe" && knownMe === null;
   const filterReady = !!filter && (!meNeeded || linearId(me.trim()));
-  const checkKey = JSON.stringify([system, viaKey, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null]);
+  const checkKey = JSON.stringify([system, viaKey, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
     if (!system || !via || !offered || !targetGood) return;
@@ -159,7 +164,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // hub that wants the id says so as a refusal.
   useEffect(() => {
     if (!now || !targetKey) return;
-    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me });
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy });
     else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
@@ -188,6 +193,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         via,
         filter,
         ...(meNeeded ? { me: me.trim() } : {}),
+        ...(notMe ? { notMe: true } : {}),
         states: mapped,
       });
       useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
@@ -352,7 +358,27 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
             {knownMe && (
               <span className="move-opt-sub sync-me">
-                {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
+                {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.{" "}
+                <button type="button" className="link" onClick={() => setNotMe(true)}>
+                  That’s not me
+                </button>
+              </span>
+            )}
+            {(notMe || (heard && heard.me === null)) && (
+              <span className="move-opt-sub sync-me">
+                {notMe
+                  ? `Desk won’t go by ${viaName}’s answer: Take it waits until you check who you are on the board.`
+                  : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    setNotMe(false);
+                    setAsked((n) => n + 1);
+                  }}
+                >
+                  Check again
+                </button>
               </span>
             )}
           </fieldset>

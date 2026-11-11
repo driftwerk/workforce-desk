@@ -16,7 +16,7 @@ import { BoardDialog, DeleteBoard } from "./BoardDialogs";
 import { LinkBoardDialog, NewTokenDialog } from "./LinkBoard";
 import { LeftFilterShelf, SyncBar, UnlinkBoard } from "./SyncBar";
 import { localSync, syncChoices, useSyncHubs } from "./syncStore";
-import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, isMine, isUnassigned, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
+import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
@@ -106,14 +106,12 @@ export function Board() {
   const me = board?.sync?.me ?? null;
   const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me }), [onBoard, filter, q, now, waiting, planTickets, me]);
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
+  // Each chip counts the cards it would show, as the search and plan
+  // leave them.
   const chipCounts = useMemo(() => {
-    const open = onBoard.filter((t) => !snoozed(t, now) && t.state !== "done" && t.state !== "dropped");
-    return {
-      waiting: mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length,
-      mine: open.filter((t) => isMine(t, me)).length,
-      unassigned: open.filter(isUnassigned).length,
-    } as Partial<Record<BoardFilter, number>>;
-  }, [onBoard, mine, now, waiting, me]);
+    const shown = (f: BoardFilter) => columns(onBoard, { filter: f, q, now, waiting, plan: planTickets, me }).reduce((n, c) => n + c.cards.length, 0);
+    return { mine: shown("mine"), unassigned: shown("unassigned"), waiting: shown("waiting") } as Partial<Record<BoardFilter, number>>;
+  }, [onBoard, q, now, waiting, planTickets, me]);
 
   const states = useMemo(() => statesOf(all), [all]);
   const move = (id: string, shown: Parameters<ReturnType<typeof useBoard.getState>["move"]>[1]) => {

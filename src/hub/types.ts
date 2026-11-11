@@ -1385,6 +1385,11 @@ export interface BoardSync {
    *  hub said or they typed; absent from an older hub. */
   me?: string;
   meName?: string;
+  /** Where `me` came from: the hub vouched for it with the person's own
+   *  key, or they typed it. Take it needs a vouched one. */
+  meSource?: "vouched" | "typed";
+  /** Why the hub can't vouch for who the person is. */
+  meNote?: string;
   /** The remote state each column moves an issue to. */
   states: Partial<Record<TicketState, string>>;
   group?: string | null;
@@ -1449,6 +1454,9 @@ export interface LinkCheck {
   me?: SyncAssignee | null;
   /** Why the filter can't be counted yet, in the hub's words. */
   filterError?: string;
+  /** Why the hub can't say who the person is (a shared key, an older
+   *  hub), when it can't. */
+  meWhy?: string;
 }
 
 /** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */
@@ -1459,6 +1467,8 @@ export interface LinkBoard {
   via: SyncVia;
   filter: SyncFilter;
   me?: string;
+  /** The person said the hub's answer of who they are isn't them. */
+  notMe?: boolean;
   states: Partial<Record<TicketState, string>>;
 }
 
