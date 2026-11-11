@@ -89,10 +89,9 @@ describe("a grid's window opens Settings in the main window", () => {
     expect(open).toHaveBeenCalledWith("providers");
     setSettingsOpener(null);
   });
-  it("redacts secrets in details and in what Desk was doing", () => {
-    const p = explain(new HubError(500, "upstream said Authorization: Bearer abc123def456"), { what: "using token=hunter2xyz" });
-    expect(p.details).not.toContain("abc123");
-    expect(p.what).not.toContain("hunter2");
+  it("shows the raw text as it is: it's the person's own machine", () => {
+    const p = explain(new HubError(500, "upstream said Authorization: Bearer abc123def456"));
+    expect(p.details).toBe("upstream said Authorization: Bearer abc123def456");
   });
 });
 

@@ -1,6 +1,5 @@
 import { HubError } from "../hub/client";
 import { useUi, type SettingsSection } from "../shell/ui";
-import { redact } from "./redact";
 
 /** What the person can press to put it right. `ask` hands the problem to Desk's
  *  chat so the agent can act on it; otherwise `run` does the fix. */
@@ -135,7 +134,7 @@ const withRetry = (o: ExplainOptions): Fix => (o.retry ? { label: "Retry", run: 
 export function explain(e: unknown, o: ExplainOptions = {}): Problem {
   const raw = e instanceof Error ? e.message : String(e);
   const done = (p: Problem): Problem => {
-    const out: Problem = { ...p, ...(o.what ? { what: redact(o.what) } : {}) };
+    const out: Problem = { ...p, ...(o.what ? { what: o.what } : {}) };
     // The backstop: machinery words never reach the headline.
     if (!readable(out.plain)) {
       out.details ??= out.plain;
@@ -143,7 +142,6 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
       out.fix ??= withRetry(o);
     }
     if (raw.trim() && raw !== out.plain && out.details === undefined) out.details = raw;
-    if (out.details !== undefined) out.details = redact(out.details);
     return out;
   };
   const known = KNOWN.find((k) => k.match.test(raw));

@@ -103,6 +103,6 @@ describe("no Desk agent", () => {
   });
 
   it("secrets are out of what Desk's agent is sent", () => {
-    expect(askText({ plain: "x", what: "using token=hunter2xyz", details: "Authorization: Bearer abc123def456 ghp_abcdefghij1234567890" })).not.toMatch(/hunter2|abc123|ghp_abc/);
+    expect(askText({ plain: "x", what: "using token=Hunter2-Hunter2-Hunter2", details: "Authorization: Bearer abc123def456 ghp_abcdefghij1234567890" })).not.toMatch(/Hunter2|abc123|ghp_abc/);
   });
 });
