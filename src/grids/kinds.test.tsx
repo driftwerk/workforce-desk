@@ -397,3 +397,35 @@ describe("narrow and short panes, in grids.css", () => {
     expect(css).toMatch(/\.gpane-k-room \.gpane-body,\s*\.gpane-k-board \.gpane-body,\s*\.gpane-k-floor \.gpane-body \{\s*container: gpane \/ size;/);
   });
 });
+
+describe("a synced board in a pane", () => {
+  it("has the board's filters in its header (Everyone, Mine, Unassigned, Waiting on me, Pinned), and Take it on a card no one has", () => {
+    const ext = (key: string, assignee: { id: string; name: string } | null) => ({ system: "jira" as const, key, url: `https://x.test/${key}`, remoteUpdatedAt: at(0), synced: true, link: "l1", assignee });
+    useBoard.setState({
+      boards: {
+        [ACME.id]: {
+          ...ACME,
+          sync: { link: "l1", system: "jira", target: "SHOP", via: { kind: "thisHub" }, person: "me@x.test", filter: { kind: "project" }, states: {}, me: "u-me", meSource: "vouched" } as never,
+        },
+      },
+      tickets: Object.fromEntries(
+        [
+          ticket(1, { state: "todo", title: "Mine there", external: ext("SHOP-1", { id: "u-me", name: "Me" }) }),
+          ticket(2, { state: "todo", title: "No one's", external: ext("SHOP-2", null) }),
+          ticket(3, { state: "doing", title: "Dana's", external: ext("SHOP-3", { id: "u-dana", name: "Dana Kim" }) }),
+        ].map((t) => [t.id, t]),
+      ),
+    });
+    grid("halves", acme);
+    const p = pane("Acme");
+    const show = within(p).getByRole("group", { name: "Show" });
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Everyone", "Mine", "Unassigned", "Waiting on me", "Pinned"]);
+    expect(within(p).getAllByRole("button", { name: /^Take / }).map((b) => b.getAttribute("aria-label"))).toEqual(["Take ACM-2"]);
+    fireEvent.click(within(show).getByRole("button", { name: "Mine" }));
+    expect(within(p).getByText("Mine there")).toBeTruthy();
+    expect(within(p).queryByText("No one's")).toBeNull();
+    fireEvent.click(within(show).getByRole("button", { name: "Unassigned" }));
+    expect(within(p).getByText("No one's")).toBeTruthy();
+    expect(within(p).queryByText("Dana's")).toBeNull();
+  });
+});

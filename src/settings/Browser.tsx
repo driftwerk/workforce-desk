@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserPill } from "../browser/BrowserPill";
-import { backendLabel } from "../browser/store";
+import { backendLabel, useLocalBrowser } from "../browser/store";
+import type { BrowserOf } from "../hub/browser";
 import { useChat } from "../chat/store";
 import { outcomeOf, whenText } from "../computer/access";
 import { HubError, type BrowserSettings, type BrowserSettingsView, type BrowserUses, type ComputerActivityRow } from "../hub/client";
@@ -41,14 +42,16 @@ export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; to
       ? { text: "Not connected. Remote debugging is on, so Desk connects when it needs to, and Chrome asks you first.", tone: "" }
       : { text: `Not connected. Turn on remote debugging in Chrome ${c.min_version} or later so Desk can use it.`, tone: "" };
 
-const hubApi = (): BrowserApi | null => {
+/** The browser's settings and screenshots are the person's: asked of this
+ *  computer's hub as them. Its activity is the computer's list. */
+const hubApi = (browser: BrowserOf | null): BrowserApi | null => {
   const hub = useDesk.getState().hub;
-  if (!hub) return null;
+  if (!hub || !browser) return null;
   return {
-    settings: () => hub.browserSettings(),
-    save: (s) => hub.setBrowserSettings(s),
+    settings: browser.settings,
+    save: browser.save,
     activity: async () => (await hub.computerActivity({ kind: "browser" })).rows,
-    shot: (f) => hub.browserShot(f),
+    shot: browser.shot,
   };
 };
 
@@ -57,7 +60,8 @@ const hubApi = (): BrowserApi | null => {
  *  page as it looked after. */
 export function Browser({ api: given }: { api?: BrowserApi }) {
   const hubReady = useDesk((s) => s.hub !== null);
-  const api = given ?? (hubReady ? hubApi() : null);
+  const browser = useLocalBrowser();
+  const api = useMemo(() => given ?? (hubReady ? hubApi(browser) : null), [given, hubReady, browser]);
   const roster = useChat((s) => s.roster);
   const names = Object.fromEntries(roster.map((a) => [a.id, a.name]));
   const [view, setView] = useState<BrowserSettingsView | null | "failed" | "old">(null);
@@ -82,7 +86,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
       .activity()
       .then(setRows)
       .catch(() => setRows("failed"));
-  }, [hubReady, given]);
+  }, [api]);
   useEffect(reload, [reload]);
 
   const save = async (next: BrowserSettings) => {

@@ -282,36 +282,6 @@
   {
     "kind": "http",
     "method": "GET",
-    "path": "/api/desk/browser/settings"
-  },
-  {
-    "kind": "http",
-    "method": "PUT",
-    "path": "/api/desk/browser/settings"
-  },
-  {
-    "kind": "http",
-    "method": "GET",
-    "path": "/api/desk/browser"
-  },
-  {
-    "kind": "http",
-    "method": "POST",
-    "path": "/api/desk/browser/stop"
-  },
-  {
-    "kind": "http",
-    "method": "POST",
-    "path": "/api/desk/browser/stop"
-  },
-  {
-    "kind": "http",
-    "method": "GET",
-    "path": "/api/desk/browser/shots/0f0e0d0c-0b0a-4909-8807-060504030201.png"
-  },
-  {
-    "kind": "http",
-    "method": "GET",
     "path": "/api/vault"
   },
   {

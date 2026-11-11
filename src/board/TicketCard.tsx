@@ -7,9 +7,10 @@ import { useHubLayout } from "../groups/hubLayout";
 import { askMove, ticketSubject } from "../groups/move";
 import { Menu } from "../ui/Menu";
 import { useDesk } from "../hub/store";
-import type { ActivityParty, Ticket } from "../hub/types";
+import type { ActivityParty, SyncAssignee, SyncSystem, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
-import { SYSTEM_TITLE } from "../hub/boardSync";
+import { SYSTEM_TITLE, takeable } from "../hub/boardSync";
+import { Mark } from "../ui/Mark";
 import { blockers, needsLine } from "./board";
 import { useBoard } from "./store";
 import type { TicketState } from "../hub/types";
@@ -33,6 +34,53 @@ export function Assignee({ who, waiting }: { who: ActivityParty; waiting: boolea
         <ChargeBadge charge={charge} />
       )}
     </span>
+  );
+}
+
+/** Who has a synced ticket's issue on Jira or Linear: their initials and
+ *  name ("You" when it's the person), or Unassigned. */
+export function Upstream({ who, me, system }: { who: SyncAssignee | null; me: string | null | undefined; system: SyncSystem }) {
+  const title = SYSTEM_TITLE[system];
+  if (!who)
+    return (
+      <span className="board-upstream board-upstream-none" title={`No one has it on ${title}`}>
+        <span className="board-upstream-ring" aria-hidden="true" />
+        Unassigned
+      </span>
+    );
+  const you = !!me && who.id === me;
+  return (
+    <span className="board-upstream" title={`${you ? "You have" : `${who.name} has`} it on ${title}`}>
+      <Mark name={who.name} size="xs" person />
+      <span className="board-upstream-name">{you ? "You" : who.name}</span>
+    </span>
+  );
+}
+
+/** Take it: the issue is assigned to the person there. */
+export function TakeIt({ ticket, className = "btn btn-sm" }: { ticket: Ticket; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const fail = useDesk((s) => s.fail);
+  const system = useBoard((s) => s.boards[ticket.board]?.sync?.system ?? null);
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={busy}
+      title={system ? `Assign ${ticket.key ?? "it"} to you on ${SYSTEM_TITLE[system]}` : undefined}
+      aria-label={`Take ${ticket.key ?? "this ticket"}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        setBusy(true);
+        useBoard
+          .getState()
+          .take(ticket.id)
+          .catch(fail)
+          .finally(() => setBusy(false));
+      }}
+    >
+      {busy ? "Taking…" : "Take it"}
+    </button>
   );
 }
 
@@ -109,17 +157,22 @@ export function TicketCard({
   const movable = useHubLayout((s) => s.layout !== null);
   // A synced board's ticket shows its issue's key; one made here waits for
   // its key until it is created there.
-  const system = useBoard((s) => s.boards[t.board]?.sync?.system ?? null);
+  const board = useBoard((s) => s.boards[t.board]);
+  const system = board?.sync?.system ?? null;
   const ext = t.external ?? null;
   const keyShown = t.key ?? (system ? `Not on ${SYSTEM_TITLE[system]} yet` : null);
+  // Who has its issue there: shown once the hub has said (an older one
+  // doesn't), and Take it while no one does.
+  const upstream = system && ext && ext.assignee !== undefined && !settled ? ext.assignee : undefined;
+  const canTake = !settled && takeable(board, t);
   return (
-    <>
+    <div className={canTake ? "board-card-wrap board-card-wrap-take" : "board-card-wrap"}>
     <button
       ref={buttonRef}
       type="button"
       className={`floor-item board-card ${look}`}
       onContextMenu={
-        movable
+        movable || canTake
           ? (e) => {
               e.preventDefault();
               setMenu({ x: e.clientX, y: e.clientY });
@@ -161,15 +214,24 @@ export function TicketCard({
       {needs && !settled && <span className={blocked ? "floor-item-what state-blocked" : "floor-item-what"}>{blocked ? needs.replace(/^needs/, "Blocked by") : needs}</span>}
       {theirs && <Maker who={t.createdBy} />}
       {t.pushProblem && !settled && <span className="floor-item-what state-blocked board-push-problem">{t.pushProblem}</span>}
+      {upstream !== undefined && system && (
+        <span className="board-card-foot">
+          <Upstream who={upstream} me={board?.sync?.me} system={system} />
+        </span>
+      )}
     </button>
+      {canTake && <TakeIt ticket={t} className="btn btn-sm board-take" />}
       {menu && (
         <Menu
           label={`${t.key ?? "Ticket"} options`}
           at={menu}
-          entries={[{ kind: "item", label: "Move to group…", onSelect: () => askMove(ticketSubject(t)) }]}
+          entries={[
+            ...(canTake ? [{ kind: "item" as const, label: "Take it", onSelect: () => void useBoard.getState().take(t.id).catch(useDesk.getState().fail) }] : []),
+            ...(movable ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(ticketSubject(t)) }] : []),
+          ]}
           onClose={() => setMenu(null)}
         />
       )}
-    </>
+    </div>
   );
 }

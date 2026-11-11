@@ -518,20 +518,6 @@ export class DeskHub {
     const qs = q.toString();
     return this.call("GET", `/api/desk/computer/activity${qs ? `?${qs}` : ""}`);
   };
-  /** Desk's browser settings and the person's Chrome's standing. */
-  browserSettings = (): Promise<BrowserSettingsView> => this.call("GET", "/api/desk/browser/settings");
-  setBrowserSettings = (s: BrowserSettings): Promise<BrowserSettingsView> => this.call("PUT", "/api/desk/browser/settings", s);
-  /** The browsers open now. */
-  browserLive = async (): Promise<BrowserLive[]> => (await this.call<{ live: BrowserLive[] }>("GET", "/api/desk/browser")).live;
-  /** Stop: the turns using the browser end, it closes, and its session allowances go. */
-  stopBrowser = (agent?: string): Promise<{ closed: number; turns_stopped: number; allowances_dropped: number }> =>
-    this.call("POST", "/api/desk/browser/stop", agent ? { agent } : {});
-  /** A screenshot a browser's activity row names. */
-  browserShot = async (file: string): Promise<Blob> => {
-    const res = await this.t.fetch("GET", `/api/desk/browser/shots/${encodeURIComponent(file)}`);
-    if (!res.ok) throw await refusal(res);
-    return res.blob();
-  };
   /** Whether macOS lets agents read other apps' files here. */
   diskAccess = async (): Promise<DiskAccess> => (await this.call<{ state: DiskAccess }>("GET", "/api/desk/computer/disk-access")).state;
 

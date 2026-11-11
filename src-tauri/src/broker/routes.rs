@@ -208,12 +208,6 @@ const HTTP: &[Route] = &[
         &["agent", "kind", "before"],
     ),
     route("GET", "/api/desk/computer/disk-access"),
-    // Desk's browser: its settings, which are open, Stop, and screenshots.
-    route("GET", "/api/desk/browser/settings"),
-    route("PUT", "/api/desk/browser/settings"),
-    route("GET", "/api/desk/browser"),
-    route("POST", "/api/desk/browser/stop"),
-    route("GET", "/api/desk/browser/shots/{}"),
     // The providers agents think with.
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),
@@ -621,6 +615,7 @@ mod tests {
             ("DELETE", "/api/desk/boards/b1/link"),
             ("POST", "/api/desk/boards/b1/pause"),
             ("POST", "/api/desk/boards/b1/sync"),
+            ("POST", "/api/desk/tickets/t1/take"),
             ("POST", "/api/me/remote-mcp-tokens/desk"),
             // Plans, the wrong way: a boss proposes and changes its plans
             // with its crew tools, never through the page.
@@ -669,6 +664,36 @@ mod tests {
             ("GET", "/api/desk/handovers/h1"),
             ("GET", "/api/desk/moves/preview"),
             ("PUT", "/api/desk/handovers/h1"),
+        ] {
+            assert!(
+                http(method, target).is_err(),
+                "{method} {target} was allowed"
+            );
+            assert!(
+                machine_http(method, target).is_err(),
+                "{method} {target} was allowed on a machine"
+            );
+            assert!(
+                native_local(method, target).is_err(),
+                "{method} {target} was native"
+            );
+        }
+    }
+
+    /// Desk's browser is the person's: the hub answers only them, so the
+    /// page asks it as the person over the paired path, never with the
+    /// broker's token or a machine's.
+    #[test]
+    fn the_browser_is_asked_as_the_person_never_through_the_broker() {
+        for (method, target) in [
+            ("GET", "/api/desk/browser/settings"),
+            ("PUT", "/api/desk/browser/settings"),
+            ("GET", "/api/desk/browser"),
+            ("POST", "/api/desk/browser/stop"),
+            (
+                "GET",
+                "/api/desk/browser/shots/0f0e0d0c-0b0a-4909-8807-060504030201.png",
+            ),
         ] {
             assert!(
                 http(method, target).is_err(),
