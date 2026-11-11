@@ -167,3 +167,13 @@ describe("the store's fail", () => {
     expect(useDesk.getState().error).toBeNull();
   });
 });
+
+describe("plainError keeps the raw text where there is no Details", () => {
+  it("appends it, on one line, to the generic headline", () => {
+    expect(plainError(new Error("boom\n  at x"))).toBe("Desk couldn’t finish that. (boom at x)");
+    expect(plainError(new HubError(400, "the body is {x}"))).toBe("Desk couldn’t do that. (the body is {x})");
+  });
+  it("leaves a specific headline alone", () => {
+    expect(plainError(new HubError(404, "no such session"))).toBe("That isn’t there any more.");
+  });
+});

@@ -31,6 +31,8 @@ export interface ExplainOptions {
   localDown?: boolean;
 }
 
+export const GENERIC = ["Desk couldn’t do that.", "Desk couldn’t finish that."] as const;
+
 const ASK: Fix = { label: "Ask Desk to fix it", ask: true };
 
 const settings = (label: string, section: Parameters<ReturnType<typeof useUi.getState>["openSettings"]>[0]): Fix => ({
@@ -124,7 +126,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     // The backstop: machinery words never reach the headline.
     if (!readable(out.plain)) {
       out.details ??= out.plain;
-      out.plain = "Desk couldn’t do that.";
+      out.plain = GENERIC[0];
       out.fix ??= withRetry(o);
     }
     if (raw.trim() && raw !== out.plain && out.details === undefined) out.details = raw;
@@ -141,7 +143,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     const m = known ? known.match.exec(raw) : null;
     if (known && m) return done({ plain: known.plain(m), fix: known.fix(o) });
     if (readable(scrub(raw))) return done({ plain: scrub(raw), ...(scrub(raw) !== raw ? { details: raw } : {}) });
-    return done({ plain: "Desk couldn’t do that.", fix: ASK, details: raw });
+    return done({ plain: GENERIC[0], fix: ASK, details: raw });
   }
   if (e instanceof TypeError) {
     return done({
@@ -154,5 +156,5 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
   if (known && m) return done({ plain: known.plain(m), fix: known.fix(o) });
   if (readable(scrub(raw))) return done({ plain: scrub(raw), ...(scrub(raw) !== raw ? { details: raw } : {}), ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });
   // Several lines (a CLI's tail, git's stderr): the first sentence leads.
-  return done({ plain: "Desk couldn’t finish that.", fix: withRetry(o), details: raw });
+  return done({ plain: GENERIC[1], fix: withRetry(o), details: raw });
 }
