@@ -255,7 +255,7 @@ describe("moving a session to another boss's group", () => {
     open(SESSION);
     expect(hub.asked).toEqual([]);
     fireEvent.click(screen.getByRole("radio", { name: /^Globex/ }));
-    await screen.findByText("Only the person who holds this computer’s hub can move things between groups.", {}, { timeout: PREVIEW_AFTER_MS + 2000 });
+    await screen.findByText("Only the person whose Desk this is can move things between groups.", {}, { timeout: PREVIEW_AFTER_MS + 2000 });
     expect(moveButton("Globex").disabled).toBe(true);
   });
 });

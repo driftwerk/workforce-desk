@@ -92,7 +92,7 @@ describe("Settings → Memory", () => {
 
   it("says so on a hub that keeps no memory settings", async () => {
     await show(fakeHub(null, null));
-    expect(screen.getByText("This computer's hub doesn't keep Desk Memory's settings yet.")).toBeTruthy();
+    expect(screen.getByText("This version of Desk doesn't keep Desk Memory's settings yet. Update Desk to change them.")).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
   });
 });

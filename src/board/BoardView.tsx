@@ -218,7 +218,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
         <header className="board-head">
           <h1 className="display">Board</h1>
         </header>
-        <p className="empty muted">This computer's hub has no board yet. Update Desk to keep tickets here.</p>
+        <p className="empty muted">This version of Desk has no board yet. Update Desk to keep tickets here.</p>
       </main>
     );
 

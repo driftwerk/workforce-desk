@@ -70,7 +70,7 @@ export const deleteAsk = (boss: string, group: string) => ({
   action: `Delete ${group}`,
 });
 
-const NOT_CONNECTED = "Desk isn’t connected to this computer’s hub just now; try again in a moment.";
+const NOT_CONNECTED = "Desk isn’t ready just now; try again in a moment.";
 
 /** Reads again who oversees what, and the Floor, after a change. */
 const heard = async (): Promise<void> => {
