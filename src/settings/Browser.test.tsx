@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { BrowserSettings, BrowserSettingsView, ComputerActivityRow } from "../hub/client";
+import { useChat } from "../chat/store";
+import type { BrowserSettings, BrowserSettingsView, ComputerActivityRow, DeskHub } from "../hub/client";
+import { useDesk } from "../hub/store";
 import { Browser, chromeLine, sitesOf, type BrowserApi } from "./Browser";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -10,9 +12,28 @@ vi.mock("../platform", async (importOriginal) => ({
   openUrl: (url: string) => opened.push(url),
 }));
 
+// This computer's hub, asked as the person over the paired path: every
+// request recorded with the hub it went to.
+const asked = vi.hoisted(() => [] as { hub: string; method: string; path: string }[]);
+vi.mock("../hub/net", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hub/net")>()),
+  pairedHub: (hub: { id: string }) => ({
+    fetch: async (method: string, path: string) => {
+      asked.push({ hub: hub.id, method, path });
+      if (path.startsWith("/api/desk/browser/shots/")) return new Response(new Blob(["png"]), { status: 200, headers: { "content-type": "image/png" } });
+      const answer = { settings: { use: "both", sites: { allow: [], block: [] } }, chrome: { available: false, connected: false, min_version: 144, turn_on: "chrome://inspect/#remote-debugging" } };
+      return new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } });
+    },
+    socket: () => {
+      throw new Error("no sockets here");
+    },
+  }),
+}));
+
 afterEach(() => {
   cleanup();
   opened.length = 0;
+  asked.length = 0;
 });
 
 const view = (s: Partial<BrowserSettings> = {}, chrome: Partial<BrowserSettingsView["chrome"]> = {}): BrowserSettingsView => ({
@@ -120,4 +141,24 @@ it("says when the hub has no browser yet", async () => {
 it("reads sites and Chrome's standing in plain words", () => {
   expect(sitesOf(" a.test, B.test\n\na.test ")).toEqual(["a.test", "b.test"]);
   expect(chromeLine({ available: true, connected: false, min_version: 144, turn_on: "" }).text).toMatch(/Chrome asks you first/);
+});
+
+it("asks this computer's hub as the person for the settings, a change and the screenshots", async () => {
+  const shot = "0f0e0d0c-0b0a-4909-8807-060504030201.png";
+  const computerActivity = vi.fn(async () => ({ rows: [row({ arguments: { url: "https://shop.example/cart", backend: "desk", screenshot: shot } })], next: null }));
+  useDesk.setState({ hub: { computerActivity } as unknown as DeskHub });
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:50148", local: true, revision: "r1" }] });
+  globalThis.URL.createObjectURL = vi.fn(() => "blob:shot");
+  globalThis.URL.revokeObjectURL = vi.fn();
+  render(<Browser />);
+  await act(async () => {});
+  await act(async () => {});
+  await act(async () => fireEvent.click(screen.getByRole("radio", { name: "My Chrome" })));
+  expect(asked).toEqual([
+    { hub: "local", method: "GET", path: "/api/desk/browser/settings" },
+    { hub: "local", method: "GET", path: `/api/desk/browser/shots/${shot}` },
+    { hub: "local", method: "PUT", path: "/api/desk/browser/settings" },
+  ]);
+  expect(computerActivity).toHaveBeenCalledWith({ kind: "browser" });
+  useDesk.setState({ hub: null });
 });

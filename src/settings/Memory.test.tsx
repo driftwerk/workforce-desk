@@ -83,9 +83,9 @@ describe("Settings → Memory", () => {
 
   it("shows what loaded when another part fails, and says why", async () => {
     const hub = fakeHub(settingsOf());
-    hub.memoryIndex.mockRejectedValue(new Error("The hub didn't answer."));
+    hub.memoryIndex.mockRejectedValue(new Error("Desk didn't answer."));
     await show(hub);
-    expect(screen.getByRole("alert").textContent).toContain("The hub didn't answer.");
+    expect(screen.getByRole("alert").textContent).toContain("Desk didn't answer.");
     expect(screen.getByRole("switch", { name: "Pause remembering" })).toBeTruthy();
     expect(screen.queryByText("Loading…")).toBeNull();
   });

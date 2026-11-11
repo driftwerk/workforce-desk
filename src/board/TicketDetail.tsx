@@ -19,8 +19,8 @@ import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
 import { useBoard } from "./store";
-import { Assignee } from "./TicketCard";
-import { issueUrl, SYSTEM_TITLE } from "../hub/boardSync";
+import { Assignee, TakeIt, Upstream } from "./TicketCard";
+import { issueUrl, SYSTEM_TITLE, takeable } from "../hub/boardSync";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -186,6 +186,9 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     p.catch((e) => setProblem(plainError(e)));
   };
   const session = t.assignee?.kind === "session" ? sessions[t.assignee.id] : undefined;
+  const board = useBoard((s) => s.boards[t.board]);
+  const sync = board?.sync ?? null;
+  const canTake = takeable(board, t);
   const neededBy = useMemo(() => Object.values(all).filter((o) => o.needs.includes(t.id)), [all, t.id]);
   const save = () => {
     const field = editing;
@@ -307,12 +310,19 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
           </select>
           {t.assignee ? <Assignee who={t.assignee} waiting={waiting} /> : <span className="faint small">No one has it</span>}
         </div>
+        {sync && t.external && t.external.assignee !== undefined && (
+          <div className="ticket-row">
+            <span className="ov-label muted">On {SYSTEM_TITLE[sync.system]}</span>
+            <Upstream who={t.external.assignee} me={sync.me} system={sync.system} />
+          </div>
+        )}
         <div className="ticket-actions">
           {session && (
             <button type="button" className="btn btn-sm" onClick={() => useDesk.getState().open(session.id)}>
               Go to session
             </button>
           )}
+          {canTake && <TakeIt ticket={t} className="btn btn-sm btn-signal" />}
           <button type="button" className="btn btn-sm" aria-haspopup="menu" onClick={(e) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget })}>
             Hand to…
           </button>

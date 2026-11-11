@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { deskListeners, useDesk } from "../hub/store";
 import type { AssignTo, Board, DeskEvent, NewTicket, Ticket, TicketMove, TicketPatch } from "../hub/types";
 import { moved } from "./board";
+import { localSync } from "./syncStore";
 
 interface BoardState {
   boards: Record<string, Board>;
@@ -29,6 +30,9 @@ interface BoardState {
   move: (id: string, move: TicketMove) => Promise<void>;
   edit: (id: string, patch: TicketPatch) => Promise<void>;
   assign: (id: string, to: AssignTo) => Promise<void>;
+  /** Take it: the ticket's issue is assigned to the person on its Jira or
+   *  Linear, as themselves (through this computer's hub, as the person). */
+  take: (id: string) => Promise<void>;
   need: (id: string, other: string, needs: boolean) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
@@ -152,6 +156,22 @@ export const useBoard = create<BoardState>((set, get) => {
     assign: async (id, to) => {
       const hub = hubNow();
       if (hub) await ask(id, () => hub.assignTicket(id, to));
+    },
+    take: async (id) => {
+      const sync = localSync();
+      if (!sync) return;
+      const since = mark(id);
+      try {
+        answered(await sync.take(id), since);
+      } catch (e) {
+        // Refused (someone took it meanwhile): the ticket as the hub now
+        // has it, which says who, unless something newer came.
+        const fresh = await hubNow()
+          ?.ticket(id)
+          .catch(() => null);
+        if (fresh) answered(fresh, since);
+        throw e;
+      }
     },
     need: async (id, other, needs) => {
       const hub = hubNow();

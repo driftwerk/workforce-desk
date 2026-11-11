@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { helperLastReason, openLoginItems, startHelper, type HelperStatus } from "../platform";
+import { helperLastReason, openLoginItems, startHelper } from "../platform";
+import { refusal } from "./helperNote";
 import { useHost } from "../shell/host";
 import { useDesk } from "./store";
 
@@ -24,26 +25,6 @@ export function useHubDown(grace = GRACE_MS): boolean {
   }, [connected, grace]);
   return down;
 }
-
-/** What a helper that did not start says, in the person's words, and the
- *  button that helps (if any). */
-const refusal = (s: HelperStatus): { text: string; login?: true } | null => {
-  switch (s.state) {
-    case "running":
-    case "starting":
-      return null;
-    case "development":
-      return { text: "This is a development run: start desk-hubd by hand, as you did before." };
-    case "needs-approval":
-      return { text: "Desk Helper is turned off in your login items.", login: true };
-    case "move-to-applications":
-      return { text: "Move Desk to your Applications folder, then open it from there." };
-    case "failed":
-      return { text: `Desk Helper couldn’t start: ${s.message}` };
-    default:
-      return { text: "Desk Helper couldn’t be started from here. Settings → Help says why." };
-  }
-};
 
 /** A quiet notice that this computer's hub isn't answering, with the last
  *  reason desk-hubd logged and a way to start it. The sidebar and Floor stay
@@ -104,13 +85,13 @@ export function HubDownBanner({ down }: { down: boolean }) {
   };
 
   return (
-    <section className="hub-down" role="status" aria-label="This computer’s hub">
+    <section className="hub-down" role="status" aria-label="Desk’s helper on this computer">
       <span className="hub-down-text">
-        <b>{starting ? "Starting this computer’s hub…" : "This computer’s hub isn’t running"}</b>
+        <b>{starting ? "Starting Desk’s helper…" : "Desk’s helper isn’t running"}</b>
         <span className="muted small">
           {starting
             ? "Reconnecting as soon as it answers."
-            : "What you see is from before it stopped, and it won’t change until the hub is back."}
+            : "What you see is from before it stopped, and it won’t change until the helper is back."}
         </span>
         {!starting && (note || slow) && (
           <span className="small hub-down-note">{note ? note.text : "It was started but isn’t answering yet."}</span>

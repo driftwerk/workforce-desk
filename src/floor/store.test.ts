@@ -301,7 +301,7 @@ describe("the floor's store", () => {
     await settle();
     hubs.local!.decide = () => 403;
     await useFloor.getState().decide("local", floorOf("local")!.floor!.needs[0]!, "deny");
-    expect(useFloor.getState().problems["local/ap-1"]).toBe("Desk isn’t allowed to do that on this computer.");
+    expect(useFloor.getState().problems["local/ap-1"]).toBe("Desk wasn’t allowed to do that.");
     expect(floorOf("local")?.floor?.needs).toHaveLength(1);
   });
 });

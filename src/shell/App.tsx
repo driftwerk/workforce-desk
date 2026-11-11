@@ -8,8 +8,11 @@ import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
+import { ProblemNote } from "../ui/ProblemNote";
+import { setStarter } from "../ui/problem";
+import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -40,7 +43,7 @@ import { SessionCard } from "../session/SessionCard";
 import { LedgerPanel } from "../spend/Ledger";
 import { Board } from "../board/BoardView";
 import { BrowserPill } from "../browser/BrowserPill";
-import { useBrowserWatch } from "../browser/store";
+import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
@@ -53,7 +56,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
-import { useUi } from "./ui";
+import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
@@ -118,6 +121,21 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   const hubDown = useHubDown();
+  // A grid's window asks for Settings here, the only window that has them.
+  useEffect(
+    () =>
+      subscribe(
+        listen<{ section: SettingsSection }>("open-settings", (e) => {
+          useUi.getState().openSettings(e.payload.section);
+          void getCurrentWindow().setFocus().catch(() => undefined);
+        }),
+      ),
+    [],
+  );
+  useEffect(() => {
+    setStarter(startLocalHelper);
+    return () => setStarter(null);
+  }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
   useAppBadge();
@@ -162,8 +180,8 @@ export function App() {
 
   // Agents on this computer still greeting with the hub's WELCOME.md get Desk's.
   const desk = useDesk((s) => s.hub);
-  // Which browsers are open, for "Desk is using the browser".
-  useBrowserWatch(desk);
+  // Which browsers are open, for "Desk is using the browser", asked as the person.
+  useBrowserWatch(useLocalBrowser());
   const localIds = useChat((s) =>
     s.roster
       .filter((a) => s.hubs.some((h) => h.local && h.id === a.hubId))
@@ -409,11 +427,8 @@ export function App() {
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (
-        <div className="toast toast-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="link" onClick={clearError}>
-            Dismiss
-          </button>
+        <div className="toast toast-error toast-problem" role="alert">
+          <ProblemNote problem={error} onDone={clearError} />
         </div>
       )}
     </div>
