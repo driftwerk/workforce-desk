@@ -551,7 +551,7 @@ function BoardPaneNote({ supported }: { supported: boolean | null }) {
     <div className="pane-note">
       <p className="muted small">
         {supported === false
-          ? "This computer's hub keeps no boards. Update Desk to keep tickets here."
+          ? "This version of Desk keeps no boards. Update Desk to keep tickets here."
           : supported === null
             ? "Reading the board…"
             : "This board is no longer on this computer's hub."}
