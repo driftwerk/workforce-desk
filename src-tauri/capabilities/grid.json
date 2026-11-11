@@ -72,6 +72,7 @@
     "allow-machine-home",
     "allow-backend-home",
     "allow-programs-under",
+    "allow-repo-facts",
     "allow-grid-window-open",
     "allow-grid-window-close",
     "allow-grid-windows-open",

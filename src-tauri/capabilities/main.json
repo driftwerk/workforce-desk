@@ -112,6 +112,7 @@
     "allow-backend-home",
     "allow-pick-folder",
     "allow-programs-under",
+    "allow-repo-facts",
     "allow-grid-window-open",
     "allow-grid-window-close",
     "allow-grid-windows-open",

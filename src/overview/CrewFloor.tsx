@@ -4,6 +4,7 @@ import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
+import { OverseerCard } from "../floor/OverseerCard";
 import { FloorSection, SealedNotes, useSections } from "../floor/FloorSection";
 import { handedOn, totals, type DeskItem } from "../floor/sections";
 import { plain } from "../ui/plain";
@@ -187,6 +188,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
           {sections && <NeedsJump sections={sections} />}
           <RestoreBanner />
           <AccountNeeds />
+          <OverseerCard />
           {onFloor ? (
             <>
               {sectioned.kind === "flat" && <SealedNotes notes={sectioned.sealed} />}

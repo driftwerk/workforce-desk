@@ -20,6 +20,7 @@ mod navigation;
 mod pair_gate;
 mod paired;
 mod remote_images;
+mod repos;
 mod reread;
 mod state;
 mod support;
@@ -675,6 +676,19 @@ async fn machine_home(
         .map_err(text)?
 }
 
+/// The repositories of the folders Desk's sessions run in, with their
+/// remotes and workflows: what Act fully's setup suggests.
+#[tauri::command]
+async fn repo_facts(
+    app: State<'_, App>,
+    folders: Vec<String>,
+) -> CommandResult<Vec<repos::RepoFacts>> {
+    let backend = app.backend()?;
+    tauri::async_runtime::spawn_blocking(move || repos::repo_facts(&backend.host, &folders))
+        .await
+        .map_err(text)
+}
+
 /// What's running in a terminal whose shell is `pid`, shell first.
 #[tauri::command]
 async fn programs_under(app: State<'_, App>, pid: u32) -> CommandResult<Vec<String>> {
@@ -1107,6 +1121,7 @@ pub fn run() {
             backend_home,
             pick_folder,
             programs_under,
+            repo_facts,
             grid_window_open,
             grid_window_close,
             grid_windows_open,

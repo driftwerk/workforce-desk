@@ -27,6 +27,7 @@ const fakeHub = () =>
     manager: vi.fn(() => Promise.resolve({ agentId: "desk", level: "watch" })),
     overview: vi.fn(() => Promise.resolve({ brief: null, counts: { working: 0, needsYou: 0, doneToday: 0 }, items: [] })),
     engines: vi.fn(() => Promise.resolve(ENGINES)),
+    spend: vi.fn(() => Promise.resolve(null)),
   }) as unknown as DeskHub;
 
 const caps = (line: "submit" | "paste" | "none") => ({ state: "hooks", approvals: "desk", resume: "byId", interrupt: "keys", plan: null, line, notes: [] });
@@ -147,13 +148,13 @@ describe("Oversees the crew", () => {
     const levels = within(screen.getByRole("radiogroup", { name: "How much it does on its own" }))
       .getAllByRole("radio")
       .map((r) => r.querySelector("b")?.textContent);
-    expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully"]);
-    expect(screen.getByText("Merges, tags, releases and runs your named workflows in the repos you name, under a daily budget.")).toBeTruthy();
+    expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully", "Unbound"]);
+    expect(screen.getByText("As Act, and merges, tags, releases and runs your named workflows in the repos you name, under a daily budget.")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Where Ledger acts fully" })).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ level: "full" }));
     expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
-    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+    expect(screen.getByText("Acting as Act: Act fully needs repos to work in and a daily budget.")).toBeTruthy();
     // Act's own rules hold at Act fully too.
     expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
     expect(screen.getByText("Always yours, at every level")).toBeTruthy();
@@ -169,7 +170,7 @@ describe("Oversees the crew", () => {
     fireEvent.change(repo, { target: { value: "acme/acme-web" } });
     await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"] } }));
-    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+    expect(screen.getByText("Acting as Act: Act fully needs a daily budget.")).toBeTruthy();
 
     // The budget is required, in the hub's words when it's wrong.
     const budget = screen.getByRole("textbox", { name: "Daily budget in US dollars" });
@@ -179,9 +180,9 @@ describe("Oversees the crew", () => {
     fireEvent.change(budget, { target: { value: "25" } });
     await act(async () => fireEvent.keyDown(budget, { key: "Enter" }));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"], budget_usd_per_day: 25 } }));
-    expect(screen.queryByText("Acting as Act until repos and a budget are set.")).toBeNull();
-    // Set, but the hub still runs it at Act: it says so.
-    expect(screen.getByText(/the hub says Act fully isn’t in force/)).toBeTruthy();
+    expect(screen.queryByText(/Act fully needs/)).toBeNull();
+    // Set, but the hub still runs it at Act: it says why, as far as Desk can tell.
+    expect(screen.getByText(/Acting as Act until the hub has read today’s spend/)).toBeTruthy();
 
     // Workflows: plain file names only.
     const workflow = screen.getByRole("textbox", { name: "Add a workflow" });
@@ -195,7 +196,7 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ full: { workflows: ["deploy.yml"] } }));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove acme/acme-web" })));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: [] } }));
-    expect(screen.getByText("Acting as Act until repos and a budget are set.")).toBeTruthy();
+    expect(screen.getByText("Acting as Act: Act fully needs a repo to work in.")).toBeTruthy();
   });
 
   it("says nothing of acting as Act once the hub runs it at Act fully", async () => {
@@ -301,9 +302,7 @@ describe("Oversees the crew", () => {
     show(fakeHub(), `${START}\n${UNBOUND}`);
     expect(screen.queryByText("Unbound now.")).toBeNull();
     expect(screen.queryByText(/^No limits: /)).toBeNull();
-    expect(
-      screen.getByText("Unbound is set, but not in force now (for example, today’s budget is spent): Desk acts within Act fully’s limits."),
-    ).toBeTruthy();
+    expect(screen.getByText(/Acting as Act until the hub has read today’s spend/)).toBeTruthy();
     cleanup();
     // No boss view at hand: the configured line, without a claim of force.
     useFloor.setState({ hubs: {} });

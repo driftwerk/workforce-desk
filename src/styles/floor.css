@@ -480,3 +480,21 @@
   grid-column: 2 / -1;
   overflow-wrap: anywhere;
 }
+
+/* ── Who oversees the crew ──────────────────────────────────────────────── */
+
+.floor-card-head .floor-card-close {
+  margin-left: auto;
+}
+.overseer-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.overseer-full {
+  padding: 4px 0;
+}
+.overseer-foot {
+  display: flex;
+  justify-content: flex-end;
+}

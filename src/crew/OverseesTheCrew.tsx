@@ -2,12 +2,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
-import type { OversightLevel } from "../hub/types";
 import { useFloor } from "../floor/store";
 import { useOverview } from "../overview/store";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
+import { LevelPicker } from "./LevelPicker";
+import { PRESET_NAME, presetOf, shownPreset, withPreset } from "./presets";
+import { WhyNotInForce } from "./WhyNotInForce";
 import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove } from "../groups/move";
@@ -16,7 +18,6 @@ import type { EngineInfo } from "../hub/types";
 import {
   MAX_CHECKINS_PER_HOUR,
   MAX_WORK_TURNS_PER_HOUR,
-  fullMissing,
   isUnbound,
   oversightOf,
   parseBudget,
@@ -40,12 +41,6 @@ const TAKE_ON = (name: string): { id: TakeOn; name: string; desc: string }[] => 
   { id: "all", name: "Every session it can", desc: `Each session on Desk’s line, as it starts. One you release stays yours.` },
 ];
 
-const LEVELS: { id: OversightLevel; name: string; desc: string }[] = [
-  { id: "watch", name: "Watch", desc: "Answers “what’s everyone doing?” and tells you when something needs you." },
-  { id: "suggest", name: "Suggest", desc: "Also proposes what to do. Nothing happens until you say yes." },
-  { id: "act", name: "Act", desc: "Does the work itself, within the switches below: starts and runs sessions, nudges, answers, and tells you what it did. What a switch keeps off comes to you to say yes to." },
-  { id: "full", name: "Act fully", desc: "Merges, tags, releases and runs your named workflows in the repos you name, under a daily budget." },
-];
 
 /** What always stays with you, at every level, Act fully included: the
  *  hub's never-list, by heading. */
@@ -256,11 +251,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     update((x) => ({ ...x, enabled: on, group: null }));
   };
 
-  const current = o ? LEVELS.findIndex((l) => l.id === o.level) : -1;
   // The level the hub runs it at now: Act until Act fully is in force.
   const running =
     manager?.agentId === agent.id ? manager.level : (manager?.bosses?.find((b) => b.agentId === agent.id)?.level ?? null);
-  const missing = o ? fullMissing(o) : [];
   const unbound = o ? isUnbound(o) : false;
   // What the hub says of it now: undefined while no boss view is at hand.
   const live = useFloor((s) => s.hubs[agent.hubId]?.floor?.bosses?.find((b) => b.agent === agent.id));
@@ -314,23 +307,10 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
         <>
           <div className="oversee-part">
             <h3>How much {name} does on its own</h3>
-            <div className="oversee-levels oversee-levels-4" role="radiogroup" aria-label="How much it does on its own">
-              {LEVELS.map((l, i) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  role="radio"
-                  className="oversee-level"
-                  aria-checked={o.level === l.id}
-                  tabIndex={i === current ? 0 : -1}
-                  onClick={() => o.level !== l.id && update((x) => ({ ...x, level: l.id }))}
-                  onKeyDown={(e) => radioKeys(e, LEVELS, current, (next) => next.id !== o.level && update((x) => ({ ...x, level: next.id })))}
-                >
-                  <b>{l.name}</b>
-                  <span>{l.desc}</span>
-                </button>
-              ))}
-            </div>
+            <LevelPicker value={shownPreset(o)} onPick={(p) => update((x) => withPreset(x, p))} />
+            {presetOf(o) === null && (
+              <span className="oversee-sub">Its switches below were changed from what {PRESET_NAME[shownPreset(o)]} sets; picking a level sets them again.</span>
+            )}
           </div>
 
           <div className="oversee-part">
@@ -562,18 +542,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           {o.level === "full" && (
             <div className="oversee-part">
               <h3>Where {name} acts fully</h3>
-              {missing.length > 0 ? (
-                <p className="small state-blocked" role="status">
-                  Acting as Act until repos and a budget are set.
-                </p>
-              ) : (
-                running === "act" && (
-                  <p className="small state-blocked" role="status">
-                    Acting as Act for now: the hub says Act fully isn’t in force. Today’s spend has reached the daily budget, or
-                    hasn’t been read yet.
-                  </p>
-                )
-              )}
+              <WhyNotInForce o={o} held={running === "act" || inForce === false} onChange={update} />
               <div className="oversee-card">
                 <Check
                   label="Anywhere"
@@ -681,7 +650,11 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
 
           {acts && (
             <div className="oversee-part">
-              <h3>What {name} may do without asking</h3>
+              <details className="oversee-advanced" open={presetOf(o) === null || undefined}>
+                <summary>
+                  <h3>What {name} may do without asking</h3>
+                  <span className="oversee-sub">Advanced: {PRESET_NAME[shownPreset(o)]} sets these; change them one by one here.</span>
+                </summary>
               <div className="oversee-card">
                 <Check
                   label="Nudge"
@@ -748,6 +721,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, setMode: v } }))}
                 />
               </div>
+              </details>
               {unbound && inForce !== false && (
                 <p className="small state-blocked" role="status">
                   {inForce && <b>Unbound now. </b>}
@@ -755,11 +729,6 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   activity log remain.
                   {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}{" "}
                   It waits while you type into a session it runs, for {o.wake.holdMinutes} minutes after your last keystroke.
-                </p>
-              )}
-              {unbound && inForce === false && (
-                <p className="small state-blocked" role="status">
-                  Unbound is set, but not in force now (for example, today’s budget is spent): Desk acts within Act fully’s limits.
                 </p>
               )}
               <span className="oversee-sub">

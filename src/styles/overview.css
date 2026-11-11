@@ -996,3 +996,43 @@ button.fsec-tile-head {
 .dm-question > .link {
   align-self: flex-start;
 }
+
+/* Five levels, Unbound the fifth: three, then two. */
+.oversee-levels-5 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .oversee-levels-5 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Why the level chosen isn't in force, and its fix. */
+.oversee-why {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.oversee-why p {
+  margin: 0;
+}
+/* The switches one by one, under Advanced. */
+.oversee-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.oversee-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.oversee-advanced > summary h3::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+.oversee-advanced[open] > summary h3::before {
+  content: "▾ ";
+}

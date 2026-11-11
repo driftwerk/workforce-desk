@@ -172,6 +172,12 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     case "machines_list":
       // Machines are reached over SSH by the app; the preview has none.
       return answer([]);
+    case "repo_facts":
+      // Two repositories, as a computer with these checkouts would say.
+      return answer([
+        { folder: "~/dev/acme-web", top: "~/dev/acme-web", remote: "git@github.com:acme/acme-web.git", workflows: ["ci.yml", "deploy.yml", "promote.yml"] },
+        { folder: "~/dev/acme-api", top: "~/dev/acme-api", remote: "https://github.com/acme/acme-api.git", workflows: ["deploy.yml"] },
+      ]);
     case "fonts_list":
       // What a computer's own list looks like; the app reads the real one.
       return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);
