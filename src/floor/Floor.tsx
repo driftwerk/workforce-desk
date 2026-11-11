@@ -4,7 +4,7 @@ import type { Session } from "../hub/types";
 import { CrewFloor } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
 import { waitsOnYou } from "./background";
-import { useFloorTick } from "./store";
+import { TICK_MS, tickFloor } from "./store";
 import { RestoreBanner } from "./RestoreBanner";
 import { GROUPS, Tile } from "./SessionTile";
 import { useSavedScroll } from "../restore/scroll";
@@ -25,24 +25,53 @@ const summary = (sessions: Session[]): string => {
  *  starting up answers 404 for a moment. */
 const REFRESH_MS = 60_000;
 
+/** The one reading of what the Floor shows, however many show it (the
+ *  Floor view, and each grid pane of the Floor), for one hub. */
+let shared: { hub: object | null; readers: number; stop: () => void } | null = null;
+
+/** Reads the overview and the overseer now and every minute, and the floor
+ *  every minute, until the last reader leaves. */
+const startReads = (hub: object | null): (() => void) => {
+  const tick = setInterval(tickFloor, TICK_MS);
+  if (!hub) return () => clearInterval(tick);
+  const { loadOverview, loadManager } = useOverview.getState();
+  void loadOverview();
+  void loadManager();
+  const t = setInterval(() => {
+    const s = useOverview.getState();
+    void s.loadOverview();
+    if (s.managerSupport === "no") void s.loadManager();
+    if (s.activitySupport === "no") void s.loadActivity("all");
+  }, REFRESH_MS);
+  return () => {
+    clearInterval(t);
+    clearInterval(tick);
+  };
+};
+
+const joinReads = (hub: object | null): (() => void) => {
+  if (shared?.hub === hub) shared.readers += 1;
+  else {
+    shared?.stop();
+    shared = { hub, readers: 1, stop: startReads(hub) };
+  }
+  const mine = shared;
+  return () => {
+    if (shared !== mine) return;
+    mine.readers -= 1;
+    if (mine.readers > 0) return;
+    mine.stop();
+    shared = null;
+  };
+};
+
 /** Keeps what the Floor shows read while it's shown (in the Floor view, or
- *  a grid's pane): the overview and the overseer, again every minute. */
+ *  a grid's pane): the overview and the overseer, again every minute, and
+ *  the floor of the hubs whose links don't keep it. However many show it,
+ *  it's read once. */
 export function useFloorReads(): void {
   const hub = useDesk((s) => s.hub);
-  useFloorTick(true);
-  useEffect(() => {
-    if (!hub) return;
-    const { loadOverview, loadManager } = useOverview.getState();
-    void loadOverview();
-    void loadManager();
-    const t = setInterval(() => {
-      const s = useOverview.getState();
-      void s.loadOverview();
-      if (s.managerSupport === "no") void s.loadManager();
-      if (s.activitySupport === "no") void s.loadActivity("all");
-    }, REFRESH_MS);
-    return () => clearInterval(t);
-  }, [hub]);
+  useEffect(() => joinReads(hub), [hub]);
 }
 
 /** The crew's overview where the hub has one; the sessions as they were

@@ -115,6 +115,7 @@
     "allow-grid-window-open",
     "allow-grid-window-close",
     "allow-grid-windows-open",
+    "allow-main-window-focus",
     "allow-grid-window-mode",
     "allow-grid-window-monitor",
     "allow-grid-monitors",

@@ -550,6 +550,18 @@ fn grid_window_close(app: tauri::AppHandle, frames: State<'_, Frames>, grid: Str
     }
 }
 
+/// Brings Desk's main window forward: shown, out of the Dock and focused
+/// (for the Ask shortcut, and for a thread or a ticket a grid's own window
+/// opened there).
+#[tauri::command]
+fn main_window_focus(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 /// The grids that have a window of their own now.
 #[tauri::command]
 fn grid_windows_open(app: tauri::AppHandle) -> Vec<String> {
@@ -1110,6 +1122,7 @@ pub fn run() {
             grid_window_open,
             grid_window_close,
             grid_windows_open,
+            main_window_focus,
             grid_window_mode,
             grid_window_monitor,
             grid_monitors,
