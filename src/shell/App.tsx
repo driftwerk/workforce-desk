@@ -1,15 +1,18 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { watchFloor } from "../floor/store";
+import { hearElsewhere } from "./elsewhere";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
+import { ProblemNote } from "../ui/ProblemNote";
+import { setStarter } from "../ui/problem";
+import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -42,6 +45,7 @@ import { Board } from "../board/BoardView";
 import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
+import { BOARD_CHROME } from "../board/chrome";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
@@ -53,7 +57,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
-import { useUi } from "./ui";
+import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
@@ -118,6 +122,21 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   const hubDown = useHubDown();
+  // A grid's window asks for Settings here, the only window that has them.
+  useEffect(
+    () =>
+      subscribe(
+        listen<{ section: SettingsSection }>("open-settings", (e) => {
+          useUi.getState().openSettings(e.payload.section);
+          void focusMainWindow().catch(() => undefined);
+        }),
+      ),
+    [],
+  );
+  useEffect(() => {
+    setStarter(startLocalHelper);
+    return () => setStarter(null);
+  }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
   useAppBadge();
@@ -157,6 +176,8 @@ export function App() {
   }, []);
 
   useEffect(watchFloor, []);
+  // A thread or a ticket a grid's own window opens shows here.
+  useEffect(() => hearElsewhere(), []);
   // Each machine's engine, beside this computer's.
   useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);
 
@@ -229,8 +250,8 @@ export function App() {
     useSettings((s) => (s.loaded ? s.keys.ask : null)),
     (e) => {
       if (e.state !== "Pressed") return;
-      const w = getCurrentWindow();
-      void w.show().then(() => w.setFocus());
+      // Shown and focused by Desk's native side: the page may not do it.
+      void focusMainWindow().catch(() => undefined);
       setAsking(true);
     },
   );
@@ -389,7 +410,7 @@ export function App() {
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (
-                  <Board />
+                  <Board chrome={BOARD_CHROME} />
                 ) : (
                   <Rooms />
                 )}
@@ -409,11 +430,8 @@ export function App() {
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (
-        <div className="toast toast-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="link" onClick={clearError}>
-            Dismiss
-          </button>
+        <div className="toast toast-error toast-problem" role="alert">
+          <ProblemNote problem={error} onDone={clearError} />
         </div>
       )}
     </div>

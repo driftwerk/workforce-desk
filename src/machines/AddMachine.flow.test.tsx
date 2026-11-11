@@ -96,7 +96,9 @@ it("says each step as it goes, a failure in place with Retry and View log, and c
   expect(list.textContent).toContain("Each step stops after 3 minutes and says why.");
 
   act(() => emit({ machine: "devbox-gpu", step: "install", state: "failed", message: "~ on devbox-gpu has 180 MB free, and Desk needs 420 MB." }));
-  expect(list.textContent).toContain("Desk couldn’t be installed: ~ on devbox-gpu has 180 MB free, and Desk needs 420 MB.");
+  expect(list.textContent).toContain("Desk couldn’t be installed there.");
+  // The machine's own words are kept, folded under Details.
+  expect(list.querySelector(".problem-raw")?.textContent).toBe("~ on devbox-gpu has 180 MB free, and Desk needs 420 MB.");
   expect(list.textContent).toContain("Free some space there, then Retry.");
   await act(async () => fireEvent.click(within(list).getByRole("button", { name: "View log" })));
   expect(fake.log).toHaveBeenCalledWith("devbox-gpu");
