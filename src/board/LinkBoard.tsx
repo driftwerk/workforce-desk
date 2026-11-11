@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
-import type { Board, LinkCheck, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
+import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
 import { openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { STATE_TITLE } from "./board";
@@ -16,16 +16,19 @@ type Team = { id: string; key: string; name: string };
 
 type FilterKind = SyncFilter["kind"];
 
-/** The filters each system's sync can import by. Linear's tools can't list
- *  a cycle, so it has none. */
+/** The filters each system's sync can import by: the whole project or
+ *  team first, then narrower ones. Linear's tools can't list a cycle, so it
+ *  has none. */
 const FILTERS: Record<SyncSystem, { kind: FilterKind; label: string; sub: string }[]> = {
   jira: [
+    { kind: "all", label: "Whole project", sub: "every open issue, whoever has it: pick up work and see who has what" },
     { kind: "assignedToMe", label: "Assigned to me", sub: "assignee = currentUser()" },
     { kind: "currentCycle", label: "The current sprint", sub: "sprint in openSprints()" },
     { kind: "label", label: "A label", sub: "issues with one label" },
     { kind: "query", label: "JQL", sub: "kept inside the project" },
   ],
   linear: [
+    { kind: "all", label: "Whole team", sub: "every open issue, whoever has it: pick up work and see who has what" },
     { kind: "assignedToMe", label: "Assigned to me", sub: "your issues in the team" },
     { kind: "label", label: "A label", sub: "issues with one label" },
     { kind: "query", label: "A Linear filter", sub: "as JSON, kept inside the team" },
@@ -58,9 +61,13 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [target, setTarget] = useState("");
   const [teamId, setTeamId] = useState("");
-  const [filterKind, setFilterKind] = useState<FilterKind>("assignedToMe");
+  const [filterKind, setFilterKind] = useState<FilterKind>("all");
   const [filterValue, setFilterValue] = useState("");
+  const [includeDone, setIncludeDone] = useState(false);
   const [me, setMe] = useState("");
+  /** Who the hub says the person is on the target's system (null: it
+   *  can't say), by the system, hub and target it was asked for. */
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null } | null>(null);
   const [checked, setChecked] = useState<{ key: string; result: Checked } | null>(null);
   const [states, setStates] = useState<Partial<Record<TicketState, string>>>({});
   const prefilledFor = useRef<string | null>(null);
@@ -108,12 +115,18 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const targetKey = system === "linear" ? (team?.key ?? "") : target;
   const targetGood = !!system && !!targetKey && targetOk(system, targetKey);
   const filter: SyncFilter | null =
-    filterKind === "assignedToMe" || filterKind === "currentCycle"
-      ? { kind: filterKind }
-      : filterValue.trim()
-        ? { kind: filterKind, value: filterValue.trim() }
-        : null;
-  const meNeeded = system === "linear" && filterKind === "assignedToMe";
+    filterKind === "all"
+      ? { kind: "all", value: { includeDone } }
+      : filterKind === "assignedToMe" || filterKind === "currentCycle"
+        ? { kind: filterKind }
+        : filterValue.trim()
+          ? { kind: filterKind, value: filterValue.trim() }
+          : null;
+  // Who the person is there comes from the hub; only where it can't say is
+  // a Linear member id asked for, for "assigned to me".
+  const meKey = `${system}:${viaKey}:${targetKey}`;
+  const knownMe = heardMe?.key === meKey ? heardMe.me : undefined;
+  const meNeeded = system === "linear" && filterKind === "assignedToMe" && knownMe === null;
   const filterReady = !!filter && (!meNeeded || linearId(me.trim()));
   const checkKey = JSON.stringify([system, viaKey, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null]);
   const checkRun = useRef(0);
@@ -142,6 +155,14 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   }, [checkKey, offered, targetGood]);
   const now = checked?.key === checkKey ? checked.result : null;
   const found: LinkCheck | null = now?.ok ? now.check : null;
+  // What the hub said of who the person is, kept for the target: an older
+  // hub that wants the id says so as a refusal.
+  useEffect(() => {
+    if (!now || !targetKey) return;
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me });
+    else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now]);
   const remoteStates = found?.states ?? null;
   // The state map starts from what the hub's states mean, once per target.
   useEffect(() => {
@@ -220,7 +241,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 onClick={() => {
                   setSystem(s);
                   setViaKey(null);
-                  setFilterKind("assignedToMe");
+                  setFilterKind("all");
                   setChecked(null);
                 }}
               >
@@ -295,11 +316,20 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
               ))}
             </div>
             <span className="move-opt-sub">{FILTERS[system].find((f) => f.kind === filterKind)?.sub}</span>
-            {meNeeded && (
-              <label className="field">
-                <span>Your Linear member id</span>
-                <input className="mono" value={me} onChange={(e) => setMe(e.target.value)} placeholder="From Linear: Settings → Account → copy your id" spellCheck={false} autoComplete="off" />
+            {filterKind === "all" && (
+              <label className="sync-done">
+                <input type="checkbox" checked={includeDone} disabled={busy} onChange={(e) => setIncludeDone(e.target.checked)} />
+                Also bring in what was done in the last two weeks
               </label>
+            )}
+            {meNeeded && (
+              <>
+                <label className="field">
+                  <span>Your Linear member id</span>
+                  <input className="mono" value={me} onChange={(e) => setMe(e.target.value)} placeholder="From Linear: Settings → Account → copy your id" spellCheck={false} autoComplete="off" />
+                </label>
+                <span className="move-opt-sub">{viaName} can’t say who you are on Linear, so Desk asks once.</span>
+              </>
             )}
             {filterKind === "label" && (
               <label className="field">
@@ -319,7 +349,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 />
               </label>
             )}
-            <MatchLine ready={filterReady} now={now} />
+            <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
+            {knownMe && (
+              <span className="move-opt-sub sync-me">
+                {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
+              </span>
+            )}
           </fieldset>
         )}
 
@@ -374,7 +409,7 @@ const notMinting = new Map<string, string>();
 const THIS = "this-computer";
 
 /** How many issues the filter matches, live. */
-function MatchLine({ ready, now }: { ready: boolean; now: Checked | null }) {
+function MatchLine({ ready, now, whole }: { ready: boolean; now: Checked | null; whole: boolean }) {
   if (!ready) return <span className="move-opt-sub">Say what to import to see how many issues match.</span>;
   if (!now)
     return (
@@ -388,12 +423,24 @@ function MatchLine({ ready, now }: { ready: boolean; now: Checked | null }) {
         {now.error}
       </p>
     );
+  if (now.check.filterError)
+    return (
+      <p className="move-callout move-refused" role="alert">
+        {now.check.filterError}
+      </p>
+    );
   const n = now.check.matches;
   if (n === undefined) return null;
+  const more = !!now.check.matchesAtLeast;
+  const count = more ? `${n.toLocaleString()} or more ${whole ? "open " : ""}issues` : `${n.toLocaleString()} ${whole ? "open " : ""}issue${n === 1 ? "" : "s"}`;
   return (
     <p className="move-callout sync-matches" role="status">
-      <b>{now.check.matchesAtLeast ? `${n} or more issues` : n === 1 ? "1 issue" : `${n} issues`}</b> {n === 1 && !now.check.matchesAtLeast ? "matches" : "match"}
-      {n === 0 ? ": the board starts empty and fills as issues come to match." : ", and come onto the board’s Backlog when it’s linked."}
+      <b>{count}</b> {n === 1 && !more ? "matches" : "match"}
+      {n === 0
+        ? ": the board starts empty and fills as issues come to match."
+        : more
+          ? `. Desk counts up to ${(now.check.ceiling ?? n).toLocaleString()}; it brings them all in, a few hundred each time it syncs.`
+          : ", and come onto the board in the columns their states map to when it’s linked."}
     </p>
   );
 }

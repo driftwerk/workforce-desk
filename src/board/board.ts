@@ -32,13 +32,43 @@ export const SETTLE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 /** The rank step between cards, as the hub spaces them. */
 export const RANK_STEP = 1024;
 
-export type BoardFilter = "all" | "waiting" | "pinned";
+export type BoardFilter = "all" | "mine" | "unassigned" | "waiting" | "pinned";
 
+/** Whether a ticket is the person's: its issue is theirs there (by the id
+ *  the board's link knows them by), or it is handed to them here. */
+export const isMine = (t: Pick<Ticket, "assignee" | "external">, me: string | null | undefined): boolean =>
+  t.assignee?.kind === "you" || (!!me && !!t.external?.assignee && t.external.assignee.id === me);
+
+/** Whether no one has a ticket: no one there (on a synced board) and no
+ *  one here. */
+export const isUnassigned = (t: Pick<Ticket, "assignee" | "external">): boolean => !t.assignee && !t.external?.assignee;
+
+/** The board's quick filters: whose tickets (everyone's, yours, no one's),
+ *  then what waits on you and what's pinned. */
 export const FILTERS: readonly { id: BoardFilter; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "all", label: "Everyone" },
+  { id: "mine", label: "Mine" },
+  { id: "unassigned", label: "Unassigned" },
   { id: "waiting", label: "Waiting on me" },
   { id: "pinned", label: "Pinned" },
 ];
+
+/** Whether `t` is what quick filter `f` shows; `me` is who the person is on
+ *  the board's Jira or Linear, when known. */
+export const shownBy = (t: Ticket, f: BoardFilter, waiting: (t: Ticket) => boolean, me?: string | null): boolean => {
+  switch (f) {
+    case "all":
+      return true;
+    case "mine":
+      return isMine(t, me);
+    case "unassigned":
+      return isUnassigned(t);
+    case "pinned":
+      return t.pinned;
+    case "waiting":
+      return waitingOnYou(t, waiting);
+  }
+};
 
 const at = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : NaN);
 
@@ -113,17 +143,16 @@ export const waitingOnYou = (t: Ticket, needsYou: (t: Ticket) => boolean): boole
  *  whether a ticket's session or agent waits on the person. */
 export const columns = (
   tickets: readonly Ticket[],
-  opts: { filter: BoardFilter; q: string; now: number; waiting: (t: Ticket) => boolean; plan?: ReadonlySet<string> | null },
+  opts: { filter: BoardFilter; q: string; now: number; waiting: (t: Ticket) => boolean; plan?: ReadonlySet<string> | null; me?: string | null },
 ): Column[] => {
   const shown = tickets.filter(
-    (t) =>
-      !snoozed(t, opts.now) &&
-      (!opts.plan || opts.plan.has(t.id)) &&
-      matches(t, opts.q) &&
-      (opts.filter === "all" || (opts.filter === "pinned" ? t.pinned : waitingOnYou(t, opts.waiting))),
+    (t) => !snoozed(t, opts.now) && (!opts.plan || opts.plan.has(t.id)) && matches(t, opts.q) && shownBy(t, opts.filter, opts.waiting, opts.me),
   );
+  // One pass into the columns, each then ordered by rank.
+  const by = new Map<TicketState, Ticket[]>(COLUMNS.map(({ state }) => [state, []]));
+  for (const t of shown) by.get(t.state === "dropped" ? "done" : t.state)?.push(t);
   return COLUMNS.map(({ state, title }) => {
-    const mine = shown.filter((t) => t.state === state || (state === "done" && t.state === "dropped")).sort(byRank);
+    const mine = by.get(state)!.sort(byRank);
     return state === "done"
       ? { state, title, cards: mine.filter((t) => !settled(t, opts.now)), shelf: mine.filter((t) => settled(t, opts.now)) }
       : { state, title, cards: mine, shelf: [] };

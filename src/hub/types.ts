@@ -1345,8 +1345,21 @@ export type SyncSystem = "jira" | "linear";
  *  the local hub's sync hubs), or with this computer's own keys. */
 export type SyncVia = { kind: "hub"; hub: string } | { kind: "thisHub" };
 
-/** Which of the target's issues a board imports and keeps in sync. */
-export type SyncFilter = { kind: "assignedToMe" } | { kind: "currentCycle" } | { kind: "label"; value: string } | { kind: "query"; value: string };
+/** Which of the target's issues a board imports and keeps in sync. `all`:
+ *  every open issue in the project or team, whoever has it (and what was
+ *  done in the last two weeks, with `includeDone`). */
+export type SyncFilter =
+  | { kind: "all"; value: { includeDone: boolean } }
+  | { kind: "assignedToMe" }
+  | { kind: "currentCycle" }
+  | { kind: "label"; value: string }
+  | { kind: "query"; value: string };
+
+/** Who has an issue on Jira or Linear: their id there and their name. */
+export interface SyncAssignee {
+  id: string;
+  name: string;
+}
 
 /** Why a synced board isn't syncing; local edits wait. */
 export type SyncPaused =
@@ -1368,7 +1381,10 @@ export interface BoardSync {
   via: SyncVia;
   person: string;
   filter: SyncFilter;
+  /** Who the person is there (a Linear user id, a Jira accountId), as the
+   *  hub said or they typed; absent from an older hub. */
   me?: string;
+  meName?: string;
   /** The remote state each column moves an issue to. */
   states: Partial<Record<TicketState, string>>;
   group?: string | null;
@@ -1395,6 +1411,9 @@ export interface TicketExternal {
   kept?: boolean;
   /** Its text read as instructions to a model when it was pulled. */
   flagged?: boolean;
+  /** Who has the issue there; null when no one does, absent from an older
+   *  hub. */
+  assignee?: SyncAssignee | null;
 }
 
 /** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */
@@ -1419,9 +1438,17 @@ export interface LinkCheck {
   states?: string[];
   /** The state map the dialog starts from. */
   prefill?: Partial<Record<TicketState, string>>;
-  /** How many issues the filter matched (of the first page). */
+  /** How many issues the filter matched, counted up to `ceiling`;
+   *  `matchesAtLeast` past it (an older hub counts one page). */
   matches?: number;
   matchesAtLeast?: boolean;
+  ceiling?: number;
+  /** Who the person is there, as the hub said; null when it can't say
+   *  (then Linear's "assigned to me" needs their member id). Absent from an
+   *  older hub. */
+  me?: SyncAssignee | null;
+  /** Why the filter can't be counted yet, in the hub's words. */
+  filterError?: string;
 }
 
 /** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */

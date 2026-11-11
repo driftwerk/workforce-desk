@@ -16,7 +16,7 @@ import { BoardDialog, DeleteBoard } from "./BoardDialogs";
 import { LinkBoardDialog, NewTokenDialog } from "./LinkBoard";
 import { LeftFilterShelf, SyncBar, UnlinkBoard } from "./SyncBar";
 import { localSync, syncChoices, useSyncHubs } from "./syncStore";
-import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
+import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, isMine, isUnassigned, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
@@ -102,9 +102,18 @@ export function Board() {
   const planTickets = useMemo(() => (plan ? new Set([...ticketPlans].filter(([, p]) => p === plan).map(([t]) => t)) : null), [plan, ticketPlans]);
   const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.goal])), [plans]);
   const planChips = useMemo(() => new Map([...ticketPlans].map(([t, p]) => [t, planNames.get(p) ?? ""])), [ticketPlans, planNames]);
-  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets }), [onBoard, filter, q, now, waiting, planTickets]);
+  // Who the person is on the board's Jira or Linear, for Mine.
+  const me = board?.sync?.me ?? null;
+  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me }), [onBoard, filter, q, now, waiting, planTickets, me]);
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
-  const waitingCount = mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length;
+  const chipCounts = useMemo(() => {
+    const open = onBoard.filter((t) => !snoozed(t, now) && t.state !== "done" && t.state !== "dropped");
+    return {
+      waiting: mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length,
+      mine: open.filter((t) => isMine(t, me)).length,
+      unassigned: open.filter(isUnassigned).length,
+    } as Partial<Record<BoardFilter, number>>;
+  }, [onBoard, mine, now, waiting, me]);
 
   const states = useMemo(() => statesOf(all), [all]);
   const move = (id: string, shown: Parameters<ReturnType<typeof useBoard.getState>["move"]>[1]) => {
@@ -220,7 +229,7 @@ export function Board() {
           {FILTERS.map((f) => (
             <button key={f.id} type="button" className="chip-btn" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
               {f.label}
-              {f.id === "waiting" && waitingCount > 0 ? ` · ${waitingCount}` : ""}
+              {(chipCounts[f.id] ?? 0) > 0 ? ` · ${chipCounts[f.id]}` : ""}
             </button>
           ))}
         </div>
@@ -297,8 +306,11 @@ export function Board() {
 }
 
 /** The five columns, as one drag-and-drop area. */
+/** How many cards a column draws at first, and each "Show more" adds. */
+export const CARD_PAGE = 80;
+
 function Columns({
-  cols,
+  cols: every,
   counts,
   all,
   waiting,
@@ -321,6 +333,10 @@ function Columns({
 }) {
   const [line, setLine] = useState<{ state: TicketState; before: string | null } | null>(null);
   const dragged = useRef(false);
+  // A column of hundreds draws its first cards, and the rest a page at a
+  // time: drops land among what is drawn.
+  const [limits, setLimits] = useState<Partial<Record<TicketState, number>>>({});
+  const cols = useMemo(() => every.map((c) => ({ ...c, cards: c.cards.slice(0, limits[c.state] ?? CARD_PAGE) })), [every, limits]);
   const overOf = (op: Operation): Over | null => {
     const { source, target } = op;
     if (!source || !target || source.type !== "ticket") return null;
@@ -360,6 +376,8 @@ function Columns({
             all={all}
             waiting={waiting}
             line={line?.state === c.state ? line.before : undefined}
+            hidden={every[i]!.cards.length - c.cards.length}
+            onMore={() => setLimits((l) => ({ ...l, [c.state]: (l[c.state] ?? CARD_PAGE) + CARD_PAGE }))}
             shelfOpen={shelfOpen}
             onShelf={onShelf}
             dragged={dragged}
@@ -379,6 +397,8 @@ function ColumnView({
   all,
   waiting,
   line,
+  hidden,
+  onMore,
   shelfOpen,
   onShelf,
   dragged,
@@ -391,6 +411,9 @@ function ColumnView({
   waiting: (t: Ticket) => boolean;
   /** Where the drop line is: before that card, at the end (null), or none. */
   line: string | null | undefined;
+  /** Its cards not drawn yet, and drawing the next page of them. */
+  hidden: number;
+  onMore: () => void;
   shelfOpen: boolean;
   onShelf: () => void;
   dragged: { current: boolean };
@@ -415,6 +438,13 @@ function ColumnView({
           <DraggableCard key={t.id} ticket={t} all={all} waiting={waiting(t)} lineBefore={line === t.id} dragged={dragged} onKey={onCardKey} register={register} />
         ))}
         {line === null && <li className="drop-line" aria-hidden="true" />}
+        {hidden > 0 && (
+          <li>
+            <button type="button" className="link board-more" onClick={onMore}>
+              Show {Math.min(hidden, CARD_PAGE)} more of {hidden}
+            </button>
+          </li>
+        )}
         {col.shelf.length > 0 && (
           <li>
             <button type="button" className="link board-shelf" aria-expanded={shelfOpen} onClick={onShelf}>

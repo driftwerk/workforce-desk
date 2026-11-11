@@ -98,9 +98,11 @@ const localRoutes = (method: string, path: string, body: Record<string, unknown>
     out.prefill = { backlog: "Backlog", todo: "To Do", doing: "In Progress", review: "In Review", done: "Done" };
     const filter = body!.filter as { kind: string; value?: string } | undefined;
     if (filter?.kind === "query" && /order by/i.test(filter.value ?? "")) return { status: 400, body: { error: "JQL here can't sort: leave out ORDER BY." } };
+    out.me = { id: "557058:sam", name: "Sam" };
     if (filter) {
-      out.matches = filter.kind === "label" ? 7 : 12;
-      out.matchesAtLeast = false;
+      out.matches = filter.kind === "label" ? 7 : filter.kind === "all" ? 2000 : 12;
+      out.matchesAtLeast = filter.kind === "all";
+      out.ceiling = 2000;
     }
     return { status: 200, body: out };
   }
@@ -189,6 +191,19 @@ describe("the link dialog", () => {
     const key = await screen.findByLabelText("Atlas’s Jira project key");
     fireEvent.change(key, { target: { value: "acme" } });
     expect((key as HTMLInputElement).value).toBe("ACME");
+    // The whole project comes first, and is what it starts on: counted to
+    // the hub's ceiling, and said so.
+    const imports = within(screen.getByRole("radiogroup", { name: "Import" }));
+    expect(imports.getAllByRole("radio")[0]!.textContent).toBe("Whole project");
+    expect(imports.getByRole("radio", { name: "Whole project" }).getAttribute("aria-checked")).toBe("true");
+    await screen.findByText("2,000 or more open issues", undefined, { timeout: 2000 });
+    expect(screen.getByText(/Desk counts up to 2,000; it brings them all in/)).toBeTruthy();
+    await waitFor(() => expect(document.querySelector(".sync-me")?.textContent).toMatch(/^Atlas knows you as Sam on Jira/));
+    fireEvent.click(screen.getByLabelText("Also bring in what was done in the last two weeks"));
+    await waitFor(() =>
+      expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && JSON.stringify(a.body?.filter) === JSON.stringify({ kind: "all", value: { includeDone: true } }))).toBe(true),
+    );
+    fireEvent.click(imports.getByRole("radio", { name: "Assigned to me" }));
     await screen.findByText("12 issues", undefined, { timeout: 2000 });
     // The map is prefilled once the hub's states are in.
     await waitFor(() => expect((screen.getByLabelText("Review moves its issue to") as HTMLSelectElement).value).toBe("In Review"));
@@ -229,6 +244,48 @@ describe("the link dialog", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/has tickets of its own/);
   });
 
+  it("links a whole team by default, and asks for a member id only where the hub can't say who you are", async () => {
+    let saysMe = true;
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear") {
+        const out: Record<string, unknown> = { offered: true, teams: [{ id: "6f1c0a2e-1b2c", key: "ATL", name: "Atlas core" }] };
+        if (!body.target) return { status: 200, body: out };
+        out.states = ["Todo", "In Progress", "Done"];
+        out.prefill = { todo: "Todo", doing: "In Progress", done: "Done" };
+        out.me = saysMe ? { id: "11111111-2222-4333-8444-555555555555", name: "Sam" } : null;
+        const filter = body.filter as { kind: string } | undefined;
+        if (filter?.kind === "assignedToMe" && !saysMe && !body.me) out.filterError = 'Say which Linear member you are, for "assigned to me".';
+        else if (filter) out.matches = filter.kind === "all" ? 340 : 9;
+        return { status: 200, body: out };
+      }
+      return localRoutes(method, path, body);
+    };
+    const { unmount } = render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Linear team"), { target: { value: "6f1c0a2e-1b2c" } });
+    const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
+    expect(imports.getByRole("radio", { name: "Whole team" }).getAttribute("aria-checked")).toBe("true");
+    await screen.findByText("340 open issues", undefined, { timeout: 2000 });
+    // The hub knows who you are: "assigned to me" asks nothing.
+    fireEvent.click(imports.getByRole("radio", { name: "Assigned to me" }));
+    await screen.findByText("9 issues", undefined, { timeout: 2000 });
+    expect(screen.queryByLabelText("Your Linear member id")).toBeNull();
+    unmount();
+    // A hub that can't say: the id is asked for, once.
+    saysMe = false;
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Linear team"), { target: { value: "6f1c0a2e-1b2c" } });
+    fireEvent.click(within(await screen.findByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "Assigned to me" }));
+    const id = await screen.findByLabelText("Your Linear member id", undefined, { timeout: 2000 });
+    fireEvent.change(id, { target: { value: "11111111-2222-4333-8444-555555555555" } });
+    await screen.findByText("9 issues", undefined, { timeout: 2000 });
+  });
+
   it("offers Linear's teams, and no current cycle", async () => {
     native.route = (hub, method, path, body) => {
       if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear")
@@ -243,7 +300,9 @@ describe("the link dialog", () => {
     const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
     expect(imports.queryByRole("radio", { name: /sprint/ })).toBeNull();
     expect(imports.getByRole("radio", { name: "Assigned to me" })).toBeTruthy();
-    expect(screen.getByLabelText("Your Linear member id")).toBeTruthy();
+    // An older hub, which can't count without the id, gets asked for it.
+    fireEvent.click(imports.getByRole("radio", { name: "Assigned to me" }));
+    expect(screen.queryByLabelText("Your Linear member id")).toBeNull();
   });
 });
 
@@ -275,6 +334,64 @@ describe("the board, synced", () => {
     expect(screen.getByText("Checkout <b>loses</b> the postcode")).toBeTruthy();
     expect(document.querySelector(".board-card b b")).toBeNull();
     await waitFor(() => expect(native.asked.some((a) => a.method === "POST" && a.path === `/api/desk/boards/${ACME.id}/sync`)).toBe(true));
+  });
+
+  it("shows who has each issue, takes an unassigned one for you, and filters to Mine and Unassigned", async () => {
+    const me = "557058:sam";
+    const b = synced({ filter: { kind: "all", value: { includeDone: false } }, me, meName: "Sam" });
+    const free = ticket(11, { key: "ACME-11", title: "Nobody has this", external: ext("ACME-11", { assignee: null }), state: "todo" });
+    const ana = ticket(12, { key: "ACME-12", title: "Ana has this", external: ext("ACME-12", { assignee: { id: "acct-ana", name: "Ana Diaz" } }), state: "todo" });
+    const mine = ticket(13, { key: "ACME-13", title: "Mine there", external: ext("ACME-13", { assignee: { id: me, name: "Sam" } }), state: "doing" });
+    const older = ticket(14, { key: "ACME-14", title: "From an older hub", external: ext("ACME-14"), state: "todo" });
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && method === "POST" && path === `/api/desk/tickets/${free.id}/take`)
+        return { status: 200, body: { ...free, external: ext("ACME-11", { assignee: { id: me, name: "Sam" } }) } };
+      return localRoutes(method, path, body);
+    };
+    show(b, [free, ana, mine, older]);
+    const todo = within(screen.getByRole("region", { name: "To do" }));
+    expect(todo.getByText("Unassigned")).toBeTruthy();
+    expect(todo.getByText("Ana Diaz")).toBeTruthy();
+    expect(todo.getByText("A")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Doing" })).getByText("You")).toBeTruthy();
+    // Only the one no one has can be taken; an older hub's says nothing.
+    expect(screen.getAllByRole("button", { name: /^Take / })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Mine · 1" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Unassigned · 2" }));
+    expect(screen.queryByText("Ana has this")).toBeNull();
+    expect(screen.getByText("Nobody has this")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Everyone" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take ACME-11" }));
+    await waitFor(() => expect(native.asked.some((a) => a.hub === "local" && a.method === "POST" && a.path === `/api/desk/tickets/${free.id}/take`)).toBe(true));
+    await waitFor(() => expect(screen.queryAllByRole("button", { name: /^Take / })).toHaveLength(0));
+    expect(useBoard.getState().tickets[free.id]!.external!.assignee).toEqual({ id: me, name: "Sam" });
+    fireEvent.click(screen.getByRole("button", { name: "Mine · 2" }));
+    expect(screen.getByText("Nobody has this")).toBeTruthy();
+    expect(screen.queryByText("Ana has this")).toBeNull();
+  });
+
+  it("says why Take it didn't, and shows who took it meanwhile", async () => {
+    const free = ticket(21, { key: "ACME-21", external: ext("ACME-21", { assignee: null }), state: "todo" });
+    const fail = vi.fn();
+    useDesk.setState({ fail, hub: { ticket: async () => ({ ...free, external: ext("ACME-21", { assignee: { id: "acct-ana", name: "Ana Diaz" } }) }) } as never });
+    native.route = (hub, method, path, body) =>
+      hub === "local" && path.endsWith("/take") ? { status: 409, body: { error: "Ana Diaz has ACME-21 on Jira already." } } : localRoutes(method, path, body);
+    show(synced({ me: "557058:sam" }), [free]);
+    fireEvent.click(screen.getByRole("button", { name: "Take ACME-21" }));
+    await waitFor(() => expect(fail).toHaveBeenCalled());
+    expect(String((fail.mock.calls[0]![0] as Error).message)).toMatch(/Ana Diaz has ACME-21/);
+    await screen.findByText("Ana Diaz");
+    expect(screen.queryByRole("button", { name: /^Take / })).toBeNull();
+  });
+
+  it("draws a column of hundreds a page at a time", () => {
+    const many = Array.from({ length: 200 }, (_, i) => ticket(100 + i, { key: `ACME-${100 + i}`, external: ext(`ACME-${100 + i}`, { assignee: null }), state: "backlog" }));
+    show(synced(), many);
+    const backlog = within(screen.getByRole("region", { name: "Backlog" }));
+    expect(backlog.getAllByRole("button", { name: /^ACME-\d+:/ })).toHaveLength(80);
+    fireEvent.click(backlog.getByRole("button", { name: "Show 80 more of 120" }));
+    expect(backlog.getAllByRole("button", { name: /^ACME-\d+:/ })).toHaveLength(160);
+    expect(backlog.getByRole("button", { name: "Show 40 more of 40" })).toBeTruthy();
   });
 
   it("says why it is paused, and pauses and resumes", async () => {

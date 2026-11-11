@@ -615,6 +615,7 @@ mod tests {
             ("DELETE", "/api/desk/boards/b1/link"),
             ("POST", "/api/desk/boards/b1/pause"),
             ("POST", "/api/desk/boards/b1/sync"),
+            ("POST", "/api/desk/tickets/t1/take"),
             ("POST", "/api/me/remote-mcp-tokens/desk"),
             // Plans, the wrong way: a boss proposes and changes its plans
             // with its crew tools, never through the page.

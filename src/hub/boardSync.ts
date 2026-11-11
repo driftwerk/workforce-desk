@@ -46,6 +46,9 @@ export const boardSyncOf = (hub: HubRef) => ({
   link: (board: string, l: LinkBoard): Promise<Board> => deskCall(hub, "PUT", `/api/desk/boards/${encodeURIComponent(board)}/link`, l),
   unlink: (board: string): Promise<Board> => deskCall(hub, "DELETE", `/api/desk/boards/${encodeURIComponent(board)}/link`),
   pause: (board: string, paused: boolean): Promise<Board> => deskCall(hub, "POST", `/api/desk/boards/${encodeURIComponent(board)}/pause`, { paused }),
+  /** Take it: the ticket's issue, which no one has there, is assigned to
+   *  the person, as themselves, through the route its board syncs by. */
+  take: (ticket: string): Promise<Ticket> => deskCall(hub, "POST", `/api/desk/tickets/${encodeURIComponent(ticket)}/take`),
   /** Asks for a pass at once; the hub answers 202 and runs it. */
   syncNow: async (board: string): Promise<void> => {
     const res = await pairedHub(hub).fetch("POST", `/api/desk/boards/${encodeURIComponent(board)}/sync`);
@@ -138,6 +141,11 @@ export const syncStatus = (b: Board, hub: string): SyncStatus | null => {
 /** "Jira ACME via Atlas": what a synced board is linked to. */
 export const linkedTo = (b: Board, hub: string): string | null =>
   b.sync ? `${SYSTEM_TITLE[b.sync.system]} ${b.sync.target}${b.sync.via.kind === "hub" ? ` via ${hub}` : " with this computer's keys"}` : null;
+
+/** Whether a ticket can be taken there: synced, no one has its issue, and
+ *  it isn't finished. */
+export const takeable = (b: Board | undefined, t: Ticket): boolean =>
+  !!b?.sync && !b.sync.paused && !!t.external?.synced && !t.external.kept && t.external.assignee === null && t.state !== "done" && t.state !== "dropped";
 
 /** The tickets on a board's Left-the-filter shelf. */
 export const leftFilterOf = (tickets: readonly Ticket[]): Ticket[] => tickets.filter((t) => t.leftFilter && t.state !== "dropped");
