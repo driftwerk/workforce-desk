@@ -124,9 +124,15 @@ mod tests {
 
     #[test]
     fn on_linux_chrome_is_its_launcher_on_the_path() {
-        let env = env_of(&[("PATH", "/usr/local/bin:/usr/bin")]);
-        let how = launch("linux", &env, &|p| p == Path::new("/usr/bin/google-chrome")).unwrap();
-        assert_eq!(how.program, PathBuf::from("/usr/bin/google-chrome"));
+        // PATH as this computer joins it, so the test reads the same on
+        // every platform it runs on.
+        let joined = std::env::join_paths(["/usr/local/bin", "/usr/bin"]).unwrap();
+        let path = joined.to_str().unwrap().to_string();
+        let vars = [("PATH", path.as_str())];
+        let env = env_of(&vars);
+        let chrome = Path::new("/usr/bin").join("google-chrome");
+        let how = launch("linux", &env, &|p| p == chrome).unwrap();
+        assert_eq!(how.program, chrome);
         assert_eq!(launch("linux", &env, &|_| false), None);
     }
 
