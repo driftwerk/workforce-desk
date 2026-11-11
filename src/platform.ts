@@ -203,6 +203,9 @@ export const openGridWindow = (
   monitor: { id: string; origin: [number, number] } | null,
 ): Promise<MonitorInfo | null> => invoke("grid_window_open", { grid, title, mode, monitor });
 export const closeGridWindow = (grid: string): Promise<void> => invoke("grid_window_close", { grid });
+/** Brings Desk's main window forward (shown, unminimised, focused). The
+ *  main window's own: a grid's window asks it to (see grids/elsewhere.ts). */
+export const focusMainWindow = (): Promise<void> => invoke("main_window_focus");
 /** The grids that have a window of their own now. */
 export const gridWindowsOpen = (): Promise<string[]> => invoke("grid_windows_open");
 /** Puts this (grid) window in a window mode. */

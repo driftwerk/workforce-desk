@@ -29,7 +29,31 @@ export type PaneContent =
   | { kind: "agent"; agent: string }
   /** A login shell the hub hosts; `terminalId` is null until the hub has
    *  opened it (or again after the hub lost it), `cwd` where it was last. */
-  | { kind: "terminal"; terminalId: string | null; cwd?: string | null; machine?: MachineId };
+  | { kind: "terminal"; terminalId: string | null; cwd?: string | null; machine?: MachineId }
+  /** A room of this computer's hub, by id: its timeline and composer. */
+  | { kind: "room"; room: string }
+  /** A board of this computer's hub, by id: its columns of tickets. */
+  | { kind: "board"; board: string }
+  /** The Floor's main column: everything, or one sidebar group's items
+   *  (`group`, a group id) when it names one. */
+  | { kind: "floor"; group?: string };
+
+/** The kinds of pane this Desk can show. A grid kept by a newer Desk (grids
+ *  follow the person through the hub) may hold one it can't: it's kept as
+ *  it is, and its pane says so. */
+export const PANE_KINDS: ReadonlySet<string> = new Set(["session", "agent", "terminal", "room", "board", "floor"]);
+
+/** Whether this Desk knows how to show `c`. */
+export const knownContent = (c: PaneContent): boolean => PANE_KINDS.has(c.kind);
+
+/** What shows room `room`. */
+export const roomContent = (room: string): Extract<PaneContent, { kind: "room" }> => ({ kind: "room", room });
+
+/** What shows board `board`. */
+export const boardContent = (board: string): Extract<PaneContent, { kind: "board" }> => ({ kind: "board", board });
+
+/** What shows the Floor: of group `group`, or of everything when none. */
+export const floorContent = (group?: string | null): Extract<PaneContent, { kind: "floor" }> => (group ? { kind: "floor", group } : { kind: "floor" });
 
 /** What shows session `key` (see `keyOf`): this computer's without a machine. */
 export const sessionContent = (key: string): Extract<PaneContent, { kind: "session" }> => {
@@ -55,7 +79,10 @@ export const terminalKeyIn = (c: PaneContent | null | undefined): string | null 
 /** `c` as stored: a machine only where it is one (`local`, or none, is
  *  this computer, and is left out). */
 export const storedContent = (c: PaneContent): PaneContent => {
-  if (c.kind === "agent" || !("machine" in c)) return c;
+  // The Floor of everything is stored without a group (an empty or null
+  // one, from anywhere, is that too).
+  if (c.kind === "floor") return "group" in c && !c.group ? { kind: "floor" } : c;
+  if ((c.kind !== "session" && c.kind !== "terminal") || !("machine" in c)) return c;
   if (c.machine && c.machine !== LOCAL) return c;
   const { machine: _local, ...rest } = c;
   return rest;
@@ -135,12 +162,26 @@ export const presetOf = (panes: readonly Pane[]): PresetId | null => {
 
 /** What a pane holds, as one string: the same session, agent or terminal
  *  twice in a grid is one thing. */
-export const contentKey = (c: PaneContent): string =>
-  c.kind === "session"
-    ? `session:${keyOf(machineOf(c), c.sessionId)}`
-    : c.kind === "agent"
-      ? `agent:${c.agent}`
-      : `terminal:${keyOf(machineOf(c), c.terminalId ?? "new")}`;
+export const contentKey = (c: PaneContent): string => {
+  switch (c.kind) {
+    case "session":
+      return `session:${keyOf(machineOf(c), c.sessionId)}`;
+    case "agent":
+      return `agent:${c.agent}`;
+    case "terminal":
+      return `terminal:${keyOf(machineOf(c), c.terminalId ?? "new")}`;
+    case "room":
+      return `room:${c.room}`;
+    case "board":
+      return `board:${c.board}`;
+    case "floor":
+      // A group's Floor is its own; the Floor of everything is one more.
+      return c.group ? `floor:${c.group}` : "floor:";
+    default:
+      // A kind a newer Desk keeps: the same as itself only.
+      return `unknown:${JSON.stringify(c)}`;
+  }
+};
 
 export const findContent = (panes: readonly Pane[], c: PaneContent): Pane | undefined =>
   c.kind === "terminal" && !c.terminalId ? undefined : panes.find((p) => p.content && contentKey(p.content) === contentKey(c));

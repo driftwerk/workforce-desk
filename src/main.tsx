@@ -64,9 +64,11 @@ void Promise.all([
   loadHost().catch(() => undefined),
   paintSavedTheme().catch(() => undefined),
 ]).then(() => {
-  // A detached grid has no drafts of its own to keep, nor rooms.
+  // Unsaved file drafts are kept in every window: a grid's own window can
+  // hold a room's or an agent's composer. Rooms' order and the machines'
+  // sessions are the main window's to follow.
+  keepFileDrafts();
   if (!grid) {
-    keepFileDrafts();
     followRooms();
     followMachineSessions();
   }

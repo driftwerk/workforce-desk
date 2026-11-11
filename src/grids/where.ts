@@ -21,14 +21,36 @@ export interface Place {
   parked: boolean;
 }
 
+/** A room's row in the sidebar, as the grids name it. */
+export const roomItem = (room: string): ItemKey => `room:${room}`;
+/** A board's row in the sidebar, as the grids name it. */
+export const boardItem = (board: string): ItemKey => `board:${board}`;
+/** The Floor, of group `group` (from that group's row) or of everything. */
+export const floorItem = (group?: string | null): ItemKey => `floor:${group ?? ""}`;
+
 /** The sidebar item content is: a session (in a pane of its own, or the
- *  one running in a terminal), or an agent. */
+ *  one running in a terminal), an agent, a room, a board, or the Floor
+ *  (of a group, or of everything). */
 export const itemOf = (sessions: Record<string, Session>, content: PaneContent | null): ItemKey | null => {
   if (!content) return null;
-  if (content.kind === "session") return sessionItem(sessionKeyIn(content)!);
-  if (content.kind === "agent") return `agent:${content.agent}`;
-  const tracked = trackedIn(sessions, terminalKeyIn(content));
-  return tracked ? sessionItem(sessionKey(tracked)) : null;
+  switch (content.kind) {
+    case "session":
+      return sessionItem(sessionKeyIn(content)!);
+    case "agent":
+      return `agent:${content.agent}`;
+    case "room":
+      return roomItem(content.room);
+    case "board":
+      return boardItem(content.board);
+    case "floor":
+      return floorItem(content.group);
+    case "terminal": {
+      const tracked = trackedIn(sessions, terminalKeyIn(content));
+      return tracked ? sessionItem(sessionKey(tracked)) : null;
+    }
+    default:
+      return null;
+  }
 };
 
 /** Every pane showing `item`, grid by grid in the sidebar's order, in each

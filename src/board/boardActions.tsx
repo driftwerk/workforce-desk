@@ -8,7 +8,9 @@ import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
 import { UnlinkBoard } from "./SyncBar";
 
-export type BoardAction = "rename" | "delete" | "link" | "unlink";
+import type { BoardAction } from "./board";
+
+export type { BoardAction };
 
 export const boardEntries = (board: Board, act: (a: BoardAction) => void): MenuEntry[] => [
   { kind: "item", label: "Rename board…", onSelect: () => act("rename") },

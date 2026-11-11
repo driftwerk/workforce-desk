@@ -24,6 +24,9 @@ import { ActivityRail } from "./ActivityRail";
 import { ItemTile } from "./ItemTile";
 import { useLocalAgent } from "./people";
 import { useOverview } from "./store";
+import { groupOfKey, useFloorScope } from "../floor/scope";
+import { useLayout } from "../groups/store";
+import type { Section } from "../floor/sections";
 
 /** Where an agent goes on the Floor, by what the overview says it's doing. */
 const AGENT_GROUP: Record<OverviewItem["state"], string> = {
@@ -107,27 +110,27 @@ export const deskItems = (groups: readonly FloorGroup[], hubId: string | null): 
     ];
   });
 
-/** The Floor as the crew's overview: the overseer's brief, then who needs
- *  you, who's working and what's done, beside what's happening. */
-export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
+/** What the Floor shows, worked out once for its header and its main
+ *  column: Desk's groups of tiles, the sections (with a bossed group), and
+ *  the counts. Under a pane showing one group's Floor (`FloorScope`), only
+ *  that group's. */
+export function useCrewFloor(overview: Overview) {
   const sessions = useDesk((s) => localSessions(s.sessions));
-  const activitySupport = useOverview((s) => s.activitySupport);
-  const manager = useOverview((s) => s.manager);
-  const managerAgent = useLocalAgent(manager?.agentId);
-  const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
-  const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
+  const scope = useFloorScope();
+  const layoutGroups = useLayout().groups;
   const onFloor = useLocalFloor();
   const merged = useMerged();
   const needs = useNeedCounts();
-  const now = useMinute();
   // A session whose work went on in another is folded under that one's tile,
   // unless it waits on you: one left running that asks keeps its own.
   const folded = handedOn(merged);
   const waits = (s: Session) => needs.has(sessionItem(s.id)) || s.state === "blocked" || s.state === "asking";
+  // One group's: its sessions and agents (of this computer) alone.
+  const inScope = (key: ItemKey) => !scope || groupOfKey(layoutGroups, key) === scope;
   const all = floorGroups(
-    overview,
-    sortedSessions(sessions).filter((s) => !folded.has(s.id) || waits(s)),
+    scope ? { ...overview, items: overview.items.filter((i) => i.kind !== "agent" || (!!localId && inScope(agentItem({ hubId: localId, id: i.id })))) } : overview,
+    sortedSessions(sessions).filter((s) => (!folded.has(s.id) || waits(s)) && inScope(sessionItem(s.id))),
     onFloor ? needs : null,
     localId,
   );
@@ -135,20 +138,104 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   const deskKey = JSON.stringify(onFloor ? deskItems(all, localId) : null);
   const desk = useMemo(() => (JSON.parse(deskKey) as DeskItem[] | null) ?? undefined, [deskKey]);
   const sectioned = useSections(desk);
-  const sections = onFloor && sectioned.kind === "sections" ? sectioned.sections : null;
+  const sections = onFloor && sectioned.kind === "sections" ? (scope ? sectionsOf(sectioned.sections, scope) : sectioned.sections) : null;
   const groups = sections ? all.filter((g) => !IN_SECTIONS.has(g.title)) : all;
   const count = (title: string) => {
     const g = all.find((x) => x.title === title);
     return (g?.agents.length ?? 0) + (g?.sessions.length ?? 0);
   };
-  const counts = sections ? totals(sections) : onFloor ? merged.counts : { working: count("Working"), needsYou: count("Needs you"), doneToday: overview.counts.doneToday };
-  const scroller = useSavedScroll<HTMLDivElement>("floor");
+  const counts = sections
+    ? totals(sections)
+    : onFloor
+      ? merged.counts
+      : { working: count("Working"), needsYou: count("Needs you"), doneToday: scope ? count("Done today") : overview.counts.doneToday };
+  return { all, groups, sections, sectioned, counts, onFloor };
+}
+
+/** What `useCrewFloor` worked out: read once for a Floor's header and its
+ *  column. */
+export type CrewFloorRead = ReturnType<typeof useCrewFloor>;
+
+/** The Floor's main column: what needs you and what's happening, the plans,
+ *  Spend and Today, then the sections and Desk's own groups of tiles. The
+ *  Floor view's, and a grid pane's (`scrollKey` null: its own scroll, not
+ *  the Floor's kept one; one group's under `FloorScope`). */
+export function FloorColumn({
+  overview,
+  read,
+  scrollKey = "floor",
+  className = "crew-floor-main",
+}: {
+  overview: Overview;
+  read: CrewFloorRead;
+  scrollKey?: string | null;
+  className?: string;
+}) {
+  const manager = useOverview((s) => s.manager);
+  const managerAgent = useLocalAgent(manager?.agentId);
+  const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
+  const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
+  const { groups, sections, sectioned, onFloor } = read;
+  const now = useMinute();
+  const scroller = useSavedScroll<HTMLDivElement>(scrollKey);
+  const scope = useFloorScope();
   const brief =
     overview.brief && manager?.agentId ? (
       <BriefCard brief={overview.brief} managerId={manager.agentId} name={managerName ?? overview.brief.by.name} onPaused={setPaused} />
     ) : (
       paused && <PausedNote who={paused} onResumed={() => setPaused(null)} />
     );
+  return (
+    <div ref={scroller} className={className}>
+      {sections && <NeedsJump sections={sections} />}
+      <RestoreBanner />
+      <AccountNeeds />
+      <OverseerCard />
+      {onFloor ? (
+        <>
+          {sectioned.kind === "flat" && <SealedNotes notes={scope ? sectioned.sealed.filter((n) => n.group.id === scope) : sectioned.sealed} />}
+          {/* The overseer's brief is of everything: one group's Floor says its own. */}
+          <RightNow brief={(!scope && brief) || null} needs={!sections} />
+          <PlanCards />
+          <SpendCard />
+          <Today now={now} />
+        </>
+      ) : (
+        !scope && brief
+      )}
+      {sections?.map((s) => (
+        <FloorSection key={s.id} section={s} now={now} />
+      ))}
+      {!sections && groups.length === 0 && (
+        <p className="empty muted">
+          {scope
+            ? "Nothing’s happening in this group right now."
+            : "Nothing’s happening on the crew right now. Start a session, or message someone from Crew, and it shows here."}
+        </p>
+      )}
+      {groups.map((g) => (
+        <Group key={g.title} group={g} />
+      ))}
+    </div>
+  );
+}
+
+/** One group's sections: its own (a bossed or sealed group's), or, for a
+ *  group with no boss of its own, the main boss's, holding just its items. */
+const sectionsOf = (sections: readonly Section[], group: string): Section[] =>
+  sections
+    .map((s) => ({ ...s, plans: s.plans.filter((p) => p.group === group), unbossed: s.unbossed.filter((g) => g.id === group) }))
+    .filter((s) => s.group?.id === group || s.needs.length + s.working.length + s.done.length + s.desk.length + s.plans.length > 0);
+
+/** The Floor as the crew's overview: the overseer's brief, then who needs
+ *  you, who's working and what's done, beside what's happening. */
+export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
+  const activitySupport = useOverview((s) => s.activitySupport);
+  const manager = useOverview((s) => s.manager);
+  const managerAgent = useLocalAgent(manager?.agentId);
+  const managerName = manager?.agentId ? (managerAgent?.name ?? overview.brief?.by.name ?? manager.agentId) : null;
+  const read = useCrewFloor(overview);
+  const { sections, counts } = read;
   const activityOpen = useUi((s) => s.activityOpen);
   const tab = useRef<HTMLButtonElement>(null);
   const railClose = useRef<HTMLButtonElement>(null);
@@ -184,34 +271,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
         </button>
       </header>
       <div className="crew-floor-body">
-        <div ref={scroller} className="crew-floor-main">
-          {sections && <NeedsJump sections={sections} />}
-          <RestoreBanner />
-          <AccountNeeds />
-          <OverseerCard />
-          {onFloor ? (
-            <>
-              {sectioned.kind === "flat" && <SealedNotes notes={sectioned.sealed} />}
-              <RightNow brief={brief || null} needs={!sections} />
-              <PlanCards />
-              <SpendCard />
-              <Today now={now} />
-            </>
-          ) : (
-            brief
-          )}
-          {sections?.map((s) => (
-            <FloorSection key={s.id} section={s} now={now} />
-          ))}
-          {!sections && groups.length === 0 && (
-            <p className="empty muted">
-              Nothing’s happening on the crew right now. Start a session, or message someone from Crew, and it shows here.
-            </p>
-          )}
-          {groups.map((g) => (
-            <Group key={g.title} group={g} />
-          ))}
-        </div>
+        <FloorColumn overview={overview} read={read} />
         {activitySupport !== "no" &&
           (activityOpen ? (
             <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={() => showActivity(false)} />

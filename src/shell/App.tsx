@@ -1,8 +1,8 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { watchFloor } from "../floor/store";
+import { hearElsewhere } from "./elsewhere";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
@@ -12,7 +12,7 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { setStarter } from "../ui/problem";
 import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -45,6 +45,7 @@ import { Board } from "../board/BoardView";
 import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
+import { BOARD_CHROME } from "../board/chrome";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
@@ -127,7 +128,7 @@ export function App() {
       subscribe(
         listen<{ section: SettingsSection }>("open-settings", (e) => {
           useUi.getState().openSettings(e.payload.section);
-          void getCurrentWindow().setFocus().catch(() => undefined);
+          void focusMainWindow().catch(() => undefined);
         }),
       ),
     [],
@@ -175,6 +176,8 @@ export function App() {
   }, []);
 
   useEffect(watchFloor, []);
+  // A thread or a ticket a grid's own window opens shows here.
+  useEffect(() => hearElsewhere(), []);
   // Each machine's engine, beside this computer's.
   useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);
 
@@ -247,8 +250,8 @@ export function App() {
     useSettings((s) => (s.loaded ? s.keys.ask : null)),
     (e) => {
       if (e.state !== "Pressed") return;
-      const w = getCurrentWindow();
-      void w.show().then(() => w.setFocus());
+      // Shown and focused by Desk's native side: the page may not do it.
+      void focusMainWindow().catch(() => undefined);
       setAsking(true);
     },
   );
@@ -407,7 +410,7 @@ export function App() {
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (
-                  <Board />
+                  <Board chrome={BOARD_CHROME} />
                 ) : (
                   <Rooms />
                 )}

@@ -1,11 +1,11 @@
 // A pane's header as it narrows: its name keeps its room longest. The rest
-// gives way first, in this order: where a terminal is, then what the pane
-// is and its state, then the Tracked badge (and a boss's badge and Hand back with it). grids.css hides each with a
+// gives way first, in this order: where a terminal is, a board's filter
+// chips, then what the pane is and its state, then the Tracked badge (and a boss's badge and Hand back with it). grids.css hides each with a
 // container query on `.gpane-head` at the width given here (head.test.ts
 // keeps the two in step), and the name, cut short at last, loses its
 // middle, so its start and end both stay.
 
-export type HeadPart = "cwd" | "meta" | "badge";
+export type HeadPart = "cwd" | "chips" | "meta" | "badge";
 
 /** Each part, in the order it gives way, with the header width (px) at
  *  which it's hidden, and below. Each width is what the busiest header (a
@@ -14,6 +14,8 @@ export type HeadPart = "cwd" | "meta" | "badge";
  *  80px of name. */
 export const HEAD_DROPS: readonly { part: HeadPart; upTo: number }[] = [
   { part: "cwd", upTo: 660 },
+  // A board's filter chips (about 210px): in its pane's menu too.
+  { part: "chips", upTo: 600 },
   { part: "meta", upTo: 570 },
   { part: "badge", upTo: 440 },
 ];

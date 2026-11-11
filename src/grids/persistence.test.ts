@@ -192,3 +192,79 @@ describe("grids, kept", () => {
     expect(useGrids.getState().order).toEqual([MAIN_GRID]);
   });
 });
+
+describe("rooms, boards and the Floor in grids, kept", () => {
+  /** A grid exactly as a Desk before these kinds stored it: a session (one
+   *  of a machine's), an agent, a terminal and an empty pane. */
+  const stored = {
+    id: "g-old",
+    name: "Morning",
+    placement: { kind: "main" },
+    panes: [
+      { id: "a", rect: { x: 0, y: 0, w: 6, h: 6 }, content: { kind: "session", sessionId: "s-1" }, lastActive: 10 },
+      { id: "b", rect: { x: 6, y: 0, w: 6, h: 6 }, content: { kind: "session", sessionId: "m1", machine: "devbox" } },
+      { id: "c", rect: { x: 0, y: 6, w: 6, h: 6 }, content: { kind: "agent", agent: "local/atlas" } },
+      { id: "d", rect: { x: 6, y: 6, w: 6, h: 6 }, content: { kind: "terminal", terminalId: "t-1", cwd: "/work" } },
+      { id: "e", rect: null, content: null },
+    ],
+  };
+
+  it("an older Desk's grid loads unchanged", async () => {
+    const file = fakeFile({
+      [INDEX_KEY]: { value: { order: ["g-old"] }, updatedAt: "t", dirty: false },
+      [gridKey("g-old")]: { value: structuredClone(stored), updatedAt: "t", dirty: false },
+    });
+    startGrids(await started(file, null), { kind: "main" }, bus);
+    expect(useGrids.getState().order).toEqual(["g-old"]);
+    expect(useGrids.getState().grids["g-old"]).toEqual(stored);
+  });
+
+  it("a room, a board, the Floor and one group's Floor come back after a restart, from Desk's file and from the hub", async () => {
+    const file = fakeFile();
+    const hub = fakeHub();
+    const first = await started(file, hub);
+    startGrids(first, { kind: "main" }, bus);
+    layOut(MAIN_GRID, "quarters", { slot: 0, content: { kind: "room", room: "r-eng" } });
+    layOut(MAIN_GRID, "quarters", { slot: 1, content: { kind: "board", board: "b-shop" } });
+    layOut(MAIN_GRID, "quarters", { slot: 2, content: { kind: "floor" } });
+    layOut(MAIN_GRID, "quarters", { slot: 3, content: { kind: "floor", group: "g-platform" } });
+    await first.flush();
+    const before = structuredClone(useGrids.getState().grids);
+    expect(before[MAIN_GRID]!.panes.map((p) => p.content)).toEqual(
+      expect.arrayContaining([{ kind: "room", room: "r-eng" }, { kind: "board", board: "b-shop" }, { kind: "floor" }, { kind: "floor", group: "g-platform" }]),
+    );
+
+    for (const again of [fakeFile(file.entries), fakeFile()]) {
+      blankState();
+      startGrids(await started(again, hub), { kind: "main" }, bus);
+      expect(useGrids.getState().grids).toEqual(before);
+    }
+  });
+
+  it("the Floor of everything is kept one way, however it was written", async () => {
+    const file = fakeFile({
+      [INDEX_KEY]: { value: { order: ["g"] }, updatedAt: "t", dirty: false },
+      [gridKey("g")]: {
+        value: { id: "g", name: "G", placement: { kind: "main" }, panes: [{ id: "a", rect: { x: 0, y: 0, w: 12, h: 12 }, content: { kind: "floor", group: "" } }] },
+        updatedAt: "t",
+        dirty: false,
+      },
+    });
+    startGrids(await started(file, null), { kind: "main" }, bus);
+    expect(useGrids.getState().grids["g"]!.panes[0]!.content).toEqual({ kind: "floor" });
+  });
+
+  it("a pane a newer Desk keeps is kept as it is, not lost or emptied", async () => {
+    const newer = { kind: "chart", chart: "c-1", range: "7d" };
+    const file = fakeFile({
+      [INDEX_KEY]: { value: { order: ["g"] }, updatedAt: "t", dirty: false },
+      [gridKey("g")]: {
+        value: { id: "g", name: "G", placement: { kind: "main" }, panes: [{ id: "a", rect: { x: 0, y: 0, w: 12, h: 12 }, content: newer }] },
+        updatedAt: "t",
+        dirty: false,
+      },
+    });
+    startGrids(await started(file, null), { kind: "main" }, bus);
+    expect(useGrids.getState().grids["g"]!.panes[0]!.content).toEqual(newer);
+  });
+});

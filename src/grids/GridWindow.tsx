@@ -36,6 +36,8 @@ import { startGridsHere } from "./windows";
 import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
 import { startUnread } from "../unread/summary";
+import { watchFloor } from "../floor/store";
+import { isView } from "./kinds";
 
 /** How long a moved window waits to be still before its monitor is read. */
 const SETTLE_MS = 700;
@@ -59,6 +61,10 @@ export function GridWindow({ gridId }: { gridId: string }) {
   // What its panes show is read here too: sessions by what the summary says
   // they did since, with the points every window writes.
   useEffect(() => startUnread(), []);
+  // A room, a board or the Floor in it reads the floor (what needs you, and
+  // what waits on you), as the main window does.
+  const views = useGrids((s) => !!s.grids[gridId]?.panes.some((p) => isView(p.content)));
+  useEffect(() => (views ? watchFloor() : undefined), [views]);
   // Its panes may show a machine's sessions and terminals: it reaches each
   // machine's engine itself, as it does this computer's.
   useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);

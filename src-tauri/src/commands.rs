@@ -87,6 +87,7 @@ pub const COMMANDS: &[&str] = &[
     "grid_window_open",
     "grid_window_close",
     "grid_windows_open",
+    "main_window_focus",
     "grid_window_mode",
     "grid_window_monitor",
     "grid_monitors",
