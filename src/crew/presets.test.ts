@@ -104,7 +104,7 @@ describe("Act fully's suggestions", () => {
 describe("why a level isn't in force", () => {
   const full = withPreset(DEFAULT_OVERSIGHT, "full");
   it("names what's missing first, then Unbound's switches, then today's spend", () => {
-    expect(causeOf(full, false, null)).toEqual({ kind: "needs", missing: ["repos", "budget"] });
+    expect(causeOf(full, false, null)).toEqual({ kind: "needs", missing: ["repos"] });
     const ready = { ...full, full: { ...full.full, repos: ["acme/a"], budgetUsdPerDay: 20 } };
     expect(fullMissing(ready)).toEqual([]);
     expect(causeOf(ready, false, null)).toBeNull();
@@ -116,6 +116,13 @@ describe("why a level isn't in force", () => {
     expect(causeOf(anywhere, false, null)).toEqual({ kind: "switches" });
     expect(causeOf(withPreset(DEFAULT_OVERSIGHT, "act"), true, null)).toBeNull();
     expect(spentToday(view([row(5, ["key"]), row(30, ["plan"])]))).toEqual({ metered: 5, all: 35 });
+    // The hub's own count of real money wins: plans never reach it.
+    const plans = view([row(5, ["key"]), row(1000, ["plan"])]);
+    expect(causeOf(ready, true, plans, { spentUsd: 5, budgetUsd: 20, spent: false })).toEqual({ kind: "unread" });
+    expect(causeOf(ready, false, plans, { spentUsd: 5, budgetUsd: 20, spent: false })).toBeNull();
+    expect(causeOf(ready, true, null, { spentUsd: 21, budgetUsd: 20, spent: true })).toEqual({ kind: "spent", spentUsd: 21, budgetUsd: 20 });
+    // No budget: nothing it spends holds it.
+    expect(fullMissing({ ...full, full: { ...full.full, repos: ["acme/a"], budgetUsdPerDay: null } })).toEqual([]);
   });
 
   it("raises a spent budget with room for today", () => {

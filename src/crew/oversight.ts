@@ -1,6 +1,6 @@
 import { parse, stringify } from "smol-toml";
 import type { DeskHub } from "../hub/client";
-import type { OversightLevel } from "../hub/types";
+import type { FullBudget, OversightLevel } from "../hub/types";
 
 /** An agent's `[oversight]`: whether it oversees the crew and how. */
 export interface Oversight {
@@ -65,8 +65,11 @@ export interface Full {
   repos: string[];
   /** Plain workflow file names it may run (`deploy.yml`). */
   workflows: string[];
-  /** Dollars a day; null until set. */
+  /** Dollars a day of real money (plans aren't counted); null until set. */
   budgetUsdPerDay: number | null;
+  /** When you last cleared today's count of the budget (an ISO time): it
+   *  counts from then until midnight. */
+  budgetClearedAt: string | null;
 }
 
 /** Which sessions it takes on: only those it starts and you hand it, or
@@ -121,7 +124,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     setMode: false,
   },
   work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
-  full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null },
+  full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
 };
 
 const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act", "full"];
@@ -218,6 +221,7 @@ export const oversightOf = (source: string): Oversight => {
         typeof full.budget_usd_per_day === "number" && full.budget_usd_per_day > 0 && full.budget_usd_per_day <= MAX_FULL_BUDGET_USD
           ? full.budget_usd_per_day
           : null,
+      budgetClearedAt: clearedAt(full.budget_cleared_at),
     },
   };
 };
@@ -276,7 +280,7 @@ export const withOversight = (source: string, o: Oversight): string => {
   };
   // Act fully's table: written once anything of it is set, kept as it is
   // otherwise (a budget never set stays absent).
-  const { budget_usd_per_day: _budget, ...wasFull } = table(was.full);
+  const { budget_usd_per_day: _budget, budget_cleared_at: _cleared, ...wasFull } = table(was.full);
   const anyFull = o.full.anywhere || o.full.repos.length > 0 || o.full.workflows.length > 0 || o.full.budgetUsdPerDay !== null || "full" in was;
   if (anyFull) {
     (doc.oversight as Doc).full = {
@@ -285,9 +289,30 @@ export const withOversight = (source: string, o: Oversight): string => {
       repos: o.full.repos,
       workflows: o.full.workflows,
       ...(o.full.budgetUsdPerDay !== null ? { budget_usd_per_day: o.full.budgetUsdPerDay } : {}),
+      ...(o.full.budgetClearedAt !== null ? { budget_cleared_at: o.full.budgetClearedAt } : {}),
     };
   }
   return stringify(doc) + "\n";
+};
+
+/** A cleared time as the file holds it: an RFC 3339 string (smol-toml
+ *  reads an unquoted one as a date). */
+const clearedAt = (v: unknown): string | null => {
+  const at = v instanceof Date ? v : typeof v === "string" ? new Date(v) : null;
+  return at && !Number.isNaN(at.getTime()) ? at.toISOString() : null;
+};
+
+/** Dollars as Desk says them: $1,000.00. */
+export const usd = (n: number): string =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Act fully's budget in a line, as the Floor heads a boss's section:
+ *  real money only. */
+export const fullBudgetText = (b: FullBudget): string => {
+  if (b.spentUsd === null) return `Act fully: today’s real money not read yet, of ${usd(b.budgetUsd)}`;
+  return b.spent
+    ? `Act fully stopped: ${usd(b.spentUsd)} of ${usd(b.budgetUsd)} real money spent today`
+    : `Act fully: ${usd(b.spentUsd)} of ${usd(b.budgetUsd)} real money today`;
 };
 
 export const MAX_MINUTES = 1440;
@@ -375,15 +400,10 @@ export const parseWorkflow = (typed: string, have: string[] = []): { value: stri
   return { value: t };
 };
 
-/** What Act fully still needs before it's in force: repos, a budget;
- *  nothing while it's Anywhere. */
-export const fullMissing = (o: Oversight): ("repos" | "budget")[] =>
-  o.full.anywhere
-    ? []
-    : [
-        ...(o.full.repos.length === 0 ? (["repos"] as const) : []),
-        ...(o.full.budgetUsdPerDay === null ? (["budget"] as const) : []),
-      ];
+/** What Act fully still needs before it's in force: repos; nothing while
+ *  it's Anywhere. Its daily budget is optional: with none, only the
+ *  check-in ceilings and Stop bound it. */
+export const fullMissing = (o: Oversight): "repos"[] => (o.full.anywhere || o.full.repos.length > 0 ? [] : ["repos"]);
 
 /** Nothing limits it: Act fully, every act switch on, and Anywhere. */
 export const isUnbound = (o: Oversight): boolean =>

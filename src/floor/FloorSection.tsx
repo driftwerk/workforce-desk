@@ -27,6 +27,7 @@ import { useSessionName } from "../groups/names";
 import { Mark } from "../ui/Mark";
 import { openTarget } from "../shell/navigate";
 import { standingText } from "../spend/budgets";
+import { fullBudgetText } from "../crew/oversight";
 import { AgentMark } from "../ui/Mark";
 import type { Target } from "../shell/navigate";
 import type { FloorNeed, FloorWork } from "./merge";
@@ -114,6 +115,12 @@ function BossLine({ section }: { section: Section }) {
         <>
           {" "}
           · <span className={`mono${boss.spend.status === "under" ? "" : " state-blocked"}`}>{standingText(boss.spend)}</span>
+        </>
+      )}
+      {boss.actFully && (
+        <>
+          {" "}
+          · <span className={`mono${boss.actFully.spent ? " state-blocked" : ""}`}>{fullBudgetText(boss.actFully)}</span>
         </>
       )}
       {covers && <> · {covers}</>}

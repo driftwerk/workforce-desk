@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
-import type { SpendView } from "../hub/types";
+import type { FullBudget, SpendView } from "../hub/types";
 import { usdText } from "../spend/spend";
 import {
   fullMissing,
@@ -40,25 +40,32 @@ export const spentToday = (
 
 /** Why `o`, chosen at Act fully or Unbound, isn't in force: what's missing
  *  from it, its switches, or, when the hub says it runs below what was
- *  chosen, today's spend against its budget. Null while it's in force. */
+ *  chosen, today's spend against its budget. `budget`: the hub's own
+ *  count of the real money spent against it, which a newer hub gives and
+ *  which wins over what Desk reckons from the ledger. Null while it's in
+ *  force. */
 export const causeOf = (
   o: Oversight,
   held: boolean,
   day: SpendView | null,
+  budget?: FullBudget | null,
 ): Cause | null => {
   if (o.level !== "full") return null;
   const missing = fullMissing(o);
   if (missing.length > 0) return { kind: "needs", missing };
   if (o.full.anywhere && !isUnbound(o) && presetOf(o) === null)
     return { kind: "switches" };
+  if (budget?.spent && budget.spentUsd !== null)
+    return { kind: "spent", spentUsd: budget.spentUsd, budgetUsd: budget.budgetUsd };
   if (!held) return null;
-  const budget = o.full.budgetUsdPerDay;
-  if (budget === null) return { kind: "unread" };
+  if (budget) return { kind: "unread" };
+  const budgetUsd = o.full.budgetUsdPerDay;
+  if (budgetUsd === null) return { kind: "unread" };
   const { metered, all } = spentToday(day);
-  const spent = metered >= budget ? metered : all >= budget ? all : null;
+  const spent = metered >= budgetUsd ? metered : all >= budgetUsd ? all : null;
   return spent === null
     ? { kind: "unread" }
-    : { kind: "spent", spentUsd: spent, budgetUsd: budget };
+    : { kind: "spent", spentUsd: spent, budgetUsd };
 };
 
 /** A budget that leaves room for today: half again what it spent, in steps
@@ -78,15 +85,17 @@ const needsText = (missing: ("repos" | "budget")[]): string =>
 
 /** The cause the level chosen isn't in force, with what fixes it in place:
  *  Desk's suggestions for what's missing, every switch on for Unbound, a
- *  higher budget for today. `held`: the hub says it runs below what was
- *  chosen. */
+ *  higher budget or today's count cleared once it's spent. `held`: the hub
+ *  says it runs below what was chosen; `budget`: its count of real money. */
 export function WhyNotInForce({
   o,
   held,
+  budget,
   onChange,
 }: {
   o: Oversight;
   held: boolean;
+  budget?: FullBudget | null;
   onChange: (change: Change) => void;
 }) {
   const hub = useDesk((s) => s.hub);
@@ -99,7 +108,7 @@ export function WhyNotInForce({
     workflows: string[];
     budgetUsd: number | null;
   } | null>(null);
-  const wantsSpend = o.level === "full" && held && fullMissing(o).length === 0;
+  const wantsSpend = o.level === "full" && held && !budget && fullMissing(o).length === 0;
   useEffect(() => {
     if (!hub || !wantsSpend) return;
     let live = true;
@@ -111,7 +120,7 @@ export function WhyNotInForce({
       live = false;
     };
   }, [hub, wantsSpend]);
-  const cause = causeOf(o, held, day);
+  const cause = causeOf(o, held, day, budget);
   if (!cause) return null;
 
   /** Finds what's missing, to show; nothing is written until confirmed. */
@@ -152,7 +161,7 @@ export function WhyNotInForce({
       : null;
 
   return (
-    <div className="oversee-why" role="status">
+    <div className="oversee-why" role={cause.kind === "spent" ? "alert" : "status"}>
       {cause.kind === "needs" && (
         <>
           <p className="small state-blocked">
@@ -224,10 +233,27 @@ export function WhyNotInForce({
       )}
       {cause.kind === "spent" && (
         <>
-          <p className="small state-blocked">
-            Acting as Act: today’s spend ({usdText(cause.spentUsd)}) reached its{" "}
-            {usdText(cause.budgetUsd)} daily budget.
+          <p className="small">
+            <b className="state-blocked">Act fully stopped: today’s budget is spent.</b>{" "}
+            {usdText(cause.spentUsd)} of {usdText(cause.budgetUsd)} in real money today
+            {budget ? " (your plans aren’t counted)" : ""}, so it no longer merges,
+            tags, releases or runs workflows on its own. It acts as Act until
+            midnight, unless you raise the budget or clear today’s count.
           </p>
+          {budget && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() =>
+                onChange((x) => ({
+                  ...x,
+                  full: { ...x.full, budgetClearedAt: new Date().toISOString() },
+                }))
+              }
+            >
+              Clear today’s count
+            </button>
+          )}
           {raised !== null && raised > cause.budgetUsd ? (
             <button
               type="button"
