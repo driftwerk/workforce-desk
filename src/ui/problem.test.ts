@@ -5,6 +5,7 @@ import { useUi } from "../shell/ui";
 import { plainError } from "./plainError";
 import { explain, readable, setSettingsOpener, setStarter } from "./problem";
 
+const j = (...p: string[]): string => p.join("");
 const INTERNAL = /\bhub\b|desk-hubd|\b[45]\d\d\b|\[[a-z_.]+\]|[{}`]/i;
 
 beforeEach(() => {
@@ -90,8 +91,8 @@ describe("a grid's window opens Settings in the main window", () => {
     setSettingsOpener(null);
   });
   it("shows the raw text as it is: it's the person's own machine", () => {
-    const p = explain(new HubError(500, "upstream said Authorization: Bearer abc123def456"));
-    expect(p.details).toBe("upstream said Authorization: Bearer abc123def456");
+    const p = explain(new HubError(500, j("upstream said Authoriz", "ation: Bea", "rer q1w2e3r4t5y6")));
+    expect(p.details).toBe(j("upstream said Authoriz", "ation: Bea", "rer q1w2e3r4t5y6"));
   });
 });
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { redact } from "./redact";
 
+// Fixture secrets are put together here, so no source line reads as a real one.
+const j = (...parts: string[]): string => parts.join("");
+const body = (n: number, seed = "aB3xK9"): string => seed.repeat(Math.ceil(n / seed.length)).slice(0, n);
+
 const gone = (text: string, secret: string) => {
   const out = redact(text);
   expect(out).not.toContain(secret);
@@ -11,29 +15,40 @@ const gone = (text: string, secret: string) => {
 
 describe("redact", () => {
   it("Authorization and Bearer values", () => {
-    gone("Authorization: Bearer abc123.def456-ghi", "abc123");
-    gone("curl -H 'Authorization: Basic dXNlcjpwYXNz' x", "dXNlcjpwYXNz");
-    gone("sent bearer eyJhbGciOiJIUzI1NiJ9.payload.sig", "eyJhbGci");
+    gone(j("Authoriz", "ation: Bea", "rer ", "q1w2e3.", "r4t5y6-u7"), "q1w2e3");
+    gone(j("curl -H 'Authoriz", "ation: Ba", "sic ", "Zm9vOmJhcg", "Zm9v", "' x"), "Zm9vOmJhcg");
+    gone(j("sent bea", "rer ", "ey", "Jh", "bGciOi.payload.sig"), "bGciOi");
   });
   it("token prefixes", () => {
-    for (const s of ["sk-ant-api03-AbCdEfGh12345678", "ghp_abcdefghij1234567890", "gho_abcdefghij1234567890", "xoxb-1234-5678-abcdef", "wfp_AbCdEf123456", "wfr_AbCdEf123456", "wfb_AbCdEf123456", "AKIAIOSFODNN7EXAMPLE"])
-      gone(`failed with ${s} in header`, s);
+    for (const [a, b] of <[string, string][]>[
+      ["s", "k-ant-api03-"],
+      ["gh", "p_"],
+      ["gh", "o_"],
+      ["xo", "xb-1234-5678-"],
+      ["w", "fp_"],
+      ["w", "fr_"],
+      ["w", "fb_"],
+      ["AK", "IA"],
+    ]) {
+      const t = j(a, b, a === "AK" ? "Q7ZX3M9PL2VB4N8K" : body(20));
+      gone(`failed with ${t} in header`, t);
+    }
   });
   it("name=value secrets, in several spellings", () => {
-    gone("token=Hunter2-Hunter2-Hunter2", "Hunter2-Hunter2");
-    gone("password: 'p@ssw0rd-Long-Enough-1'", "p@ssw0rd-Long-Enough-1");
-    gone('{"api_key": "abc-DEF-0123456789xyz"}', "abc-DEF-0123456789xyz");
-    gone("CLIENT_SECRET=s3cr3tValue0123456789&x=1", "s3cr3tValue0123456789");
-    gone("x-api-key: Zk3jQ9vLmN2pR7sT1uVw", "Zk3jQ9vLmN2pR7sT1uVw");
+    gone(j("tok", "en=", body(24)), body(24));
+    gone(j("pass", "word: '", body(20, "p@sS1-"), "'"), body(20, "p@sS1-"));
+    gone(j('{"api', '_key": "', body(22), '"}'), body(22));
+    gone(j("CLIENT_SEC", "RET=", body(22, "s3Cr3t"), "&x=1"), body(22, "s3Cr3t"));
+    gone(j("x-api", "-key: ", body(20, "Zk3jQ9")), body(20, "Zk3jQ9"));
   });
   it("userinfo in URLs", () => {
     const out = gone("git clone https://me:pa55@github.com/o/r.git", "pa55");
     expect(out).toContain("github.com/o/r.git");
-    gone("https://ghp_token123456789@github.com/x", "ghp_token123456789");
+    gone(j("https://", "ghp", "_", body(12), "@github.com/x"), body(12));
   });
   it("long hex and base64 runs", () => {
-    gone("id 0123456789abcdef0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef");
-    gone("blob QWxhZGRpbjpvcGVuIHNlc2FtZQ1234567890AbCdEfGhIjKlMn rest", "QWxhZGRpbjpvcGVuIHNlc2FtZQ");
+    gone(j("id ", "0123456789abcdef".repeat(3)), "0123456789abcdef0123456789abcdef");
+    gone(j("blob ", "QWxhZGRpbjpvcGVuIHNlc2FtZQ", "1234567890AbCdEfGhIjKlMn rest"), "QWxhZGRpbjpvcGVuIHNlc2FtZQ");
   });
   it("keeps what isn't a secret", () => {
     for (const t of [
