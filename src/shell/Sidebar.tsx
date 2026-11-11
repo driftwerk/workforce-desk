@@ -21,7 +21,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
 import { RoomMarks } from "../unread/RoomMarks";
 import { Marks, useRoomsBadge, useTotal } from "../unread/Marks";
 import { BoardsSection } from "../board/BoardsSection";
-import { SideSection } from "./SideSection";
+import { setSectionOpen, SideSection } from "./SideSection";
 import { needsYou } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
 import { NEW_CREW_LINE, NEW_SESSION_LINE } from "./newLines";
@@ -121,6 +121,14 @@ export function Sidebar({
   const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
   const roomsById = useDesk((s) => s.rooms);
   const roomsBadge = useRoomsBadge(rooms.map((r) => r.id));
+  // A room opened elsewhere opens Rooms, so its row shows; once each time,
+  // so it can be closed again.
+  const roomBefore = useRef(activeRoom);
+  useEffect(() => {
+    if (activeRoom === roomBefore.current) return;
+    roomBefore.current = activeRoom;
+    if (activeRoom) setSectionOpen("rooms", true);
+  }, [activeRoom]);
   /** Deletes a room on the hub, and here at once (the hub says so too).
    *  Its members' hubs are told first, so what was set up there reaches
    *  your DM instead. */

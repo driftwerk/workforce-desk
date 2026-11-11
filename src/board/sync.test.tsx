@@ -314,6 +314,12 @@ describe("the link dialog", () => {
     cleanup();
     render(<LinkBoardDialog board={ACME} tickets={2} onClose={() => {}} />);
     expect(note()).toBe(`Linking needs an empty board: ${ACME.name} has tickets.`);
+    // No hub on this computer: said, not waited on.
+    cleanup();
+    useChat.setState({ hubs: [ATLAS] as never });
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    expect(note()).toBe("This computer’s hub isn’t running, so nothing can be checked or linked yet.");
   });
 });
 

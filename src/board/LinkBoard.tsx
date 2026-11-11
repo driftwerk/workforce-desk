@@ -159,6 +159,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     if (busy) return null;
     if (hasTickets) return { words: `Linking needs an empty board: ${board.name} has tickets.`, failed: true };
     if (!system) return { words: "Pick Jira or Linear.", failed: false };
+    if (!localSync()) return { words: "This computer’s hub isn’t running, so nothing can be checked or linked yet.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
     if (!offered) {
       if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };

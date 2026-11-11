@@ -148,6 +148,30 @@ describe("Sidebar", () => {
     useDesk.setState({ roomDrafts: {} });
   });
 
+  it("opens a closed Rooms or Boards when its row becomes the one shown, once, and says the board's shortcut", () => {
+    const room = { id: "r1", slug: "r1", name: "Launch", members: [], defaultMember: null, createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-01T09:00:00Z" } as unknown as Room;
+    useDesk.setState({ rooms: { r1: room }, activeRoom: null });
+    useBoard.setState({ boards: { [ACME.id]: ACME }, supported: true, shown: null });
+    sidebar();
+    const head = (name: string) => within(screen.getByRole("region", { name })).getByRole("button", { name: new RegExp(`^${name}`) });
+    expect(head("Boards").title).toMatch(/^Boards \(.*B\)$/);
+    fireEvent.click(head("Rooms"));
+    fireEvent.click(head("Boards"));
+    act(() => useDesk.setState({ activeRoom: "r1", view: "rooms" }));
+    expect(head("Rooms").getAttribute("aria-expanded")).toBe("true");
+    expect(head("Boards").getAttribute("aria-expanded")).toBe("false");
+    // Closed again by hand while it's still shown, it stays closed.
+    fireEvent.click(head("Rooms"));
+    act(() => useDesk.setState({ view: "floor" }));
+    expect(head("Rooms").getAttribute("aria-expanded")).toBe("false");
+    act(() => useDesk.setState({ view: "board" }));
+    expect(head("Boards").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(head("Boards"));
+    act(() => useBoard.setState({ boards: { [ACME.id]: ACME } }));
+    expect(head("Boards").getAttribute("aria-expanded")).toBe("false");
+    useDesk.setState({ activeRoom: null });
+  });
+
   it("keeps working when this browser's storage can't be read or written", () => {
     const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("denied");

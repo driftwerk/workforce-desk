@@ -56,6 +56,7 @@ export function SideSection({
   newLabel,
   onNew,
   badge,
+  title,
   children,
 }: {
   id: SectionId;
@@ -66,6 +67,8 @@ export function SideSection({
   onNew: () => void;
   /** What's for you inside, shown on the header while it's closed. */
   badge: Badge;
+  /** The header's tooltip, as "Boards (⌘B)". */
+  title?: string;
   children: ReactNode;
 }) {
   const open = useSections((s) => !s.closed[id]);
@@ -73,7 +76,7 @@ export function SideSection({
   return (
     <div className={`side-section ${className}`.trim()} role="region" aria-label={label}>
       <span className="side-label side-label-action side-head">
-        <button type="button" className="side-toggle" aria-expanded={open} aria-controls={open ? body : undefined} onClick={() => setSectionOpen(id, !open)}>
+        <button type="button" className="side-toggle" title={title} aria-expanded={open} aria-controls={open ? body : undefined} onClick={() => setSectionOpen(id, !open)}>
           <span className={`grp-chevron ${open ? "open" : ""}`} aria-hidden="true">
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M3 2l4 3-4 3" />

@@ -1,9 +1,11 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMinute } from "../floor/RightNow";
 import { SortList, SortRow } from "../groups/rows";
 import { useDesk } from "../hub/store";
 import type { Ticket } from "../hub/types";
-import { SideSection } from "../shell/SideSection";
+import { setSectionOpen, SideSection } from "../shell/SideSection";
+import { useSettings } from "../settings/store";
+import { shortcutLabel } from "../shortcuts/keys";
 import { badgeOfGroup, NO_BADGE, type Badge } from "../unread/badges";
 import { Marks } from "../unread/Marks";
 import { Menu } from "../ui/Menu";
@@ -45,6 +47,16 @@ export function BoardsSection() {
   const rows = useRef(new Map<string, HTMLElement>());
   const dragged = useRef(false);
   const hint = useId();
+  const keys = useSettings((s) => s.keys);
+  // Going to a board opens Boards, so its row shows; once each time, so it
+  // can be closed again.
+  const shownBefore = useRef(onBoard ? shown : null);
+  useEffect(() => {
+    const now = onBoard ? shown : null;
+    if (now === shownBefore.current) return;
+    shownBefore.current = now;
+    if (now) setSectionOpen("boards", true);
+  }, [onBoard, shown]);
   const list = arrangedBoards(boards, order);
   // An older hub keeps no boards: nothing to list or make.
   if (supported === false) return null;
@@ -66,7 +78,7 @@ export function BoardsSection() {
   const actingBoard = acting ? boards[acting.id] : undefined;
   return (
     <>
-      <SideSection id="boards" label="Boards" newLabel="New board" onNew={() => setMaking(true)} badge={badgeOfGroup(list.map((b) => badgeOf(waiting.get(b.id))))}>
+      <SideSection id="boards" label="Boards" title={`Boards (${shortcutLabel(keys.board)})`} newLabel="New board" onNew={() => setMaking(true)} badge={badgeOfGroup(list.map((b) => badgeOf(waiting.get(b.id))))}>
         <span id={hint} className="sr-only">
           Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
         </span>
