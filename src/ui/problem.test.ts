@@ -3,7 +3,7 @@ import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { plainError } from "./plainError";
-import { explain, readable, setStarter } from "./problem";
+import { explain, readable, setSettingsOpener, setStarter } from "./problem";
 
 const INTERNAL = /\bhub\b|desk-hubd|\b[45]\d\d\b|\[[a-z_.]+\]|[{}`]/i;
 
@@ -26,7 +26,7 @@ describe("explain: hub refusals", () => {
   it("403 is no dead end: it hands the problem to Desk", () => {
     const p = explain(new HubError(403, "forbidden: browser.use"));
     expect(p.plain).toBe("Desk wasn’t allowed to do that.");
-    expect(p.fix).toEqual({ label: "Ask Desk to fix it", ask: true });
+    expect(p.fix).toMatchObject({ label: "Ask Desk to fix it", ask: true });
     expect(p.details).toBe("forbidden: browser.use");
   });
 
@@ -56,6 +56,17 @@ describe("explain: hub refusals", () => {
     );
   });
 
+  it("403 without a Desk agent still has a real next step", () => {
+    const f = explain(new HubError(403, "forbidden")).fix!;
+    expect(f.alt?.label).toBe("Open settings");
+    f.alt?.run?.();
+    expect(useUi.getState().settings).toBe("computer");
+  });
+
+  it("says workspaces for hubs", () => {
+    expect(explain(new HubError(400, "None of the hubs answered.")).plain).toBe("None of the workspaces answered.");
+  });
+
   it("never shows the hub's developer text as the headline", () => {
     const p = explain(new HubError(400, 'the body is {"fields": {name: value}}'));
     expect(p.plain).toBe("Desk couldn’t do that.");
@@ -67,6 +78,21 @@ describe("explain: hub refusals", () => {
     const p = explain(new HubError(400, "The hub is busy."));
     expect(p.plain).toBe("Desk is busy.");
     expect(p.details).toBe("The hub is busy.");
+  });
+});
+
+describe("a grid's window opens Settings in the main window", () => {
+  it("through the registered opener", () => {
+    const open = vi.fn();
+    setSettingsOpener(open);
+    explain("Claude sign-in ended without a token.").fix?.run?.();
+    expect(open).toHaveBeenCalledWith("providers");
+    setSettingsOpener(null);
+  });
+  it("redacts secrets in details and in what Desk was doing", () => {
+    const p = explain(new HubError(500, "upstream said Authorization: Bearer abc123def456"), { what: "using token=hunter2xyz" });
+    expect(p.details).not.toContain("abc123");
+    expect(p.what).not.toContain("hunter2");
   });
 });
 
@@ -113,7 +139,7 @@ describe("explain: the app's own texts", () => {
   });
 
   it("session start: not a folder, branch taken, git's stderr", () => {
-    expect(explain(new HubError(400, "/Users/me/x is not a folder")).plain).toBe("/Users/me/x isn’t a folder Desk can open.");
+    expect(explain(new HubError(400, "/Users/me/x is not a folder")).plain).toBe("That isn’t a folder Desk can open.");
     expect(explain(new HubError(409, "a branch called fix-1 already exists")).plain).toBe("A branch called fix-1 already exists. Pick another name.");
     const git = explain(new HubError(500, "git worktree add /tmp/w: fatal: 'main' is already checked out"));
     expect(git.details).toContain("fatal:");
@@ -144,6 +170,10 @@ describe("no internal term reaches a headline", () => {
     new Error("request failed with status 418"),
     new Error("invalid_request_error"),
     new TypeError("x"),
+    new HubError(400, "set desk.memory.retain_days in the config"),
+    new HubError(400, "cannot read /Users/me/.desk/state.json"),
+    new HubError(400, "C:\\Users\\me\\x is gone"),
+    new HubError(400, "none of the hubs answered"),
   ];
   it.each(samples.map((s, i) => [i, s] as const))("sample %i", (_i, e) => {
     expect(explain(e).plain).not.toMatch(INTERNAL);
@@ -175,5 +205,16 @@ describe("plainError keeps the raw text where there is no Details", () => {
   });
   it("leaves a specific headline alone", () => {
     expect(plainError(new HubError(404, "no such session"))).toBe("That isn’t there any more.");
+  });
+});
+
+describe("inline errors past what they show", () => {
+  it("keep the whole text for Copy details", async () => {
+    const { fullDetailsOf } = await import("./plainError");
+    const long = `boom ${"x".repeat(600)}\nsecond line`;
+    const said = plainError(new Error(long));
+    expect(said.length).toBeLessThan(500);
+    expect(fullDetailsOf(said)).toBe(long);
+    expect(fullDetailsOf(plainError(new Error("boom\nshort")))).toBeNull();
   });
 });

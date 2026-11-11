@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useReducer, useRef, useState } from "rea
 import { EngineBlocks } from "../settings/EngineBlocks";
 import { useHost } from "../shell/host";
 import { askDesk, useCanAskDesk } from "../ui/askDesk";
+import { redact } from "../ui/redact";
 import { plainError } from "../ui/plainError";
 import { CANCELLED, setUp, START, step, type Item } from "./addFlow";
 import { useMachines } from "./engines";
@@ -261,7 +262,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
     askDesk({
       plain: `Adding ${flow.at === "setup" ? flow.name : "a machine"} stopped on a step.`,
       what: "adding a machine in Settings → Machines",
-      details: [i.message ?? "", ...lines.slice(-40).map((l) => `${clock(l.at)} ${l.text}`)].filter(Boolean).join("\n"),
+      details: [redact(i.message ?? ""), ...lines.slice(-40).map((l) => redact(`${clock(l.at)} ${l.text}`))].filter(Boolean).join("\n"),
     });
   };
 

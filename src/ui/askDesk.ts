@@ -2,18 +2,21 @@ import { useChat } from "../chat/store";
 import { localKey, openLocalDm } from "../overview/people";
 import { useOverview } from "../overview/store";
 import type { Problem } from "./problem";
+import { redact } from "./redact";
 
 /** What Desk's agent is told when a problem is handed over: what happened,
  *  what Desk was doing, and the raw text it can act on. */
 export const askText = (p: Problem): string =>
-  [
+  redact(
+    [
     "Something went wrong in Desk and I’d like you to fix it, or tell me exactly what to do.",
     "",
     `What I saw: ${p.plain}`,
     ...(p.what ? [`What I was doing: ${p.what}`] : []),
     ...(p.fix && !p.fix.ask ? [`The button Desk offered was: ${p.fix.label}`] : []),
     ...(p.details ? ["", "The raw error:", p.details] : []),
-  ].join("\n");
+    ].join("\n"),
+  );
 
 /** Whether Desk's agent is there to ask. */
 export const useCanAskDesk = (): boolean => useOverview((s) => !!s.manager?.agentId);

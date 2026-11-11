@@ -1,5 +1,7 @@
+import { emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ProblemNote } from "../ui/ProblemNote";
+import { setSettingsOpener } from "../ui/problem";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
@@ -66,6 +68,13 @@ export function GridWindow({ gridId }: { gridId: string }) {
     const onChange = () => useThemeStore.getState().setSystemDark(media.matches);
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  // Settings live in the main window: a problem's "Sign in again" and "Open
+  // settings" ask it to open them.
+  useEffect(() => {
+    setSettingsOpener((section) => void emitTo("main", "open-settings", { section }).catch(() => undefined));
+    return () => setSettingsOpener(null);
   }, []);
 
   useEffect(() => {

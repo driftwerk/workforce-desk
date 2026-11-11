@@ -92,3 +92,17 @@ describe("askText", () => {
     expect(t).toMatch(/The raw error:\nClaude sign-in ended/);
   });
 });
+
+describe("no Desk agent", () => {
+  it("an ask-fix gives way to its real next step", () => {
+    const run = vi.fn();
+    render(<ProblemNote problem={{ plain: "Desk wasn’t allowed to do that.", fix: { label: "Ask Desk to fix it", ask: true, alt: { label: "Open settings", run } } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(run).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Ask Desk/ })).toBeNull();
+  });
+
+  it("secrets are out of what Desk's agent is sent", () => {
+    expect(askText({ plain: "x", what: "using token=hunter2xyz", details: "Authorization: Bearer abc123def456 ghp_abcdefghij1234567890" })).not.toMatch(/hunter2|abc123|ghp_abc/);
+  });
+});

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
+import { idsNow, mayHaveHappened, reconcile } from "../ui/reconcile";
 import { MemberPicker } from "./MemberPicker";
 
 export function NewRoom({ onClose }: { onClose: () => void }) {
@@ -7,10 +8,26 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [lead, setLead] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const toggle = (k: string) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
+  // What a second go reads: the form as it is then, not as it was when it failed.
+  const latest = useRef({ name, picked, lead, hub });
+  latest.current = { name, picked, lead, hub };
+  const working = useRef(false);
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!hub) return;
+    const { name, picked, lead, hub } = latest.current;
+    if (!hub || working.current) return;
+    working.current = true;
+    setBusy(true);
+    const before = await idsNow(() => hub.rooms());
     try {
       const members = picked.map((k) => {
         const [h, ...rest] = k.split("/");
@@ -20,7 +37,18 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
       await openRoom(room.id);
       onClose();
     } catch (err) {
-      fail(err, { what: "making a room", retry: () => void submit() });
+      // A create whose answer never came may have been made: look before offering it again.
+      const seen = mayHaveHappened(err) ? await reconcile(() => hub.rooms(), before, (r) => r.name === name) : null;
+      if (seen?.kind === "made") {
+        await openRoom(seen.made.id).catch(() => undefined);
+        onClose();
+      } else {
+        const again = !seen || seen.kind === "absent";
+        fail(err, { what: "making a room", ...(again ? { retry: () => here.current && void submit() } : {}) });
+      }
+    } finally {
+      working.current = false;
+      if (here.current) setBusy(false);
     }
   };
   return (
@@ -40,7 +68,7 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={!name.trim()}>
+          <button type="submit" className="btn btn-signal" disabled={!name.trim() || busy}>
             Create
           </button>
         </footer>

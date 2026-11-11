@@ -1,4 +1,5 @@
 import { askDesk, useCanAskDesk } from "./askDesk";
+import { fullDetailsOf } from "./plainError";
 import type { Problem } from "./problem";
 
 /** A problem in the one shape Desk uses everywhere: the headline in plain
@@ -10,7 +11,8 @@ export function ProblemNote({ problem, onDone, className = "" }: { problem: Prob
   const ask = () => {
     if (askDesk(problem)) onDone?.();
   };
-  const primary = fix && (fix.ask ? canAsk : true) ? fix : null;
+  // With no Desk agent to ask, an ask-fix gives way to its real next step.
+  const primary = !fix ? null : fix.ask ? (canAsk ? fix : (fix.alt ?? null)) : fix;
   return (
     <div className={`problem ${className}`.trim()}>
       <p className="problem-plain">{problem.plain}</p>
@@ -50,5 +52,20 @@ export function ProblemNote({ problem, onDone, className = "" }: { problem: Prob
         </details>
       )}
     </div>
+  );
+}
+
+/** For an inline error string from `plainError`: "Copy details" when the raw
+ *  text behind it is longer than what the string shows. */
+export function CopyDetails({ text }: { text: string | null | undefined }) {
+  const full = text ? fullDetailsOf(text) : null;
+  if (!full) return null;
+  return (
+    <>
+      {" "}
+      <button type="button" className="link small" onClick={() => void navigator.clipboard?.writeText(full).catch(() => undefined)}>
+        Copy details
+      </button>
+    </>
   );
 }

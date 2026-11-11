@@ -10,8 +10,9 @@ import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
 import { ProblemNote } from "../ui/ProblemNote";
 import { setStarter } from "../ui/problem";
+import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, startHelper, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -55,7 +56,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
-import { useUi } from "./ui";
+import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
 import { useSetup } from "../setup/store";
@@ -120,8 +121,19 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   const hubDown = useHubDown();
+  // A grid's window asks for Settings here, the only window that has them.
+  useEffect(
+    () =>
+      subscribe(
+        listen<{ section: SettingsSection }>("open-settings", (e) => {
+          useUi.getState().openSettings(e.payload.section);
+          void getCurrentWindow().setFocus().catch(() => undefined);
+        }),
+      ),
+    [],
+  );
   useEffect(() => {
-    setStarter(() => void startHelper().catch(() => undefined));
+    setStarter(startLocalHelper);
     return () => setStarter(null);
   }, []);
   useHubLinks();

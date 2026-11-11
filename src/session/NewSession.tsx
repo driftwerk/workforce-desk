@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { idsNow, mayHaveHappened, reconcile } from "../ui/reconcile";
 import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn, defaultChoice, hasAccounts, ownSignInWorks } from "../engines/accounts";
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
@@ -129,13 +130,27 @@ export function NewSession({
     if (!name) setName(nameFrom(dir));
   };
 
+  const working = useRef(false);
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  // What a second go runs: the form as it is then, not as it was when it failed.
+  const again = useRef<() => Promise<void>>(async () => {});
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!hub || (!cwd && !remote)) return;
+    if (!hub || (!cwd && !remote) || working.current) return;
+    working.current = true;
     setBusy(true);
+    const before = await idsNow(() => hub.sessions());
+    let startedAs = { cwd: "", name: "" };
     try {
       // On a machine, its own path: `~` (and nothing typed) is its home.
       const where = remote ? onMachine(cwd || "~", await homeWithin(() => machineHome(runOn), runOn)) : cwd;
+      startedAs = { cwd: where, name: name || nameFrom(where) };
       const s = await hub.start({
         engine,
         cwd: where,
@@ -154,11 +169,24 @@ export function NewSession({
       open(key);
       onClose();
     } catch (err) {
-      fail(err, { what: "starting a session", retry: () => void submit() });
+      // A start whose answer never came may have happened: look before offering it again.
+      const seen =
+        startedAs.cwd && mayHaveHappened(err) ? await reconcile(() => hub.sessions(), before, (x) => x.cwd === startedAs.cwd && x.name === startedAs.name) : null;
+      if (seen?.kind === "made") {
+        const key = keyOf(runOn, seen.made.id);
+        if (group !== UNGROUPED && layout.groups.some((g) => g.id === group)) moveItem([], sessionItem(key), group, null);
+        open(key);
+        onClose();
+      } else {
+        const safe = !mayHaveHappened(err) || seen?.kind === "absent";
+        fail(err, { what: "starting a session", ...(safe ? { retry: () => here.current && void again.current() } : {}) });
+      }
     } finally {
-      setBusy(false);
+      working.current = false;
+      if (here.current) setBusy(false);
     }
   };
+  again.current = submit;
 
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
