@@ -14,3 +14,7 @@ export const openChrome = (): Promise<void> => invoke<void>("open_chrome");
 
 /** How often the guide asks whether Chrome has turned debugging on. */
 export const CONNECT_POLL_MS = 2000;
+
+/** How long the guide watches before it says it's still waiting and stops
+ *  asking until the person says to check again. */
+export const CONNECT_WAIT_MS = 5 * 60 * 1000;

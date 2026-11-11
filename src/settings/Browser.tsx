@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserPill } from "../browser/BrowserPill";
-import { CONNECT_POLL_MS, GET_CHROME, openChrome, TURN_ON } from "../browser/chrome";
+import { CONNECT_POLL_MS, CONNECT_WAIT_MS, GET_CHROME, openChrome, TURN_ON } from "../browser/chrome";
 import { backendLabel, useLocalBrowser } from "../browser/store";
 import type { BrowserOf } from "../hub/browser";
 import { useChat } from "../chat/store";
@@ -75,8 +75,11 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   const [block, setBlock] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  /** The guide to Chrome's switch is open, and what opening Chrome said. */
-  const [connecting, setConnecting] = useState(false);
+  /** The guide to Chrome's switch is open (and since when, which changes
+   *  when the person says to check again), and what opening Chrome said. */
+  const [connecting, setConnecting] = useState<number | null>(null);
+  /** The guide watched its five minutes without Chrome turning it on. */
+  const [stillWaiting, setStillWaiting] = useState(false);
   const [noChrome, setNoChrome] = useState<string | null>(null);
   /** Whether the address is on the clipboard: said only when it is. */
   const [copied, setCopied] = useState(false);
@@ -99,16 +102,24 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   }, [api]);
   useEffect(reload, [reload]);
 
-  // While the guide is open, Desk watches for Chrome's switch and says so.
+  // While the guide is open, Desk watches for Chrome's switch and says so,
+  // for five minutes at a time. Only Chrome's standing is taken from what
+  // it reads: site lists being edited are left as they are.
   useEffect(() => {
-    if (!connecting || !api) return;
+    if (connecting === null || !api) return;
+    setStillWaiting(false);
     const t = setInterval(() => {
+      if (Date.now() - connecting >= CONNECT_WAIT_MS) {
+        clearInterval(t);
+        setStillWaiting(true);
+        return;
+      }
       api
         .settings()
         .then((v) => {
           if (!v.chrome.available) return;
-          shown(v);
-          setConnecting(false);
+          setView((now) => (now && typeof now === "object" ? { ...now, chrome: v.chrome } : v));
+          setConnecting(null);
         })
         .catch(() => undefined);
     }, CONNECT_POLL_MS);
@@ -127,7 +138,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
     await copy(TURN_ON);
     try {
       await (api?.openChrome ?? openChrome)();
-      setConnecting(true);
+      setConnecting(Date.now());
     } catch (e) {
       setNoChrome(plainError(e));
     }
@@ -205,7 +216,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
             <>
               <h2 className="field-label">My Chrome</h2>
               <p className={`small ${chromeLine(chrome).tone === "done" ? "state-done" : "muted"}`}>{chromeLine(chrome).text}</p>
-              {!chrome.available && !connecting && (
+              {!chrome.available && connecting === null && (
                 <div className="browser-chrome-on">
                   <button type="button" className="btn btn-sm btn-signal" onClick={() => void connect()}>
                     Connect my Chrome
@@ -220,7 +231,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
                   </button>
                 </p>
               )}
-              {!chrome.available && connecting && (
+              {!chrome.available && connecting !== null && (
                 <div className="browser-connect" role="group" aria-label="Connect my Chrome">
                   <p className="small">Chrome is open. Two steps there, once:</p>
                   <ol className="browser-connect-steps small">
@@ -233,11 +244,21 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
                     </li>
                     <li>Tick “Allow remote debugging for this browser instance”.</li>
                   </ol>
-                  <p className="small muted">
-                    <span className="dot dot-working" aria-hidden="true" /> Waiting for Chrome… Chrome remembers this, and asks you to Allow
-                    Desk the first time it connects.
-                  </p>
-                  <button type="button" className="btn btn-sm" onClick={() => setConnecting(false)}>
+                  {stillWaiting ? (
+                    <p className="small" role="status">
+                      Still waiting: Chrome hasn’t turned it on yet. Check the box is ticked in Chrome, then{" "}
+                      <button type="button" className="link small" onClick={() => setConnecting(Date.now())}>
+                        check again
+                      </button>
+                      .
+                    </p>
+                  ) : (
+                    <p className="small muted">
+                      <span className="dot dot-working" aria-hidden="true" /> Waiting for Chrome… Chrome remembers this, and asks you to
+                      Allow Desk the first time it connects.
+                    </p>
+                  )}
+                  <button type="button" className="btn btn-sm" onClick={() => setConnecting(null)}>
                     Cancel
                   </button>
                 </div>

@@ -30,16 +30,41 @@ fn windows_chrome(
         .find(|p| exists(p))
 }
 
-/// Where Chrome is on Linux: the first of its launchers on `PATH`.
-fn linux_chrome(
-    env: &dyn Fn(&str) -> Option<String>,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    let path = env("PATH")?;
-    ["google-chrome-stable", "google-chrome"]
+/// The folders Chrome's launchers install to on Linux. Fixed, never read
+/// from `PATH`: a relative or planted entry there can't pick what runs.
+const LINUX_DIRS: &[&str] = &[
+    "/usr/bin",
+    "/usr/local/bin",
+    "/opt/google/chrome",
+    "/snap/bin",
+];
+
+/// Where Chrome is on Linux: the first of its launchers in [`LINUX_DIRS`].
+fn linux_chrome(exists: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    LINUX_DIRS
         .iter()
-        .flat_map(|name| std::env::split_paths(&path).map(move |dir| dir.join(name)))
+        .flat_map(|dir| {
+            ["google-chrome-stable", "google-chrome", "chrome"]
+                .iter()
+                .map(move |name| Path::new(dir).join(name))
+        })
         .find(|p| exists(p))
+}
+
+/// Whether `path` is a program this person can run: a file, executable.
+fn runnable(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_file()
+    }
 }
 
 /// How to open Chrome on `os` (`std::env::consts::OS`), with no address
@@ -58,7 +83,7 @@ pub fn launch(
             program,
             args: vec![],
         }),
-        _ => linux_chrome(env, exists).map(|program| Launch {
+        _ => linux_chrome(exists).map(|program| Launch {
             program,
             args: vec![],
         }),
@@ -70,7 +95,7 @@ pub const NOT_INSTALLED: &str = "Chrome isn't installed on this computer.";
 /// Opens the person's Chrome (or brings it forward when it's open).
 pub fn open() -> Result<(), String> {
     let env = |k: &str| std::env::var(k).ok();
-    let exists = |p: &Path| p.is_file();
+    let exists = |p: &Path| runnable(p);
     let Some(how) = launch(std::env::consts::OS, &env, &exists) else {
         return Err(NOT_INSTALLED.into());
     };
@@ -85,8 +110,14 @@ pub fn open() -> Result<(), String> {
             Err(NOT_INSTALLED.into())
         };
     }
-    // Chrome hands itself to a running Chrome and exits, or keeps running.
-    command.spawn().map(|_| ()).map_err(|e| e.to_string())
+    // Chrome hands itself to a running Chrome and exits, or keeps running:
+    // either way it is waited for on a thread of its own, so it never
+    // lingers as a zombie of Desk's.
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -123,17 +154,34 @@ mod tests {
     }
 
     #[test]
-    fn on_linux_chrome_is_its_launcher_on_the_path() {
-        // PATH as this computer joins it, so the test reads the same on
-        // every platform it runs on.
-        let joined = std::env::join_paths(["/usr/local/bin", "/usr/bin"]).unwrap();
-        let path = joined.to_str().unwrap().to_string();
-        let vars = [("PATH", path.as_str())];
-        let env = env_of(&vars);
-        let chrome = Path::new("/usr/bin").join("google-chrome");
+    fn on_linux_chrome_is_found_in_its_install_folders_never_by_path() {
+        let chrome = Path::new("/opt/google/chrome").join("google-chrome");
+        let env = env_of(&[("PATH", "bin:.:/home/sarah/evil")]);
         let how = launch("linux", &env, &|p| p == chrome).unwrap();
         assert_eq!(how.program, chrome);
+        assert!(how.args.is_empty());
+        let planted = Path::new("/home/sarah/evil").join("google-chrome");
+        assert_eq!(
+            launch("linux", &env, &|p| p == planted),
+            None,
+            "a PATH entry never picks what runs"
+        );
         assert_eq!(launch("linux", &env, &|_| false), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_an_executable_file_is_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("google-chrome");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!runnable(&file), "not executable");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runnable(&file));
+        assert!(!runnable(dir.path()), "a folder");
+        assert!(!runnable(&dir.path().join("missing")));
     }
 
     #[test]

@@ -117,6 +117,28 @@ it("Connect my Chrome copies Chrome's page, opens Chrome natively, and says Read
   vi.useRealTimers();
 });
 
+it("keeps site lists being edited when Chrome turns on, and says Still waiting after five minutes", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let on = false;
+  const a = api(view(), [], { settings: vi.fn(async () => view({}, { available: on })), openChrome: vi.fn(async () => undefined), copy: async () => undefined });
+  await show(a);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Connect my Chrome" })));
+  // Five minutes with nothing: it stops asking and says so.
+  await act(async () => vi.advanceTimersByTime(5 * 60 * 1000 + 2100));
+  expect(screen.getByRole("status").textContent).toContain("Still waiting");
+  const asked = vi.mocked(a.settings).mock.calls.length;
+  await act(async () => vi.advanceTimersByTime(10_000));
+  expect(vi.mocked(a.settings).mock.calls.length).toBe(asked);
+  // Check again: it watches again, and a site list being typed stays.
+  fireEvent.change(screen.getByLabelText("Only these sites (leave empty for any)"), { target: { value: "docs.example" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "check again" })));
+  on = true;
+  await act(async () => vi.advanceTimersByTime(2100));
+  expect(screen.getByText(/^Ready\./)).toBeTruthy();
+  expect((screen.getByLabelText("Only these sites (leave empty for any)") as HTMLInputElement).value).toBe("docs.example");
+  vi.useRealTimers();
+});
+
 it("doesn't say it copied the address when the clipboard refused", async () => {
   await show(api(view(), [], { openChrome: vi.fn(async () => undefined), copy: async () => Promise.reject(new Error("no clipboard")) }));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Connect my Chrome" })));
