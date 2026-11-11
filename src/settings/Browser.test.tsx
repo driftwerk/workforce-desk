@@ -89,17 +89,52 @@ it("shows Desk's browser by default, and turning that off saves it", async () =>
   expect(a.save).toHaveBeenCalledWith(expect.objectContaining({ show: false }));
 });
 
-it("says how to turn on remote debugging when Chrome isn't connected, and opens it", async () => {
-  await show(api(view()));
-  expect(screen.getByText(/Turn on remote debugging in Chrome 144 or later/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Open in Chrome" }));
-  expect(opened).toEqual(["chrome://inspect/#remote-debugging"]);
+it("Connect my Chrome copies Chrome's page, opens Chrome natively, and says Ready once Chrome turns it on", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const copied: string[] = [];
+  const openChrome = vi.fn(async () => undefined);
+  let on = false;
+  const a = api(view(), [], {
+    settings: vi.fn(async () => view({}, { available: on })),
+    openChrome,
+    copy: async (t) => void copied.push(t),
+  });
+  await show(a);
+  expect(screen.getByText(/Connect it once and Chrome remembers/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Open in Chrome" })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Connect my Chrome" })));
+  expect(copied).toEqual(["chrome://inspect/#remote-debugging"]);
+  expect(openChrome).toHaveBeenCalledOnce();
+  // No chrome:// address goes to the link opener.
+  expect(opened).toEqual([]);
+  const guide = screen.getByRole("group", { name: "Connect my Chrome" });
+  expect(guide.textContent).toContain("paste and press Return");
+  expect(guide.textContent).toContain("Allow remote debugging for this browser instance");
+  on = true;
+  await act(async () => vi.advanceTimersByTime(2100));
+  expect(screen.queryByRole("group", { name: "Connect my Chrome" })).toBeNull();
+  expect(screen.getByText(/^Ready\./)).toBeTruthy();
+  vi.useRealTimers();
+});
+
+it("says when Chrome isn't installed and where to get it", async () => {
+  await show(api(view(), [], { openChrome: vi.fn(async () => Promise.reject(new Error("Chrome isn't installed on this computer."))), copy: async () => undefined }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Connect my Chrome" })));
+  expect(screen.getByRole("alert").textContent).toContain("Chrome isn't installed on this computer.");
+  fireEvent.click(screen.getByRole("button", { name: "Get Chrome" }));
+  expect(opened).toEqual(["https://www.google.com/chrome/"]);
 });
 
 it("says Connected when Desk is working in the person's Chrome", async () => {
   await show(api(view({}, { available: true, connected: true })));
   expect(screen.getByText(/^Connected\./)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Open in Chrome" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Connect my Chrome" })).toBeNull();
+});
+
+it("says what unbound means in plain words", async () => {
+  await show(api(view()));
+  expect(screen.getByText(/Unless you let it act fully, it asks you/)).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/unbound|once by hand/);
 });
 
 it("keeps the site lists as hosts and saves them", async () => {
@@ -140,7 +175,7 @@ it("says when the hub has no browser yet", async () => {
 
 it("reads sites and Chrome's standing in plain words", () => {
   expect(sitesOf(" a.test, B.test\n\na.test ")).toEqual(["a.test", "b.test"]);
-  expect(chromeLine({ available: true, connected: false, min_version: 144, turn_on: "" }).text).toMatch(/Chrome asks you first/);
+  expect(chromeLine({ available: true, connected: false, min_version: 144, turn_on: "" }).text).toMatch(/Chrome asks you to Allow it first/);
 });
 
 it("asks this computer's hub as the person for the settings, a change and the screenshots", async () => {
