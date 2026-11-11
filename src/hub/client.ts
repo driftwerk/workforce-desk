@@ -235,6 +235,9 @@ export class HubError extends Error {
     message: string,
     /** The hub's own name for the refusal, when it gives one. */
     readonly code?: string,
+    /** The hubs a room's conversation would go to that the person hasn't
+     *  agreed to, when that's what the refusal asks about. */
+    readonly hubs?: string[],
   ) {
     super(message);
   }
@@ -255,17 +258,19 @@ export const refusal = async (res: Response): Promise<HubError> => {
   const text = (await res.text().catch(() => "")).trim();
   let message = text.startsWith("<") ? "" : text;
   let code: string | undefined;
+  let hubs: string[] | undefined;
   try {
     const body: unknown = JSON.parse(text);
     if (body && typeof body === "object") {
-      const { error, code: c } = body as { error?: unknown; code?: unknown };
+      const { error, code: c, hubs: h } = body as { error?: unknown; code?: unknown; hubs?: unknown };
       message = typeof error === "string" && error.trim() ? error : "";
       if (typeof c === "string" && c) code = c;
+      if (Array.isArray(h) && h.length && h.every((x) => typeof x === "string")) hubs = h as string[];
     }
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "The hub refused that.", code);
+  return new HubError(res.status, message || res.statusText || "The hub refused that.", code, hubs);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
@@ -712,11 +717,13 @@ export class DeskHub {
   dismissSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/dismiss`);
 
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
-  createRoom = (name: string, members: RoomMemberRef[], defaultMember?: string): Promise<Room> =>
-    this.call("POST", "/api/desk/rooms", { name, members, defaultMember });
+  /** `shareWith`: the hubs the person said its conversation may go to,
+   *  in answer to the hub asking (see `rooms/share`). */
+  createRoom = (name: string, members: RoomMemberRef[], defaultMember?: string, shareWith: string[] = []): Promise<Room> =>
+    this.call("POST", "/api/desk/rooms", { name, members, defaultMember, ...(shareWith.length ? { shareWith } : {}) });
   updateRoom = (
     id: string,
-    patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null },
+    patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null; shareWith?: string[] },
   ): Promise<Room> => this.call("PATCH", `/api/desk/rooms/${id}`, patch);
   deleteRoom = (id: string): Promise<void> => this.call("DELETE", `/api/desk/rooms/${id}`);
   /** A page of a room's main timeline (or of one thread), oldest first: its

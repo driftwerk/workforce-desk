@@ -32,7 +32,7 @@ const room = {
 let patches: unknown[] = [];
 const updateRoom = vi.fn(async (_id: string, patch: { name?: string }) => {
   patches.push(patch);
-  if (patch.name === "acme-web") throw new HubError(409, "a room is called that");
+  if (patch.name?.toLowerCase() === "acme-web") throw new HubError(409, "a room is called that");
   return { ...room, ...patch };
 });
 
@@ -79,6 +79,17 @@ describe("a room's details", () => {
     fireEvent.change(name, { target: { value: "Atlas release" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await vi.waitFor(() => expect(patches.at(-1)).toEqual({ name: "Atlas release" }));
+  });
+
+  it("offers to open the room that has the name asked for", async () => {
+    const open = vi.fn(async () => {});
+    useDesk.setState((s) => ({ rooms: { ...s.rooms, r2: { ...room, id: "r2", slug: "acme-web", name: "acme-web" } }, openRoom: open }));
+    details();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme-Web" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", expect.stringContaining("There’s already a room called acme-web."));
+    fireEvent.click(screen.getByRole("button", { name: "Open acme-web" }));
+    expect(open).toHaveBeenCalledWith("r2");
   });
 
   it("says what each member is doing, and whose workspace isn't connected", () => {
