@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ProblemNote } from "../ui/ProblemNote";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
@@ -210,11 +211,8 @@ function Toast() {
   const { error, clearError } = useDesk();
   if (!error) return null;
   return (
-    <div className="toast toast-error" role="alert">
-      <span>{error}</span>
-      <button type="button" className="link" onClick={clearError}>
-        Dismiss
-      </button>
+    <div className="toast toast-error toast-problem" role="alert">
+      <ProblemNote problem={error} onDone={clearError} />
     </div>
   );
 }

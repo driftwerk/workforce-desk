@@ -129,8 +129,8 @@ export function NewSession({
     if (!name) setName(nameFrom(dir));
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!hub || (!cwd && !remote)) return;
     setBusy(true);
     try {
@@ -154,7 +154,7 @@ export function NewSession({
       open(key);
       onClose();
     } catch (err) {
-      fail(err);
+      fail(err, { what: "starting a session", retry: () => void submit() });
     } finally {
       setBusy(false);
     }

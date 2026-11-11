@@ -8,8 +8,10 @@ import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
+import { ProblemNote } from "../ui/ProblemNote";
+import { setStarter } from "../ui/problem";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { hubAccounts, inApp, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { hubAccounts, inApp, localHub, startHelper, onThemesChanged, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -118,6 +120,10 @@ export function App() {
     prune(rooms, hubs);
   }, [rooms, hubs]);
   const hubDown = useHubDown();
+  useEffect(() => {
+    setStarter(() => void startHelper().catch(() => undefined));
+    return () => setStarter(null);
+  }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
   useAppBadge();
@@ -409,11 +415,8 @@ export function App() {
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (
-        <div className="toast toast-error" role="alert">
-          <span>{error}</span>
-          <button type="button" className="link" onClick={clearError}>
-            Dismiss
-          </button>
+        <div className="toast toast-error toast-problem" role="alert">
+          <ProblemNote problem={error} onDone={clearError} />
         </div>
       )}
     </div>

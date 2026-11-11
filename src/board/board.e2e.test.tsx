@@ -261,7 +261,7 @@ describe("the board", () => {
     await connect();
     render(<Board />);
     await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowRight", altKey: true }));
-    await waitFor(() => expect(useDesk.getState().error).toMatch(/changed while this was being done/));
+    await waitFor(() => expect(useDesk.getState().error?.plain).toMatch(/changed while this was being done/));
     expect(cardsIn("To do")).toEqual(["ACM-1"]);
     expect(cardsIn("Doing")).toEqual(["ACM-3"]);
   });
@@ -413,7 +413,7 @@ describe("when the hub and Desk cross", () => {
       if (route.endsWith("/move")) hub.put({ ...hub.tickets.get("t1")!, state: "review" });
     };
     await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowRight", altKey: true }));
-    await waitFor(() => expect(useDesk.getState().error).toBe("That ticket changed while this was being done; look at it again."));
+    await waitFor(() => expect(useDesk.getState().error?.plain).toBe("That ticket changed while this was being done; look at it again."));
     expect(cardsIn("Review")).toEqual(["ACM-1"]);
     expect(cardsIn("Doing")).toEqual(["ACM-3"]);
   });

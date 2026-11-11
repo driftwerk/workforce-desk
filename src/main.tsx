@@ -22,6 +22,7 @@ import { loadHost } from "./shell/host";
 import { DeskRichHost } from "./shell/richHost";
 import "./styles/app.css";
 import "./styles/crew.css";
+import "./styles/problem.css";
 import "./styles/overview.css";
 import "./styles/floor.css";
 import "./styles/grids.css";

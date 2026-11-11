@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
 import { EngineBlocks } from "../settings/EngineBlocks";
 import { useHost } from "../shell/host";
+import { askDesk, useCanAskDesk } from "../ui/askDesk";
 import { plainError } from "../ui/plainError";
 import { CANCELLED, setUp, START, step, type Item } from "./addFlow";
 import { useMachines } from "./engines";
@@ -54,10 +55,10 @@ function Check({ item, text, children }: { item: Item; text: string; children?: 
 }
 
 const checkText = {
-  connect: (i: Item, name: string) => i.detail ?? (i.state === "failed" ? (i.message ?? `Couldn’t connect to ${name}`) : `Connecting to ${name}…`),
+  connect: (i: Item, name: string) => i.detail ?? (i.state === "failed" ? `Couldn’t connect to ${name}.` : `Connecting to ${name}…`),
   install: (i: Item) =>
     i.state === "failed"
-      ? `Desk couldn’t be installed: ${(i.message ?? "").replace(/^Desk couldn.t be installed[:.]?\s*/, "")}`.replace(/:\s*$/, ".")
+      ? "Desk couldn’t be installed there."
       : i.state === "done"
         ? (i.detail ?? "Desk installed, and set to start when it boots")
         : i.state === "running"
@@ -71,7 +72,7 @@ const checkText = {
       : i.state === "running"
         ? (i.detail ?? "Installing Claude Code and Codex…")
         : i.state === "failed"
-          ? (i.message ?? "Claude Code and Codex couldn’t be installed")
+          ? "Claude Code and Codex couldn’t be installed there."
           : "Install Claude Code and Codex",
 };
 
@@ -252,6 +253,18 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
     native.reconnect(flow.machine).catch((e: unknown) => dispatch({ type: "failed", message: plainError(e) }));
   };
 
+  const canAsk = useCanAskDesk();
+  /** Hands the failed step, with this computer's log of it, to Desk's agent. */
+  const askToLook = async (i: Item) => {
+    const id = flow.at === "setup" ? (flow.machine ?? flow.target) : "";
+    const lines = await native.log(id).catch(() => [] as LogLine[]);
+    askDesk({
+      plain: `Adding ${flow.at === "setup" ? flow.name : "a machine"} stopped on a step.`,
+      what: "adding a machine in Settings → Machines",
+      details: [i.message ?? "", ...lines.slice(-40).map((l) => `${clock(l.at)} ${l.text}`)].filter(Boolean).join("\n"),
+    });
+  };
+
   /** A failed step's way out, in place. */
   const wayOut = (i: Item) =>
     i.state === "failed" && newer ? (
@@ -266,7 +279,18 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         <button type="button" className="btn btn-sm" onClick={() => setShowLog((v) => !v)}>
           {showLog ? "Hide log" : "View log"}
         </button>
+        {canAsk && (
+          <button type="button" className="btn btn-sm" onClick={() => void askToLook(i)}>
+            Ask Desk to look
+          </button>
+        )}
         <span className="small faint">{failedHint(i)}</span>
+        {i.message && (
+          <details className="problem-details">
+            <summary className="small faint">Details</summary>
+            <pre className="problem-raw mono small">{i.message}</pre>
+          </details>
+        )}
       </span>
     ) : i.state === "running" && flow.at === "setup" && !ready ? (
       <span className="small muted">

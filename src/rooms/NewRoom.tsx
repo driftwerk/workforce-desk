@@ -8,8 +8,8 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [lead, setLead] = useState<string | null>(null);
   const toggle = (k: string) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!hub) return;
     try {
       const members = picked.map((k) => {
@@ -20,7 +20,7 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
       await openRoom(room.id);
       onClose();
     } catch (err) {
-      fail(err);
+      fail(err, { what: "making a room", retry: () => void submit() });
     }
   };
   return (

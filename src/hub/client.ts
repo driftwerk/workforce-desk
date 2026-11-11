@@ -187,7 +187,7 @@ export interface ComputerActivityPage {
 export type DiskAccess = "granted" | "missing" | "unknown";
 
 /** What a hub without a route is taken to have said. */
-const NO_ROUTE = "This hub doesn’t have that yet.";
+const NO_ROUTE = "This part of Desk doesn’t have that yet.";
 
 /** One key of Desk's state on a hub. */
 export interface StateRow {

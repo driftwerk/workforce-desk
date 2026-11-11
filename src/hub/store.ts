@@ -3,6 +3,7 @@ import { shownState } from "../floor/background";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
 import { DeskHub, HubError, ROOM_PAGE } from "./client";
+import { explain, type ExplainOptions, type Problem } from "../ui/problem";
 import type { DeskTransport } from "./transport";
 import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "./machines";
 import { byTime, later } from "../rooms/time";
@@ -66,7 +67,7 @@ interface DeskState {
   inbox: boolean;
   /** Rooms with the Unread page, or back from it. */
   setInbox: (on: boolean) => void;
-  error: string | null;
+  error: Problem | null;
   /** A detached grid's window, which leaves telling the system of sessions'
    *  changes, and handing Desk's groups to the hub, to the main window. */
   detached: boolean;
@@ -85,7 +86,8 @@ interface DeskState {
   /** The hub has said which rooms and sessions it has. */
   loaded: boolean;
   openThread: (roomId: string, threadId: string) => Promise<void>;
-  fail: (e: unknown) => void;
+  /** Shows what went wrong as a `Problem`: plain words, a fix, the raw text under Details. */
+  fail: (e: unknown, opts?: ExplainOptions) => void;
   clearError: () => void;
 }
 
@@ -513,7 +515,7 @@ export const useDesk = create<DeskState>((set, get) => ({
   toNewest: async (roomId, thread) => {
     if (!isLive(get().windows[placeKey(roomId, thread)])) await get().page(roomId, thread, "newest");
   },
-  fail: (e) => set({ error: e instanceof Error ? e.message : String(e) }),
+  fail: (e, opts) => set({ error: explain(e, { localDown: !get().connected, ...opts }) }),
   clearError: () => set({ error: null }),
 }));
 

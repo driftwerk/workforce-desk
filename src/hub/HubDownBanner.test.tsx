@@ -51,7 +51,7 @@ describe("the local hub is down", () => {
     act(() => useDesk.setState({ connected: false }));
     await tick(GRACE_MS + 100);
     await flush();
-    expect(screen.getByText("This computer’s hub isn’t running")).toBeTruthy();
+    expect(screen.getByText("Desk’s helper isn’t running")).toBeTruthy();
     expect(screen.getByText(/Last logged: Postgres failed: port 5433 is busy/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start it" })).toBeTruthy();
     expect(screen.getByTestId("app").getAttribute("data-hub-down")).toBe("true");
@@ -73,7 +73,7 @@ describe("the local hub is down", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start it" }));
     await flush();
     expect(platform.startHelper).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Starting this computer’s hub…")).toBeTruthy();
+    expect(screen.getByText("Starting Desk’s helper…")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Starting…" }) as HTMLButtonElement).disabled).toBe(true);
     act(() => useDesk.setState({ connected: true }));
     await flush();
@@ -111,7 +111,7 @@ describe("the local hub is down", () => {
     await tick(GRACE_MS + 100);
     fireEvent.click(screen.getByRole("button", { name: "Start it" }));
     await flush();
-    expect(screen.getByText(/development run: start desk-hubd by hand/)).toBeTruthy();
+    expect(screen.getByText(/development run: start Desk’s helper by hand/)).toBeTruthy();
   });
 
   it("is not shown on Windows before Desk is set up, when there is no local hub", async () => {
