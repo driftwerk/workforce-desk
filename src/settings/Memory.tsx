@@ -169,7 +169,7 @@ export function Memory() {
       {limits && (
         <section className="prov-section" aria-label="Limits">
           <h2 className="field-label">Limits</h2>
-          <p className="faint small">Set in the hub's config, under [desk.memory].</p>
+          <p className="faint small">These limits are set in Desk’s memory settings file. Ask Desk to change them.</p>
           <ul className="memory-limits small">
             {!limits.enabled && <li>Remembering conversations is turned off for this Desk.</li>}
             <li>Conversations are kept {count(limits.retainDays, "day")} after they end; notes stay until you forget them.</li>

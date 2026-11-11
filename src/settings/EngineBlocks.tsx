@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { explain } from "../ui/problem";
+import { ProblemNote } from "../ui/ProblemNote";
 import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
 import { CODEX_LOGIN, useCodexSignIn } from "../engines/signIn";
@@ -131,7 +133,7 @@ export function EngineBlocks({
   });
 
   if (!hub && !Array.isArray(engines)) {
-    if (machine === LOCAL) return <p className="faint small">Not connected to a hub.</p>;
+    if (machine === LOCAL) return <p className="faint small">Not connected yet.</p>;
     return (
       <p className={`small ${slowConnect ? "state-blocked" : "faint"}`}>
         {slowConnect ? `${where} hasn’t connected in a minute.` : `Waiting for ${where} to connect…`}{" "}
@@ -246,9 +248,9 @@ export function CodexSigningIn({ codex, machine, where }: { codex: ReturnType<ty
           </p>
         )}
         {r.at === "failed" && (
-          <p className="small state-blocked" role="alert">
-            {r.why}
-          </p>
+          <div role="alert">
+            <ProblemNote problem={explain(new Error(r.why), { what: "signing in to ChatGPT", retry: () => void codex.begin() })} />
+          </div>
         )}
         {r.at === "terminal" && (
           <>

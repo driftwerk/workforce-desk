@@ -48,7 +48,7 @@ describe("desk links", () => {
   it("say so for a room this computer doesn't have", () => {
     openLink(deskLink({ room: "99999999-2222-4333-8444-555555555555", message: MSG }));
     expect(openTarget).not.toHaveBeenCalled();
-    expect(useDesk.getState().error).toBe("That message isn’t in any of your rooms.");
+    expect(useDesk.getState().error?.plain).toBe("That message isn’t in any of your rooms.");
   });
 });
 
