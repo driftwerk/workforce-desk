@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FileHome } from "../attachments/Attachments";
+import { browserOf } from "../hub/browser";
 import { connectionsOf, type ConnectionsApi, type Setup, type SetupStep } from "../hub/connections";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
@@ -19,9 +20,26 @@ const settled = (s: Setup): boolean =>
 /** The setups an agent's message started (`count` of them, from `at`),
  *  as the hub keeps them: never what the agent wrote. Shown while they
  *  run, and once they are done. */
-export function SetupCards({ origin, at, count, api: given }: { origin: FileHome; at: string; count: number; api?: ConnectionsApi }) {
+export function SetupCards({
+  origin,
+  at,
+  count,
+  api: given,
+  showPage: givenShow,
+}: {
+  origin: FileHome;
+  at: string;
+  count: number;
+  api?: ConnectionsApi;
+  /** Brings the agent's page to the front; false when it can't. */
+  showPage?: (agent: string) => Promise<boolean>;
+}) {
   const hub = useChat((s) => s.hubs.find((h) => h.id === origin.hub));
   const api = useMemo(() => given ?? (hub?.local ? connectionsOf(hub) : null), [given, hub]);
+  const showPage = useMemo(
+    () => givenShow ?? (hub?.local ? (agent: string) => browserOf(hub).show(agent) : async () => false),
+    [givenShow, hub],
+  );
   const [setups, setSetups] = useState<Setup[] | null>(null);
   const live = useLive();
 
@@ -57,7 +75,14 @@ export function SetupCards({ origin, at, count, api: given }: { origin: FileHome
   return (
     <>
       {setups.map((s) => (
-        <SetupCard key={s.id} setup={s} api={api} origin={origin} onChange={(n) => setSetups((list) => list?.map((x) => (x.id === n.id ? n : x)) ?? null)} />
+        <SetupCard
+          key={s.id}
+          setup={s}
+          api={api}
+          origin={origin}
+          showPage={showPage}
+          onChange={(n) => setSetups((list) => list?.map((x) => (x.id === n.id ? n : x)) ?? null)}
+        />
       ))}
     </>
   );
@@ -77,11 +102,13 @@ export function SetupCard({
   setup: s,
   api,
   origin,
+  showPage,
   onChange,
 }: {
   setup: Setup;
   api: ConnectionsApi;
   origin: FileHome;
+  showPage: (agent: string) => Promise<boolean>;
   onChange: (s: Setup) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -89,6 +116,13 @@ export function SetupCard({
   const title = `${s.serviceName} · ${s.name}`;
   const at = s.steps.findIndex((x) => x.state !== "done");
   const n = s.steps.length;
+
+  /** Desk's browser to the front, on the sign-in page; where it isn't on
+   *  screen, Settings → Browser, where it is turned on and its pages show. */
+  const show = async () => {
+    const shown = await showPage(origin.agent).catch(() => false);
+    if (!shown) useUi.getState().openSettings("browser");
+  };
 
   const signedIn = async () => {
     setBusy(true);
@@ -121,7 +155,7 @@ export function SetupCard({
                     {x.note ?? "Your password stays with you. The page is open in Desk’s browser; it carries on the moment you’re in."}
                   </span>
                   <span className="setup-actions">
-                    <button type="button" className="btn btn-sm btn-blocked" onClick={() => useUi.getState().openSettings("browser")}>
+                    <button type="button" className="btn btn-sm btn-blocked" onClick={() => void show()}>
                       Show the sign-in page
                     </button>
                     <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void signedIn()}>

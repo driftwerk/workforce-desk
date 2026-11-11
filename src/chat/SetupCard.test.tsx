@@ -41,8 +41,22 @@ const api = (setups: Setup[], over: Partial<ConnectionsApi> = {}): ConnectionsAp
     ...over,
   }) as unknown as ConnectionsApi;
 
+let shown: string[] = [];
+let onScreen = true;
 const show = async (a: ConnectionsApi, count = 1) => {
-  render(<SetupCards origin={ORIGIN} at="2026-11-11T11:04:00Z" count={count} api={a} />);
+  shown = [];
+  render(
+    <SetupCards
+      origin={ORIGIN}
+      at="2026-11-11T11:04:00Z"
+      count={count}
+      api={a}
+      showPage={async (agent) => {
+        shown.push(agent);
+        return onScreen;
+      }}
+    />,
+  );
   await act(async () => {});
 };
 
@@ -53,7 +67,18 @@ it("shows the hub's steps, the one waiting on the person with what to do", async
   const waiting = within(card).getByText("Sign in to Atlassian as sam@globex.example").closest("li")!;
   expect(waiting.className).toContain("setup-step-waiting");
   expect(within(waiting).getByText(/Your password stays with you/)).toBeTruthy();
-  fireEvent.click(within(waiting).getByRole("button", { name: "Show the sign-in page" }));
+  useUi.setState({ settings: null });
+  onScreen = true;
+  await act(async () => {
+    fireEvent.click(within(waiting).getByRole("button", { name: "Show the sign-in page" }));
+  });
+  expect(shown).toEqual(["desk"]);
+  expect(useUi.getState().settings).toBeNull();
+  // Where Desk's browser isn't on screen: where it is turned on.
+  onScreen = false;
+  await act(async () => {
+    fireEvent.click(within(waiting).getByRole("button", { name: "Show the sign-in page" }));
+  });
   expect(useUi.getState().settings).toBe("browser");
   expect(card.querySelectorAll(".setup-step-done")).toHaveLength(2);
   expect(card.querySelectorAll(".setup-step-todo")).toHaveLength(2);
