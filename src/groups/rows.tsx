@@ -6,6 +6,8 @@
 import { Accessibility, defaultPreset, PointerSensor } from "@dnd-kit/dom";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
 import { useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import { dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
+import type { PaneContent } from "../grids/engine";
 
 /** Only the pointer drags: the keyboard moves with Alt+↑/↓ and the menus,
  *  and Desk says so itself, so the library's keyboard dragging and its
@@ -223,11 +225,15 @@ export function SortList({
   justDragged,
   empty,
   row,
+  toGrid,
 }: {
   label: string;
   type: string;
   ids: string[];
   chip: (id: string) => ReactNode;
+  /** What row `id` is in a grid's pane, when it can be dropped on one (a
+   *  room, a board), with its name for the dragged chip. */
+  toGrid?: (id: string) => { content: PaneContent; name: string } | null;
   onMove: (id: string, before: string | null) => void;
   onDragStart?: () => void;
   /** Set for a moment after a drag ends, so the click that follows isn't one. */
@@ -253,17 +259,29 @@ export function SortList({
     <DragDropProvider
       sensors={SENSORS}
       plugins={PLUGINS}
-      onDragStart={() => onDragStart?.()}
-      onDragMove={(e) => show(e.operation)}
-      onDragOver={(e) => show(e.operation)}
+      onDragStart={(e) => {
+        onDragStart?.();
+        // A room or a board can also be dropped on a grid's pane.
+        const s = e.operation.source;
+        const it = s && toGrid?.(String(s.id));
+        if (it) startGridDrag(it.content, it.name);
+      }}
+      onDragMove={(e) => {
+        const { x, y } = e.operation.position.current;
+        if (moveGridDrag(x, y)) setBefore(null);
+        else show(e.operation);
+      }}
+      onDragOver={(e) => (useGridDrag.getState().over ? setBefore(null) : show(e.operation))}
       onDragEnd={(e) => {
         const s = e.operation.source;
-        const d = e.canceled ? null : dropFor(e.operation);
+        const onGrid = endGridDrag(e.canceled);
+        const d = e.canceled || onGrid ? null : dropFor(e.operation);
         setBefore(null);
         if (justDragged) {
           justDragged.current = true;
           setTimeout(() => (justDragged.current = false), 0);
         }
+        if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
         if (!s || !d) return;
         const id = String(s.id);
         // Where it is already.

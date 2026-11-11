@@ -34,6 +34,12 @@ import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
 import { BoardChips, BoardPaneBody, FloorMeta, FloorPaneBody, FloorPaneScope, KindIcon, RoomPaneBody, RoomPaneMarks, setPaneFilter, usePaneFilter, useViewLabel, type ViewLabel } from "./kinds";
 import { FILTERS } from "../board/board";
+import { PanePicker } from "./Picker";
+import { useBoard } from "../board/store";
+import { arrangedBoards, useBoardOrder } from "../board/order";
+import { arranged, useRoomOrder } from "../rooms/order";
+import { useLayout } from "../groups/store";
+import { boardContent, floorContent, roomContent } from "./engine";
 import { findContent, knownContent, parkedOrder, sessionContent, sessionKeyIn, STEPS, terminalContent, terminalKeyIn, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
 import { FocusIcon, OutOfSight, UnfocusIcon, useOutOfSight } from "../panels/Stage";
@@ -523,11 +529,10 @@ function DropZones({ zone, free, single }: { zone: Zone | null; free: boolean; s
 
 function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
   const c = pane.content;
-  const keys = useSettings((s) => s.keys.newTerminal);
   if (!c) {
     return (
-      <div className="gpane-empty">
-        <p className="muted small">Drop a session here, or press {shortcutLabel(keys)} for a terminal.</p>
+      <div className="gpane-empty gpane-picking">
+        <PanePicker gridId={gridId} paneId={pane.id} />
       </div>
     );
   }
@@ -636,6 +641,15 @@ function usePaneMenu(
   // pane where they're shown with their machine).
   const mine = useDesk((s) => localSessions(s.sessions));
   const roster = useChat((s) => s.roster);
+  const rooms = arranged(
+    useDesk((s) => s.rooms),
+    useRoomOrder((s) => s.order),
+  );
+  const boards = arrangedBoards(
+    useBoard((s) => s.boards),
+    useBoardOrder((s) => s.order),
+  );
+  const groups = useLayout().groups;
   // Selected as they're kept (a list made in the selector would be new on
   // every read, which zustand takes for a change).
   const order = useGrids((s) => s.order);
@@ -655,6 +669,17 @@ function usePaneMenu(
     ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
+    { kind: "separator" },
+    ...(rooms.length ? [{ kind: "item" as const, label: "Room", submenu: rooms.map((r): MenuEntry => ({ kind: "item", label: r.name, onSelect: () => put(roomContent(r.id)) })) }] : []),
+    ...(boards.length ? [{ kind: "item" as const, label: "Board", submenu: boards.map((b): MenuEntry => ({ kind: "item", label: b.name, onSelect: () => put(boardContent(b.id)) })) }] : []),
+    {
+      kind: "item",
+      label: "Floor",
+      submenu: [
+        { kind: "item", label: "Everything", onSelect: () => put(floorContent()) },
+        ...groups.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => put(floorContent(g.id)) })),
+      ],
+    },
   ];
   const others = grids.filter((g) => g.id !== gridId);
   const move: MenuEntry[] = [
