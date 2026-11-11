@@ -187,7 +187,7 @@ export function FolderPicker({
           <li key={f.path}>
             <button type="button" className={`folder-row ${typed.replace(/\/+$/, "") === f.path ? "on" : ""}`} onClick={() => onChange(f.path)}>
               <span className="mono">{shownPath(f.path)}</span>
-              {f.git && <span className="mono small faint">git</span>}
+              {f.git && <span className="small faint">{f.remote ?? "git"}</span>}
             </button>
             <button type="button" className="folder-open" aria-label={`Open ${shownPath(f.path)}`} onClick={() => open(f.path)}>
               ›

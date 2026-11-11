@@ -55,6 +55,7 @@ beforeEach(() => {
   useMachines.setState({ listed: true, machines: [machine({ id: "devbox" }), machine({ id: "buildbox", state: { kind: "unreachable" } })] });
 });
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.useRealTimers();
 });
@@ -150,7 +151,7 @@ describe("on a machine whose Claude Code was never signed in", () => {
   it("says so plainly, and starts nothing, when none of its accounts can sign in", async () => {
     await onDevbox(false);
     expect(screen.getByRole("alert").textContent).toBe(
-      "Claude Code isn’t signed in on devbox, and none of its accounts there can sign in. Add an account again in Settings → Engines, then start the session.",
+      "Claude Code isn’t signed in on devbox, and none of its accounts there can sign in. Sign in to Claude Code",
     );
     const start = screen.getByRole("button", { name: /^Start/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
@@ -161,7 +162,7 @@ describe("on a machine whose Claude Code was never signed in", () => {
 
 it("forgets a folder typed for another computer when Run on changes", async () => {
   render(<NewSession onClose={() => {}} native={fakeNative().native} />);
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/Users/me/work" } });
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/Users/me/work" } });
   await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
   expect((screen.getByLabelText("Folder on devbox") as HTMLInputElement).value).toBe("");
 });
@@ -205,7 +206,7 @@ describe("its group", () => {
 
   it("one on this computer lands in its group too; Ungrouped takes one as it comes", async () => {
     render(<NewSession group="atlas" onClose={() => {}} native={fakeNative().native} />);
-    fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/Users/me/atlas" } });
+    fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/Users/me/atlas" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
     expect(useSettings.getState().groups[1]!.items).toEqual(["session:s-1"]);
     expect(groupSays("ungrouped", "acme", "Ungrouped", null)).toBe("It shows in Ungrouped.");

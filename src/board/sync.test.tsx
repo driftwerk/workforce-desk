@@ -276,7 +276,35 @@ describe("the link dialog", () => {
     expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
     render(<LinkBoardDialog board={ACME} tickets={3} onClose={() => {}} />);
-    expect(screen.getByRole("alert").textContent).toMatch(/has tickets of its own/);
+    expect(screen.getByRole("radiogroup", { name: "Acme’s tickets" })).toBeTruthy();
+  });
+
+  it("links a board with tickets of its own, keeping them beside the issues or clearing them first", async () => {
+    const ours = [ticket(1, { state: "todo" }), ticket(2, { state: "backlog" })];
+    useBoard.setState({ tickets: Object.fromEntries(ours.map((t) => [t.id, t])) });
+    const deleteTicket = vi.fn(async (_id: string) => {});
+    useDesk.setState({ hub: { deleteTicket } as never });
+    const linkUp = async (choice: RegExp) => {
+      render(<LinkBoardDialog board={ACME} tickets={2} onClose={() => {}} />);
+      expect(document.querySelector(".move-foot .dialog-foot-note")!.textContent).toBe("Say what happens to Acme’s 2 tickets.");
+      fireEvent.click(screen.getByRole("radio", { name: choice }));
+      pickSystem("Jira");
+      await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+      fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+      fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
+      await waitFor(() => expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+      fireEvent.click(screen.getByRole("button", { name: "Link to ACME" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(true));
+      return native.asked.filter((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`).pop()!.body!;
+    };
+    expect(await linkUp(/Keep them beside the issues/)).toMatchObject({ keepTickets: true });
+    expect(deleteTicket).not.toHaveBeenCalled();
+    cleanup();
+    native.asked.length = 0;
+    useBoard.setState({ tickets: Object.fromEntries(ours.map((t) => [t.id, t])) });
+    const cleared = await linkUp(/Clear them first/);
+    expect(cleared.keepTickets).toBeUndefined();
+    expect(deleteTicket.mock.calls.map((c) => c[0]).sort()).toEqual(["t1", "t2"]);
   });
 
   it("links a whole team by default, and asks for a member id only where the hub can't say who you are", async () => {
@@ -382,7 +410,7 @@ describe("the link dialog", () => {
     expect(button().disabled).toBe(true);
     cleanup();
     render(<LinkBoardDialog board={ACME} tickets={2} onClose={() => {}} />);
-    expect(note()).toBe(`Linking needs an empty board: ${ACME.name} has tickets.`);
+    expect(note()).toBe(`Say what happens to ${ACME.name}’s 2 tickets.`);
     // No hub on this computer: said, not waited on.
     cleanup();
     useChat.setState({ hubs: [ATLAS] as never });
