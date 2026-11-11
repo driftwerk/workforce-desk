@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { explain } from "../ui/problem";
 import { useDesk } from "../hub/store";
 import {
   cancelLogin,
@@ -99,6 +100,11 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     url: busy ? url : null,
     status,
     failed: progress?.state === "failed" || install?.state === "failed",
+    /** The failure in Desk's one shape, with the way to try again. */
+    problem:
+      progress?.state === "failed" && plan
+        ? explain(new Error(progress.message), { what: `signing in to ${CLI_NAME[plan] ?? plan}`, retry: () => void startLogin(plan).catch(fail) })
+        : null,
     /** What to run in a terminal by hand when the install stopped. */
     manual: install?.state === "failed" && install.command ? { command: install.command, hint: install.hint } : null,
     busy,

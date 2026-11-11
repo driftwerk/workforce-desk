@@ -5,3 +5,9 @@
 # (src-tauri/src/hub_io.rs), never a real one.
 7f38fac403572615186c7f5bf4c9d3933de4e879:src-tauri/src/hub_io.rs:generic-api-key:815
 7f38fac403572615186c7f5bf4c9d3933de4e879:src-tauri/src/hub_io.rs:generic-api-key:867
+# Test fixtures: made-up tokens, passwords and an Authorization header that
+# src/ui/redact.test.ts feeds redact() to prove it strips them. Never real.
+356a5f5bdbfc23a6472f3afcc3b6f7f27f83a553:src/ui/redact.test.ts:curl-auth-header:15
+356a5f5bdbfc23a6472f3afcc3b6f7f27f83a553:src/ui/redact.test.ts:generic-api-key:19
+4b32c83c1831b59e4ad7252ab35d7c0049bf1873:src/ui/redact.test.ts:generic-api-key:25
+4b32c83c1831b59e4ad7252ab35d7c0049bf1873:src/ui/redact.test.ts:generic-api-key:27

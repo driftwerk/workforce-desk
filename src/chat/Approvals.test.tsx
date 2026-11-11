@@ -30,10 +30,10 @@ describe("an approval routed to a conversation", () => {
   });
 
   it("alerts you when the answer didn't go through, and keeps its buttons", async () => {
-    vi.mocked(decideApproval).mockRejectedValue(new Error("The hub said no."));
+    vi.mocked(decideApproval).mockRejectedValue(new Error("Desk said no."));
     render(<RoutedApproval hubId="dw" requestId="q1" />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Deny" })));
-    expect(screen.getByRole("alert").textContent).toBe("The hub said no.");
+    expect(screen.getByRole("alert").textContent).toBe("Desk said no.");
     expect(screen.getByRole("button", { name: "Deny" })).toHaveProperty("disabled", false);
   });
 });
