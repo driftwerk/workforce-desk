@@ -57,6 +57,35 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.browser-connect {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 560px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+}
+.browser-connect p {
+  margin: 0;
+}
+.browser-connect-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text);
+}
+.browser-connect .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
 .browser-sites {
   align-self: stretch;
   max-width: 520px;

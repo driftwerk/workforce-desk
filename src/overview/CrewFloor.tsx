@@ -4,6 +4,7 @@ import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
+import { OverseerCard } from "../floor/OverseerCard";
 import { FloorSection, SealedNotes, useSections } from "../floor/FloorSection";
 import { handedOn, totals, type DeskItem } from "../floor/sections";
 import { plain } from "../ui/plain";
@@ -189,6 +190,8 @@ export function FloorColumn({
       {sections && <NeedsJump sections={sections} />}
       <RestoreBanner />
       <AccountNeeds />
+      {/* Who oversees everything is asked on the whole Floor only. */}
+      {!scope && <OverseerCard />}
       {onFloor ? (
         <>
           {sectioned.kind === "flat" && <SealedNotes notes={scope ? sectioned.sealed.filter((n) => n.group.id === scope) : sectioned.sealed} />}

@@ -172,6 +172,12 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     case "machines_list":
       // Machines are reached over SSH by the app; the preview has none.
       return answer([]);
+    case "repo_facts":
+      // Two repositories, as a computer with these checkouts would say.
+      return answer([
+        { folder: "~/dev/acme-web", top: "~/dev/acme-web", remote: "git@github.com:acme/acme-web.git", workflows: ["ci.yml", "deploy.yml", "promote.yml"] },
+        { folder: "~/dev/acme-api", top: "~/dev/acme-api", remote: "https://github.com/acme/acme-api.git", workflows: ["deploy.yml"] },
+      ]);
     case "fonts_list":
       // What a computer's own list looks like; the app reads the real one.
       return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);
@@ -220,7 +226,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "max"];
 const OPENAI_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 const claudeModels = (prefix = "claude-"): Fixture["models"] => [
-  { id: `${prefix}fable-5-1`, name: "Fable 5.1", description: "Most capable — for hard, long-running work", default: false },
+  { id: `${prefix}fable-5-2`, name: "Fable 5.2", description: "Most capable — for hard, long-running work", default: false },
   { id: `${prefix}opus-5-5`, name: "Opus 5.5", description: "Deep reasoning and careful writing", default: false },
   { id: `${prefix}sonnet-5-5`, name: "Sonnet 5.5", description: "Fast and strong — the everyday choice", default: true },
   { id: `${prefix}haiku-5-5`, name: "Haiku 5.5", description: "Quickest, for light chores", default: false },

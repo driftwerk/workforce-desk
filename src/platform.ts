@@ -168,6 +168,20 @@ export const onMachinesChanged = (f: () => void): Promise<() => void> => listen(
  *  where Desk can't look (outside the app). */
 export const programsUnder = async (pid: number): Promise<string[]> => (preview ? [] : invoke<string[]>("programs_under", { pid }));
 
+/** One folder's repository, as Desk read it with git: its top folder (one
+ *  for every worktree), its origin's address, its tracked workflows. */
+export interface RepoFacts {
+  folder: string;
+  top: string;
+  remote: string | null;
+  workflows: string[];
+}
+
+/** The repositories of `folders`, for Act fully's suggestions; none where
+ *  Desk can't look. */
+export const repoFacts = async (folders: string[]): Promise<RepoFacts[]> =>
+  folders.length === 0 ? [] : invoke<RepoFacts[]>("repo_facts", { folders }).catch(() => []);
+
 /** A monitor as Desk recognises it again (see src-tauri/src/grid_windows.rs). */
 export interface MonitorInfo {
   /** `name:WxH@scale`. */
