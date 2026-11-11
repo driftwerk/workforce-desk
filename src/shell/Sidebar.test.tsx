@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
@@ -10,6 +10,10 @@ import { useRoomOrder } from "../rooms/order";
 import { useSettings } from "../settings/store";
 import { defaultShortcuts } from "../shortcuts/keys";
 import { Sidebar, scrollEdges } from "./Sidebar";
+import { reloadSections, SECTIONS_KEY } from "./SideSection";
+import { useBoard } from "../board/store";
+import { useBoardOrder } from "../board/order";
+import { ACME, ticket } from "../board/testing";
 import { useUi } from "./ui";
 import { servePictures } from "../pictures/testing";
 
@@ -26,8 +30,14 @@ const kept = new Map<string, unknown>();
 const memory = (): GridStorage =>
   ({ get: (k) => kept.get(k), set: (k, v) => void kept.set(k, structuredClone(v)), remove: (k) => void kept.delete(k), subscribe: () => () => {} }) as GridStorage;
 
+const GLOBEX = { ...ACME, id: "b-globex", name: "Globex", prefix: "GLX", createdAt: "2026-11-02T09:00:00Z" };
+
 beforeEach(() => {
   kept.clear();
+  localStorage.removeItem(SECTIONS_KEY);
+  reloadSections();
+  useBoardOrder.setState({ order: [] });
+  useBoard.setState({ boards: {}, tickets: {}, supported: null, shown: null, open: null });
   useRoomOrder.setState({ order: [] });
   useSettings.setState({ shortcuts: {}, keys: defaultShortcuts(), groups: [], sessionNames: {} });
   useDesk.setState({ view: "floor", rooms: {}, sessions: {} });
@@ -36,13 +46,122 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("has the board's row under the views, with its shortcut, opening the board", () => {
+  it("lists the boards under Boards, as Rooms lists rooms: a + to make one, each opening its board", () => {
+    useBoard.setState({ boards: { [ACME.id]: ACME, [GLOBEX.id]: GLOBEX }, supported: true, shown: null });
     sidebar();
-    const row = screen.getByRole("button", { name: "Board" });
-    expect(row.title).toMatch(/^Board \(.*B\)$/);
-    fireEvent.click(row);
+    const boards = screen.getByRole("region", { name: "Boards" });
+    // In the middle with Rooms and Groups, between them; no row at the top.
+    const regions = [...document.querySelectorAll(".side-scroll > [role=region]")].map((r) => r.getAttribute("aria-label"));
+    expect(regions).toEqual(["Rooms", "Boards", "Groups"]);
+    expect(within(document.querySelector<HTMLElement>(".side-top")!).queryByRole("button", { name: /^Board/ })).toBeNull();
+    // The same + as Rooms' and Groups'.
+    const plus = within(boards).getByRole("button", { name: "New board" });
+    expect(plus.className).toBe(within(screen.getByRole("region", { name: "Rooms" })).getByRole("button", { name: "New room" }).className);
+    const rows = within(within(boards).getByRole("list", { name: "Boards" })).getAllByRole("button").filter((b) => b.classList.contains("gi"));
+    expect(rows.map((b) => b.querySelector(".gi-name")!.textContent)).toEqual(["Acme", "Globex"]);
+    fireEvent.click(rows[1]!);
     expect(useDesk.getState().view).toBe("board");
-    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(useBoard.getState().shown).toBe(GLOBEX.id);
+    expect(rows[1]!.getAttribute("aria-current")).toBe("true");
+    expect(rows[0]!.getAttribute("aria-current")).toBeNull();
+    // Its ⋯ keeps what the board's own menu offers.
+    fireEvent.click(within(boards).getByRole("button", { name: "Acme options" }));
+    expect(screen.getByRole("menuitem", { name: "Rename board…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete board…" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Link to Jira or Linear…" }));
+    expect(screen.getByRole("heading", { name: "Link “Acme” to Jira or Linear" })).toBeTruthy();
+  });
+
+  it("makes a board from the +, and shows it", async () => {
+    const made = { ...GLOBEX, id: "b-new", name: "Initech" };
+    const createBoard = vi.fn(() => Promise.resolve(made));
+    useDesk.setState({ hub: { createBoard } as never });
+    useBoard.setState({ boards: {}, supported: true, shown: null });
+    sidebar();
+    fireEvent.click(screen.getByRole("button", { name: "New board" }));
+    fireEvent.change(screen.getByPlaceholderText("Acme"), { target: { value: "Initech" } });
+    fireEvent.click(screen.getByRole("button", { name: "Make board" }));
+    await waitFor(() => expect(useDesk.getState().view).toBe("board"));
+    expect(createBoard).toHaveBeenCalledWith({ name: "Initech" });
+    expect(useBoard.getState().shown).toBe("b-new");
+    expect(within(screen.getByRole("list", { name: "Boards" })).getByText("Initech")).toBeTruthy();
+  });
+
+  it("has no Boards on a hub that keeps none", () => {
+    useBoard.setState({ boards: {}, supported: false });
+    sidebar();
+    expect(screen.queryByRole("region", { name: "Boards" })).toBeNull();
+  });
+
+  it("opens and closes Rooms, Boards and Groups from their headers, remembered, and a closed one still says what's for you", () => {
+    useBoard.setState({
+      boards: { [ACME.id]: ACME },
+      tickets: { t1: ticket(1, { state: "review" }), t2: ticket(2, { state: "review" }), t3: ticket(3) },
+      supported: true,
+    });
+    sidebar();
+    for (const name of ["Rooms", "Boards", "Groups"]) {
+      const region = screen.getByRole("region", { name });
+      const head = within(region).getByRole("button", { name: new RegExp(`^${name}`) });
+      expect(head.getAttribute("aria-expanded")).toBe("true");
+      expect(document.getElementById(head.getAttribute("aria-controls")!)).toBeTruthy();
+      expect(head.querySelector(".grp-chevron.open")).toBeTruthy();
+    }
+    const boards = screen.getByRole("region", { name: "Boards" });
+    const head = within(boards).getByRole("button", { name: /^Boards/ });
+    // Open, the count is on the board's row, not the header.
+    expect(head.querySelector(".badge")).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Boards" })).getByText("2 need you")).toBeTruthy();
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    expect(head.getAttribute("aria-controls")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Boards" })).toBeNull();
+    // Closed: the header says it.
+    expect(head.querySelector(".badge")!.textContent).toBe("22 need you");
+    expect(head.textContent).toMatch(/Boards.*2 need you/);
+    expect(JSON.parse(localStorage.getItem(SECTIONS_KEY)!)).toEqual({ boards: true });
+    fireEvent.click(within(screen.getByRole("region", { name: "Rooms" })).getByRole("button", { name: /^Rooms/ }));
+    expect(JSON.parse(localStorage.getItem(SECTIONS_KEY)!)).toEqual({ boards: true, rooms: true });
+    // Still closed after a restart.
+    cleanup();
+    reloadSections();
+    sidebar();
+    expect(within(screen.getByRole("region", { name: "Boards" })).getByRole("button", { name: /^Boards/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(screen.getByRole("region", { name: "Groups" })).getByRole("button", { name: /^Groups/ }).getAttribute("aria-expanded")).toBe("true");
+    // The + opens it, so what's made shows.
+    fireEvent.click(within(screen.getByRole("region", { name: "Boards" })).getByRole("button", { name: "New board" }));
+    expect(within(screen.getByRole("region", { name: "Boards" })).getByRole("button", { name: /^Boards/ }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("says on a closed Rooms what its rooms' rows said, together", () => {
+    const room = (id: string, name: string) => ({ id, slug: id, name, members: [], defaultMember: null, createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-01T09:00:00Z" }) as unknown as Room;
+    const failed = (id: string) => ({ id, member: "local/allan", threadId: null, asked: "m1", since: 0, text: "", working: null, tools: [], attachments: [], prompts: [], state: "failed" as const });
+    useDesk.setState({ rooms: { r1: room("r1", "Launch"), r2: room("r2", "Ops") }, roomDrafts: { r1: [failed("d1")], r2: [failed("d2"), failed("d3")] } });
+    sidebar();
+    const rooms = screen.getByRole("region", { name: "Rooms" });
+    expect(within(rooms).getByText("1 needs you")).toBeTruthy();
+    expect(within(rooms).getByText("2 need you")).toBeTruthy();
+    const head = within(rooms).getByRole("button", { name: /^Rooms/ });
+    expect(head.querySelector(".badge")).toBeNull();
+    fireEvent.click(head);
+    expect(head.querySelector(".badge")!.textContent).toContain("3 need you");
+    useDesk.setState({ roomDrafts: {} });
+  });
+
+  it("keeps working when this browser's storage can't be read or written", () => {
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    reloadSections();
+    sidebar();
+    const head = within(screen.getByRole("region", { name: "Groups" })).getByRole("button", { name: /^Groups/ });
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    get.mockRestore();
+    set.mockRestore();
   });
 
   it("shows each shortcut's configured keys", () => {

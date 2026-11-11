@@ -19,7 +19,9 @@ import { useYou } from "../pictures/who";
 import { useUi } from "./ui";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { RoomMarks } from "../unread/RoomMarks";
-import { Marks, useTotal } from "../unread/Marks";
+import { Marks, useRoomsBadge, useTotal } from "../unread/Marks";
+import { BoardsSection } from "../board/BoardsSection";
+import { SideSection } from "./SideSection";
 import { needsYou } from "../ui/Badge";
 import { useSavedScroll } from "../restore/scroll";
 import { NEW_CREW_LINE, NEW_SESSION_LINE } from "./newLines";
@@ -44,24 +46,6 @@ function UnreadRow() {
     >
       <span className="gi-name">Unread</span>
       <Marks badge={total} />
-    </button>
-  );
-}
-
-/** The board's row: opens the board, as the Unread row opens its page. */
-function BoardRow() {
-  const on = useDesk((s) => s.view === "board");
-  const setView = useDesk((s) => s.setView);
-  const keys = useSettings((s) => s.keys);
-  return (
-    <button
-      type="button"
-      className={`side-unread${on ? " on" : ""}`}
-      aria-current={on ? "page" : undefined}
-      title={`Board (${shortcutLabel(keys.board)})`}
-      onClick={() => setView("board")}
-    >
-      <span className="gi-name">Board</span>
     </button>
   );
 }
@@ -136,6 +120,7 @@ export function Sidebar({
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<string | null>(null);
   const roomsById = useDesk((s) => s.rooms);
+  const roomsBadge = useRoomsBadge(rooms.map((r) => r.id));
   /** Deletes a room on the hub, and here at once (the hub says so too).
    *  Its members' hubs are told first, so what was set up there reaches
    *  your DM instead. */
@@ -181,7 +166,6 @@ export function Sidebar({
             </button>
           ))}
         </div>
-        <BoardRow />
         <UnreadRow />
       </div>
       <div className="side-mid">
@@ -189,15 +173,7 @@ export function Sidebar({
           {view === "grids" ? (
             <GridsSection />
           ) : (
-            <div className="side-section" role="region" aria-label="Rooms">
-              <span className="side-label side-label-action side-head">
-                Rooms
-                <button type="button" className="icon-btn-sm" aria-label="New room" title="New room" onClick={onNewRoom}>
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                    <path d="M7 2v10M2 7h10" />
-                  </svg>
-                </button>
-              </span>
+            <SideSection id="rooms" label="Rooms" newLabel="New room" onNew={onNewRoom} badge={roomsBadge}>
               <span id={roomHint} className="sr-only">
                 Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
               </span>
@@ -264,9 +240,10 @@ export function Sidebar({
                   }}
                 />
               )}
-              {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
-            </div>
+            </SideSection>
           )}
+          {deletingRoom && roomsById[deletingRoom] && <DeleteRoom room={roomsById[deletingRoom]!} onClose={() => setDeletingRoom(null)} />}
+          <BoardsSection />
           <SidebarGroups onNewSession={onNewSession} />
           {view === "grids" && <p className="faint small side-hint">Drag a session or agent from here onto a pane. Hold ⇧ to drop it in the next free place.</p>}
         </div>

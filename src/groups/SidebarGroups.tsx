@@ -35,6 +35,7 @@ import {
   type Shown,
 } from "./model";
 import { badgeOfGroup, itemBadge, type Badge } from "../unread/badges";
+import { setSectionOpen, SideSection } from "../shell/SideSection";
 import { Marks, useBadgeData } from "../unread/Marks";
 import { levelOf, NOTIFY_LEVELS, setLevel } from "../unread/prefs";
 import { useSessionNames } from "./names";
@@ -233,6 +234,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     litBefore.current = inFocus;
     if (!inFocus) return;
     const group = shown.find((g) => g.items.includes(inFocus));
+    if (group) setSectionOpen("groups", true);
     if (group?.collapsed) collapseGroup(group.id, false);
     scrollTo.current = inFocus;
   });
@@ -647,15 +649,14 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         dropItem(present, end(s).id, d);
       }}
     >
-      <div className="side-section groups" aria-label="Groups" role="region">
-        <span className="side-label side-label-action side-head">
-          Groups
-          <button type="button" className="icon-btn-sm" aria-label="New group" title="New group" onClick={() => newGroup()}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M7 2v10M2 7h10" />
-            </svg>
-          </button>
-        </span>
+      <SideSection
+        id="groups"
+        label="Groups"
+        className="groups"
+        newLabel="New group"
+        onNew={() => newGroup()}
+        badge={badgeOfGroup(shown.flatMap((g) => g.items.map((key) => itemBadge(key, badges))))}
+      >
         <span id={`${hint}-session`} className="sr-only">
           Alt+Up and Alt+Down move it. F2 renames. Delete removes it. Shift+F10 opens its menu.
         </span>
@@ -739,7 +740,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         <span className="sr-only" aria-live="polite">
           {said}
         </span>
-      </div>
+      </SideSection>
       <DragOverlay dropAnimation={null}>
         {(source) => {
           const id = String(source.id);

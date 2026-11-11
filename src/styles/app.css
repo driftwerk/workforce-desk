@@ -368,6 +368,43 @@ button {
   align-items: center;
   padding-bottom: 2px;
 }
+/* The name opens and closes the section, its chevron as a group's. */
+.side-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  margin-left: -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.side-toggle:hover {
+  color: var(--text);
+}
+.side-toggle .grp-chevron {
+  color: inherit;
+}
+.side-toggle-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-toggle:has(.side-dot, .badge) .side-toggle-name {
+  color: var(--text);
+}
+/* What the section lists: laid out as if it were the section itself. */
+.side-section-body {
+  display: contents;
+}
 
 /* The look: Auto · Night · Day, and the chooser for every other theme. */
 .look {
