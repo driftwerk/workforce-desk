@@ -69,7 +69,7 @@ export interface Full {
   budgetUsdPerDay: number | null;
   /** When you last cleared today's count of the budget (an ISO time): it
    *  counts from then until midnight. */
-  budgetClearedAt: string | null;
+  budgetClearedAt?: string | null;
 }
 
 /** Which sessions it takes on: only those it starts and you hand it, or
@@ -289,7 +289,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       repos: o.full.repos,
       workflows: o.full.workflows,
       ...(o.full.budgetUsdPerDay !== null ? { budget_usd_per_day: o.full.budgetUsdPerDay } : {}),
-      ...(o.full.budgetClearedAt !== null ? { budget_cleared_at: o.full.budgetClearedAt } : {}),
+      ...(o.full.budgetClearedAt ? { budget_cleared_at: o.full.budgetClearedAt } : {}),
     };
   }
   return stringify(doc) + "\n";

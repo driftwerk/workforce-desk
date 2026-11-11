@@ -83,7 +83,7 @@ describe("Why the level chosen isn't in force", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     cleanup();
     useDesk.setState({ hub, sessions: {} });
-    let now = ready;
+    let now: Oversight = ready;
     render(<WhyNotInForce o={ready} held budget={{ spentUsd: 210, budgetUsd: 200, spent: true }} onChange={(c) => (now = c(now))} />);
     const spent = screen.getByRole("alert");
     expect(spent.textContent).toContain("$210 of $200 in real money today (your plans aren’t counted)");

@@ -223,14 +223,14 @@ describe("Oversees the crew", () => {
         } as never,
       });
     atFull({ spentUsd: 12.5, budgetUsd: 200, spent: false });
-    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nanywhere = true\nbudget_usd_per_day = 200\n`);
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 200\n`);
     expect(screen.getByText(/Real money spent today: \$12\.50 of \$200\.00 \(your plans aren’t counted\)/)).toBeTruthy();
     expect(screen.getByText(/Your Claude and ChatGPT plans aren’t counted/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     cleanup();
 
     atFull({ spentUsd: 210, budgetUsd: 200, spent: true });
-    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nanywhere = true\nbudget_usd_per_day = 200\n`);
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 200\n`);
     const spent = screen.getByRole("alert");
     expect(spent.textContent).toContain("Act fully stopped: today’s budget is spent.");
     expect(spent.textContent).toContain("$210 of $200 in real money today (your plans aren’t counted), so it no longer merges, tags, releases or runs workflows on its own.");
