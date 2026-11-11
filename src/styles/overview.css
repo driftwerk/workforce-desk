@@ -1036,3 +1036,16 @@ button.fsec-tile-head {
 .oversee-advanced[open] > summary h3::before {
   content: "▾ ";
 }
+/* What Desk found for Act fully, said yes to before it's written. */
+.oversee-found {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-basis: 100%;
+}
+.oversee-found ul {
+  margin: 0;
+  padding-left: 18px;
+  flex-basis: 100%;
+}

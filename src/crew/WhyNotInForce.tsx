@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { SpendView } from "../hub/types";
 import { usdText } from "../spend/spend";
-import { fullMissing, isUnbound, MAX_FULL_BUDGET_USD, type Oversight } from "./oversight";
+import {
+  fullMissing,
+  isUnbound,
+  MAX_FULL_BUDGET_USD,
+  parseBudget,
+  type Oversight,
+} from "./oversight";
 import { presetOf, withPreset } from "./presets";
 import { suggestFull } from "./suggest";
 
@@ -18,10 +24,16 @@ export type Cause =
 /** What a day's spend by account says the hub has counted: metered calls
  *  (an API key, a cloud account), or every call where only that reaches
  *  the budget (an older hub counts plans' calls at API prices too). */
-export const spentToday = (day: SpendView | null): { metered: number; all: number } => {
+export const spentToday = (
+  day: SpendView | null,
+): { metered: number; all: number } => {
   const rows = day?.rows ?? [];
   const metered = rows
-    .filter((r) => r.totals.billing.length > 0 && r.totals.billing.every((b) => b === "key" || b === "vendor"))
+    .filter(
+      (r) =>
+        r.totals.billing.length > 0 &&
+        r.totals.billing.every((b) => b === "key" || b === "vendor"),
+    )
     .reduce((sum, r) => sum + r.totals.usd, 0);
   return { metered, all: day?.total.usd ?? 0 };
 };
@@ -29,36 +41,64 @@ export const spentToday = (day: SpendView | null): { metered: number; all: numbe
 /** Why `o`, chosen at Act fully or Unbound, isn't in force: what's missing
  *  from it, its switches, or, when the hub says it runs below what was
  *  chosen, today's spend against its budget. Null while it's in force. */
-export const causeOf = (o: Oversight, held: boolean, day: SpendView | null): Cause | null => {
+export const causeOf = (
+  o: Oversight,
+  held: boolean,
+  day: SpendView | null,
+): Cause | null => {
   if (o.level !== "full") return null;
   const missing = fullMissing(o);
   if (missing.length > 0) return { kind: "needs", missing };
-  if (o.full.anywhere && !isUnbound(o) && presetOf(o) === null) return { kind: "switches" };
+  if (o.full.anywhere && !isUnbound(o) && presetOf(o) === null)
+    return { kind: "switches" };
   if (!held) return null;
   const budget = o.full.budgetUsdPerDay;
   if (budget === null) return { kind: "unread" };
   const { metered, all } = spentToday(day);
   const spent = metered >= budget ? metered : all >= budget ? all : null;
-  return spent === null ? { kind: "unread" } : { kind: "spent", spentUsd: spent, budgetUsd: budget };
+  return spent === null
+    ? { kind: "unread" }
+    : { kind: "spent", spentUsd: spent, budgetUsd: budget };
 };
 
 /** A budget that leaves room for today: half again what it spent, in steps
  *  of $5, and above what it was. */
 export const raisedBudget = (spentUsd: number, budgetUsd: number): number =>
-  Math.min(MAX_FULL_BUDGET_USD, Math.max(budgetUsd + 5, Math.ceil((spentUsd * 1.5) / 5) * 5));
+  Math.min(
+    MAX_FULL_BUDGET_USD,
+    Math.max(budgetUsd + 5, Math.ceil((spentUsd * 1.5) / 5) * 5),
+  );
 
 const needsText = (missing: ("repos" | "budget")[]): string =>
-  missing.length === 2 ? "repos to work in and a daily budget" : missing[0] === "repos" ? "a repo to work in" : "a daily budget";
+  missing.length === 2
+    ? "repos to work in and a daily budget"
+    : missing[0] === "repos"
+      ? "a repo to work in"
+      : "a daily budget";
 
 /** The cause the level chosen isn't in force, with what fixes it in place:
  *  Desk's suggestions for what's missing, every switch on for Unbound, a
  *  higher budget for today. `held`: the hub says it runs below what was
  *  chosen. */
-export function WhyNotInForce({ o, held, onChange }: { o: Oversight; held: boolean; onChange: (change: Change) => void }) {
+export function WhyNotInForce({
+  o,
+  held,
+  onChange,
+}: {
+  o: Oversight;
+  held: boolean;
+  onChange: (change: Change) => void;
+}) {
   const hub = useDesk((s) => s.hub);
   const sessions = useDesk((s) => s.sessions);
   const [day, setDay] = useState<SpendView | null>(null);
   const [finding, setFinding] = useState<"idle" | "finding" | "none">("idle");
+  /** What Desk found, shown to say yes to before anything is written. */
+  const [found, setFound] = useState<{
+    repos: string[];
+    workflows: string[];
+    budgetUsd: number | null;
+  } | null>(null);
   const wantsSpend = o.level === "full" && held && fullMissing(o).length === 0;
   useEffect(() => {
     if (!hub || !wantsSpend) return;
@@ -74,42 +114,110 @@ export function WhyNotInForce({ o, held, onChange }: { o: Oversight; held: boole
   const cause = causeOf(o, held, day);
   if (!cause) return null;
 
+  /** Finds what's missing, to show; nothing is written until confirmed. */
   const suggest = async () => {
     if (!hub) return;
     setFinding("finding");
     const s = await suggestFull(hub, Object.values(sessions)).catch(() => null);
-    if (!s || (fullMissing(o).includes("repos") && s.repos.length === 0 && !o.full.anywhere)) {
-      // What Desk found still goes in; repos are typed below.
-      if (s) onChange((x) => ({ ...x, full: { ...x.full, budgetUsdPerDay: x.full.budgetUsdPerDay ?? s.budgetUsd } }));
+    const repos = o.full.repos.length ? [] : (s?.repos ?? []);
+    const workflows = o.full.workflows.length ? [] : (s?.workflows ?? []);
+    const budget =
+      o.full.budgetUsdPerDay === null && s
+        ? parseBudget(String(s.budgetUsd))
+        : null;
+    const budgetUsd = budget && "value" in budget ? budget.value : null;
+    if (repos.length + workflows.length === 0 && budgetUsd === null)
       return setFinding("none");
-    }
-    setFinding("idle");
+    setFinding(
+      fullMissing(o).includes("repos") && repos.length === 0 ? "none" : "idle",
+    );
+    setFound({ repos, workflows, budgetUsd });
+  };
+  const confirm = () => {
+    if (!found) return;
+    setFound(null);
     onChange((x) => ({
       ...x,
       full: {
         ...x.full,
-        repos: x.full.repos.length ? x.full.repos : s.repos,
-        workflows: x.full.workflows.length ? x.full.workflows : s.workflows,
-        budgetUsdPerDay: x.full.budgetUsdPerDay ?? s.budgetUsd,
+        repos: x.full.repos.length ? x.full.repos : found.repos,
+        workflows: x.full.workflows.length ? x.full.workflows : found.workflows,
+        budgetUsdPerDay: x.full.budgetUsdPerDay ?? found.budgetUsd,
       },
     }));
   };
+  const raised =
+    cause.kind === "spent"
+      ? raisedBudget(cause.spentUsd, cause.budgetUsd)
+      : null;
 
   return (
     <div className="oversee-why" role="status">
       {cause.kind === "needs" && (
         <>
-          <p className="small state-blocked">Acting as Act: Act fully needs {needsText(cause.missing)}.</p>
-          <button type="button" className="btn btn-sm" disabled={finding === "finding"} onClick={() => void suggest()}>
-            {finding === "finding" ? "Looking…" : "Use Desk’s suggestions"}
-          </button>
-          {finding === "none" && <p className="small faint">Desk found no repos in your sessions’ folders. Add one below.</p>}
+          <p className="small state-blocked">
+            Acting as Act: Act fully needs {needsText(cause.missing)}.
+          </p>
+          {!found && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={finding === "finding"}
+              onClick={() => void suggest()}
+            >
+              {finding === "finding" ? "Looking…" : "See Desk’s suggestions"}
+            </button>
+          )}
+          {finding === "none" && (
+            <p className="small faint">
+              Desk found no repos in your sessions’ folders. Add one below.
+            </p>
+          )}
+          {found && (
+            <div
+              className="oversee-found"
+              role="group"
+              aria-label="Desk’s suggestions"
+            >
+              <ul className="small">
+                {found.repos.length > 0 && (
+                  <li>Repos: {found.repos.join(", ")}</li>
+                )}
+                {found.workflows.length > 0 && (
+                  <li>Workflows: {found.workflows.join(", ")}</li>
+                )}
+                {found.budgetUsd !== null && (
+                  <li>Daily budget: {usdText(found.budgetUsd)}</li>
+                )}
+              </ul>
+              <button
+                type="button"
+                className="btn btn-sm btn-signal"
+                onClick={confirm}
+              >
+                Add these
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setFound(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </>
       )}
       {cause.kind === "switches" && (
         <>
-          <p className="small state-blocked">Unbound needs every switch on, so it acts as Act fully for now.</p>
-          <button type="button" className="btn btn-sm" onClick={() => onChange((x) => withPreset(x, "unbound"))}>
+          <p className="small state-blocked">
+            Unbound needs every switch on, so it acts as Act fully for now.
+          </p>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => onChange((x) => withPreset(x, "unbound"))}
+          >
             Turn every switch on
           </button>
         </>
@@ -117,19 +225,34 @@ export function WhyNotInForce({ o, held, onChange }: { o: Oversight; held: boole
       {cause.kind === "spent" && (
         <>
           <p className="small state-blocked">
-            Acting as Act: today’s spend ({usdText(cause.spentUsd)}) reached its {usdText(cause.budgetUsd)} daily budget.
+            Acting as Act: today’s spend ({usdText(cause.spentUsd)}) reached its{" "}
+            {usdText(cause.budgetUsd)} daily budget.
           </p>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => onChange((x) => ({ ...x, full: { ...x.full, budgetUsdPerDay: raisedBudget(cause.spentUsd, cause.budgetUsd) } }))}
-          >
-            Raise to {usdText(raisedBudget(cause.spentUsd, cause.budgetUsd))} a day
-          </button>
+          {raised !== null && raised > cause.budgetUsd ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() =>
+                onChange((x) => ({
+                  ...x,
+                  full: { ...x.full, budgetUsdPerDay: raised },
+                }))
+              }
+            >
+              Raise to {usdText(raised)} a day
+            </button>
+          ) : (
+            <p className="small faint">
+              It’s at the most a daily budget can be.
+            </p>
+          )}
         </>
       )}
       {cause.kind === "unread" && (
-        <p className="small faint">Acting as Act until the hub has read today’s spend. It checks again in a moment.</p>
+        <p className="small faint">
+          Acting as Act until the hub has read today’s spend. It checks again in
+          a moment.
+        </p>
       )}
     </div>
   );

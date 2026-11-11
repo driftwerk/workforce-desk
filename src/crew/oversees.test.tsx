@@ -311,6 +311,19 @@ describe("Oversees the crew", () => {
     expect(screen.queryByText("Unbound now.")).toBeNull();
   });
 
+  it("says when a level sets switches changed by hand again, and Undo puts them back", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n[oversight.act]\nset_mode = true\n`);
+    expect(screen.getByText(/Its switches below were changed from what Act sets/)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
+    await waitFor(() => expect(oversight()).toMatchObject({ level: "full", act: { set_mode: false } }));
+    expect(screen.getByText(/Act fully set its switches again, over the ones you’d changed/)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+    await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { set_mode: true } }));
+    expect(screen.queryByText(/set its switches again/)).toBeNull();
+  });
+
   it("shows the hub's own refusal when it won't save", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     const hub = fakeHub();

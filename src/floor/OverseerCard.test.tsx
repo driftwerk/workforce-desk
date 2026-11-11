@@ -124,15 +124,15 @@ describe("Who oversees the crew, on the Floor", () => {
     expect(screen.getByText("Name a repo as owner/name, its address, or a folder like ~/dev/acme-web.")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: /Daily budget/ }), { target: { value: "0" } });
     expect(screen.getByText(/Its daily budget must be an amount in dollars above 0/)).toBeTruthy();
-    // Unbound: the budget optional, every switch on, anywhere.
+    // Unbound: every switch on, anywhere; no repos, workflows or budget asked or written.
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Unbound/ })));
-    fireEvent.change(screen.getByRole("textbox", { name: /Daily budget/ }), { target: { value: "" } });
+    expect(screen.queryByRole("textbox", { name: /Daily budget/ })).toBeNull();
     expect(screen.getByText(/No limits: it does everything itself/)).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Desk oversees at Unbound" })));
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
     const o = oversight("desk")!;
     expect(o).toMatchObject({ level: "full", full: { anywhere: true } });
     expect(Object.values(o.act as Record<string, boolean>).every(Boolean)).toBe(true);
-    expect("budget_usd_per_day" in (o.full as object)).toBe(false);
+    expect(o.full).toEqual({ anywhere: true, repos: [], workflows: [] });
   });
 });

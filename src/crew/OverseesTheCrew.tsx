@@ -8,7 +8,7 @@ import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { useAgentConfigs } from "./agentBrain";
 import { LevelPicker } from "./LevelPicker";
-import { PRESET_NAME, presetOf, shownPreset, withPreset } from "./presets";
+import { PRESET_NAME, presetOf, shownPreset, withPreset, type Preset } from "./presets";
 import { WhyNotInForce } from "./WhyNotInForce";
 import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
@@ -121,6 +121,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const [fields, setFields] = useState<Record<Field, Typed> | null>(null);
   const [status, setStatus] = useState<{ state: "idle" | "saving" | "saved" } | { state: "failed"; problem: string }>({ state: "idle" });
   const [confirming, setConfirming] = useState(false);
+  /** The oversight a level's switches replaced, for Undo. */
+  const [reset, setReset] = useState<{ was: Oversight; to: Preset } | null>(null);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const saving = useRef(0);
   const ids = useId();
@@ -307,7 +309,31 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
         <>
           <div className="oversee-part">
             <h3>How much {name} does on its own</h3>
-            <LevelPicker value={shownPreset(o)} onPick={(p) => update((x) => withPreset(x, p))} />
+            <LevelPicker
+              value={shownPreset(o)}
+              onPick={(p) => {
+                // Switches changed by hand are set again by the level: said,
+                // with Undo.
+                setReset(presetOf(o) === null && o.level !== "watch" && o.level !== "suggest" ? { was: o, to: p } : null);
+                update((x) => withPreset(x, p));
+              }}
+            />
+            {reset && (
+              <span className="oversee-sub" role="status">
+                {PRESET_NAME[reset.to]} set its switches again, over the ones you’d changed.{" "}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    const was = reset.was;
+                    setReset(null);
+                    update(() => was);
+                  }}
+                >
+                  Undo
+                </button>
+              </span>
+            )}
             {presetOf(o) === null && (
               <span className="oversee-sub">Its switches below were changed from what {PRESET_NAME[shownPreset(o)]} sets; picking a level sets them again.</span>
             )}

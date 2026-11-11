@@ -4,7 +4,13 @@ import type { Oversight } from "./oversight";
  *  Unbound is Act fully with every switch on, anywhere. */
 export type Preset = "watch" | "suggest" | "act" | "full" | "unbound";
 
-export const PRESETS: readonly Preset[] = ["watch", "suggest", "act", "full", "unbound"];
+export const PRESETS: readonly Preset[] = [
+  "watch",
+  "suggest",
+  "act",
+  "full",
+  "unbound",
+];
 
 /** The switches Act turns on: what it needs to do the work itself inside
  *  Desk. The four left off reach outside Desk or loosen the person's own
@@ -55,9 +61,13 @@ export const withPreset = (o: Oversight, preset: Preset): Oversight => {
 /** The preset `o` is at, or null when its switches were changed from what
  *  its level implies (under Advanced). */
 export const presetOf = (o: Oversight): Preset | null => {
-  const same = (a: Oversight["act"]) => (Object.keys(a) as (keyof Oversight["act"])[]).every((k) => a[k] === o.act[k]);
+  const same = (a: Oversight["act"]) =>
+    (Object.keys(a) as (keyof Oversight["act"])[]).every(
+      (k) => a[k] === o.act[k],
+    );
   if (o.level === "full" && o.full.anywhere && same(ALL_ON)) return "unbound";
-  if (o.level === "full" && !o.full.anywhere && same(ACT_SWITCHES)) return "full";
+  if (o.level === "full" && !o.full.anywhere && same(ACT_SWITCHES))
+    return "full";
   if (o.level === "act" && same(ACT_SWITCHES)) return "act";
   // Below Act the switches do nothing, so any of them is the level.
   if (o.level === "watch" || o.level === "suggest") return o.level;
@@ -67,7 +77,14 @@ export const presetOf = (o: Oversight): Preset | null => {
 /** The level a preset's card is shown at: the one it is, else the nearest
  *  (Act or Act fully with switches changed). */
 export const shownPreset = (o: Oversight): Preset =>
-  presetOf(o) ?? (o.level === "full" ? (o.full.anywhere ? "unbound" : "full") : o.level === "act" ? "act" : o.level);
+  presetOf(o) ??
+  (o.level === "full"
+    ? o.full.anywhere
+      ? "unbound"
+      : "full"
+    : o.level === "act"
+      ? "act"
+      : o.level);
 
 export const PRESET_NAME: Record<Preset, string> = {
   watch: "Watch",
@@ -80,9 +97,11 @@ export const PRESET_NAME: Record<Preset, string> = {
 /** What each preset does, said for `name`. */
 export const presetDesc = (preset: Preset): string =>
   ({
-    watch: "Answers “what’s everyone doing?” and tells you when something needs you.",
+    watch:
+      "Answers “what’s everyone doing?” and tells you when something needs you.",
     suggest: "Also proposes what to do. Nothing happens until you say yes.",
     act: "Does the work itself: starts and runs sessions, nudges, answers and approves reads. Messaging agents and other terminals stays yours.",
     full: "As Act, and merges, tags, releases and runs your named workflows in the repos you name, under a daily budget.",
-    unbound: "Does everything itself, in any repo, with every switch on. Only your budget, Stop and the activity log hold it.",
+    unbound:
+      "Does everything itself, in any repo, with every switch on. Only your budget, Stop and the activity log hold it.",
   })[preset];

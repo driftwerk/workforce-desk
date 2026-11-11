@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_OVERSIGHT, fullMissing, isUnbound, type Oversight } from "./oversight";
 import { ACT_SWITCHES, PRESETS, presetOf, withPreset } from "./presets";
-import { budgetFrom, foldersOf, fromFacts, PLAN_ONLY_BUDGET_USD, repoName } from "./suggest";
+import { budgetFrom, foldersOf, fromFacts, PLAN_ONLY_BUDGET_USD, repoName, withoutCredentials } from "./suggest";
+import { MAX_FULL_BUDGET_USD } from "./oversight";
 import { causeOf, raisedBudget, spentToday } from "./WhyNotInForce";
 import type { Session, SpendRow, SpendView } from "../hub/types";
 
@@ -63,6 +64,27 @@ describe("Act fully's suggestions", () => {
     expect(s).toEqual({ repos: ["acme/a", "/r/b"], workflows: ["ci.yml", "deploy.yml"] });
   });
 
+  it("never keeps credentials from a remote, and leaves out what the hub wouldn't take", () => {
+    expect(withoutCredentials("https://oauth2:glpat-SECRET@gitlab.example.com/acme/web.git")).toBe("https://gitlab.example.com/acme/web.git");
+    expect(withoutCredentials("tok:SECRET@gitlab.example.com:acme/web.git")).toBe("gitlab.example.com:acme/web.git");
+    expect(withoutCredentials("git@gitlab.example.com:acme/web.git")).toBe("git@gitlab.example.com:acme/web.git");
+    expect(repoName("https://oauth2:glpat-SECRET@gitlab.example.com/acme/web.git")).toBe("https://gitlab.example.com/acme/web.git");
+    expect(repoName("https://x-access-token:ghs_SECRET@github.com/acme/web.git")).toBe("acme/web");
+    // A page under a repo is that repo.
+    expect(repoName("https://ghp_SECRET@github.com/acme/web/tree/main")).toBe("acme/web");
+    const s = fromFacts([
+      { folder: "/w/a", top: "/r/a", remote: "https://oauth2:glpat-SECRET@gitlab.example.com/acme/web.git", workflows: [] },
+      { folder: "/w/b", top: "/r/b", remote: "file:///srv/git/b.git", workflows: [".hidden.yml", "123.yml", "deploy.yaml"] },
+      { folder: "/w/c", top: "rel/c/d", remote: null, workflows: Array.from({ length: 30 }, (_, i) => `w${i}.yml`) },
+    ]);
+    expect(s.repos).toEqual(["https://gitlab.example.com/acme/web.git"]);
+    expect(JSON.stringify(s)).not.toContain("SECRET");
+    expect(s.workflows).toHaveLength(20);
+    expect(s.workflows).toContain("deploy.yaml");
+    expect(s.workflows).not.toContain("123.yml");
+    expect(s.workflows).not.toContain(".hidden.yml");
+  });
+
   it("budgets from metered spend only, and a plan-only crew gets a cap for API spend", () => {
     expect(budgetFrom(null)).toEqual({ usd: PLAN_ONLY_BUDGET_USD, metered: false });
     // Plans bill nobody; a mixed account can't be split, so neither counts.
@@ -70,6 +92,7 @@ describe("Act fully's suggestions", () => {
     // $35 metered in a week: $5 a day, twice that.
     expect(budgetFrom(view([row(20, ["key"]), row(15, ["vendor"]), row(400, ["plan"])]))).toEqual({ usd: 10, metered: true });
     expect(budgetFrom(view([row(1, ["key"])]))).toEqual({ usd: 5, metered: true });
+    expect(budgetFrom(view([row(1_000_000, ["key"])]))).toEqual({ usd: MAX_FULL_BUDGET_USD, metered: true });
   });
 
   it("reads folders from this computer's sessions and the month's spend, each once", () => {
@@ -99,5 +122,6 @@ describe("why a level isn't in force", () => {
     expect(raisedBudget(25, 20)).toBe(40);
     expect(raisedBudget(20, 20)).toBe(30);
     expect(raisedBudget(1, 20)).toBe(25);
+    expect(raisedBudget(50_000, MAX_FULL_BUDGET_USD)).toBe(MAX_FULL_BUDGET_USD);
   });
 });
