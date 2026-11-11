@@ -1,12 +1,31 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { BrowserLive, DeskHub } from "../hub/client";
-import { useDesk } from "../hub/store";
+import { useChat } from "../chat/store";
+import type { BrowserLive } from "../hub/client";
 import { useUi } from "../shell/ui";
 import { BrowserPill } from "./BrowserPill";
 import { useBrowser } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
+
+// This computer's hub, asked as the person over the paired path: every
+// request recorded with the hub it went to.
+const asked = vi.hoisted(() => [] as { hub: string; method: string; path: string; body: unknown }[]);
+vi.mock("../hub/net", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hub/net")>()),
+  pairedHub: (hub: { id: string }) => ({
+    fetch: async (method: string, path: string, body?: { data: string }) => {
+      asked.push({ hub: hub.id, method, path, body: body ? JSON.parse(body.data) : undefined });
+      return new Response(JSON.stringify(path.endsWith("/stop") ? { closed: 1, turns_stopped: 1, allowances_dropped: 0 } : { live: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+    socket: () => {
+      throw new Error("no sockets here");
+    },
+  }),
+}));
 
 const live = (l: Partial<BrowserLive> = {}): BrowserLive => ({
   agent: "allan",
@@ -19,12 +38,12 @@ const live = (l: Partial<BrowserLive> = {}): BrowserLive => ({
   ...l,
 });
 
-let hub: { stopBrowser: ReturnType<typeof vi.fn>; browserLive: ReturnType<typeof vi.fn> };
-
 beforeEach(() => {
-  hub = { stopBrowser: vi.fn(async () => ({ closed: 1, turns_stopped: 1, allowances_dropped: 0 })), browserLive: vi.fn(async () => []) };
-  useDesk.setState({ hub: hub as unknown as DeskHub });
+  asked.length = 0;
+  useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:50148", local: true, revision: "r1" }] });
 });
+
+const stops = () => asked.filter((a) => a.path === "/api/desk/browser/stop");
 
 afterEach(() => {
   cleanup();
@@ -43,7 +62,7 @@ it("says Desk is using the browser, where and in which, and Stop stops it", asyn
   expect(pill.textContent).toContain("shop.example");
   expect(pill.textContent).toContain("My Chrome");
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop" })));
-  expect(hub.stopBrowser).toHaveBeenCalledWith(undefined);
+  expect(stops()).toEqual([{ hub: "local", method: "POST", path: "/api/desk/browser/stop", body: {} }]);
   expect(useBrowser.getState().live).toEqual([]);
 });
 
@@ -53,7 +72,7 @@ it("on the overseer's card shows only its own browser, and stops only that", asy
   expect(screen.getByRole("status").textContent).toContain("docs.example");
   expect(screen.getByRole("status").textContent).not.toContain("more");
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop" })));
-  expect(hub.stopBrowser).toHaveBeenCalledWith("allan");
+  expect(stops()).toEqual([{ hub: "local", method: "POST", path: "/api/desk/browser/stop", body: { agent: "allan" } }]);
 });
 
 it("opens Settings → Browser to show what it did", () => {
