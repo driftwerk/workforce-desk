@@ -13,6 +13,7 @@ import { useCharge } from "../crew/chargeStore";
 import { ENGINE_TITLE } from "../engines/engines";
 import { GroupDot } from "../groups/GroupChip";
 import { useLayout } from "../groups/store";
+import { useFloorIds } from "./scope";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove, sessionSubject } from "../groups/move";
 import { askHandoff } from "../handoff/store";
@@ -369,9 +370,10 @@ export function FloorSection({ section, now }: { section: Section; now: number }
   };
   const boss = section.boss;
   const bossKey = boss ? localKey(boss.agent) : null;
+  const ids = useFloorIds();
   return (
     <section
-      id={sectionDomId(section.id)}
+      id={ids + sectionDomId(section.id)}
       className={`fsec ${section.needs.length ? "fsec-needs" : ""} ${folded ? "fsec-folded" : ""}`}
       aria-label={section.kind === "main" && boss ? `${sectionName(section)}, everything else` : title}
     >

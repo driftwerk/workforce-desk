@@ -75,3 +75,20 @@ describe("going to a parked pane in a grid's own window", () => {
     expect(useGrids.getState().flash).toMatchObject({ gridId: ops, paneIds: [pane.id] });
   });
 });
+
+describe("showing a room, a board or the Floor from the sidebar", () => {
+  it("goes to the grid it is in, and points its pane out", () => {
+    const grid = createGrid();
+    layOut(grid, "halves");
+    deliver(grid, { kind: "board", board: "b1" });
+    deliver(grid, { kind: "room", room: "r1" });
+    useGrids.setState({ active: MAIN_GRID, flash: null });
+    expect(reveal({ kind: "room", roomId: "r1" } as unknown as PaneContent)).toBe(false);
+    expect(reveal({ kind: "room", room: "r1" })).toBe(true);
+    expect(useDesk.getState().view).toBe("grids");
+    expect(useGrids.getState().active).toBe(grid);
+    const pane = useGrids.getState().grids[grid]!.panes.find((p) => p.content?.kind === "room")!;
+    expect(useGrids.getState().flash?.paneIds).toEqual([pane.id]);
+    expect(reveal({ kind: "floor" })).toBe(false);
+  });
+});

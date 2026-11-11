@@ -32,9 +32,11 @@ import { CloseButton, Dialog } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { paneJustDragged, useGridDrag, usePaneDrag } from "./drag";
 import { nameParts } from "./head";
-import { findContent, parkedOrder, sessionContent, sessionKeyIn, STEPS, terminalContent, terminalKeyIn, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
+import { BoardChips, BoardPaneBody, FloorMeta, FloorPaneBody, KindIcon, RoomPaneBody, RoomPaneMarks, setPaneFilter, usePaneFilter, useViewLabel, type ViewLabel } from "./kinds";
+import { FILTERS } from "../board/board";
+import { findContent, knownContent, parkedOrder, sessionContent, sessionKeyIn, STEPS, terminalContent, terminalKeyIn, type Pane as PaneData, type PaneContent, type Rect, type Zone } from "./engine";
 import { closePane, createGrid, flashDone, hostedBy, movePane, newTerminal, replacePane, setFocus, swapInPane, toggleFill, unfill, useGrids, writes } from "./store";
-import { FocusIcon, UnfocusIcon, useOutOfSight } from "../panels/Stage";
+import { FocusIcon, OutOfSight, UnfocusIcon, useOutOfSight } from "../panels/Stage";
 import { useSeenSession } from "../unread/seen";
 import { closeContent, describeTerminal, reopenTerminal, trackedIn, useTerminalPane, useTerminals } from "./terminals";
 import type { Grid } from "./model";
@@ -84,6 +86,8 @@ export interface Label {
   asking: Session | null;
   cwd: string | null;
   mono: boolean;
+  /** A room, a board or the Floor: what its header says of it. */
+  view?: ViewLabel;
 }
 
 const home = (path: string | null | undefined): string | null => (path ? homeShort(path) : null);
@@ -102,7 +106,11 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const tracked = content?.kind === "terminal" ? trackedIn(sessions, terminal) : null;
   const session = shows ? sessions[shows] : tracked;
   const name = useSessionName(session && sessionKey(session), session?.name ?? "");
+  const view = useViewLabel(content);
   if (!content) return { name: "Empty pane", meta: "", state: null, tracked: null, asking: null, cwd: null, mono: false };
+  if (view) return { name: view.name, meta: view.meta, state: null, tracked: null, asking: null, cwd: null, mono: false, view };
+  // Kept by a newer Desk (grids follow the person through the hub).
+  if (!knownContent(content)) return { name: "Pane from a newer Desk", meta: "update Desk to show it", state: null, tracked: null, asking: null, cwd: null, mono: false };
   if (content.kind === "agent") {
     const agent = roster.find((a) => agentKey(a) === content.agent);
     const hub = hubs.find((h) => h.id === agent?.hubId);
@@ -127,7 +135,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
       mono: true,
     };
   }
-  if (content.kind === "session") return { name: "Session", meta: "no longer on the hub", state: "closed", tracked: null, asking: null, cwd: null, mono: true };
+  if (content.kind !== "terminal") return { name: "Session", meta: "no longer on the hub", state: "closed", tracked: null, asking: null, cwd: null, mono: true };
   const t = describeTerminal(info, programs);
   const cwd = info?.cwd ?? content.cwd ?? null;
   return {
@@ -184,6 +192,14 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
         }
       : pane.content?.kind === "agent"
         ? { title: `Close ${label.name}’s pane?`, says: "The conversation stays; you can open it again from the sidebar.", action: "Close pane" }
+        : label.view
+          ? {
+              title: `Close ${label.name}’s pane?`,
+              says: label.view.gone
+                ? "It’s no longer there, so nothing is lost."
+                : `${label.view.kind === "room" ? "The room" : label.view.kind === "board" ? "The board" : "The Floor"} stays as it is; you can put it in a grid again from the sidebar.`,
+              action: "Close pane",
+            }
         : pane.content?.kind === "session"
           ? {
               title: "Close this pane?",
@@ -194,7 +210,9 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
                   : "The session stays as it is.",
               action: "Close pane",
             }
-          : { title: "Close this empty pane?", says: "It holds nothing, so nothing is lost.", action: "Close pane" };
+          : pane.content
+            ? { title: "Close this pane?", says: "What it holds stays as it is.", action: "Close pane" }
+            : { title: "Close this empty pane?", says: "It holds nothing, so nothing is lost.", action: "Close pane" };
   const dialog = confirm && (
     <Dialog
       onClose={keep}
@@ -302,11 +320,11 @@ export function GridPane({
   return (
     <section
       ref={box}
-      className={`gpane ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
+      className={`gpane ${pane.content ? `gpane-k-${pane.content.kind}` : ""} ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
       style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}
       // What a narrow header no longer shows, still said.
-      aria-describedby={[label.meta && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
+      aria-describedby={[(label.meta || pane.content?.kind === "floor") && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
       data-drop-pane={pane.id}
       data-grid={gridId}
       onPointerDownCapture={() => setFocus(gridId, pane.id)}
@@ -314,24 +332,27 @@ export function GridPane({
     >
       <div className="gpane-box">
         <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
-          <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />
+          {label.view ? <KindIcon kind={label.view.kind} /> : <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />}
           {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
           {pane.content?.kind === "agent" && <MicBadge agent={pane.content.agent} />}
           <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
             <span className="gpane-name-start">{start}</span>
             {end && <span className="gpane-name-end">{end}</span>}
           </span>
-          <OnMachine machine={session ? machineOf(session) : machineOf(pane.content?.kind === "agent" ? null : pane.content)} />
+          <OnMachine machine={session ? machineOf(session) : machineOf(pane.content?.kind === "session" || pane.content?.kind === "terminal" ? pane.content : null)} />
           {paneItem && <GroupChip item={paneItem} />}
           {label.meta && (
             <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
               {label.meta}
             </span>
           )}
+          {pane.content?.kind === "floor" && !label.view?.gone && <FloorMeta group={pane.content.group ?? null} id={`${said}-meta`} />}
           {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
           {pane.content?.kind === "session" && <SessionTicketChip session={pane.content.sessionId} className="gpane-ticket" />}
           <ChargeBadge charge={charge} className="gpane-badge" />
           <span className="gpane-fill" />
+          {pane.content?.kind === "room" && <RoomPaneMarks room={pane.content.room} />}
+          {pane.content?.kind === "board" && !label.view?.gone && <BoardChips gridId={gridId} paneId={pane.id} />}
           {label.cwd && (
             <span id={`${said}-cwd`} className="gpane-cwd mono">
               {label.cwd}
@@ -396,7 +417,10 @@ export function GridPane({
           )}
         </header>
         <div className="gpane-body">
-          <PaneBody gridId={gridId} pane={pane} />
+          {/* Behind a pane filling the grid: mounted, but nothing in it is read. */}
+          <OutOfSight hidden={fill === "hidden"}>
+            <PaneBody gridId={gridId} pane={pane} />
+          </OutOfSight>
         </div>
         {label.asking && <Approval session={label.asking} />}
         {dragging && (zone || free) && <DropZones zone={zone} free={!!free} single={movingPane && !pane.content ? "Move here" : swapping ? "Swap in" : null} />}
@@ -505,9 +529,26 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
       </div>
     );
   }
-  if (c.kind === "terminal") return <TerminalBody gridId={gridId} pane={pane.id} content={c} />;
-  if (c.kind === "agent") return <DirectMessage key={c.agent} agent={c.agent} />;
-  return <SessionPane id={sessionKeyIn(c)!} />;
+  switch (c.kind) {
+    case "terminal":
+      return <TerminalBody gridId={gridId} pane={pane.id} content={c} />;
+    case "agent":
+      return <DirectMessage key={c.agent} agent={c.agent} />;
+    case "session":
+      return <SessionPane id={sessionKeyIn(c)!} />;
+    case "room":
+      return <RoomPaneBody key={c.room} room={c.room} />;
+    case "board":
+      return <BoardPaneBody key={c.board} gridId={gridId} paneId={pane.id} board={c.board} />;
+    case "floor":
+      return <FloorPaneBody key={c.group ?? ""} group={c.group ?? null} />;
+    default:
+      return (
+        <div className="gpane-empty">
+          <p className="muted small">A newer Desk put this here. Update Desk to show it.</p>
+        </div>
+      );
+  }
 }
 
 /** The session `id` (a key, see `keyOf`) in a pane. */
@@ -633,6 +674,18 @@ function usePaneMenu(
       : []),
   ];
   const agent = pane.content?.kind === "agent" ? pane.content.agent : null;
+  // A board's filter: in its header's chips too, while the header is wide enough.
+  const boardFilter = usePaneFilter(gridId, pane.id);
+  const show: MenuEntry[] =
+    pane.content?.kind === "board"
+      ? [
+          {
+            kind: "item",
+            label: "Show",
+            submenu: FILTERS.map((f): MenuEntry => ({ kind: "item", label: f.label, checked: boardFilter === f.id, onSelect: () => setPaneFilter(gridId, pane.id, f.id) })),
+          },
+        ]
+      : [];
   // A tracked terminal shows as its session, and back: the same terminal
   // either way, so nothing starts or stops.
   const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, terminalKeyIn(pane.content)) : null;
@@ -675,6 +728,7 @@ function usePaneMenu(
   return [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
+    ...show,
     // This computer's session moves between groups as the hub previews it.
     ...(session && machineOf(session) === LOCAL && canMove()
       ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(sessionSubject(session.id, names[session.id] ?? session.displayName ?? session.name)) }]

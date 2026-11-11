@@ -12,6 +12,8 @@ import { usePlans as useBossPlans } from "../crew/planStore";
 import { missing } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { useWatching, watched } from "../unread/watching";
+import { scoped, useFloorScope } from "./scope";
+import { useLayout } from "../groups/store";
 import { answeredInRoom, stillNeeds, useNeedsDismissed, useNeedsSeen, yourPosts } from "../unread/needsSeen";
 import { merged, type Merged } from "./merge";
 import { countsByItem } from "./needs";
@@ -322,15 +324,21 @@ export const useMerged = (): Merged => {
   const asked = useLine((s) => s.asked);
   const gone = useNeedsDismissed((s) => s.gone);
   const posts = useDesk((s) => yourPosts(s.timelines));
+  // Under a pane showing one group's Floor: that group's alone.
+  const scope = useFloorScope();
+  // Its groups only: the rest of the layout is made afresh on every read.
+  const groups = useLayout().groups;
+  const day = useFloor((s) => s.day);
   return useMemo(() => {
-    const all = merged(hubs, list);
+    const whole = merged(hubs, list);
+    const all = scope ? scoped(whole, scope, groups, day) : whole;
     const needs = all.needs.filter(
       (n) => stillNeeds(n, seen, (key) => watched(w, key)) && !lineSettled(n, asked, NOT_WAITING) && !gone.has(n.key) && !answeredInRoom(n, posts),
     );
     const wentAhead = all.wentAhead.filter((n) => !lineSettled(n, asked, CLOSED));
     if (needs.length === all.needs.length && wentAhead.length === all.wentAhead.length) return all;
     return { ...all, needs, wentAhead, counts: { ...all.counts, needsYou: needs.length } };
-  }, [hubs, list, seen, w, asked, gone, posts]);
+  }, [hubs, list, seen, w, asked, gone, posts, scope, scope ? groups : null, scope ? day : 0]);
 };
 
 /** Where a question on this computer's lines no longer waits on you, and

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { watchFloor } from "../floor/store";
+import { hearElsewhere } from "../grids/elsewhere";
 import { GridsMain } from "../grids/Grids";
 import { newTerminalHere, useGrids } from "../grids/store";
 import { startGridsHere, useGridWindows } from "../grids/windows";
@@ -157,6 +158,8 @@ export function App() {
   }, []);
 
   useEffect(watchFloor, []);
+  // A thread or a ticket a grid's own window opens shows here.
+  useEffect(() => hearElsewhere(), []);
   // Each machine's engine, beside this computer's.
   useEffect(() => watchMachines(nativeMachines, () => void hubAccounts().then(useChat.getState().setHubs).catch(useDesk.getState().fail)), []);
 

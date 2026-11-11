@@ -22,6 +22,7 @@ import { Menu } from "../ui/Menu";
 import { openTarget } from "../shell/navigate";
 import { below, isMenuKey } from "../groups/rows";
 import { ThreadBar } from "./ThreadBar";
+import { useInPane, useThreadOpener } from "./inPane";
 import { useAuthor } from "./names";
 import { memberOf } from "./routing";
 import { after } from "./time";
@@ -181,7 +182,8 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const paging = useDesk((s) => s.paging[key]);
   const drafts = useDesk((s) => s.roomDrafts[room.id]) ?? NO_DRAFTS;
   const openThread = useUi((u) => u.roomThreads[room.id] ?? null);
-  const setRoomThread = useUi((u) => u.setRoomThread);
+  const setRoomThread = useThreadOpener();
+  const inPane = useInPane();
   const flash = useUi((u) => u.flash);
   const author = useAuthor();
   const live = isLive(window);
@@ -216,7 +218,8 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   const needs = useMemo(() => inRoom(floorNeeds, room.id), [floorNeeds, room.id]);
   const here = byThread.get(thread) ?? NO_DRAFTS;
 
-  const anchorKey = thread ? null : `room:${room.id}`;
+  // In a pane, its own scroll: never the one Rooms keeps for the room.
+  const anchorKey = thread || inPane ? null : `room:${room.id}`;
   const anchored = useAnchoredScroll<HTMLDivElement>(anchorKey);
   const followed = useFollowEnd(live, !(anchorKey && useUi.getState().anchors[anchorKey]));
   const { setAtEnd } = followed;
@@ -350,7 +353,7 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
     e.stopPropagation();
     unreadFromHere(m);
   };
-  const run = (id: ActionId, m: RoomMessage) => runAction(id, room, m, { thread, name: author(m.author).name, markUnread: () => unreadFromHere(m) });
+  const run = (id: ActionId, m: RoomMessage) => runAction(id, room, m, { thread, name: author(m.author).name, markUnread: () => unreadFromHere(m), openThread: setRoomThread });
   const [menu, setMenu] = useState<{ m: RoomMessage; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   // Each row's bar is handed the same two callbacks while the timeline
   // stands, so it renders again only when its message does.

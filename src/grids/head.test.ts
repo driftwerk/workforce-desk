@@ -8,9 +8,10 @@ const cwd = (globalThis as unknown as { process: { cwd: () => string } }).proces
 const css = fs.readFileSync(`${cwd}/src/styles/grids.css`, "utf8");
 
 describe("a pane's header as it narrows", () => {
-  it("gives way where a terminal is first, then what the pane is, then the badge; the name stays", () => {
-    expect(headParts(900)).toEqual(["cwd", "meta", "badge"]);
-    expect(headParts(660)).toEqual(["meta", "badge"]);
+  it("gives way where a terminal is first, then a board's chips, then what the pane is, then the badge; the name stays", () => {
+    expect(headParts(900)).toEqual(["cwd", "chips", "meta", "badge"]);
+    expect(headParts(660)).toEqual(["chips", "meta", "badge"]);
+    expect(headParts(600)).toEqual(["meta", "badge"]);
     expect(headParts(570)).toEqual(["badge"]);
     // Three panes side by side on a laptop: the name alone.
     expect(headParts(380)).toEqual([]);

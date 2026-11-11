@@ -25,11 +25,10 @@ const summary = (sessions: Session[]): string => {
  *  starting up answers 404 for a moment. */
 const REFRESH_MS = 60_000;
 
-/** The crew's overview where the hub has one; the sessions as they were
- *  shown before, where it doesn't (or until it answers). */
-export function Floor({ onNewSession }: { onNewSession: () => void }) {
+/** Keeps what the Floor shows read while it's shown (in the Floor view, or
+ *  a grid's pane): the overview and the overseer, again every minute. */
+export function useFloorReads(): void {
   const hub = useDesk((s) => s.hub);
-  const overview = useOverview((s) => s.overview);
   useFloorTick(true);
   useEffect(() => {
     if (!hub) return;
@@ -44,6 +43,13 @@ export function Floor({ onNewSession }: { onNewSession: () => void }) {
     }, REFRESH_MS);
     return () => clearInterval(t);
   }, [hub]);
+}
+
+/** The crew's overview where the hub has one; the sessions as they were
+ *  shown before, where it doesn't (or until it answers). */
+export function Floor({ onNewSession }: { onNewSession: () => void }) {
+  const overview = useOverview((s) => s.overview);
+  useFloorReads();
   return overview ? <CrewFloor overview={overview} onNewSession={onNewSession} /> : <SessionsFloor />;
 }
 
