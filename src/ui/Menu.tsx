@@ -4,7 +4,8 @@ import { createPortal } from "react-dom";
 export type MenuEntry =
   /** `checked`: a setting it turns on or off, shown ticked while on. */
   /** `disabled`: said and reachable, but choosing it does nothing. */
-  | { kind: "item"; label: string; kbd?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; submenu?: MenuEntry[] }
+  /** `hint`: a quiet word after the label ("Morning · the empty pane"). */
+  | { kind: "item"; label: string; hint?: string; kbd?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; submenu?: MenuEntry[] }
   | { kind: "separator" };
 
 const MARGIN = 8;
@@ -171,7 +172,10 @@ function MenuList({
             }}
             onClick={(e) => (entry.disabled ? undefined : entry.submenu ? openSub(i, e.currentTarget, true) : onChoose(entry.onSelect))}
           >
-            <span className="menu-label">{entry.label}</span>
+            <span className="menu-label">
+              {entry.label}
+              {entry.hint && <span className="menu-hint"> · {entry.hint}</span>}
+            </span>
             {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
             {entry.checked && (
               <span className="menu-kbd" aria-hidden="true">

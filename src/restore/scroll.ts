@@ -8,8 +8,9 @@ const WAIT_MS = 4000;
 
 /** A ref for a scrolling pane whose position is kept as `pane` and put back
  *  when it mounts — once its content (read from the hub, often after it
- *  mounts) is tall enough, and unless it has been scrolled meanwhile. */
-export function useSavedScroll<T extends HTMLElement>(pane: string): (el: T | null) => void {
+ *  mounts) is tall enough, and unless it has been scrolled meanwhile. With
+ *  `pane` null, nothing is kept (a grid pane's Floor scrolls on its own). */
+export function useSavedScroll<T extends HTMLElement>(pane: string | null): (el: T | null) => void {
   const el = useRef<T | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
@@ -18,7 +19,7 @@ export function useSavedScroll<T extends HTMLElement>(pane: string): (el: T | nu
       cleanup.current?.();
       cleanup.current = null;
       el.current = node;
-      if (!node) return;
+      if (!node || pane === null) return;
       const target = useUi.getState().scroll[pane] ?? 0;
       let restoring = target > 0;
       let frame = 0;

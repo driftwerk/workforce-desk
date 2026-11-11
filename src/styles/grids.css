@@ -243,6 +243,11 @@
     display: none;
   }
 }
+@container gpane-head (max-width: 600px) {
+  .gpane-chips {
+    display: none;
+  }
+}
 @container gpane-head (max-width: 570px) {
   .gpane-meta {
     display: none;
@@ -633,4 +638,392 @@ body.gsplitting-h * {
 }
 .grid-window .gcanvas {
   padding: 2px;
+}
+
+/* ── A room, a board or the Floor in a pane ─────────────────────────────── */
+
+/* Its kind, where a session's dot is. */
+.gpane-kind {
+  flex: none;
+  color: var(--muted);
+}
+/* A board's filter, in its header (and in the pane's menu once it's
+   hidden). */
+.gpane-chips {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.gpane-chips .chip-btn {
+  padding: 1px 8px;
+  font-size: 11.5px;
+}
+/* A room's, a board's or the Floor's header has little else in it: what
+   it is stays (cut short) after a session's would have gone. */
+@container gpane-head (min-width: 300px) {
+  .gpane-k-room .gpane-meta,
+  .gpane-k-board .gpane-meta,
+  .gpane-k-floor .gpane-meta {
+    display: inline;
+    /* It gives way before the name does. */
+    flex: 0 100 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+/* What it shows sizes to its pane: narrow and short panes have layouts
+   of their own (below). */
+.gpane-k-room .gpane-body,
+.gpane-k-board .gpane-body,
+.gpane-k-floor .gpane-body {
+  container: gpane / size;
+}
+
+/* A board: its columns under the pane's header, tighter than the Board
+   view's; a column at a time when narrow, its counts when short. */
+.board-in-pane .board-cols {
+  --board-col: calc((100cqw - 20px - 32px) / 5);
+  gap: 8px;
+  padding: 10px 10px 12px;
+  scroll-padding-inline: 10px;
+}
+.board-in-pane .board-col {
+  padding: 12px 10px;
+}
+.board-in-pane .board-sync,
+.board-in-pane .board-left {
+  margin-inline: 10px;
+}
+@container gpane (max-width: 1000px) {
+  .board-in-pane .board-cols {
+    --board-col: calc((100cqw - 20px - 24px) / 4);
+  }
+}
+@container gpane (max-width: 800px) {
+  .board-in-pane .board-cols {
+    --board-col: calc((100cqw - 20px - 16px) / 3);
+  }
+}
+@container gpane (max-width: 640px) {
+  .board-in-pane .board-cols {
+    --board-col: calc((100cqw - 20px - 8px) / 2);
+  }
+}
+.board-tabs {
+  display: none;
+  flex: none;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.board-tab {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 11.5px var(--font-ui);
+  cursor: pointer;
+}
+.board-tab[aria-selected="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+/* A card dragged over a tab goes to the end of that column. */
+.board-tab-over {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+@container gpane (max-width: 520px) {
+  .board-in-pane .board-tabs {
+    display: flex;
+  }
+  .board-in-pane .board-cols {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: hidden;
+  }
+  .board-in-pane .board-col:not(.board-col-on) {
+    display: none;
+  }
+}
+.board-short {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+.board-short-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.board-short-label {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.board-short-n {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.board-short-waiting {
+  background: var(--blocked-soft);
+}
+.board-short-waiting .board-short-label {
+  color: var(--blocked);
+}
+@container gpane (max-height: 240px) {
+  .board-in-pane > :not(.board-short) {
+    display: none;
+  }
+  .board-in-pane .board-short {
+    display: grid;
+  }
+}
+
+/* The Floor: its main column, tighter than the Floor view's; narrow, the
+   cards stack and each plan's meters fold to a line; short, its counts. */
+.floor-in-pane {
+  padding: 10px;
+  gap: 10px;
+}
+.floor-in-pane .floor-card {
+  padding: 12px 14px;
+}
+.floor-in-pane .plan-cards {
+  gap: 10px;
+}
+.floor-short {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+.floor-short li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@container gpane (max-width: 520px) {
+  .floor-in-pane .plan-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .floor-in-pane .plan-card .floor-card-head .muted,
+  .floor-in-pane .plan-window > .small,
+  .floor-in-pane .plan-window-head .floor-time {
+    display: none;
+  }
+  .floor-in-pane .plan-window {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .floor-in-pane .plan-window-head {
+    flex: none;
+    min-width: 120px;
+  }
+  .floor-in-pane .plan-bar {
+    flex: 1;
+    height: 5px;
+  }
+  .floor-in-pane .today-legend {
+    display: none;
+  }
+}
+@container gpane (max-height: 240px) {
+  .floor-in-pane {
+    display: none;
+  }
+  .gpane-body .floor-short {
+    display: flex;
+  }
+}
+
+/* A room stays a chat, whatever the pane's size. */
+.gpane-k-room .room-in-pane {
+  height: 100%;
+}
+
+/* ── An empty pane's picker: what goes in it ────────────────────────────── */
+
+.gpane-picking {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 8px;
+}
+.gpick {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
+  box-shadow: 0 12px 32px var(--shadow);
+  text-align: left;
+}
+.gpick-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.gpick-search {
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--text);
+  font: 400 13.5px var(--font-ui);
+  outline: none;
+}
+.gpick-search:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.gpick-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 8px;
+}
+.gpick-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--font-ui);
+  cursor: pointer;
+}
+.gpick-tab[aria-selected="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+.gpick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin-top: 4px;
+  overflow-y: auto;
+}
+.gpick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: 500 13.5px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.gpick-row:hover:not(:disabled),
+.gpick-row:focus-visible {
+  background: var(--signal-soft);
+  outline: none;
+}
+.gpick-row:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.gpick-mono .gpick-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.gpick-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gpick-meta {
+  flex: none;
+  max-width: 50%;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.gpick-none {
+  margin: 6px 10px;
+}
+.gpick p {
+  max-width: none;
+}
+.gpick-foot {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+/* In a small pane, the picker is the pane: no card around it, its tabs on
+   one line, so the list keeps the room. */
+.gpane-vacant .gpane-body {
+  container: gpane / size;
+}
+@container gpane (max-height: 320px) {
+  .gpane-picking {
+    align-items: stretch;
+    padding: 0;
+  }
+  .gpick {
+    width: 100%;
+    height: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .gpick-title,
+  .gpick-foot {
+    display: none;
+  }
+  .gpick-tabs {
+    flex: none;
+    flex-wrap: nowrap;
+    margin: 8px 0 4px;
+    overflow-x: auto;
+  }
+  .gpick-tab {
+    flex: none;
+  }
 }

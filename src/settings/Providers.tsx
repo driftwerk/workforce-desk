@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CopyDetails, ProblemNote } from "../ui/ProblemNote";
 import { useChat } from "../chat/store";
 import { brainOn, newAgentBrain } from "../crew/brain";
 import { PLAN_OF, type Provider, type ProviderGroup } from "../hub/providers";
@@ -208,6 +209,9 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
     <div className="prov-row">
       <span className="prov-text">
         <b>{provider.name}</b>
+        {login.problem && !problem ? (
+          <ProblemNote problem={login.problem} />
+        ) : (
         <span className={login.failed || problem ? "state-blocked" : undefined} role={problem ? "alert" : undefined}>
           {problem ??
             status ??
@@ -217,9 +221,11 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
                 {usedBy.length > 0 && ` · used by ${names(usedBy)}`}
               </>
             ))}
+          <CopyDetails text={problem} />
           {provider.connect.kind === "login" && <ReopenLink login={login} />}
           {provider.connect.kind === "login" && <CopyInstall login={login} />}
         </span>
+        )}
       </span>
       {action}
     </div>

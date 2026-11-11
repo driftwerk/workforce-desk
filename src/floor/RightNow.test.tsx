@@ -427,7 +427,7 @@ describe("Right now's needs, answered in place", () => {
     hubs.local!.decide = () => 403;
     render(<RightNow brief={null} />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" })));
-    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk isn’t allowed to do that on this computer.");
+    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk wasn’t allowed to do that.");
     const allow = screen.getByRole("button", { name: "Allow “Run npm test?” for acme-web" });
     expect(allow.getAttribute("aria-disabled")).toBe("false");
     expect(openTarget).not.toHaveBeenCalled();
@@ -476,7 +476,7 @@ describe("Right now's needs, answered in place", () => {
     render(<RightNow brief={null} />);
     const allow = screen.getByRole("button", { name: "Allow this command for this session and continue: keychain-check" });
     await act(async () => fireEvent.click(allow));
-    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk isn’t allowed to do that on this computer.");
+    expect(within(needRows()[0]!).getByRole("alert").textContent).toBe("Desk wasn’t allowed to do that.");
     expect((allow as HTMLButtonElement).disabled).toBe(false);
     expect(useDesk.getState().error).toBeNull();
   });

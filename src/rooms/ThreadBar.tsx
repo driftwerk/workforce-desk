@@ -3,7 +3,7 @@ import type { FloorNeed } from "../floor/merge";
 import { dayClock } from "../floor/time";
 import type { RoomDraft } from "../hub/store";
 import type { RoomMessage } from "../hub/types";
-import { useUi } from "../shell/ui";
+import { useThreadOpener } from "./inPane";
 import { effective, useReads } from "../unread/reads";
 import { useUnread } from "../unread/summary";
 import { MemberMark } from "./MemberMark";
@@ -64,6 +64,7 @@ export const ThreadBar = memo(function ThreadBar({
   opens?: boolean;
 }) {
   const author = useAuthor();
+  const openThread = useThreadOpener();
   const point = useReads((s) => s.local[`thread:${room}/${parent.id}`]);
   const floor = useUnread((s) => s.local?.floor);
   const read = effective(point, floor);
@@ -83,7 +84,7 @@ export const ThreadBar = memo(function ThreadBar({
     </>
   );
   return opens ? (
-    <button type="button" className={`thread-bar small${unread ? " thread-unread" : ""}`} onClick={() => useUi.getState().setRoomThread(room, parent.id)}>
+    <button type="button" className={`thread-bar small${unread ? " thread-unread" : ""}`} onClick={() => openThread(room, parent.id)}>
       {inner}
     </button>
   ) : (

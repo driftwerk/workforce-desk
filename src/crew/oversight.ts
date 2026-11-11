@@ -111,7 +111,8 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     nudge: true,
     resumeRestart: true,
     readOnlyApprovals: false,
-    handOutWork: false,
+    // At Act it starts the sessions its work needs, as the hub defaults it.
+    handOutWork: true,
     interrupt: false,
     messageAgents: false,
     messageTerminalSessions: false,

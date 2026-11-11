@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ProblemNote } from "../ui/ProblemNote";
 import { PLAN_OF, type Provider, type ProviderField } from "../hub/providers";
 import { radioKeys } from "../ui/Dialog";
 import { useDesk } from "../hub/store";
@@ -39,7 +40,8 @@ function PlanConnect({ provider, onConnected, onCancel }: { provider: Provider; 
   });
   return (
     <div className="connect-form">
-      {(login.status ?? provider.connect.hint) && (
+      {login.problem && <ProblemNote problem={login.problem} />}
+      {!login.problem && (login.status ?? provider.connect.hint) && (
         <p className={`small ${login.failed ? "state-blocked" : "muted"}`} role="status">
           {login.status ?? provider.connect.hint}
           <ReopenLink login={login} />

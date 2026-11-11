@@ -10,7 +10,7 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react
 import { create } from "zustand";
 import { close, zoneAt, type Pane, type PaneContent, type PresetId, type Zone } from "./engine";
 import { changePanes, createGrid, deliver, dropOnPane, layOut, movePane, movePaneWithin, useGrids } from "./store";
-import { sessionContent } from "./engine";
+import { boardContent, floorContent, roomContent, sessionContent } from "./engine";
 
 export type GridTarget =
   | { kind: "pane"; gridId: string; paneId: string; zone: Zone }
@@ -44,14 +44,27 @@ export const useGridDrag = create<GridDrag>(() => ({ item: null, over: null, fre
 
 const sameTarget = (a: GridTarget | null, b: GridTarget | null) => JSON.stringify(a) === JSON.stringify(b);
 
-/** A sidebar item's key (`session:<id>`, `agent:<hub>/<agent>`) as what a
- *  pane holds. */
-export const contentOfItem = (key: string): PaneContent | null =>
-  key.startsWith("session:")
-    ? sessionContent(key.slice("session:".length))
-    : key.startsWith("agent:")
-      ? { kind: "agent", agent: key.slice("agent:".length) }
-      : null;
+/** A sidebar item's key (`session:<id>`, `agent:<hub>/<agent>`, and
+ *  `room:<id>`, `board:<id>` or `floor:<group>` as `itemOf` names them) as
+ *  what a pane holds. */
+export const contentOfItem = (key: string): PaneContent | null => {
+  const at = key.indexOf(":");
+  const [kind, rest] = at < 0 ? [key, ""] : [key.slice(0, at), key.slice(at + 1)];
+  if (kind === "floor") return floorContent(rest || null);
+  if (!rest) return null;
+  switch (kind) {
+    case "session":
+      return sessionContent(rest);
+    case "agent":
+      return { kind: "agent", agent: rest };
+    case "room":
+      return roomContent(rest);
+    case "board":
+      return boardContent(rest);
+    default:
+      return null;
+  }
+};
 
 /** Where the pointer was last, so pressing or letting go of ⇧ without
  *  moving shows the change at once. */

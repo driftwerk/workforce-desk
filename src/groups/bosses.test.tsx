@@ -248,12 +248,12 @@ describe("a group's boss in the sidebar", () => {
   });
 
   it("keeps the group, and says why, when the boss can't be taken off", async () => {
-    world.hub.saveAgentConfig.mockRejectedValueOnce(new Error("The hub is busy."));
+    world.hub.saveAgentConfig.mockRejectedValueOnce(new Error("Desk is busy."));
     render(<SidebarGroups />);
     fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Acme" }));
-    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("The hub is busy."));
+    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain("Desk is busy."));
     expect(useSettings.getState().groups.map((g) => g.id)).toEqual(["acme", "globex"]);
   });
 
@@ -327,7 +327,7 @@ describe("the fix round", () => {
     const layout = { groups: [ACME, GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped };
     Object.assign(world.hub, {
       deleteGroup: vi.fn(async () => {
-        throw new Error("The hub is busy.");
+        throw new Error("Desk is busy.");
       }),
       layout: vi.fn(async () => layout),
     });
@@ -338,7 +338,7 @@ describe("the fix round", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Acme" }));
     await waitFor(() =>
-      expect(screen.getByRole("dialog").textContent).toContain("Sarah no longer oversees Acme; Acme couldn’t be deleted: The hub is busy."),
+      expect(screen.getByRole("dialog").textContent).toContain("Sarah no longer oversees Acme; Acme couldn’t be deleted: Desk is busy."),
     );
     await waitFor(() => expect(screen.getByRole("group", { name: "Acme" })).toBeTruthy());
     useHubLayout.setState({ layout: null, kept: null });
@@ -352,7 +352,7 @@ describe("the fix round", () => {
     Object.assign(world.hub, {
       deleteGroup: vi.fn(async () => ({ groups: [GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped })),
       orderUngrouped: vi.fn(async () => {
-        throw new Error("The hub is busy.");
+        throw new Error("Desk is busy.");
       }),
       layout: vi.fn(async () => layout),
     });
@@ -362,7 +362,7 @@ describe("the fix round", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete group" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Acme" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(fail.mock.calls.map(([e]) => (e as Error).message)).toEqual(["Acme was deleted, but its members’ order in Ungrouped wasn’t saved: The hub is busy."]);
+    expect(fail.mock.calls.map(([e]) => (e as Error).message)).toEqual(["Acme was deleted, but its members’ order in Ungrouped wasn’t saved: Desk is busy."]);
     expect(screen.getByText("Deleted Acme; its members are in Ungrouped")).toBeTruthy();
     useHubLayout.setState({ layout: null, kept: null });
   });

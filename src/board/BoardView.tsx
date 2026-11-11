@@ -1,5 +1,5 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { useChat } from "../chat/store";
 import { useBoss } from "../crew/chargeStore";
 import { plansOn, usePlans } from "../crew/planStore";
@@ -8,16 +8,14 @@ import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
 import { PLUGINS, SENSORS, DragChip, MoreIcon, below, type Operation } from "../groups/rows";
 import { useDesk, localSessions } from "../hub/store";
-import type { Ticket, TicketState } from "../hub/types";
+import type { Board as BoardT, Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { leftFilterOf } from "../hub/boardSync";
+import { leftFilterOf, syncStatus } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
-import { BoardActionDialog, boardEntries, type BoardAction } from "./boardActions";
-import { NewTokenDialog } from "./LinkBoard";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
-import { localSync, syncChoices, useSyncHubs } from "./syncStore";
-import { FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, type BoardFilter, type Column, type Over } from "./board";
+import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
+import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
@@ -42,25 +40,85 @@ export const useWaiting = (): ((t: Ticket) => boolean) => {
   );
 };
 
+/** The column a card dropped on `id` goes to the end of: a column's own
+ *  area (`col:<state>`), or its tab in a narrow pane (`tab:<state>`); null
+ *  for a card (it goes beside that card). */
+export const columnDroppedOn = (id: string): TicketState | null => (id.startsWith("col:") || id.startsWith("tab:") ? (id.slice(4) as TicketState) : null);
+
+/** Below this width (px) a board's pane shows a column at a time (kept in
+ *  step with grids.css's container query, by grids/kinds.test.tsx). */
+export const NARROW_PX = 520;
+
+/** Whether `el` is under NARROW_PX wide, as it resizes; while it can't be
+ *  measured (no ResizeObserver), it's taken as narrow. */
+const useNarrow = (el: HTMLElement | null): boolean => {
+  const [narrow, setNarrow] = useState(true);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setNarrow(el.getBoundingClientRect().width < NARROW_PX);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return narrow;
+};
+
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
 /** The plan each ticket is in, by its goal, for the board's cards. */
 const Plans = createContext<ReadonlyMap<string, string>>(new Map());
+/** Where a card opens its ticket: the panel beside the main window's view,
+ *  unless the board is somewhere that has none (a grid's own window). */
+const TicketOpener = createContext<(id: string) => void>((id) => useBoard.getState().openTicket(id));
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
+/** What the Board view's header offers beyond the board itself: the
+ *  board's menu (rename, delete, link to Jira or Linear) with its dialogs,
+ *  and minting a sync token. Handed in by Desk's main window (see
+ *  board/chrome.tsx), so a grid's own window, whose board panes have no
+ *  such header, never reaches what mints a token. */
+export interface BoardChrome {
+  entries: (board: BoardT, act: (a: BoardAction) => void) => MenuEntry[];
+  Action: ComponentType<{ board: BoardT; action: BoardAction; onClose: () => void }>;
+  NewToken: ComponentType<{ choice: SyncChoice; onClose: () => void }>;
+}
+
+/** A board shown in a grid's pane: which one, and its filter, which the
+ *  pane's header shows. */
+export interface BoardInPane {
+  board: string;
+  filter: BoardFilter;
+  onFilter: (f: BoardFilter) => void;
+  /** Opens a ticket, where this pane's window can show it. */
+  openTicket: (id: string) => void;
+}
+
 /** The board: its five columns of tickets, filtered and searched; cards
- *  dragged (or moved with Alt+arrows) between and within columns. */
-export function Board() {
+ *  dragged (or moved with Alt+arrows) between and within columns. With
+ *  `pane`, that board in a grid's pane: under the pane's header, which has
+ *  its name and filter, its columns alone (and its sync while that has a
+ *  problem); a narrow pane shows a column at a time, a short one counts. */
+export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChrome } = {}) {
   const supported = useBoard((s) => s.supported);
-  const board = useBoard(shownBoard);
+  const board = useBoard((s) => (pane ? (s.boards[pane.board] ?? null) : shownBoard(s)));
   const boards = useBoard((s) => s.boards);
   const all = useBoard((s) => s.tickets);
   const fail = useDesk((s) => s.fail);
   const boss = useBoss();
   const waiting = useWaiting();
   const now = useMinute();
-  const [filter, setFilter] = useState<BoardFilter>("all");
+  const [ownFilter, setOwnFilter] = useState<BoardFilter>("all");
+  const filter = pane?.filter ?? ownFilter;
+  const setFilter = pane?.onFilter ?? setOwnFilter;
+  // Ids of its own: a grid can show more than one board.
+  const uid = useId();
+  const searchId = `${uid}-search`;
+  // A pane under NARROW_PX wide shows a column at a time, with tabs: only
+  // then are the tabs there (and take drops).
+  const [paneRoot, setPaneRoot] = useState<HTMLDivElement | null>(null);
+  const narrow = useNarrow(paneRoot);
   const [q, setQ] = useState("");
   const [shelfOpen, setShelfOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -107,6 +165,9 @@ export function Board() {
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
   // Each chip counts the cards it would show, as the search and plan
   // leave them.
+  // What waits on the person, whatever is filtered or searched: a short
+  // pane's count.
+  const waitingCount = mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length;
   const chipCounts = useMemo(() => {
     const shown = (f: BoardFilter) => columns(onBoard, { filter: f, q, now, waiting, plan: planTickets, me }).reduce((n, c) => n + c.cards.length, 0);
     return { mine: shown("mine"), unassigned: shown("unassigned"), waiting: shown("waiting") } as Partial<Record<BoardFilter, number>>;
@@ -148,6 +209,8 @@ export function Board() {
       useBoard.getState().openTicket(found.id);
     } else setSaid(`There's no ${key}`);
   };
+
+  if (pane && !board) return <BoardPaneNote supported={supported} />;
 
   if (supported === false)
     return (
@@ -197,8 +260,46 @@ export function Board() {
       .map((b) => ({ kind: "item" as const, label: b.name, checked: b.id === board.id, onSelect: () => useBoard.getState().show(b.id) })),
     { kind: "separator" },
     { kind: "item", label: "New board…", onSelect: () => setNaming(true) },
-    ...boardEntries(board, setActing),
+    ...(chrome?.entries(board, setActing) ?? []),
   ];
+
+  const columnsShown = (
+    <States.Provider value={states}>
+      <Plans.Provider value={planChips}>
+        <TicketOpener.Provider value={pane?.openTicket ?? ((id) => useBoard.getState().openTicket(id))}>
+          <Columns
+            cols={cols}
+            counts={counts}
+            all={all}
+            waiting={waiting}
+            shelfOpen={shelfOpen}
+            onShelf={() => setShelfOpen((o) => !o)}
+            onMove={move}
+            onCardKey={onCardKey}
+            register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
+            ids={uid}
+            tabs={!!pane && narrow}
+          />
+        </TicketOpener.Provider>
+      </Plans.Provider>
+    </States.Provider>
+  );
+  const live = (
+    <p className="sr-only" aria-live="polite">
+      {said}
+    </p>
+  );
+
+  if (pane)
+    return (
+      <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
+        {board.sync && <PaneSync board={board} now={now} />}
+        <LeftFilterShelf board={board} tickets={left} />
+        {columnsShown}
+        <BoardShort counts={counts} waiting={waitingCount} />
+        {live}
+      </div>
+    );
 
   return (
     <main className="board" aria-label="Board">
@@ -235,11 +336,11 @@ export function Board() {
             ))}
           </select>
         )}
-        <label className="sr-only" htmlFor="board-search">
+        <label className="sr-only" htmlFor={searchId}>
           Search tickets
         </label>
         <input
-          id="board-search"
+          id={searchId}
           className="board-search"
           value={q}
           placeholder={`Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
@@ -256,26 +357,10 @@ export function Board() {
           New ticket
         </button>
       </header>
-      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor ? () => setNewToken(true) : undefined} />}
+      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf board={board} tickets={left} />
-      <States.Provider value={states}>
-      <Plans.Provider value={planChips}>
-      <Columns
-        cols={cols}
-        counts={counts}
-        all={all}
-        waiting={waiting}
-        shelfOpen={shelfOpen}
-        onShelf={() => setShelfOpen((o) => !o)}
-        onMove={move}
-        onCardKey={onCardKey}
-        register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
-      />
-      </Plans.Provider>
-      </States.Provider>
-      <p className="sr-only" aria-live="polite">
-        {said}
-      </p>
+      {columnsShown}
+      {live}
       {menu && (
         <Menu
           label="Boards"
@@ -289,8 +374,8 @@ export function Board() {
       )}
       {adding && <NewTicket board={board} onClose={() => setAdding(false)} />}
       {naming && <BoardDialog onClose={() => setNaming(false)} />}
-      {acting && <BoardActionDialog board={board} action={acting} onClose={() => setActing(null)} />}
-      {newToken && tokenFor && <NewTokenDialog choice={tokenFor} onClose={() => setNewToken(false)} />}
+      {acting && chrome && <chrome.Action board={board} action={acting} onClose={() => setActing(null)} />}
+      {newToken && tokenFor && chrome && <chrome.NewToken choice={tokenFor} onClose={() => setNewToken(false)} />}
     </main>
   );
 }
@@ -309,7 +394,14 @@ function Columns({
   onMove,
   onCardKey,
   register,
+  ids,
+  tabs = false,
 }: {
+  /** What its element ids start with. */
+  ids: string;
+  /** Column tabs, for a pane too narrow for every column (which then
+   *  shows the one picked): each takes a card dropped on it. */
+  tabs?: boolean;
   cols: Column[];
   /** The columns unfiltered, for their counts. */
   counts: Column[];
@@ -322,6 +414,11 @@ function Columns({
   register: (id: string, el: HTMLElement | null) => void;
 }) {
   const [line, setLine] = useState<{ state: TicketState; before: string | null } | null>(null);
+  // The column a narrow pane shows, until one is picked: what's being done,
+  // else what's next, else the first with cards.
+  const [picked, setPicked] = useState<TicketState | null>(null);
+  const has = (state: TicketState) => every.some((c) => c.state === state && c.cards.length > 0);
+  const on = picked ?? (has("doing") ? "doing" : has("todo") ? "todo" : (every.find((c) => c.cards.length)?.state ?? every[0]?.state ?? null));
   const dragged = useRef(false);
   // A column of hundreds draws its first cards, and the rest a page at a
   // time: drops land among what is drawn.
@@ -331,7 +428,8 @@ function Columns({
     const { source, target } = op;
     if (!source || !target || source.type !== "ticket") return null;
     const id = String(target.id);
-    if (id.startsWith("col:")) return { column: id.slice(4) as TicketState };
+    const column = columnDroppedOn(id);
+    if (column) return { column };
     const rect = target.element?.getBoundingClientRect();
     return { card: id, upper: rect ? op.position.current.y < rect.top + rect.height / 2 : true };
   };
@@ -357,10 +455,27 @@ function Columns({
         if (mv) onMove(String(source.id), mv);
       }}
     >
+      {tabs && (
+        <div className="board-tabs" role="tablist" aria-label="Column">
+          {cols.map((c, i) => (
+            <ColumnTab
+              key={c.state}
+              col={c}
+              count={counts[i]!.cards.length + counts[i]!.shelf.length}
+              on={on === c.state}
+              over={line?.state === c.state}
+              panel={`${ids}-col-${c.state}`}
+              onPick={() => setPicked(c.state)}
+            />
+          ))}
+        </div>
+      )}
       <div className="board-cols">
         {cols.map((c, i) => (
           <ColumnView
             key={c.state}
+            ids={ids}
+            on={on === c.state}
             col={c}
             count={counts[i]!.cards.length + counts[i]!.shelf.length}
             all={all}
@@ -381,7 +496,73 @@ function Columns({
   );
 }
 
+/** A column's tab, in a narrow pane: picks the column shown, and takes a
+ *  card dropped on it to the end of that column. */
+function ColumnTab({ col, count, on, over, panel, onPick }: { col: Column; count: number; on: boolean; over: boolean; panel: string; onPick: () => void }) {
+  const el = useRef<HTMLButtonElement | null>(null);
+  useDroppable({ id: `tab:${col.state}`, type: "column", accept: "ticket", element: el, collisionPriority: 2 });
+  return (
+    <button
+      ref={el}
+      type="button"
+      role="tab"
+      aria-selected={on}
+      aria-controls={panel}
+      className={`board-tab ${over ? "board-tab-over" : ""}`}
+      onClick={onPick}
+    >
+      {count > 0 ? `${col.title} ${count}` : col.title}
+    </button>
+  );
+}
+
+/** A board in a short pane: how many tickets each column has, and how
+ *  many wait on you. */
+function BoardShort({ counts, waiting }: { counts: Column[]; waiting: number }) {
+  const shown = counts.filter((c) => c.state === "todo" || c.state === "doing" || c.state === "review");
+  return (
+    <ul className="board-short" aria-label="Counts">
+      {shown.map((c) => (
+        <li key={c.state} className="board-short-tile">
+          <span className="board-short-label">{c.title}</span>
+          <span className="board-short-n display">{c.cards.length + c.shelf.length}</span>
+        </li>
+      ))}
+      <li className={`board-short-tile ${waiting ? "board-short-waiting" : ""}`}>
+        <span className="board-short-label">Waiting on me</span>
+        <span className="board-short-n display">{waiting}</span>
+      </li>
+    </ul>
+  );
+}
+
+/** A board in a pane says its sync in the pane's header while it's well;
+ *  here, only once it isn't (paused, or a problem), with what to do. */
+function PaneSync({ board, now }: { board: BoardT; now: number }) {
+  const kept = useSyncHubs((s) => s.hubs);
+  const paired = useChat((s) => s.hubs);
+  if (!board.sync || syncStatus(board, hubNameOf(board.sync.via, kept, paired))?.kind === "synced") return null;
+  return <SyncBar board={board} now={now} />;
+}
+
+/** In place of a pane's board that isn't there (yet, or any more). */
+function BoardPaneNote({ supported }: { supported: boolean | null }) {
+  return (
+    <div className="pane-note">
+      <p className="muted small">
+        {supported === false
+          ? "This computer's hub keeps no boards. Update Desk to keep tickets here."
+          : supported === null
+            ? "Reading the board…"
+            : "This board is no longer on this computer's hub."}
+      </p>
+    </div>
+  );
+}
+
 function ColumnView({
+  ids,
+  on,
   col,
   count,
   all,
@@ -395,6 +576,9 @@ function ColumnView({
   onCardKey,
   register,
 }: {
+  ids: string;
+  /** The column a narrow pane shows. */
+  on: boolean;
   col: Column;
   count: number;
   all: Readonly<Record<string, Ticket>>;
@@ -412,9 +596,9 @@ function ColumnView({
 }) {
   const area = useRef<HTMLElement | null>(null);
   useDroppable({ id: `col:${col.state}`, type: "column", accept: "ticket", element: area, collisionPriority: 0 });
-  const titleId = `board-col-${col.state}`;
+  const titleId = `${ids}-col-${col.state}-title`;
   return (
-    <section ref={area} className="floor-card board-col" aria-labelledby={titleId}>
+    <section ref={area} id={`${ids}-col-${col.state}`} className={`floor-card board-col ${on ? "board-col-on" : ""}`} aria-labelledby={titleId}>
       <div className="board-col-head">
         <h2 id={titleId} className="ov-label muted">
           {col.title}
@@ -470,6 +654,7 @@ function DraggableCard({
   const el = useRef<HTMLButtonElement | null>(null);
   const states = useContext(States);
   const plan = useContext(Plans).get(ticket.id);
+  const openTicket = useContext(TicketOpener);
   // A dropped ticket comes back by Bring it back, never by landing in a column.
   const drag = useDraggable({ id: ticket.id, type: "ticket", element: el, disabled: ticket.state === "dropped" });
   useDroppable({ id: ticket.id, type: "ticket", accept: "ticket", element: el, collisionPriority: 1 });
@@ -490,7 +675,7 @@ function DraggableCard({
           }}
           onOpen={() => {
             if (dragged.current) return;
-            useBoard.getState().openTicket(ticket.id);
+            openTicket(ticket.id);
           }}
           onKeyDown={(e) => onKey(ticket, e)}
         />

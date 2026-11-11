@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardContent,
+  contentKey,
+  findContent,
+  floorContent,
+  knownContent,
+  roomContent,
+  storedContent,
   applyPreset,
   blank,
   close,
@@ -422,3 +429,51 @@ const laidOutIds = (panes: Pane[]) =>
     .filter((p) => p.rect)
     .sort((a, b) => a.rect!.y - b.rect!.y || a.rect!.x - b.rect!.x)
     .map((p) => p.id);
+
+describe("rooms, boards and the Floor as what panes hold", () => {
+  const room = { kind: "room", room: "r1" } as const;
+  const board = { kind: "board", board: "b1" } as const;
+  const all = { kind: "floor" } as const;
+  const platform = { kind: "floor", group: "g-platform" } as const;
+
+  it("each is one thing in a grid: the same room twice is one, a group's Floor is not the Floor of everything", () => {
+    expect(contentKey(room)).toBe("room:r1");
+    expect(contentKey(board)).toBe("board:b1");
+    expect(contentKey(all)).toBe("floor:");
+    expect(contentKey(platform)).toBe("floor:g-platform");
+    expect(contentKey(floorContent(null))).toBe(contentKey(all));
+    expect(contentKey(floorContent("g-platform"))).toBe(contentKey(platform));
+    // A room and a board with the same id are still two things.
+    expect(contentKey(roomContent("x"))).not.toBe(contentKey(boardContent("x")));
+    const panes = [
+      { id: "a", rect: { x: 0, y: 0, w: 6, h: 12 }, content: room },
+      { id: "b", rect: { x: 6, y: 0, w: 6, h: 12 }, content: platform },
+    ];
+    expect(findContent(panes, roomContent("r1"))?.id).toBe("a");
+    expect(findContent(panes, floorContent("g-platform"))?.id).toBe("b");
+    expect(findContent(panes, all)).toBeUndefined();
+  });
+
+  it("are stored as they are; the Floor of everything without a group", () => {
+    expect(storedContent(room)).toEqual(room);
+    expect(storedContent(board)).toEqual(board);
+    expect(storedContent(platform)).toEqual(platform);
+    expect(storedContent({ kind: "floor", group: "" })).toEqual({ kind: "floor" });
+    expect(knownContent(room) && knownContent(board) && knownContent(all)).toBe(true);
+    expect(knownContent({ kind: "chart" } as unknown as PaneContent)).toBe(false);
+    // A kind a newer Desk keeps is the same as itself only.
+    expect(contentKey({ kind: "chart", id: 1 } as unknown as PaneContent)).not.toBe(contentKey({ kind: "chart", id: 2 } as unknown as PaneContent));
+  });
+
+  it("are placed, moved and closed as every pane is", () => {
+    let panes = blank(() => "p0");
+    panes = place(panes, { id: "p1", content: room })!;
+    panes = place(panes, { id: "p2", content: board })!;
+    panes = place(panes, { id: "p3", content: all })!;
+    expect(tiles(panes)).toBe(true);
+    expect(panes.map((p) => p.content)).toEqual([room, board, all]);
+    panes = close(panes, panes.find((p) => p.content === board)!.id);
+    expect(tiles(panes)).toBe(true);
+    expect(panes.map((p) => p.content)).toEqual([room, all]);
+  });
+});
