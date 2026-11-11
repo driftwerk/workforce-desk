@@ -190,7 +190,8 @@ export function FloorColumn({
       {sections && <NeedsJump sections={sections} />}
       <RestoreBanner />
       <AccountNeeds />
-      <OverseerCard />
+      {/* Who oversees everything is asked on the whole Floor only. */}
+      {!scope && <OverseerCard />}
       {onFloor ? (
         <>
           {sectioned.kind === "flat" && <SealedNotes notes={scope ? sectioned.sealed.filter((n) => n.group.id === scope) : sectioned.sealed} />}
