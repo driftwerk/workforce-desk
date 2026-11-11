@@ -25,7 +25,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
   const fail = useDesk((s) => s.fail);
-  const [busy, setBusy] = useState<"pause" | "sync" | null>(null);
+  const [busy, setBusy] = useState<"pause" | "sync" | "me" | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const sync = board.sync;
   if (!sync) return null;
@@ -59,7 +59,30 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       setBusy(null);
     }
   };
+  // Who the hub says the person is there, asked again: "that's not me" or
+  // a new token of their own.
+  const recheck = async () => {
+    const api = localSync();
+    if (!api) return;
+    setBusy("me");
+    setSaid(null);
+    try {
+      const b = await api.recheckMe(board.id);
+      kept_(b);
+      setSaid(b.sync?.meSource === "vouched" ? `${hub} knows you as ${b.sync.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
+    } catch (e) {
+      fail(new Error(saidOf(e)));
+    } finally {
+      setBusy(null);
+    }
+  };
   const pulled = ago(sync.pulledAt, now);
+  const who =
+    sync.meSource === "vouched" && sync.meName
+      ? `you're ${sync.meName} there`
+      : sync.meSource === "typed"
+        ? "your id as you typed it: Take it needs the hub to say who you are"
+        : (sync.meNote ?? null);
   return (
     <div className="board-sync" aria-label={`Sync with ${SYSTEM_TITLE[sync.system]}`}>
       <span className={`chip board-sync-chip board-sync-${status.kind}`}>{status.kind === "synced" ? "Synced" : status.kind === "paused" ? "Paused" : "Sync problem"}</span>
@@ -68,6 +91,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           <>
             {linkedTo(board, hub)}
             {pulled && <span className="faint"> · checked {pulled}</span>}
+            {who && <span className="faint board-sync-me"> · {who}</span>}
           </>
         ) : (
           status.words
@@ -80,6 +104,9 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
             New token…
           </button>
         )}
+        <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${hub} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
+          {busy === "me" ? "Checking…" : sync.meSource === "vouched" ? "Check again" : "Check who you are"}
+        </button>
         <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => void pause()}>
           {paused ? "Resume" : "Pause"}
         </button>
