@@ -19,6 +19,7 @@ import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
 import { commandMarkdown, shownText } from "../chat/commands";
+import { SetupCards, setupsStarted } from "../chat/SetupCard";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -212,6 +213,9 @@ export const Message = memo(function Message({
             </summary>
             <Steps steps={stepsOf(steps)} />
           </details>
+        )}
+        {message.role === "assistant" && origin && Math.max(setupsStarted(steps), setupsStarted(message.tools)) > 0 && (
+          <SetupCards origin={origin} at={message.at} count={Math.max(setupsStarted(steps), setupsStarted(message.tools))} />
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.undelivered && you && (

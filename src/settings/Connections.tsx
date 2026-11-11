@@ -3,10 +3,11 @@ import { useChat } from "../chat/store";
 import { ago } from "../crew/files";
 import { HubError } from "../hub/client";
 import {
-  agentOnly,
   connectionsOf,
-  mine,
+  forWhom,
   names,
+  SET_UP_BY_AGENT,
+  setUpRequest,
   statusLine,
   type At,
   type Connection,
@@ -14,8 +15,11 @@ import {
   type Connector,
   type Started,
 } from "../hub/connections";
+import { useOverview } from "../overview/store";
 import { openUrl } from "../platform";
+import { useUi } from "../shell/ui";
 import "../styles/connections.css";
+import { askDeskTo } from "../ui/askDesk";
 import { useLive } from "../ui/useLive";
 
 const SAVED_WHERE = "Saved in Desk’s vault on this computer. Never in a file.";
@@ -24,9 +28,10 @@ const EXPIRED = "The sign-in timed out. Nothing was saved.";
 /** How often a sign-in in progress is asked about. */
 const FLOW_POLL_MS = 1500;
 
-const ALL: At = { level: "all" };
-
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** `text` ending as a sentence does. */
+const sentence = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
 /** The local hub's Connections, asked as the person. */
 const localApi = (): ConnectionsApi | null => {
@@ -34,17 +39,40 @@ const localApi = (): ConnectionsApi | null => {
   return hub ? connectionsOf(hub) : null;
 };
 
-const dated = (iso: string | null): string =>
-  iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+/** The agents on this computer, for "Just one agent". */
+const useLocalAgents = (): { id: string; name: string }[] => {
+  const hub = useChat((s) => s.hubs.find((h) => h.local));
+  const roster = useChat((s) => s.roster);
+  return hub ? roster.filter((a) => a.hubId === hub.id).map((a) => ({ id: a.id, name: a.name })) : [];
+};
 
-/** Settings → Connections: the services agents on this computer can be
- *  given, connected once for all the person's agents or just for one. */
-export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
+/** Asks Desk's agent to set `c` up (or one the person names), in its
+ *  chat. */
+const askDesk = (c: Connector | null): boolean => {
+  const asked = askDeskTo(
+    c ? setUpRequest(c.name, "all") : "I’d like to connect a service for my agents. Ask me which one, then set it up in your browser.",
+  );
+  if (asked) useUi.getState().closeSettings();
+  return asked;
+};
+
+/** Settings → Connections: the services agents on this computer work in.
+ *  A service holds several connections, each named, kept for all the
+ *  person's agents or just one; each agent uses the ones picked for it. */
+export function Connections({
+  api: given,
+  ask = askDesk,
+}: {
+  api?: ConnectionsApi;
+  /** Hands setting a service up to Desk's agent; false when there's none. */
+  ask?: (c: Connector | null) => boolean;
+} = {}) {
   const [api] = useState<ConnectionsApi | null>(() => given ?? localApi());
   const [list, setList] = useState<Connector[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const canAsk = useOverview((s) => !!s.manager?.agentId) || given !== undefined;
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -61,16 +89,25 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
     void load();
   }, [load]);
 
-  const nothing = list !== null && list.every((c) => c.connections.length === 0);
+  const askFor = (c: Connector | null) => {
+    if (!ask(c)) setNotice("Desk’s agent isn’t on this computer to ask. Connect it yourself below.");
+  };
 
   return (
     <section className="settings-pane providers-pane connections-pane" aria-label="Connections">
-      <header>
-        <h1 className="display-lg">Connections</h1>
-        <p className="muted">
-          The services your agents on this computer can work in. Connect each one once for all your agents, then turn it on for the agents that
-          need it in their Connectors.
-        </p>
+      <header className="conn-header">
+        <div>
+          <h1 className="display-lg">Connections</h1>
+          <p className="muted">
+            The services your agents on this computer work in. A service can have several connections — two Jira sites, work and personal
+            email — each with its own name. Each agent uses only the ones you pick for it.
+          </p>
+        </div>
+        {canAsk && (
+          <button type="button" className="btn" onClick={() => askFor(null)}>
+            Ask an agent to set one up
+          </button>
+        )}
       </header>
 
       {!api || unsupported ? (
@@ -107,19 +144,18 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
         </div>
       )}
 
-      {nothing && (
-        <div className="setting-card connections-empty">
-          <span className="card-text">
-            <b>Nothing connected yet</b>
-            <span>Connect the tools your agents work with. Each agent only gets the ones you turn on for it.</span>
-          </span>
-        </div>
-      )}
-
       {api && list && list.length > 0 && (
-        <div className="prov-list" role="list" aria-label="Connectors">
-          {list.map((c) => (
-            <ConnectorRow key={c.id} api={api} connector={c} reload={load} onNotice={setNotice} />
+        <div className="conn-services" role="list" aria-label="Services">
+          {list.map((c, i) => (
+            <ServiceCard
+              key={c.id}
+              api={api}
+              connector={c}
+              open={i === list.findIndex((x) => x.connections.length >= 2)}
+              reload={load}
+              onNotice={setNotice}
+              onAsk={canAsk ? () => askFor(c) : undefined}
+            />
           ))}
         </div>
       )}
@@ -129,160 +165,240 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
   );
 }
 
-/** One connector's row, and its detail when open. */
-function ConnectorRow({
+/** One service: its connections, open, or what they are, closed. */
+function ServiceCard({
   api,
   connector: c,
+  open: startOpen,
   reload,
   onNotice,
+  onAsk,
 }: {
   api: ConnectionsApi;
   connector: Connector;
+  /** Open at first: the first service of several connections. */
+  open: boolean;
   reload: () => Promise<void>;
   onNotice: (n: string | null) => void;
+  onAsk?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const all = mine(c);
-  const only = agentOnly(c);
-  const trouble = c.connections.some((x) => x.status !== "connected");
+  const count = c.connections.length;
+  const [open, setOpen] = useState(startOpen);
+  const [adding, setAdding] = useState(false);
+  const trouble = c.connections.filter((x) => x.status !== "connected");
+  const using = c.usedBy.length;
+  const agents = using === 1 ? "1 agent uses it" : `${using} agents use ${count >= 2 ? "them" : "it"}`;
 
-  const status = (() => {
-    if (all) return <span className={all.status === "connected" ? "state-on" : "state-blocked"}>{statusLine(all)}</span>;
-    if (only.length > 0) {
-      return <span>{only.length === 1 ? `Connected just for ${only[0]!.agentName ?? only[0]!.agent}` : `Connected for ${only.length} agents`}</span>;
-    }
-    return <span className="faint">Not connected</span>;
+  const summary = (() => {
+    if (count === 0) return <span className="faint">Not connected</span>;
+    if (open) return <span>{`${count === 1 ? "1 connection" : `${count} connections`}${using ? ` · ${agents}` : ""}`}</span>;
+    return (
+      <span>
+        {c.connections.map((x, i) => (
+          <span key={x.id}>
+            {i > 0 && " · "}
+            {x.name}
+            {x.status !== "connected" && (
+              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : "needs signing in again"})</span>
+            )}
+          </span>
+        ))}
+        {using > 0 && ` · ${agents}`}
+      </span>
+    );
   })();
 
-  const using = c.usedBy.length;
   return (
-    <div className={`prov-row ${open ? "prov-row-open" : ""}`} role="listitem" aria-label={c.name}>
+    <section className={`conn-service ${open ? "conn-service-open" : ""}`} role="listitem" aria-label={c.name}>
       <div className="conn-head">
-        <span className={`conn-dot ${trouble ? "conn-dot-blocked" : all || only.length ? "conn-dot-on" : ""}`} aria-hidden="true" />
-        <span className="prov-text">
-          <b>{c.name}</b>
-          <span>
-            {status}
-            {using > 0 && ` · ${using === 1 ? "1 agent uses it" : `${using} agents use it`}`}
-          </span>
+        <span className={`conn-dot ${trouble.length ? "conn-dot-blocked" : count ? "conn-dot-on" : ""}`} aria-hidden="true" />
+        <b className="conn-service-name">{c.name}</b>
+        <span className="conn-summary small">{summary}</span>
+        <span className="conn-head-actions">
+          {count === 0 ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setOpen(true);
+                  setAdding(true);
+                }}
+              >
+                Connect
+              </button>
+              {onAsk && SET_UP_BY_AGENT.has(c.id) && (
+                <button type="button" className="btn btn-sm btn-signal" onClick={onAsk}>
+                  Have Desk set it up
+                </button>
+              )}
+            </>
+          ) : open ? (
+            <>
+              {c.several && !adding && (
+                <button type="button" className="btn btn-sm btn-signal-outline" onClick={() => setAdding(true)}>
+                  + Add another {c.name}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                aria-expanded
+                onClick={() => {
+                  setOpen(false);
+                  setAdding(false);
+                }}
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn btn-sm" aria-expanded={false} onClick={() => setOpen(true)}>
+              Manage
+            </button>
+          )}
         </span>
-        <button type="button" className="btn btn-ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {open ? "Close" : all || only.length ? "Manage" : "Connect"}
-        </button>
       </div>
-      {open && <ConnectorDetail api={api} connector={c} reload={reload} onNotice={onNotice} />}
-    </div>
+      {open && (
+        <div className="conn-body">
+          {count === 0 && <p className="small muted">{c.about}</p>}
+          {count > 0 && (
+            <div className="conn-grid">
+              {c.connections.map((x) => (
+                <ConnectionCard key={x.id} api={api} connector={c} connection={x} reload={reload} onNotice={onNotice} />
+              ))}
+            </div>
+          )}
+          {adding && (
+            <AddConnection
+              api={api}
+              connector={c}
+              first={count === 0}
+              onDone={async () => {
+                setAdding(false);
+                await reload();
+              }}
+              onCancel={() => {
+                setAdding(false);
+                if (count === 0) setOpen(false);
+              }}
+            />
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
-function ConnectorDetail({
+/** A new connection: its name, whom it is for, then its sign-in or keys. */
+function AddConnection({
   api,
   connector: c,
-  reload,
-  onNotice,
+  first,
+  onDone,
+  onCancel,
 }: {
   api: ConnectionsApi;
   connector: Connector;
-  reload: () => Promise<void>;
-  onNotice: (n: string | null) => void;
+  first: boolean;
+  onDone: () => void | Promise<void>;
+  onCancel: () => void;
 }) {
-  const all = mine(c);
-  const only = agentOnly(c);
+  const agents = useLocalAgents();
+  const [name, setName] = useState("");
+  const [whom, setWhom] = useState<string>("all");
+  const at: At = whom === "all" ? { level: "all" } : { level: "agent", agent: whom };
+  const title = first ? `Connect ${c.name}` : `Add another ${c.name}`;
   return (
-    <div className="conn-detail">
-      {all ? (
-        <ConnectedCard api={api} connector={c} connection={all} at={ALL} reload={reload} onNotice={onNotice} />
-      ) : (
-        <>
-          <p className="small muted">{c.about}</p>
-          <Connect api={api} connector={c} at={ALL} label="Connect for all my agents" onDone={reload} />
-        </>
-      )}
-
-      {c.usedBy.length > 0 && (
-        <section className="conn-sub" aria-label="Used by">
-          <h3 className="field-label">Used by</h3>
-          <ul className="conn-used">
-            {c.usedBy.map((u) => (
-              <li key={u.agent}>
-                <span>{u.name}</span>
-                <span className="conn-tag">{u.connection === "own" ? "own connection" : "my connection"}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {only.length > 0 && (
-        <section className="conn-sub" aria-label="Agent-only connections">
-          <h3 className="field-label">Agent-only connections</h3>
-          {only.map((x) => (
-            <ConnectedCard
-              key={x.agent}
-              api={api}
-              connector={c}
-              connection={x}
-              at={{ level: "agent", agent: x.agent ?? "" }}
-              reload={reload}
-              onNotice={onNotice}
-              title={`${c.name} for ${x.agentName ?? x.agent} only`}
+    <div className="conn-card conn-add" role="group" aria-label={title}>
+      <b>{title}</b>
+      <div className="conn-add-row">
+        {c.several && (
+          <label className="field-stack">
+            <span className="field-label">Name</span>
+            <input
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              data-autofocus
+              maxLength={80}
+              placeholder={c.nameHint || c.name}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
             />
-          ))}
-        </section>
-      )}
+          </label>
+        )}
+        <label className="field-stack">
+          <span className="field-label">For</span>
+          <select className="ability-select" value={whom} onChange={(e) => setWhom(e.target.value)}>
+            <option value="all">All my agents</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                Just {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <Connect api={api} connector={c} at={at} name={name} label={`Connect ${c.name}`} onDone={onDone} onCancel={onCancel} open />
     </div>
   );
 }
 
-/** A kept connection: whose, since when, and Test, Reconnect, Disconnect. */
-function ConnectedCard({
+/** One connection: its name and site, whose account, for whom and who uses
+ *  it, and Test, Rename, Reconnect, Disconnect. */
+function ConnectionCard({
   api,
   connector: c,
   connection: x,
-  at,
   reload,
   onNotice,
-  title,
 }: {
   api: ConnectionsApi;
   connector: Connector;
   connection: Connection;
-  at: At;
   reload: () => Promise<void>;
   onNotice: (n: string | null) => void;
-  title?: string;
 }) {
-  const [busy, setBusy] = useState<null | "test" | "disconnect">(null);
+  const [busy, setBusy] = useState<null | "test" | "disconnect" | "rename">(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const losing = x.usedBy.map((u) => u.name);
 
-  // Who loses it: the agents using this connection.
-  const losing = c.usedBy.filter((u) => (at.level === "all" ? u.connection === "mine" : u.agent === at.agent)).map((u) => u.name);
-
-  const run = async (kind: "test" | "disconnect", work: () => Promise<unknown>) => {
+  const run = async (kind: "test" | "disconnect" | "rename", work: () => Promise<unknown>): Promise<boolean> => {
     setBusy(kind);
     setProblem(null);
     try {
       await work();
       await reload();
+      return true;
     } catch (e) {
       setProblem(message(e));
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
+  const at: At = x.level === "all" ? { level: "all" } : { level: "agent", agent: x.agent ?? "" };
+  const signedIn = c.signIn === "google" || (c.signIn === "github" && c.signInReady);
+
   if (reconnecting) {
     return (
       <div className="conn-card">
-        {title && <b>{title}</b>}
+        <b>Reconnect {x.name}</b>
         <Connect
           api={api}
           connector={c}
           at={at}
-          label={`Reconnect ${c.name}`}
+          name={x.name}
+          reconnect={c.fields.length > 0 && !signedIn ? x.id : undefined}
+          label={`Reconnect ${x.name}`}
           onDone={async () => {
+            // A sign-in makes a new connection: the old one goes.
+            if (signedIn) await api.disconnect(c.id, x.id).catch(() => {});
             setReconnecting(false);
             await reload();
           }}
@@ -293,30 +409,63 @@ function ConnectedCard({
     );
   }
 
+  const ok = x.status === "connected";
   return (
-    <div className="conn-card">
-      {title && <b>{title}</b>}
+    <div className={`conn-card ${ok ? "" : "conn-card-trouble"}`} aria-label={x.name}>
+      <div className="conn-card-head">
+        {renaming !== null ? (
+          <form
+            className="conn-rename"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!renaming.trim()) return;
+              void run("rename", () => api.rename(c.id, x.id, renaming.trim())).then((done) => done && setRenaming(null));
+            }}
+          >
+            <input
+              type="text"
+              aria-label={`New name for ${x.name}`}
+              data-autofocus
+              maxLength={80}
+              value={renaming}
+              onChange={(e) => setRenaming(e.target.value)}
+            />
+            <button type="submit" className="btn btn-sm btn-signal" disabled={busy !== null || !renaming.trim()}>
+              {busy === "rename" ? "Saving…" : "Save"}
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRenaming(null)}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <b>{x.name}</b>
+            {x.site && <span className="mono conn-site">{x.site.replace(/^https?:\/\//, "")}</span>}
+          </>
+        )}
+        <span className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}>{statusLine(x)}</span>
+      </div>
       <dl className="conn-facts">
         <div>
           <dt>Account</dt>
-          <dd className={x.status === "connected" ? undefined : "state-blocked"}>{x.status === "connected" ? (x.account ?? "Connected") : statusLine(x)}</dd>
+          <dd>{x.account ?? "—"}</dd>
         </div>
-        {x.connectedAt && (
-          <div>
-            <dt>Connected</dt>
-            <dd>{dated(x.connectedAt)}</dd>
-          </div>
-        )}
         <div>
-          <dt>Last checked</dt>
-          <dd>{x.checkedAt ? ago(x.checkedAt) : "Not checked yet"}</dd>
+          <dt>For</dt>
+          <dd>{forWhom(x)}</dd>
+        </div>
+        <div>
+          <dt>Used by</dt>
+          <dd>{losing.length ? names(losing) : "No agent yet"}</dd>
         </div>
       </dl>
-      {x.status !== "connected" && x.detail && (
-        <p className="small state-blocked" role="status">
-          {x.detail}
+      {!ok && (
+        <p className="small state-blocked conn-fix" role="status">
+          {sentence(x.detail ?? (x.status === "failing" ? `${c.name} isn’t answering` : `${c.name} no longer takes this key`))}{" "}
+          {x.status === "failing" ? "Test it again in a moment, or reconnect it." : "Reconnect it to carry on."}
         </p>
       )}
+      {x.checkedAt && ok && <p className="small faint">Checked {ago(x.checkedAt)}</p>}
       {problem && (
         <p className="small state-blocked" role="alert">
           {problem}
@@ -324,21 +473,17 @@ function ConnectedCard({
       )}
       {confirming ? (
         <div className="prov-actions">
-          <span className="small">
-            {losing.length > 0
-              ? `${names(losing)} will lose ${c.name}.`
-              : `Disconnect ${c.name}${at.level === "agent" ? ` for ${x.agentName ?? at.agent}` : ""}?`}
-          </span>
-          <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)}>
+          <span className="small">{losing.length > 0 ? `${names(losing)} will lose ${x.name}.` : `Disconnect ${x.name}?`}</span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirming(false)}>
             Keep
           </button>
           <button
             type="button"
-            className="btn btn-danger"
+            className="btn btn-sm btn-danger"
             disabled={busy !== null}
             onClick={() =>
               void run("disconnect", async () => {
-                const left = await api.disconnect(c.id, at);
+                const left = await api.disconnect(c.id, x.id);
                 onNotice(left.note);
               }).then(() => setConfirming(false))
             }
@@ -347,14 +492,19 @@ function ConnectedCard({
           </button>
         </div>
       ) : (
-        <div className="prov-actions">
-          <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => void run("test", () => api.test(c.id, at))}>
+        <div className="prov-actions conn-actions">
+          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void run("test", () => api.test(c.id, x.id))}>
             {busy === "test" ? "Testing…" : "Test"}
           </button>
-          <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setReconnecting(true)}>
+          {c.several && (
+            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setRenaming(x.name)}>
+              Rename
+            </button>
+          )}
+          <button type="button" className={`btn btn-sm ${ok ? "" : "btn-signal"}`} disabled={busy !== null} onClick={() => setReconnecting(true)}>
             Reconnect
           </button>
-          <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setConfirming(true)}>
+          <button type="button" className="btn btn-sm btn-ghost conn-disconnect" disabled={busy !== null} onClick={() => setConfirming(true)}>
             Disconnect
           </button>
         </div>
@@ -368,6 +518,8 @@ export function Connect({
   api,
   connector: c,
   at,
+  name,
+  reconnect,
   label,
   onDone,
   onCancel,
@@ -377,6 +529,10 @@ export function Connect({
   api: ConnectionsApi;
   connector: Connector;
   at: At;
+  /** The name the person gave the new connection. */
+  name?: string;
+  /** The connection whose keys these replace. */
+  reconnect?: string;
   label: string;
   onDone: () => void | Promise<void>;
   onCancel?: () => void;
@@ -388,7 +544,7 @@ export function Connect({
   const [problem, setProblem] = useState<string | null>(null);
 
   if (c.signIn === "google") {
-    return <GoogleSignIn api={api} connector={c} at={at} onDone={onDone} onCancel={onCancel} />;
+    return <GoogleSignIn api={api} connector={c} at={at} name={name} onDone={onDone} onCancel={onCancel} />;
   }
   if (c.signIn === "github" && !form) {
     return (
@@ -399,7 +555,16 @@ export function Connect({
           </p>
         )}
         {c.signInReady ? (
-          <DeviceSignIn api={api} connector={c} at={at} onDone={onDone} onProblem={setProblem} onToken={() => setForm(true)} onCancel={onCancel} />
+          <DeviceSignIn
+            api={api}
+            connector={c}
+            at={at}
+            name={name}
+            onDone={onDone}
+            onProblem={setProblem}
+            onToken={() => setForm(true)}
+            onCancel={onCancel}
+          />
         ) : (
           <div className="connect-actions">
             {onCancel && (
@@ -429,6 +594,8 @@ export function Connect({
       api={api}
       connector={c}
       at={at}
+      name={name}
+      reconnect={reconnect}
       title={title}
       onDone={onDone}
       onCancel={() => {
@@ -444,6 +611,8 @@ export function FieldsForm({
   api,
   connector: c,
   at,
+  name,
+  reconnect,
   title,
   onDone,
   onCancel,
@@ -451,6 +620,8 @@ export function FieldsForm({
   api: ConnectionsApi;
   connector: Connector;
   at: At;
+  name?: string;
+  reconnect?: string;
   title?: string;
   onDone: () => void | Promise<void>;
   onCancel?: () => void;
@@ -471,7 +642,8 @@ export function FieldsForm({
           .map(([k, v]) => [k, v.trim()])
           .filter(([, v]) => v),
       );
-      await api.connect(c.id, at, fields);
+      if (reconnect) await api.reconnect(c.id, reconnect, fields);
+      else await api.connect(c.id, at, fields, name?.trim() || undefined);
       await onDone();
     } catch (err) {
       setProblem(message(err));
@@ -585,6 +757,7 @@ function DeviceSignIn({
   api,
   connector: c,
   at,
+  name,
   onDone,
   onProblem,
   onToken,
@@ -593,6 +766,7 @@ function DeviceSignIn({
   api: ConnectionsApi;
   connector: Connector;
   at: At;
+  name?: string;
   onDone: () => void | Promise<void>;
   onProblem: (p: string | null) => void;
   onToken: () => void;
@@ -606,7 +780,7 @@ function DeviceSignIn({
     setSaid(null);
     onProblem(null);
     try {
-      const s = await api.start(c.id, at);
+      const s = await api.start(c.id, at, name?.trim() || undefined);
       setStarted(s);
       if (s.verificationUri) openUrl(s.verificationUri);
     } catch (e) {
@@ -667,12 +841,14 @@ function GoogleSignIn({
   api,
   connector: c,
   at,
+  name,
   onDone,
   onCancel,
 }: {
   api: ConnectionsApi;
   connector: Connector;
   at: At;
+  name?: string;
   onDone: () => void | Promise<void>;
   onCancel?: () => void;
 }) {
@@ -701,7 +877,7 @@ function GoogleSignIn({
     setSaid(null);
     setProblem(null);
     try {
-      const s = await api.start(c.id, at);
+      const s = await api.start(c.id, at, name?.trim() || undefined);
       setStarted(s);
       if (s.url) openUrl(s.url);
     } catch (e) {

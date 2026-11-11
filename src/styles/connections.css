@@ -1,54 +1,132 @@
-/* Settings → Connections: one row per connector in the providers' list;
-   opened, what it's connected as, who uses it and its agent-only ones. */
-.connections-pane .prov-row {
+/* Settings → Connections: a card per service; open, its connections side
+   by side, each with whose account it is, for whom, who uses it, and its
+   actions. */
+.providers-pane.connections-pane {
+  max-width: 1180px;
+  gap: 18px;
+}
+.providers-pane > header.conn-header {
+  flex-direction: row;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.conn-header h1 {
+  margin: 0 0 6px;
+}
+.conn-header > div {
+  flex: 1;
+  min-width: 0;
+}
+.conn-header > .btn {
+  flex: none;
+}
+.conn-services {
+  display: flex;
   flex-direction: column;
-  align-items: stretch;
+  gap: 10px;
+}
+.conn-service {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
 }
 .conn-head {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex-wrap: wrap;
+}
+.conn-service-name {
+  font-size: 15px;
+}
+.conn-summary {
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.conn-head-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
 }
 .conn-dot {
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--idle);
+  box-sizing: border-box;
+  border: 1px solid var(--faint);
 }
 .conn-dot-on {
+  border: 0;
   background: var(--done);
 }
 .conn-dot-blocked {
+  border: 0;
   background: var(--blocked);
 }
-.conn-detail {
+.btn-signal-outline {
+  border-color: var(--signal);
+  background: transparent;
+  color: var(--signal-soft-text);
+  font-weight: 600;
+  box-shadow: none;
+}
+.conn-body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding-left: 20px;
+  gap: 10px;
 }
-.conn-detail > p {
+.conn-body > p {
   margin: 0;
+}
+.conn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 10px;
 }
 .conn-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--raised);
+  min-width: 0;
 }
 .conn-card > p {
   margin: 0;
 }
+.conn-card-trouble {
+  border-color: var(--blocked);
+}
+.conn-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.conn-site {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.conn-status {
+  margin-left: auto;
+}
 .conn-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px 12px;
   margin: 0;
 }
 .conn-facts dt {
@@ -57,8 +135,35 @@
 }
 .conn-facts dd {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   overflow-wrap: anywhere;
+}
+.conn-card .conn-actions {
+  justify-content: flex-start;
+  gap: 6px;
+  margin-top: 2px;
+}
+.conn-disconnect {
+  color: var(--muted);
+}
+.conn-rename {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.conn-rename input {
+  flex: 1;
+  min-width: 0;
+}
+.conn-add {
+  background: var(--surface);
+}
+.conn-add-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
 }
 .conn-sub {
   display: flex;
@@ -68,22 +173,8 @@
 .conn-sub h3 {
   margin: 0;
 }
-.conn-used {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.conn-used li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
 .conn-tag {
-  font-size: 12px;
+  font-size: 11.5px;
   padding: 1px 8px;
   border-radius: 999px;
   background: var(--sunken);
@@ -105,29 +196,97 @@
 .conn-where {
   margin-right: auto;
 }
-.connections-pane .state-on {
+.connections-pane .state-on,
+.agent-connectors .state-on {
   color: var(--done);
 }
-.connections-pane .state-blocked {
+.connections-pane .state-blocked,
+.agent-connectors .state-blocked {
   color: var(--blocked);
 }
 
-/* An agent's Connectors tab: a row per connector, whose connection it
-   uses and whether it may change things, then its recent calls. */
-.agent-connectors .conn-choice {
-  flex-wrap: wrap;
+/* An agent's Connectors tab: a card per service, a checkbox per
+   connection, whether it takes changes, its default; then its recent
+   calls. */
+.conn-picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: 12px;
+  margin-top: 4px;
 }
-.conn-segs {
+.conn-pick {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  min-width: 0;
+}
+.conn-pick-empty {
+  border-style: dashed;
+  background: var(--bg);
+}
+.conn-pick-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.conn-pick-head b {
+  font-size: 15px;
+}
+.conn-pick-rows {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
-.conn-first {
-  align-self: flex-start;
+.conn-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
 }
-.agent-connectors > .conn-card,
+.conn-pick-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.conn-pick-label input {
+  accent-color: var(--signal);
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.conn-pick-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.conn-pick-write {
+  color: var(--faint);
+  flex: none;
+}
+.conn-pick-default {
+  margin: 0;
+}
+.conn-pick-default-name {
+  color: var(--text);
+}
+.conn-pick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .agent-connectors > .conn-sub {
   margin-top: 12px;
 }
@@ -148,4 +307,112 @@
 }
 .conn-calls li > span {
   overflow-wrap: anywhere;
+}
+
+/* An agent setting a connection up, in its chat: the hub's steps, done,
+   under way, waiting on the person, to come; then what is connected. */
+.setup-card,
+.setup-done {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  max-width: 720px;
+}
+.setup-done {
+  gap: 6px;
+  padding: 12px 14px;
+}
+.setup-done p {
+  margin: 0;
+}
+.setup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.setup-head > :last-child {
+  margin-left: auto;
+}
+.setup-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.setup-mark {
+  flex: none;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--faint);
+}
+.setup-step-done .setup-mark {
+  border: 0;
+  background: var(--done);
+  color: var(--bg);
+}
+.setup-step-failed {
+  color: var(--blocked);
+}
+.setup-step-failed .setup-mark {
+  border: 0;
+  background: var(--blocked);
+  color: var(--on-blocked);
+}
+.setup-step-current .setup-mark {
+  border: 2px solid var(--signal);
+}
+.setup-step-todo {
+  color: var(--faint);
+}
+.setup-step-waiting {
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--blocked);
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+}
+.setup-step-waiting .setup-mark {
+  border: 2px solid var(--blocked);
+}
+.setup-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* A new connection's form: its name and whom it is for above its keys. */
+.conn-add .connect-form,
+.conn-add-row {
+  max-width: 640px;
+}
+.conn-add .ability-select {
+  height: 40px;
+  padding: 0 10px;
 }
