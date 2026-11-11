@@ -13,7 +13,7 @@ import { native as machineNative, type MachineNative } from "../machines/native"
 import { RunOn } from "../machines/RunOn";
 import { FolderPicker } from "../machines/FolderPicker";
 import { homeWithin, onMachine } from "../machines/folders";
-import { nameOfMachine } from "../machines/words";
+import { nameOfMachine, thisComputerLower } from "../machines/words";
 import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
 import { NEW_SESSION_LINE } from "../shell/newLines";
@@ -79,6 +79,8 @@ export function NewSession({
   const machines = useMachines((s) => s.machines);
   const platform = useHost((h) => h.platform);
   const where = nameOfMachine(runOn, machines, platform);
+  // Mid-sentence: this computer, or the machine by name.
+  const whereSaid = runOn === LOCAL ? thisComputerLower(platform) : where;
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState("");
   /** The folder typed is one the machine says isn't there. */
@@ -131,7 +133,7 @@ export function NewSession({
   // (and no account of its). Said, with the fix in place, and Start waits.
   const info = engines?.find((e) => e.engine === engine);
   const noEngine = engines !== null && offered.length === 0;
-  const signedOut = !noEngine && info?.installed === true && info.signIn.state === "out" && !accounts.some((a) => a.signedIn);
+  const signedOut = !noEngine && info?.installed === true && info.signIn.state === "out" && accounts.length === 0;
   const blocked = noEngine || signedOut || cantSignIn;
   useEffect(() => {
     void accountStore.getState().load();
@@ -233,8 +235,8 @@ export function NewSession({
             {missing.join(" and ")} {missing.length === 1 ? "isn’t" : "aren’t"} installed on {where}.
           </p>
         )}
-        {noEngine && engines && <NothingToStart engines={engines} machine={runOn} where={where} native={native} onFixed={readAgain} />}
-        {signedOut && info && <NotSignedIn engine={info} machine={runOn} where={where} native={native} onFixed={readAgain} />}
+        {noEngine && engines && <NothingToStart engines={engines} machine={runOn} where={whereSaid} native={native} onFixed={readAgain} />}
+        {signedOut && info && <NotSignedIn engine={info} machine={runOn} where={whereSaid} native={native} onFixed={readAgain} />}
         {remote ? (
           <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always onMissing={setNoFolder} />
         ) : (
@@ -390,10 +392,12 @@ function NothingToStart({ engines, machine, where, native, onFixed }: { engines:
           ? `Neither Claude Code nor Codex is installed on ${where}, so there’s nothing to start a session with yet.`
           : `Nothing on ${where} can start a session yet.`}
       </p>
-      {/* A machine's installs both at once. */}
-      {(machine === LOCAL ? absent : absent.slice(0, 1)).map((e) => (
-        <InstallEngine key={e.engine} engine={e} machine={machine} where={where} native={native} onInstalled={onFixed} />
-      ))}
+      <span>
+        {/* A machine's installs both at once. */}
+        {(machine === LOCAL ? absent : absent.slice(0, 1)).map((e) => (
+          <InstallEngine key={e.engine} engine={e} machine={machine} where={where} native={native} onInstalled={onFixed} />
+        ))}
+      </span>
     </div>
   );
 }
