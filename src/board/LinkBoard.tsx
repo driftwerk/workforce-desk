@@ -11,6 +11,7 @@ import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, T
 import { openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { STATE_TITLE } from "./board";
+import { ChooseMe } from "./ChooseMe";
 import { useBoard } from "./store";
 import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import { connectionsOf, type Listing } from "../hub/connections";
@@ -81,7 +82,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [me, setMe] = useState("");
   /** Who the hub says the person is on the target's system (null: it
    *  can't say), by the system, hub and target it was asked for. */
-  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; byEmail?: boolean } | null>(null);
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; by?: "email" | "slack" | "chosen" } | null>(null);
+  /** Choosing who they are on a shared key. */
+  const [choosing, setChoosing] = useState(false);
   /** The person said the hub's answer isn't them: it isn't kept. */
   const [notMe, setNotMe] = useState(false);
   /** Bumped to ask the hub again. */
@@ -186,7 +189,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // hub that wants the id says so as a refusal.
   useEffect(() => {
     if (!now || !targetKey) return;
-    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, byEmail: now.check.meBy === "email" });
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, by: now.check.meBy });
     else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
@@ -447,17 +450,21 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
             {knownMe && (
               <span className="move-opt-sub sync-me">
-                {heard?.byEmail ? (
+                {heard?.by === "chosen" ? (
                   <>
-                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there by your verified email: Mine and Take it go by that.
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and you chose <b>{knownMe.name}</b> there: Mine and Take it go by that.
+                  </>
+                ) : heard?.by ? (
+                  <>
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there {heard.by === "slack" ? "by your Slack email" : "by your verified email"}: Mine and Take it go by that.
                   </>
                 ) : (
                   <>
                     {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
                   </>
                 )}{" "}
-                <button type="button" className="link" onClick={() => setNotMe(true)}>
-                  That’s not me
+                <button type="button" className="link" onClick={() => (heard?.by ? setChoosing(true) : setNotMe(true))}>
+                  {heard?.by === "chosen" ? "Change" : "That’s not me"}
                 </button>
               </span>
             )}
@@ -468,6 +475,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
                 {!notMe && heard?.why && /shared/.test(heard.why) && (
                   <>
+                    <button type="button" className="link" onClick={() => setChoosing(true)}>
+                      Choose who you are
+                    </button>
+                    {" · "}
                     <button type="button" className="link" onClick={() => openSettingsAt("connections")}>
                       Set up your own {SYSTEM_TITLE[system]} key
                     </button>
@@ -485,6 +496,19 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   Check again
                 </button>
               </span>
+            )}
+            {choosing && system && via && (
+              <ChooseMe
+                where={{ system, via, ...(found?.agent?.id ? { agent: found.agent.id } : {}) }}
+                hub={viaName}
+                chosen={heard?.by === "chosen"}
+                onCancel={() => setChoosing(false)}
+                onDone={() => {
+                  setChoosing(false);
+                  setNotMe(false);
+                  setAsked((n) => n + 1);
+                }}
+              />
             )}
           </fieldset>
         )}

@@ -1272,6 +1272,9 @@ pub fn run() {
             wsl::wsl_install,
             wsl::wsl_forget_resume,
             wsl::wsl_convert,
+            wsl::wsl_create_user,
+            wsl::wsl_user_name,
+            wsl::wsl_install_alongside,
             wsl::wsl_setup,
             wsl::wsl_fix_forwarding,
             wsl::wsl_installed

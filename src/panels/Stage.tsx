@@ -287,6 +287,13 @@ const UnfocusIcon = () => (
     <path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5l4-4M6.5 9.5l-4 4" />
   </svg>
 );
+/** A window with a column on its right: open it in the side panel. */
+const SidePanelIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+    <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+    <path d="M9.5 2.5v11" />
+  </svg>
+);
 export { FocusIcon, UnfocusIcon };
 
 /** One right-hand column: its header (what it is, its own actions, focus
@@ -360,5 +367,48 @@ export function SidePanel({
       )}
       {children}
     </aside>
+  );
+}
+
+/** What a right-hand column shows, as a popup instead (a ticket over a
+ *  grid): the same header (what it is, its own actions, then where focus
+ *  would be "Open in side panel", and close) over the same body. The
+ *  popup's dialog, around it, is labelled and modal. */
+export function PopupPanel({
+  noun,
+  title,
+  actions,
+  onClose,
+  onSidePanel,
+  className = "",
+  children,
+}: {
+  noun: string;
+  title?: ReactNode;
+  actions?: ReactNode;
+  onClose: () => void;
+  /** Closes the popup and opens what it shows in the side panel. */
+  onSidePanel: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`rpanel rpanel-popup ${className}`}>
+      <header className="rpanel-head">
+        {title}
+        <span className="rpanel-actions">
+          {actions}
+          <button type="button" className="icon-btn-sm rpanel-btn" aria-label="Open in side panel" title="Open in side panel, beside your work" onClick={onSidePanel}>
+            <SidePanelIcon />
+          </button>
+          <button type="button" className="icon-btn-sm rpanel-btn" aria-label={`Close ${noun}`} title="Close (Esc)" onClick={onClose}>
+            <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+              <path d="M3 3l8 8M11 3l-8 8" />
+            </svg>
+          </button>
+        </span>
+      </header>
+      {children}
+    </div>
   );
 }
