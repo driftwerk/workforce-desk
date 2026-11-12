@@ -145,6 +145,58 @@ function stateRoute(method: string, path: string, body: unknown): { answer: unkn
   return null;
 }
 
+// ── Workspaces, for the preview ────────────────────────────────────────────
+// Paired in the page (the app's native side pairs and keeps their tokens),
+// kept in this browser's localStorage. `?workspaces=` seeds them as JSON
+// (`[{id,label,url,token}]`), for screenshots of the Workspaces page.
+
+interface PreviewWorkspace {
+  id: string;
+  label: string;
+  url: string;
+  token: string;
+}
+const WORKSPACES = "desk.dev.workspaces";
+const seeded = new URLSearchParams(location.search).get("workspaces");
+if (seeded) store(WORKSPACES, JSON.parse(seeded) as unknown);
+const workspaces = (): PreviewWorkspace[] => {
+  const v = stored<unknown>(WORKSPACES) as unknown;
+  return Array.isArray(v) ? (v as PreviewWorkspace[]) : [];
+};
+const keepWorkspaces = (all: PreviewWorkspace[]) => store(WORKSPACES, all);
+
+/** Pairing as the native side does it (src-tauri/src/hub_io.rs), in the
+ *  page: the same answers, and the same plain words when it can't reach. */
+async function previewPairing(cmd: string, a: Record<string, unknown>): Promise<unknown> {
+  const url = String(a.url);
+  const host = new URL(url).hostname;
+  const reach = async (path: string, init?: RequestInit) => {
+    try {
+      return await fetch(`${url}${path}`, init);
+    } catch {
+      throw new Error(`Can't reach ${host}: check the address, your internet or VPN.`);
+    }
+  };
+  if (cmd === "pair_request") {
+    const res = await reach("/api/pair/device/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ device_name: a.deviceName, device_kind: "desktop_device", ...(a.identityHint ? { identity_hint: a.identityHint } : {}) }),
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  }
+  const res = await reach(`/api/pair/device/status/${String(a.code)}`);
+  if (res.status === 404) return { status: "expired" };
+  const body = (await res.json()) as { status: string; token?: string; identity?: { display_name?: string; email?: string } | null };
+  if (body.status !== "approved") return { status: body.status };
+  if (!body.token) return { status: "used" };
+  const id = host.replace(/\./g, "-");
+  keepWorkspaces([...workspaces().filter((w) => w.id !== id), { id, label: String(a.label), url, token: body.token }]);
+  setDevToken(id, body.token);
+  const who = body.identity && (body.identity.display_name || body.identity.email) ? { name: body.identity.display_name ?? null, email: body.identity.email ?? null } : null;
+  return { status: "approved", hub: id, identity: who };
+}
+
 const opened = Date.now();
 
 /** Where Desk Helper stands in the preview (`?helper=`). */
@@ -214,7 +266,20 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       // The preview reaches the hub itself, with this token (in the app the
       // native side holds every hub's, and the page has none).
       setDevToken("local", need("device"));
-      return answer([{ id: "local", label: "This computer", url: need("hub"), local: true, revision: "preview" }]);
+      for (const w of workspaces()) setDevToken(w.id, w.token);
+      return answer([
+        { id: "local", label: "This computer", url: need("hub"), local: true, revision: "preview" },
+        ...workspaces().map((w) => ({ id: w.id, label: w.label, url: w.url, local: false, revision: w.token })),
+      ]);
+    case "pair_request":
+    case "pair_collect":
+      return answer(await previewPairing(cmd, args ?? {}));
+    case "hubs_remove":
+      keepWorkspaces(workspaces().filter((w) => w.id !== args?.id));
+      return answer(undefined);
+    case "hubs_rename":
+      keepWorkspaces(workspaces().map((w) => (w.id === args?.id ? { ...w, label: String(args?.label ?? w.label).trim() } : w)));
+      return answer(undefined);
     case "settings_load":
       return answer(settings);
     case "settings_save":

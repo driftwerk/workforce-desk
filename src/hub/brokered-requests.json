@@ -21,6 +21,11 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/features"
+  },
+  {
+    "kind": "http",
     "method": "POST",
     "path": "/api/desk/engines/read"
   },

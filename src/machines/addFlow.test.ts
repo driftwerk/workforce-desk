@@ -5,6 +5,29 @@ import { probeOf } from "./testing";
 const run = (events: FlowEvent[], from: Flow = START): Flow => events.reduce(step, from);
 const typed = (target: string): FlowEvent[] => [{ type: "edit", target }, { type: "submit" }];
 
+describe("signing in to it once, in Desk's own field", () => {
+  const key = (why: "refused" | "locked"): Flow => ({ at: "key", target: "devbox", name: "devbox", user: "dev", why });
+  it("goes from a refused or locked key to Desk's field, and back with why, or on to look again", () => {
+    const asking = step(key("refused"), { type: "signIn", with: "password" });
+    expect(asking).toMatchObject({ at: "signingIn", with: "password", why: "refused" });
+    expect(step(asking, { type: "keyed" })).toEqual({ at: "checking", target: "devbox", name: "devbox" });
+    expect(step(asking, { type: "signInCancelled" })).toEqual(key("refused"));
+    expect(step(asking, { type: "signInFailed", message: "No." })).toEqual({ ...key("refused"), problem: "No." });
+    expect(step(key("locked"), { type: "signIn", with: "passphrase" })).toMatchObject({ at: "signingIn", with: "passphrase", why: "locked" });
+    // Only from the key's step.
+    expect(step({ at: "checking", target: "devbox", name: "devbox" }, { type: "signIn", with: "password" })).toMatchObject({ at: "checking" });
+  });
+
+  it("forgets a changed key only once asked, and keeps the line by hand", () => {
+    const changed: Flow = { at: "changed", target: "devbox", name: "devbox", fingerprint: "SHA256:new", keyType: "ED25519", forgetKey: "ssh-keygen -R devbox" };
+    const forgetting = step(changed, { type: "forget" });
+    expect(forgetting).toMatchObject({ at: "forgetting", fingerprint: "SHA256:new", forgetKey: "ssh-keygen -R devbox" });
+    expect(step(forgetting, { type: "forgotten" })).toEqual({ at: "checking", target: "devbox", name: "devbox" });
+    expect(step(forgetting, { type: "forgetCancelled" })).toEqual(changed);
+    expect(step(forgetting, { type: "forgetFailed", message: "No." })).toEqual({ ...changed, problem: "No." });
+  });
+});
+
 describe("adding a machine", () => {
   it("checks the address before asking the native side, and says what's wrong", () => {
     expect(run(typed(""))).toMatchObject({ at: "address", problem: "Type the machine’s address." });

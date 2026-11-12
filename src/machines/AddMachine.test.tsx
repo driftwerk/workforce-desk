@@ -46,8 +46,10 @@ it("trusts a new machine by its fingerprint, sets it up step by step, and signs 
   expect(fake.probe).toHaveBeenCalledWith("devbox");
   const box = screen.getByRole("group", { name: "New machine" });
   expect(box.textContent).toContain("Desk hasn’t connected to devbox before");
+  // Its fingerprint in a fold; no second question in a system dialog.
   expect(box.textContent).toContain("SHA256:k3Vq9fXc (ED25519)");
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Trust this machine" })));
+  expect(screen.queryByText(/asks you once more/)).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Trust and continue" })));
   await settle();
   expect(fake.trust).toHaveBeenCalledWith("devbox", "SHA256:k3Vq9fXc");
   expect(fake.probe).toHaveBeenCalledTimes(2);
@@ -93,43 +95,86 @@ function fakeEngine() {
   return { hub };
 }
 
-it("refuses a machine whose key has changed, with no way to trust it", async () => {
+it("forgets a changed machine's old key only through the native question, then looks again", async () => {
   const { native, fake } = fakeNative();
-  fake.probe.mockResolvedValueOnce(probeOf({ hostKey: { kind: "changed", fingerprint: "SHA256:other", keyType: "ED25519" }, access: null }));
+  fake.probe
+    .mockResolvedValueOnce(probeOf({ hostKey: { kind: "changed", fingerprint: "SHA256:other", keyType: "ED25519" }, access: null, forgetKey: "ssh-keygen -R devbox" }))
+    .mockResolvedValueOnce(probeOf());
+  fake.forgetKey.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error("devbox's old key is also in a known hosts file of this computer's own")).mockResolvedValueOnce(true);
   render(<AddMachine native={native} onClose={() => {}} />);
   await typeAndGo("devbox");
-  expect(screen.getByRole("alert", { name: "Its key has changed" }).textContent).toContain("Desk won’t connect to it");
+  const box = screen.getByRole("alert", { name: "Its key has changed" });
+  expect(box.textContent).toContain("Desk won’t connect yet");
+  expect(box.textContent).toContain("SHA256:other");
+  expect(screen.queryByRole("button", { name: "Trust and continue" })).toBeNull();
+  // The line by hand, folded.
   expect(screen.getByText("ssh-keygen -R devbox")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Trust this machine" })).toBeNull();
-  expect(fake.trust).not.toHaveBeenCalled();
+  const forget = () => screen.getByRole("button", { name: "Forget the old key and trust the new one" });
+  // No to the native question: as it was.
+  await act(async () => fireEvent.click(forget()));
+  await settle();
+  expect(fake.forgetKey).toHaveBeenCalledWith("devbox", "SHA256:other");
   expect(fake.add).not.toHaveBeenCalled();
+  // Refused: said in place.
+  await act(async () => fireEvent.click(forget()));
+  await settle();
+  expect(screen.getByRole("alert", { name: "Its key has changed" }).textContent).toContain("also in a known hosts file");
+  // Yes: it looks again and goes on.
+  await act(async () => fireEvent.click(forget()));
+  await settle();
+  expect(fake.probe).toHaveBeenCalledTimes(2);
+  expect(fake.trust).not.toHaveBeenCalled();
+  expect(fake.add).toHaveBeenCalledWith("devbox", "devbox");
 });
 
-it("helps put this computer's key on a machine that refuses it, then tries again", async () => {
+it("signs in to a machine that refuses this computer's key with its password once, in Desk's own field", async () => {
   const { native, fake } = fakeNative();
   fake.probe
     .mockResolvedValueOnce(probeOf({ name: "203.0.113.7", access: { kind: "refused", user: "dev" } }))
     .mockResolvedValueOnce(probeOf({ name: "203.0.113.7" }));
+  fake.installKey.mockResolvedValueOnce({ kind: "cancelled" }).mockRejectedValueOnce(new Error("203.0.113.7 only lets keys sign in, not passwords.")).mockResolvedValueOnce({ kind: "done", linger: true });
   render(<AddMachine native={native} onClose={() => {}} />);
   await typeAndGo("dev@203.0.113.7");
-  const help = screen.getByRole("group", { name: "This computer’s key" });
-  expect(help.textContent).toContain("203.0.113.7 didn’t take any of this computer’s SSH keys");
-  expect(screen.getByText("ssh-copy-id dev@203.0.113.7")).toBeTruthy();
-  expect(screen.getByText("ssh-ed25519 AAAAC3NzaExampleKey you@laptop")).toBeTruthy();
+  const help = screen.getByRole("group", { name: "Sign in to 203.0.113.7" });
+  expect(help.textContent).toMatch(/203\.0\.113\.7 doesn’t know this (Mac|computer) yet/);
+  expect(help.textContent).toContain("dev’s password there once, in its own window");
+  // No terminal: the line by hand only in a fold.
+  expect(screen.getByText("ssh-copy-id dev@203.0.113.7").closest("details")).toBeTruthy();
+  // The page never has a password field of its own.
+  expect(document.querySelector("input[type=password]")).toBeNull();
+  const signIn = () => screen.getByRole("button", { name: "Sign in with 203.0.113.7’s password" });
+  // Closed the field: back as it was, nothing added.
+  await act(async () => fireEvent.click(signIn()));
+  await settle();
+  expect(fake.installKey).toHaveBeenCalledWith("dev@203.0.113.7");
   expect(fake.add).not.toHaveBeenCalled();
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Try again" })));
+  // Refused: said in place.
+  await act(async () => fireEvent.click(signIn()));
+  await settle();
+  expect(screen.getByRole("group", { name: "Sign in to 203.0.113.7" }).textContent).toContain("only lets keys sign in");
+  // Done: it looks again and is added.
+  await act(async () => fireEvent.click(signIn()));
   await settle();
   expect(fake.probe).toHaveBeenCalledTimes(2);
   expect(fake.add).toHaveBeenCalledWith("dev@203.0.113.7", "203.0.113.7");
 });
 
-it("asks for a locked key to be unlocked", async () => {
+it("unlocks a locked key with its passphrase in Desk's own field, or uses the machine's password instead", async () => {
   const { native, fake } = fakeNative();
-  fake.probe.mockResolvedValueOnce(probeOf({ access: { kind: "locked" } }));
+  fake.probe.mockResolvedValueOnce(probeOf({ access: { kind: "locked" } })).mockResolvedValueOnce(probeOf());
+  fake.unlockKey.mockRejectedValueOnce(new Error("No SSH agent is running for Desk to unlock your key in."));
   render(<AddMachine native={native} onClose={() => {}} />);
   await typeAndGo("devbox");
   expect(screen.getByText("Your SSH key is locked")).toBeTruthy();
-  expect(screen.getByText("ssh-add")).toBeTruthy();
+  expect(screen.queryByText("ssh-add")).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unlock your key" })));
+  await settle();
+  expect(fake.unlockKey).toHaveBeenCalledWith("devbox");
+  expect(screen.getByRole("alert").textContent).toContain("No SSH agent");
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use devbox’s password instead" })));
+  await settle();
+  expect(fake.installKey).toHaveBeenCalledWith("devbox");
+  expect(fake.add).toHaveBeenCalledWith("devbox", "devbox");
 });
 
 it("says why it can't reach a machine, and never asks the native side about a bad address", async () => {

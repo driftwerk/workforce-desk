@@ -193,7 +193,7 @@ fn a_machine_that_turns_ssh_away_says_so_and_nothing_is_written() {
         |_| {},
     )
     .unwrap_err();
-    assert!(err.contains("ssh-add"), "{err}");
+    assert!(err.contains("SSH key away"), "{err}");
     assert!(
         !Path::new(&f.home())
             .join(".local/share/Desk/uploads")

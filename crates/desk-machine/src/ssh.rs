@@ -3,19 +3,40 @@
 //! checked target, quoted words). Nothing here reads a token: what a
 //! command prints goes back to its caller, never into an error or a log.
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::{Arc, Mutex};
 
 use desk_core::host::Invocation;
 use desk_core::machine::{Machine, SSH};
 
 /// The `ssh` Desk runs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SshExe {
     program: PathBuf,
     /// When everything it runs gives up: none, each runs as long as it takes.
     until: Option<std::time::Instant>,
+    /// Desk's own key, and the machines (by target) it was put on: those
+    /// also sign in with it. Shared by every clone.
+    own: Arc<OwnKey>,
 }
+
+/// Desk's own SSH key ([`crate::own_key`]): its file, and the targets of
+/// the machines it was put on.
+#[derive(Debug, Default)]
+pub struct OwnKey {
+    file: Option<PathBuf>,
+    targets: Mutex<HashSet<String>>,
+}
+
+impl PartialEq for SshExe {
+    fn eq(&self, other: &Self) -> bool {
+        self.program == other.program && self.until == other.until
+    }
+}
+
+impl Eq for SshExe {}
 
 /// What `ssh` exits with when it failed itself, rather than the command it
 /// ran.
@@ -33,6 +54,61 @@ impl SshExe {
         Self {
             program: program.into(),
             until: None,
+            own: Arc::default(),
+        }
+    }
+
+    /// This `ssh`, with Desk's own key kept at `file` (made when first
+    /// needed). Before any clone is made: clones share it.
+    pub fn with_own_key(mut self, file: impl Into<PathBuf>) -> Self {
+        self.own = Arc::new(OwnKey {
+            file: Some(file.into()),
+            targets: Mutex::default(),
+        });
+        self
+    }
+
+    /// Where Desk's own key is kept, when it has one.
+    pub fn own_key_file(&self) -> Option<&Path> {
+        self.own.file.as_deref()
+    }
+
+    /// Machine `target` takes Desk's own key: it signs in with it too.
+    pub fn uses_own_key(&self, target: &str, on: bool) {
+        let mut t = self.own.targets.lock().unwrap_or_else(|e| e.into_inner());
+        if on {
+            t.insert(target.to_string());
+        } else {
+            t.remove(target);
+        }
+    }
+
+    /// Whether machine `target` takes Desk's own key.
+    pub fn has_own_key(&self, target: &str) -> bool {
+        self.own
+            .targets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(target)
+    }
+
+    /// `args` with Desk's own key offered (`-i`) before the target, when
+    /// the machine they name takes it and the key is there.
+    fn with_identity(&self, args: &[String]) -> Vec<String> {
+        let Some(file) = self.own.file.as_ref().filter(|f| f.is_file()) else {
+            return args.to_vec();
+        };
+        let Some(dash) = args.iter().position(|a| a == "--") else {
+            return args.to_vec();
+        };
+        match args.get(dash + 1) {
+            Some(target) if self.has_own_key(target) => {
+                let mut out = args[..dash].to_vec();
+                out.extend(["-i".into(), file.to_string_lossy().into_owned()]);
+                out.extend_from_slice(&args[dash..]);
+                out
+            }
+            _ => args.to_vec(),
         }
     }
 
@@ -42,6 +118,7 @@ impl SshExe {
         Self {
             program: self.program.clone(),
             until: Some(at),
+            own: Arc::clone(&self.own),
         }
     }
 
@@ -51,7 +128,7 @@ impl SshExe {
     pub fn command(&self, invocation: &Invocation) -> Command {
         let mut command = Command::new(&self.program);
         command
-            .args(&invocation.args)
+            .args(self.with_identity(&invocation.args))
             .stdin(Stdio::null())
             .env("SSH_ASKPASS_REQUIRE", "never")
             .env_remove("SSH_ASKPASS");
@@ -250,6 +327,14 @@ pub fn said(stderr: &[u8]) -> Option<String> {
     Some(q.trim_start_matches('“').trim_end_matches('”').to_string())
 }
 
+/// `s` with its first letter a capital.
+pub fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
 /// What went wrong reaching `machine`, from what `ssh` said on its error
 /// output, in the person's words.
 pub fn problem(machine: &Machine, stderr: &[u8]) -> String {
@@ -258,14 +343,21 @@ pub fn problem(machine: &Machine, stderr: &[u8]) -> String {
     let has = |s: &str| said.contains(s);
     if has("REMOTE HOST IDENTIFICATION HAS CHANGED") || has("Host key for") && has("has changed") {
         return format!(
-            "{name}'s host key isn't the one your Mac knows. Desk won't connect until you've checked why and fixed known_hosts."
+            "{name} shows a different host key from the one {here} knows, so Desk won't connect. If it was reinstalled, Forget the old key in Settings → Machines.",
+            here = crate::this_computer()
         );
     }
     if has("Host key verification failed") || has("No matching host key") {
-        return format!("Connect to {name} once with ssh in a terminal, so your Mac knows it.");
+        return format!(
+            "{} doesn't know {name}'s host key yet. Add it again in Settings → Machines to trust it.",
+            capital(crate::this_computer())
+        );
     }
     if has("Permission denied") || has("Too many authentication failures") {
-        return format!("{name} turned your SSH key away, or it needs unlocking first (ssh-add).");
+        return format!(
+            "{name} turned {}'s SSH key away. Add it again in Settings → Machines to sign in with your password once.",
+            crate::this_computer()
+        );
     }
     let reach = has("Could not resolve hostname")
         || has("Connection refused")
@@ -358,6 +450,17 @@ pub struct Settings {
     pub via: Option<String>,
     /// Forwards the config sets for it, by name (`localforward`, …).
     pub forwards: Vec<String>,
+    /// The name its host key is kept under, when the config sets one:
+    /// what ssh names the machine by in its password prompt too.
+    pub host_key_alias: Option<String>,
+}
+
+impl Settings {
+    /// The host ssh names in its password prompt (`user@<this>'s
+    /// password:`): its `HostKeyAlias`, else its `HostName`.
+    pub fn prompted_host(&self) -> Option<&str> {
+        self.host_key_alias.as_deref().or(self.hostname.as_deref())
+    }
 }
 
 impl Settings {
@@ -375,7 +478,33 @@ impl Settings {
             port: value("port"),
             via: value("proxyjump").or_else(|| value("proxycommand")),
             forwards: desk_core::machine::config_forwards(said),
+            host_key_alias: value("hostkeyalias"),
         }
+    }
+}
+
+/// The OpenSSH version `ssh -V` says (`OpenSSH_9.6p1, …` gives `(9, 6)`);
+/// none when it says something else.
+pub fn openssh_version(said: &str) -> Option<(u32, u32)> {
+    let v = said.trim().strip_prefix("OpenSSH_")?;
+    let mut parts = v.split(|c: char| !c.is_ascii_digit());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+impl SshExe {
+    /// This ssh's OpenSSH version (`ssh -V`, which connects nowhere); none
+    /// when it can't say.
+    pub fn version(&self) -> Option<(u32, u32)> {
+        let out = Command::new(&self.program)
+            .arg("-V")
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        let said = String::from_utf8_lossy(&out.stderr).into_owned()
+            + &String::from_utf8_lossy(&out.stdout);
+        openssh_version(&said)
     }
 }
 
@@ -420,9 +549,9 @@ mod tests {
     fn what_ssh_said_is_told_plainly() {
         let m = devbox();
         let said = |s: &str| problem(&m, s.as_bytes());
-        assert!(said("No ED25519 host key is known for devbox and you have requested strict checking.\r\nHost key verification failed.\r\n").contains("once with ssh in a terminal"));
-        assert!(said("@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.\n").contains("isn't the one your Mac knows"));
-        assert!(said("dev@devbox: Permission denied (publickey).\n").contains("ssh-add"));
+        assert!(said("No ED25519 host key is known for devbox and you have requested strict checking.\r\nHost key verification failed.\r\n").contains("doesn't know devbox's host key yet"));
+        assert!(said("@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.\n").contains("shows a different host key"));
+        assert!(said("dev@devbox: Permission denied (publickey).\n").contains("password once"));
         let unresolved =
             said("ssh: Could not resolve hostname devbox: nodename nor servname provided\n");
         assert!(
@@ -482,6 +611,20 @@ mod tests {
             after.starts_with("Desk couldn't reach devbox. devbox said: “the box says no”"),
             "{after}"
         );
+    }
+
+    #[test]
+    fn openssh_s_version_is_read() {
+        assert_eq!(
+            openssh_version("OpenSSH_9.6p1 Ubuntu-3ubuntu13.5, OpenSSL 3.0.13\n"),
+            Some((9, 6))
+        );
+        assert_eq!(
+            openssh_version("OpenSSH_10.0p2, LibreSSL 3.3.6"),
+            Some((10, 0))
+        );
+        assert_eq!(openssh_version("OpenSSH_8.3p1"), Some((8, 3)));
+        assert_eq!(openssh_version("Dropbear"), None);
     }
 
     #[test]
