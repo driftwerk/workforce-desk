@@ -2700,6 +2700,35 @@ button.thread-bar:hover {
   margin: 0 28px 6px;
   color: var(--blocked);
 }
+/* Deleting your message, confirmed in place under it. */
+.msg-confirm {
+  display: grid;
+  gap: 9px;
+  margin-left: 48px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  font-size: 13px;
+}
+.msg-confirm-forget {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+}
+.msg-confirm-forget input {
+  margin-top: 3px;
+  accent-color: var(--signal);
+}
+.msg-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.msg-action-danger {
+  color: var(--ansi-red);
+}
 .msg-dim {
   opacity: 0.45;
 }
