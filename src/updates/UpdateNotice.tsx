@@ -6,6 +6,9 @@ import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { useMachines } from "../hub/engines";
 import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
+import { lastInputAt } from "./away";
+import { isRunning, useChat } from "../chat/store";
+import { useVoiceStore } from "../voice/store";
 import type { Session } from "../hub/types";
 
 /** Looks for a new version on launch and every few hours; downloads it in
@@ -22,31 +25,36 @@ export function useUpdateChecks() {
   }, [check]);
 }
 
-/** How long since the person last typed or clicked in Desk before it may
- *  restart into an update by itself. */
+/** How long since the person last used any of Desk's windows before it
+ *  may restart into an update by itself. */
 export const AWAY_MS = 2 * 60 * 1000;
 
-let lastInput = Date.now();
-if (typeof window !== "undefined") {
-  for (const e of ["keydown", "pointerdown", "wheel"]) window.addEventListener(e, () => (lastInput = Date.now()), { capture: true, passive: true });
-}
-/** For tests: when the person last did something. */
-export const setLastInput = (at: number): void => {
-  lastInput = at;
-};
+export { setLastInput } from "./away";
 
-/** Installs a ready update by itself once no session on this computer is
- *  working and the person has stepped away from Desk for a couple of
- *  minutes, unless they put it off. Called once from the shell, so it runs
- *  whichever view is open (Settings included). */
+/** Nothing the person would lose to a restart now: no session of this
+ *  computer's working (or that can't be told not to be), none at all
+ *  unless they're kept through it, no voice call, and no agent's turn in a
+ *  DM or a room on its way. */
+export const restartsQuietly = (o: { live: Session[]; kept: boolean; voiceOff: boolean; turns: boolean }): boolean =>
+  o.voiceOff && !o.turns && !o.live.some(isWorking) && (o.kept || o.live.length === 0);
+
+/** Installs a ready update by itself once restarting would take nothing
+ *  from the person (`restartsQuietly`) and they've stepped away from every
+ *  Desk window for a couple of minutes, unless they put it off. Called
+ *  once from the shell, so it runs whichever view is open (Settings
+ *  included). Only this computer's sessions count: a machine's run on. */
 export function useRestartWhenIdle() {
   const waiting = useUpdates((s) => s.waiting);
   const phase = useUpdates((s) => s.state.phase);
+  const kept = useUpdates((s) => s.sessionsKept);
   const restart = useUpdates((s) => s.restart);
   const sessions = useDesk((s) => localSessions(s.sessions));
+  const roomTurns = useDesk((s) => Object.values(s.roomDrafts).some((ds) => ds.some((d) => !["stopped", "interrupted", "failed"].includes(d.state))));
+  const dmTurns = useChat((s) => Object.values(s.conversations).some((c) => isRunning(c)));
+  const voiceOff = useVoiceStore((v) => v.status.state === "off" && Object.keys(v.waiting).length === 0);
   const fail = useDesk((s) => s.fail);
   const live = Object.values(sessions).filter(isLive);
-  const working = live.filter(isWorking).length;
+  const quiet = restartsQuietly({ live, kept, voiceOff, turns: roomTurns || dmTurns });
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!waiting || phase !== "ready") return;
@@ -54,10 +62,15 @@ export function useRestartWhenIdle() {
     return () => clearInterval(t);
   }, [waiting, phase]);
   useEffect(() => {
-    if (waiting && phase === "ready" && working === 0 && Date.now() - lastInput >= AWAY_MS)
-      void restart(live.map((s) => s.id)).catch((e: unknown) => fail(e, { what: "restarting into the update" }));
+    if (!(waiting && phase === "ready" && quiet && Date.now() - lastInputAt() >= AWAY_MS)) return;
+    const go = () =>
+      void useUpdates
+        .getState()
+        .restart(Object.values(localSessions(useDesk.getState().sessions)).filter(isLive).map((s) => s.id))
+        .catch((e: unknown) => fail(e, { what: "restarting into the update", retry: go }));
+    go();
     // The sessions current at this render.
-  }, [waiting, phase, working, tick]);
+  }, [waiting, phase, quiet, tick, restart, fail]);
 }
 
 /** Says where the band ends (`--update-band-bottom` on the page), for the
@@ -174,7 +187,12 @@ export function UpdateNotice() {
           `Updating to Desk ${state.version}…`
         ) : asking ? (
           <>
-            <b>{`${list(stopping)} ${stopping.length === 1 ? "is" : "are"} working right now.`}</b> {whatHappens(live, sessionsKept)}
+            <b>
+              {stopping.length
+                ? `${list(stopping)} ${stopping.length === 1 ? "is" : "are"} working right now.`
+                : `${sessionsWord(live.length)} ${live.length === 1 ? "is" : "are"} open.`}
+            </b>{" "}
+            {whatHappens(live, sessionsKept)}
             {machines.length > 0 && ` Your machines’ sessions don’t stop. Each machine updates to ${state.version} when Desk reconnects to it.`}
           </>
         ) : (
@@ -193,7 +211,7 @@ export function UpdateNotice() {
         <span className="update-notice-actions">
           {asking ? (
             <button type="button" className="link small" onClick={() => setAsking(false)}>
-              Wait for them
+              {stopping.length ? "Wait for them" : "Not now"}
             </button>
           ) : (
             laterButton
@@ -205,7 +223,8 @@ export function UpdateNotice() {
               asking
                 ? go()
                 : // Whether the holder keeps them now, not as of the last check.
-                  void probe().then((kept) => (!kept && working.length > 0 ? setAsking(true) : go()))
+                  // Sessions not kept through it stop: asked first, working or not.
+                  void probe().then((kept) => (!kept && live.length > 0 ? setAsking(true) : go()))
             }
           >
             {asking ? "Restart now" : "Update now"}
