@@ -709,12 +709,13 @@ export function ThisComputerSetup({ system, disabled, onReady, fallback = null }
   const config = useAgentConfigs((s) => s.configs[key]);
   const [api] = useState(() => (local ? connectionsOf(local) : null));
   const [listing, setListing] = useState<Listing | null>(null);
+  const [unlisted, setUnlisted] = useState(false);
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     if (!api) return;
-    api.list().then(setListing, () => setListing(null));
+    api.list().then(setListing, () => setUnlisted(true));
   }, [api]);
   // Read fresh each time: it may have changed since it was last read.
   useEffect(() => {
@@ -725,7 +726,8 @@ export function ThisComputerSetup({ system, disabled, onReady, fallback = null }
   const connector = listing?.connectors.find((c) => c.id === system);
   // Where Desk can't help, what the caller offers instead; nothing while
   // the connections and the agent's config are still being read.
-  if (!api || !desk || !agent) return <>{fallback}</>;
+  // (Connections that couldn't be read, or have no such connector, too.)
+  if (!api || !desk || !agent || unlisted || (listing && !connector)) return <>{fallback}</>;
   if (!connector || config === undefined) return null;
   // The person's own connection, for all their agents: a board here syncs
   // with their keys, never one kept just for an agent.

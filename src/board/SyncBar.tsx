@@ -105,18 +105,13 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     if (!api) return;
     setBusy("sync");
     setFailed(null);
-    let resumed = false;
     try {
-      if (paused) {
-        kept_(await api.pause(board.id, false));
-        resumed = true;
-      }
+      if (paused) kept_(await api.pause(board.id, false));
       await api.syncNow(board.id);
       setSaid("Syncing now");
     } catch (e) {
-      // Resumed only to try: if the try failed it is paused again, not left
-      // running and failing.
-      if (resumed) void api.pause(board.id, true).then(kept_, () => {});
+      // Not paused again here: that would read "paused by you" and hide the
+      // real reason, which the hub's next pass records again itself.
       setFailed({ words: plainError(e), op: "retry" });
     } finally {
       setBusy(null);

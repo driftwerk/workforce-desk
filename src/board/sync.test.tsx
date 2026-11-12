@@ -772,13 +772,14 @@ describe("the board, synced", () => {
     expect(fail).not.toHaveBeenCalled();
   });
 
-  it("pauses it again when a try to resume it failed", async () => {
+  it("leaves the reason to the hub when a try to resume it failed, never a pause by you", async () => {
     native.route = (_hub, method, path, body) =>
       path.endsWith("/pause") ? { status: 200, body: synced({ paused: (body as { paused: boolean }).paused ? { kind: "byYou" } : null }) } : path.endsWith("/sync") ? { status: 409, body: { error: "Atlas is busy." } } : localRoutes(method, path, body);
     show(synced({ paused: { kind: "refused", reason: "policy denied" } }), []);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByRole("alert");
-    await waitFor(() => expect(native.asked.filter((a) => a.path.endsWith("/pause")).map((a) => a.body?.paused)).toEqual([false, true]));
+    await waitFor(() => expect(native.asked.some((a) => a.path.endsWith("/sync"))).toBe(true));
+    expect(native.asked.filter((a) => a.path.endsWith("/pause")).map((a) => a.body?.paused)).toEqual([false]);
   });
 
   it("puts issues that left the filter on their shelf, out of the columns, to keep or drop", async () => {
