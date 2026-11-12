@@ -83,6 +83,12 @@ describe("a room reaching another workspace", () => {
 describe("picking a room's crew", () => {
   it("says there's no crew yet, with New crew member, rather than that everyone is in", () => {
     useUi.setState({ newCrew: false });
+    // Not read yet: nothing is said of an empty crew.
+    useChat.setState({ rosterRead: false });
+    const { unmount } = render(<MemberPicker picked={[]} onToggle={() => undefined} />);
+    expect(screen.queryByText(/You have no crew yet/)).toBeNull();
+    unmount();
+    useChat.setState({ rosterRead: true });
     render(<MemberPicker picked={[]} onToggle={() => undefined} />);
     expect(screen.queryByText("Everyone in your crew is in it.")).toBeNull();
     expect(screen.getByText(/You have no crew yet/)).toBeTruthy();
@@ -129,9 +135,13 @@ describe("a member's turn that failed in a room", () => {
   it("offers Reconnect for a member on a workspace Desk lost", () => {
     const opened = vi.fn();
     useUi.setState({ openSettings: opened } as never);
-    render(<Draft roomId="r1" name="Scout" draft={draft("Scout is on a workspace Desk isn’t connected to any more.")} />);
+    render(<Draft roomId="r1" name="Scout" draft={{ ...draft("Scout is on a workspace Desk isn’t connected to any more."), reason: "workspace_gone" }} />);
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     expect(opened).toHaveBeenCalledWith("hubs");
+    cleanup();
+    // Only the code chooses it: the same words without it offer no Reconnect.
+    render(<Draft roomId="r1" name="Scout" draft={draft("Scout is on a workspace Desk isn’t connected to any more.")} />);
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
 
   it("says what to change when the model provider refused, and nothing of it for other refusals", () => {
@@ -139,5 +149,10 @@ describe("a member's turn that failed in a room", () => {
       "Couldn’t answer: its model provider refused the key or account it uses. Switch its model, or its key, in its settings.",
     );
     expect(readableError("Agent error: Permission denied (os error 13)").text).toBe("Couldn’t answer: Permission denied (os error 13)");
+    expect(readableError("Agent error: Bedrock returned 403 Forbidden: not subscribed to this model").text).toMatch(/model provider refused/);
+    // A 403 from a tool, not the model's provider: its own words.
+    for (const other of ["Agent error: GitHub API returned 403: Resource not accessible by integration", "Agent error: jira api key expired (403)"]) {
+      expect(readableError(other).text).not.toMatch(/model provider/);
+    }
   });
 });

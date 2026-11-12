@@ -54,6 +54,16 @@ export interface CustomVoice {
   description?: string;
 }
 
+/** Where the first-run setup stands (see `setup/`). */
+export interface SetupProgress {
+  /** Offered once: it isn't opened by itself again. */
+  started: boolean;
+  /** Closed by the person: shown again only when reopened. */
+  closed: boolean;
+  /** Steps skipped, by id. */
+  skipped: string[];
+}
+
 export interface Settings {
   theme: string;
   /** The sidebar chooser's theme, kept while Auto, Night or Day is on;
@@ -95,6 +105,8 @@ export interface Settings {
   /** Sites (host names, lowercased) whose pictures in agent markdown show
    *  without a click; older files have none. */
   imageSites?: string[];
+  /** The first-run setup's progress; older files have none. */
+  setup?: SetupProgress;
 }
 
 export interface ThemeFile {

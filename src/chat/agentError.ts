@@ -24,8 +24,12 @@ const IDS = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
 
 /** A model provider refusing the key or account: its status with what it
  *  is, or its own words for a bad key. */
-const PROVIDER_REFUSED =
-  /\b(?:401|403)\b[^\n]*\b(?:api|anthropic|openai|bedrock|vertex|gemini|openrouter|provider|model|key)\b|\b(?:api|anthropic|openai|bedrock|vertex|gemini|openrouter|provider)\b[^\n]*\b(?:401|403|forbidden|unauthori[sz]ed)\b|invalid (?:x-)?api[ _-]?key|incorrect api key/i;
+const PROVIDER = String.raw`(?:anthropic|openai|bedrock|vertex|gemini|openrouter|model provider)`;
+const REFUSED = String.raw`(?:401|403|forbidden|unauthori[sz]ed)`;
+const PROVIDER_REFUSED = new RegExp(
+  String.raw`\b${PROVIDER}\b[^\n]{0,80}\b${REFUSED}\b|\b${REFUSED}\b[^\n]{0,80}\b${PROVIDER}\b|invalid x-api-key|invalid api[ _-]?key|incorrect api key`,
+  "i",
+);
 
 /** The plan the hub's words are about, if they say. */
 const planOf = (raw: string): PlanKind | null => {

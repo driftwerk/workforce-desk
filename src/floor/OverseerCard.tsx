@@ -52,7 +52,7 @@ interface FullPick {
  *  much it does on its own, in one step; Act fully is set up from what
  *  Desk finds before anything is written. Overseeing is the person's to
  *  set, so this is Desk's own card, never an agent's. */
-export function OverseerCard() {
+export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
   const hub = useDesk((s) => s.hub);
   const sessions = useDesk((s) => s.sessions);
   const support = useOverview((s) => s.managerSupport);
@@ -98,7 +98,7 @@ export function OverseerCard() {
   }, [hub, wantsFull, full, sessions]);
 
   if (
-    dismissed ||
+    (dismissed && !inSetup) ||
     !agent ||
     !asksForOverseer(support, manager?.agentId, candidates.length)
   )
@@ -169,23 +169,29 @@ export function OverseerCard() {
       className="floor-card overseer-card"
       aria-labelledby={`${ids}-title`}
     >
-      <div className="floor-card-head">
+      {/* In the setup, its step says what it is: the title stays for its name. */}
+      <div className={`floor-card-head${inSetup ? " sr-only" : ""}`}>
         <h2 id={`${ids}-title`} className="display floor-card-title">
           No one oversees your crew
         </h2>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm floor-card-close"
-          onClick={dismiss}
-        >
-          Not now
-        </button>
+        {/* In the setup, its own Skip puts it off. */}
+        {!inSetup && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm floor-card-close"
+            onClick={dismiss}
+          >
+            Not now
+          </button>
+        )}
       </div>
-      <p className="small muted">
-        An overseer keeps track of every agent and session, tells you what needs
-        you and, at Act, does the work itself. You can change any of this later
-        in its settings.
-      </p>
+      {!inSetup && (
+        <p className="small muted">
+          An overseer keeps track of every agent and session, tells you what
+          needs you and, at Act, does the work itself. You can change any of
+          this later in its settings.
+        </p>
+      )}
       {candidates.length > 1 && (
         <label className="overseer-who">
           <span className="small">Who oversees</span>

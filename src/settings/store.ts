@@ -1,12 +1,16 @@
 import { create } from "zustand";
 import { EMPTY_LAYOUT } from "../groups/model";
-import { loadSettings, saveSettings, type CustomVoice, type Settings, type VoiceSpec } from "../platform";
+import { loadSettings, saveSettings, type CustomVoice, type Settings, type SetupProgress, type VoiceSpec } from "../platform";
+
+/** The setup as an older file has it: never offered. */
+export const NO_SETUP: SetupProgress = { started: false, closed: false, skipped: [] };
 import { choose, defaultShortcuts, resolve, type ShortcutId } from "../shortcuts/keys";
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
   emoticons: boolean;
   imageSites: string[];
+  setup: SetupProgress;
   writtenReplies: string[];
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
@@ -42,6 +46,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     layoutOnHub: s.layoutOnHub ?? false,
     emoticons: s.emoticons ?? true,
     imageSites: s.imageSites ?? [],
+    setup: s.setup ?? NO_SETUP,
     writtenReplies: s.writtenReplies ?? [],
     loaded: true,
   });
@@ -68,6 +73,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   layoutOnHub: false,
   emoticons: true,
   imageSites: [],
+  setup: NO_SETUP,
   keys: defaultShortcuts(),
   loaded: false,
   // One read at a time: a second caller (the shell, after the read before
@@ -98,6 +104,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       layoutOnHub: s.layoutOnHub,
       emoticons: s.emoticons,
       imageSites: s.imageSites,
+      setup: s.setup,
     });
   },
   setShortcut: (id, accel) => get().set({ shortcuts: choose(get().shortcuts, id, accel) }),

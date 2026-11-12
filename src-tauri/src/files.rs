@@ -141,6 +141,26 @@ pub struct Settings {
     pub push_to_talk_shortcut: Option<String>,
     #[serde(default, skip_serializing)]
     pub ask_shortcut: Option<String>,
+    /// Where the first-run setup stands: whether it has been offered, closed,
+    /// and the steps skipped. Older files have none (never offered).
+    #[serde(default)]
+    pub setup: Setup,
+}
+
+/// The first-run setup's progress, kept so it can be picked up again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Setup {
+    /// It has been offered once; it isn't opened by itself again.
+    #[serde(default)]
+    pub started: bool,
+    /// The person closed it; it shows again only when reopened.
+    #[serde(default)]
+    pub closed: bool,
+    /// Steps skipped, by id (`plan`, `helper`, …). Kept as text so a newer
+    /// Desk's steps survive.
+    #[serde(default)]
+    pub skipped: Vec<String>,
 }
 
 fn default_theme() -> String {
@@ -185,6 +205,7 @@ impl Default for Settings {
             image_sites: Vec::new(),
             push_to_talk_shortcut: None,
             ask_shortcut: None,
+            setup: Setup::default(),
         }
     }
 }
@@ -317,6 +338,24 @@ mod tests {
         .unwrap();
         assert!(load_settings(&paths).unwrap().tuple);
         assert_eq!(load_settings(&paths).unwrap().theme, "harbour");
+    }
+
+    #[test]
+    fn the_setup_is_kept_and_an_older_file_never_offered_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"harbour"}"#).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, Setup::default());
+        let settings = Settings {
+            setup: Setup {
+                started: true,
+                closed: false,
+                skipped: vec!["machines".into(), "a-newer-step".into()],
+            },
+            ..Settings::default()
+        };
+        save_settings(&paths, &settings).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, settings.setup);
     }
 
     #[test]

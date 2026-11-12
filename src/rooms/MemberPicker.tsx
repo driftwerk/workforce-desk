@@ -18,9 +18,11 @@ export function MemberPicker({
   leaveOut?: readonly string[];
 }) {
   const roster = useChat((s) => s.roster);
+  const rosterRead = useChat((s) => s.rosterRead);
   const hubs = useChat((s) => s.hubs);
   const offered = roster.filter((a: Agent) => !leaveOut.includes(agentKey(a)));
-  if (!roster.length)
+  // Only once the crew has been read: before then, empty says nothing.
+  if (!roster.length && rosterRead)
     return (
       <p className="faint small">
         You have no crew yet.{" "}

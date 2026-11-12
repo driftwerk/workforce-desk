@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SetupFloor } from "../setup/slot";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
@@ -190,6 +191,7 @@ export function FloorColumn({
       {sections && <NeedsJump sections={sections} />}
       <RestoreBanner />
       <AccountNeeds />
+      {!scope && <SetupFloor />}
       {/* Who oversees everything is asked on the whole Floor only. */}
       {!scope && <OverseerCard />}
       {onFloor ? (

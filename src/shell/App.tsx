@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SetupLauncher } from "../setup/SetupLauncher";
 import { ShareAsk } from "../rooms/share";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
@@ -430,6 +431,7 @@ export function App() {
       <HandoffDialog />
       <LifecycleDialogs />
       <ShareAsk />
+      <SetupLauncher />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (
