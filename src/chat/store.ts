@@ -18,6 +18,7 @@ import {
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
 import { deleteMessage } from "./remove";
+import { contextBefore, copyToChat, fetchThreads, splitKey, threadChannel, type ThreadSummary } from "./thread";
 import { readAround, type Around } from "./search";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
@@ -104,6 +105,14 @@ interface ChatStore {
   answerPrompt: (key: string, requestId: string, choice: PermissionChoice) => boolean;
   /** Stops the agent's turn; what's queued for it then waits, paused. */
   cancel: (key: string) => void;
+  /** Each DM's threads, by agent key, the one with the newest reply first;
+   *  absent until read, and on a hub that has none. */
+  threads: Record<string, ThreadSummary[]>;
+  /** Reads the DM's threads from the hub (on one with `desk.dm_threads`). */
+  loadThreads: (key: string) => Promise<void>;
+  /** Sends your reply in a thread to the DM too, marked as the thread's; false
+   *  when the hub couldn't take it. */
+  copyReply: (key: string, text: string) => Promise<boolean>;
   /** What's queued in each DM for its agent's next turn, by agent key. */
   queues: Record<string, Queue>;
   /** Queues a message for the agent's next turn; behind a paused queue it
@@ -305,7 +314,7 @@ const drain = (key: string) => {
   const { text, attachments } = merged(items);
   // Marked first, so another window reading the kept queue holds off.
   putQueue(key, (was) => ({ ...was, items: was.items.map((i) => (items.includes(i) ? { ...i, sending: ticket } : i)) }));
-  if (!convo.send(text, { turn: dmTurn(), attachments, queued: ticket })) putQueue(key, (was) => unmark(was, ticket));
+  if (!convo.send(text, { turn: turnOf(key), attachments, queued: ticket })) putQueue(key, (was) => unmark(was, ticket));
 };
 
 /** What became of queued send `ticket`: taken, it leaves the queue; held
@@ -390,10 +399,30 @@ const readShown = new Map<string, number>();
  *  began before one doesn't put the old picture back. */
 const mySets = new Map<string, number>();
 
-const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: Agent; hub: HubAccount } | null => {
-  const agent = s.roster.find((a) => agentKey(a) === key);
+/** The agent a conversation key is with, on its hub: a thread's key
+ *  (`<agent>#<parent>`) is with the agent of the DM it is on, and `channel`
+ *  is where on the hub it is kept. */
+const whereIs = (
+  s: Pick<ChatStore, "roster" | "hubs">,
+  key: string,
+): { agent: Agent; hub: HubAccount; channel?: string; parent?: string } | null => {
+  const { agent: base, parent } = splitKey(key);
+  const agent = s.roster.find((a) => agentKey(a) === base);
   const hub = agent && s.hubs.find((h) => h.id === agent.hubId);
-  return agent && hub ? { agent, hub } : null;
+  return agent && hub ? { agent, hub, ...(parent ? { parent, channel: threadChannel(parent) } : {}) } : null;
+};
+
+/** The turn `key`'s conversation sends: a DM turn, or in a thread one placed
+ *  there, carrying the chat up to the thread's first message. */
+export const turnOf = (key: string, voice?: DeskVoice): DeskTurn => {
+  const { agent: base, parent } = splitKey(key);
+  const turn = dmTurn(voice);
+  if (!parent) return turn;
+  const s = useChat.getState();
+  const agent = s.roster.find((a) => agentKey(a) === base);
+  const seen = new Set<string>();
+  const chat = [...(s.histories[base]?.messages ?? []), ...(s.conversations[base]?.messages ?? [])].filter((m) => !seen.has(m.id) && !!seen.add(m.id));
+  return { ...turn, place: { kind: "dm", thread: parent }, context: contextBefore(chat, parent, "You", agent?.name ?? "The agent") };
 };
 
 /** A live conversation with the agent, opened if it isn't yet; false for
@@ -401,7 +430,8 @@ const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: A
 const ensure = (key: string): boolean => {
   if (live.has(key)) return true;
   const { roster, hubs } = useChat.getState();
-  const agent = roster.find((a) => agentKey(a) === key);
+  const { agent: base, parent } = splitKey(key);
+  const agent = roster.find((a) => agentKey(a) === base);
   const hub = agent && hubs.find((h) => h.id === agent.hubId);
   if (!agent || !hub) return false;
   const kept = useChat.getState().queues[key] ? null : readQueue(key);
@@ -422,6 +452,7 @@ const ensure = (key: string): boolean => {
     const was = useChat.getState().conversations[key];
     useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
     if (c.features && c.features !== was?.features) useChat.getState().learnFeatures(hub.id, c.features);
+    if (!parent && c.features?.has(FEATURES.dmThreads) && !was?.features?.has(FEATURES.dmThreads)) void useChat.getState().loadThreads(key);
     // Back after the hub restarted: what was said meanwhile is only in its copy.
     if (c.connected && !was?.connected) {
       if (everConnected) void useChat.getState().refreshHistory(key);
@@ -432,6 +463,8 @@ const ensure = (key: string): boolean => {
     queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
     if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+    // A thread's count and who's working in it are the DM's to show.
+    if (parent && c.working !== was?.working) void useChat.getState().loadThreads(base);
     // A turn that ended is in the hub's copy, by the id it was saved under.
     const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
     if (!settled.length) return;
@@ -451,7 +484,7 @@ const ensure = (key: string): boolean => {
           live.get(key)?.forget(t.ref);
         });
       });
-  });
+  }, parent ? threadChannel(parent) : undefined);
   convo.onQueued = (ticket, outcome) => settleQueued(key, ticket, outcome);
   live.set(key, convo);
   return true;
@@ -623,7 +656,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     // What's sent from here on, the read may not have seen.
     const started = new Date().toISOString();
     try {
-      const page = await fetchHistory(target.hub, target.agent.id);
+      const page = await fetchHistory(target.hub, target.agent.id, undefined, target.channel);
       if (!get().histories[key]) return; // forgotten meanwhile
       putHistory(
         page
@@ -644,7 +677,7 @@ export const useChat = create<ChatStore>((set, get) => ({
       set((s) => (s.histories[key] ? { histories: { ...s.histories, [key]: { ...s.histories[key]!, ...f(s.histories[key]!) } } } : {}));
     put(() => ({ earlier: "loading" }));
     try {
-      const page = await fetchHistory(target.hub, target.agent.id, first);
+      const page = await fetchHistory(target.hub, target.agent.id, first, target.channel);
       put((h) => ({
         earlier: "idle",
         messages: page ? prepend(page.messages, h.messages) : h.messages,
@@ -662,7 +695,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     readsBegun.set(key, read);
     let page;
     try {
-      page = await fetchHistory(target.hub, target.agent.id);
+      page = await fetchHistory(target.hub, target.agent.id, undefined, target.channel);
     } catch {
       return; // What's shown stays; the next open reads it again.
     }
@@ -689,7 +722,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, {
-      turn: { ...dmTurn(opts.voice), ...(opts.message ? { message: opts.message } : {}) },
+      turn: { ...turnOf(key, opts.voice), ...(opts.message ? { message: opts.message } : {}) },
       attachments: opts.attachments,
     }) ?? false) !== false,
   retry: (key, id) => {
@@ -725,6 +758,29 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.cancel();
   },
   queues: {},
+  threads: {},
+  loadThreads: async (key) => {
+    const target = whereIs(get(), key);
+    if (!target || target.parent || !get().conversations[key]?.features?.has(FEATURES.dmThreads)) return;
+    try {
+      const threads = await fetchThreads(target.hub, target.agent.id);
+      set((s) => ({ threads: { ...s.threads, [key]: threads } }));
+    } catch {
+      // What's shown stays; the next change reads it again.
+    }
+  },
+  copyReply: async (key, text) => {
+    const target = whereIs(get(), key);
+    if (!target?.parent) return false;
+    try {
+      await copyToChat(target.hub, target.agent.id, target.parent, text);
+    } catch {
+      return false;
+    }
+    // The DM shows it from the hub's copy.
+    void get().refreshHistory(splitKey(key).agent);
+    return true;
+  },
   setAside: {},
   orphans: {},
   around: {},
@@ -830,6 +886,8 @@ export const useChat = create<ChatStore>((set, get) => ({
       return { settling: on ? { ...rest, [key]: true } : rest };
     }),
   forget: (key) => {
+    // A DM's threads go with it.
+    if (!splitKey(key).parent) for (const k of [...live.keys()]) if (k.startsWith(`${key}#`)) get().forget(k);
     live.get(key)?.close();
     keepQueue(key, emptyQueue());
     held.delete(key);
@@ -847,7 +905,9 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _orphans, ...orphans } = s.orphans;
       const { [key]: _around, ...around } = s.around;
       const { [key]: _back, ...editBack } = s.editBack;
+      const { [key]: _threads, ...threads } = s.threads;
       return {
+        threads,
         conversations,
         histories,
         queues,
