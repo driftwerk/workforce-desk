@@ -403,6 +403,15 @@ const settleLive = (key: string, kept: ChatMessage[], read: Reading) => {
   live.get(key)?.drop(ids);
 };
 
+/** Each agent's name as its hub last listed it: an optimistic rename in
+ *  Desk isn't one until the hub lists it. */
+const lastRead = new Map<string, string>();
+let renamedTo: (key: string, was: string, now: string) => void = () => {};
+/** Calls `f` when the hub lists an agent under a new name. */
+export const onRenamed = (f: (key: string, was: string, now: string) => void): void => {
+  renamedTo = f;
+};
+
 export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
@@ -493,6 +502,12 @@ export const useChat = create<ChatStore>((set, get) => ({
             if (settling[agentKey(a)] && !listed.has(agentKey(a))) fresh.splice(Math.min(at, fresh.length), 0, a);
           });
         roster.push(...fresh);
+        for (const a of r.value) {
+          const key = agentKey(a);
+          const was = lastRead.get(key);
+          if (was !== undefined && was !== a.name) renamedTo(key, was, a.name);
+          lastRead.set(key, a.name);
+        }
         read.add(hub.id);
       } else {
         // This computer's hub being down doesn't make its agents vanish: the
