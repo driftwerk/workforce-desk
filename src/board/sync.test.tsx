@@ -508,6 +508,14 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: /Set up your own/ })).toBeNull();
   });
 
+  it("says plainly when Jira hides your email from the shared key, and offers your own key", () => {
+    const note = "Atlas uses a shared Jira key, and Jira doesn't show your email to the shared key, so it can't say who you are.";
+    show(synced({ meNote: note }), []);
+    expect(document.querySelector(".board-sync-me")?.textContent).toContain("Jira doesn't show your email to the shared key");
+    fireEvent.click(screen.getByRole("button", { name: "Set up your own Jira key" }));
+    expect(useUi.getState().settings).toBe("connections");
+  });
+
   it("says why Take it didn't, and shows who took it meanwhile", async () => {
     const free = ticket(21, { key: "ACME-21", external: ext("ACME-21", { assignee: null }), state: "todo" });
     const fail = vi.fn();
