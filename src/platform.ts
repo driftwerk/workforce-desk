@@ -502,6 +502,8 @@ export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_conv
 /** "Create a user": a normal user named after the Windows one, made the
  *  distro's default (it restarts; its files stay). Its name. */
 export const createWslUser = (distro: string): Promise<string> => invoke("wsl_create_user", { distro });
+/** The user "Create a user" makes, to say before it does. */
+export const wslUserName = (): Promise<string> => invoke("wsl_user_name");
 /** "Install Ubuntu alongside": a current Ubuntu beside a Linux too old for
  *  Desk, with a normal user. Its name, to set Desk up in. */
 export const installUbuntuAlongside = (): Promise<string> => invoke("wsl_install_alongside");

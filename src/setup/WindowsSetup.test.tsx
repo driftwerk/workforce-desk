@@ -9,6 +9,7 @@ const platform = vi.hoisted(() => ({
   convertToWsl2: vi.fn(),
   createWslUser: vi.fn(),
   installUbuntuAlongside: vi.fn(),
+  wslUserName: vi.fn(),
   fixWslForwarding: vi.fn(),
   forgetWslResume: vi.fn(),
 }));
@@ -43,6 +44,7 @@ beforeEach(() => {
   platform.convertToWsl2.mockReset().mockResolvedValue(undefined);
   platform.createWslUser.mockReset().mockResolvedValue("sarah");
   platform.installUbuntuAlongside.mockReset().mockResolvedValue("Ubuntu-24.04");
+  platform.wslUserName.mockReset().mockResolvedValue("sarah");
   useSetup.setState({ open: true, skipped: false });
   useHost.setState({ ...DEFAULT_HOST, platform: "windows", host: null });
 });
@@ -64,6 +66,13 @@ describe("Linux Desk can't use yet, put right by Desk", () => {
     expect(platform.setUpInWsl).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Create a user, then set up" }));
     await flush();
+    // Said in full first: the user, its sudo, and that Debian restarts.
+    const ask = screen.getByRole("group", { name: "Before Desk changes your Linux" });
+    expect(ask.textContent).toContain("Desk makes the user sarah in Debian, who can use sudo without a password");
+    expect(ask.textContent).toContain("Debian then restarts: anything running in it stops.");
+    expect(platform.createWslUser).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Create sarah and restart Debian" }));
+    await flush();
     expect(platform.createWslUser).toHaveBeenCalledWith("Debian");
     expect(platform.setUpInWsl).toHaveBeenCalledWith("Debian");
   });
@@ -74,6 +83,9 @@ describe("Linux Desk can't use yet, put right by Desk", () => {
     await flush();
     expect(screen.getByText(/Too old for Desk/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Install Ubuntu alongside" }));
+    await flush();
+    expect(screen.getByRole("group", { name: "Before Desk changes your Linux" }).textContent).toContain("makes you the user sarah there");
+    fireEvent.click(screen.getByRole("button", { name: "Install Ubuntu 24.04" }));
     await flush();
     expect(platform.installUbuntuAlongside).toHaveBeenCalledTimes(1);
     expect(platform.setUpInWsl).toHaveBeenCalledWith("Ubuntu-24.04");
@@ -86,10 +98,15 @@ describe("Linux Desk can't use yet, put right by Desk", () => {
     await flush();
     fireEvent.click(screen.getByRole("button", { name: "Convert to WSL 2, then set up" }));
     await flush();
+    expect(screen.getByRole("group", { name: "Before Desk changes your Linux" }).textContent).toContain("anything running in Ubuntu-20.04 stops");
+    fireEvent.click(screen.getByRole("button", { name: "Move Ubuntu-20.04 to WSL 2" }));
+    await flush();
     expect(platform.convertToWsl2).toHaveBeenCalledWith("Ubuntu-20.04");
     expect(platform.setUpInWsl).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("Ubuntu-20.04 didn't move to WSL 2");
     fireEvent.click(screen.getByRole("button", { name: "Convert to WSL 2, then set up" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Move Ubuntu-20.04 to WSL 2" }));
     await flush();
     expect(platform.setUpInWsl).toHaveBeenCalledWith("Ubuntu-20.04");
   });

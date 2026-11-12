@@ -156,6 +156,7 @@
     "allow-wsl-forget-resume",
     "allow-wsl-convert",
     "allow-wsl-create-user",
+    "allow-wsl-user-name",
     "allow-wsl-install-alongside",
     "allow-wsl-setup",
     "allow-wsl-fix-forwarding",

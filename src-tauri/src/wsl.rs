@@ -139,6 +139,13 @@ pub async fn wsl_convert(distro: String) -> CommandResult<()> {
         .map_err(text)?
 }
 
+/// The Linux user Desk would make for the person (named after the Windows
+/// one), to say before it does.
+#[tauri::command]
+pub fn wsl_user_name() -> String {
+    desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default())
+}
+
 /// "Create a user": `distro`'s only user is root, which Desk won't run
 /// as, so Desk makes a normal one named after the Windows user and makes it
 /// the default (the distro restarts; its files stay). Its name.

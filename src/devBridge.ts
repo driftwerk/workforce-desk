@@ -262,6 +262,8 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
                 ? { problem: null, distros: FIXABLE.slice(2) }
                 : WSL_FIXTURE,
       );
+    case "wsl_user_name":
+      return answer("sarah");
     case "wsl_install":
       if (params.wsl === "refused")
         throw new Error("WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks.");

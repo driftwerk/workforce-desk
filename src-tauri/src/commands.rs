@@ -130,6 +130,7 @@ pub const COMMANDS: &[&str] = &[
     "wsl_forget_resume",
     "wsl_convert",
     "wsl_create_user",
+    "wsl_user_name",
     "wsl_install_alongside",
     "wsl_setup",
     "wsl_fix_forwarding",

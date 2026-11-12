@@ -74,7 +74,10 @@ export const onlyChoice = (found: WslFound[]): string | null => {
 /** Whether to offer "Install Ubuntu alongside": a Linux is there, but the
  *  only ones Desk can't use are too old for it, and none is usable. */
 export const offerAlongside = (found: WslFound[]): boolean =>
-  found.some((f) => f.problem?.kind === "old_linux") && !found.map(optionFor).some((o) => o.usable);
+  found.some((f) => f.problem?.kind === "old_linux") &&
+  !found.map(optionFor).some((o) => o.usable) &&
+  // Never for one Desk couldn't look into: what's wrong there is unknown.
+  found.every((f) => f.problem !== null || f.probe !== null);
 
 /** Why "Set up" can't be pressed yet, or null when it can. */
 export const whyNotYet = (option: DistroOption | null, busy: boolean): string | null =>

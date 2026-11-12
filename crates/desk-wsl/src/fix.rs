@@ -32,39 +32,62 @@ pub fn user_name(windows: &str) -> String {
 }
 
 /// Run as root in the distro, with the user's name as `$1`: makes the user
-/// (with a home, bash, and in `sudo` where there is one) unless it's there,
-/// and makes it the distro's default in `/etc/wsl.conf`, keeping the rest
-/// of that file. WSL starts the distro as that user after a restart.
+/// (a home, bash, uid 1000 or above) unless it's there, refusing an
+/// existing system account (uid below 1000, or a shell that can't log in);
+/// lets it use sudo without a password (a file of its own in
+/// `/etc/sudoers.d`, checked with visudo where there is one), since it has
+/// none; and makes it the distro's default in `/etc/wsl.conf`, keeping the
+/// rest of that file (and the link, when it is one). WSL starts the distro
+/// as that user after a restart.
 pub const CREATE_USER_SCRIPT: &str = r#"set -eu
 u="$1"
-if ! id -u "$u" >/dev/null 2>&1; then
+if id -u "$u" >/dev/null 2>&1; then
+  uid=$(id -u "$u")
+  sh_=$(getent passwd "$u" | cut -d: -f7)
+  case "$sh_" in */nologin|*/false|"") echo "system-account" >&2; exit 3 ;; esac
+  [ "$uid" -ge 1000 ] || { echo "system-account" >&2; exit 3; }
+else
   if command -v useradd >/dev/null 2>&1; then useradd -m -s /bin/bash "$u"
   else adduser -D -s /bin/sh "$u"; fi
 fi
-if getent group sudo >/dev/null 2>&1; then usermod -aG sudo "$u" 2>/dev/null || true; fi
-if getent group wheel >/dev/null 2>&1; then usermod -aG wheel "$u" 2>/dev/null || true; fi
+if [ -d /etc/sudoers.d ]; then
+  s="/etc/sudoers.d/desk-$u"
+  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$u" > "$s.desk"
+  chmod 0440 "$s.desk"
+  if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$s.desk" >/dev/null 2>&1; then rm -f "$s.desk"
+  else mv "$s.desk" "$s"; fi
+fi
 f=/etc/wsl.conf
-[ -e "$f" ] || : > "$f"
+t=$(readlink -f "$f" 2>/dev/null || echo "$f")
+[ -e "$t" ] || : > "$t"
 awk -v u="$u" '
-  /^\[user\][[:space:]]*$/ { print; print "default=" u; inuser = 1; done = 1; next }
-  /^\[/ { inuser = 0 }
-  inuser && /^[[:space:]]*default[[:space:]]*=/ { next }
+  /^[[:space:]]*\[[^]]*\][[:space:]]*$/ {
+    name = tolower($0); gsub(/[[:space:]]/, "", name)
+    inuser = (name == "[user]")
+    print
+    if (inuser && !done) { print "default=" u; done = 1 }
+    next
+  }
+  inuser && tolower($0) ~ /^[[:space:]]*default[[:space:]]*=/ { next }
   { print }
   END { if (!done) { print ""; print "[user]"; print "default=" u } }
-' "$f" > "$f.desk"
-mv "$f.desk" "$f"
+' "$t" > "$t.desk"
+cat "$t.desk" > "$t"
+rm -f "$t.desk"
 "#;
 
 /// Makes a normal user `user` in `distro` and its default, then stops the
 /// distro so it starts as that user next time.
 pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<(), String> {
     let out = wsl
+        // --exec: run as given, never through the distro's shell (which
+        // would read the script and the name itself).
         .run(&[
             "-d",
             distro,
             "-u",
             "root",
-            "--",
+            "--exec",
             "sh",
             "-c",
             CREATE_USER_SCRIPT,
@@ -76,14 +99,16 @@ pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<(), String>
             format!("Desk couldn't make a user in {distro}. Try again.")
         })?;
     if !out.status.success() {
-        tracing::warn!(
-            distro,
-            said = %crate::detect::decode(&out.stderr).trim(),
-            "creating a user failed"
-        );
-        return Err(format!(
+        let said = crate::detect::decode(&out.stderr);
+        tracing::warn!(distro, said = %said.trim(), "creating a user failed");
+        if said.contains("system-account") {
+            return Err(format!(
+                "{distro} already has a system account called {user}, which Desk won't log in as. Make a normal user there yourself and set it as the default."
+            ));
+        }
+        return Err(crate::run::plain(&said).unwrap_or_else(|| format!(
             "Desk couldn't make a user in {distro}. Try again, or make one there yourself and set it as the default."
-        ));
+        )));
     }
     // Stopped, so it starts as the new default; its files stay.
     let _ = wsl.run(&["--terminate", distro]);
@@ -101,16 +126,17 @@ pub fn install_alongside(wsl: &WslExe) -> Result<(), String> {
             format!("Desk couldn't install {ALONGSIDE}. Try again.")
         })?;
     if !out.status.success() {
-        tracing::warn!(
-            said = %crate::detect::decode(&out.stderr).trim(),
-            "installing Ubuntu alongside failed"
-        );
+        let said = crate::detect::decode(&out.stderr);
+        tracing::warn!(said = %said.trim(), "installing Ubuntu alongside failed");
+        if let Some(plain) = crate::run::plain(&said) {
+            return Err(plain);
+        }
         return Err(format!(
             "Windows didn't install {ALONGSIDE}. Try again; if it keeps stopping, install it from the Microsoft Store and Desk notices it by itself."
         ));
     }
     // Registered on its first start: started as root, running nothing.
-    let started = wsl.run(&["-d", ALONGSIDE, "-u", "root", "--", "true"]);
+    let started = wsl.run(&["-d", ALONGSIDE, "-u", "root", "--exec", "true"]);
     if !started.as_ref().is_ok_and(|o| o.status.success()) {
         if let Ok(o) = &started {
             tracing::warn!(said = %crate::detect::decode(&o.stderr).trim(), "the new Ubuntu didn't start");
@@ -131,13 +157,8 @@ pub fn convert(wsl: &WslExe, distro: &str) -> Result<(), String> {
     if !out.status.success() {
         let said = crate::detect::decode(&out.stderr);
         tracing::warn!(distro, said = %said.trim(), "moving to WSL 2 failed");
-        // The one cause people can fix: virtualization off in the BIOS.
-        if said.contains("Virtual Machine Platform")
-            || said.to_lowercase().contains("virtualization")
-        {
-            return Err(format!(
-                "{distro} didn't move to WSL 2: Windows needs virtualization turned on (in the BIOS) and the Virtual Machine Platform feature. Turn them on, then try again."
-            ));
+        if let Some(plain) = crate::run::plain(&said) {
+            return Err(format!("{distro} didn't move to WSL 2. {plain}"));
         }
         return Err(format!(
             "{distro} didn't move to WSL 2. Try again; Settings → Help can save a report."
@@ -195,5 +216,44 @@ mod tests {
             run(Some("[boot]\nsystemd=true\n")),
             "[boot]\nsystemd=true\n\n[user]\ndefault=kings\n"
         );
+        // Any case, and a second [user]: one default, under the first.
+        assert_eq!(
+            run(Some(
+                "[User]\nDefault = root\n[boot]\nsystemd=true\n[USER]\ndefault=other\n"
+            )),
+            "[User]\ndefault=kings\n[boot]\nsystemd=true\n[USER]\n"
+        );
+        // A linked wsl.conf stays a link, its target changed.
+        let target = dir.path().join("real.conf");
+        std::fs::write(&target, "[boot]\nsystemd=true\n").unwrap();
+        let _ = std::fs::remove_file(&conf);
+        std::os::unix::fs::symlink(&target, &conf).unwrap();
+        let script = format!("set -eu\nu=\"$1\"\nf={}{part}", conf.display());
+        assert!(
+            std::process::Command::new("sh")
+                .args(["-c", &script, "t", "kings"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            std::fs::symlink_metadata(&conf)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            std::fs::read_to_string(&target)
+                .unwrap()
+                .contains("default=kings")
+        );
+    }
+
+    #[test]
+    fn the_script_and_name_go_to_sh_as_given_never_through_a_shell() {
+        // --exec, and the name its own argument after the script's $0.
+        assert!(CREATE_USER_SCRIPT.contains(r#"u="$1""#));
+        assert!(CREATE_USER_SCRIPT.contains("NOPASSWD"));
+        assert!(CREATE_USER_SCRIPT.contains("system-account"));
     }
 }

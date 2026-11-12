@@ -53,6 +53,8 @@ describe("a Linux too old for Desk", () => {
     expect(offerAlongside([ancient, ubuntu])).toBe(false);
     expect(offerAlongside([ancient, rooted])).toBe(false);
     expect(offerAlongside([rooted])).toBe(false);
+    // One Desk couldn't look into: unknown, so nothing to offer for it.
+    expect(offerAlongside([ancient, { ...debian, probe: null, problem: null }])).toBe(false);
   });
 });
 
