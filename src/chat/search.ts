@@ -10,7 +10,7 @@ import type { ChatMessage, HubAccount } from "./types";
 /** One message that matches, as the results list shows it. */
 export interface Match {
   id: string;
-  from: "user" | "assistant";
+  from: "user" | "agent";
   at: string;
   excerpt: string;
 }
