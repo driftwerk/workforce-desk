@@ -192,14 +192,15 @@ export function useSearchMarks(pane: HTMLElement | null, terms: string[], curren
   const [changed, setChanged] = useState(0);
   useEffect(() => {
     if (!pane || !terms.length || typeof MutationObserver === "undefined") return;
-    let frame = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const seen = new MutationObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setChanged((n) => n + 1));
+      // Settled, not per token of an answer streaming in.
+      clearTimeout(timer);
+      timer = setTimeout(() => setChanged((n) => n + 1), 150);
     });
     seen.observe(pane, { childList: true, subtree: true, characterData: true });
     return () => {
-      cancelAnimationFrame(frame);
+      clearTimeout(timer);
       seen.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

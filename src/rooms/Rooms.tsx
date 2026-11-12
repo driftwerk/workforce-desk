@@ -357,7 +357,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     toShowAt.current = m.id;
     if (shown.some((x) => x.id === m.id)) return stay.keep();
     showAround(activeAgent, m.id).catch((e: unknown) => {
-      toShowAt.current = null;
+      if (toShowAt.current === m.id) toShowAt.current = null;
       setEditNote(e instanceof Error ? e.message : String(e));
     });
   };
@@ -407,7 +407,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
       onKeyDown={(e) => {
-        if (searching && e.key === "Escape") {
+        if (searching && e.key === "Escape" && !e.defaultPrevented) {
           e.preventDefault();
           closeSearch();
           return;

@@ -733,9 +733,16 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (!target) return;
     const n = (arounds.get(key) ?? 0) + 1;
     arounds.set(key, n);
-    const page = await readAround(target.hub, target.agent.id, id);
-    // Only the newest ask is shown: a slower, older one resolving last
-    // would put up a stretch that doesn't hold the match chosen.
+    // Only the newest ask is shown, or answers for: a slower, older one
+    // resolving (or failing) last would put up a stretch that doesn't hold
+    // the match chosen, or say the newer one failed.
+    let page;
+    try {
+      page = await readAround(target.hub, target.agent.id, id);
+    } catch (e) {
+      if (arounds.get(key) === n) throw e;
+      return;
+    }
     if (arounds.get(key) !== n) return;
     set((s) => ({ around: { ...s.around, [key]: page } }));
   },
