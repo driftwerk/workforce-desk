@@ -69,6 +69,7 @@ import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
+import { useAgentConfigs } from "../crew/agentBrain";
 import { useUi } from "../shell/ui";
 import { ACME, ticket } from "./testing";
 
@@ -282,6 +283,71 @@ describe("the link dialog", () => {
     await waitFor(() => expect(sendTo).toHaveBeenCalledWith(`${GLOBEX.id}/helper`, expect.stringContaining("switch Jira on for an agent I can use on Globex")));
     await screen.findByText(/Asked Helper on Globex to switch Jira on/);
     useChat.setState({ sendTo: was, roster: [] as never });
+  });
+
+  describe("where no hub offers it, This computer", () => {
+    const MAX = { hubId: "local", id: "max", name: "Max", model: null, provider: null, isDefault: true };
+    const jiraConnector = (connected: boolean) => ({
+      id: "jira",
+      name: "Jira",
+      about: "Issues and projects",
+      signIn: "fields",
+      fields: [{ name: "api_token", label: "API token", secret: true, required: true, placeholder: "" }],
+      signInReady: true,
+      connections: connected
+        ? [{ level: "all", agent: null, agentName: null, account: "sam@acme.example", status: "connected", detail: null, connectedAt: null, checkedAt: null, source: "user" }]
+        : [],
+      usedBy: [],
+    });
+    let saved: string[] = [];
+    const withConnections = (connected: boolean) => {
+      native.route = (hub, method, path, body) =>
+        hub === "local" && method === "GET" && path === "/api/desk/connections"
+          ? { status: 200, body: { connectors: [jiraConnector(connected)], adapters: ["browser"] } }
+          : hub === "local"
+            ? localRoutes(method, path, body)
+            : { status: 404 };
+    };
+    beforeEach(() => {
+      offers = {};
+      saved = [];
+      useChat.setState({ roster: [MAX] as never });
+      useAgentConfigs.setState({ configs: {} });
+      useDesk.setState({
+        hub: {
+          agentConfig: async () => saved.at(-1) ?? '[skills]\nenabled = ["github"]\n',
+          saveAgentConfig: async (_id: string, toml: string) => {
+            saved.push(toml);
+            offers.this = true;
+          },
+        } as never,
+      });
+    });
+    afterEach(() => {
+      useChat.setState({ roster: [] as never });
+      useDesk.setState({ hub: null });
+    });
+
+    it("turns the person's connection on for its default agent itself, then asks again", async () => {
+      withConnections(true);
+      render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("Jira");
+      fireEvent.click(await screen.findByRole("button", { name: "Turn Jira on for Max" }));
+      await waitFor(() => expect(via().getByText("With this computer’s own Jira keys")).toBeTruthy());
+      expect(saved).toHaveLength(1);
+      expect(saved[0]).toMatch(/enabled = \[[^\]]*"github"[^\]]*"jira"/);
+      expect((via().getByRole("radio", { name: /This computer/ }) as HTMLInputElement).disabled).toBe(false);
+      expect(document.body.textContent).not.toMatch(/admin|remote MCP/);
+    });
+
+    it("asks for the person's own key in place where there's no connection yet", async () => {
+      withConnections(false);
+      render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("Jira");
+      expect(await screen.findByRole("button", { name: "Connect Jira" })).toBeTruthy();
+      expect(screen.getByText("Connect Jira to sync through this computer; Desk turns it on for Max.")).toBeTruthy();
+      expect(saved).toHaveLength(0);
+    });
   });
 
   it("says the hub's refusals in its words: tools missing, a filter it won't take, a board with tickets", async () => {
