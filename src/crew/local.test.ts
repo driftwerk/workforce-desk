@@ -208,11 +208,53 @@ describe("renaming an agent", () => {
     expect(files).toEqual(before);
   });
 
+  it("never writes a file it didn't change when putting the others back, nor makes one that wasn't there", async () => {
+    const files = LEDGER();
+    delete files["WELCOME.md"];
+    const hub = filesHub(files, () => Promise.reject(new HubError(500, "busy")));
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "SOUL.md") throw new HubError(500, "disk full");
+      return save(id, f, t);
+    });
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("disk full");
+    // IDENTITY.md went back; AGENTS.md and WELCOME.md were never written.
+    expect(hub.calls).toEqual(["write IDENTITY.md", "write IDENTITY.md"]);
+    expect(files["WELCOME.md"]).toBeUndefined();
+  });
+
+  it("says when the hub hadn't served the agent again in time", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = renameLocalAgent(filesHub(LEDGER()), "ledger", "Penny", undefined, async () => ["other"]);
+      await vi.advanceTimersByTimeAsync(25_000);
+      await expect(done).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("puts the files back when the hub refuses the name, and says why", async () => {
     const files = LEDGER();
     const before = { ...files };
     const hub = filesHub(files, () => Promise.reject(new HubError(400, "an agent's name is 1 to 64 characters")));
     await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("an agent's name is 1 to 64 characters");
+    expect(files).toEqual(before);
+  });
+});
+
+describe("a new purpose", () => {
+  it("says a file it couldn't write, even a missing one, and puts back those it wrote", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files);
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "AGENTS.md") throw new HubError(404, "Not Found");
+      return save(id, f, t);
+    });
+    await expect(setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.")).rejects.toThrow("Not Found");
+    expect(hub.renameAgent).not.toHaveBeenCalled();
     expect(files).toEqual(before);
   });
 });

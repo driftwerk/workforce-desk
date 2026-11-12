@@ -178,14 +178,25 @@ const jobChanges = async (hub: DeskHub, id: string, who: string, job: string, so
   ];
 };
 
-/** Writes each change; `back` writes what was there instead. */
-const write = async (hub: DeskHub, id: string, changes: readonly Change[], back = false): Promise<void> => {
-  for (const c of changes) if (c.was !== c.now) await hub.saveIdentityFile(id, c.file, back ? c.was : c.now);
+/** Writes each change that changes something, noting in `written` each
+ *  one once it is. */
+const write = async (hub: DeskHub, id: string, changes: readonly Change[], written: Change[]): Promise<void> => {
+  for (const c of changes) {
+    if (c.was === c.now) continue;
+    await hub.saveIdentityFile(id, c.file, c.now);
+    written.push(c);
+  }
 };
 
-/** Puts the files back as they were, as far as it can: the error that
- *  brought it here is the one that's said. */
-const undo = (hub: DeskHub, id: string, changes: readonly Change[]): Promise<void> => write(hub, id, changes, true).catch(() => undefined);
+/** Puts back the files that were written, as far as it can (one never
+ *  written is left alone): the error that brought it here is the one
+ *  that's said. */
+const undo = async (hub: DeskHub, id: string, written: readonly Change[]): Promise<void> => {
+  for (const c of written) await hub.saveIdentityFile(id, c.file, c.was).catch(() => undefined);
+};
+
+/** A hub too old to take a new name or instructions. */
+const cantTake = (e: unknown) => e instanceof HubError && (e.status === 404 || e.status === 405);
 
 /** How long Desk waits for the hub to serve an agent again after a new
  *  name or new instructions, which build it again. */
@@ -219,21 +230,29 @@ export async function servingAgain(listed: Serving, id: string, within = SERVE_A
 /** A new description of what an agent is for, in every file that says it
  *  and in its instructions (a hub that can't update those keeps the old).
  *  The files are written first, while the agent serves; the instructions
- *  then build it again, and (given `listed`) this waits until it serves. */
-export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string, listed?: Serving): Promise<void> {
+ *  then build it again, and (given `listed`) this waits until it serves:
+ *  false when it didn’t in time. */
+export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string, listed?: Serving): Promise<boolean> {
   const who = name.trim();
   const job = purpose.trim();
   const changes = await jobChanges(hub, id, who, job);
+  const written: Change[] = [];
   try {
     // Written as one: a file that fails puts back those written before it.
-    await write(hub, id, changes);
-    await hub.renameAgent(id, who, instructions(who, job));
+    await write(hub, id, changes, written);
   } catch (e) {
-    if (e instanceof HubError && (e.status === 404 || e.status === 405)) return;
-    await undo(hub, id, changes);
+    await undo(hub, id, written);
     throw e;
   }
-  if (listed) await servingAgain(listed, id);
+  try {
+    await hub.renameAgent(id, who, instructions(who, job));
+  } catch (e) {
+    // A hub that can't take instructions keeps the old: the files say it.
+    if (cantTake(e)) return true;
+    await undo(hub, id, written);
+    throw e;
+  }
+  return listed ? servingAgain(listed, id) : true;
 }
 
 /** Said when the hub can't rename agents yet. */
@@ -245,23 +264,29 @@ export const RENAME_UNAVAILABLE = "Renaming isn’t available yet: Desk needs an
  *  instructions that say it. Files first, while the agent serves: the new
  *  name builds it again, and while that runs its files can't be read. If
  *  the hub doesn't take the name, the files go back. Given how to read the
- *  agents the hub serves (`listed`), waits until it serves again. */
-export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string, listed?: Serving): Promise<void> {
+ *  agents the hub serves (`listed`), waits until it serves again: false
+ *  when it didn’t in time. */
+export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string, listed?: Serving): Promise<boolean> {
   const who = name.trim();
   const soul = await hub.identityFile(id, "SOUL.md");
   const job = purpose?.trim() || purposeOf(soul);
   const identity = await hub.identityFile(id, "IDENTITY.md");
   const changes: Change[] = [{ file: "IDENTITY.md", was: identity, now: withName(identity, who) }, ...(job ? await jobChanges(hub, id, who, job, soul) : [])];
+  const written: Change[] = [];
   try {
     // Written as one: a file that fails puts back those written before it.
-    await write(hub, id, changes);
-    await hub.renameAgent(id, who, job ? instructions(who, job) : undefined);
+    await write(hub, id, changes, written);
   } catch (e) {
-    await undo(hub, id, changes);
-    if (e instanceof HubError && (e.status === 404 || e.status === 405)) throw new Error(RENAME_UNAVAILABLE);
+    await undo(hub, id, written);
     throw e;
   }
-  if (listed) await servingAgain(listed, id);
+  try {
+    await hub.renameAgent(id, who, job ? instructions(who, job) : undefined);
+  } catch (e) {
+    await undo(hub, id, written);
+    throw cantTake(e) ? new Error(RENAME_UNAVAILABLE) : e;
+  }
+  return listed ? servingAgain(listed, id) : true;
 }
 
 /** Writes `brain` to the agent's config; answers with the config as written. */

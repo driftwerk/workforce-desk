@@ -88,6 +88,8 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   const { rename, refreshRoster, setPicture, settle } = useChat();
   const src = useAgentImage(agentKey(agent));
   const [saved, setSaved] = useState<string | null>(null);
+  // Saved, but their hub hadn't served them again when Desk stopped waiting.
+  const [starting, setStarting] = useState(false);
   const [purpose, setPurpose] = useState("");
   // The name as saved, kept while a rename is in flight so it can go back.
   const [savedName, setSavedName] = useState(agent.name);
@@ -134,13 +136,14 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
     // it serves, the roster keeps it, so it stays where it is shown.
     settle(key, true);
     const listed = hub ? () => agentIdsOn(hub) : undefined;
+    let served = true;
     try {
       if (renaming) {
         // Shown everywhere at once; put back if the hub doesn't take it.
         const was = savedName;
         rename(key, nextName);
         try {
-          await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined, listed);
+          served = await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined, listed);
         } catch (e) {
           rename(key, was);
           setProblem(plainError(e));
@@ -151,7 +154,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
         setName(nextName);
       } else if (purposeChanged) {
         try {
-          await setAgentPurpose(desk, agent.id, agent.name, purpose, listed);
+          served = await setAgentPurpose(desk, agent.id, agent.name, purpose, listed);
         } catch (e) {
           setProblem(plainError(e));
           setState("idle");
@@ -167,6 +170,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
       setSaved(purpose.trim());
       setPurpose(purpose.trim());
     }
+    setStarting(!served);
     setState("saved");
   };
 
@@ -246,7 +250,9 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
               </button>
             </>
           )}
-          {!changed && state === "saved" && <span className="small state-done">Saved into their files.</span>}
+          {!changed && state === "saved" && (
+            <span className="small state-done">{starting ? `Saved into their files. ${savedName} is still starting: they’ll be back in a moment.` : "Saved into their files."}</span>
+          )}
           {problem && <span className="small state-blocked">{problem}</span>}
         </div>
       )}
