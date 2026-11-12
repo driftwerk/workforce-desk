@@ -9,6 +9,8 @@ import { HOST, Link, type LinkState, type Port } from "./link";
 import type { ToHub } from "./protocol";
 
 const KEPT = "desk";
+/** The person's own window they used last (`storage.session`). */
+const PERSONS = "persons";
 
 const tabsApi: ChromeTabs = {
   async createWindow() {
@@ -50,6 +52,28 @@ const tabsApi: ChromeTabs = {
   removeWindow: (windowId) => chrome.windows.remove(windowId),
   activate: async (tabId) => void (await chrome.tabs.update(tabId, { active: true })),
   focusWindow: async (windowId) => void (await chrome.windows.update(windowId, { focused: true })),
+  async personsWindow(desk) {
+    const theirs = (w: chrome.windows.Window | null | undefined): w is chrome.windows.Window & { id: number } => !!w && w.id !== undefined && w.id !== desk && w.type === "normal" && !w.incognito;
+    // The window the person last used that isn't Desk's, as noted when it
+    // took the focus; Chrome's own "last focused" may be Desk's.
+    const noted = ((await chrome.storage.session.get(PERSONS))[PERSONS] as number | undefined) ?? null;
+    const was = noted === null ? null : await chrome.windows.get(noted).catch(() => null);
+    if (theirs(was)) return was.id;
+    const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+    if (theirs(last)) return last.id;
+    const all = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter(theirs);
+    return (all.find((w) => w.state !== "minimized") ?? all[0])?.id ?? null;
+  },
+  async moveTab(tabId, windowId) {
+    await chrome.tabs.ungroup(tabId).catch(() => undefined);
+    await chrome.tabs.move(tabId, { windowId, index: -1 });
+  },
+  async windowWith(tabId) {
+    await chrome.tabs.ungroup(tabId).catch(() => undefined);
+    const w = await chrome.windows.create({ tabId, focused: true, type: "normal" });
+    if (w?.id === undefined) throw new Error("Chrome didn't open a window");
+    return w.id;
+  },
   load: async () => ((await chrome.storage.session.get(KEPT))[KEPT] as Kept | undefined) ?? null,
   save: (kept) => chrome.storage.session.set({ [KEPT]: kept }),
 };
@@ -100,6 +124,15 @@ const exec: Exec = {
     await chrome.windows.update(windowId, { focused: true, state: "normal" });
     await chrome.tabs.update(tabId, { active: true });
   },
+  async raise(windowId, tabId) {
+    await chrome.tabs.update(tabId, { active: true });
+    const w = await chrome.windows.get(windowId);
+    await chrome.windows.update(windowId, w.state === "minimized" ? { focused: true, state: "normal" } : { focused: true });
+  },
+  async inFront(windowId, tabId) {
+    const [t, w] = await Promise.all([chrome.tabs.get(tabId), chrome.windows.get(windowId)]);
+    return { active: t.active && t.windowId === windowId, focused: w.focused && w.state !== "minimized" };
+  },
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
@@ -126,6 +159,16 @@ link.onChange(badge);
 // A tab a page of Desk's opens joins Desk; any other is left alone.
 chrome.tabs.onCreated.addListener((t) => {
   if (t.id !== undefined) void tabs.adopt(t.id, t.openerTabId);
+});
+// The person's own window, each time one takes the focus: where a page
+// opened for them goes.
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  void tabs.windowId().then(async (desk) => {
+    if (windowId === desk) return;
+    const w = await chrome.windows.get(windowId).catch(() => null);
+    if (w?.type === "normal" && !w.incognito) await chrome.storage.session.set({ [PERSONS]: windowId });
+  });
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   void tabs.closed(tabId).then((session) => {
