@@ -65,8 +65,8 @@ const useNarrow = (el: HTMLElement | null): boolean => {
   return narrow;
 };
 
-/** Shift+wheel scrolls the columns sideways where the system left it
- *  vertical (`deltaX` 0, as on Windows); where it already turned it
+/** Shift+wheel scrolls a pane's columns (which don't snap) sideways where
+ *  the system left it vertical (`deltaX` 0, as on Windows); where it already turned it
  *  sideways (macOS), and for a trackpad's own sideways swipe, the browser
  *  scrolls them and this does nothing. */
 export const useShiftWheel = (el: HTMLElement | null): void => {
@@ -75,6 +75,10 @@ export const useShiftWheel = (el: HTMLElement | null): void => {
     const onWheel = (e: WheelEvent) => {
       if (!e.shiftKey || e.ctrlKey || e.metaKey || e.deltaX !== 0 || e.deltaY === 0) return;
       if (el.scrollWidth <= el.clientWidth) return;
+      // Columns that snap (the Board view's) are left to the browser, whose
+      // steps snap column by column: a step of ours would be pulled back.
+      const snap = getComputedStyle(el).scrollSnapType;
+      if (snap && snap !== "none") return;
       // Lines and pages as pixels, roughly as a browser counts them.
       const by = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * el.clientWidth : e.deltaY;
       e.preventDefault();
