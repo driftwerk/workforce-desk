@@ -33,11 +33,11 @@ const words = (step: Step, state: StepState, name: string): string => {
               : `Couldn’t sign Codex out on ${name}`;
     case "remove":
       return state === "done"
-        ? "Removed Desk’s folder, with the Claude sign-ins it kept"
+        ? "Removed Desk’s folder, with the Claude sign-ins Desk copied there"
         : state === "running"
-          ? "Removing Desk’s folder and the Claude sign-ins it kept…"
+          ? "Removing Desk’s folder and the Claude sign-ins Desk copied there…"
           : state === "waiting"
-            ? "Remove Desk’s folder and the Claude sign-ins it kept"
+            ? "Remove Desk’s folder and the Claude sign-ins Desk copied there"
             : "Couldn’t remove ~/.local/share/Desk";
     case "linger":
       return state === "done" ? "Turned linger off" : state === "running" ? "Turning linger off…" : state === "blocked" ? "Linger stays on" : "Turn linger off";
@@ -68,6 +68,9 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
   const held = machine.state.kind === "failed" && machine.state.message.startsWith("Uninstalling stopped partway");
   const reachable = held || machine.state.kind === "ready" || machine.state.kind === "updateFailed" || machine.state.kind === "newer";
   const [uninstall, setUninstall] = useState(held);
+  /** Sign Codex out there too: ticked, as the person may use Codex there
+   *  outside Desk and can keep it. */
+  const [signOutCodex, setSignOutCodex] = useState(true);
   const [busy, setBusy] = useState(false);
   const [steps, setSteps] = useState<Partial<Record<Step, RemoveEvent>> | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -109,7 +112,7 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
     setCancelling(false);
     setSteps({});
     try {
-      if (await native.uninstall(machine.id)) return onRemoved();
+      if (await native.uninstall(machine.id, { signOutCodex })) return onRemoved();
       // A no to the question, or Cancel before anything was removed.
       setSteps(null);
       setKept(true);
@@ -133,7 +136,7 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
     });
   };
 
-  const checks: Step[] = ["stop", "sign_out", "remove", "linger", "forget"];
+  const checks: Step[] = signOutCodex ? ["stop", "sign_out", "remove", "linger", "forget"] : ["stop", "remove", "linger", "forget"];
   return (
     <Dialog
       onClose={() => !busy && onClose()}
@@ -176,16 +179,23 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
                   <b>Also uninstall Desk from {name}</b>
                   <span className="small muted">
                     {reachable
-                      ? `${ends} Desk’s service there, signs Claude and Codex out there, and removes Desk’s folder with its memory. Your files, repos, Claude Code and Codex stay.`
+                      ? `${ends} Desk’s service there and removes Desk’s folder with its memory and the Claude sign-ins Desk copied there. Your files, repos, Claude Code and Codex stay.`
                       : `Desk can’t reach ${name} right now, so it can only forget it here.`}
                   </span>
                 </span>
               </button>
             </div>
-            {!steps && !reachable && (
+            {uninstall && reachable && !steps && (
+              <label className="remove-option small">
+                <input type="checkbox" checked={signOutCodex} disabled={busy} onChange={(e) => setSignOutCodex(e.target.checked)} />
+                Also sign Codex out on {name} (untick if you use Codex there yourself)
+              </label>
+            )}
+            {!steps && (
               <p className="small muted">
-                {name} keeps copies of your accounts’ Claude sign-ins until Desk is uninstalled there. Desk can’t reach it to end them: if {name} is lost, or you no longer
-                trust it, revoke them at claude.ai.
+                {uninstall && reachable
+                  ? `Removing Desk’s copies of your Claude sign-ins doesn’t revoke them: if ${name} may have been seen by someone else, or you no longer trust it, revoke them at claude.ai too.`
+                  : `${name} keeps copies of your accounts’ Claude sign-ins while Desk runs there. If ${name} is lost, or you no longer trust it, revoke them at claude.ai.`}
               </p>
             )}
             {!reachable && !steps && (

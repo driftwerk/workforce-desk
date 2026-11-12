@@ -385,9 +385,10 @@ pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) ->
 pub async fn machine_uninstall(
     fleet: tauri::State<'_, Arc<Fleet>>,
     id: String,
+    sign_out_codex: Option<bool>,
 ) -> CommandResult<bool> {
     let fleet = Arc::clone(&fleet);
-    blocking(move || fleet.uninstall(&id)).await
+    blocking(move || fleet.uninstall_with(&id, sign_out_codex.unwrap_or(true))).await
 }
 
 /// How long reading Desk's log on a machine may take.

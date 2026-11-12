@@ -209,7 +209,7 @@ export interface MachineNative {
   /** Removes it after uninstalling Desk from it (its service, everything
    *  Desk keeps there, linger), saying each step on `removing`; nothing is
    *  forgotten when a step fails. */
-  uninstall(id: MachineId): Promise<boolean>;
+  uninstall(id: MachineId, opts?: { signOutCodex?: boolean }): Promise<boolean>;
   /** Stops an uninstall before it removes anything. */
   cancelUninstall(id: MachineId): Promise<void>;
   removing(f: (e: RemoveEvent) => void): () => void;
@@ -244,7 +244,7 @@ export const native: MachineNative = {
   cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
   retryEngines: (id) => invoke<void>("machine_retry_engines", { id }),
   cancelUpdate: (id) => invoke<void>("machine_cancel_update", { id }),
-  uninstall: (id) => invoke<boolean>("machine_uninstall", { id }),
+  uninstall: (id, opts) => invoke<boolean>("machine_uninstall", { id, signOutCodex: opts?.signOutCodex ?? true }),
   cancelUninstall: (id) => invoke<void>("machine_cancel_uninstall", { id }),
   removing: (f) => subscribe(listen<RemoveEvent>("machine-remove", (e) => f(e.payload))),
 };
