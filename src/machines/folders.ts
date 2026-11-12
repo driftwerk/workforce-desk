@@ -10,7 +10,33 @@ export interface Folder {
   path: string;
   /** It's a git repository. */
   git: boolean;
+  /** Where its repository comes from (`github.com/acme/web`), when the hub
+   *  says. */
+  remote?: string;
 }
+
+/** What a folder is, as its hub says: in a git repository or not, and the
+ *  repository's remote; `git` is undefined where the hub doesn't say (an
+ *  older one, or a folder it won't list). */
+export interface FolderInfo {
+  git?: boolean;
+  remote?: string;
+}
+
+/** What `fetch` (a hub's `GET /api/desk/folders?path=`) says of `path`. */
+export const folderInfo = async (fetch: (path: string) => Promise<Response>, path: string): Promise<FolderInfo> => {
+  try {
+    const res = await fetch(`/api/desk/folders?${new URLSearchParams({ path }).toString()}`);
+    if (!res.ok) return {};
+    const o = ((await res.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+    return {
+      ...(typeof o.git === "boolean" ? { git: o.git } : {}),
+      ...(typeof o.remote === "string" && o.remote ? { remote: o.remote } : {}),
+    };
+  } catch {
+    return {};
+  }
+};
 
 /** `path` with the home folder as `~`. */
 export const tilde = (path: string, home: string | null): string =>
@@ -45,7 +71,7 @@ export const readFolders = (body: unknown, known: string | null = null): { folde
     if (!r || typeof r !== "object") return [];
     const f = r as Record<string, unknown>;
     if (typeof f.path !== "string" || !f.path) return [];
-    return [{ path: tilde(f.path, home), git: f.git === true || f.repo === true }];
+    return [{ path: tilde(f.path, home), git: f.git === true || f.repo === true, ...(typeof f.remote === "string" && f.remote ? { remote: f.remote } : {}) }];
   });
   return { folders, home };
 };

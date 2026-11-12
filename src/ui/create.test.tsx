@@ -23,7 +23,10 @@ beforeEach(() => {
   openRoom.mockClear();
   useDesk.setState({ error: null, openRoom, openId: null } as never);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 const room = (id: string, name: string) => ({ id, name, slug: name, members: [], defaultMember: null });
 
@@ -109,7 +112,7 @@ it("a refusal (4xx) is safe to retry", async () => {
   expect(useDesk.getState().error?.fix?.label).toBe("Retry");
 });
 
-const type = (v: string) => fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: v } });
+const type = (v: string) => fireEvent.change(screen.getByLabelText("Folder"), { target: { value: v } });
 
 it("a session is started once, opened when a 5xx hid that it was, else retried with the current folder", async () => {
   const sessions = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "s-7", cwd: "/work/atlas", name: "atlas" }]);

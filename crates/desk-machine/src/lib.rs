@@ -15,6 +15,8 @@
 //!   one on an older Desk.
 //! - [`callback`] forwards one sign-in's callback port, while it runs.
 //! - [`upload`] copies files dropped on a machine's terminal there.
+//! - [`own_key`] is Desk's own SSH key, put on a machine with the person's
+//!   password once (given to ssh by [`askpass`], never the page).
 //! - [`link`] reads the machine's hub tokens over SSH, holds them only in
 //!   memory, and hands them on to go only through the forward's socket.
 //!
@@ -22,11 +24,16 @@
 //! scenario and really forwards a port, as `ssh -L` does.
 
 pub mod admit;
+#[cfg(unix)]
+pub mod askpass;
 pub mod callback;
 pub mod fleet;
 pub mod hostkey;
 pub mod link;
+#[cfg(unix)]
+pub mod own_key;
 pub mod probe;
+pub mod secret;
 pub mod setup;
 pub mod ssh;
 pub mod suggest;
@@ -35,3 +42,12 @@ pub mod upload;
 
 pub use link::{Link, Machines};
 pub use ssh::SshExe;
+
+/// This computer, mid-sentence, as the page says it (`thisComputerLower`).
+pub const fn this_computer() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "this Mac"
+    } else {
+        "this computer"
+    }
+}

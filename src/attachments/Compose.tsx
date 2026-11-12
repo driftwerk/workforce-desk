@@ -3,6 +3,8 @@ import { droppedFiles, readDropped, type DroppedFile } from "../drop/native";
 import { nativeDrops, registerZone, useDropOver, ZONE_ATTR } from "../drop/route";
 import { describe, formatSize, kindOf } from "./kinds";
 import { MAX_FILE_BYTES, MAX_FILES, tooBig } from "./upload";
+import { ProblemNote } from "../ui/ProblemNote";
+import { permissionOf, permissionProblem, useRecheckOnFocus, type Pane } from "../ui/privacy";
 
 /** A file waiting to go with your next message. */
 export interface Pending {
@@ -91,7 +93,11 @@ export function PendingFiles({ pending, problem, onRemove }: { pending: Pending[
           </span>
         );
       })}
-      {problem && (
+      {problem && permissionProblem(problem, "attaching a file") ? (
+        <div className="pending-problem" role="alert">
+          <ProblemNote problem={permissionProblem(problem, "attaching a file")!} />
+        </div>
+      ) : problem && (
         <span className="small state-blocked pending-problem" role="alert">
           {problem}
         </span>
@@ -102,11 +108,41 @@ export function PendingFiles({ pending, problem, onRemove }: { pending: Pending[
 
 const carriesFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
 
+/** What a drop gave a message: the files read, what was wrong with any it
+ *  couldn't take, and the paths the system kept from Desk (read again once
+ *  the person allowed it, by `pane`). */
+export interface DropRead {
+  files: File[];
+  problem: string | null;
+  kept: string[];
+  pane: Pane | null;
+}
+
 /** Files dropped from the system, as a message attaches them: each read
- *  whole, those it can't carry (a folder, one too big) said instead. */
-export const filesOfDrop = async (paths: string[]): Promise<{ files: File[]; problem: string | null }> => {
-  const found = await droppedFiles(paths);
+ *  whole, those it can't carry (a folder, one too big, one the system keeps
+ *  from Desk) said instead. Each is asked for on its own, so one that can't
+ *  be read never holds back the others. */
+export const filesOfDrop = async (paths: string[]): Promise<DropRead> => {
   const problems: string[] = [];
+  const kept: string[] = [];
+  let pane: Pane | null = null;
+  const refused = (path: string, e: unknown) => {
+    const said = e instanceof Error ? e.message : String(e);
+    const p = permissionOf(said);
+    if (p?.pane) {
+      kept.push(path);
+      pane ??= p.pane;
+    }
+    problems.push(said);
+  };
+  const found: DroppedFile[] = [];
+  for (const path of paths) {
+    try {
+      found.push(...(await droppedFiles([path])));
+    } catch (e) {
+      refused(path, e);
+    }
+  }
   const files: File[] = [];
   const take: DroppedFile[] = [];
   for (const f of found) {
@@ -116,8 +152,16 @@ export const filesOfDrop = async (paths: string[]): Promise<{ files: File[]; pro
   }
   // No more are read than a message carries.
   if (take.length > MAX_FILES) problems.push(`A message can carry up to ${MAX_FILES} files.`);
-  for (const f of take.slice(0, MAX_FILES)) files.push(await readDropped(f));
-  return { files, problem: problems.join(" ") || null };
+  for (const f of take.slice(0, MAX_FILES)) {
+    try {
+      files.push(await readDropped(f));
+    } catch (e) {
+      refused(f.path, e);
+    }
+  }
+  // A permission leads: it's the one with a button.
+  problems.sort((a, b) => Number(permissionOf(b) !== null) - Number(permissionOf(a) !== null));
+  return { files, problem: problems.join(" ") || null, kept, pane };
 };
 
 /** Dropping files anywhere on an element: whether some are being dragged
@@ -132,6 +176,30 @@ export function useFileDrop(onFiles: (files: File[]) => void, onProblem?: (probl
   const latest = useRef({ onFiles, onProblem });
   latest.current = { onFiles, onProblem };
   const native = nativeDrops();
+  // Files of a drop the system kept from Desk: read again once Desk is back
+  // in front and the person allowed it, without dropping them again. The
+  // composer is mounted afresh for each room, thread and DM, so these never
+  // follow you to another.
+  const [kept, setKept] = useState<{ paths: string[]; pane: Pane } | null>(null);
+  const took = useCallback(({ files, problem, kept: still, pane }: DropRead, initial: boolean) => {
+    if (files.length) latest.current.onFiles(files);
+    setKept(still.length && pane ? { paths: still, pane } : null);
+    // A drop says what it couldn't take; reading one again also clears it.
+    if (problem || !initial) latest.current.onProblem?.(problem);
+  }, []);
+  useRecheckOnFocus(kept?.pane ?? null, kept !== null, () => undefined, async () => {
+    if (!kept) return false;
+    const read = await filesOfDrop(kept.paths).catch((e: unknown) => ({
+      files: [],
+      problem: e instanceof Error ? e.message : String(e),
+      kept: [],
+      pane: null,
+    }));
+    // Still kept: the problem stays and asks again next time. Otherwise
+    // what happened is said (a drop too old says to drop it again).
+    took(read, false);
+    return read.kept.length === 0;
+  });
   useEffect(
     () =>
       native
@@ -139,10 +207,7 @@ export function useFileDrop(onFiles: (files: File[]) => void, onProblem?: (probl
             label: "conversation",
             drop: (paths) =>
               void filesOfDrop(paths).then(
-                ({ files, problem }) => {
-                  if (files.length) latest.current.onFiles(files);
-                  if (problem) latest.current.onProblem?.(problem);
-                },
+                (read) => took(read, true),
                 (e: unknown) => latest.current.onProblem?.(e instanceof Error ? e.message : String(e)),
               ),
           })

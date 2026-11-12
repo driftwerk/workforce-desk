@@ -114,10 +114,7 @@ impl Hub {
         }
         let body = response.body_mut().read_to_string()?;
         if !status.is_success() {
-            bail!(
-                "Desk's hub wouldn't read the key ({status}): {}",
-                refusal(&body)
-            );
+            bail!("Desk wouldn't read the key ({status}): {}", refusal(&body));
         }
         #[derive(Deserialize)]
         struct Entry {
@@ -150,7 +147,7 @@ pub fn speech_error(status: u16, body: &str) -> SpeechError {
         503 => SpeechError::NoKey(message),
         400 => SpeechError::Rejected(message),
         502 => SpeechError::Provider(message),
-        _ => SpeechError::Hub(format!("the hub couldn't speak ({status}): {message}")),
+        _ => SpeechError::Hub(format!("Desk couldn't speak ({status}): {message}")),
     }
 }
 
@@ -163,7 +160,7 @@ impl Sessions for Hub {
         let status = response.status();
         let body = response.body_mut().read_to_string()?;
         if !status.is_success() {
-            bail!("the hub couldn't open a voice session: {}", refusal(&body));
+            bail!("Desk couldn't open a voice session: {}", refusal(&body));
         }
         Ok(serde_json::from_str(&body)?)
     }
@@ -194,7 +191,7 @@ impl CloudSpeech for Hub {
             .header("Authorization", &format!("Bearer {}", self.token))
             .content_type("application/json")
             .send(body)
-            .map_err(|e| SpeechError::Hub(format!("couldn't reach Desk's hub: {e}")))?;
+            .map_err(|e| SpeechError::Hub(format!("couldn't reach Desk's helper: {e}")))?;
         let status = response.status();
         let content_type = response
             .headers()

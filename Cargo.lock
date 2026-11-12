@@ -1146,6 +1146,7 @@ dependencies = [
  "desk-core",
  "eyre",
  "libc",
+ "rand 0.10.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1153,6 +1154,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -1190,6 +1192,7 @@ dependencies = [
  "tungstenite",
  "unicode-normalization",
  "ureq 3.5.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -270,7 +270,7 @@ impl Sockets {
             || pooled.filter(|h| h.owner == owner).count() >= per_window
         {
             return Err(match pool {
-                Pool::Local => "Desk has too many connections to this computer's hub open.",
+                Pool::Local => "Desk has too many connections to its helper open.",
                 Pool::Machine(_) => "Desk has too many connections to that machine open.",
                 Pool::Hubs => "Desk has too many conversations open.",
             }
@@ -316,9 +316,7 @@ impl Sockets {
             .out
             .try_send(Said::Frame(frame))
             .map_err(|e| match e {
-                mpsc::error::TrySendError::Full(_) => {
-                    "This computer's hub isn't keeping up.".to_string()
-                }
+                mpsc::error::TrySendError::Full(_) => "Desk's helper isn't keeping up.".to_string(),
                 mpsc::error::TrySendError::Closed(_) => "That connection is closed.".to_string(),
             })
     }
@@ -423,27 +421,21 @@ impl Failed {
     /// What the page is told: the status the hub answered, never the
     /// request (which, to an older hub, has the token in its URL).
     fn said(&self, pool: Pool) -> String {
-        let hub = match pool {
-            Pool::Local => "This computer's hub",
-            Pool::Machine(_) => "The machine's hub",
-            Pool::Hubs => "The workspace",
+        let (hub, it) = match pool {
+            Pool::Local => ("Desk's helper", "Desk's helper"),
+            Pool::Machine(_) => ("The machine", "the machine"),
+            Pool::Hubs => ("The workspace", "the workspace"),
         };
         match self {
             Failed::Late => format!("{hub} didn't answer in time."),
             Failed::Refused(status) => format!("{hub} refused the connection ({status})."),
-            Failed::Other => format!("Desk couldn't reach {}.", hub.to_lowercase()),
+            Failed::Other => format!("Desk couldn't reach {it}."),
             Failed::Unsendable => format!("{hub} has a token Desk can't send."),
             Failed::Proxy(super::tunnel::Refused::Status(status)) => {
-                format!(
-                    "This computer's proxy refused to reach {} ({status}).",
-                    hub.to_lowercase()
-                )
+                format!("This computer's proxy refused to reach {it} ({status}).")
             }
             Failed::Proxy(super::tunnel::Refused::Unsupported(kind)) => {
-                format!(
-                    "Desk can't reach {} through a {kind} proxy.",
-                    hub.to_lowercase()
-                )
+                format!("Desk can't reach {it} through a {kind} proxy.")
             }
             Failed::Proxy(_) => "Desk couldn't reach this computer's proxy.".into(),
         }

@@ -41,7 +41,7 @@ export const boardSyncOf = (hub: HubRef) => ({
     } catch {
       /* not the hub's JSON */
     }
-    return { ok: false, error: res.status === 404 || res.status === 405 ? "This computer's hub can't sync boards yet. Update Desk." : text.trim() || res.statusText || "The hub refused that.", paused: null, status: res.status };
+    return { ok: false, error: res.status === 404 || res.status === 405 ? "This version of Desk can't sync boards yet. Update Desk." : text.trim() || res.statusText || "Desk couldn’t do that.", paused: null, status: res.status };
   },
   link: (board: string, l: LinkBoard): Promise<Board> => deskCall(hub, "PUT", `/api/desk/boards/${encodeURIComponent(board)}/link`, l),
   unlink: (board: string): Promise<Board> => deskCall(hub, "DELETE", `/api/desk/boards/${encodeURIComponent(board)}/link`),
@@ -163,10 +163,14 @@ export const linkedTo = (b: Board, hub: string): string | null => {
 /** Whether a set of sync tools is Linear's (else Jira's). */
 const systemOfTools = (tools: readonly string[]): string => (tools[0]?.startsWith("linear") ? "Linear" : "Jira");
 
+/** Whether the hub stood behind who the person is: by their own key, or by
+ *  the one user there with their verified email. */
+export const vouched = (source: string | undefined): boolean => source === "vouched" || source === "vouchedByEmail";
+
 /** Whether a ticket can be taken there: the hub vouches for who the
  *  person is, it is synced, no one has its issue, and it isn't finished. */
 export const takeable = (b: Board | undefined, t: Ticket): boolean =>
-  !!b?.sync && !b.sync.paused && b.sync.meSource === "vouched" && !!t.external?.synced && !t.external.kept && t.external.assignee === null && t.state !== "done" && t.state !== "dropped";
+  !!b?.sync && !b.sync.paused && vouched(b.sync.meSource) && !!t.external?.synced && !t.external.kept && t.external.assignee === null && t.state !== "done" && t.state !== "dropped";
 
 /** The tickets on a board's Left-the-filter shelf. */
 export const leftFilterOf = (tickets: readonly Ticket[]): Ticket[] => tickets.filter((t) => t.leftFilter && t.state !== "dropped");

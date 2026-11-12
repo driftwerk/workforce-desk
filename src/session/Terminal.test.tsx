@@ -9,7 +9,8 @@ import { NIGHT } from "../theme/builtin";
 import { useThemeStore } from "../theme/store";
 import { EMOJI_STACK } from "../theme/tokens";
 import { openTerminalLink, openUrl } from "../platform";
-import { Terminal, reattachPrefix, terminalLinks } from "./Terminal";
+import { Terminal, reattachPrefix } from "./Terminal";
+import type { ILinkHandler } from "@xterm/xterm";
 
 const terms: { options: Record<string, unknown>; field?: HTMLTextAreaElement; written: string[]; resets: number }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -23,6 +24,7 @@ vi.mock("@xterm/xterm", () => ({
     written: string[] = [];
     resets = 0;
     buffer = { active: { type: "normal" } };
+    modes = { mouseTrackingMode: "none" };
     private keys?: (e: KeyboardEvent) => boolean;
     private data?: (d: string) => void;
     constructor(options: Record<string, unknown>) {
@@ -305,16 +307,16 @@ describe("a link in a terminal", () => {
     const socket = { readyState: 0, send: vi.fn(), close: vi.fn() };
     useDesk.setState({ hub: { ptySocket: () => socket } as never });
     render(<Terminal sessionId="s1" />);
-    // xterm is given the handler: its own default would confirm() and window.open().
-    expect(terms.at(-1)!.options.linkHandler).toBe(terminalLinks);
+    // xterm is given a handler: its own default would confirm() and window.open().
+    const links = terms.at(-1)!.options.linkHandler as ILinkHandler;
     const page = "https://claude.com/cai/oauth/authorize?code=true&state=s";
-    terminalLinks.activate(new MouseEvent("click"), page);
-    terminalLinks.activate(new MouseEvent("click"), "http://127.0.0.1:9/");
+    links.activate(new MouseEvent("click"), page, null as never);
+    links.activate(new MouseEvent("click"), "http://127.0.0.1:9/", null as never);
     expect(vi.mocked(openTerminalLink).mock.calls).toEqual([[page], ["http://127.0.0.1:9/"]]);
     expect(openUrl).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
-    expect(terminalLinks.allowNonHttpProtocols).toBe(false);
+    expect(links.allowNonHttpProtocols).toBe(false);
     vi.unstubAllGlobals();
   });
 });

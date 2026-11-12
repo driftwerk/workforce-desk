@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { SideResize } from "./SideResize";
+import { useSideFoot, useSideWidth } from "./sideWidth";
 import { useChat } from "../chat/store";
 import { workspaces } from "../chat/types";
 import { GridsSection } from "../grids/Grids";
@@ -150,6 +152,11 @@ export function Sidebar({
   };
   const hubs = useChat((s) => workspaces(s.hubs));
   const keys = useSettings((s) => s.keys);
+  const sideWidth = useSideWidth((s) => s.width);
+  const footOpen = useSideFoot((s) => s.open);
+  const setFootOpen = useSideFoot.getState().setOpen;
+  const voiceOn = useSettings((s) => s.voice);
+  const setSettings = useSettings((s) => s.set);
   // Where it was scrolled is kept (in `ui.main`) and put back.
   const saved = useSavedScroll<HTMLElement>("sidebar");
   const edges = useScrollEdges();
@@ -161,7 +168,8 @@ export function Sidebar({
     [saved, edges],
   );
   return (
-    <nav className="sidebar" aria-label="Desk">
+    <nav className="sidebar" aria-label="Desk" style={{ "--side-w": `${sideWidth}px` } as React.CSSProperties}>
+      <SideResize />
       <div className="side-top">
         <div className="wordmark" onMouseDown={dragWindow}>
           <span>desk</span>
@@ -270,7 +278,41 @@ export function Sidebar({
         <span className="side-fade side-fade-top" aria-hidden="true" />
         <span className="side-fade side-fade-bottom" aria-hidden="true" />
       </div>
-      <div className="side-foot">
+      <div className="side-foot" data-open={footOpen || undefined}>
+        {!footOpen && (
+          <div className="side-mini" role="toolbar" aria-label="Quick actions">
+            <button type="button" className="icon-btn side-mini-btn" onClick={() => onNewSession()} aria-label="New session" title={`New session (${shortcutLabel(keys.newSession)})`}>
+              <PlusIcon />
+            </button>
+            <button type="button" className="icon-btn side-mini-btn" onClick={onNewCrew} aria-label="New crew member" title="New crew member">
+              <CrewIcon />
+            </button>
+            <button type="button" className="icon-btn side-mini-btn" onClick={onSettings} aria-label="Settings" title={`Settings (${shortcutLabel(keys.settings)})`}>
+              <GearIcon />
+            </button>
+            <button
+              type="button"
+              className={`icon-btn side-mini-btn${voiceOn ? " on" : ""}`}
+              aria-pressed={voiceOn}
+              aria-label={voiceOn ? "Turn voice off" : "Turn voice on"}
+              title={`${voiceOn ? "Turn voice off" : "Turn voice on"} (hold ${shortcutLabel(keys.pushToTalk)} to talk)`}
+              onClick={() => setSettings({ voice: !voiceOn })}
+            >
+              <MicIcon />
+            </button>
+            <button type="button" className="icon-btn side-mini-btn side-foot-toggle" aria-expanded={false} aria-label="Show more" title="Show New session, Settings, voice and themes" onClick={() => setFootOpen(true)}>
+              <Chevron open={false} />
+            </button>
+          </div>
+        )}
+        {footOpen && (
+          <button type="button" className="icon-btn side-mini-btn side-foot-toggle side-foot-fold" aria-expanded aria-label="Show less" title="Fold these into a row of icons" onClick={() => setFootOpen(false)}>
+            <Chevron open />
+          </button>
+        )}
+        {footOpen && (
+          <>
+
         <div className="side-actions">
           <button type="button" className="btn side-btn" onClick={() => onNewSession()} aria-label="New session" title={NEW_SESSION_LINE}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -297,7 +339,39 @@ export function Sidebar({
         <You />
         <span className="faint small side-hubs">{connected ? hubs.map((h) => h.label).join(" · ") || "This computer" : "Starting…"}</span>
         <ThemeSwitcher onSettings={onSettings} />
+          </>
+        )}
       </div>
     </nav>
   );
 }
+
+const icon = { width: 14, height: 14, viewBox: "0 0 14 14", fill: "none", stroke: "currentColor", strokeWidth: 1.7, "aria-hidden": true } as const;
+const PlusIcon = () => (
+  <svg {...icon}>
+    <path d="M7 2v10M2 7h10" />
+  </svg>
+);
+const CrewIcon = () => (
+  <svg {...icon}>
+    <circle cx="5.5" cy="4.5" r="2.5" />
+    <path d="M1 12.5c.4-2.4 2.2-3.8 4.5-3.8s4.1 1.4 4.5 3.8M11 4v4M9 6h4" />
+  </svg>
+);
+const GearIcon = () => (
+  <svg {...icon}>
+    <circle cx="7" cy="7" r="2" />
+    <path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.8 2.8l1.4 1.4M9.8 9.8l1.4 1.4M2.8 11.2l1.4-1.4M9.8 4.2l1.4-1.4" />
+  </svg>
+);
+const MicIcon = () => (
+  <svg {...icon}>
+    <rect x="5" y="1.5" width="4" height="7" rx="2" />
+    <path d="M2.5 7a4.5 4.5 0 0 0 9 0M7 11.5V13" />
+  </svg>
+);
+const Chevron = ({ open }: { open: boolean }) => (
+  <svg {...icon} style={{ transform: open ? "none" : "rotate(180deg)" }}>
+    <path d="M3 5l4 4 4-4" />
+  </svg>
+);

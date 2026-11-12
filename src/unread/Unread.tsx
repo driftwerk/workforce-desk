@@ -372,7 +372,7 @@ export function Unread() {
   };
 
   const said = [needing ? needsYou(needing) : "", rows.length ? `${rows.length} unread` : ""].filter(Boolean).join(" · ");
-  const summary = loading ? "Reading what’s new…" : away ? "Waiting for this computer’s hub" : said || "Nothing new";
+  const summary = loading ? "Reading what’s new…" : away ? "Getting Desk ready" : said || "Nothing new";
   const list = rows.length ? kept : [];
   const groups = groupRows(list, rooms);
   const readNow = rows.length ? [] : kept;
@@ -445,8 +445,8 @@ export function Unread() {
         {caughtUp && <CaughtUp />}
         {away && (
           <div className="unread-empty" role="status">
-            <h2 className="display-md">Waiting for the hub</h2>
-            <p className="muted">Desk can’t reach this computer’s hub yet, so it can’t say what’s unread. It shows here as soon as the hub answers.</p>
+            <h2 className="display-md">Getting Desk ready</h2>
+            <p className="muted">Desk is still getting ready, so it can’t say what’s unread yet. It shows here as soon as Desk is ready.</p>
           </div>
         )}
         {loading && (

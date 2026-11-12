@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { clampSide, SIDE_MAX, SIDE_MIN, SIDE_WIDTH, useSideFoot, useSideWidth } from "./sideWidth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
@@ -34,6 +35,9 @@ const GLOBEX = { ...ACME, id: "b-globex", name: "Globex", prefix: "GLX", created
 
 beforeEach(() => {
   kept.clear();
+  localStorage.clear();
+  useSideFoot.setState({ open: true });
+  useSideWidth.setState({ width: SIDE_WIDTH });
   localStorage.removeItem(SECTIONS_KEY);
   reloadSections();
   useBoardOrder.setState({ order: [] });
@@ -43,6 +47,56 @@ beforeEach(() => {
   useDesk.setState({ view: "floor", rooms: {}, sessions: {} });
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+});
+
+describe("the sidebar's width", () => {
+  const sep = () => screen.getByRole("separator", { name: "Sidebar width" });
+  it("is a keyboard-reachable separator that arrow keys move within its limits and double-click resets", () => {
+    const { container } = sidebar();
+    const nav = container.querySelector<HTMLElement>(".sidebar")!;
+    expect(sep().getAttribute("aria-valuenow")).toBe(String(SIDE_WIDTH));
+    expect(sep().getAttribute("aria-valuemin")).toBe(String(SIDE_MIN));
+    expect(sep().getAttribute("aria-valuemax")).toBe(String(SIDE_MAX));
+    fireEvent.keyDown(sep(), { key: "ArrowRight" });
+    expect(nav.style.getPropertyValue("--side-w")).toBe(`${SIDE_WIDTH + 16}px`);
+    fireEvent.keyDown(sep(), { key: "End" });
+    fireEvent.keyDown(sep(), { key: "ArrowRight" });
+    expect(sep().getAttribute("aria-valuenow")).toBe(String(SIDE_MAX));
+    fireEvent.keyDown(sep(), { key: "Home" });
+    fireEvent.keyDown(sep(), { key: "ArrowLeft", shiftKey: true });
+    expect(sep().getAttribute("aria-valuenow")).toBe(String(SIDE_MIN));
+    expect(JSON.stringify(Object.fromEntries(Object.entries(localStorage)))).toContain(String(SIDE_MIN));
+    fireEvent.doubleClick(sep());
+    expect(sep().getAttribute("aria-valuenow")).toBe(String(SIDE_WIDTH));
+  });
+  it("clamps, and survives storage that throws", () => {
+    expect(clampSide(10)).toBe(SIDE_MIN);
+    expect(clampSide(9999)).toBe(SIDE_MAX);
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(() => useSideWidth.getState().setWidth(300)).not.toThrow();
+    expect(useSideWidth.getState().width).toBe(300);
+    spy.mockRestore();
+  });
+});
+
+describe("the sidebar's bottom block", () => {
+  it("is folded by default to icon buttons with labels and shortcut tooltips, and a chevron opens it", () => {
+    useSideFoot.setState({ open: false });
+    sidebar();
+    const bar = screen.getByRole("toolbar", { name: "Quick actions" });
+    for (const name of ["New session", "New crew member", "Settings", "Turn voice on"]) expect(within(bar).getByRole("button", { name })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "New session" }).title).toContain("⌘N");
+    expect(within(bar).getByRole("button", { name: "Settings" }).title).toContain("⌘,");
+    expect(screen.queryByRole("radiogroup", { name: "Look" })).toBeNull();
+    fireEvent.click(within(bar).getByRole("button", { name: "Show more" }));
+    expect(screen.getByRole("radiogroup", { name: "Look" })).toBeTruthy();
+    expect(screen.queryByRole("toolbar", { name: "Quick actions" })).toBeNull();
+    expect(localStorage.getItem("desk.sidebar.foot.main")).toBe("open");
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(localStorage.getItem("desk.sidebar.foot.main")).toBeNull();
+  });
 });
 
 describe("Sidebar", () => {
@@ -217,7 +271,7 @@ describe("Sidebar", () => {
     expect(within(foot as HTMLElement).getByRole("radiogroup", { name: "Look" })).toBeTruthy();
     // Nothing that's meant to stay put is inside what scrolls.
     for (const el of [top, foot]) expect(middle.contains(el)).toBe(false);
-    expect([...container.querySelector(".sidebar")!.children].map((c) => c.className)).toEqual(["side-top", "side-mid", "side-foot"]);
+    expect([...container.querySelector(".sidebar")!.children].map((c) => c.className)).toEqual(["side-resize", "side-top", "side-mid", "side-foot"]);
   });
 
   it("shows the fade at an edge only while there's more that way", () => {

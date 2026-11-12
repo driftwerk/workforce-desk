@@ -152,10 +152,12 @@ it("says where each machine stands and why, its way out on its row", async () =>
   expect(within(bb).getByRole("button", { name: "Reconnect" })).toBeTruthy();
   expect(within(bb).getByRole("button", { name: "View log" })).toBeTruthy();
 
-  expect(row("scratch").textContent).toContain("your SSH key is locked, or scratch turned it away. Run ssh-add in a terminal, then Reconnect.");
-  // A changed key: the line that removes the old one, with Copy.
+  expect(row("scratch").textContent).toContain("scratch won’t take the SSH key Desk signs in with. Remove it and add it again: Desk asks for its password once.");
+  // A changed key: Forget the old one (asked natively), the line by hand
+  // folded, with Copy.
   const ci = row("old-ci");
-  expect(ci.textContent).toContain("old-ci shows a different host key from the one this computer knows");
+  expect(ci.textContent).toMatch(/old-ci shows a different host key from the one this (Mac|computer) knows, so Desk won’t connect\. If it was reinstalled, forget the old key/);
+  expect(within(ci).getByRole("button", { name: "Forget the old key and trust the new one" })).toBeTruthy();
   // By the name and port ssh looks its key up by, with both keys.
   expect(within(ci).getByText("ssh-keygen -R '[10.0.9.9]:2222'")).toBeTruthy();
   expect(ci.textContent).toContain("shows SHA256:Zp4w…a1Qe · Desk knew SHA256:k3Vq…9fXc");

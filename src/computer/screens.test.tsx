@@ -137,6 +137,30 @@ describe("Settings → This computer", () => {
     expect(await screen.findByText("Full Disk Access is on.")).toBeTruthy();
   });
 
+  it("opens Full Disk Access natively, and the card goes once it's on and Desk is back in front", async () => {
+    const { invoke } = await import("../platform");
+    let state: "missing" | "granted" = "missing";
+    setUp(fakeHub({ diskAccess: vi.fn(() => Promise.resolve(state)) }));
+    render(<Computer />);
+    fireEvent.click(await screen.findByRole("button", { name: "Grant Full Disk Access" }));
+    // Not a link the page's opener refuses: the native command, by pane.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("privacy_open", { pane: "fullDiskAccess" });
+    state = "granted";
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(await screen.findByText("Full Disk Access is on.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Grant Full Disk Access" })).toBeNull();
+  });
+
+  it("keeps the Full Disk Access card when the hub doesn't answer on coming back", async () => {
+    let fails = false;
+    setUp(fakeHub({ diskAccess: vi.fn(() => (fails ? Promise.reject(new Error("down")) : Promise.resolve("missing" as const))) }));
+    render(<Computer />);
+    expect(await screen.findByRole("button", { name: "Grant Full Disk Access" })).toBeTruthy();
+    fails = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(screen.getByRole("button", { name: "Grant Full Disk Access" })).toBeTruthy();
+  });
+
   it("says when there's nothing yet, and when the hub can't be read", async () => {
     setUp(fakeHub({ computerGrants: vi.fn(() => Promise.resolve([])), computerActivity: vi.fn(() => Promise.resolve({ rows: [], next: null })) }));
     render(<Computer />);
@@ -151,7 +175,7 @@ describe("Settings → This computer", () => {
       }),
     );
     render(<Computer />);
-    expect(await screen.findByText("Couldn’t ask the hub about this computer just now.")).toBeTruthy();
+    expect(await screen.findByText("Desk couldn’t read this computer’s settings just now.")).toBeTruthy();
     expect(await screen.findByText("Couldn’t read what’s allowed just now.")).toBeTruthy();
     expect(await screen.findByText("Couldn’t read the activity just now.")).toBeTruthy();
   });
@@ -160,14 +184,14 @@ describe("Settings → This computer", () => {
 describe("a hub without these routes", () => {
   it("says it doesn't have that yet, in Settings and on the tab", async () => {
     const { HubError } = await import("../hub/client");
-    const old = () => Promise.reject(new HubError(404, "This hub doesn’t have that yet."));
+    const old = () => Promise.reject(new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it."));
     setUp(fakeHub({ computerAccess: vi.fn(old), computerGrants: vi.fn(old), computerActivity: vi.fn(old), diskAccess: vi.fn(old) }));
     render(<Computer />);
-    expect(await screen.findByText("This hub doesn’t have that yet.")).toBeTruthy();
+    expect(await screen.findByText("This version of Desk can’t do that yet. Update Desk to use it.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop all access now" })).toBeNull();
     cleanup();
     render(<AgentAccess agent={allan} />);
-    expect(await screen.findByText("This hub doesn’t have that yet.")).toBeTruthy();
+    expect(await screen.findByText("This version of Desk can’t do that yet. Update Desk to use it.")).toBeTruthy();
   });
 });
 

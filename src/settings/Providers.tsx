@@ -84,7 +84,7 @@ export function Providers() {
         );
       })}
 
-      <p className="small faint">Keys are kept in this computer’s vault and never leave it except to call the provider. Speech keys live under Voices.</p>
+      <p className="small faint">Keys are kept in this computer’s vault and never leave it except to call the provider. Desk tries each key before it says Connected. Voice keys are under Voices; Gemini Live uses this Gemini key too.</p>
 
       {choosing && (
         <BrainDialog

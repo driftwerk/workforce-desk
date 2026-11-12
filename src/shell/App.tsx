@@ -13,8 +13,8 @@ import { nativeMachines, watchMachines } from "../hub/engines";
 import { ProblemNote } from "../ui/ProblemNote";
 import { setStarter } from "../ui/problem";
 import { startLocalHelper } from "../hub/helperNote";
-import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { DeskReadyBanner, useDeskReady } from "../hub/DeskReady";
+import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, setOpenReporter, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -124,7 +124,8 @@ export function App() {
   useEffect(() => {
     prune(rooms, hubs);
   }, [rooms, hubs]);
-  const hubDown = useHubDown();
+  const { readiness, retry: retryReady } = useDeskReady();
+  const hubDown = readiness.kind !== "ready";
   // A grid's window asks for Settings here, the only window that has them.
   useEffect(
     () =>
@@ -139,6 +140,11 @@ export function App() {
   useEffect(() => {
     setStarter(startLocalHelper);
     return () => setStarter(null);
+  }, []);
+  // A privacy pane that wouldn't open is said, not only logged.
+  useEffect(() => {
+    setOpenReporter((e) => useDesk.getState().fail(e, { what: "opening a link or a setting" }));
+    return () => setOpenReporter(null);
   }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
@@ -215,11 +221,11 @@ export function App() {
     const unlisten = subscribe(onThemesChanged(refresh));
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).
-    // The hub may not be up yet, or may have stopped before Desk opened:
-    // asked again until it answers (the banner says meanwhile).
+    // Desk's helper may not be up yet, or may have stopped before Desk
+    // opened: asked again until it answers. The banner says how far it has
+    // got, and what to do if it can't start; never a toast.
     let gone = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
-    let said = false;
     const reach = (): Promise<void> =>
       localHub().then(
         (t) => {
@@ -228,8 +234,7 @@ export function App() {
           return inApp ? resumeAfterUpdate() : undefined;
         },
         (e: unknown) => {
-          if (!said) fail(e);
-          said = true;
+          console.warn("Desk's helper isn't answering yet:", e);
           // Not awaited: workspaces connected from here load meanwhile.
           if (!gone) retry = setTimeout(() => void reach().catch(fail), LOCAL_HUB_RETRY_MS);
         },
@@ -433,7 +438,7 @@ export function App() {
       <ShareAsk />
       <SetupLauncher />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
-      <HubDownBanner down={hubDown} />
+      <DeskReadyBanner readiness={readiness} onRetry={retryReady} />
       {error && (
         <div className="toast toast-error toast-problem" role="alert">
           <ProblemNote problem={error} onDone={clearError} />
