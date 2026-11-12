@@ -1,4 +1,4 @@
-import { HubError } from "../hub/client";
+import { HubError, KEY_REFUSED } from "../hub/client";
 import { useUi, type SettingsSection } from "../shell/ui";
 import { paneFix, permissionOf } from "./privacy";
 
@@ -159,6 +159,8 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
   const known = KNOWN.find((k) => k.match.test(raw));
   if (e instanceof HubError) {
     const s = e.status;
+    // The provider's reason with its fix, already in the person's words.
+    if (s === 400 && e.code === KEY_REFUSED && raw.trim()) return { plain: raw.trim(), ...(o.what ? { what: o.what } : {}) };
     if (s === 401) return done({ plain: "You’re signed out of this workspace.", fix: settings("Sign in again", "hubs"), details: raw });
     if (s === 403) return done({ plain: "Desk wasn’t allowed to do that.", fix: askOr(settings("Open settings", "computer")), details: raw });
     if (s === 404) return done({ plain: "That isn’t there any more.", details: raw, ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });

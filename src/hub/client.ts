@@ -247,6 +247,9 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** A key the provider refused when the hub tried it: its error is written
+ *  for the person, the fix included. */
+export const KEY_REFUSED = "key_refused";
 
 /** Whether `e` is the hub refusing a change only a move may make. */
 export const crossesBoss = (e: unknown): boolean => e instanceof HubError && e.status === 409 && e.code === CROSSES_BOSS;
@@ -555,6 +558,11 @@ export class DeskHub {
   /** Vault paths (never values) on this hub. */
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;
   saveVault = (path: string, value: string): Promise<void> => this.call("POST", `/api/vault/${path}`, { value });
+  /** Tries a voice key (`fish_audio`, `elevenlabs`, `openai`, `soniox`,
+   *  `gemini`) with the smallest call its provider takes, and keeps it only
+   *  if the provider takes it; a refusal says why in the person's words. */
+  saveVoiceKey = (provider: string, key: string): Promise<void> =>
+    this.call("POST", `/api/desk/voice/keys/${encodeURIComponent(provider)}`, { key });
 
   /** The local agents themselves, created and configured on the person's behalf. */
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>

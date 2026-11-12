@@ -217,6 +217,8 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),
     route("DELETE", "/api/desk/providers/{}"),
+    // A voice key, tried before it is kept.
+    route("POST", "/api/desk/voice/keys/{}"),
     // The crew.
     route("GET", "/api/desk/overview"),
     with_query("GET", "/api/desk/activity", &["limit", "filter", "before"]),

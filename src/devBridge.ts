@@ -250,6 +250,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       // Voice and Tuple live in the app process; in the preview they are off.
       if (cmd === "voice_status") return answer({ state: "off" });
       if (cmd === "voice_lookup") return answer({ state: "failed", message: "Looking a voice up needs the Desk app." });
+      if (cmd === "voice_engine_voices" || cmd === "voice_kokoro_voices") return answer([]);
       if (/^(voice|tuple)_/.test(cmd)) return answer(undefined);
       throw new Error(`${cmd} is only available in the Desk app`);
   }
