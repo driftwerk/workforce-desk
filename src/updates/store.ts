@@ -74,6 +74,17 @@ export const isLive = (s: Session): boolean => s.live;
 export const isWorking = (s: Session): boolean =>
   s.live &&
   (["starting", "working", "blocked", "asking"].includes(s.state) || (s.background?.count ?? 0) > 0 || s.caps?.state === "none" || s.origin === "external");
+
+/** `a` older than `b`, by their numbered parts (`0.2.10` after `0.2.9`). */
+export const olderThan = (a: string, b: string): boolean => {
+  const parts = (v: string) => v.split(/[.+-]/).map((p) => Number.parseInt(p, 10)).map((n) => (Number.isNaN(n) ? 0 : n));
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0);
+    if (d !== 0) return d < 0;
+  }
+  return false;
+};
 /** One that can't be resumed if its CLI stops. */
 export const cantResume = (s: Session): boolean => s.caps?.resume === "none";
 

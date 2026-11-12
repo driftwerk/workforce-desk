@@ -131,6 +131,9 @@ export interface ChatMessage {
   /** Desk's own id for a message you sent, which the hub keeps it under: on
    *  a hub with client ids, the kept copy is known by it alone. */
   clientId?: string;
+  /** Changed after it was sent: a newer version replaced it, and the turn
+   *  that answered the old one was set aside. */
+  edited?: boolean;
   /** Where a kept message is in the hub's archive: higher was kept later. */
   seq?: number;
   /** The client id of the message whose turn said this: an answer, the
@@ -181,6 +184,10 @@ export const FEATURES = {
    *  each kept row's place in the archive: a live message is known by its
    *  id alone. A hub without it is matched by words (./legacy.ts). */
   clientIds: "desk.client_ids",
+  /** A DM turn may replace your latest message (`edit`): the hub sets the
+   *  old one and everything after it aside, and tells the agent what the
+   *  set-aside reply did. */
+  edit: "desk.edit",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */
@@ -217,6 +224,9 @@ export interface DeskTurn {
   voice?: DeskVoice;
   /** Who is in the room, for a hub that takes them (`desk.roster`). */
   members?: DeskMember[];
+  /** In a DM, on a hub with `desk.edit`: this replaces your latest message,
+   *  `replaces` (the id the hub keeps it under). */
+  edit?: { replaces: string };
 }
 
 /** A room's member, as a room turn names them. */
@@ -253,6 +263,8 @@ export interface DeskMark {
   /** What the turn asked with `in_reply_to` failed with, said instead of an
    *  answer. */
   failed?: boolean;
+  /** A newer version of the message, which replaced it. */
+  edited?: boolean;
 }
 
 /** What a live turn is doing, as a snapshot says. */

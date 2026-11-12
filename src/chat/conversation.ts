@@ -836,6 +836,7 @@ export class Conversation {
       ...message("user", content),
       ...(files.length ? { attachments: files } : {}),
       ...(clientId ? { clientId } : {}),
+      ...(ask.turn?.edit ? { edited: true } : {}),
     };
     if (ask.queued) this.waiting.set(ask.queued, { ref: turnRef, shown: said.id });
     // Unheard of a minute on, it isn't delivered. A queued send is the

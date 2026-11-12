@@ -1,5 +1,6 @@
 import { parse, stringify } from "smol-toml";
 import type { DeskHub } from "../hub/client";
+import type { Listing } from "../hub/connections";
 
 /** Which connectors reach an agent, as its own `config.toml` says:
  *
@@ -65,6 +66,18 @@ export interface Today {
   reaching: string[];
   own: string[];
 }
+
+/** What reaches agent `agent` today by `listing`, as a first choice must
+ *  keep it: the catalog's connectors, every other adapter the hub has, and
+ *  the ones it reaches through its own connection. */
+export const todayOf = (listing: Listing | null, agent: string): Today => {
+  const list = listing?.connectors;
+  if (!list) return { reaching: [], own: [] };
+  return {
+    reaching: [...new Set([...list.map((c) => c.id), ...(listing.adapters ?? [])])],
+    own: list.filter((c) => c.usedBy.some((u) => u.agent === agent && u.connection === "own")).map((c) => c.id),
+  };
+};
 
 /** `b` as written once the person first chooses: an agent with no
  *  `enabled` yet gets what reaches it today, so choosing one changes

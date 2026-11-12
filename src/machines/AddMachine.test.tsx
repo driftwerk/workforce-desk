@@ -204,6 +204,45 @@ it("offers the spelling the SSH config knows when a name didn't resolve, and put
   expect(fake.probe).toHaveBeenCalledTimes(1);
 });
 
+it("gives Desk its own SSH entry for a machine whose config forwards ports, then looks at it by that name", async () => {
+  const { native, fake } = fakeNative();
+  const refused = "Your SSH config forwards ports for devbox (localforward). Desk keeps its connection open all the time, so it won't carry them.";
+  fake.probe.mockRejectedValueOnce(new Error(refused));
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("devbox");
+  const box = screen.getByRole("alert", { name: "Desk can’t add it" });
+  expect(box.textContent).toContain("forwards ports for devbox");
+  // One primary button: Continue steps back while the offer stands.
+  expect(screen.getByRole("button", { name: "Continue" }).className).not.toContain("btn-signal");
+  await act(async () => fireEvent.click(within(box).getByRole("button", { name: "Give Desk its own entry" })));
+  expect(fake.deskEntry).toHaveBeenCalledWith("devbox");
+  // Looked at again, by Desk's entry.
+  expect(fake.probe).toHaveBeenLastCalledWith("desk-m-devbox-a1b2c3");
+  expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("desk-m-devbox-a1b2c3");
+});
+
+it("never offers Desk's entry again for one of its own", async () => {
+  const { native, fake } = fakeNative();
+  fake.probe.mockRejectedValue(new Error("Your SSH config forwards ports for desk-m-devbox-a1b2c3 (localforward). Desk keeps its connection open all the time, so it won't carry them."));
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("desk-m-devbox-a1b2c3");
+  expect(screen.getByRole("alert", { name: "Desk can’t add it" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Give Desk its own entry" })).toBeNull();
+});
+
+it("leaves it as it was when the person says no to Desk's entry, and says why one can't help", async () => {
+  const { native, fake } = fakeNative();
+  fake.probe.mockRejectedValue(new Error("Your SSH config forwards ports for devbox (localforward). Give Desk a Host entry without forwards."));
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("devbox");
+  fake.deskEntry.mockResolvedValueOnce(null);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Give Desk its own entry" })));
+  expect(fake.probe).toHaveBeenCalledTimes(1);
+  fake.deskEntry.mockRejectedValueOnce(new Error("Your SSH config forwards ports for every host it reaches (under Host * or a pattern), so an entry of Desk's would carry them too."));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Give Desk its own entry" })));
+  expect(screen.getByText(/for every host it reaches/)).toBeTruthy();
+});
+
 it("says plainly that an account running desktop Desk can't be a machine", async () => {
   const { native, fake } = fakeNative();
   const desktop = "This account already runs Desk as a desktop app; use another account for a machine. Desk won't change anything there.";

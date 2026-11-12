@@ -162,7 +162,7 @@ it("says where each machine stands and why, its way out on its row", async () =>
   expect(within(ci).getByText("ssh-keygen -R '[10.0.9.9]:2222'")).toBeTruthy();
   expect(ci.textContent).toContain("shows SHA256:Zp4w…a1Qe · Desk knew SHA256:k3Vq…9fXc");
   expect(within(ci).getByRole("button", { name: "Copy" })).toBeTruthy();
-  expect(row("shared").textContent).toContain("It runs a newer Desk (0.2.2). Update Desk here to drive it; its sessions keep running.");
+  expect(row("shared").textContent).toContain("It runs a newer Desk (0.2.2). Update Desk on this Mac to drive it; its sessions keep running.");
   expect(row("gpu").textContent).toContain("Connecting… Desk gives up after 15 s and says why.");
 });
 

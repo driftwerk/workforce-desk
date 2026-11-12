@@ -1,0 +1,317 @@
+<title>Agent Chat Upgrades</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650&family=Figtree:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a stack of Desk-window frames, one per feature, each with a short note beside it. Desk's own Night (default) and Day tokens. */
+:root{
+  --bg:#111210;--surface:#171815;--raised:#1E1F1B;--sunken:#0C0D0B;--border:#2C2E28;
+  --text:#F1F2EC;--muted:#B4B7AA;--faint:#8F9285;
+  --signal:#D4FF3A;--on-signal:#161A05;--signal-soft:#262E10;--signal-soft-text:#DFFF7A;
+  --working:#7DB8FF;--blocked:#FFB547;--blocked-soft:#2A2110;--done:#6EE7A8;--danger:#FF8A7A;
+  --mark:#4A5A12;--shadow:0 18px 50px #00000080;
+  --display:"Bricolage Grotesque","Figtree",system-ui,sans-serif;
+  --ui:"Figtree",system-ui,-apple-system,sans-serif;
+  --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#FBFAF7;--surface:#F3F1EB;--raised:#FFFFFF;--sunken:#ECE9E0;--border:#DAD6CA;
+  --text:#1B1C18;--muted:#50534A;--faint:#62655B;
+  --signal:#3F5A06;--on-signal:#F7FCDD;--signal-soft:#E8F0C4;--signal-soft-text:#34490A;
+  --working:#1D58C0;--blocked:#9A5200;--blocked-soft:#FCEFD6;--done:#12703A;--danger:#B3261E;
+  --mark:#E3EDB0;--shadow:0 18px 50px #3C341E38;color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#FBFAF7;--surface:#F3F1EB;--raised:#FFFFFF;--sunken:#ECE9E0;--border:#DAD6CA;
+  --text:#1B1C18;--muted:#50534A;--faint:#62655B;
+  --signal:#3F5A06;--on-signal:#F7FCDD;--signal-soft:#E8F0C4;--signal-soft-text:#34490A;
+  --working:#1D58C0;--blocked:#9A5200;--blocked-soft:#FCEFD6;--done:#12703A;--danger:#B3261E;
+  --mark:#E3EDB0;--shadow:0 18px 50px #3C341E38;color-scheme:light}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font:14px/1.5 var(--ui);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.page{max-width:1180px;margin:0 auto;display:grid;gap:56px}
+header.intro{display:grid;gap:8px;max-width:70ch}
+h1{font:650 34px/1.1 var(--display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:650 21px/1.2 var(--display);margin:0;text-wrap:balance}
+.lede{color:var(--muted);margin:0}
+.chip{display:inline-flex;align-items:center;gap:6px;font:500 11px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+.chip b{color:var(--signal-soft-text);background:var(--signal-soft);padding:4px 7px;border-radius:5px;font-weight:500}
+
+section.feature{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:start}
+.note{display:grid;gap:10px;color:var(--muted);font-size:13.5px}
+.note p{margin:0}
+.note ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.note .k{font:500 12px var(--mono);color:var(--text);background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+
+/* Desk window */
+.win{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;min-width:0}
+.bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)}
+.av{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font:600 12px var(--display);flex:none}
+.av.agent{background:var(--signal-soft);color:var(--signal-soft-text)}
+.av.me{background:var(--raised);color:var(--muted);border:1px solid var(--border)}
+.bar .name{font:600 14px var(--ui)}
+.bar .meta{color:var(--faint);font-size:12px}
+.bar .sp{flex:1}
+.iconbtn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--muted);border:1px solid transparent}
+.iconbtn.on{background:var(--raised);border-color:var(--border);color:var(--text)}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 340px}
+.split > .side{border-left:1px solid var(--border);background:var(--bg);min-width:0;display:flex;flex-direction:column}
+.chat{position:relative;background:var(--bg);display:flex;flex-direction:column;min-width:0}
+.msgs{padding:16px 18px 12px;display:grid;gap:14px;min-height:300px;align-content:end}
+.msg{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;position:relative;border-radius:8px;padding:6px 8px;margin:-6px -8px}
+.msg .who{font:600 13px var(--ui)}
+.msg .who time{font:400 11.5px var(--mono);color:var(--faint);margin-left:6px}
+.msg .body{color:var(--text);margin-top:2px;min-width:0}
+.msg .body p{margin:0 0 6px}
+.msg .body p:last-child{margin:0}
+.msg.hover{background:var(--surface)}
+.msg.dim{opacity:.45}
+code{font:12.5px var(--mono);background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+.day{display:flex;align-items:center;gap:10px;color:var(--faint);font:500 11px var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.day::before,.day::after{content:"";flex:1;height:1px;background:var(--border)}
+.newline{display:flex;align-items:center;gap:10px;color:var(--signal-soft-text);font:500 11px var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.newline::after{content:"";flex:1;height:1px;background:var(--signal)}
+
+.tools{position:absolute;right:10px;top:-14px;display:flex;background:var(--raised);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 14px #0004;overflow:hidden}
+.tools span{padding:5px 9px;font-size:12px;color:var(--muted);display:flex;gap:5px;align-items:center;border-right:1px solid var(--border);white-space:nowrap}
+.tools span:last-child{border-right:0}
+.tools span.hot{background:var(--signal-soft);color:var(--signal-soft-text)}
+.tools span.del{color:var(--danger)}
+
+.composer{margin:0 14px 14px;border:1px solid var(--border);background:var(--raised);border-radius:10px;padding:10px 12px;display:grid;gap:8px}
+.composer .ph{color:var(--faint)}
+.composer .row{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.btn{font:600 12.5px var(--ui);padding:6px 12px;border-radius:7px;border:1px solid var(--border);background:var(--raised);color:var(--text);white-space:nowrap}
+.btn.primary{background:var(--signal);color:var(--on-signal);border-color:var(--signal)}
+.btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.hint{font-size:12px;color:var(--faint)}
+.hint .k{font:500 11px var(--mono);background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:0 4px;color:var(--muted)}
+
+/* 1 jump pill */
+.pill{position:absolute;left:50%;bottom:86px;transform:translateX(-50%);background:var(--signal);color:var(--on-signal);font:600 12.5px var(--ui);padding:7px 14px;border-radius:999px;box-shadow:0 6px 20px #0006;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.pill small{font:500 11px var(--mono);opacity:.75}
+.anchor{display:flex;gap:8px;align-items:center;font:500 11px var(--mono);color:var(--working)}
+
+/* 2 edit */
+.editing{border-color:var(--signal);box-shadow:0 0 0 3px var(--signal-soft)}
+.editing .lbl{font:500 11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--signal-soft-text)}
+.warn{background:var(--blocked-soft);color:var(--text);border-radius:8px;padding:9px 11px;font-size:12.5px;display:grid;gap:4px}
+.warn b{color:var(--blocked)}
+.warn ul{margin:0;padding-left:16px}
+.edited{font:400 11.5px var(--ui);color:var(--faint);margin-left:6px}
+
+/* 3 delete */
+.confirm{grid-column:2;margin-top:8px;border:1px solid var(--border);background:var(--raised);border-radius:9px;padding:11px 12px;display:grid;gap:9px}
+.confirm label{display:flex;gap:8px;align-items:flex-start;color:var(--muted);font-size:13px}
+.box{width:15px;height:15px;border-radius:4px;border:1.5px solid var(--signal);background:var(--signal);flex:none;margin-top:2px;display:grid;place-items:center;color:var(--on-signal);font-size:10px;font-weight:700}
+.gone{color:var(--faint);font-style:italic;font-size:13px}
+
+/* 4 search */
+.search{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--raised)}
+.search .field{flex:1;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--signal);border-radius:8px;padding:6px 10px;min-width:0}
+.search .count{font:500 12px var(--mono);color:var(--muted);white-space:nowrap}
+mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
+mark.cur{background:var(--signal);color:var(--on-signal)}
+.results{padding:8px;display:grid;gap:4px;overflow:auto}
+.res{border-radius:8px;padding:8px 10px;display:grid;gap:2px;font-size:12.5px}
+.res.cur{background:var(--surface);border:1px solid var(--border)}
+.res .when{font:500 11px var(--mono);color:var(--faint)}
+.res .txt{color:var(--muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.sidehead{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.sidehead .t{font:600 13.5px var(--ui)}
+.sidehead .sp{flex:1}
+.loadmark{font:500 11px var(--mono);color:var(--faint);text-align:center}
+
+/* 5 threads */
+.replies{margin-top:6px;display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--working);font-weight:600}
+.replies .faces{display:flex}
+.replies .faces i{width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font:600 9px var(--display);font-style:normal;border:1.5px solid var(--bg)}
+.replies .faces i+i{margin-left:-5px}
+.replies small{color:var(--faint);font-weight:400}
+.msg.active{background:var(--signal-soft)}
+.parent{margin:12px 14px;padding:10px 12px;border-radius:9px;background:var(--surface);border:1px solid var(--border);font-size:13px;display:grid;gap:4px}
+.parent .who{font:600 12.5px var(--ui)}
+.tcount{display:flex;align-items:center;gap:10px;margin:0 14px;color:var(--faint);font:500 11px var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.tcount::after{content:"";flex:1;height:1px;background:var(--border)}
+.side .msgs{min-height:0;align-content:start;padding:12px 14px;flex:1}
+.side .composer{margin:0 12px 12px}
+.check{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted)}
+.check .box{width:13px;height:13px;font-size:9px}
+.typing{display:flex;gap:4px;align-items:center;color:var(--faint);font-size:12px}
+.typing i{width:5px;height:5px;border-radius:50%;background:var(--working);display:inline-block}
+
+.legend{display:flex;flex-wrap:wrap;gap:16px;color:var(--faint);font-size:12.5px}
+
+@media (max-width:980px){
+  section.feature{grid-template-columns:minmax(0,1fr)}
+  .split{grid-template-columns:minmax(0,1fr)}
+  .split > .side{border-left:0;border-top:1px solid var(--border)}
+}
+@media (max-width:520px){
+  h1{font-size:27px}
+  .tools span .lab{display:none}
+  .pill{bottom:92px}
+}
+@media (prefers-reduced-motion: no-preference){
+  .typing i{animation:b 1.2s infinite ease-in-out}
+  .typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+  @keyframes b{0%,80%,100%{opacity:.25}40%{opacity:1}}
+}
+</style>
+
+<div class="page">
+  <header class="intro">
+    <span class="chip">Desk · agent chat · <b>proposal</b></span>
+    <h1>Agent chat upgrades</h1>
+    <p class="lede">Six changes to a chat with an agent, shown in Desk's Night theme (Day if your system is light). The scroll fix is invisible, so it shares a frame with "Jump to latest". The sample chat is with Desk, your overseer.</p>
+  </header>
+
+  <!-- 1 -->
+  <section class="feature" aria-labelledby="f1">
+    <div class="win">
+      <div class="bar"><div class="av agent">D</div><div><div class="name">Desk</div><div class="meta">overseer · idle</div></div><span class="sp"></span><span class="iconbtn" title="Search">⌕</span><span class="iconbtn">⋯</span></div>
+      <div class="chat">
+        <div class="msgs">
+          <div class="anchor">◆ You're reading here. New messages don't move this.</div>
+          <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:14</time></div><div class="body"><p>Ledger Migration finished the ATL-563 fix. #511 passed its independent review and goes into the merge queue once CI is green.</p></div></div></div>
+          <div class="msg"><div class="av me">K</div><div><div class="who">You<time>16:15</time></div><div class="body"><p>ok, and what about ATL-562, the agency leads?</p></div></div></div>
+          <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:15</time></div><div class="body"><p>Still the top priority. Check production's role setup first: it decides whether the fix is a migration or a config change.</p></div></div></div>
+        </div>
+        <div class="pill" role="button">↓ Jump to latest <small>3 new</small></div>
+        <div class="composer"><span class="ph">Message Desk</span><div class="row"><span class="hint"><span class="k">End</span> jumps to latest</span><span class="btn primary">Send</span></div></div>
+      </div>
+    </div>
+    <div class="note">
+      <h2 id="f1">Stays put · Jump to latest</h2>
+      <p><b>Scroll fix.</b> The chat only follows new messages when you're already at the bottom. Otherwise it keeps the message you're reading in place when:</p>
+      <ul><li>older history loads above it</li><li>a table, image or code block finishes drawing</li><li>a streaming reply re-renders</li></ul>
+      <p><b>Jump to latest.</b> Shows whenever you're scrolled up, with a count of what arrived since. Click it or press <span class="k">End</span>. Coming back to a chat with unread messages opens at a "New" line.</p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="feature" aria-labelledby="f2">
+    <div class="win">
+      <div class="bar"><div class="av agent">D</div><div><div class="name">Desk</div><div class="meta">overseer · idle</div></div><span class="sp"></span></div>
+      <div class="chat">
+        <div class="msgs">
+          <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:20</time></div><div class="body"><p>Want me to file the leads bug for Ledger Migration?</p></div></div></div>
+          <div class="msg"><div class="av me">K</div><div><div class="who">You<time>16:21</time></div><div class="body"><p>yes file it as ATL and assign to Sam</p></div></div></div>
+          <div class="msg dim"><div class="av agent">D</div><div><div class="who">Desk<time>16:21</time></div><div class="body"><p>Filed ATL-571 and assigned it to Sam Lee.</p></div></div></div>
+        </div>
+        <div class="composer editing">
+          <span class="lbl">Editing your last message</span>
+          <div>yes file it as ATL and assign to <u>me</u></div>
+          <div class="warn"><b>Desk's reply to it already did 2 things:</b><ul><li>created ATL-571 in Linear</li><li>assigned it to Sam Lee</li></ul>Editing won't undo them. Desk answers the new version knowing they happened, so it can fix them itself.</div>
+          <div class="row"><span class="hint"><span class="k">Esc</span> cancel</span><span class="btn ghost">Cancel</span><span class="btn primary">Save and ask again</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <h2 id="f2">↑ edits your last message</h2>
+      <p>In an empty composer, <span class="k">↑</span> opens your last message for editing. You can also choose Edit from its hover menu.</p>
+      <ul><li>Saving replaces the message, which then reads "(edited)". Desk's old reply is set aside (dimmed here) and the agent answers again.</li><li>If that reply took actions, the edit box lists them first. They can't be undone, so the agent is told they happened rather than pretending otherwise.</li><li>Only your latest message, and only once the agent has finished replying. Edit an earlier one and later replies would no longer fit.</li></ul>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="feature" aria-labelledby="f3">
+    <div class="win">
+      <div class="bar"><div class="av agent">D</div><div><div class="name">Desk</div><div class="meta">overseer · idle</div></div><span class="sp"></span></div>
+      <div class="chat">
+        <div class="msgs">
+          <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>11:43</time></div><div class="body"><p>Ledger Migration has been waiting on you for about 45 minutes.</p></div></div></div>
+          <div class="msg hover">
+            <div class="tools"><span>↩ <span class="lab">Reply in thread</span></span><span>✎ <span class="lab">Edit</span></span><span class="del hot">🗑 <span class="lab">Delete</span></span><span>⋯</span></div>
+            <div class="av me">K</div>
+            <div><div class="who">You<time>11:44</time></div><div class="body"><p>the staging DB password is in the old wiki page, use that</p></div></div>
+            <div class="confirm">
+              <div><b>Delete this message?</b> <span class="hint">It leaves this chat and everything Desk sees from now on.</span></div>
+              <label><span class="box">✓</span><span>Also forget what Desk saved from it. Desk saved 1 memory from this message: <i>"staging DB password is on the old wiki page"</i>.</span></label>
+              <div class="row" style="display:flex;gap:8px;justify-content:flex-end"><span class="btn ghost">Cancel</span><span class="btn danger">Delete</span></div>
+            </div>
+          </div>
+          <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>11:44</time></div><div class="body"><p class="gone">After deleting, this reply stays, with a note that it answered a message you deleted.</p></div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <h2 id="f3">Delete your messages</h2>
+      <p>Hover a message you sent, then Delete. You confirm in place, with no pop-up.</p>
+      <ul><li>It's removed from the chat and from the agent's history, so it can't come back in a later turn.</li><li>Anything the agent saved to memory from it is listed by name, with "also forget" ticked.</li><li>The agent's replies stay, marked "answered a deleted message", so the chat still reads correctly.</li><li>The agent's own messages can't be deleted. You can only hide them, so nothing is lost by accident.</li></ul>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="feature" aria-labelledby="f4">
+    <div class="win">
+      <div class="bar"><div class="av agent">D</div><div><div class="name">Desk</div><div class="meta">overseer · idle</div></div><span class="sp"></span><span class="iconbtn on" title="Search">⌕</span></div>
+      <div class="search"><div class="field">⌕ <span>ledger</span></div><span class="count">2 of 14</span><span class="iconbtn">↑</span><span class="iconbtn">↓</span><span class="btn ghost">Done</span></div>
+      <div class="split">
+        <div class="chat">
+          <div class="msgs" style="min-height:280px">
+            <div class="day">Tue 10 Nov</div>
+            <div class="msg"><div class="av me">K</div><div><div class="who">You<time>09:12</time></div><div class="body"><p>start a session to move atlas onto <mark class="cur">Ledger</mark>, Claude in the monorepo</p></div></div></div>
+            <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>09:12</time></div><div class="body"><p>Started "<mark>Ledger</mark> Migration" on Claude in ~/dev/projects/atlas/monorepo. It's in the Atlas group.</p></div></div></div>
+          </div>
+        </div>
+        <div class="side">
+          <div class="sidehead"><span class="t">14 matches</span><span class="sp"></span><span class="hint">whole history</span></div>
+          <div class="results">
+            <div class="res"><span class="when">Today 16:14 · Desk</span><span class="txt"><mark>Ledger</mark> Migration finished the ATL-563 fix…</span></div>
+            <div class="res cur"><span class="when">Tue 10 Nov 09:12 · You</span><span class="txt">start a session to move atlas onto <mark>Ledger</mark>…</span></div>
+            <div class="res"><span class="when">Tue 10 Nov 09:12 · Desk</span><span class="txt">Started "<mark>Ledger</mark> Migration" on Claude…</span></div>
+            <div class="res"><span class="when">Mon 9 Nov 17:40 · Desk</span><span class="txt">The <mark>Ledger</mark> staging stack is up…</span></div>
+            <div class="loadmark">10 more</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <h2 id="f4">Search the chat</h2>
+      <p><span class="k">⌘F</span> in a chat searches its whole history, including what isn't loaded yet.</p>
+      <ul><li>Matches are listed on the right, newest first. <span class="k">↑</span> <span class="k">↓</span> or <span class="k">Enter</span> steps through them.</li><li>Choosing a match loads the chat around it and highlights it in place, with the conversation either side.</li><li>Filters to come if wanted: "from me", "from the agent", a date.</li><li>The search runs on the hub, so it also covers chats from another device.</li></ul>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="feature" aria-labelledby="f5">
+    <div class="win">
+      <div class="bar"><div class="av agent">D</div><div><div class="name">Desk</div><div class="meta">overseer · 1 thread working</div></div><span class="sp"></span></div>
+      <div class="split">
+        <div class="chat">
+          <div class="msgs" style="min-height:380px">
+            <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:30</time></div><div class="body"><p>Three things need you:</p><p>1. ATL-562, sales reps can read every agency's leads<br>2. Production promotion for #509<br>3. Ledger Migration's question about the leads test</p></div></div></div>
+            <div class="msg active"><div class="av me">K</div><div><div class="who">You<time>16:31</time></div><div class="body"><p>let's dig into ATL-562 properly</p><div class="replies"><span class="faces"><i class="av agent">D</i><i class="av me">K</i></span>4 replies <small>last 16:38</small></div></div></div></div>
+            <div class="msg"><div class="av me">K</div><div><div class="who">You<time>16:33</time></div><div class="body"><p>and promote #509, it's fine</p></div></div></div>
+            <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:33</time></div><div class="body"><p>Promoting #509 to production now.</p></div></div></div>
+          </div>
+          <div class="composer"><span class="ph">Message Desk</span><div class="row"><span class="btn primary">Send</span></div></div>
+        </div>
+        <div class="side">
+          <div class="sidehead"><span class="t">Thread</span><span class="hint">· ATL-562</span><span class="sp"></span><span class="iconbtn">⤢</span><span class="iconbtn">✕</span></div>
+          <div class="parent"><span class="who">You · 16:31</span>let's dig into ATL-562 properly</div>
+          <div class="tcount">4 replies</div>
+          <div class="msgs">
+            <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:32</time></div><div class="body"><p>Production gives sales reps the <code>agency_admin</code> role. That's why they see every agency.</p></div></div></div>
+            <div class="msg"><div class="av me">K</div><div><div class="who">You<time>16:36</time></div><div class="body"><p>so it's config, not a migration?</p></div></div></div>
+            <div class="msg"><div class="av agent">D</div><div><div class="who">Desk<time>16:38</time></div><div class="body"><p>Mostly. Two seeded reps also need their rows fixed. I'll draft both for you to approve.</p></div></div></div>
+            <div class="typing"><i></i><i></i><i></i> Desk is drafting</div>
+          </div>
+          <div class="composer"><span class="ph">Reply in thread</span><label class="check"><span class="box">✓</span>Also send to the chat</label><div class="row"><span class="btn primary">Reply</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <h2 id="f5">Threads in a DM</h2>
+      <p>Reply in thread on any message opens it beside the chat. The main chat keeps moving, and the message shows "4 replies".</p>
+      <ul><li>In a thread the agent sees the message it started from, the thread, and the chat up to that point. Other threads stay out.</li><li>A thread runs its own turn, so the agent can work on two things at once, as it does here: drafting in the thread while promoting #509 in the main chat.</li><li>"Also send to the chat" posts a reply in both places, like Slack.</li><li>Memory is shared: what the agent learns in a thread it knows everywhere.</li><li>Threads in a Slack DM map to these one to one.</li></ul>
+      <p class="hint">Needs a hub change: replies in a DM carry the id of the thread they're in.</p>
+    </div>
+  </section>
+
+  <div class="legend"><span>Shortcuts: <span class="hint"><span class="k">↑</span> edit last · <span class="k">End</span> latest · <span class="k">⌘F</span> search · <span class="k">T</span> on a hovered message, reply in thread</span></span></div>
+</div>

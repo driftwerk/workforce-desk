@@ -53,6 +53,7 @@
     "allow-machine-log",
     "allow-machine-remote-log",
     "allow-machine-ssh-hosts",
+    "allow-machine-desk-entry",
     "allow-machine-edit",
     "allow-machine-check-reach",
     "allow-machine-cancel-add",
@@ -155,6 +156,9 @@
     "allow-wsl-install",
     "allow-wsl-forget-resume",
     "allow-wsl-convert",
+    "allow-wsl-create-user",
+    "allow-wsl-user-name",
+    "allow-wsl-install-alongside",
     "allow-wsl-setup",
     "allow-wsl-fix-forwarding",
     "allow-wsl-installed"
