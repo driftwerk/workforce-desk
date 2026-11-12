@@ -238,6 +238,24 @@ pub(crate) fn same_place(a: &str, b: &str) -> bool {
     }
 }
 
+/// Names paired hub `id` `label` (the name its workspace gives itself,
+/// say): only the name changes, never its id, address or token.
+pub fn rename(paths: &Paths, id: &str, label: &str) -> Result<HubRecord> {
+    let label = label.trim();
+    if label.is_empty() || label.chars().count() > 60 {
+        eyre::bail!("A workspace's name is 1 to 60 characters.");
+    }
+    let mut records = read_records(paths)?;
+    let record = records
+        .iter_mut()
+        .find(|r| r.id == id)
+        .ok_or_else(|| eyre::eyre!("Desk isn't connected to that workspace any more."))?;
+    record.label = label.to_string();
+    let renamed = record.clone();
+    write_records(paths, &records)?;
+    Ok(renamed)
+}
+
 pub fn remove(paths: &Paths, id: &str) -> Result<()> {
     let records: Vec<_> = read_records(paths)?
         .into_iter()
@@ -504,6 +522,40 @@ mod tests {
         // The same place, however it is written, is paired again in place.
         save_with(&secrets, &paths, "Ours", "https://A.b-c.example/", "again").unwrap();
         assert_eq!(token("a-b-c-example").as_deref(), Some("again"));
+    }
+
+    #[test]
+    fn a_workspace_is_renamed_in_place_keeping_its_id_address_and_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let secrets = Secrets::of(&paths, desk_core::KeyStore::File);
+        save_with(
+            &secrets,
+            &paths,
+            "Driftwork",
+            "https://workforce.driftwerk.xyz",
+            "tok",
+        )
+        .unwrap();
+        let before = read_records(&paths).unwrap()[0].clone();
+        let renamed = rename(&paths, &before.id, " Driftwerk ").unwrap();
+        assert_eq!(renamed.label, "Driftwerk");
+        let after = read_records(&paths).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(
+            (after[0].id.as_str(), after[0].url.as_str()),
+            (before.id.as_str(), before.url.as_str())
+        );
+        assert_eq!(
+            secrets
+                .get_account(&device_token_account(&before.id))
+                .unwrap()
+                .as_deref(),
+            Some("tok")
+        );
+        assert!(rename(&paths, &before.id, "  ").is_err());
+        assert!(rename(&paths, &before.id, &"x".repeat(61)).is_err());
+        assert!(rename(&paths, "nobody-example-com", "Acme").is_err());
     }
 
     #[test]

@@ -26,11 +26,57 @@ export type PairStatus =
   | { status: "expired" }
   | { status: "used" };
 
+/** What a typed address that isn't one says. */
+export const NOT_AN_ADDRESS = "That isn’t a workspace address. Type one like workforce.example.com.";
+
+/** A typed workspace address as Desk keeps it: a bare host (`acme.io`), a
+ *  full address or a link pasted from the workspace (its path dropped) all
+ *  become `https://host[:port]`; `http` only as typed. Anything else is
+ *  refused in plain words, never the browser's own ("Invalid URL"). */
 export const normaliseHubUrl = (raw: string): string => {
   const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed || /\s/.test(trimmed)) throw new Error(NOT_AN_ADDRESS);
   const withScheme = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  const u = new URL(withScheme);
+  let u: URL;
+  try {
+    u = new URL(withScheme);
+  } catch {
+    throw new Error(NOT_AN_ADDRESS);
+  }
+  // A host with a dot (or localhost, or an address): `acme` alone is a typo.
+  const host = u.hostname;
+  const named = host === "localhost" || host.includes(".") || host.startsWith("[");
+  if ((u.protocol !== "https:" && u.protocol !== "http:") || !named) throw new Error(NOT_AN_ADDRESS);
   return `${u.protocol}//${u.host}`;
+};
+
+/** The words a hub's address often starts with, which say nothing of whose
+ *  it is. */
+const GENERIC = new Set(["www", "workforce", "hub", "app", "desk", "api", "gateway", "agents", "ai"]);
+
+/** What a workspace at `url` is called when it doesn't say (an older hub):
+ *  the first part of its address that says whose it is —
+ *  `workforce.driftwerk.xyz` → "Driftwerk". As the hub names itself
+ *  (`name_of_host` in its gateway): the two give the same name. */
+export const nameOfHost = (url: string): string => {
+  let host: string;
+  try {
+    host = new URL(/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`).hostname;
+  } catch {
+    return url;
+  }
+  const labels = host.split(".").filter(Boolean);
+  if (labels.length < 2 || labels.every((l) => /^\d+$/.test(l)) || host.startsWith("[")) return host;
+  const named = labels.slice(0, -1).find((l) => !GENERIC.has(l.toLowerCase()));
+  return named ? named[0]!.toUpperCase() + named.slice(1) : host;
+};
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 };
 
 /** A code asked for, and the page to approve it on — null from a hub that
@@ -38,6 +84,8 @@ export const normaliseHubUrl = (raw: string): string => {
 export interface PairingCode {
   code: string;
   approveUrl: string | null;
+  /** What the workspace calls itself; null from a hub that doesn't say. */
+  name: string | null;
 }
 
 /** The approval page as Desk opens it: an https page (the hub's sign-in may
@@ -59,16 +107,18 @@ const approvePage = (raw: unknown, hub: string): string | null => {
  *  approved, the only time such a hub does. */
 export const requestPairing = async (url: string, deviceName: string, email?: string): Promise<PairingCode> => {
   const identity = email?.trim();
-  const res = await invoke<{ status: number; body: { code?: unknown; approve_url?: unknown } | null }>("pair_request", {
+  const res = await invoke<{ status: number; body: { code?: unknown; approve_url?: unknown; name?: unknown } | null }>("pair_request", {
     url,
     deviceName,
     identityHint: identity || null,
   });
-  if (res.status === 404) throw new Error("That workspace doesn't accept new devices.");
-  if (res.status === 429) throw new Error("Too many pairing attempts — wait a minute and try again.");
-  if (res.status < 200 || res.status >= 300) throw new Error(`The workspace refused the request (${res.status}).`);
-  if (typeof res.body?.code !== "string" || !res.body.code) throw new Error("The workspace gave no code.");
-  return { code: res.body.code, approveUrl: approvePage(res.body.approve_url, url) };
+  const host = hostOf(url);
+  if (res.status === 404) throw new PairingRefused(`${host} doesn’t let new devices connect. Ask its admin to turn on device pairing.`, res.status);
+  if (res.status === 429) throw new PairingRefused(`${host} has had too many tries just now. Try again in a minute.`, res.status);
+  if (res.status >= 500) throw new PairingRefused(`Something went wrong at ${host}. Try again in a moment.`, res.status);
+  if (res.status < 200 || res.status >= 300) throw new PairingRefused(`${host} turned the request down.`, res.status);
+  if (typeof res.body?.code !== "string" || !res.body.code) throw new PairingRefused(`${host} didn’t give Desk a code. Try again in a moment.`, res.status);
+  return { code: res.body.code, approveUrl: approvePage(res.body.approve_url, url), name: text(res.body.name) };
 };
 
 /** How pairing `code` at `url` stands; once approved, the native side has
@@ -81,15 +131,19 @@ const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ?
 /** Who a hub takes Desk's token to be (`GET /api/me`): a person; nobody —
  *  the device is paired but linked to no account (401); or unknown, when
  *  the hub couldn't say. */
-export type Who = { state: "person"; name: string | null; email: string | null } | { state: "nobody" } | { state: "unknown"; why: string };
+export type Who =
+  /** `workspace`: what the hub calls itself; null from one that doesn't say. */
+  | { state: "person"; name: string | null; email: string | null; workspace: string | null }
+  | { state: "nobody" }
+  | { state: "unknown"; why: string };
 
 export const whoAmI = async (hub: HubRef): Promise<Who> => {
   try {
     const res = await pairedHub(hub).fetch("GET", "/api/me");
     if (res.status === 401) return { state: "nobody" };
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return { state: "unknown", why: `${res.status}` };
-    const body = (await res.json()) as { display_name?: unknown; email?: unknown };
-    return { state: "person", name: text(body.display_name), email: text(body.email) };
+    const body = (await res.json()) as { display_name?: unknown; email?: unknown; workspace?: unknown };
+    return { state: "person", name: text(body.display_name), email: text(body.email), workspace: text(body.workspace) };
   } catch (e) {
     return { state: "unknown", why: e instanceof Error ? e.message : String(e) };
   }
@@ -138,8 +192,27 @@ export const dropPending = (store: PendingStore, code?: string): void => {
   if (!code || pendingPairing(store)?.code === code) store.remove(PENDING);
 };
 
-/** A pairing that ended without a token: turned down or expired. */
-export class PairingEnded extends Error {}
+/** A workspace's answer to a request for a code that isn't one: what it
+ *  means, in plain words, and its status (kept for Details). */
+export class PairingRefused extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** A pairing that ended without a token: turned down, or its code expired
+ *  or was already used (both of which Desk starts again with a new code). */
+export class PairingEnded extends Error {
+  constructor(
+    message: string,
+    readonly reason: "rejected" | "expired" | "used" = "expired",
+  ) {
+    super(message);
+  }
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -147,6 +220,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *  says. */
 export interface Paired {
   label: string;
+  /** Its address, to sign in again there. */
+  url: string;
   as: PairedAs | null;
 }
 
@@ -167,18 +242,21 @@ export function collectPairing(
   const running = collecting.get(p.code);
   if (running) return running;
   const run = (async () => {
-    const label = p.label || new URL(p.url).hostname;
+    const label = p.label || nameOfHost(p.url);
     for (;;) {
       const s = await pairingStatus(p.url, p.code, label);
       if (s.status === "approved") {
         dropPending(store, p.code);
         await saved(s.hub);
-        return { label, as: s.identity };
+        return { label, url: p.url, as: s.identity };
       }
-      if (s.status === "used") throw new Error("Approved, but that code was already used. Try connecting again.");
+      if (s.status === "used") {
+        dropPending(store, p.code);
+        throw new PairingEnded("That code was already used.", "used");
+      }
       if (s.status !== "pending") {
         dropPending(store, p.code);
-        throw new PairingEnded(s.status === "rejected" ? "The workspace turned the request down." : "The code expired. Ask for a new one.");
+        throw new PairingEnded(s.status === "rejected" ? `${hostOf(p.url)} turned the request down.` : "The code expired.", s.status === "rejected" ? "rejected" : "expired");
       }
       await sleep(every);
     }

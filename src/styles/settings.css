@@ -1567,3 +1567,11 @@ legend.set-label {
 .dialog-foot-note.state-blocked {
   color: var(--blocked);
 }
+/* "Rename to Driftwerk": the name the workspace gives itself. */
+.hub-name .hub-rename {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.hub-row-warning .problem {
+  margin: 0;
+}

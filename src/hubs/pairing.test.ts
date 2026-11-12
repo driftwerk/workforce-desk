@@ -21,8 +21,11 @@ import {
   collectPairing,
   keepPending,
   lastEmail,
+  nameOfHost,
   normaliseHubUrl,
+  NOT_AN_ADDRESS,
   PairingEnded,
+  PairingRefused,
   pairingStatus,
   pendingPairing,
   rememberEmail,
@@ -40,9 +43,36 @@ afterEach(() => {
 });
 
 describe("pairing", () => {
-  it("normalises what people type as a hub address", () => {
+  it("normalises what people type as a hub address, and says plainly when it isn't one", () => {
     expect(normaliseHubUrl("workforce.example.com/")).toBe("https://workforce.example.com");
+    expect(normaliseHubUrl(" acme.io ")).toBe("https://acme.io");
     expect(normaliseHubUrl("https://hub.example.com:8443/app")).toBe("https://hub.example.com:8443");
+    // A link pasted from the workspace: its page dropped.
+    expect(normaliseHubUrl("https://workforce.driftwerk.xyz/pair?code=8CA2")).toBe("https://workforce.driftwerk.xyz");
+    expect(normaliseHubUrl("localhost:4000")).toBe("https://localhost:4000");
+    expect(normaliseHubUrl("http://localhost:4000")).toBe("http://localhost:4000");
+    for (const typed of ["", "acme", "work force.example.com", "https://", "ftp://acme.io", "::::"]) {
+      expect(() => normaliseHubUrl(typed), typed).toThrow(NOT_AN_ADDRESS);
+    }
+  });
+
+  it("names a workspace by the part of its address that says whose it is, as its hub does", () => {
+    // The same table as the hub's `name_of_host` test (crates/hub/src/gateway.rs).
+    for (const [host, name] of [
+      ["workforce.driftwerk.xyz", "Driftwerk"],
+      ["hub.acme.io", "Acme"],
+      ["acme.example.com", "Acme"],
+      ["www.globex.co", "Globex"],
+      ["workforce.driftwerk.xyz:8443", "Driftwerk"],
+      ["agents.hub.initech.com", "Initech"],
+      ["localhost", "localhost"],
+      ["localhost:4000", "localhost"],
+      ["127.0.0.1", "127.0.0.1"],
+      ["10.0.1.20:8080", "10.0.1.20"],
+      ["workforce.app", "workforce.app"],
+    ]) {
+      expect(nameOfHost(`https://${host}`), host).toBe(name);
+    }
   });
 
   it("asks the native side for a code, with the page to approve it on", async () => {
@@ -50,22 +80,31 @@ describe("pairing", () => {
     expect(await requestPairing("https://hub.example.com", "Desk on Ash")).toEqual({
       code: "K7Q2XM",
       approveUrl: "https://hub.example.com/pair/K7Q2XM",
+      name: null,
     });
-    expect(native.calls).toEqual([{ cmd: "pair_request", args: { url: "https://hub.example.com", deviceName: "Desk on Ash", identityHint: null } }]);
+    // A hub that names itself.
+    answer({ status: 200, body: { code: "K7Q2XN", approve_url: "/pair?code=K7Q2XN", name: "Driftwerk" } });
+    expect((await requestPairing("https://hub.example.com", "Desk")).name).toBe("Driftwerk");
+    expect(native.calls[0]).toEqual({ cmd: "pair_request", args: { url: "https://hub.example.com", deviceName: "Desk on Ash", identityHint: null } });
   });
 
   it("names you by email only to a hub without browser approval", async () => {
     answer({ status: 200, body: { code: "K7Q2XM" } });
-    expect(await requestPairing("https://hub", "Desk", " k@example.com ")).toEqual({ code: "K7Q2XM", approveUrl: null });
+    expect(await requestPairing("https://hub", "Desk", " k@example.com ")).toEqual({ code: "K7Q2XM", approveUrl: null, name: null });
     expect(native.calls[0]!.args.identityHint).toBe("k@example.com");
   });
 
-  it("says why a hub wouldn't give a code", async () => {
-    answer({ status: 404, body: null }, { status: 429, body: null }, { status: 500, body: null }, { status: 200, body: {} });
-    await expect(requestPairing("https://hub", "Desk")).rejects.toThrow(/doesn't accept/);
-    await expect(requestPairing("https://hub", "Desk")).rejects.toThrow(/Too many/);
-    await expect(requestPairing("https://hub", "Desk")).rejects.toThrow(/500/);
-    await expect(requestPairing("https://hub", "Desk")).rejects.toThrow(/no code/);
+  it("says why a hub wouldn't give a code, in plain words with what to do, never a status code", async () => {
+    answer({ status: 404, body: null }, { status: 429, body: null }, { status: 500, body: null }, { status: 403, body: null }, { status: 200, body: {} });
+    const said = async () => (await requestPairing("https://hub.acme.io", "Desk").catch((e: Error) => e)) as Error;
+    expect((await said()).message).toBe("hub.acme.io doesn’t let new devices connect. Ask its admin to turn on device pairing.");
+    expect((await said()).message).toBe("hub.acme.io has had too many tries just now. Try again in a minute.");
+    expect((await said()).message).toBe("Something went wrong at hub.acme.io. Try again in a moment.");
+    const refused = await said();
+    expect(refused).toBeInstanceOf(PairingRefused);
+    expect(refused.message).toBe("hub.acme.io turned the request down.");
+    expect((refused as PairingRefused).status).toBe(403);
+    expect((await said()).message).toBe("hub.acme.io didn’t give Desk a code. Try again in a moment.");
   });
 
   it("opens only a web page as the approval page", async () => {
@@ -96,7 +135,7 @@ describe("pairing", () => {
     const f = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ display_name: "Kings", email: "k@example.com" }), { status: 200, ...json }));
-    expect(await whoAmI(hub)).toEqual({ state: "person", name: "Kings", email: "k@example.com" });
+    expect(await whoAmI(hub)).toEqual({ state: "person", name: "Kings", email: "k@example.com", workspace: null });
     expect(String(f.mock.calls[0]![0])).toBe("https://hub/api/me");
     f.mockResolvedValueOnce(new Response(null, { status: 401 }));
     expect(await whoAmI(hub)).toEqual({ state: "nobody" });
@@ -138,19 +177,24 @@ describe("a pairing waiting for approval", () => {
     const first = collectPairing(store, p, saved, 1);
     // A second caller (the dialog, after the resume at launch) shares the one collection.
     expect(collectPairing(store, p, saved, 1)).toBe(first);
-    expect(await first).toEqual({ label: "Acme", as: { name: "Kings", email: "k@example.com" } });
+    expect(await first).toEqual({ label: "Acme", url: p.url, as: { name: "Kings", email: "k@example.com" } });
     expect(saved).toHaveBeenCalledTimes(1);
     expect(saved).toHaveBeenCalledWith("hub-example-com");
     expect(pendingPairing(store)).toBeNull();
     expect(native.calls.map((c) => c.cmd)).toEqual(["pair_collect", "pair_collect"]);
   });
 
-  it("says a code already collected was, and keeps it for a fresh try", async () => {
+  it("ends with a used or expired code, saying which, so Desk can ask for a new one", async () => {
     const store = memory();
     keepPending(store, p);
     answer({ status: "used" });
-    await expect(collectPairing(store, p, vi.fn(), 1)).rejects.toThrow(/already/);
-    expect(pendingPairing(store)).toEqual(p);
+    const used = await collectPairing(store, p, vi.fn(), 1).catch((e: PairingEnded) => e);
+    expect(used).toBeInstanceOf(PairingEnded);
+    expect((used as PairingEnded).reason).toBe("used");
+    expect(pendingPairing(store)).toBeNull();
+    keepPending(store, p);
+    answer({ status: "expired" });
+    expect(((await collectPairing(store, p, vi.fn(), 1).catch((e: PairingEnded) => e)) as PairingEnded).reason).toBe("expired");
   });
 
   it("is forgotten when turned down, and kept when the hub can't be reached", async () => {

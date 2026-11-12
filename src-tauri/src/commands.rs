@@ -50,6 +50,7 @@ pub const COMMANDS: &[&str] = &[
     "themes_reveal",
     "hubs_list",
     "hubs_remove",
+    "hubs_rename",
     "tuple_enable",
     "tuple_disable",
     "tuple_reply",

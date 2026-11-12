@@ -16,6 +16,7 @@ import {
   type PermissionChoice,
 } from "./types";
 import { pairedHub } from "../hub/net";
+import { HubError } from "../hub/client";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
@@ -41,6 +42,9 @@ interface ChatStore {
   hubs: HubAccount[];
   roster: Agent[];
   rosterErrors: Record<string, string>;
+  /** Why each hub's agents couldn't be read, by kind: its token no longer
+   *  works (`signedOut`, a 401 — sign in again), or it couldn't be reached. */
+  rosterTrouble: Record<string, "signedOut" | "unreachable" | "other">;
   /** You on each hub that knows you (your name there words a suggestion you
    *  said yes to; your picture there shows you in its places), by hub id. */
   me: Record<string, Me>;
@@ -264,7 +268,7 @@ interface AgentsResponse {
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   const res = await pairedHub(hub).fetch("GET", "/api/agents");
-  if (!res.ok) throw new Error(`${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
+  if (!res.ok) throw new HubError(res.status, `${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
   const body = (await res.json()) as AgentsResponse;
   return body.agents.map((a) => ({
     hubId: hub.id,
@@ -394,6 +398,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
   rosterErrors: {},
+  rosterTrouble: {},
   me: {},
   refreshMe: async (hubId) => {
     const hub = get().hubs.find((h) => h.id === hubId);
@@ -464,6 +469,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     const results = await Promise.allSettled(get().hubs.map((h) => (h.machine ? machineAgents() : fetchAgents(h))));
     const roster: Agent[] = [];
     const rosterErrors: Record<string, string> = {};
+    const rosterTrouble: Record<string, "signedOut" | "unreachable" | "other"> = {};
     const read = new Set<string>();
     results.forEach((r, i) => {
       const hub = get().hubs[i]!;
@@ -475,12 +481,14 @@ export const useChat = create<ChatStore>((set, get) => ({
         // last list stays (Desk marks it stale) until the hub answers.
         if (hub.local) roster.push(...get().roster.filter((a) => a.hubId === hub.id));
         rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        rosterTrouble[hub.id] =
+          r.reason instanceof HubError ? (r.reason.status === 401 ? "signedOut" : "other") : r.reason instanceof TypeError || /reach/i.test(rosterErrors[hub.id]!) ? "unreachable" : "other";
       }
     });
     // The side panel's agent goes once its hub has been read without it.
     const panel = get().panelAgent;
     const gone = !!panel && read.has(hubOf(panel)) && !roster.some((a) => agentKey(a) === panel);
-    set({ roster, rosterErrors, rosterRead: true, ...(gone ? { panelAgent: null } : {}) });
+    set({ roster, rosterErrors, rosterTrouble, rosterRead: true, ...(gone ? { panelAgent: null } : {}) });
     get().reopenDm();
   },
   reopenDm: () => {

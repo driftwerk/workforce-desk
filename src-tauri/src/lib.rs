@@ -234,6 +234,22 @@ fn hubs_remove(app: State<'_, App>, io: State<'_, hub_io::HubIo>, id: String) ->
     removed
 }
 
+/// Names a paired workspace as it names itself (`/api/me`'s `workspace`).
+#[tauri::command]
+fn hubs_rename(
+    app: State<'_, App>,
+    io: State<'_, hub_io::HubIo>,
+    id: String,
+    label: String,
+) -> CommandResult<()> {
+    if hubs::machine_of(&id).is_some() || id == desk_core::LOCAL_HUB_ID {
+        return Err("Only a workspace is renamed here.".into());
+    }
+    hubs::rename(&app.paths, &id, &label).map_err(text)?;
+    io.forget();
+    Ok(())
+}
+
 #[tauri::command]
 fn tuple_enable(app: tauri::AppHandle, tuple: State<'_, tuple::Tuple>, names: Vec<String>) {
     tuple.enable(app, names);
@@ -1110,6 +1126,7 @@ pub fn run() {
             themes_reveal,
             hubs_list,
             hubs_remove,
+            hubs_rename,
             tuple_enable,
             tuple_disable,
             tuple_reply,
@@ -1294,6 +1311,7 @@ mod tests {
             "pair_request",
             "pair_collect",
             "hubs_remove",
+            "hubs_rename",
             "wsl_install",
             "report_save",
         ] {
