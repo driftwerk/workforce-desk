@@ -201,15 +201,18 @@ impl Installs {
                 }
                 break;
             }
-            // Still not there: the other ways the docs give, before Desk
-            // hands out a command to run by hand. Not when offline, where
-            // they'd fail the same way.
-            let offline_now = matches!(&outcome.status, Ok(s) if offline(s.code()));
-            if !outcome.ok()
-                && !offline_now
-                && let Some(other) = other_ways(&backend, plan, &report)
-            {
-                outcome = other;
+            // A download that still failed: the other ways the docs give,
+            // before Desk hands out a command to run by hand. Not for a
+            // timeout or any other failure, nor offline, where they'd fail
+            // the same way. If none works, what's said and offered stays
+            // the installer's; theirs goes under Details.
+            let mut also = None;
+            if worth_other_ways(&outcome) {
+                match other_ways(&backend, plan, &report, brew_here(&backend)) {
+                    Other::Installed(other) => outcome = other,
+                    Other::Failed { name, last } => also = Some((name, last)),
+                    Other::NoneThere => {}
+                }
             }
             running.lock().expect("installs").retain(|p| *p != plan);
             let by_hand =
@@ -233,7 +236,7 @@ impl Installs {
                 Err(e) => Progress::failed(failure(plan, None, e)),
             };
             if let Progress::Failed { details, .. } = &mut progress {
-                *details = (!last.is_empty()).then_some(last);
+                *details = said_under_details(&last, also.as_ref());
             }
             if let (true, Progress::Failed { command, hint, .. }) = (by_hand, &mut progress) {
                 *command = Some(plan.installer().to_string());
@@ -251,13 +254,57 @@ impl Installs {
 /// Tries `plan`'s other ways to install in turn: the first that installs
 /// it, else the last that was there and failed; none when no other way's
 /// tool is there.
+/// How the other ways went.
+enum Other {
+    /// One of them installed it.
+    Installed(Outcome),
+    /// The last that was there failed; what it printed last.
+    Failed { name: &'static str, last: String },
+    /// None's tool was there.
+    NoneThere,
+}
+
+/// Whether a failed run is one the other ways may get round: a download
+/// that failed, while this computer is online. Never a timeout, an
+/// unsupported system, or anything else the installer stopped at.
+fn worth_other_ways(outcome: &Outcome) -> bool {
+    let offline_now = matches!(&outcome.status, Ok(s) if offline(s.code()));
+    !outcome.ok() && !outcome.timed_out && !offline_now && probe::is_download_failure(&outcome.last)
+}
+
+/// Whether Homebrew is one of the ways where `backend` runs: a Mac's own.
+fn brew_here(backend: &Backend) -> bool {
+    cfg!(target_os = "macos") && matches!(backend.host, Host::Native)
+}
+
+/// What goes under Details: what the installer last printed, and what
+/// another way that also failed did.
+fn said_under_details(last: &str, also: Option<&(&'static str, String)>) -> Option<String> {
+    let mut lines = Vec::new();
+    if !last.is_empty() {
+        lines.push(last.to_string());
+    }
+    if let Some((name, said)) = also {
+        let said = said.trim();
+        lines.push(match said.is_empty() {
+            true => format!("{name} didn't install it either."),
+            false => format!("{name} didn't install it either: {said}"),
+        });
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
 fn other_ways(
     backend: &Backend,
     plan: Plan,
     report: &(impl Fn(Progress) + Clone + Send + 'static),
-) -> Option<Outcome> {
-    let mut tried = None;
+    brew: bool,
+) -> Other {
+    let mut tried = Other::NoneThere;
     for (name, way) in plan.alternatives() {
+        if name == "Homebrew" && !brew {
+            continue;
+        }
         let Ok(child) = spawn_script(backend, &format!("{}{way}", clear_dead_link(plan))) else {
             continue;
         };
@@ -269,9 +316,12 @@ fn other_ways(
             continue;
         }
         if outcome.ok() && installed(backend, plan) {
-            return Some(outcome);
+            return Other::Installed(outcome);
         }
-        tried = Some(outcome);
+        tried = Other::Failed {
+            name,
+            last: outcome.last,
+        };
     }
     tried
 }
@@ -505,6 +555,65 @@ mod tests {
         let [npm, brew] = Plan::Chatgpt.alternatives();
         assert!(npm.1.ends_with("@openai/codex"));
         assert!(brew.1.ends_with("brew install --cask codex"));
+    }
+
+    #[cfg(unix)]
+    fn ran(code: i32, last: &str, timed_out: bool) -> Outcome {
+        use std::os::unix::process::ExitStatusExt;
+        Outcome {
+            status: Ok(std::process::ExitStatus::from_raw(code << 8)),
+            last: last.into(),
+            timed_out,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_failed_download_while_online_tries_the_other_ways() {
+        let stalled = "curl: (18) transfer closed with outstanding read data remaining";
+        assert!(
+            probe::is_download_failure(stalled),
+            "the fixture is a download failure"
+        );
+        assert!(worth_other_ways(&ran(18, stalled, false)));
+        assert!(!worth_other_ways(&ran(
+            1,
+            "Unsupported architecture",
+            false
+        )));
+        assert!(
+            !worth_other_ways(&ran(18, stalled, true)),
+            "never after a timeout"
+        );
+        assert!(
+            !worth_other_ways(&ran(6, "curl: (6) Could not resolve host", false)),
+            "never offline"
+        );
+        assert!(!worth_other_ways(&ran(0, "", false)));
+    }
+
+    #[test]
+    fn homebrew_is_only_a_way_on_a_macs_own_desk() {
+        let wsl = Backend::wsl(desk_core::host::Wsl {
+            distro: "Ubuntu".into(),
+            user: "sarah".into(),
+            home: "/home/sarah".into(),
+            automount: "/mnt/".into(),
+        });
+        assert!(!brew_here(&wsl));
+    }
+
+    #[test]
+    fn what_the_other_ways_said_goes_only_under_details() {
+        assert_eq!(said_under_details("", None), None);
+        assert_eq!(
+            said_under_details(
+                "curl: (56) Recv failure",
+                Some(&("npm", "npm ERR! 404".into()))
+            )
+            .unwrap(),
+            "curl: (56) Recv failure\nnpm didn't install it either: npm ERR! 404"
+        );
     }
 
     #[cfg(unix)]
