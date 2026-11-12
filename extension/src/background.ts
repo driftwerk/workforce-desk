@@ -50,6 +50,23 @@ const tabsApi: ChromeTabs = {
   removeWindow: (windowId) => chrome.windows.remove(windowId),
   activate: async (tabId) => void (await chrome.tabs.update(tabId, { active: true })),
   focusWindow: async (windowId) => void (await chrome.windows.update(windowId, { focused: true })),
+  async personsWindow(desk) {
+    const theirs = (w: chrome.windows.Window | null | undefined): w is chrome.windows.Window & { id: number } => !!w && w.id !== undefined && w.id !== desk && w.type === "normal" && !w.incognito;
+    const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+    if (theirs(last)) return last.id;
+    const all = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter(theirs);
+    return (all.find((w) => w.state !== "minimized") ?? all[0])?.id ?? null;
+  },
+  async moveTab(tabId, windowId) {
+    await chrome.tabs.ungroup(tabId).catch(() => undefined);
+    await chrome.tabs.move(tabId, { windowId, index: -1 });
+  },
+  async windowWith(tabId) {
+    await chrome.tabs.ungroup(tabId).catch(() => undefined);
+    const w = await chrome.windows.create({ tabId, focused: true, type: "normal" });
+    if (w?.id === undefined) throw new Error("Chrome didn't open a window");
+    return w.id;
+  },
   load: async () => ((await chrome.storage.session.get(KEPT))[KEPT] as Kept | undefined) ?? null,
   save: (kept) => chrome.storage.session.set({ [KEPT]: kept }),
 };
@@ -99,6 +116,15 @@ const exec: Exec = {
   async front(windowId, tabId) {
     await chrome.windows.update(windowId, { focused: true, state: "normal" });
     await chrome.tabs.update(tabId, { active: true });
+  },
+  async raise(windowId, tabId) {
+    await chrome.tabs.update(tabId, { active: true });
+    const w = await chrome.windows.get(windowId);
+    await chrome.windows.update(windowId, w.state === "minimized" ? { focused: true, state: "normal" } : { focused: true });
+  },
+  async inFront(windowId, tabId) {
+    const [t, w] = await Promise.all([chrome.tabs.get(tabId), chrome.windows.get(windowId)]);
+    return { active: t.active && t.windowId === windowId, focused: w.focused && w.state !== "minimized" };
   },
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 };

@@ -19,6 +19,13 @@ export interface Exec {
   capture(windowId: number, tabId: number): Promise<string | null>;
   activate(tabId: number): Promise<void>;
   front(windowId: number, tabId: number): Promise<void>;
+  /** Makes `tabId` the active tab of `windowId` and that window the focused
+   *  one, restoring it only if minimised: the person's window keeps its
+   *  size. */
+  raise(windowId: number, tabId: number): Promise<void>;
+  /** Whether `tabId` is the active tab of `windowId`, and that window is
+   *  focused and not minimised, as Chrome says now. */
+  inFront(windowId: number, tabId: number): Promise<{ active: boolean; focused: boolean }>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -59,6 +66,7 @@ const typed = (done: "ok" | "missing" | "moved", missing: string) => {
 /** Does `c`, answering what it returns. */
 export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<unknown> {
   if (c.cmd === "stop") return { closed: await tabs.stop() };
+  if (c.cmd === "hand_over") return handOver(c.session, tabs, exec);
   if (c.cmd === "close") return { closed: await tabs.close(c.session) };
   if (c.cmd === "open") {
     const tab = await tabs.tabFor(c.session);
@@ -166,4 +174,33 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       return exec.where(tab);
     }
   }
+}
+
+/** How long a hand-over waits for Chrome to say the tab is in front. */
+const FRONT_MS = 1_500;
+
+/** Hands `session`'s tab to the person and brings it to the front of their
+ *  window. The answer says whether Chrome confirmed it's in front; once
+ *  moved, the tab is theirs either way. */
+async function handOver(session: string, tabs: DeskTabs, exec: Exec): Promise<unknown> {
+  // Never a fresh tab: only a page the hub just opened is handed over.
+  const tab = await tabs.existing(session);
+  if (tab === null) throw new Fail("Desk has no page open to hand over.");
+  const at = await exec.where(tab);
+  if (!workable(at.url)) throw new Fail("Desk's tab is on a page Desk doesn't work in.");
+  const moved = await tabs.handOver(session);
+  if (moved === null) throw new Fail("Desk has no page open to hand over.");
+  let seen = { active: false, focused: false };
+  try {
+    await exec.raise(moved.windowId, moved.tabId);
+    // Focus lands a moment after Chrome is asked for it.
+    for (let waited = 0; ; waited += 100) {
+      seen = await exec.inFront(moved.windowId, moved.tabId);
+      if ((seen.active && seen.focused) || waited >= FRONT_MS) break;
+      await exec.sleep(100);
+    }
+  } catch {
+    // The tab is the person's now; it just isn't confirmed in front.
+  }
+  return { handed: true, ...seen, url: at.url, title: at.title };
 }

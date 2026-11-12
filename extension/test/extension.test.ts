@@ -18,6 +18,14 @@ class FakeChrome implements ChromeTabs {
   groups: Record<number, number[]> = {};
   kept: Kept | null = null;
   personsTab = 1;
+  /** The person's own window; null for none. */
+  persons: number | null = null;
+  /** Gives the person a window of their own, holding their tab. */
+  withPersonsWindow(): this {
+    this.windows.set(50, { state: "normal", tabs: [this.personsTab] });
+    this.persons = 50;
+    return this;
+  }
   async createWindow() {
     const windowId = this.next++;
     const tabId = this.next++;
@@ -48,6 +56,24 @@ class FakeChrome implements ChromeTabs {
   }
   async activate() {}
   async focusWindow() {}
+  async personsWindow(desk: number) {
+    return this.persons !== null && this.persons !== desk && this.windows.has(this.persons) ? this.persons : null;
+  }
+  async moveTab(tabId: number, windowId: number) {
+    for (const [id, w] of this.windows) {
+      w.tabs = w.tabs.filter((t) => t !== tabId);
+      // As Chrome does: a window left with no tab closes.
+      if (w.tabs.length === 0 && id !== windowId) this.windows.delete(id);
+    }
+    for (const g of Object.keys(this.groups)) this.groups[Number(g)] = this.groups[Number(g)]!.filter((t) => t !== tabId);
+    this.windows.get(windowId)!.tabs.push(tabId);
+  }
+  async windowWith(tabId: number) {
+    const id = this.next++;
+    this.windows.set(id, { state: "normal", tabs: [] });
+    await this.moveTab(tabId, id);
+    return id;
+  }
   async load() {
     return this.kept;
   }
@@ -58,9 +84,11 @@ class FakeChrome implements ChromeTabs {
 
 /** Runs page functions against this test's document, as Chrome would in
  *  Desk's tab. */
-const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]; captured: number; active: number | null } => {
+const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]; captured: number; active: number | null; raised: number[]; front_: { active: boolean; focused: boolean } } => {
   const e = {
     navigated: [] as string[],
+    raised: [] as number[],
+    front_: { active: true, focused: true },
     captured: 0,
     at: url,
     active: null as number | null,
@@ -85,6 +113,12 @@ const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]
       e.active = tab;
     },
     async front() {},
+    async raise(windowId: number) {
+      e.raised.push(windowId);
+    },
+    async inFront() {
+      return e.front_;
+    },
     async sleep() {},
   };
   return e;
@@ -112,7 +146,7 @@ describe("the protocol", () => {
 
   it("names every command the fixture holds, and the fixture holds every command", () => {
     const cmds = fixture.from_hub.calls.map((c) => c.cmd).sort();
-    const known: Command["cmd"][] = ["capture", "capture_key", "click", "close", "fill", "front", "navigate", "open", "press", "read", "select", "shown", "stop", "type", "upload", "wait", "where"];
+    const known: Command["cmd"][] = ["capture", "capture_key", "click", "close", "fill", "front", "hand_over", "navigate", "open", "press", "read", "select", "shown", "stop", "type", "upload", "wait", "where"];
     expect(cmds).toEqual([...known].sort());
   });
 });
@@ -309,6 +343,67 @@ describe("calls", () => {
     document.body.innerHTML = `<p id="done"></p>`;
     expect(await perform({ cmd: "wait", session: "s", selector: "#done", timeout_ms: 50 }, tabs, exec)).toBe(true);
     await expect(perform({ cmd: "wait", session: "s", selector: "#never", timeout_ms: 0 }, tabs, exec)).rejects.toThrow("didn't appear");
+  });
+});
+
+describe("handing a page to the person", () => {
+  it("moves the session's tab to the front of the person's window, and lets go of it", async () => {
+    const c = new FakeChrome().withPersonsWindow();
+    const tabs = new DeskTabs(c);
+    const exec = execOn("https://staging.example.com/");
+    await perform({ cmd: "navigate", session: "s", url: "https://staging.example.com/" }, tabs, exec);
+    const tab = (await tabs.existing("s"))!;
+    const desk = (await tabs.windowId())!;
+    const out = await perform({ cmd: "hand_over", session: "s" }, tabs, exec);
+    expect(out).toEqual({ handed: true, active: true, focused: true, url: "https://staging.example.com/", title: document.title });
+    expect(c.windows.get(50)!.tabs).toContain(tab);
+    expect(exec.raised).toEqual([50]);
+    // Theirs: no session's, not Desk's, never closed or adopted by Desk.
+    expect(await tabs.existing("s")).toBeNull();
+    expect(await tabs.owns(tab)).toBe(false);
+    expect(await tabs.adopt(777, tab)).toBe(false);
+    expect(await tabs.close("s")).toBe(false);
+    expect(await tabs.stop()).toBe(0);
+    expect(c.windows.get(50)!.tabs).toContain(tab);
+    // Desk's window, now holding no session, is gone.
+    expect(c.windows.has(desk)).toBe(false);
+    // The agent's next call gets a tab of its own again.
+    expect(await tabs.tabFor("s")).not.toBe(tab);
+  });
+
+  it("keeps Desk's window for the sessions still in it", async () => {
+    const c = new FakeChrome().withPersonsWindow();
+    const tabs = new DeskTabs(c);
+    const other = await tabs.tabFor("other");
+    await tabs.tabFor("s");
+    await perform({ cmd: "hand_over", session: "s" }, tabs, execOn());
+    expect(await tabs.existing("other")).toBe(other);
+    expect(c.windows.get((await tabs.windowId())!)!.tabs).toContain(other);
+  });
+
+  it("opens a window of the person's own when they have none but Desk's", async () => {
+    const c = new FakeChrome();
+    const tabs = new DeskTabs(c);
+    const exec = execOn();
+    const tab = await tabs.tabFor("s");
+    const desk = (await tabs.windowId())!;
+    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, exec)).toMatchObject({ handed: true, focused: true });
+    const into = exec.raised[0]!;
+    expect(into).not.toBe(desk);
+    expect(c.windows.get(into)!.tabs).toEqual([tab]);
+  });
+
+  it("says when Chrome doesn't confirm it's in front, and never opens a tab to hand over", async () => {
+    const tabs = new DeskTabs(new FakeChrome().withPersonsWindow());
+    const behind = execOn();
+    behind.front_ = { active: true, focused: false };
+    await tabs.tabFor("s");
+    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, behind)).toMatchObject({ handed: true, focused: false });
+    await expect(perform({ cmd: "hand_over", session: "none" }, tabs, execOn())).rejects.toThrow("no page open");
+    expect(await tabs.existing("none")).toBeNull();
+    await tabs.tabFor("off");
+    await expect(perform({ cmd: "hand_over", session: "off" }, tabs, execOn("chrome://settings"))).rejects.toThrow("doesn't work in");
+    expect(await tabs.existing("off")).not.toBeNull();
   });
 });
 
