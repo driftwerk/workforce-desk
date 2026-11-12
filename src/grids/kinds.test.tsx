@@ -521,5 +521,11 @@ describe("a board pane's columns scroll sideways whenever they don't fit", () =>
     cols.dispatchEvent(plain);
     expect(by).toEqual([120]);
     expect(turned.defaultPrevented || plain.defaultPrevented).toBe(false);
+    // Columns that snap (the Board view's) are left to the browser.
+    cols.style.scrollSnapType = "x mandatory";
+    const snapping = new WheelEvent("wheel", { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(snapping);
+    expect(by).toEqual([120]);
+    expect(snapping.defaultPrevented).toBe(false);
   });
 });
