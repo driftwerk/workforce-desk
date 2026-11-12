@@ -15,6 +15,12 @@ export const browserOf = (hub: HubRef) => ({
   /** Desk's browser settings and the person's Chrome's standing. */
   settings: (): Promise<BrowserSettingsView> => deskCall(hub, "GET", "/api/desk/browser/settings"),
   save: (s: BrowserSettings): Promise<BrowserSettingsView> => deskCall(hub, "PUT", "/api/desk/browser/settings", s),
+  /** The person confirms a Chrome profile asking to connect is theirs. */
+  confirm: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "POST", `/api/desk/browser/chrome/${encodeURIComponent(id)}/confirm`),
+  /** The profile Desk uses, of those confirmed. */
+  choose: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "POST", `/api/desk/browser/chrome/${encodeURIComponent(id)}/choose`),
+  /** Forgets a profile, or refuses one asking: it reaches nothing until confirmed again. */
+  forget: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "DELETE", `/api/desk/browser/chrome/${encodeURIComponent(id)}`),
   /** The browsers open now. */
   live: async (): Promise<BrowserLive[]> => (await deskCall<{ live: BrowserLive[] }>(hub, "GET", "/api/desk/browser")).live,
   /** Stop: the turns using the browser end, it closes, and its session allowances go. */

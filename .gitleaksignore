@@ -11,3 +11,6 @@
 356a5f5bdbfc23a6472f3afcc3b6f7f27f83a553:src/ui/redact.test.ts:generic-api-key:19
 4b32c83c1831b59e4ad7252ab35d7c0049bf1873:src/ui/redact.test.ts:generic-api-key:25
 4b32c83c1831b59e4ad7252ab35d7c0049bf1873:src/ui/redact.test.ts:generic-api-key:27
+# The protocol fixture's sample public key (extension/protocol/v1.json), made
+# up and public by nature; later commits name no key at all.
+96be8b8c29c12dce179cb47fa25efe51ad297153:extension/protocol/v1.json:generic-api-key:8

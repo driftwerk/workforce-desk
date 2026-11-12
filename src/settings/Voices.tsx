@@ -3,6 +3,7 @@ import { useDesk } from "../hub/store";
 import { explain, type Problem } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { AddVoiceById } from "./AddVoiceById";
+import { Calls } from "./Calls";
 import { addCustomVoice, removeCustomVoice, useSettings } from "./store";
 import {
   describeVoice,
@@ -19,6 +20,10 @@ import {
 
 const LIVE = new Set(["gpt-live", "gemini-live"]);
 
+/** The first page of Voice: talking to agents (by name, push to talk,
+ *  Tuple); the providers after it are how they sound. */
+const TALK = "talk";
+
 /** Where the Gemini key agents think with also talks: Gemini Live uses it
  *  when Voices has none of its own. */
 const GEMINI_KEY = "speech/gemini/api_key";
@@ -28,7 +33,8 @@ const GEMINI_KEY = "speech/gemini/api_key";
 export function Voices() {
   const { hub, fail } = useDesk();
   const { defaultVoice, customVoices, set } = useSettings();
-  const [selected, setSelected] = useState(defaultVoice.provider);
+  // Talking to agents first; then each provider, for how they sound.
+  const [selected, setSelected] = useState<string>(TALK);
   const [have, setHave] = useState<string[]>([]);
   const [geminiProvider, setGeminiProvider] = useState(false);
   const provider = providerById(selected) ?? VOICE_PROVIDERS[0]!;
@@ -47,37 +53,34 @@ export function Voices() {
 
   return (
     <div className="voices">
-      <nav className="voices-providers" aria-label="Voice providers">
+      <nav className="voices-providers" aria-label="Voice">
+        <button type="button" className={`side-row ${selected === TALK ? "on" : ""}`} onClick={() => setSelected(TALK)}>
+          <span className="side-name">Talking to agents</span>
+        </button>
+        <span className="voices-nav-label faint small">How agents sound</span>
         {VOICE_PROVIDERS.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`side-row ${p.id === selected ? "on" : ""}`}
-            onClick={() => setSelected(p.id)}
-          >
+          <button key={p.id} type="button" className={`side-row ${p.id === selected ? "on" : ""}`} onClick={() => setSelected(p.id)}>
             <span className="side-name">{p.name}</span>
             <span className="faint small">
-              {p.id === defaultVoice.provider
-                ? "default"
-                : !p.keyPath
-                  ? "this computer"
-                  : keyOf(p)
-                    ? "connected"
-                    : ""}
+              {p.id === defaultVoice.provider ? "default" : !p.keyPath ? "this computer" : keyOf(p) ? "connected" : ""}
             </span>
           </button>
         ))}
       </nav>
-      <ProviderDetail
-        key={provider.id}
-        provider={provider}
-        keyFrom={keyOf(provider)}
-        onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
-        isLive={LIVE.has(provider.id)}
-        defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
-        onUse={(voice, model) => set({ defaultVoice: { provider: provider.id, model, voice } })}
-        currentDefault={defaultVoice.provider === provider.id ? defaultVoice.voice : undefined}
-      />
+      {selected === TALK ? (
+        <Calls />
+      ) : (
+        <ProviderDetail
+          key={provider.id}
+          provider={provider}
+          keyFrom={keyOf(provider)}
+          onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
+          isLive={LIVE.has(provider.id)}
+          defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
+          onUse={(voice, model) => set({ defaultVoice: { provider: provider.id, model, voice } })}
+          currentDefault={defaultVoice.provider === provider.id ? defaultVoice.voice : undefined}
+        />
+      )}
     </div>
   );
 }
@@ -233,7 +236,9 @@ function ProviderDetail({
             Use a voice ID
           </button>
         ))}
-      {isLive && <p className="faint small">Give an agent one of these voices in its settings; it’s used when {provider.name} is your voice engine.</p>}
+      {isLive && (
+        <p className="faint small">Give an agent one of these voices in its settings; it’s used when {provider.name} is your voice engine.</p>
+      )}
       {problem && <p className="state-blocked small">{problem}</p>}
     </section>
   );

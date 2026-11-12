@@ -21,6 +21,7 @@ import { App } from "./shell/App";
 import { SECRET_WINDOW, SecretWindow } from "./machines/SecretWindow";
 import { thisWindow } from "./grids/windows";
 import { loadHost } from "./shell/host";
+import { followInput } from "./updates/away";
 import { DeskRichHost } from "./shell/richHost";
 import "./styles/app.css";
 import "./styles/crew.css";
@@ -85,6 +86,9 @@ else void Promise.all([
   // hold a room's or an agent's composer. Rooms' order and the machines'
   // sessions are the main window's to follow.
   keepFileDrafts();
+  // Whether the person is at Desk counts every window, for an update to
+  // wait until they've stepped away from all of them.
+  followInput();
   if (!grid) {
     followRooms();
     followMachineSessions();

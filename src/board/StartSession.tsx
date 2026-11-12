@@ -8,9 +8,12 @@ import { plainError } from "../ui/plainError";
 import { GroupChoice } from "../session/GroupChoice";
 import { sessionItem, UNGROUPED } from "../groups/model";
 import { moveItem, nameSession, useLayout } from "../groups/store";
-import { sessionNameFor, sessionsOf } from "./board";
+import { recentFolders, sessionNameFor, sessionsOf } from "./board";
 import { boardStartGroup, lastBoardGroup, rememberBoardGroup } from "./startGroup";
 import { useBoard } from "./store";
+
+/** A folder as a chip says it: its own name. */
+const folderName = (dir: string): string => dir.split("/").filter(Boolean).pop() ?? dir;
 
 /** A new session for a ticket: its engine and folder; it starts with the
  *  ticket as its goal and first prompt, and the ticket moves to Doing. */
@@ -21,6 +24,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
   const usual = sessionsOf(t)
     .map((id) => sessions[id]?.cwd)
     .find(Boolean) ?? sortedSessions(sessions)[0]?.cwd ?? "";
+  const recent = recentFolders(Object.values(sessions));
   const layout = useLayout();
   const boardGroup = useBoard((s) => s.boards[t.board]?.group);
   const [group, setGroup] = useState(() => boardStartGroup(layout, boardGroup, lastBoardGroup()));
@@ -75,10 +79,22 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
             </button>
           ))}
         </div>
+        {recent.length > 0 && (
+          <div className="field">
+            <span className="ov-label muted">Recent folders</span>
+            <div className="chip-row" role="radiogroup" aria-label="Recent folders">
+              {recent.map((dir) => (
+                <button key={dir} type="button" role="radio" className="chip-btn" title={dir} aria-checked={cwd.trim() === dir} aria-pressed={cwd.trim() === dir} onClick={() => setCwd(dir)}>
+                  {folderName(dir)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <label className="field">
           <span>Folder</span>
           <span className="field-row">
-            <input data-autofocus value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/repo" required />
+            <input data-autofocus value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="Choose a folder, or type its path" required />
             <button
               type="button"
               className="btn btn-ghost"
