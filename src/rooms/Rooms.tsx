@@ -1,7 +1,7 @@
 import { toShow } from "../chat/conversation";
 import { SetupInDm } from "../setup/slot";
 import { formAnswer } from "../chat/forms";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { uploadAll } from "../attachments/upload";
@@ -33,7 +33,8 @@ import { relayedOf } from "../chat/relayed";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
-import { useAnchoredScroll } from "../restore/scroll";
+import { useStayPut } from "../restore/scroll";
+import { useReads } from "../unread/reads";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
 import { GroupChip } from "../groups/GroupChip";
 import { agentItem } from "../groups/model";
@@ -46,8 +47,15 @@ import { DmVoiceBar, DmVoiceControls, useDmVoiceEntries } from "../voice/DmVoice
 import { ComposerMore } from "./ComposerMore";
 import { useDmPresence } from "../voice/dms";
 import { after } from "./time";
+import type { ReadPoint } from "../hub/types";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act", full: "Act fully" };
+
+/** Who said a message and what, as one key. */
+const saidKey = (m: ChatMessage): string => `${m.role}\u0000${m.content.trim()}`;
+
+/** A message's time in ms; 0 when it has none. */
+const ms = (iso: string): number => Date.parse(iso) || 0;
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -130,22 +138,33 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // Held here, not in the composer, so a message still uploading while
   // another tab is open is still sending when you come back.
   const sending = useState(false);
-  const end = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement | null>(null);
   // Where "talk here" finds this DM, and lets its microphone go when it goes.
   useDmPresence(agent ? (activeAgent ?? null) : null, root);
   const scroller = useRef<HTMLDivElement | null>(null);
-  const anchored = useAnchoredScroll<HTMLDivElement>(activeAgent ? `dm:${activeAgent}` : null);
+  const settled = !history || history.state === "ready" || history.state === "absent";
+  const read = history?.state === "ready" || history?.state === "absent" || history?.state === "failed";
+  // Where you're reading stays put; at the newest message, it follows.
+  const stay = useStayPut(activeAgent ? `dm:${activeAgent}` : null, read);
+  // How far the DM was read when it opened, once that's known (null: not
+  // at all), and the message its New line goes before once the
+  // conversation is read (null: none).
+  const readsLoaded = useReads((s) => s.loaded);
+  const readAtOpen = useRef<ReadPoint | null | undefined>(undefined);
+  if (readAtOpen.current === undefined && readsLoaded && activeAgent) readAtOpen.current = useReads.getState().dms[activeAgent] ?? null;
+  const newLine = useRef<string | null | undefined>(undefined);
+  const openedAtLine = useRef(false);
+  // The newest message's time when you last were at the end: Jump to
+  // latest counts what the agent said after it.
+  const leftAt = useRef(0);
+  const seenThen = useRef<Set<string>>(new Set());
   const scrollerRef = useCallback(
     (el: HTMLDivElement | null) => {
       scroller.current = el;
-      anchored(el);
+      stay.pane(el);
     },
-    [anchored],
+    [stay.pane],
   );
-  // Distance from the bottom when an earlier page was asked for, so the
-  // messages you were reading stay put as it lands above them.
-  const anchor = useRef<number | null>(null);
   const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
   // The conversation is read while it's on screen, wherever this shows:
   // through the newest of the hub's copies of what the agent said, or the
@@ -166,28 +185,17 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     if (inPane && known) watchDm(inPane);
   }, [inPane, known, watchDm]);
 
-  // In a pane, only the pane's own list scrolls: never the grid around it.
-  const toEnd = useCallback(() => {
-    if (!inPane) end.current?.scrollIntoView({ block: "end" });
-    else if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [inPane]);
-
-  useEffect(() => {
-    if (tab === "chat") toEnd();
-  }, [convo?.messages, convo?.working?.step, convo?.prompts.length, tab, toEnd]);
-
+  // Every render may change what's shown: kept where it was, or at the end.
+  // A DM opened with something unread opens at its New line.
   useLayoutEffect(() => {
-    const el = scroller.current;
-    if (!el || tab !== "chat") return;
-    if (anchor.current !== null) el.scrollTop = el.scrollHeight - anchor.current;
-    else toEnd();
-    anchor.current = null;
-  }, [history?.messages, tab, toEnd]);
+    if (typeof newLine.current === "string" && !openedAtLine.current) {
+      openedAtLine.current = true;
+      stay.showAt(newLine.current);
+    } else stay.keep();
+  });
 
   const earlier = useCallback(() => {
     if (!activeAgent || !history?.more || history.earlier === "loading") return;
-    const el = scroller.current;
-    if (el) anchor.current = el.scrollHeight - el.scrollTop;
     void loadEarlier(activeAgent);
   }, [activeAgent, history?.more, history?.earlier, loadEarlier]);
 
@@ -264,7 +272,19 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const shown = convo.features?.has(FEATURES.clientIds)
     ? shownWith(history?.messages ?? [], liveShown)
     : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
-  const settled = !history || history.state === "ready" || history.state === "absent";
+  if (newLine.current === undefined && read && readAtOpen.current !== undefined) {
+    const r = readAtOpen.current;
+    newLine.current = r ? (shown.find((m) => m.role === "assistant" && ms(m.at) > ms(r.at))?.id ?? null) : null;
+  }
+  if (!stay.away) {
+    leftAt.current = shown.reduce((t, m) => Math.max(t, ms(m.at)), 0);
+    // By id and by what it says: a kept copy that takes a live message's
+    // place (another id, the hub's time) isn't new.
+    seenThen.current = new Set(shown.flatMap((m) => [m.id, saidKey(m)]));
+  }
+  // Only what the agent said counts: not what you sent, nor your queue
+  // going as a message.
+  const arrived = stay.away ? shown.filter((m) => m.role === "assistant" && !seenThen.current.has(m.id) && !seenThen.current.has(saidKey(m)) && ms(m.at) >= leftAt.current).length : 0;
 
   const chat = tab !== "settings" && !((tab === "files" || tab === "access" || tab === "connectors") && local);
   return (
@@ -275,6 +295,16 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       className={`${inPane ? "room room-in-pane" : "room"} drop-target`}
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
+      onKeyDown={(e) => {
+        // End goes to the newest message: not from a field (where it moves
+        // the caret), but from the composer when nothing's typed in it.
+        if (tab !== "chat" || e.key !== "End" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+        const t = e.target;
+        const field = t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+        if (field && !(t instanceof HTMLTextAreaElement && t.closest("[data-composer]") && t.value === "")) return;
+        e.preventDefault();
+        stay.toLatest();
+      }}
     >
       {!inPane && (
         <header className="room-head">
@@ -324,74 +354,96 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         </div>
       ) : (
         <>
-          <div
-            ref={scrollerRef}
-            className="room-scroll"
-            role={inPane ? undefined : "tabpanel"}
-            id={inPane ? undefined : "agent-tab-panel"}
-            aria-labelledby={inPane ? undefined : "agent-tab-chat"}
-            onScroll={(e) => {
-              if (e.currentTarget.scrollTop < 80 && history?.earlier === "idle") earlier();
-            }}
-          >
-            {history?.more && (
-              <div className="history-note">
-                {history.earlier === "failed" ? (
-                  <span className="faint small">
-                    Couldn’t load earlier messages.{" "}
-                    <button type="button" className="link small" onClick={earlier}>
-                      Try again
-                    </button>
-                  </span>
-                ) : (
-                  <button type="button" className="link small" disabled={history.earlier === "loading"} onClick={earlier}>
-                    {history.earlier === "loading" ? "Loading earlier messages…" : "Load earlier messages"}
-                  </button>
+          <div className="timeline">
+            <div
+              ref={scrollerRef}
+              className="room-scroll dm-scroll"
+              role={inPane ? undefined : "tabpanel"}
+              id={inPane ? undefined : "agent-tab-panel"}
+              aria-labelledby={inPane ? undefined : "agent-tab-chat"}
+              onScroll={(e) => {
+                if (e.currentTarget.scrollTop < 80 && history?.earlier === "idle") earlier();
+              }}
+            >
+              <div ref={stay.list} className="dm-list">
+                {history?.more && (
+                  <div className="history-note">
+                    {history.earlier === "failed" ? (
+                      <span className="faint small">
+                        Couldn’t load earlier messages.{" "}
+                        <button type="button" className="link small" onClick={earlier}>
+                          Try again
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" className="link small" disabled={history.earlier === "loading"} onClick={earlier}>
+                        {history.earlier === "loading" ? "Loading earlier messages…" : "Load earlier messages"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {history?.state === "failed" && (
+                  <div className="history-note">
+                    <span className="faint small">
+                      Couldn’t load your earlier conversation.{" "}
+                      <button type="button" className="link small" onClick={() => void loadHistory(activeAgent)}>
+                        Try again
+                      </button>
+                    </span>
+                  </div>
+                )}
+                {history?.state === "loading" && shown.length === 0 && (
+                  <div className="history-note">
+                    <span className="faint small">Loading your conversation…</span>
+                  </div>
+                )}
+                {settled && shown.length === 0 && !convo.working && (
+                  <div className="history-note">
+                    <span className="faint small">This is the start of your conversation with {agent.name}.</span>
+                  </div>
+                )}
+                {shown.map((m) => (
+                  <Fragment key={m.id}>
+                    {m.id === newLine.current && (
+                      <div className="new-divider" role="separator" aria-label="New messages">
+                        <span>New</span>
+                      </div>
+                    )}
+                    <DmMessage
+                      message={m}
+                      author={agent.name}
+                      authorKey={agentKey(agent)}
+                      youOn={agent.hubId}
+                      home={hub?.label}
+                      sentOn={sentOn}
+                      origin={origin}
+                      onSubmitForm={submitForm}
+                      onRetry={retry}
+                      onRemove={discard}
+                    />
+                  </Fragment>
+                ))}
+                {/* Desk's own agent says the setup in its DM while it's open. */}
+                <SetupInDm agent={agent} />
+                {convo.prompts.map((p) => (
+                  <PromptCard
+                    key={p.requestId}
+                    prompt={p}
+                    agent={activeAgent}
+                    onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)}
+                  />
+                ))}
+                {convo.working && !answering && (
+                  <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />
                 )}
               </div>
+            </div>
+            {stay.away && (
+              <button type="button" className="jump-pill" title="Jump to latest (End)" aria-live="polite" onClick={stay.toLatest}>
+                <span aria-hidden="true">↓</span> Jump to latest
+                {arrived > 0 && <small className="jump-pill-count">{arrived} new</small>}
+              </button>
             )}
-            {history?.state === "failed" && (
-              <div className="history-note">
-                <span className="faint small">
-                  Couldn’t load your earlier conversation.{" "}
-                  <button type="button" className="link small" onClick={() => void loadHistory(activeAgent)}>
-                    Try again
-                  </button>
-                </span>
-              </div>
-            )}
-            {history?.state === "loading" && shown.length === 0 && (
-              <div className="history-note">
-                <span className="faint small">Loading your conversation…</span>
-              </div>
-            )}
-            {settled && shown.length === 0 && !convo.working && (
-              <div className="history-note">
-                <span className="faint small">This is the start of your conversation with {agent.name}.</span>
-              </div>
-            )}
-            {shown.map((m) => (
-              <DmMessage
-                key={m.id}
-                message={m}
-                author={agent.name}
-                authorKey={agentKey(agent)}
-                youOn={agent.hubId}
-                home={hub?.label}
-                sentOn={sentOn}
-                origin={origin}
-                onSubmitForm={submitForm}
-                onRetry={retry}
-                onRemove={discard}
-              />
-            ))}
-            {/* Desk's own agent says the setup in its DM while it's open. */}
-            <SetupInDm agent={agent} />
-            {convo.prompts.map((p) => (
-              <PromptCard key={p.requestId} prompt={p} agent={activeAgent} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
-            ))}
-            {convo.working && !answering && <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />}
-            <div ref={end} />
           </div>
           <DmComposer
             to={activeAgent}
@@ -403,6 +455,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             inPane={!!inPane}
             files={files}
             sending={sending}
+            onSent={stay.toLatest}
+            away={stay.away}
           />
           {drop.dragging && <DropOverlay to={agent.name} />}
         </>
@@ -434,7 +488,10 @@ const DmMessage = memo(function DmMessage({
   message,
   sentOn,
   ...shown
-}: Omit<ComponentProps<typeof Message>, "relayed"> & { message: ChatMessage; sentOn: Parameters<typeof relayedOf>[1] }) {
+}: Omit<ComponentProps<typeof Message>, "relayed"> & {
+  message: ChatMessage;
+  sentOn: Parameters<typeof relayedOf>[1];
+}) {
   const relayed = useMemo(() => relayedOf(message, sentOn), [message, sentOn]);
   return <Message message={message} relayed={relayed} steps={message.steps} {...shown} />;
 });
@@ -454,6 +511,8 @@ function DmComposer({
   inPane,
   files,
   sending: [sending, setSending],
+  onSent,
+  away,
 }: {
   /** The agent's key. */
   to: string;
@@ -466,6 +525,10 @@ function DmComposer({
   inPane: boolean;
   files: Files;
   sending: [boolean, (sending: boolean) => void];
+  /** Something you sent went: the chat goes to it. Not a queued one. */
+  onSent: () => void;
+  /** Scrolled up from the newest message: End takes you back. */
+  away: boolean;
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
@@ -478,8 +541,17 @@ function DmComposer({
   const [draft, setDraft] = useDraft(draftKey.dm(to));
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
-  const emoji = useEmojiInput({ field: composer, value: draft, setValue: setDraft });
-  const commands = useCommandMenu({ field: composer, value: draft, setValue: setDraft, commands: useHubCommands(hub) });
+  const emoji = useEmojiInput({
+    field: composer,
+    value: draft,
+    setValue: setDraft,
+  });
+  const commands = useCommandMenu({
+    field: composer,
+    value: draft,
+    setValue: setDraft,
+    commands: useHubCommands(hub),
+  });
   const listing = commands.open ? commands : emoji.open ? emoji : null;
   const voiceEntries = useDmVoiceEntries(to, agent.name);
 
@@ -494,7 +566,10 @@ function DmComposer({
       if (holding) {
         enqueue(to, text);
         setDraft("");
-      } else if (send(to, text)) setDraft("");
+      } else if (send(to, text)) {
+        setDraft("");
+        onSent();
+      }
       return;
     }
     if (!hub) return;
@@ -506,6 +581,7 @@ function DmComposer({
         const q = s.queues[to];
         if (isRunning(s.conversations[to]) || (!!q?.items.length && !q.paused)) enqueue(to, text, attachments);
         else if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+        else onSent();
         setDraft("");
         files.sent(picked);
       })
@@ -552,6 +628,11 @@ function DmComposer({
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
         <ComposerMore label={`More for ${agent.name}`} onEmoji={emoji.insert} more={voiceEntries} disabled={sending} />
+        {away && !draft && (
+          <span className="composer-hint" aria-hidden="true">
+            <kbd>End</kbd> jumps to latest
+          </span>
+        )}
         {holding && (
           <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop
