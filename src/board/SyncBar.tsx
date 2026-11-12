@@ -1,15 +1,13 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
-import { HubError } from "../hub/client";
-import { linkedTo, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { fixOf, linkedTo, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
 import { openSettingsAt } from "../ui/problem";
+import { plainError } from "../ui/plainError";
 import type { Board, Ticket } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
 import { useBoard } from "./store";
 import { hubNameOf, localSync, useSyncHubs } from "./syncStore";
-
-const saidOf = (e: unknown): string => (e instanceof HubError || e instanceof Error ? e.message : String(e));
 
 /** "3 min ago", from the minute it's drawn in. */
 const ago = (iso: string | null | undefined, now: number): string | null => {
@@ -25,9 +23,12 @@ const ago = (iso: string | null | undefined, now: number): string | null => {
 export function SyncBar({ board, now, onToken }: { board: Board; now: number; onToken?: () => void }) {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
-  const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState<"pause" | "sync" | "me" | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  // What went wrong with the last thing asked here, shown in this bar with
+  // a way to ask again, not in the window's toast.
+  const [failed, setFailed] = useState<{ words: string; again: () => void } | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
   const sync = board.sync;
   if (!sync) return null;
   const hub = hubNameOf(sync.via, kept, paired);
@@ -38,10 +39,11 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     const api = localSync();
     if (!api) return;
     setBusy("pause");
+    setFailed(null);
     try {
       kept_(await api.pause(board.id, !paused));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), again: () => void pause() });
     } finally {
       setBusy(null);
     }
@@ -52,10 +54,11 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     setBusy("sync");
     setSaid(null);
     try {
+      setFailed(null);
       await api.syncNow(board.id);
       setSaid("Syncing now");
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), again: () => void syncNow() });
     } finally {
       setBusy(null);
     }
@@ -70,9 +73,31 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     try {
       const b = await api.recheckMe(board.id);
       kept_(b);
+      setFailed(null);
       setSaid(vouched(b.sync?.meSource) ? `${hub} knows you as ${b.sync?.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), again: () => void recheck() });
+    } finally {
+      setBusy(null);
+    }
+  };
+  // The one button that mends what the chip says is wrong.
+  const fix = fixOf(sync, hub);
+  const mend = async () => {
+    if (!fix) return;
+    if (fix.kind === "token") return onToken?.();
+    if (fix.kind === "connections") return openSettingsAt("connections");
+    if (fix.kind === "unlink") return setUnlinking(true);
+    const api = localSync();
+    if (!api) return;
+    setBusy("sync");
+    setFailed(null);
+    try {
+      if (paused) kept_(await api.pause(board.id, false));
+      await api.syncNow(board.id);
+      setSaid("Syncing now");
+    } catch (e) {
+      setFailed({ words: plainError(e), again: () => void mend() });
     } finally {
       setBusy(null);
     }
@@ -102,9 +127,9 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       </span>
       {said && <span className="sr-only" aria-live="polite">{said}</span>}
       <span className="board-sync-actions">
-        {sync.paused?.kind === "noToken" && sync.via.kind === "hub" && onToken && (
-          <button type="button" className="btn btn-sm btn-signal" onClick={onToken}>
-            New token…
+        {fix && !(fix.kind === "token" && !onToken) && (
+          <button type="button" className="btn btn-sm btn-signal" disabled={!!busy} onClick={() => void mend()}>
+            {fix.label}
           </button>
         )}
         <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${hub} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
@@ -123,6 +148,15 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           {busy === "sync" ? "Syncing…" : "Sync now"}
         </button>
       </span>
+      {failed && (
+        <span className="board-sync-failed" role="alert">
+          {failed.words}{" "}
+          <button type="button" className="link" onClick={failed.again}>
+            Try again
+          </button>
+        </span>
+      )}
+      {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
     </div>
   );
 }
@@ -130,8 +164,8 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
 /** The tickets whose issues left the board's import filter: kept here,
  *  unsynced for good, or dropped (the issue is never touched). */
 export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Ticket[] }) {
-  const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ words: string; again: () => void } | null>(null);
   // Its own, as a grid can show more than one board.
   const titleId = useId();
   if (!tickets.length) return null;
@@ -140,10 +174,11 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
     const hub = useDesk.getState().hub;
     if (!hub) return;
     setBusy(t.id);
+    setFailed(null);
     try {
       useBoard.getState().heard(await hub.leftFilter(t.id, keep));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), again: () => void decide(t, keep) });
     } finally {
       setBusy(null);
     }
@@ -156,6 +191,14 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
         </h2>
         <span className="move-opt-sub">These issues no longer match what the board imports. Keep one here, unsynced, or drop it; {system} is never changed.</span>
       </div>
+      {failed && (
+        <p className="small state-blocked" role="alert">
+          {failed.words}{" "}
+          <button type="button" className="link" onClick={failed.again}>
+            Try again
+          </button>
+        </p>
+      )}
       <ul className="board-left-rows">
         {tickets.map((t) => (
           <li key={t.id} className="board-left-row">

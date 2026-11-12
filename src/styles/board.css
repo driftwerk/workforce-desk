@@ -617,6 +617,11 @@ button.ticket-chip:hover {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+.board-sync-failed {
+  flex: 1 1 100%;
+  color: var(--blocked);
+  overflow-wrap: anywhere;
+}
 .board-sync-actions {
   display: flex;
   flex-wrap: wrap;

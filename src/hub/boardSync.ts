@@ -12,7 +12,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { deskCall, HubError, refusal } from "./client";
 import { jsonBody, pairedHub, type HubRef } from "./net";
-import type { Board, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
+import type { Board, BoardSync, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
 
 /** What a check of a link answered with: what it found, or why the hub
  *  can't (its words, and the pause it would be), or a refusal. */
@@ -117,7 +117,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "hubOffline":
       return `Paused: ${hub} is offline since ${hhmm(p.since)}; changes go out when it's back.`;
     case "hubUnpaired":
-      return `Paused: ${hub} isn't linked any more. Unlink the board to keep it here, unsynced.`;
+      return `Paused: ${hub} isn't linked any more.`;
     case "noToken":
       return `Paused: ${hub} needs a new token.`;
     case "missing":
@@ -125,8 +125,37 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "refused":
       return `Paused: ${hub} refused: ${p.reason}`;
     case "leftGroup":
-      return "Paused: this board left the group it was linked in; unlink it and link it again.";
+      return "Paused: this board left the group it was linked in.";
   }
+};
+
+/** The one button that mends a pause or problem: what it says and what it
+ *  does (`token`: a new token for the hub; `connections`: Settings, where
+ *  the service is connected; `unlink`: unlink, keeping the tickets; `retry`:
+ *  resume and sync again). A pause you chose has Resume already. */
+export type SyncFix = { kind: "token" | "connections" | "unlink" | "retry"; label: string };
+
+export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
+  const system = SYSTEM_TITLE[s.system];
+  if (s.paused) {
+    switch (s.paused.kind) {
+      case "byYou":
+        return null;
+      case "hubOffline":
+        return { kind: "retry", label: "Try again" };
+      case "hubUnpaired":
+        return { kind: "unlink", label: "Keep the tickets, unlink" };
+      case "noToken":
+        return s.via.kind === "hub" ? { kind: "token", label: "New token…" } : { kind: "connections", label: `Set up ${system}` };
+      case "missing":
+        return { kind: "connections", label: `Turn on ${system} for ${hub}` };
+      case "refused":
+        return { kind: "retry", label: "Try again" };
+      case "leftGroup":
+        return { kind: "unlink", label: "Keep the tickets, unlink" };
+    }
+  }
+  return s.problem ? { kind: "retry", label: "Try again" } : null;
 };
 
 /** The status a synced board's chip shows: synced, paused (with why), or a

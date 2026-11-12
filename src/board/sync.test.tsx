@@ -597,6 +597,36 @@ describe("the board, synced", () => {
     expect(screen.getByRole("button", { name: "New token…" })).toBeTruthy();
   });
 
+  it("gives each pause and problem its own fix button, none telling you to unlink and link again", async () => {
+    const words = () => document.querySelector(".board-sync")!.textContent!;
+    let u = show(synced({ paused: { kind: "hubUnpaired" } }), []);
+    expect(words()).not.toMatch(/link it again/);
+    fireEvent.click(screen.getByRole("button", { name: "Keep the tickets, unlink" }));
+    await screen.findByText(/Its tickets stay here with their keys/);
+    cleanup();
+    u = show(synced({ paused: { kind: "missing", tools: ["jira.search"] } }), []);
+    fireEvent.click(screen.getByRole("button", { name: "Turn on Jira for Atlas" }));
+    expect(useUi.getState().settings).toBe("connections");
+    u.unmount();
+    native.route = (_hub, method, path, body) =>
+      path.endsWith("/pause") ? { status: 200, body: synced({ paused: null }) } : path.endsWith("/sync") ? { status: 202 } : localRoutes(method, path, body);
+    show(synced({ paused: { kind: "refused", reason: "policy denied" } }), []);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(native.asked.some((a) => a.path.endsWith("/pause") && a.body?.paused === false)).toBe(true));
+    await waitFor(() => expect(native.asked.some((a) => a.path.endsWith("/sync"))).toBe(true));
+  });
+
+  it("shows a sync that failed in the bar, with Try again, and not in the window's toast", async () => {
+    const fail = vi.fn();
+    useDesk.setState({ fail });
+    native.route = (_hub, method, path, body) => (path.endsWith("/sync") ? { status: 409, body: { error: "Atlas is busy." } } : localRoutes(method, path, body));
+    show(synced(), []);
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Try again");
+    expect(fail).not.toHaveBeenCalled();
+  });
+
   it("puts issues that left the filter on their shelf, out of the columns, to keep or drop", async () => {
     const left = ticket(5, { key: "ACME-455", title: "Mobile nav focus ring", external: ext("ACME-455", { synced: false }), leftFilter: true, state: "todo" });
     const leftFilter = vi.fn(async (id: string, keep: boolean) => ({ ...left, id, leftFilter: false, external: ext("ACME-455", { synced: false, kept: keep }) }));
