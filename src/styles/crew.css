@@ -419,7 +419,8 @@
   flex-wrap: wrap;
   gap: 4px 12px;
 }
-.handoff-egress {
+.handoff-egress,
+.handoff-defaults {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;

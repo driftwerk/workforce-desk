@@ -2,7 +2,7 @@
 
 import { ENGINE_TITLE } from "../engines/engines";
 import { clock } from "../floor/time";
-import type { Continued, Engine, HandoffPreview, Hop, Session } from "../hub/types";
+import type { Continued, Engine, HandoffPlace, HandoffPreview, HandoffSource, Hop, Session } from "../hub/types";
 
 /** "Claude Code · 10:42", or the engine alone when the time isn't known. */
 const engineAt = (engine: Engine | null, at: string | null): string =>
@@ -46,3 +46,16 @@ export const acrossText = (engines: readonly (Engine | null | undefined)[]): str
   if (titles.length === 1) return `in ${titles[0]}`;
   return `across ${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
 };
+
+/** What becomes of the session handed over, as the dialog's line says it. */
+export const sourceSaid = (source: HandoffSource, running: boolean): string =>
+  source === "keep" ? "this one keeps running" : source === "after_turn" ? "this one stops after its turn" : running ? "this one stops now" : "this one stays stopped";
+
+/** The handoff as it goes when nothing is changed: "Continues in Codex on
+ *  Work, in this folder; this one stops now." */
+export const defaultsLine = (o: { engine: string; account?: string | null; place: HandoffPlace; source: HandoffSource; running: boolean }): string =>
+  `Continues in ${o.engine}${o.account ? ` on ${o.account}` : ""}, ${o.place === "new_worktree" ? "in a new worktree" : "in this folder"}; ${sourceSaid(o.source, o.running)}.`;
+
+/** A hand back as it goes when nothing is changed: "Hands the work back to
+ *  acme-api; this one stops now." */
+export const backLine = (o: { to: string; source: HandoffSource; running: boolean }): string => `Hands the work back to ${o.to}; ${sourceSaid(o.source, o.running)}.`;
