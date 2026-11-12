@@ -131,19 +131,46 @@ fn forget_resume() {
 fn forget_resume() {}
 
 /// Moves `distro` to WSL 2, which takes a few minutes and keeps its files.
+/// What `wsl.exe` says goes to the log, not the person.
 #[tauri::command]
 pub async fn wsl_convert(distro: String) -> CommandResult<()> {
+    tauri::async_runtime::spawn_blocking(move || desk_wsl::fix::convert(&WslExe::system(), &distro))
+        .await
+        .map_err(text)?
+}
+
+/// The Linux user Desk would make for the person (named after the Windows
+/// one), to say before it does.
+#[tauri::command]
+pub fn wsl_user_name() -> String {
+    desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default())
+}
+
+/// "Create a user": `distro`'s only user is root, which Desk won't run
+/// as, so Desk makes a normal one named after the Windows user and makes it
+/// the default (the distro restarts; its files stay). Its name.
+#[tauri::command]
+pub async fn wsl_create_user(distro: String) -> CommandResult<String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let out = WslExe::system()
-            .run(&["--set-version", &distro, "2"])
-            .map_err(text)?;
-        if !out.status.success() {
-            return Err(format!(
-                "{distro} didn't move to WSL 2: {}",
-                desk_wsl::detect::decode(&out.stderr).trim()
-            ));
-        }
-        Ok(())
+        let user = desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default());
+        desk_wsl::fix::create_user(&WslExe::system(), &distro, &user)?;
+        Ok(user)
+    })
+    .await
+    .map_err(text)?
+}
+
+/// "Install Ubuntu alongside": the person's Linux is too old for Desk, so
+/// Desk installs a current Ubuntu beside it (theirs stays as it is) with a
+/// normal user named after the Windows one. Its name, to set Desk up in.
+#[tauri::command]
+pub async fn wsl_install_alongside() -> CommandResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let wsl = WslExe::system();
+        desk_wsl::fix::install_alongside(&wsl)?;
+        let user = desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default());
+        desk_wsl::fix::create_user(&wsl, desk_wsl::fix::ALONGSIDE, &user)?;
+        Ok(desk_wsl::fix::ALONGSIDE.to_string())
     })
     .await
     .map_err(text)?
