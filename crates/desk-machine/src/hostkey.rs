@@ -324,14 +324,21 @@ impl EntryQuestion {
 pub struct UninstallQuestion {
     pub name: String,
     pub target: String,
+    /// Codex is signed out there too.
+    pub sign_out_codex: bool,
 }
 
 impl UninstallQuestion {
     pub fn text(&self) -> String {
         format!(
-            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with the sign-ins and memory Desk keeps there; its sessions end. Your files, repos, Claude Code and Codex stay, and so does Codex's own sign-in (~/.codex).",
+            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with its memory and the Claude sign-ins Desk copied there (that doesn't revoke them: do that at claude.ai if you no longer trust {name}); its sessions end.{codex} Your files, repos, Claude Code and Codex stay.",
             name = self.name,
-            target = self.target
+            target = self.target,
+            codex = if self.sign_out_codex {
+                " Codex is signed out there too."
+            } else {
+                ""
+            },
         )
     }
 }
