@@ -4,7 +4,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { SpendRow, SpendView } from "../hub/types";
 import { SpendCard } from "./SpendCard";
-import { SpendStrip } from "./SpendStrip";
+import { CostChip } from "./SpendStrip";
 import { useSpend } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -61,15 +61,20 @@ it("shows nothing from a hub without a ledger", async () => {
   expect(container.innerHTML).toBe("");
 });
 
-it("puts a session's spend today and this week on its card", () => {
+it("puts a session's spend today on a chip that opens today and this week", () => {
   useSpend.setState({
     supported: true,
     views: { day: view([row("s-web", "acme-web", 4.1, 10)]), week: view([row("s-web", "acme-web", 12, 30)]) },
   });
-  render(<SpendStrip sessionId="s-web" />);
-  const strip = screen.getByLabelText("Spend");
-  expect(strip.textContent).toBe("Today 2.1M tokens · $4.10 API-equivalent · this week 2.1M tokens · $12.00 API-equivalent");
+  render(<CostChip sessionId="s-web" />);
+  const chip = screen.getByRole("button", { name: "Spend today: $4.10 API-equivalent" });
+  fireEvent.click(chip);
+  const pop = screen.getByRole("dialog", { name: "What it spent" });
+  expect([...pop.querySelectorAll("dt, dd")].map((e) => e.textContent)).toEqual(["Today", "2.1M tokens · $4.10", "This week", "2.1M tokens · $12.00"]);
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(chip);
   cleanup();
-  const { container } = render(<SpendStrip sessionId="s-other" />);
+  const { container } = render(<CostChip sessionId="s-other" />);
   expect(container.innerHTML).toBe("");
 });
