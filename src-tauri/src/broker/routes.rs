@@ -129,6 +129,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/breakers/continue"),
     route("POST", "/api/desk/breakers/keep"),
     route("GET", "/api/desk/engines"),
+    route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and

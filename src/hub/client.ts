@@ -411,6 +411,17 @@ export class DeskHub {
       throw e;
     }
   };
+  /** What the hub can do that an older one can't (`fresh-worktree`, …);
+   *  none from a hub that doesn't say, which is an older one. */
+  features = async (): Promise<string[]> => {
+    try {
+      const f = await this.call<{ features?: unknown }>("GET", "/api/desk/features");
+      return Array.isArray(f.features) ? f.features.filter((x): x is string => typeof x === "string") : [];
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return [];
+      throw e;
+    }
+  };
   /** Every engine read again now, as after Desk installed one or signed
    *  one in; a hub too old to read on asking says what it read last. */
   enginesNow = async (): Promise<EngineInfo[] | null> => {
