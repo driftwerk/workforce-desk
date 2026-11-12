@@ -162,13 +162,15 @@ it("adds an account from a pasted token, sent once and never shown", async () =>
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Sign in…" }));
   fireEvent.click(screen.getByRole("button", { name: "Paste a token instead" }));
+  // Named already, as a sign-in would be; the person may change it.
+  expect((screen.getByPlaceholderText("Work") as HTMLInputElement).value).toBe("Claude");
   fireEvent.change(screen.getByPlaceholderText("Work"), { target: { value: "Work" } });
-  const field = screen.getByLabelText("Token from claude setup-token") as HTMLInputElement;
+  const field = screen.getByLabelText("Sign-in token") as HTMLInputElement;
   expect(field.type).toBe("password");
   fireEvent.change(field, { target: { value: "sk-ant-oat01-pasted" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add account" })));
   expect(addAccount).toHaveBeenCalledWith({ engine: "claude", name: "Work", token: "sk-ant-oat01-pasted", makeDefault: true });
-  expect(screen.queryByLabelText("Token from claude setup-token")).toBeNull();
+  expect(screen.queryByLabelText("Sign-in token")).toBeNull();
 });
 
 it("says why the hub refused an account", async () => {
@@ -178,7 +180,7 @@ it("says why the hub refused an account", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Sign in…" }));
   fireEvent.click(screen.getByRole("button", { name: "Paste a token instead" }));
   fireEvent.change(screen.getByPlaceholderText("Work"), { target: { value: "Work" } });
-  fireEvent.change(screen.getByLabelText("Token from claude setup-token"), { target: { value: "bad" } });
+  fireEvent.change(screen.getByLabelText("Sign-in token"), { target: { value: "bad" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add account" })));
   expect(screen.getByText(/didn't accept that token/)).toBeTruthy();
 });
@@ -235,7 +237,7 @@ it("offers pasting a token when the sign-in fails, saying why", async () => {
   );
   expect(screen.getByText(/paste it instead/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Paste a token instead" }));
-  expect(screen.getByLabelText("Token from claude setup-token")).toBeTruthy();
+  expect(screen.getByLabelText("Sign-in token")).toBeTruthy();
 });
 
 it("asks before removing an account, saying what happens to its sessions", async () => {
