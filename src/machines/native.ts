@@ -122,7 +122,7 @@ export type Checked =
 /** A step of removing a machine with Desk uninstalled from it. */
 export interface RemoveEvent {
   machine: MachineId;
-  step: "stop" | "remove" | "linger" | "forget";
+  step: "stop" | "sign_out" | "remove" | "linger" | "forget";
   state: "running" | "done" | "failed" | "blocked";
   message?: string;
   /** What to run there by hand, when Desk couldn't. */

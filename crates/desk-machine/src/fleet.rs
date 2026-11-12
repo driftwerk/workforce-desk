@@ -373,6 +373,9 @@ pub trait Host: Send + Sync + 'static {
 pub enum RemoveStep {
     /// Desk's service stopped there, and its unit taken away.
     Stop,
+    /// Codex signed out there (its own sign-in, `~/.codex`); Desk's copies
+    /// of the Claude accounts' sign-ins go with its folder, next.
+    SignOut,
     /// Everything Desk keeps there removed.
     Remove,
     /// Linger turned off for the account.
@@ -2759,6 +2762,29 @@ impl Fleet {
             drop(held);
             self.kick(id);
             return Ok(false);
+        }
+        // Codex's own sign-in there, which removing Desk's folder leaves:
+        // signed out as the person would (`codex logout`), else the line to
+        // run. Never a reason to stop: Desk there is already stopped.
+        say(RemoveStep::SignOut, StepState::Running, None, None);
+        match self.step_uncancellable().run(|| {
+            setup::run(
+                &self.ssh,
+                &machine,
+                setup::UNINSTALL_SIGN_OUT_SCRIPT,
+                "sign-out",
+            )
+        }) {
+            Ok(_) => say(RemoveStep::SignOut, StepState::Done, None, None),
+            Err(m) => {
+                self.note(id, LogKind::Error, m);
+                say(
+                    RemoveStep::SignOut,
+                    StepState::Blocked,
+                    Some(format!("Codex may still be signed in on {name}.")),
+                    Some("codex logout".into()),
+                );
+            }
         }
         let removed = run(
             RemoveStep::Remove,

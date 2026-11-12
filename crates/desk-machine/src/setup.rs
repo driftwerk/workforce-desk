@@ -375,6 +375,19 @@ pub fn uninstall_gone_script() -> String {
     )
 }
 
+/// Uninstalling: signs Codex out there (its sign-in in `$CODEX_HOME`, else
+/// `~/.codex`) as `codex logout` does, or by taking its sign-in file away
+/// where the CLI isn't on the PATH or fails; then checks it is gone. Claude
+/// Code's own sign-in there is the person's, and stays; Desk's copies of
+/// the Claude accounts' sign-ins are in Desk's folder, removed next.
+pub const UNINSTALL_SIGN_OUT_SCRIPT: &str = "set -u
+     a=\"${CODEX_HOME:-$HOME/.codex}/auth.json\"
+     [ -e \"$a\" ] || exit 0
+     if command -v codex >/dev/null 2>&1; then codex logout >/dev/null 2>&1 || true; fi
+     [ -e \"$a\" ] && rm -f -- \"$a\"
+     if [ -e \"$a\" ]; then echo \"Codex's sign-in is still there\" >&2; exit 1; fi
+";
+
 /// Uninstalling: turns linger off for the account (as itself, never sudo).
 pub const UNINSTALL_LINGER_SCRIPT: &str = "loginctl disable-linger \"$(id -un)\"";
 
@@ -393,6 +406,31 @@ mod tests {
         assert!(s.contains(&sha));
         assert!(copy_script("/b", "../x", &sha).is_err());
         assert!(copy_script("/b", "0.3.0", "$(id)").is_err());
+    }
+
+    #[test]
+    fn signing_codex_out_takes_only_its_sign_in_and_checks_it_went() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex = dir.path().join("codex-home");
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::write(codex.join("auth.json"), "{}").unwrap();
+        std::fs::write(codex.join("config.toml"), "").unwrap();
+        let run = || {
+            std::process::Command::new("sh")
+                .args(["-c", UNINSTALL_SIGN_OUT_SCRIPT])
+                .env("CODEX_HOME", &codex)
+                .env("HOME", dir.path())
+                // No codex CLI here: the file goes by hand.
+                .env("PATH", "/usr/bin:/bin")
+                .status()
+                .unwrap()
+        };
+        assert!(run().success());
+        assert!(!codex.join("auth.json").exists());
+        assert!(codex.join("config.toml").exists(), "only the sign-in");
+        // Nothing to sign out of: done all the same.
+        assert!(run().success());
+        assert!(!UNINSTALL_SIGN_OUT_SCRIPT.contains("sudo"));
     }
 
     #[test]

@@ -303,7 +303,7 @@ pub struct UninstallQuestion {
 impl UninstallQuestion {
     pub fn text(&self) -> String {
         format!(
-            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with the sign-ins and memory Desk keeps there; its sessions end. Your files, repos, Claude Code and Codex stay, and so does Codex's own sign-in (~/.codex).",
+            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with the sign-ins and memory Desk keeps there; its sessions end. It signs Codex out there too. Your files, repos, Claude Code and Codex stay.",
             name = self.name,
             target = self.target
         )

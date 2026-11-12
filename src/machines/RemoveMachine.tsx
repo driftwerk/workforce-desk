@@ -21,8 +21,24 @@ const words = (step: Step, state: StepState, name: string): string => {
   switch (step) {
     case "stop":
       return state === "done" ? `Stopped Desk’s service on ${name}` : state === "running" ? `Stopping Desk’s service on ${name}…` : `Couldn’t stop Desk’s service on ${name}`;
+    case "sign_out":
+      return state === "done"
+        ? `Signed Codex out on ${name}`
+        : state === "running"
+          ? `Signing Codex out on ${name}…`
+          : state === "waiting"
+            ? `Sign Codex out on ${name}`
+            : state === "blocked"
+              ? `Codex may still be signed in on ${name}`
+              : `Couldn’t sign Codex out on ${name}`;
     case "remove":
-      return state === "done" ? "Removed ~/.local/share/Desk" : state === "running" ? "Removing ~/.local/share/Desk…" : state === "waiting" ? "Remove ~/.local/share/Desk" : "Couldn’t remove ~/.local/share/Desk";
+      return state === "done"
+        ? "Removed Desk’s folder, with the Claude sign-ins it kept"
+        : state === "running"
+          ? "Removing Desk’s folder and the Claude sign-ins it kept…"
+          : state === "waiting"
+            ? "Remove Desk’s folder and the Claude sign-ins it kept"
+            : "Couldn’t remove ~/.local/share/Desk";
     case "linger":
       return state === "done" ? "Turned linger off" : state === "running" ? "Turning linger off…" : state === "blocked" ? "Linger stays on" : "Turn linger off";
     case "forget":
@@ -117,7 +133,7 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
     });
   };
 
-  const checks: Step[] = ["stop", "remove", "linger", "forget"];
+  const checks: Step[] = ["stop", "sign_out", "remove", "linger", "forget"];
   return (
     <Dialog
       onClose={() => !busy && onClose()}
@@ -160,15 +176,16 @@ export function RemoveMachine({ machine, native, onClose, onRemoved }: { machine
                   <b>Also uninstall Desk from {name}</b>
                   <span className="small muted">
                     {reachable
-                      ? `${ends} Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay, and so does Codex’s own sign-in (~/.codex): run codex logout there to end it.`
+                      ? `${ends} Desk’s service there, signs Claude and Codex out there, and removes Desk’s folder with its memory. Your files, repos, Claude Code and Codex stay.`
                       : `Desk can’t reach ${name} right now, so it can only forget it here.`}
                   </span>
                 </span>
               </button>
             </div>
-            {!steps && (
+            {!steps && !reachable && (
               <p className="small muted">
-                {name} keeps copies of your accounts’ sign-ins until Desk is uninstalled there. If {name} is lost, or you no longer trust it, revoke them at claude.ai.
+                {name} keeps copies of your accounts’ Claude sign-ins until Desk is uninstalled there. Desk can’t reach it to end them: if {name} is lost, or you no longer
+                trust it, revoke them at claude.ai.
               </p>
             )}
             {!reachable && !steps && (
