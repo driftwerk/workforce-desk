@@ -71,10 +71,12 @@ pub async fn wsl_detect() -> CommandResult<Detection> {
 }
 
 /// Installs WSL with Ubuntu, as an administrator (Windows asks); Windows
-/// then needs a restart.
+/// then needs a restart, after which Windows opens Desk once by itself and
+/// the setup carries on.
 #[tauri::command]
 pub async fn wsl_install() -> CommandResult<()> {
     tauri::async_runtime::spawn_blocking(|| {
+        resume_after_restart();
         let elevated = Invocation {
             program: "powershell.exe".into(),
             args: vec![
@@ -85,7 +87,10 @@ pub async fn wsl_install() -> CommandResult<()> {
         };
         let status = elevated.command().status().map_err(text)?;
         if !status.success() {
-            return Err("WSL didn't install. Run “wsl --install -d Ubuntu” in PowerShell as an administrator.".into());
+            return Err(
+                "WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks."
+                    .into(),
+            );
         }
         Ok(())
     })
@@ -197,6 +202,23 @@ fn start_at_signin() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Opens Desk once at the next sign-in. Best effort: without it, the person
+/// opens Desk after the restart and the setup carries on just the same.
+#[cfg(windows)]
+fn resume_after_restart() {
+    match std::env::current_exe() {
+        Ok(desk) => {
+            if let Err(e) = desk_wsl::startup::resume_after_restart(&desk) {
+                tracing::warn!(error = %format!("{e:#}"), "Desk won't open by itself after the restart");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Desk won't open by itself after the restart"),
+    }
+}
+
+#[cfg(not(windows))]
+fn resume_after_restart() {}
+
 #[cfg(not(windows))]
 fn start_at_signin() -> eyre::Result<()> {
     eyre::bail!("Desk runs its backend in WSL on Windows only")
@@ -243,6 +265,8 @@ pub async fn wsl_setup(app: AppHandle, distro: String) -> CommandResult<()> {
         })?;
         reach_hub(&app, &wsl, &w)?;
         say(&app, Step::Startup, State::Done, None);
+        #[cfg(windows)]
+        desk_wsl::startup::forget_resume();
         Ok(())
     })
     .await

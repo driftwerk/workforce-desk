@@ -53,3 +53,21 @@ describe("setting Desk up", () => {
     expect(after.reach.state).toBe("blocked");
   });
 });
+
+describe("what Desk doesn't need to ask", () => {
+  it("sets up without asking only when one Linux on WSL 2 can be used", async () => {
+    const { onlyChoice } = await import("./wsl");
+    expect(onlyChoice([ubuntu])).toBe("Ubuntu-24.04");
+    expect(onlyChoice([ubuntu, rooted])).toBe("Ubuntu-24.04");
+    expect(onlyChoice([ubuntu, debian])).toBeNull();
+    expect(onlyChoice([old])).toBeNull();
+    expect(onlyChoice([])).toBeNull();
+  });
+
+  it("says why Set up can't be pressed", async () => {
+    const { whyNotYet } = await import("./wsl");
+    expect(whyNotYet(null, false)).toBe("Choose a Linux first.");
+    expect(whyNotYet(optionFor(rooted), false)).toMatch(/^Desk can’t run in Debian: Set a normal default user/);
+    expect(whyNotYet(optionFor(ubuntu), false)).toBeNull();
+  });
+});

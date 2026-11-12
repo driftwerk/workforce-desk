@@ -1,7 +1,8 @@
 // Lets `vite dev` run the UI in a plain browser against a running local hub,
 // for checking screens without the app: open
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
-// (and &platform=linux or windows to see another system's screens).
+// (and &platform=linux or windows to see another system's screens; with
+// &wsl=none, WSL isn't installed yet, and &wsl=refused, installing it fails).
 // Only reachable from development builds.
 
 import { HubError } from "./hub/client";
@@ -10,7 +11,7 @@ import { setDevToken } from "./hub/devTokens";
 import { DEFAULT_HOST } from "./shell/host";
 
 const params = (() => {
-  const keys = ["hub", "admin", "device", "platform"] as const;
+  const keys = ["hub", "admin", "device", "platform", "wsl"] as const;
   const fromUrl = new URLSearchParams(location.search);
   const read = (k: string) => {
     const v = fromUrl.get(k);
@@ -156,7 +157,11 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
           : { ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform },
       );
     case "wsl_detect":
-      return answer(WSL_FIXTURE);
+      return answer(params.wsl === "none" || params.wsl === "refused" ? { problem: { kind: "not_installed" }, distros: [] } : WSL_FIXTURE);
+    case "wsl_install":
+      if (params.wsl === "refused")
+        throw new Error("WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks.");
+      return answer(new Promise(() => {}));
     case "hubs_list":
       // The preview reaches the hub itself, with this token (in the app the
       // native side holds every hub's, and the page has none).
