@@ -898,7 +898,6 @@ export const useChat = create<ChatStore>((set, get) => ({
       const s = get();
       const kept = [...live.keys(), ...Object.keys(s.conversations), ...Object.keys(s.histories), ...Object.keys(s.queues)];
       for (const k of new Set(kept)) if (k.startsWith(`${key}#`)) get().forget(k);
-      threadsBegun.delete(key);
     }
     live.get(key)?.close();
     keepQueue(key, emptyQueue());

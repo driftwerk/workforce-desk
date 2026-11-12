@@ -74,14 +74,30 @@ describe("The hub's threads", () => {
 });
 
 describe("A DM's threads beside the DM", () => {
-  it("each keeps its own queue, and forgetting the DM forgets them", () => {
+  it("each keeps its own queue", () => {
     useChat.setState({ hubs: [hub], roster: [agent], queues: {}, conversations: {}, histories: {}, threads: {} });
     useChat.getState().enqueue("acme/scout#p", "in the thread");
     useChat.getState().enqueue("acme/scout", "in the chat");
     const { queues } = useChat.getState();
     expect(queues["acme/scout#p"]?.items.map((i) => i.text)).toEqual(["in the thread"]);
     expect(queues["acme/scout"]?.items.map((i) => i.text)).toEqual(["in the chat"]);
+  });
+
+  it("are forgotten with it, wherever the store holds them, and another agent's are not", () => {
+    const history = { state: "ready" as const, messages: [], more: false, earlier: "idle" as const, loadedAt: null };
+    const queue = { items: [], paused: false };
+    useChat.setState({
+      hubs: [hub],
+      roster: [agent],
+      // Held with no live conversation of their own: only the store's maps know them.
+      histories: { "acme/scout": history, "acme/scout#q": history, "acme/other#q": history },
+      queues: { "acme/scout#q": queue, "acme/other#q": queue },
+      threads: { "acme/scout": [], "acme/other": [] },
+    });
     useChat.getState().forget("acme/scout");
-    expect(Object.keys(useChat.getState().queues)).toEqual([]);
+    const s = useChat.getState();
+    expect(Object.keys(s.histories)).toEqual(["acme/other#q"]);
+    expect(Object.keys(s.queues)).toEqual(["acme/other#q"]);
+    expect(Object.keys(s.threads)).toEqual(["acme/other"]);
   });
 });
