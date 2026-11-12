@@ -350,7 +350,7 @@ pub fn socket(target: &str) -> Result<Allowed, Refused> {
 fn allowed(routes: &'static [Route], method: &str, target: &str) -> Result<Allowed, Refused> {
     let refuse = || {
         Refused(format!(
-            "Desk doesn't send {method} {target} to this computer's hub."
+            "Desk doesn't send {method} {target} to its helper."
         ))
     };
     let (path, query) = match target.split_once('?') {
@@ -801,7 +801,7 @@ mod tests {
         let e = http("GET", "/api/admin/x").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "Desk doesn't send GET /api/admin/x to this computer's hub."
+            "Desk doesn't send GET /api/admin/x to its helper."
         );
     }
 

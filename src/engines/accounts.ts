@@ -117,7 +117,7 @@ export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: strin
 
 /** What a sign-in problem says. */
 export const problemText = (p: SignInProblem, store: string | null): string => {
-  const where = store ?? "the hub's store";
+  const where = store ?? "Desk's store";
   switch (p.problem) {
     case "gone":
       return `${p.name}’s sign-in is no longer in ${where}: sign it in again from its row. Nothing is switched to it.`;

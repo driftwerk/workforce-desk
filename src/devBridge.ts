@@ -2,7 +2,9 @@
 // for checking screens without the app: open
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
 // (and &platform=linux or windows to see another system's screens; with
-// &wsl=none, WSL isn't installed yet, and &wsl=refused, installing it fails).
+// &wsl=none, WSL isn't installed yet, and &wsl=refused, installing it fails;
+// with &helper=needs-approval, move-to-applications, failed or development,
+// Desk Helper stands that way, for the banner shown while Desk gets ready).
 // Only reachable from development builds.
 
 import { HubError } from "./hub/client";
@@ -11,7 +13,7 @@ import { setDevToken } from "./hub/devTokens";
 import { DEFAULT_HOST } from "./shell/host";
 
 const params = (() => {
-  const keys = ["hub", "admin", "device", "platform", "wsl"] as const;
+  const keys = ["hub", "admin", "device", "platform", "wsl", "helper"] as const;
   const fromUrl = new URLSearchParams(location.search);
   const read = (k: string) => {
     const v = fromUrl.get(k);
@@ -142,6 +144,22 @@ function stateRoute(method: string, path: string, body: unknown): { answer: unkn
   return null;
 }
 
+const opened = Date.now();
+
+/** Where Desk Helper stands in the preview (`?helper=`). */
+const helperStands = () => {
+  switch (params.helper) {
+    case "needs-approval":
+    case "move-to-applications":
+    case "development":
+      return { state: params.helper };
+    case "failed":
+      return { state: "failed", message: "launchctl: Bootstrap failed: 5: Input/output error" };
+    default:
+      return { state: "running" };
+  }
+};
+
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const answer = (v: unknown) => v as T;
   const state = stateCommand(cmd, args);
@@ -183,6 +201,18 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
         { folder: "~/dev/acme-web", top: "~/dev/acme-web", remote: "git@github.com:acme/acme-web.git", workflows: ["ci.yml", "deploy.yml", "promote.yml"] },
         { folder: "~/dev/acme-api", top: "~/dev/acme-api", remote: "https://github.com/acme/acme-api.git", workflows: ["deploy.yml"] },
       ]);
+    case "helper_status":
+    case "helper_start":
+      return answer(helperStands());
+    case "helper_progress": {
+      // The steps a first start goes through, a few seconds each.
+      const s = (Date.now() - opened) / 1000;
+      return answer(s < 2 ? "starting" : s < 6 ? "database" : s < 9 ? "services" : "connecting");
+    }
+    case "helper_last_reason":
+      return answer(params.helper === "failed" ? "Postgres failed: port 5433 is busy" : null);
+    case "helper_move_to_applications":
+      throw new Error("Moving Desk needs the Desk app.");
     case "fonts_list":
       // What a computer's own list looks like; the app reads the real one.
       return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);
