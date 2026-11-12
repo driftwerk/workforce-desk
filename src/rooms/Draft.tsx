@@ -11,10 +11,6 @@ import { ImageBudget } from "../shell/RemoteImage";
 import { TurnError } from "./Message";
 import { openSettingsAt } from "../ui/problem";
 
-/** A member's workspace Desk lost its connection to: reconnecting it
- *  in Settings lets it answer again. */
-const GONE = /isn’t connected to any more/;
-
 /** What a draft says when it isn't going: why, and what can be done. */
 const NOTE: Partial<Record<RoomDraft["state"], string>> = {
   queued: "Will answer once it’s done in another thread",
@@ -71,7 +67,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
         {draft.state === "failed" && draft.error && (
           <div role="alert">
             <TurnError raw={draft.error} />
-            {GONE.test(draft.error) && (
+            {draft.reason === "workspace_gone" && (
               <button type="button" className="btn btn-sm" onClick={() => openSettingsAt("hubs")}>
                 Reconnect
               </button>
