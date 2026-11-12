@@ -11,6 +11,7 @@ import {
   sendLoginCode,
   startLogin,
   subscribe,
+  type ClaudeUse,
   type InstallProgress,
   type LoginProgress,
   type PlanName,
@@ -20,8 +21,11 @@ import {
 export const CLI_NAME: Record<PlanName, string> = { claude: "Claude Code", chatgpt: "Codex" };
 
 /** A plan's one-click sign-in through its own page in the browser —
- *  installing its CLI first when this computer doesn't have it. */
-export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void) {
+ *  installing its CLI first when this computer doesn't have it. A Claude
+ *  sign-in goes where `to` says when it starts (see `ClaudeUse`): one
+ *  sign-in serves the crew and coding sessions both. `onConnected` hears
+ *  the account it went to, if any. */
+export function usePlanLogin(plan: PlanName | undefined, onConnected: (account?: string) => void, to?: () => ClaudeUse | undefined) {
   const fail = useDesk((s) => s.fail);
   const [progress, setProgress] = useState<LoginProgress | null>(null);
   // The sign-in page, kept while the sign-in waits for a code too.
@@ -33,6 +37,12 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
   const [install, setInstall] = useState<InstallProgress | null>(null);
   const connectedRef = useRef(onConnected);
   connectedRef.current = onConnected;
+  const toRef = useRef(to);
+  toRef.current = to;
+  const begin = (p: PlanName) => {
+    const to = p === "claude" ? toRef.current?.() : undefined;
+    return to ? startLogin(p, to) : startLogin(p);
+  };
 
   useEffect(() => {
     if (!plan) return;
@@ -46,7 +56,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
         if (next.state !== "done") return setInstall(next);
         setInstall(null);
         setInstalled(true);
-        startLogin(plan).catch(fail);
+        begin(plan).catch(fail);
       }),
     );
     return () => {
@@ -65,7 +75,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
         else if (next.state !== "needs-code") setUrl(null);
         // The pasted code is kept no longer than the sign-in.
         if (next.state === "done" || next.state === "failed") setCode("");
-        if (next.state === "done") connectedRef.current();
+        if (next.state === "done") connectedRef.current(next.account);
       }),
     );
   }, [plan]);
@@ -103,7 +113,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     /** The failure in Desk's one shape, with the way to try again. */
     problem:
       progress?.state === "failed" && plan
-        ? explain(new Error(progress.message), { what: `signing in to ${CLI_NAME[plan] ?? plan}`, retry: () => void startLogin(plan).catch(fail) })
+        ? explain(new Error(progress.message), { what: `signing in to ${CLI_NAME[plan] ?? plan}`, retry: () => void begin(plan).catch(fail) })
         : null,
     /** What to run in a terminal by hand when the install stopped. */
     manual: install?.state === "failed" && install.command ? { command: install.command, hint: install.hint } : null,
@@ -119,7 +129,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: () => void
     },
     code,
     setCode,
-    start: () => plan && startLogin(plan).catch(fail),
+    start: () => plan && begin(plan).catch(fail),
     cancel: () =>
       plan &&
       void cancelLogin(plan).then(() => {

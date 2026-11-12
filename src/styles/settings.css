@@ -1567,3 +1567,38 @@ legend.set-label {
 .dialog-foot-note.state-blocked {
   color: var(--blocked);
 }
+
+/* A row's sign-in again, or its rename: across the whole row. */
+.account-row > .account-add {
+  grid-column: 1 / -1;
+}
+/* An engine row's Install, beside its version, and what went wrong. */
+.engine-install {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* What a new session or crew member can't start on yet, and its fix. */
+.new-fix {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.new-fix p {
+  margin: 0;
+}
+.new-fix > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* "Use this for coding sessions too", under the Claude plan. */
+.prov-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--muted);
+}

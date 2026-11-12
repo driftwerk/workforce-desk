@@ -1268,7 +1268,14 @@ mod tests {
             ("HOME".to_string(), "/Users/k".to_string()),
         ]);
         let env = hub_env(&login);
-        assert_eq!(env["PATH"], "/usr/bin:/Users/k/.local/bin");
+        assert!(
+            env["PATH"].starts_with("/usr/bin:/Users/k/.local/bin:"),
+            "{}",
+            env["PATH"]
+        );
+        // npm's and Homebrew's too, where a CLI may have been installed.
+        assert!(env["PATH"].contains("/Users/k/.npm-global/bin"));
+        assert!(env["PATH"].ends_with(":/opt/homebrew/bin:/usr/local/bin"));
     }
 
     #[tokio::test]

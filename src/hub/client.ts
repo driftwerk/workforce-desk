@@ -403,6 +403,16 @@ export class DeskHub {
       throw e;
     }
   };
+  /** Every engine read again now, as after Desk installed one or signed
+   *  one in; a hub too old to read on asking says what it read last. */
+  enginesNow = async (): Promise<EngineInfo[] | null> => {
+    try {
+      return await this.call<EngineInfo[]>("POST", "/api/desk/engines/read");
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return this.engines();
+      throw e;
+    }
+  };
   /** The person's engine accounts; null from a hub without them. */
   accounts = async (): Promise<AccountsInfo | null> => {
     try {
@@ -416,6 +426,11 @@ export class DeskHub {
    *  engine's own sign-in begins. */
   addAccount = (a: { engine: Engine; name: string; token?: string; makeDefault?: boolean; remote?: boolean }): Promise<AccountAdded> =>
     this.call("POST", "/api/desk/accounts", a);
+
+  /** Signs account `id` in again, its sign-in gone: a pasted token is kept
+   *  for it, else its sign-in begins (as adding one does). */
+  signInAgain = (id: string, a: { token?: string; remote?: boolean } = {}): Promise<AccountAdded> =>
+    this.call("POST", `/api/desk/accounts/${id}/sign-in`, a);
 
   updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
     this.call("PATCH", `/api/desk/accounts/${id}`, patch);

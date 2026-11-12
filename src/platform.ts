@@ -318,12 +318,21 @@ export type LoginProgress =
   | { state: "browser"; url: string }
   | { state: "needs-code" }
   | { state: "saving" }
-  | { state: "done" }
+  /** `account`: the Desk account a Claude sign-in went to, if it went to one. */
+  | { state: "done"; account?: string }
   | { state: "failed"; message: string };
+
+/** Where one Claude sign-in goes: to the crew's agents (the plan they run
+ *  on), to a Desk account coding sessions run on (a new one, or `again`,
+ *  whose sign-in it replaces), or both. Unsaid: to the agents alone. */
+export interface ClaudeUse {
+  agents: boolean;
+  account?: { name?: string; makeDefault?: boolean; again?: string } | null;
+}
 
 /** Connects a plan through its own sign-in (the real `claude` / `codex`
  *  CLI); progress arrives through `onLoginProgress`. */
-export const startLogin = (plan: PlanName): Promise<void> => invoke("login_start", { plan });
+export const startLogin = (plan: PlanName, to?: ClaudeUse): Promise<void> => invoke("login_start", to ? { plan, to } : { plan });
 export const sendLoginCode = (plan: PlanName, code: string): Promise<void> => invoke("login_code", { plan, code });
 export const cancelLogin = (plan: PlanName): Promise<void> => invoke("login_cancel", { plan });
 export const onLoginProgress = (f: (plan: PlanName, p: LoginProgress) => void): Promise<() => void> =>
