@@ -85,7 +85,7 @@ describe("the charges Desk keeps", () => {
   it("says a session waits on you, never that the boss has it, while what it asks is yours to answer", () => {
     expect(badgeOf(charge())?.text).toBe("Sarah has it");
     expect(badgeOf(charge(), false, "Sarah left this to you.")).toEqual({ text: "Waiting on you", look: "you" });
-    expect(badgeOf(charge(), true, "Sarah only suggests: you decide.")).toEqual({ text: "Yours", look: "you" });
+    expect(badgeOf(charge(), true, "Sarah only suggests: you decide.")).toEqual({ text: "Asks you", look: "you" });
     expect(badgeOf(charge({ wheel: "person" }), false, "You're driving it.")?.text).toBe("You’re driving");
     expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z" }), false, "x")).toBeNull();
   });

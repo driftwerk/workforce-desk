@@ -8,20 +8,24 @@ import { useBossOf, useCharge, useCharges } from "./chargeStore";
 import { Popover } from "../ui/Popover";
 import { sessionKey } from "../hub/machines";
 
-/** Why what the session `charge` is for waits on the person though its
- *  boss runs it, as the hub says; nothing while the boss has it. */
-const useWaitsOnYou = (charge: ChargeView | undefined): string | undefined =>
-  useDesk((s) => (charge ? s.sessions[charge.session]?.waitsOnYou : undefined));
+/** Why the session whose key is `key` (as Desk keeps its sessions, a
+ *  machine's prefixed) waits on the person though its boss runs it, as the
+ *  hub says; nothing while the boss has it. */
+const useWaitsOnYou = (key: string | null | undefined): string | undefined => useDesk((s) => (key ? s.sessions[key]?.waitsOnYou : undefined));
+
+/** `why` as a sentence of its own, ending in a full stop. */
+const sentence = (why: string): string => `${why.trim().replace(/[.!?]+$/, "")}.`;
 
 /** What the badge's title says: why it waits on you, when it does, then
  *  how the boss came to run it and who has the wheel. */
-const titleOf = (charge: ChargeView, waits: string | undefined): string => `${waits && !driving(charge) ? `Waiting on you: ${waits} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
+const titleOf = (charge: ChargeView, waits: string | undefined): string => `${waits && !driving(charge) ? `Waiting on you: ${sentence(waits)} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
 
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
  *  `short`), dashed "You're driving" while the person has the wheel, and
- *  "Waiting on you" while what it waits on is the person's to answer. */
-export function ChargeBadge({ charge, short = false, className = "" }: { charge: ChargeView | undefined; short?: boolean; className?: string }) {
-  const waits = useWaitsOnYou(charge);
+ *  "Waiting on you" while what it waits on is the person's to answer.
+ *  `session` is the session's key, as its charge was looked up by. */
+export function ChargeBadge({ charge, session, short = false, className = "" }: { charge: ChargeView | undefined; session: string | null | undefined; short?: boolean; className?: string }) {
+  const waits = useWaitsOnYou(session);
   const badge = badgeOf(charge, short, waits);
   if (!charge || !badge) return null;
   return (
@@ -113,10 +117,10 @@ export function DriverChip({ session }: { session: Session }) {
       {from && (
         <Popover label={`Who runs ${name}`} from={from} onClose={() => setFrom(null)} className="driver-pop">
           <span className="driver-pop-head">
-            <ChargeBadge charge={charge} />
+            <ChargeBadge charge={charge} session={sessionKey(session)} />
             <span className="small faint">{howText(charge)}</span>
           </span>
-          {waits && !driving(charge) && <p className="driver-pop-text">Waiting on you: {waits}</p>}
+          {waits && !driving(charge) && <p className="driver-pop-text">Waiting on you: {sentence(waits)}</p>}
           <p className="driver-pop-text">{wheelText(charge)}</p>
           {problem && (
             <p className="small state-blocked" role="alert">
