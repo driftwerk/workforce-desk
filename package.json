@@ -9,7 +9,10 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "extension": "vite build --config extension/vite.config.ts",
+    "extension:check": "tsc -p extension --noEmit",
+    "extension:e2e": "node extension/test/e2e.mjs"
   },
   "dependencies": {
     "@dnd-kit/dom": "0.5.1",
@@ -39,6 +42,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4",
     "@testing-library/react": "16.3.3",
+    "@types/chrome": "^0.3.7",
     "@types/culori": "4.0.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

@@ -43,6 +43,12 @@ fn main() -> eyre::Result<()> {
     // Desk Helper writes the local hub's secrets, and migrates them.
     desk_core::vault::writes_as(desk_core::vault::KeyOwner::Helper);
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Chrome starting Desk Helper as its native messaging host for Desk's
+    // extension: a relay to the local hub, not the helper (no place or
+    // single-instance checks; see desk-chrome-host).
+    if desk_chrome_host::is_chrome_launch(&args) {
+        std::process::exit(desk_chrome_host::run(&args, chrome_hub));
+    }
     // A release starts only the programs installed beside it.
     programs::check_args(&args)?;
     let env = std::env::vars().collect();
@@ -72,6 +78,20 @@ fn main() -> eyre::Result<()> {
             Ok(())
         }
     }
+}
+
+/// The local hub as Chrome's host reaches it: its address and Desk's
+/// device token, from Desk Helper's own files and keychain items.
+#[cfg(unix)]
+fn chrome_hub() -> eyre::Result<Option<desk_chrome_host::Hub>> {
+    let paths = desk_core::Paths::new()?;
+    let backend = desk_core::backend::Backend::native(paths);
+    Ok(backend.connection()?.and_then(|c| {
+        c.device_token.map(|token| desk_chrome_host::Hub {
+            gateway_url: c.gateway_url,
+            token,
+        })
+    }))
 }
 
 #[cfg(not(unix))]
