@@ -430,7 +430,7 @@ export class DeskHub {
   /** Signs account `id` in again, its sign-in gone: a pasted token is kept
    *  for it, else its sign-in begins (as adding one does). */
   signInAgain = (id: string, a: { token?: string; remote?: boolean } = {}): Promise<AccountAdded> =>
-    this.call("POST", `/api/desk/accounts/${id}/sign-in`, a);
+    this.call("POST", `/api/desk/accounts/${encodeURIComponent(id)}/sign-in`, a);
 
   updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
     this.call("PATCH", `/api/desk/accounts/${id}`, patch);
