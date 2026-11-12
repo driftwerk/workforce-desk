@@ -483,11 +483,16 @@ export const useChat = create<ChatStore>((set, get) => ({
     results.forEach((r, i) => {
       const hub = get().hubs[i]!;
       if (r.status === "fulfilled") {
-        roster.push(...r.value);
-        // An agent being built again is kept until it serves.
+        // An agent being built again is kept, where it was, until it serves.
         const settling = get().settling;
         const listed = new Set(r.value.map(agentKey));
-        roster.push(...get().roster.filter((a) => a.hubId === hub.id && settling[agentKey(a)] && !listed.has(agentKey(a))));
+        const fresh = [...r.value];
+        get()
+          .roster.filter((a) => a.hubId === hub.id)
+          .forEach((a, at) => {
+            if (settling[agentKey(a)] && !listed.has(agentKey(a))) fresh.splice(Math.min(at, fresh.length), 0, a);
+          });
+        roster.push(...fresh);
         read.add(hub.id);
       } else {
         // This computer's hub being down doesn't make its agents vanish: the

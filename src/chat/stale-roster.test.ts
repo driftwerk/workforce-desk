@@ -34,12 +34,12 @@ describe("The agent list while a hub can't be read", () => {
 });
 
 describe("An agent being built again (a new name)", () => {
-  it("stays on the list while its hub leaves it out, and goes once it's done if the hub still does", async () => {
+  it("stays on the list, where it was, while its hub leaves it out, and goes once it's done if the hub still does", async () => {
     useChat.setState({ hubs: [local], roster: [{ ...agent("local", "ledger"), name: "Penny" }, agent("local", "scout")] });
     useChat.getState().settle("local/ledger", true);
     fetches.fetch.mockResolvedValue({ ok: true, json: async () => ({ agents: [{ id: "scout" }] }) });
     await useChat.getState().refreshRoster();
-    expect(useChat.getState().roster.map((a) => `${a.id} ${a.name}`)).toEqual(["scout scout", "ledger Penny"]);
+    expect(useChat.getState().roster.map((a) => `${a.id} ${a.name}`)).toEqual(["ledger Penny", "scout scout"]);
 
     useChat.getState().settle("local/ledger", false);
     await useChat.getState().refreshRoster();
