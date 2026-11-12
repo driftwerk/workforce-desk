@@ -237,6 +237,12 @@ pub trait TrustConfirm: Send + Sync + 'static {
         let _ = question;
         false
     }
+    /// The person's yes to Desk adding an entry of its own to their SSH
+    /// config. No unless asked.
+    fn desk_entry(&self, question: &EntryQuestion) -> bool {
+        let _ = question;
+        false
+    }
     /// The person's yes to Desk asking for a machine's password to turn
     /// linger on there with sudo. No unless asked.
     fn linger(&self, question: &LingerQuestion) -> bool {
@@ -289,6 +295,26 @@ impl ForgetQuestion {
             target = self.target,
             kind = self.kind,
             fp = self.fingerprint
+        )
+    }
+}
+
+/// Adding Desk's own entry for a machine to the SSH config: the exact
+/// lines, and where they go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryQuestion {
+    pub name: String,
+    pub file: String,
+    pub block: String,
+}
+
+impl EntryQuestion {
+    pub fn text(&self) -> String {
+        format!(
+            "Give Desk its own SSH entry for {name}?\n\nDesk adds these lines at the top of {file}. Your entry for {name} and its port forwards stay as they are; Desk reaches {name} by this one.\n\n{block}",
+            name = self.name,
+            file = self.file,
+            block = self.block.trim_end()
         )
     }
 }

@@ -22,7 +22,8 @@ use desk_core::machine_backend::{Arch, Backend};
 use serde::{Deserialize, Serialize};
 
 use crate::admit::{self, Confirm, Gate, Question};
-use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
+use crate::entry;
+use crate::hostkey::{self, EntryQuestion, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
 use crate::link::{Link, Machines};
 use crate::probe::{self, Access, Missed, Probe, ProbeKey, System};
 use crate::setup::{self, Person};
@@ -2330,6 +2331,75 @@ impl Fleet {
     /// The `Host` entries in the person's SSH config, read as text.
     pub fn ssh_hosts(&self) -> Vec<suggest::HostEntry> {
         suggest::hosts(&self.home)
+    }
+
+    /// "Give Desk its own entry" (`machine_desk_entry`): for `target`, whose
+    /// SSH config forwards ports, an entry of Desk's own at the top of the
+    /// config with the same address, account, port, jump and keys but none
+    /// of the forwards, after the person's yes to its exact lines. Its name
+    /// (`desk-…`), to add or reach the machine by; `target` itself when it
+    /// forwards nothing; none when the person said no. Checked with ssh
+    /// before it is written: refused when the forwards would reach it too
+    /// (set under `Host *`). Blocking.
+    pub fn desk_entry(&self, target: &str) -> Result<Option<String>, String> {
+        let machine = Self::looked_at(target)?;
+        // Reading the config can run what it says (`Match exec`).
+        self.ask(&machine)?;
+        let said = self.settings_said(&machine)?;
+        if ssh::Settings::parse(&said).forwards.is_empty() {
+            return Ok(Some(machine.target.to_string()));
+        }
+        let alias = entry::alias_for(&machine.name);
+        let file = entry::config_file(&self.home);
+        let before = std::fs::read_to_string(&file).unwrap_or_default();
+        let forwards_of = |config: &std::path::Path| -> Result<Vec<String>, String> {
+            let out = self
+                .ssh
+                .settings_with(config, &alias)
+                .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+            if !out.status.success() {
+                return Err(ssh::problem(&machine, &out.stderr));
+            }
+            Ok(ssh::Settings::parse(&String::from_utf8_lossy(&out.stdout)).forwards)
+        };
+        let carried = "Your SSH config forwards ports for every host it reaches (under Host * or a pattern), so an entry of Desk's would carry them too. Move those forwards under the hosts that use them, then try again.";
+        if entry::has_entry(&before, &alias) {
+            // One Desk (or the person) made before: used when it forwards nothing.
+            return if forwards_of(&file)?.is_empty() {
+                Ok(Some(alias))
+            } else {
+                Err(format!(
+                    "Your SSH config has an entry called {alias} that forwards ports: take its forwards out, or rename it, and try again."
+                ))
+            };
+        }
+        let block = entry::block(&alias, &machine.name, &said);
+        // What ssh would make of it, before anything is written.
+        let dir = file
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| self.home.join(".ssh"));
+        let trial = dir.join(format!(".config.desk-check-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&trial, format!("{block}\n{before}"))
+            .map_err(|_| "Desk couldn't check the entry with ssh.".to_string())?;
+        let forwards = forwards_of(&trial);
+        let _ = std::fs::remove_file(&trial);
+        if !forwards?.is_empty() {
+            return Err(carried.into());
+        }
+        let question = EntryQuestion {
+            name: machine.name.clone(),
+            file: entry::shown(&file, &self.home),
+            block: block.clone(),
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.desk_entry(&question))? {
+            return Ok(None);
+        }
+        entry::write(&self.home, &block)?;
+        tracing::info!(machine = %machine.name, entry = %alias, "added Desk's own SSH entry");
+        Ok(Some(alias))
     }
 
     /// The last `lines` of Desk's own log on machine `id` (its service's,

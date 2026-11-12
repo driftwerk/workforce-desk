@@ -196,6 +196,9 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
             "Check",
         )
     }
+    fn desk_entry(&self, question: &desk_machine::hostkey::EntryQuestion) -> bool {
+        self.ask("Give Desk its own SSH entry", question.text(), "Add Entry")
+    }
     fn uninstall(&self, question: &UninstallQuestion) -> bool {
         self.ask(
             "Uninstall Desk from a machine",
@@ -429,6 +432,17 @@ pub async fn machine_edit(
 ) -> CommandResult<Edited> {
     let fleet = Arc::clone(&fleet);
     blocking(move || fleet.edit(&id, target.as_deref(), name.as_deref())).await
+}
+
+/// "Give Desk its own entry" for `target` (`Fleet::desk_entry`): the name
+/// to reach it by, or none when the person said no.
+#[tauri::command]
+pub async fn machine_desk_entry(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    target: String,
+) -> CommandResult<Option<String>> {
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.desk_entry(&target)).await
 }
 
 /// Checks another address reaches machine `id` (`Fleet::check_reach`).

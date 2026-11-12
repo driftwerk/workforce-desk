@@ -189,6 +189,11 @@ export interface MachineNative {
   remoteLog(id: MachineId): Promise<string>;
   /** The `Host` entries in the person's SSH config, read as text. */
   sshHosts(): Promise<HostEntry[]>;
+  /** "Give Desk its own entry": for `target`, whose SSH config forwards
+   *  ports, Desk adds an entry of its own without them (after the person's
+   *  yes to its exact lines natively). The name to reach it by; null when
+   *  the person said no. */
+  deskEntry(target: string): Promise<string | null>;
   /** A new name, a new address (only once the person says yes natively
    *  and it shows the machine's own host key), or both. */
   edit(id: MachineId, change: { target?: string; name?: string }): Promise<Edited>;
@@ -238,6 +243,7 @@ export const native: MachineNative = {
   log: (id) => invoke<LogLine[]>("machine_log", { id }),
   remoteLog: (id) => invoke<string>("machine_remote_log", { id }),
   sshHosts: () => invoke<HostEntry[]>("machine_ssh_hosts"),
+  deskEntry: (target) => invoke<string | null>("machine_desk_entry", { target }),
   edit: (id, change) => invoke<Edited>("machine_edit", { id, target: change.target ?? null, name: change.name ?? null }),
   checkReach: (id, target) => invoke<Checked>("machine_check_reach", { id, target }),
   revealLog: () => invoke<void>("machine_reveal_log"),

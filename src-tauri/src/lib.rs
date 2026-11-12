@@ -1161,6 +1161,7 @@ pub fn run() {
             machine_setup::machine_log,
             machine_setup::machine_remote_log,
             machine_setup::machine_ssh_hosts,
+            machine_setup::machine_desk_entry,
             machine_setup::machine_edit,
             machine_setup::machine_check_reach,
             machine_setup::machine_cancel_add,

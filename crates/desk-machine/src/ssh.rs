@@ -494,6 +494,17 @@ pub fn openssh_version(said: &str) -> Option<(u32, u32)> {
 }
 
 impl SshExe {
+    /// What ssh makes of `host` with the config `file` (`ssh -F file -G
+    /// host`, which connects nowhere).
+    pub fn settings_with(&self, file: &Path, host: &str) -> std::io::Result<std::process::Output> {
+        Command::new(&self.program)
+            .arg("-F")
+            .arg(file)
+            .args(["-G", "--", host])
+            .stdin(Stdio::null())
+            .output()
+    }
+
     /// This ssh's OpenSSH version (`ssh -V`, which connects nowhere); none
     /// when it can't say.
     pub fn version(&self) -> Option<(u32, u32)> {
@@ -526,7 +537,7 @@ pub fn no_forwards(machine: &Machine, settings: &Settings) -> Result<(), String>
         return Ok(());
     }
     Err(format!(
-        "Your SSH config forwards ports for {} ({}). Desk keeps its connection open all the time, so it won't carry them: give Desk a Host entry without forwards.",
+        "Your SSH config forwards ports for {} ({}). Desk keeps its connection open all the time, so it won't carry them.",
         machine.name,
         settings.forwards.join(", ")
     ))

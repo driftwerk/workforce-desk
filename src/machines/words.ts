@@ -83,6 +83,10 @@ export const stateText = (m: Machine, deskVersion: string | null): string | null
   }
 };
 
+/** Whether `problem` is Desk refusing a config that forwards ports: what
+ *  "Give Desk its own entry" fixes. */
+export const forwardsRefused = (problem: string | null | undefined): boolean => !!problem && /forwards ports for/.test(problem);
+
 /** A machine's name from the address it was added by: an SSH config host
  *  as it is, `user@address` as its address. */
 export const nameFromTarget = (target: string): string => {

@@ -144,4 +144,19 @@ it("says when the SSH config has nothing to pick, and reads it again", async () 
   expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("203.0.113.7");
   fireEvent.click(screen.getByRole("radio", { name: "From your SSH config" }));
   expect(screen.getByText(/has no Host entries Desk can list/)).toBeTruthy();
+  // Its way out: typing an address.
+  fireEvent.click(screen.getByRole("button", { name: "Type an address" }));
+  expect(screen.getByRole("radio", { name: "An address" }).getAttribute("aria-checked")).toBe("true");
+});
+
+it("gives Desk its own entry when the one picked forwards ports, then checks that one", async () => {
+  const { fake } = await open();
+  fake.checkReach.mockRejectedValueOnce(new Error("Your SSH config forwards ports for devbox-new (localforward). Desk keeps its connection open all the time, so it won't carry them."));
+  fake.checkReach.mockResolvedValueOnce(SAME);
+  fireEvent.click(screen.getByRole("radio", { name: /devbox-new/ }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Check devbox-new" })));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Give Desk its own entry" })));
+  expect(fake.deskEntry).toHaveBeenCalledWith("devbox-new");
+  expect(fake.checkReach).toHaveBeenLastCalledWith("devbox", "desk-devbox-new");
+  expect(screen.getByRole("status").textContent).toContain("Same machine");
 });
