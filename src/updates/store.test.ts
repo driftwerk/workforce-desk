@@ -19,3 +19,21 @@ describe("updates", () => {
     expect(readyToResume(pending, sessions)).toEqual(["b"]);
   });
 });
+
+describe("what holds a restart, and which version catches up", () => {
+  it("counts a session whose turn ended but background work still runs as working", async () => {
+    const { isWorking } = await import("./store");
+    const s = { live: true, state: "idle", background: { count: 2, since: "2026-11-12T10:00:00Z" } } as unknown as Parameters<typeof isWorking>[0];
+    expect(isWorking(s)).toBe(true);
+    expect(isWorking({ ...s, background: null })).toBe(false);
+    expect(isWorking({ ...s, background: { count: 0, since: "" } })).toBe(false);
+  });
+
+  it("orders versions by their numbered parts", async () => {
+    const { olderThan } = await import("./store");
+    expect(olderThan("0.2.9", "0.2.10")).toBe(true);
+    expect(olderThan("0.2.10", "0.2.9")).toBe(false);
+    expect(olderThan("0.3.0", "0.3.0")).toBe(false);
+    expect(olderThan("0.3", "0.3.1")).toBe(true);
+  });
+});
