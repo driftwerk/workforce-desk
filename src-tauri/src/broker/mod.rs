@@ -98,8 +98,8 @@ impl Reached for desk_machine::Link {
 impl Place {
     fn local() -> Self {
         Self {
-            hub: "this computer's hub".into(),
-            idle: "This computer's hub isn't running yet.".into(),
+            hub: "Desk's helper".into(),
+            idle: "Desk isn't ready yet. Try again in a moment.".into(),
             routes: routes::http,
             pool: socket::Pool::Local,
         }
@@ -274,7 +274,7 @@ impl Broker {
     /// ([`routes::native_local`]): never the page's, and never a machine's.
     pub async fn fetch_native(&self, method: &str, target: &str) -> Result<NativeAnswer, String> {
         if self.machine.is_some() {
-            return Err("Desk asks that of this computer's hub alone.".into());
+            return Err("Desk asks that of its own helper alone.".into());
         }
         let allowed = routes::native_local(method, target).map_err(|e| e.to_string())?;
         let Answer { status, body, .. } = self.send_allowed(allowed, None).await?;
@@ -395,7 +395,7 @@ impl Broker {
         let local = self.local().await?;
         let mut url = at(&local.base, &allowed.path, None)?;
         url.set_scheme("ws")
-            .map_err(|_| "This computer's hub has no socket address.".to_string())?;
+            .map_err(|_| "Desk's helper has no socket address.".to_string())?;
         let (source, kept) = (Arc::clone(&self.source), Arc::clone(&self.local));
         let (idle, machine) = (Arc::clone(&self.place.idle), self.machine.clone());
         let forwarded = self.unix.is_some();
@@ -482,7 +482,7 @@ fn loopback(gateway_url: &str) -> Result<Url, String> {
 /// normalise into another path isn't sent.
 fn at(base: &Url, path: &str, query: Option<&str>) -> Result<Url, String> {
     desk_core::net::at(base, path, query)
-        .map_err(|_| format!("Desk doesn't send {path} to this computer's hub."))
+        .map_err(|_| format!("Desk doesn't send {path} to its helper."))
 }
 
 /// A request header the page sent, percent-decoded.
@@ -1056,7 +1056,7 @@ mod tests {
             .fetch("POST", "/api/desk/sessions", None)
             .await
             .unwrap_err();
-        assert!(e.contains("couldn't reach this computer's hub"), "{e}");
+        assert!(e.contains("couldn't reach Desk's helper"), "{e}");
     }
 
     /// A request got through, then the forward ended before the answer and

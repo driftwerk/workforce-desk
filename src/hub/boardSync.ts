@@ -41,7 +41,7 @@ export const boardSyncOf = (hub: HubRef) => ({
     } catch {
       /* not the hub's JSON */
     }
-    return { ok: false, error: res.status === 404 || res.status === 405 ? "This computer's hub can't sync boards yet. Update Desk." : text.trim() || res.statusText || "The hub refused that.", paused: null, status: res.status };
+    return { ok: false, error: res.status === 404 || res.status === 405 ? "This version of Desk can't sync boards yet. Update Desk." : text.trim() || res.statusText || "Desk couldn’t do that.", paused: null, status: res.status };
   },
   link: (board: string, l: LinkBoard): Promise<Board> => deskCall(hub, "PUT", `/api/desk/boards/${encodeURIComponent(board)}/link`, l),
   unlink: (board: string): Promise<Board> => deskCall(hub, "DELETE", `/api/desk/boards/${encodeURIComponent(board)}/link`),

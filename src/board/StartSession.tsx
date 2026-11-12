@@ -5,7 +5,11 @@ import type { Engine, EngineInfo, Ticket } from "../hub/types";
 import { pickFolder } from "../platform";
 import { useModal } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
-import { sessionsOf } from "./board";
+import { GroupChoice } from "../session/GroupChoice";
+import { sessionItem, UNGROUPED } from "../groups/model";
+import { moveItem, nameSession, useLayout } from "../groups/store";
+import { sessionNameFor, sessionsOf } from "./board";
+import { boardStartGroup, lastBoardGroup, rememberBoardGroup } from "./startGroup";
 import { useBoard } from "./store";
 
 /** A new session for a ticket: its engine and folder; it starts with the
@@ -17,6 +21,9 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
   const usual = sessionsOf(t)
     .map((id) => sessions[id]?.cwd)
     .find(Boolean) ?? sortedSessions(sessions)[0]?.cwd ?? "";
+  const layout = useLayout();
+  const boardGroup = useBoard((s) => s.boards[t.board]?.group);
+  const [group, setGroup] = useState(() => boardStartGroup(layout, boardGroup, lastBoardGroup()));
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState(usual);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
@@ -40,7 +47,16 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
     setBusy(true);
     setProblem(null);
     try {
-      await useBoard.getState().assign(t.id, { newSession: { path: cwd.trim(), engine } });
+      const had = new Set(sessionsOf(t));
+      const now = await useBoard.getState().assign(t.id, { newSession: { path: cwd.trim(), engine } });
+      rememberBoardGroup(group);
+      // The new session: the one the ticket gained, else the one it is given to.
+      const made = now ? (sessionsOf(now).find((id) => !had.has(id)) ?? (now.assignee?.kind === "session" ? now.assignee.id : null)) : null;
+      if (made) {
+        if (group !== UNGROUPED && layout.groups.some((g) => g.id === group)) moveItem([], sessionItem(made), group, null);
+        // Short, so the sidebar row still shows it: the key and a few words.
+        nameSession(made, sessionNameFor(t), useDesk.getState().sessions[made]?.name ?? "");
+      }
       onClose();
     } catch (err) {
       setProblem(plainError(err));
@@ -75,6 +91,12 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
             </button>
           </span>
         </label>
+        {layout.groups.length > 0 && (
+          <div className="field">
+            <span className="ov-label muted">Group</span>
+            <GroupChoice group={group} groups={layout.groups} onPick={setGroup} />
+          </div>
+        )}
         {problem && (
           <p className="small state-blocked" role="alert">
             {problem}

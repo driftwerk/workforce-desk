@@ -262,7 +262,7 @@ describe("a room in a pane", () => {
   it("says so when the room has gone, and closing it says nothing is lost", () => {
     grid("halves", { kind: "room", room: "gone" });
     const p = pane("Room");
-    expect(within(p).getByText("This room is no longer on this computer's hub.")).toBeTruthy();
+    expect(within(p).getByText("This room is no longer on this computer.")).toBeTruthy();
     fireEvent.click(within(p).getByRole("button", { name: "Remove from grid" }));
     expect(screen.getByRole("dialog").textContent).toMatch(/no longer there, so nothing is lost/);
   });

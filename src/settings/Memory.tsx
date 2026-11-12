@@ -96,7 +96,7 @@ export function Memory() {
       {settings === undefined ? (
         <p className="faint small">Loading…</p>
       ) : settings === null ? (
-        !problem && <p className="muted small">This computer's hub doesn't keep Desk Memory's settings yet.</p>
+        !problem && <p className="muted small">This version of Desk doesn't keep Desk Memory's settings yet. Update Desk to change them.</p>
       ) : (
         <>
           <div className="ability-row">
@@ -141,7 +141,7 @@ export function Memory() {
         <section className="prov-section" aria-label="Search">
           <h2 className="field-label">Search</h2>
           {index === null ? (
-            <p className="small muted">This computer's hub has no search index for Desk Memory; Desk searches by keyword.</p>
+            <p className="small muted">Desk Memory has no search index here yet, so Desk searches by keyword.</p>
           ) : (
             <>
               {indexLines(index).map((l) => (

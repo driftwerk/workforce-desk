@@ -4,7 +4,7 @@ import { explain, setStarter } from "../ui/problem";
 import { afterStart, startLocalHelper } from "./helperNote";
 import { useDesk } from "./store";
 
-const platform = vi.hoisted(() => ({ startHelper: vi.fn(), openLoginItems: vi.fn() }));
+const platform = vi.hoisted(() => ({ startHelper: vi.fn(), openLoginItems: vi.fn(), moveToApplications: vi.fn() }));
 vi.mock("../platform", () => platform);
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -42,13 +42,18 @@ describe("Start it from an error toast", () => {
     expect(platform.openLoginItems).toHaveBeenCalled();
   });
 
-  it("outside Applications, says to move Desk", async () => {
+  it("outside Applications, offers to move Desk", async () => {
     platform.startHelper.mockResolvedValue({ state: "move-to-applications" });
     useDesk.getState().fail(new TypeError("x"));
     useDesk.getState().error!.fix!.run!();
     useDesk.getState().clearError(); // as the toast does after a button
     await flush();
-    expect(useDesk.getState().error!.plain).toBe("Move Desk to your Applications folder, then open it from there.");
+    const next = useDesk.getState().error!;
+    expect(next.plain).toBe("Desk needs to be in your Applications folder to keep running.");
+    expect(next.fix?.label).toBe("Move it for me");
+    platform.moveToApplications.mockResolvedValue(undefined);
+    next.fix!.run!();
+    expect(platform.moveToApplications).toHaveBeenCalledTimes(1);
   });
 
   it("in a development run, says to start it by hand", async () => {

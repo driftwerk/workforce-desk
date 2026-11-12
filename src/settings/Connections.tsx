@@ -53,7 +53,7 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
       setList((await api.list()).connectors);
     } catch (e) {
       if (e instanceof HubError && e.status === 404) setUnsupported(true);
-      else setProblem("Couldn’t ask the hub about connections just now.");
+      else setProblem("Desk couldn’t read your connections just now.");
     }
   }, [api]);
 
@@ -76,7 +76,7 @@ export function Connections({ api: given }: { api?: ConnectionsApi } = {}) {
       {!api || unsupported ? (
         <div className="setting-card">
           <span className="card-text">
-            <span className="muted">This computer’s hub doesn’t offer connections yet. Update Desk to connect services.</span>
+            <span className="muted">This version of Desk doesn’t offer connections yet. Update Desk to connect services.</span>
           </span>
         </div>
       ) : null}

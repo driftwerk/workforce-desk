@@ -409,7 +409,7 @@ describe("the link dialog", () => {
     useChat.setState({ hubs: [ATLAS] as never });
     render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
     pickSystem("Linear");
-    expect(note()).toBe("This computer’s hub isn’t running, so nothing can be checked or linked yet.");
+    expect(note()).toBe("Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.");
   });
 });
 

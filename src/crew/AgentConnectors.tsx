@@ -101,8 +101,8 @@ export function AgentConnectors({
     } catch (e) {
       setProblem(
         e instanceof HubError && e.status === 404
-          ? "This computer’s hub doesn’t offer connectors yet."
-          : "Couldn’t ask the hub about connections just now.",
+          ? "This version of Desk doesn’t offer connectors yet. Update Desk to use them."
+          : "Desk couldn’t read your connections just now.",
       );
     }
   }, [api]);

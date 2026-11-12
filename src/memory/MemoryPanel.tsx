@@ -319,7 +319,7 @@ function AskToNote({ group, notes, onAnswer }: { group: Group; notes: Pick<Memor
     <div className="memory-ask" role="group" aria-label={`Let Desk's model read ${group.name}'s sessions?`}>
       <p className="memory-ask-q">Let Desk's model read {group.name}'s sessions to note decisions?</p>
       <p className="small muted">
-        {who ? `What they say is sent to ${who} to note decisions, facts and to-dos.` : "What they say is sent to the model the hub notes with, to note decisions, facts and to-dos."}
+        {who ? `What they say is sent to ${who} to note decisions, facts and to-dos.` : "What they say is sent to the model Desk notes with, to note decisions, facts and to-dos."}
         {notes.fallbackProviders && ` ${fallbackText}`} You can change this in the group's memory settings.
       </p>
       <div className="memory-ask-actions">

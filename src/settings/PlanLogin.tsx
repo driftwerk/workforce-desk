@@ -117,6 +117,8 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: (account?:
         : null,
     /** What to run in a terminal by hand when the install stopped. */
     manual: install?.state === "failed" && install.command ? { command: install.command, hint: install.hint } : null,
+    /** What the installer last printed, after it stopped. */
+    installDetails: install?.state === "failed" ? (install.details ?? null) : null,
     busy,
     installing,
     /** False when the plan's CLI isn't on this computer yet. */
@@ -190,12 +192,21 @@ function CopyText({ text, label, children }: { text: string; label: string; chil
 /** After an install that stopped: the installer's command to run by hand,
  *  with where to run it. */
 export function CopyInstall({ login }: { login: PlanLoginState }) {
-  if (!login.manual) return null;
+  const details = login.installDetails && (
+    <details className="problem-details">
+      <summary className="small faint">Details</summary>
+      <pre className="problem-raw mono small">{login.installDetails}</pre>
+    </details>
+  );
+  if (!login.manual) return details || null;
   const { command, hint } = login.manual;
   return (
-    <CopyText text={command} label="Copy command">
-      {hint && <span className="small muted">{hint}</span>}
-    </CopyText>
+    <>
+      {details}
+      <CopyText text={command} label="Copy command">
+        {hint && <span className="small muted">{hint}</span>}
+      </CopyText>
+    </>
   );
 }
 

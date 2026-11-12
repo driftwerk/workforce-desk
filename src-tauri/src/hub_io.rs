@@ -225,7 +225,7 @@ impl HubIo {
             .await
             .map_err(|e| e.to_string())?;
         if there.local {
-            return Err("This computer's hub syncs with its own keys, not a token.".into());
+            return Err("Desk syncs this computer's boards with its own keys, not a token.".into());
         }
         let here = self
             .paired
@@ -233,7 +233,7 @@ impl HubIo {
             .await
             .map_err(|e| e.to_string())?;
         if !here.local {
-            return Err("Desk gives a hub's token only to this computer's hub.".into());
+            return Err("Desk keeps a workspace's token only on this computer.".into());
         }
         // The address the local hub will keep it under, checked as the local
         // hub checks it, before anything is minted.
@@ -301,7 +301,7 @@ impl HubIo {
                 }
                 let reason = reason.trim().trim_end_matches('.');
                 return Err(format!(
-                    "{name} made a token but this computer's hub couldn't keep it: {reason}. The board needs a new token."
+                    "{name} made a token but Desk couldn't keep it: {reason}. The board needs a new token."
                 ));
             }
         };
@@ -981,7 +981,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e,
-            "Atlas made a token but this computer's hub couldn't keep it: Desk couldn't keep the token. Try again. The board needs a new token."
+            "Atlas made a token but Desk couldn't keep it: Desk couldn't keep the token. Try again. The board needs a new token."
         );
         assert!(!e.contains("SENTINEL"));
         let _mint = remote_seen.recv().await.unwrap();

@@ -1,9 +1,10 @@
 import { relaunch } from "@tauri-apps/plugin-process";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   convertToWsl2,
   detectWsl,
   fixWslForwarding,
+  forgetWslResume,
   installWsl,
   onWslSetup,
   openUrl,
@@ -13,44 +14,76 @@ import {
   type WslDetection,
 } from "../platform";
 import "../styles/setup.css";
+import { explain, type Problem } from "../ui/problem";
+import { ProblemNote } from "../ui/ProblemNote";
 import { useSetup } from "./store";
-import { firstPick, optionFor, problemText, STEPS, stepsAfter } from "./wsl";
+import { firstPick, LOOK_AGAIN_MS, START_SOON_MS, onlyChoice, optionFor, problemText, STEPS, stepsAfter, whyNotYet } from "./wsl";
 
 const WSL_DOCS = "https://learn.microsoft.com/windows/wsl/networking";
 
 type Stage = "finding" | "no-wsl" | "choose" | "setup";
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Windows' first run: Desk's own agents, their memory, terminals and
  *  sessions run in the person's Linux, inside WSL. Finds WSL, has the
  *  person choose a distro, and sets Desk up there; workspaces they connect
  *  work meanwhile, so it can wait. */
 export function WindowsSetup() {
-  const hide = useSetup((s) => s.hide);
+  const skipSetup = useSetup((s) => s.skip);
+  // Not now: nothing is coming that needs Desk to open after a restart.
+  const skip = () => {
+    void forgetWslResume().catch(() => undefined);
+    skipSetup();
+  };
   const [stage, setStage] = useState<Stage>("finding");
   const [found, setFound] = useState<WslDetection | null>(null);
   const [pick, setPick] = useState<string | null>(null);
   const [events, setEvents] = useState<SetupEvent[]>([]);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [installing, setInstalling] = useState(false);
+  // Set up by itself once, when there's only one Linux it could use.
+  const started = useRef(false);
+  // The only Linux, about to be set up: a moment to cancel first.
+  const [soon, setSoon] = useState<string | null>(null);
+  const stageNow = useRef(stage);
+  stageNow.current = stage;
 
-  const find = async () => {
-    setStage("finding");
+  /** Looks for WSL; `quietly` while waiting for it, without the
+   *  "Looking…" screen. A quiet look that comes back after the stage moved
+   *  on (or the wait ended) is ignored. */
+  const find = async (quietly = false, gone: () => boolean = () => false) => {
+    if (!quietly) setStage("finding");
     try {
       const d = await detectWsl();
+      if (quietly && (gone() || stageNow.current !== "no-wsl")) return;
+      if (quietly && d.problem) return;
       setFound(d);
       setPick(firstPick(d.distros));
+      setProblem(null);
       setStage(d.problem ? "no-wsl" : "choose");
     } catch (e) {
-      setProblem(errorText(e));
+      if (quietly || gone()) return;
+      setProblem(explain(e, { what: "looking for WSL", retry: () => void find() }));
       setStage("no-wsl");
     }
   };
   useEffect(() => {
     void find();
   }, []);
+  // While WSL isn't there, Desk looks again by itself: after the install,
+  // the restart, or the person installing it their own way.
+  useEffect(() => {
+    if (stage !== "no-wsl") return;
+    let cancelled = false;
+    const look = () => void find(true, () => cancelled);
+    const every = setInterval(look, LOOK_AGAIN_MS);
+    window.addEventListener("focus", look);
+    return () => {
+      cancelled = true;
+      clearInterval(every);
+      window.removeEventListener("focus", look);
+    };
+  }, [stage]);
   useEffect(() => subscribe(onWslSetup((e) => setEvents((all) => [...all, e]))), []);
 
   const option = found?.distros.map(optionFor).find((o) => o.name === pick) ?? null;
@@ -58,37 +91,69 @@ export function WindowsSetup() {
   const blocked = steps.reach.state === "blocked";
   const ready = steps.startup.state === "done";
 
-  const run = async (work: () => Promise<void>) => {
+  const run = async (what: string, work: () => Promise<void>, again: () => void) => {
     setBusy(true);
     setProblem(null);
     try {
       await work();
     } catch (e) {
-      setProblem(errorText(e));
+      setProblem(explain(e, { what, retry: again }));
     } finally {
       setBusy(false);
     }
   };
 
-  const setUp = () =>
-    run(async () => {
-      if (!option || !pick) return;
-      if (option.convert) await convertToWsl2(pick);
-      setEvents([]);
-      setStage("setup");
-      await setUpInWsl(pick);
-    });
+  const setUpIn = (name: string, convert: boolean) =>
+    run(
+      `setting Desk up in ${name}`,
+      async () => {
+        if (convert) await convertToWsl2(name);
+        setEvents([]);
+        setStage("setup");
+        await setUpInWsl(name);
+      },
+      () => void setUpIn(name, convert),
+    );
+  const setUp = () => (option && pick ? setUpIn(pick, option.convert) : Promise.resolve());
+
+  // Only one Linux Desk can use: nothing to choose, so it carries on,
+  // after a moment in which the person can still say no.
+  useEffect(() => {
+    if (stage !== "choose" || !found || started.current) return;
+    const only = onlyChoice(found.distros);
+    if (!only) return;
+    started.current = true;
+    setPick(only);
+    setSoon(only);
+  }, [stage, found]);
+  useEffect(() => {
+    if (!soon) return;
+    const go = setTimeout(() => {
+      setSoon(null);
+      void setUpIn(soon, false);
+    }, START_SOON_MS);
+    return () => clearTimeout(go);
+  }, [soon]);
 
   const fix = () =>
-    run(async () => {
-      if (pick) await fixWslForwarding(pick);
-    });
+    run(
+      "turning on WSL's localhost forwarding",
+      async () => {
+        if (pick) await fixWslForwarding(pick);
+      },
+      () => void fix(),
+    );
 
   const install = () =>
-    run(async () => {
-      setInstalling(true);
-      await installWsl();
-    });
+    run(
+      "installing WSL",
+      async () => {
+        setInstalling(true);
+        await installWsl();
+      },
+      () => void install(),
+    );
+  const notYet = whyNotYet(option, busy);
 
   const rail: [string, boolean, boolean][] = [
     ["Find WSL", stage === "no-wsl" || stage === "finding", stage === "choose" || stage === "setup"],
@@ -116,7 +181,7 @@ export function WindowsSetup() {
             </li>
           ))}
         </ol>
-        <button type="button" className="link small" onClick={hide}>
+        <button type="button" className="link small" onClick={skip}>
           Not now: use connected workspaces only
         </button>
       </aside>
@@ -133,22 +198,37 @@ export function WindowsSetup() {
             </p>
             <div className="wsl-card wsl-measure">
               <code>wsl --install -d Ubuntu</code>
-              <span className="muted small">About 5 minutes, then restart. Open Desk again afterwards and it carries on here.</span>
+              <span className="muted small">About 5 minutes, then restart when Windows asks. Desk opens by itself after the restart and carries on here.</span>
               <span className="wsl-actions">
-                <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void install()}>
-                  Install WSL and Ubuntu
-                </button>
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void find()}>
-                  I’ve installed it: look again
+                <button type="button" className="btn btn-signal" disabled={busy || (installing && !problem)} onClick={() => void install()}>
+                  {installing && !problem ? "Installing…" : "Install WSL and Ubuntu"}
                 </button>
               </span>
-              {installing && !problem && <span className="state-blocked small">Installing… Windows will ask to restart when it’s done.</span>}
+              <span className="faint small">
+                {installing && !problem
+                  ? "Windows asks for an administrator’s OK, then to restart when it’s done."
+                  : "Installed it another way? Desk notices by itself."}
+              </span>
             </div>
             <p className="muted small">Until then you can still connect a workspace and chat with its agents.</p>
           </>
         )}
 
-        {stage === "choose" && found && (
+        {stage === "choose" && soon && (
+          <>
+            <h2 className="display-lg">Setting up Desk in {soon}…</h2>
+            <p className="muted wsl-measure">
+              It’s the only Linux Desk can use here, so Desk sets its helper, agents and memory up there now.
+            </p>
+            <span className="wsl-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setSoon(null)}>
+                Cancel
+              </button>
+            </span>
+          </>
+        )}
+
+        {stage === "choose" && found && !soon && (
           <>
             <h2 className="display-lg">Which Linux should Desk use?</h2>
             <p className="muted">
@@ -176,10 +256,16 @@ export function WindowsSetup() {
               ))}
             </div>
             <span className="wsl-actions">
-              <button type="button" className="btn btn-signal" disabled={!option?.usable || busy} onClick={() => void setUp()}>
+              <button
+                type="button"
+                className="btn btn-signal"
+                disabled={!!notYet || busy}
+                title={notYet ?? undefined}
+                onClick={() => void setUp()}
+              >
                 {option?.convert ? "Convert to WSL 2, then set up" : `Set up Desk in ${pick ?? "Linux"}`}
               </button>
-              <span className="muted small">Desk keeps its files in your Linux home (~/.local/share/Desk), never on C:.</span>
+              <span className="muted small">{notYet ?? "Desk keeps its files in your Linux home, never on C:."}</span>
             </span>
           </>
         )}
@@ -232,9 +318,9 @@ export function WindowsSetup() {
         )}
 
         {problem && (
-          <p className="state-blocked" role="alert">
-            {problem}
-          </p>
+          <div role="alert" className="wsl-measure">
+            <ProblemNote problem={problem} />
+          </div>
         )}
       </main>
     </div>
