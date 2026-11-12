@@ -1387,6 +1387,9 @@ export interface BoardSync {
   target: string;
   targetId?: string;
   via: SyncVia;
+  /** The agent on the hub whose tools it syncs through; absent: the hub's
+   *  default agent (or an older hub). */
+  agent?: string;
   person: string;
   filter: SyncFilter;
   /** Who the person is there (a Linear user id, a Jira accountId), as the
@@ -1445,6 +1448,9 @@ export type SyncOffers = { jira: boolean; linear: boolean } | null;
 /** What `POST /api/desk/boards/link/check` found. */
 export interface LinkCheck {
   offered: boolean;
+  /** The agent there that offers the tools; null: the hub's default, or
+   *  this computer. Absent from an older hub. */
+  agent?: { id: string; name: string } | null;
   /** Linear: the hub's teams. */
   teams?: { id: string; key: string; name: string }[];
   /** The states an issue in the target can be in. */
