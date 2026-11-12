@@ -294,7 +294,7 @@ describe("the link dialog", () => {
     fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A Jira search" }));
     fireEvent.change(screen.getByLabelText("The search"), { target: { value: "project = ACME ORDER BY created" } });
-    await screen.findByText("JQL here can't sort: leave out ORDER BY.", undefined, { timeout: 2000 });
+    await screen.findByText(/can’t sort the issues: leave out its “order by” part/, undefined, { timeout: 2000 });
     expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
     render(<LinkBoardDialog board={ACME} tickets={3} onClose={() => {}} />);
@@ -387,6 +387,48 @@ describe("the link dialog", () => {
     expect(screen.queryByLabelText("Atlas’s Jira project key")).toBeNull();
     fireEvent.change(pick, { target: { value: "OPS" } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Link to OPS" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+    // A project that isn't listed can still be typed.
+    fireEvent.click(screen.getByRole("button", { name: "Not listed? Type the key" }));
+    expect(screen.getByLabelText("Atlas’s Jira project key")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pick from the list" }));
+    expect(screen.getByLabelText("Atlas’s Jira project")).toBeTruthy();
+  });
+
+  it("takes a new board away again when its link fails, leaving no ghost and showing the first board", async () => {
+    const nb = { ...ACME, id: "b-new", name: "Acme · Jira", prefix: null } as BoardT;
+    const deleteBoard = vi.fn(async (_id: string) => {});
+    useDesk.setState({ hub: { createBoard: async () => nb, updateBoard: async () => nb, boards: async () => [ACME, nb], deleteBoard } as never });
+    native.route = (hub, method, path, body) => (hub === "local" && method === "PUT" && path.endsWith("/b-new/link") ? { status: 422, body: { error: "Atlas refused that." } } : localRoutes(method, path, body));
+    useBoard.setState({ tickets: { t1: ticket(1) } });
+    render(<LinkBoardDialog board={ACME} tickets={1} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Make a new board and link it/ }));
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+    fireEvent.click(screen.getByRole("button", { name: "Link to ACME" }));
+    await waitFor(() => expect(deleteBoard).toHaveBeenCalledWith("b-new"));
+    await waitFor(() => expect(useBoard.getState().boards["b-new"]).toBeUndefined());
+    expect(useBoard.getState().shown).toBe(ACME.id);
+  });
+
+  it("keeps a new board whose link did apply though the answer was lost", async () => {
+    const nb = { ...ACME, id: "b-new", name: "Acme · Jira", prefix: null } as BoardT;
+    const deleteBoard = vi.fn(async (_id: string) => {});
+    useDesk.setState({ hub: { createBoard: async () => nb, updateBoard: async () => nb, boards: async () => [ACME, { ...nb, sync: { link: "l", system: "jira", target: "ACME" } }], deleteBoard } as never });
+    native.route = (hub, method, path, body) => (hub === "local" && method === "PUT" && path.endsWith("/b-new/link") ? { status: 502, body: { error: "lost" } } : localRoutes(method, path, body));
+    useBoard.setState({ tickets: { t1: ticket(1) } });
+    render(<LinkBoardDialog board={ACME} tickets={1} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Make a new board and link it/ }));
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+    fireEvent.click(screen.getByRole("button", { name: "Link to ACME" }));
+    await waitFor(() => expect(useBoard.getState().shown).toBe("b-new"));
+    expect(deleteBoard).not.toHaveBeenCalled();
   });
 
   it("links a whole team by default, and asks for a member id only where the hub can't say who you are", async () => {

@@ -54,7 +54,35 @@ const linearId = (s: string): boolean => /^[0-9a-fA-F-]{1,64}$/.test(s);
 
 /** A refusal in the hub's words, or why it couldn't be asked. */
 const saidOf = (e: unknown): string =>
-  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+  e instanceof HubError ? plainLinkError(e.message) : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+
+/** A hub's refusal of a search, in words that don't need JQL. */
+const plainLinkError = (said: string): string => (/ORDER BY/i.test(said) && /JQL/i.test(said) ? "A Jira search here can’t sort the issues: leave out its “order by” part." : said);
+
+/** A board made for a link that failed: taken away again, here and on the
+ *  hub, and the original shown. If the failure was a lost answer and the
+ *  link did apply, the board is kept (`linked`) instead. `stuck`: the hub
+ *  wouldn't delete it. */
+const undoMade = async (made: string, original: string): Promise<"removed" | "linked" | "stuck"> => {
+  const hub = useDesk.getState().hub;
+  if (!hub) return "stuck";
+  const now = await hub.boards().catch(() => null);
+  const there = now?.find((b) => b.id === made);
+  if (there?.sync) {
+    useBoard.setState((st) => ({ boards: { ...st.boards, [made]: there }, shown: made }));
+    return "linked";
+  }
+  try {
+    await hub.deleteBoard(made);
+  } catch {
+    return "stuck";
+  }
+  useBoard.setState((st) => {
+    const { [made]: _, ...boards } = st.boards;
+    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: original };
+  });
+  return "removed";
+};
 
 /** The link dialog, from a board's menu: the system, then a hub that offers
  *  it (or this computer), then the project or team, the import filter with
@@ -71,6 +99,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [viaKey, setViaKey] = useState<string | null>(null);
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [target, setTarget] = useState("");
+  /** The project key typed though the hub lists projects. */
+  const [typedKey, setTypedKey] = useState(false);
   const [teamId, setTeamId] = useState("");
   const [filterKind, setFilterKind] = useState<FilterKind>("all");
   const [filterValue, setFilterValue] = useState("");
@@ -212,10 +242,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (probe.state === "needsToken") return { words: `${viaName} needs a token first.`, failed: false };
       if (probe.state === "no") return { words: probe.noToken ? `${viaName} needs a new token.` : probe.error, failed: true };
     }
-    if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 ? "Pick a project." : "Enter the Jira project key."), failed: false };
+    if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 && !typedKey ? "Pick a project." : "Enter the Jira project key."), failed: false };
     if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
     if (!now) return { words: "Waiting for the match count…", failed: false };
-    if (!now.ok) return { words: `The match check failed: ${now.error}`, failed: true };
+    if (!now.ok) return { words: `The match check failed: ${plainLinkError(now.error)}`, failed: true };
     if (now.check.matches === undefined) return { words: "Waiting for the match count…", failed: false };
     return null;
   })();
@@ -261,9 +291,17 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       void sync.syncNow(b.id).catch(() => {});
       onClose();
     } catch (e) {
-      // A board made for this link that it didn’t take is not left behind.
-      if (made) void useDesk.getState().hub?.deleteBoard(made.id).catch(() => {});
-      setProblem(saidOf(e));
+      let words = saidOf(e);
+      if (made) {
+        const outcome = await undoMade(made.id, board.id);
+        if (outcome === "linked") {
+          void sync.syncNow(made.id).catch(() => {});
+          onClose();
+          return;
+        }
+        if (outcome === "stuck") words = `${words} The new board “${made.name}” couldn’t be removed either: delete it from its menu.`;
+      }
+      setProblem(words);
       setBusy(false);
     }
   };
@@ -368,7 +406,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         {system && via && offered && (
           <fieldset className="move-field">
             <legend>{system === "jira" ? "Project" : "Team"}</legend>
-            {system === "jira" && projects.length > 0 ? (
+            {system === "jira" && projects.length > 0 && !typedKey ? (
+              <>
               <label className="field">
                 <span>{viaName}’s Jira project</span>
                 <select className="board-select sync-select" value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -380,7 +419,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   ))}
                 </select>
               </label>
+              <button type="button" className="link small" onClick={() => { setTypedKey(true); setTarget(""); }}>
+                Not listed? Type the key
+              </button>
+              </>
             ) : system === "jira" ? (
+              <>
               <label className="field">
                 <span>
                   {viaName}’s Jira project key
@@ -397,6 +441,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 />
                 {!!target && !targetGood && <span className="move-opt-sub state-blocked">A project key is capitals and digits, like ACME.</span>}
               </label>
+              {projects.length > 0 && (
+                <button type="button" className="link small" onClick={() => { setTypedKey(false); setTarget(""); }}>
+                  Pick from the list
+                </button>
+              )}
+              </>
             ) : teams.length === 0 ? (
               <p className="faint small">{viaName} has no Linear team you can reach.</p>
             ) : (
