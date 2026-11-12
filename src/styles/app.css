@@ -111,7 +111,9 @@ button {
 }
 
 .sidebar {
-  flex: 0 0 288px;
+  position: relative;
+  flex: 0 0 var(--side-w, 288px);
+  container: sidebar / inline-size;
   background: var(--surface);
   padding: 34px 12px 16px;
   display: flex;
@@ -119,6 +121,43 @@ button {
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+/* The edge you drag to set the sidebar's width. */
+.side-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.side-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  transition:
+    background 0.12s,
+    width 0.12s;
+}
+.side-resize:hover::after,
+.side-resize:focus-visible::after,
+body.side-resizing .side-resize::after {
+  width: 3px;
+  background: var(--handle-active);
+}
+.side-resize:focus-visible {
+  outline: none;
+}
+body.side-resizing,
+body.side-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
 }
 /* Always on screen: the wordmark, Ask anyone and the views. */
 .side-top {
@@ -1037,7 +1076,10 @@ button {
   min-width: 0;
 }
 .room-scroll {
-  flex: 1;
+  /* A length, not 0%: the messages take what the composer leaves, in a
+     pane as it resizes too. */
+  flex: 1 1 0px;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 28px 16px;
   display: flex;
@@ -1060,6 +1102,13 @@ button {
   font-size: var(--font-size-chat);
   line-height: 1.55;
   white-space: pre-wrap;
+  /* A long link or path breaks rather than widening the conversation. */
+  overflow-wrap: anywhere;
+}
+/* Code keeps its lines: it scrolls in its own box, never the messages. */
+.msg-text.rich pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 /* The rich renderer draws code in the system's monospace: the emoji fonts
    go after it, as they do in every stack. */
@@ -1151,6 +1200,7 @@ button {
 }
 .composer textarea {
   flex: 1;
+  min-width: 0;
   border: 0;
   outline: none;
   background: transparent;
@@ -1158,6 +1208,109 @@ button {
   max-height: 200px;
   field-sizing: content;
   padding: 8px 0;
+}
+
+/* ── A conversation, at the width it has ───────────────────────────────── */
+
+/* A conversation (a DM, a room, a thread) lays itself out for its own width:
+   a grid's narrow pane, a side column or a small window. */
+.room,
+.thread-body {
+  container: chat / inline-size;
+}
+/* While it shows the conversation, only the messages scroll: the composer
+   stays at the bottom, in a pane, a filled pane and the main view. (Its
+   other tabs, Settings and Files, still scroll as the room.) */
+.room:has(> .room-scroll),
+.room:has(> .timeline) {
+  /* Clipped, not hidden: nothing (a scrollIntoView, a focus) can shift it. */
+  overflow: clip;
+}
+.room > .composer,
+.room > .dm-voice-bar,
+.thread-body > .composer {
+  flex: none;
+}
+/* Shown only while the composer is narrow, for the buttons it folds. */
+.composer .composer-more {
+  display: none;
+}
+@container chat (max-width: 520px) {
+  /* A DM's or room's own header: its tabs go below its name, and scroll
+     rather than widen it. */
+  .room-head {
+    flex-wrap: wrap;
+    padding: 18px 14px 10px;
+  }
+  .room-head > .tabs {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .room-scroll {
+    padding: 8px 14px 12px;
+    gap: 16px;
+  }
+  .composer {
+    margin: 0 12px 12px;
+    padding: 6px 8px;
+    row-gap: 2px;
+  }
+  /* What's typed has the whole width; the buttons go on a line below,
+     Send at its end. */
+  .composer > textarea {
+    flex: 1 1 100%;
+    order: -1;
+    padding: 6px 4px;
+  }
+  .composer > .pending-files,
+  .composer > .pending-problem {
+    order: -2;
+  }
+  .composer > :not(.btn) + .btn {
+    margin-left: auto;
+  }
+  .dm-voice-bar {
+    margin: 0 12px 8px;
+  }
+}
+@container chat (max-width: 360px) {
+  .room-scroll {
+    padding: 6px 10px 10px;
+  }
+  /* The emoji and voice buttons fold into the one overflow menu. */
+  .composer:has(.composer-more) .composer-emoji,
+  .composer:has(.composer-more) > .dm-voice {
+    display: none;
+  }
+  .composer .composer-more {
+    display: inline-grid;
+    place-items: center;
+  }
+  /* A message without its picture, its name and time on one line. */
+  .msg > .mark {
+    display: none;
+  }
+  .msg-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .msg-head > * {
+    flex: none;
+  }
+  .msg-head > .faint {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .typing,
+  .thread-bar {
+    margin-left: 0;
+  }
 }
 
 /* ── Session card ───────────────────────────────────────────────────────── */
@@ -1179,9 +1332,37 @@ button {
   border-top: 1px solid var(--border);
 }
 .session-goal > input,
-.session-goal > .goal-text {
+.session-goal > .goal-text,
+.session-goal > .goal-wrap {
   flex: 1;
   min-width: 0;
+}
+/* A long goal takes two lines, not the session's height: "more" shows the
+   rest, scrolling past a third of the window. */
+.goal-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.goal-wrap > .goal-text {
+  flex: 1;
+  min-width: 0;
+}
+/* The text, not the button, is clamped: WebKit doesn't clamp a button. */
+.goal-clamped > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.goal-open > span {
+  display: block;
+  max-height: 33vh;
+  overflow-y: auto;
+}
+.goal-more {
+  flex: none;
+  padding: 2px 0;
 }
 /* The session's whole line, read under its terminal. */
 .session-line-history {
@@ -1467,6 +1648,124 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* New session: one field, the folder with its recent ones, the copy toggle,
+   the rest folded under Options, and why Start waits. Its height and
+   scrolling are every sheet's, below. */
+.ns-remote {
+  padding-left: 2px;
+}
+.ns-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+.ns-recent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ns-recent-row:hover,
+.ns-recent-row:focus-visible {
+  border-color: var(--border);
+  background: var(--sunken);
+}
+.ns-recent-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.ns-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.ns-copy input {
+  margin-top: 3px;
+  accent-color: var(--signal);
+}
+.ns-copy-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ns-copy-off {
+  cursor: default;
+  color: var(--muted);
+}
+.ns-options {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.ns-options > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.ns-options > summary::-webkit-details-marker {
+  display: none;
+}
+.ns-options > summary::before {
+  content: "›";
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.ns-options[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ns-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 12px;
+}
+.ns-foot {
+  align-items: center;
+}
+.ns-why {
+  flex: 1;
+  color: var(--blocked);
+}
+
+/* A sheet is never taller than the window: what it asks scrolls inside it,
+   and its buttons stay at its foot, always reachable. */
+.sheet {
+  max-height: calc(100vh - 12vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sheet .sheet-foot {
+  position: sticky;
+  bottom: -20px;
+  z-index: 1;
+  margin: 0 -20px -20px;
+  padding: 12px 20px 20px;
+  background: var(--raised);
+  border-top: 1px solid var(--border);
+}
+@media (max-height: 640px) {
+  .sheet-backdrop {
+    padding-top: 16px;
+  }
+  .sheet {
+    max-height: calc(100vh - 32px);
+  }
 }
 .quick-ask input {
   font-size: 17px;
@@ -1781,7 +2080,7 @@ button.thread-bar:hover {
   background: var(--raised);
   border: 1px solid var(--border);
 }
-/* The hub-down banner floats at the top: below the notice while one shows,
+/* The Desk-ready banner floats at the top: below the notice while one shows,
    however many lines it takes (measured into --update-band-bottom). */
 .app:has(.update-notice) .hub-down {
   top: calc(var(--update-band-bottom, 82px) + 12px);
@@ -2072,9 +2371,19 @@ button.thread-bar:hover {
   height: 8px;
   margin: 0 3px;
 }
+/* A row never squeezes its name to nothing: badges that don't fit drop to
+   a second line under it, and the least important meta hides when narrow. */
+.gi:not(.gi-editing) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 .gi-name {
-  flex: 1;
-  min-width: 0;
+  /* Its own length decides whether the badges fit beside it: a name that
+     would be cut takes the whole first line and they wrap under it. */
+  flex: 1 1 auto;
+  /* Never wider than what is left after the grip and dot, so they stay on its line. */
+  max-width: calc(100% - 44px);
+  min-width: 9ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2373,7 +2682,7 @@ button.thread-bar:hover {
 }
 .timeline {
   position: relative;
-  flex: 1;
+  flex: 1 1 0px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2995,6 +3304,46 @@ button.urow-open {
 .hub-down-reason {
   overflow-wrap: anywhere;
 }
+.hub-down-reason summary {
+  cursor: pointer;
+  width: fit-content;
+}
+/* How far Desk has got starting its helper. */
+.ready-bar {
+  position: relative;
+  display: block;
+  height: 4px;
+  margin: 6px 0 2px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ready-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--signal);
+  transition: width 0.4s ease;
+}
+.ready-bar-unknown > span {
+  width: 30%;
+  animation: ready-sweep 1.4s ease-in-out infinite;
+}
+@keyframes ready-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ready-bar-unknown > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
 /* What is shown while the hub is down is from before: kept, and dimmed. */
 .app[data-hub-down] .sidebar,
 .app[data-hub-down] .stage {
@@ -3336,4 +3685,52 @@ body.line-resizing * {
 .folder-suggestion:focus-visible {
   background: var(--surface);
   color: var(--text);
+}
+
+/* ── The bottom block, folded to a row of icons ─────────────────────────── */
+.side-mini {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+.side-mini-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+.side-mini-btn:hover,
+.side-mini-btn:focus-visible {
+  background: var(--raised);
+  color: var(--text);
+}
+.side-mini-btn.on {
+  color: var(--signal);
+}
+.side-mini .side-foot-toggle {
+  margin-left: auto;
+}
+.side-foot-fold {
+  align-self: flex-end;
+  margin-bottom: -4px;
+}
+
+@container sidebar (max-width: 260px) {
+  .gi-meta,
+  .gi-machine {
+    display: none;
+  }
+}
+/* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .gi-ticket,
+.gi > .gi-charge,
+.gi > .gi-meta,
+.gi > .gi-machine {
+  margin-left: auto;
 }

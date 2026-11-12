@@ -187,7 +187,7 @@ export interface ComputerActivityPage {
 export type DiskAccess = "granted" | "missing" | "unknown";
 
 /** What a hub without a route is taken to have said. */
-const NO_ROUTE = "This part of Desk doesn’t have that yet.";
+const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
 
 /** One key of Desk's state on a hub. */
 export interface StateRow {
@@ -213,7 +213,7 @@ export const stateRows = (body: unknown): StateRow[] => {
   if (!Array.isArray(list)) throw new HubError(404, NO_ROUTE);
   const rows = list.flatMap((x) => stateRow(x) ?? []);
   if (rows.length < list.length) {
-    throw new HubError(502, `The hub's Desk state listing has ${list.length - rows.length} rows Desk can't read.`);
+    throw new HubError(502, `Desk's saved state has ${list.length - rows.length} rows Desk can't read.`);
   }
   return rows;
 };
@@ -247,6 +247,9 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** A key the provider refused when the hub tried it: its error is written
+ *  for the person, the fix included. */
+export const KEY_REFUSED = "key_refused";
 
 /** Whether `e` is the hub refusing a change only a move may make. */
 export const crossesBoss = (e: unknown): boolean => e instanceof HubError && e.status === 409 && e.code === CROSSES_BOSS;
@@ -270,7 +273,7 @@ export const refusal = async (res: Response): Promise<HubError> => {
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "The hub refused that.", code, hubs);
+  return new HubError(res.status, message || res.statusText || "Desk couldn’t do that.", code, hubs);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
@@ -405,6 +408,17 @@ export class DeskHub {
       return await this.call<EngineInfo[]>("GET", "/api/desk/engines");
     } catch (e) {
       if (e instanceof HubError && e.status === 404) return null;
+      throw e;
+    }
+  };
+  /** What the hub can do that an older one can't (`fresh-worktree`, …);
+   *  none from a hub that doesn't say, which is an older one. */
+  features = async (): Promise<string[]> => {
+    try {
+      const f = await this.call<{ features?: unknown }>("GET", "/api/desk/features");
+      return Array.isArray(f.features) ? f.features.filter((x): x is string => typeof x === "string") : [];
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 405)) return [];
       throw e;
     }
   };
@@ -544,6 +558,11 @@ export class DeskHub {
   /** Vault paths (never values) on this hub. */
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;
   saveVault = (path: string, value: string): Promise<void> => this.call("POST", `/api/vault/${path}`, { value });
+  /** Tries a voice key (`fish_audio`, `elevenlabs`, `openai`, `soniox`,
+   *  `gemini`) with the smallest call its provider takes, and keeps it only
+   *  if the provider takes it; a refusal says why in the person's words. */
+  saveVoiceKey = (provider: string, key: string): Promise<void> =>
+    this.call("POST", `/api/desk/voice/keys/${encodeURIComponent(provider)}`, { key });
 
   /** The local agents themselves, created and configured on the person's behalf. */
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>

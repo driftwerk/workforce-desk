@@ -392,6 +392,12 @@ fn key_part(line: &str) -> Option<String> {
 /// denied"). `ssh-keygen -y` with an empty passphrase tells: it fails on a
 /// key that needs one. Nothing it prints is kept.
 fn locked(files: &Files) -> bool {
+    locked_key(files).is_some()
+}
+
+/// The first key ssh would sign in with that needs a passphrase no agent
+/// holds, as [`locked`] tells.
+pub fn locked_key(files: &Files) -> Option<PathBuf> {
     let agent: Vec<String> = std::process::Command::new("/usr/bin/ssh-add")
         .arg("-L")
         .stdin(Stdio::null())
@@ -404,24 +410,29 @@ fn locked(files: &Files) -> bool {
                 .collect()
         })
         .unwrap_or_default();
-    files.identities.iter().filter(|k| k.is_file()).any(|key| {
-        let held = std::fs::read_to_string(pub_of(key))
-            .ok()
-            .and_then(|l| key_part(&l))
-            .is_some_and(|k| agent.contains(&k));
-        if held {
-            return false;
-        }
-        std::process::Command::new("/usr/bin/ssh-keygen")
-            .args(["-y", "-P", "", "-f"])
-            .arg(key)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .output()
-            .is_ok_and(|o| {
-                !o.status.success() && String::from_utf8_lossy(&o.stderr).contains("passphrase")
-            })
-    })
+    files
+        .identities
+        .iter()
+        .filter(|k| k.is_file())
+        .find(|key| {
+            let held = std::fs::read_to_string(pub_of(key))
+                .ok()
+                .and_then(|l| key_part(&l))
+                .is_some_and(|k| agent.contains(&k));
+            if held {
+                return false;
+            }
+            std::process::Command::new("/usr/bin/ssh-keygen")
+                .args(["-y", "-P", "", "-f"])
+                .arg(key)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .output()
+                .is_ok_and(|o| {
+                    !o.status.success() && String::from_utf8_lossy(&o.stderr).contains("passphrase")
+                })
+        })
+        .cloned()
 }
 
 fn pub_of(key: &Path) -> PathBuf {

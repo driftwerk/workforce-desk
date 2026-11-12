@@ -126,7 +126,7 @@ export function PlanCard({ mentioned, text }: { mentioned: { id: string; revisio
       <div className="dm-action pc-notice" role="group" aria-label="Plan">
         <span className="dm-action-text">
           {text && <span className="pc-fallback">{text}</span>}
-          <span className="small faint">{supported === false ? "This computer's hub has no plans yet: update Desk to approve it here." : unread ? `Desk couldn't read this plan: ${unread}` : "Reading the plan…"}</span>
+          <span className="small faint">{supported === false ? "This version of Desk can't show plans yet: update Desk to approve it here." : unread ? `Desk couldn't read this plan: ${unread}` : "Reading the plan…"}</span>
         </span>
       </div>
     );

@@ -218,7 +218,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
         <header className="board-head">
           <h1 className="display">Board</h1>
         </header>
-        <p className="empty muted">This computer's hub has no board yet. Update Desk to keep tickets here.</p>
+        <p className="empty muted">This version of Desk has no board yet. Update Desk to keep tickets here.</p>
       </main>
     );
 
@@ -551,10 +551,10 @@ function BoardPaneNote({ supported }: { supported: boolean | null }) {
     <div className="pane-note">
       <p className="muted small">
         {supported === false
-          ? "This computer's hub keeps no boards. Update Desk to keep tickets here."
+          ? "This version of Desk keeps no boards. Update Desk to keep tickets here."
           : supported === null
             ? "Reading the board…"
-            : "This board is no longer on this computer's hub."}
+            : "This board is no longer on this computer."}
       </p>
     </div>
   );

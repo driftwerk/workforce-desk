@@ -192,6 +192,9 @@ export interface NewSession {
   cwd: string;
   goal?: string;
   worktree?: string;
+  /** The separate copy is a new branch: `worktree` is where its name
+   *  starts, and the hub takes the first free one (`-2`, `-3`, …). */
+  freshWorktree?: boolean;
   prompt?: string;
   approvals?: "desk" | "terminal";
   /** Codex's own reviewer answers its approvals ("Approve for me"). */
@@ -1483,6 +1486,9 @@ export interface LinkBoard {
   me?: string;
   /** The person said the hub's answer of who they are isn't them. */
   notMe?: boolean;
+  /** A board with tickets of its own: they stay on Desk only, beside the
+   *  issues that come in. */
+  keepTickets?: boolean;
   states: Partial<Record<TicketState, string>>;
 }
 

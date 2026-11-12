@@ -250,16 +250,17 @@ fn adding_asks_first_and_runs_nothing_on_a_cancel() {
 }
 
 #[test]
-fn a_host_the_mac_doesnt_know_is_refused_with_how_to_fix_it() {
+fn a_host_this_computer_doesnt_know_is_refused_with_how_to_fix_it() {
     let mut h = host("devbox", 1, ADMIN, DEVICE);
     h["refuse"] = json!({"stderr": "No ED25519 host key is known for devbox and you have requested strict checking.\nHost key verification failed.", "code": 255});
     let f = fake(json!([h]));
     let id = MachineId::new("devbox").unwrap();
     let e = admit::admit(&Gate::new(answer(true)), &f.ssh, id, "devbox", "devbox").unwrap_err();
     assert!(
-        e.contains("Connect to devbox once with ssh in a terminal"),
+        e.contains("doesn't know devbox's host key yet. Add it again in Settings → Machines"),
         "{e}"
     );
+    assert!(!e.contains("terminal") && !e.contains("your Mac"), "{e}");
     let reach = f.calls().pop().unwrap();
     assert!(
         reach
@@ -509,7 +510,8 @@ fn a_locked_key_or_a_helper_not_running_is_said_plainly() {
         json!({"stderr": "dev@203.0.113.7: Permission denied (publickey).", "code": 255});
     let f = fake(json!([locked]));
     let e = link(&f, "devbox").read().unwrap_err();
-    assert!(e.contains("ssh-add"), "{e}");
+    assert!(e.contains("turned") && e.contains("SSH key away"), "{e}");
+    assert!(e.contains("password once"), "{e}");
     let mut idle = host("devbox", 1, ADMIN, DEVICE);
     idle["commands"][0]["stdout"] = json!("null");
     f.say(json!([idle]));

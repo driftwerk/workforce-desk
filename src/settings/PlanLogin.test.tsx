@@ -59,6 +59,17 @@ describe("a Claude Code install that stopped", () => {
     expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
   });
 
+  it("keeps what the installer printed under Details, never in the sentence", () => {
+    render(<PlanSignIn kind="claude" />);
+    act(() =>
+      push("claude", { state: "failed", message: "Claude Code's installer stopped before it finished.", details: "Unsupported architecture" }),
+    );
+    expect(screen.getByRole("status").textContent).toContain("Claude Code's installer stopped before it finished.");
+    const details = screen.getByText("Details").closest("details")!;
+    expect(details.textContent).toContain("Unsupported architecture");
+    expect(details.open).toBe(false);
+  });
+
   it("says so when the clipboard won't take it", async () => {
     writeText.mockRejectedValueOnce(new Error("denied"));
     render(<PlanSignIn kind="claude" />);

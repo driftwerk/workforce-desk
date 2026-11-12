@@ -15,11 +15,13 @@ mod hubs;
 mod links;
 mod logins;
 mod machine_accounts;
+mod machine_secret;
 mod machine_setup;
 mod machines;
 mod navigation;
 mod pair_gate;
 mod paired;
+mod privacy;
 mod remote_images;
 mod repos;
 mod reread;
@@ -110,11 +112,9 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
             if let Some(why) = helper::login(&backend).status().blocked() {
                 return Err(why);
             }
+            // The page shows how far it has got meanwhile, and asks again.
             if Instant::now() > deadline {
-                return Err(
-                    "Desk Helper hasn’t started. Settings → Help says why, and can save a report."
-                        .into(),
-                );
+                return Err("Desk isn’t ready yet.".into());
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -335,6 +335,51 @@ async fn helper_start(app: State<'_, App>) -> CommandResult<helper::Status> {
 fn helper_last_reason(app: State<'_, App>) -> Option<String> {
     let paths = app.backend.as_ref().map_or(&app.paths, |b| &b.paths);
     helper::last_reason_in(&paths.logs().join("desk-hubd.log"))
+}
+
+/// How far Desk Helper has got since it last started, from its log; none
+/// when it hasn't logged a start.
+#[tauri::command]
+fn helper_progress(app: State<'_, App>) -> Option<helper::Stage> {
+    let paths = app.backend.as_ref().map_or(&app.paths, |b| &b.paths);
+    helper::stage_in(&paths.logs().join("desk-hubd.log"))
+}
+
+/// Copies Desk into the Applications folder, then quits and opens the copy
+/// (macOS, when it runs from its disk image or Downloads). Answers only
+/// when it couldn't, with why.
+#[tauri::command]
+async fn helper_move_to_applications(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+) -> CommandResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // Only a Desk that can't keep running where it is moves itself.
+        let backend = app.backend()?;
+        let status = tauri::async_runtime::spawn_blocking(move || helper::login(&backend).status())
+            .await
+            .map_err(text)?;
+        if status != helper::Status::MoveToApplications {
+            return Err("Desk is already where it can keep running, so it moves nothing.".into());
+        }
+        let exe = std::env::current_exe().map_err(text)?;
+        let moved = tauri::async_runtime::spawn_blocking(move || {
+            helper::moving::copy_to_applications(&exe)
+        })
+        .await
+        .map_err(text)?
+        .map_err(text)?;
+        tracing::info!(to = %moved.display(), "Desk copied itself to Applications; reopening there");
+        helper::moving::reopen_after_exit(&moved).map_err(text)?;
+        handle.exit(0);
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, app);
+        Err("Only Desk on a Mac is moved to the Applications folder.".into())
+    }
 }
 
 #[tauri::command]
@@ -979,10 +1024,15 @@ pub fn run() {
             let sockets = Arc::new(broker::socket::Sockets::default());
             // The person's own machines, reached over SSH (none until one
             // is added).
+            // One ssh for every machine, which knows Desk's own key and
+            // the machines it was put on.
+            let ssh = desk_machine::SshExe::system()
+                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"));
             let machines = Arc::new(desk_machine::Machines::new(
-                desk_machine::SshExe::system(),
+                ssh.clone(),
                 &paths.root.join("machines"),
             ));
+            app.manage(Arc::new(machine_secret::SecretField::default()));
             let paired = Arc::new(paired::Paired::new(
                 paths.clone(),
                 backend.clone(),
@@ -998,7 +1048,7 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_default();
             let fleet = desk_machine::fleet::Fleet::new(
-                desk_machine::SshExe::system(),
+                ssh,
                 machines,
                 paths.root.join("machines.json"),
                 home.clone(),
@@ -1079,6 +1129,13 @@ pub fn run() {
             machine_setup::machines_list,
             machine_setup::machine_probe,
             machine_setup::machine_trust,
+            machine_setup::machine_install_key,
+            machine_setup::machine_unlock_key,
+            machine_setup::machine_forget_key,
+            machine_setup::machine_linger_with_password,
+            machine_secret::machine_secret_request,
+            machine_secret::machine_secret_submit,
+            machine_secret::machine_secret_cancel,
             machine_setup::machine_public_key,
             machine_setup::machine_add,
             machine_setup::machine_reconnect,
@@ -1126,6 +1183,8 @@ pub fn run() {
             helper_open_login_items,
             helper_start,
             helper_last_reason,
+            helper_progress,
+            helper_move_to_applications,
             cli_installed,
             cli_install,
             report_save,
@@ -1161,6 +1220,8 @@ pub fn run() {
             attachments::attachment_save,
             attachments::attachment_upload,
             drops::dropped_files,
+            privacy::privacy_open,
+            privacy::privacy_check,
             drops::dropped_file_read,
             drops::terminal_drop,
             drops::terminal_drop_cancel,
@@ -1181,6 +1242,7 @@ pub fn run() {
             voice::voice_status,
             wsl::wsl_detect,
             wsl::wsl_install,
+            wsl::wsl_forget_resume,
             wsl::wsl_convert,
             wsl::wsl_setup,
             wsl::wsl_fix_forwarding,
@@ -1323,6 +1385,35 @@ mod tests {
         // And a window that is neither gets nothing.
         let other = ask("elsewhere", "hub_fetch");
         assert!(other.contains("not allowed"), "{other}");
+        // Desk's own password field alone asks for and answers a password;
+        // it can do nothing with machines, pairing or the hub.
+        for cmd in [
+            "machine_secret_request",
+            "machine_secret_submit",
+            "machine_secret_cancel",
+        ] {
+            for label in ["main", "grid-c"] {
+                let refused = ask(label, cmd);
+                assert!(
+                    refused.contains("not allowed"),
+                    "{cmd} in {label}: {refused}"
+                );
+            }
+            let own = ask(machine_secret::LABEL, cmd);
+            assert!(!own.contains("not allowed"), "{cmd} in its window: {own}");
+        }
+        for cmd in [
+            "machine_install_key",
+            "machine_add",
+            "hub_fetch",
+            "pair_request",
+        ] {
+            let refused = ask(machine_secret::LABEL, cmd);
+            assert!(
+                refused.contains("not allowed"),
+                "{cmd} in the field: {refused}"
+            );
+        }
     }
 
     /// What `hub_connection` hands the page, serialized as the IPC sends it.

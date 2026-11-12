@@ -129,6 +129,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/breakers/continue"),
     route("POST", "/api/desk/breakers/keep"),
     route("GET", "/api/desk/engines"),
+    route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
@@ -216,6 +217,8 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),
     route("DELETE", "/api/desk/providers/{}"),
+    // A voice key, tried before it is kept.
+    route("POST", "/api/desk/voice/keys/{}"),
     // The crew.
     route("GET", "/api/desk/overview"),
     with_query("GET", "/api/desk/activity", &["limit", "filter", "before"]),
@@ -350,7 +353,7 @@ pub fn socket(target: &str) -> Result<Allowed, Refused> {
 fn allowed(routes: &'static [Route], method: &str, target: &str) -> Result<Allowed, Refused> {
     let refuse = || {
         Refused(format!(
-            "Desk doesn't send {method} {target} to this computer's hub."
+            "Desk doesn't send {method} {target} to its helper."
         ))
     };
     let (path, query) = match target.split_once('?') {
@@ -801,7 +804,7 @@ mod tests {
         let e = http("GET", "/api/admin/x").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "Desk doesn't send GET /api/admin/x to this computer's hub."
+            "Desk doesn't send GET /api/admin/x to its helper."
         );
     }
 

@@ -167,7 +167,7 @@ describe("closing a pane", () => {
     expect(said(shell)).toEqual(["Close this terminal?", "Its shell stops when it closes."]);
     expect(panes()).toBe(4);
     act(() => useDesk.setState((s) => ({ sessions: { s1: s.sessions.s1! } })));
-    expect(said(regionOf("Session"))).toEqual(["Close this pane?", "The session is no longer on the hub; nothing else changes."]);
+    expect(said(regionOf("Session"))).toEqual(["Close this pane?", "The session is no longer running; nothing else changes."]);
     expect(panes()).toBe(4);
     expect(closeTerminal).not.toHaveBeenCalled();
   });

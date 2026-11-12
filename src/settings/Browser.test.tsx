@@ -178,7 +178,7 @@ it("lists what the browser did with the page as it looked after", async () => {
 it("says when the hub has no browser yet", async () => {
   const { HubError } = await import("../hub/client");
   await show(api(view(), [], { settings: vi.fn(async () => Promise.reject(new HubError(404, "no"))) }));
-  expect(screen.getByText("This hub doesn’t have the browser yet.")).toBeTruthy();
+  expect(screen.getByText("This version of Desk doesn’t have the browser yet. Update Desk to use it.")).toBeTruthy();
 });
 
 it("reads sites and Chrome's standing in plain words", () => {

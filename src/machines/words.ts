@@ -180,7 +180,7 @@ export const sessionsCount = (n: number): string => `${n} ${n === 1 ? "session" 
 export const keyChanged = (m: Machine): boolean => m.state.kind === "failed" && /host key isn.t the one/.test(m.state.message);
 
 /** Whether a failure is this computer's SSH key: locked, or turned away. */
-export const keyRefused = (m: Machine): boolean => m.state.kind === "failed" && /turned your SSH key away|ssh-add/.test(m.state.message);
+export const keyRefused = (m: Machine): boolean => m.state.kind === "failed" && /turned .*SSH key away|ssh-add/.test(m.state.message);
 
 /** What ssh said, as the end of a sentence: "Connection timed out after
  *  15 s." from "ssh: connect to host 10.0.3.14 port 22: Connection timed
@@ -246,7 +246,7 @@ export const rowLines = (
       return { first: `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`, tone: "blocked", second: null };
     case "failed":
       if (keyRefused(m))
-        return { first: `Offline: your SSH key is locked, or ${m.name} turned it away. Run ssh-add in a terminal, then Reconnect.`, tone: "blocked", second: keep };
+        return { first: `Offline: ${m.name} won’t take the SSH key Desk signs in with. Remove it and add it again: Desk asks for its password once.`, tone: "blocked", second: keep };
       return { first: m.state.message || m.reason || "Desk couldn’t set it up.", tone: "blocked", second: keep };
   }
 };

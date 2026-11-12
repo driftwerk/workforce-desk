@@ -221,17 +221,49 @@ fn post(
     Ok((status, said))
 }
 
-/// Saves a login where the agents on this computer read it.
+/// How long Desk waits before each further try at keeping a sign-in.
+const SAVE_RETRIES: [std::time::Duration; 2] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(3),
+];
+
+/// Saves a login where the agents on this computer read it. A sign-in the
+/// person just finished is kept and the save tried again while Desk's
+/// helper is busy or briefly away, rather than lost to one bad answer.
 fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
-    let (status, _) = post(
-        backend,
-        &format!("/api/vault/{}", plan.vault_path()),
-        &serde_json::json!({ "value": value }),
-    )?;
-    if !status.is_success() {
-        eyre::bail!("saving the login failed ({status})");
+    keep_trying(&SAVE_RETRIES, std::thread::sleep, || {
+        post(
+            backend,
+            &format!("/api/vault/{}", plan.vault_path()),
+            &serde_json::json!({ "value": value }),
+        )
+        .map(|(status, _)| status)
+    })
+}
+
+/// Runs `attempt` once, then again after each of `waits` while it fails in
+/// a way worth trying again (no answer, or a 5xx).
+fn keep_trying(
+    waits: &[std::time::Duration],
+    sleep: impl Fn(std::time::Duration),
+    mut attempt: impl FnMut() -> eyre::Result<reqwest::StatusCode>,
+) -> eyre::Result<()> {
+    let mut waits = waits.iter();
+    loop {
+        let again = match attempt() {
+            Ok(status) if status.is_success() => return Ok(()),
+            Ok(status) if !status.is_server_error() => {
+                eyre::bail!("Desk couldn't keep the sign-in ({status}).")
+            }
+            Ok(_) | Err(_) => waits.next(),
+        };
+        match again {
+            Some(wait) => sleep(*wait),
+            None => eyre::bail!(
+                "Desk couldn't keep the sign-in just now: its helper didn't answer. Sign in again in a moment."
+            ),
+        }
     }
-    Ok(())
 }
 
 /// What a hub refusal says, in its words.
@@ -672,6 +704,66 @@ impl Logins {
         {
             cli::stop_sign_in(backend, Plan::Claude.program(), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use std::cell::{Cell, RefCell};
+    use std::time::Duration;
+
+    use reqwest::StatusCode;
+
+    use super::{SAVE_RETRIES, keep_trying};
+
+    #[test]
+    fn a_sign_in_is_kept_by_trying_again_while_the_helper_is_busy() {
+        let answers = RefCell::new(vec![
+            Ok(StatusCode::OK),
+            Err(eyre::eyre!("connection refused")),
+            Ok(StatusCode::INTERNAL_SERVER_ERROR),
+        ]);
+        let slept = RefCell::new(Vec::new());
+        keep_trying(
+            &SAVE_RETRIES,
+            |d| slept.borrow_mut().push(d),
+            || answers.borrow_mut().pop().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(*slept.borrow(), SAVE_RETRIES.to_vec());
+    }
+
+    #[test]
+    fn it_gives_up_plainly_and_never_retries_a_refusal() {
+        let tries = Cell::new(0);
+        let e = keep_trying(
+            &SAVE_RETRIES,
+            |_| {},
+            || {
+                tries.set(tries.get() + 1);
+                Ok(StatusCode::BAD_GATEWAY)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(tries.get(), 3);
+        assert!(
+            e.to_string()
+                .starts_with("Desk couldn't keep the sign-in just now"),
+            "{e}"
+        );
+        assert!(!e.to_string().contains("502"));
+
+        let tries = Cell::new(0);
+        let _ = keep_trying(
+            &[Duration::ZERO; 2],
+            |_| {},
+            || {
+                tries.set(tries.get() + 1);
+                Ok(StatusCode::FORBIDDEN)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(tries.get(), 1, "a refusal isn't tried again");
     }
 }
 

@@ -85,10 +85,14 @@
 .floor-item-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   min-width: 0;
 }
+/* The name keeps its room; the state and time wrap under it when they would squeeze it. */
 .floor-item-head b {
+  min-width: min(14ch, calc(100% - 20px));
+  max-width: calc(100% - 20px);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;

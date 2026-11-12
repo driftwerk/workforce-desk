@@ -31,9 +31,18 @@ export function TicketChip({ ticket, className = "", still = false }: { ticket: 
   );
 }
 
+/** Whether `name` begins with ticket key `key` (`ACM-12 Fix the flaky`). */
+export const namesKey = (name: string, key: string): boolean => {
+  const n = name.trimStart().toUpperCase();
+  const k = key.toUpperCase();
+  return n.startsWith(k) && !/[A-Z0-9]/.test(n.charAt(k.length));
+};
+
 /** The chip of the ticket session `id` works on, when it has one. */
-export function SessionTicketChip({ session, className = "", still = false }: { session: string; className?: string; still?: boolean }) {
+export function SessionTicketChip({ session, className = "", still = false, name }: { session: string; className?: string; still?: boolean; name?: string }) {
   const t = useSessionTicket(session);
+  // A name that already starts with the key says it.
+  if (t?.key && name && namesKey(name, t.key)) return null;
   return t ? <TicketChip ticket={t} className={className} still={still} /> : null;
 }
 

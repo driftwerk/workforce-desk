@@ -61,8 +61,8 @@ const notesOf = (p: MovePreview | null | undefined, was: Record<string, Note>): 
 /** A refusal in the person's words. */
 const said = (e: unknown): string => {
   if (e instanceof HubError) {
-    if (e.status === 401 || e.status === 403) return "Only the person who holds this computer’s hub can move things between groups.";
-    if (e.status === 404 || e.status === 405) return "This computer’s hub can’t move things between groups yet.";
+    if (e.status === 401 || e.status === 403) return "Only the person whose Desk this is can move things between groups.";
+    if (e.status === 404 || e.status === 405) return "This version of Desk can’t move things between groups yet. Update Desk to use it.";
   }
   return plainError(e);
 };
@@ -82,7 +82,7 @@ const NOTHING_ELSE: Record<MoveAsk["subject"]["kind"], (name: string) => string>
   boss: (name) => `Nothing changes for ${name}.`,
 };
 
-const NOT_CONNECTED = "Desk isn’t connected to this computer’s hub just now; try again in a moment.";
+const NOT_CONNECTED = "Desk isn’t ready just now; try again in a moment.";
 
 /** The dialog, while a move is asked for. */
 export function MoveDialog() {

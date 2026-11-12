@@ -82,7 +82,7 @@ export const usePlans = create<PlanState>((set, get) => {
    *  one, else the hub's own words. The refusal is thrown on. */
   const act = async (id: string, request: () => Promise<BossPlanDetail>): Promise<void> => {
     const hub = hubNow();
-    if (!hub) throw new Error("This computer's hub isn't running.");
+    if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
     const shown = get().details[id]?.revision ?? get().plans[id]?.revision;
     set((s) => ({ refusals: without(s.refusals, id) }));
     try {
@@ -167,7 +167,7 @@ export const usePlans = create<PlanState>((set, get) => {
     decide: (id, revision, choice, budget) =>
       act(id, async () => {
         const local = useChat.getState().hubs.find((h) => h.local);
-        if (!local) throw new Error("This computer's hub isn't paired yet.");
+        if (!local) throw new Error("Desk isn't ready yet. Try again in a moment.");
         // The hub answers with the plan as it now is (an older one, with nothing).
         const now = await floorOf(local).decidePlan({ kind: "plan", plan: id, revision }, choice, budget);
         return now && typeof now === "object" && "tickets" in now ? now : hubNow()!.plan(id);
