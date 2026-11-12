@@ -10,6 +10,7 @@ import {
   isDefaultEffort,
   isDefaultModel,
   newAgentBrain,
+  brainReady,
   resolveBrain,
   withBrain,
   withDeskSettings,
@@ -155,7 +156,7 @@ describe("an agent's brain in its config", () => {
 
 describe("where new agents start", () => {
   it("uses the saved choice, with the provider's defaults for what it leaves out", () => {
-    expect(newAgentBrain({ provider: "chatgpt" }, ALL)).toEqual({ provider: "chatgpt", model: "chatgpt-mid", effort: "medium" });
+    expect(newAgentBrain({ provider: "chatgpt" }, [CLAUDE, { ...CHATGPT, connected: true }, ROUTER])).toEqual({ provider: "chatgpt", model: "chatgpt-mid", effort: "medium" });
     expect(newAgentBrain({ provider: "claude-code", model: "claude-code-big", effort: "high" }, ALL)).toEqual({
       provider: "claude-code",
       model: "claude-code-big",
@@ -169,6 +170,18 @@ describe("where new agents start", () => {
       model: "claude-code-mid",
       effort: "medium",
     });
+  });
+
+  it("never starts on a saved choice that isn't connected while another is: an agent there couldn't answer", () => {
+    expect(newAgentBrain({ provider: "chatgpt", model: "chatgpt-big" }, ALL).provider).toBe("claude-code");
+    // Nothing connected at all: the saved choice, which isn't ready.
+    const none = [{ ...CLAUDE, connected: false }, CHATGPT];
+    const brain = newAgentBrain({ provider: "chatgpt" }, none);
+    expect(brain.provider).toBe("chatgpt");
+    expect(brainReady(brain, none)).toBe(false);
+    expect(brainReady(newAgentBrain(null, ALL), ALL)).toBe(true);
+    // Not listed yet: the saved choice stands.
+    expect(newAgentBrain({ provider: "chatgpt" }, []).provider).toBe("chatgpt");
   });
 
   it("starts on a connected plan when nothing is saved", () => {
