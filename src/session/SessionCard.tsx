@@ -19,10 +19,9 @@ import { useTheme } from "../theme/store";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
 import { BreakerBanner } from "../spend/BreakerBanner";
-import { SpendStrip } from "../spend/SpendStrip";
 import { ImageBudget } from "../shell/RemoteImage";
 import { LinePanel } from "../line/LinePanel";
-import { ChargeStrip } from "../crew/ChargeBadge";
+import { DriverBar } from "../crew/ChargeBadge";
 import { SubjectHistory } from "../board/History";
 import { keyOf, machineOf, sessionKey } from "../hub/machines";
 import { sessionContent } from "../grids/engine";
@@ -84,9 +83,9 @@ export function SessionCard({ session }: { session: Session }) {
           below either. */}
       <div className="session-view" role="tabpanel" id={panelId(tabIds, "session")} aria-labelledby={tabId(tabIds, "session")} hidden={tab !== "session"}>
         <LineageChips session={session} />
-        <SpendStrip sessionId={key} />
+        {/* Only what waits on you gets a bar of its own. */}
         <BreakerBanner sessionId={key} />
-        <ChargeStrip session={session} />
+        <DriverBar session={session} />
         <SessionBody session={session} />
       </div>
       <Approval session={session} />

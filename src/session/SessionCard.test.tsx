@@ -8,6 +8,8 @@ import type { GridStorage } from "../grids/storage";
 import { createGrid, deliver, layOut, renameGrid, setActive, startGrids, useGrids } from "../grids/store";
 import { useTerminals } from "../grids/terminals";
 import { SessionCard } from "./SessionCard";
+import { useCharges } from "../crew/chargeStore";
+import { useOverview } from "../overview/store";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -174,7 +176,7 @@ describe("a session's chrome", () => {
     fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
     expect(hub.interrupt).toHaveBeenCalledWith("s1");
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
-    expect(options()[0]).toBe("Stop");
+    expect(options().slice(-3)).toEqual(["Stop", "End session…", "Remove…"]);
     unmount();
     useDesk.setState({ sessions: { s1: session({ live: false, state: "stopped", cliSessionId: "c1" }) } });
     card();
@@ -214,5 +216,46 @@ describe("a session's chrome", () => {
     expect(head.textContent).toContain("working");
     expect(head.textContent).toContain("Claude Code");
     expect(head.textContent).toContain("/tmp/patchworkhealth");
+  });
+});
+
+describe("who runs a session, in its chrome", () => {
+  const charge = (wheel: "boss" | "person") => ({
+    session: "s1",
+    group: null,
+    boss: "a1",
+    bossName: "Desk",
+    how: "started" as const,
+    wheel,
+    wheelSince: null,
+    since: "2026-11-12T10:00:00Z",
+    releasedAt: null,
+  });
+  afterEach(() => {
+    useCharges.setState({ bySession: {} });
+    useOverview.setState({ suggestions: {} });
+  });
+
+  it("is a chip that opens what that means and the choices, with no bar of its own", () => {
+    useCharges.setState({ bySession: { s1: charge("boss") } });
+    card();
+    fireEvent.click(screen.getByRole("button", { name: "Who runs it: Desk has it" }));
+    const who = screen.getByRole("dialog", { name: "Who runs api-e7" });
+    expect(who.textContent).toContain("Desk runs this session.");
+    expect(within(who).getAllByRole("button").map((b) => b.textContent)).toEqual(["I’ll drive", "Release"]);
+    expect(screen.queryByRole("list", { name: /suggests/ })).toBeNull();
+  });
+
+  it("counts what the boss suggests while you drive, each in a bar to do or dismiss", () => {
+    useCharges.setState({ bySession: { s1: charge("person") } });
+    useOverview.setState({
+      wantSuggestions: () => {},
+      suggestions: { x1: { id: "x1", state: "open", subject: { kind: "session", id: "s1" }, text: "Run the eval spec again." } },
+    } as never);
+    card();
+    expect(screen.getByRole("button", { name: "Who runs it: You’re driving, 1 suggested" })).toBeTruthy();
+    const bar = screen.getByRole("list", { name: "What Desk suggests" });
+    expect(bar.textContent).toContain("Run the eval spec again.");
+    expect(within(bar).getByRole("button", { name: "Do it" })).toBeTruthy();
   });
 });

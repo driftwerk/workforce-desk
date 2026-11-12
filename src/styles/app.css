@@ -832,28 +832,6 @@ body.side-resizing * {
   text-overflow: ellipsis;
   padding: 1px 7px;
 }
-/* A session card's word on who runs it, under its goal. */
-.charge-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.charge-strip-quiet {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.charge-strip-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
 .charge-strip-buttons {
   display: flex;
   gap: 6px;

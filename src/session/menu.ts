@@ -17,12 +17,12 @@ import { approvalsSwitchable, lifecycleActions, sessionActions, setApprovalsInDe
 
 /** A session's menu in its parts, each in the order it shows. */
 export interface SessionMenu {
-  /** Stop, Continue in…, Account, Move to group…, Edit goal…, Messages
-   *  with Desk…, Answer approvals in Desk. */
+  /** Continue in…, Account, Move to group…, Edit goal…, Messages with
+   *  Desk…, Answer approvals in Desk. */
   session: MenuEntry[];
   /** Who runs it: I'll drive, Hand back, Release, Hand to … */
   driver: MenuEntry[];
-  /** End session…, Remove… or Stop tracking… */
+  /** Stop, End session…, Remove… or Stop tracking… */
   lifecycle: MenuEntry[];
 }
 
@@ -49,11 +49,11 @@ export function useSessionMenu(session: Session | null | undefined, { onEditGoal
     ...(ownWorks || session.engine !== "claude" ? [{ kind: "item" as const, label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) }] : []),
   ];
   // Interrupt and Resume are the header's own button; Stop, which ends the
-  // process, is only here, away from closing the panel.
+  // process, is only here, with ending it, away from closing the panel and
+  // never the item the menu opens on.
   const stop = sessionActions(session).filter((a) => a.label === "Stop");
   return {
     session: [
-      ...stop.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
       ...(canHandOff(session) ? [{ kind: "item" as const, label: "Continue in…", onSelect: () => askHandoff({ id: session.id }) }] : []),
       ...(accounts.length ? [{ kind: "item" as const, label: "Account", submenu: account }] : []),
       // This computer's session moves between groups as the hub previews it.
@@ -76,7 +76,7 @@ export function useSessionMenu(session: Session | null | undefined, { onEditGoal
         : []),
     ],
     driver: charge.map((a): MenuEntry => ({ kind: "item", label: a.label, disabled: a.busy, onSelect: a.run })),
-    lifecycle: lifecycleActions(session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
+    lifecycle: [...stop, ...lifecycleActions(session)].map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
   };
 }
 

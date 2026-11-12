@@ -5,6 +5,7 @@ import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
 import { badgeOf, called, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
 import { useBossOf, useCharge, useCharges } from "./chargeStore";
+import { Popover } from "../ui/Popover";
 import { sessionKey } from "../hub/machines";
 
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
@@ -47,17 +48,22 @@ export const useChargeActions = (session: Session | null | undefined): (ChargeCh
   }));
 };
 
-/** A session card's word on who runs it: while a boss does, its badge,
- *  what that means, I'll drive or Hand back, and Release; then what the
- *  boss suggests for it while you drive. One the boss could run, Hand to
- *  it, quietly. */
-export function ChargeStrip({ session }: { session: Session }) {
+/** Who runs `session`, in its chrome: the badge as a button ("Desk has it
+ *  ▾", dashed "You're driving ▾"), with a count of what the boss suggests
+ *  while you drive. It opens what that means and the choices: I'll drive,
+ *  Hand back, Release. Nothing while no boss runs it (Hand to … is in the
+ *  session's menu). */
+export function DriverChip({ session }: { session: Session }) {
   const charge = useCharge(sessionKey(session));
   const boss = useBossOf(session);
+  const suggested = useSuggested(charge && charge.wheel !== "boss" ? session.id : null).length;
+  const [from, setFrom] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const badge = badgeOf(charge);
+  const short = badgeOf(charge, true);
+  if (!charge || !badge || !short) return null;
   const choices = chargeChoices(session, charge, boss);
-  if (!charge && !choices.length) return null;
   const run = (c: ChargeChoice) => {
     if (busy) return;
     setBusy(c.verb);
@@ -65,61 +71,84 @@ export function ChargeStrip({ session }: { session: Session }) {
     useCharges
       .getState()
       .act(sessionKey(session), c.verb)
+      .then(() => setFrom(null))
       .catch((e: unknown) => setProblem(plainError(e)))
       .finally(() => setBusy(null));
   };
   const name = session.displayName ?? session.name;
-  const buttons = (
-    <span className="charge-strip-buttons">
-      {choices.map((c) => (
-        <button key={c.verb} type="button" className={c.verb === "release" ? "btn btn-sm btn-ghost" : "btn btn-sm"} disabled={!!busy} onClick={() => run(c)}>
-          {busy === c.verb ? `${c.label}…` : c.label}
-        </button>
-      ))}
-    </span>
-  );
-  if (!charge)
-    return (
-      <div className="charge-strip charge-strip-quiet" role="group" aria-label={`Who runs ${name}`}>
-        <span className="charge-strip-text">
-          <span className="small faint">{called(boss?.name ?? "", true)} can run this session with you: it hears when each turn ends and tells it the next step.</span>
-          {problem && (
-            <span className="small state-blocked" role="alert">
-              {problem}
-            </span>
-          )}
-        </span>
-        {buttons}
-      </div>
-    );
   return (
-    <div className="charge-strip" role="status" aria-label={`Who runs ${name}`}>
-      <span className="charge-strip-text">
-        <ChargeBadge charge={charge} />
-        <span className="small muted">{wheelText(charge)}</span>
-        {problem && (
-          <span className="small state-blocked" role="alert">
-            {problem}
+    <>
+      <button
+        type="button"
+        className={`charge-badge charge-${badge.look} sc-driver`}
+        aria-haspopup="dialog"
+        aria-expanded={!!from}
+        aria-label={`Who runs it: ${badge.text}${suggested ? `, ${suggested} suggested` : ""}`}
+        title={`${howText(charge)}. ${wheelText(charge)}`}
+        onClick={(e) => setFrom(from ? null : e.currentTarget)}
+      >
+        <span className="sc-long">{badge.text}</span>
+        <span className="sc-short">{short.text}</span>
+        {suggested > 0 && <span className="sc-count">{suggested}</span>}
+        <Caret />
+      </button>
+      {from && (
+        <Popover label={`Who runs ${name}`} from={from} onClose={() => setFrom(null)} className="driver-pop">
+          <span className="driver-pop-head">
+            <ChargeBadge charge={charge} />
+            <span className="small faint">{howText(charge)}</span>
           </span>
-        )}
-      </span>
-      {buttons}
-      {charge.wheel !== "boss" && <BossSuggestions sessionId={session.id} bossName={charge.bossName} />}
-    </div>
+          <p className="driver-pop-text">{wheelText(charge)}</p>
+          {problem && (
+            <p className="small state-blocked" role="alert">
+              {problem}
+            </p>
+          )}
+          <span className="charge-strip-buttons">
+            {choices.map((c) => (
+              <button key={c.verb} type="button" className={c.verb === "release" ? "btn btn-sm btn-ghost" : "btn btn-sm"} disabled={!!busy} onClick={() => run(c)}>
+                {busy === c.verb ? `${c.label}…` : c.label}
+              </button>
+            ))}
+          </span>
+        </Popover>
+      )}
+    </>
   );
 }
+
+/** What the boss suggests for this session while you drive: a bar of its
+ *  own over the session, each to do or dismiss, since it waits on you. */
+export function DriverBar({ session }: { session: Session }) {
+  const charge = useCharge(sessionKey(session));
+  if (!charge || charge.wheel === "boss") return null;
+  return <BossSuggestions sessionId={session.id} bossName={charge.bossName} />;
+}
+
+const Caret = () => (
+  <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
+    <path d="M1.5 3l2.5 2.5L6.5 3" fill="none" stroke="currentColor" strokeWidth="1.4" />
+  </svg>
+);
+
+/** The open suggestions for session `id` (none for null), read once asked. */
+const useSuggested = (id: string | null) => {
+  const want = useOverview((s) => s.wantSuggestions);
+  const suggestions = useOverview((s) => s.suggestions);
+  useEffect(() => {
+    if (id) want();
+  }, [id, want]);
+  return id ? Object.values(suggestions).filter((s) => s.state === "open" && s.subject?.kind === "session" && s.subject.id === id) : [];
+};
 
 /** While the person drives, what the boss would have done on this session
  *  comes as suggestions: each here, to do or dismiss. (The boss makes them
  *  once it answers for the sessions it runs.) */
 function BossSuggestions({ sessionId, bossName }: { sessionId: string; bossName: string }) {
-  const want = useOverview((s) => s.wantSuggestions);
-  const suggestions = useOverview((s) => s.suggestions);
-  useEffect(() => want(), [want]);
-  const mine = Object.values(suggestions).filter((s) => s.state === "open" && s.subject?.kind === "session" && s.subject.id === sessionId);
+  const mine = useSuggested(sessionId);
   if (!mine.length) return null;
   return (
-    <ul className="charge-suggestions" aria-label={`What ${called(bossName)} suggests`}>
+    <ul className="charge-suggestions decide-bar" aria-label={`What ${called(bossName)} suggests`}>
       {mine.map((s) => (
         <BossSuggestion key={s.id} id={s.id} text={s.text} bossName={bossName} />
       ))}

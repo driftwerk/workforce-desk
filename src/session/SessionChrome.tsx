@@ -1,10 +1,13 @@
 // A session's chrome, the same wherever it shows (the side panel, a grid
 // pane): two rows over what it shows. The first says who and where it is,
 // then its one state action and the host's own buttons; the second what it
-// is for, then its tabs. The rest is in its ⋯ menu.
+// is for, then who runs it, what it spent and its tabs. The rest is in its
+// ⋯ menu.
 
 import { useId, useState, type HTMLAttributes, type ReactNode } from "react";
 import { SessionTicketChip } from "../board/TicketChip";
+import { DriverChip } from "../crew/ChargeBadge";
+import { CostChip } from "../spend/SpendStrip";
 import { switchingText, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 import { lookOf, statusOf } from "../floor/background";
@@ -187,6 +190,8 @@ export function SessionChrome({
         </span>
         {place}
         <span className="sc-fill" />
+        <DriverChip session={session} />
+        <CostChip sessionId={key} />
         <SessionTabs name={name} tab={tab} onTab={onTab} ids={tabIds} />
       </div>
       {menu && (
