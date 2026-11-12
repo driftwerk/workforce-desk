@@ -17,6 +17,7 @@ import { useSeenSession } from "../unread/seen";
 import { Mark } from "../ui/Mark";
 import { needsRestartForColors } from "../theme/hubColors";
 import { useTheme } from "../theme/store";
+import { GoalText } from "./GoalText";
 import { approvalsSwitchable, lifecycleActions, runs, sessionActions, setApprovalsInDesk } from "./actions";
 import { Approval } from "./Approval";
 import { Terminal } from "./Terminal";
@@ -162,9 +163,7 @@ export function SessionCard({ session }: { session: Session }) {
             onKeyDown={(e) => e.key === "Enter" && saveGoal()}
           />
         ) : (
-          <button type="button" className="goal-text" onClick={() => setEditingGoal(true)}>
-            {session.goal || <span className="faint">Add a goal so you know what this one is for</span>}
-          </button>
+          <GoalText goal={session.goal} onEdit={() => setEditingGoal(true)} />
         )}
         {session.view !== "desk" && (
           <button type="button" className="link small session-line-history" onClick={() => useLinePanel.getState().show(key, "history")}>
