@@ -8,6 +8,7 @@ import {
   dropPending,
   keepPending,
   lastEmail,
+  capName,
   nameOfHost,
   normaliseHubUrl,
   PairingEnded,
@@ -22,7 +23,8 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { explain, type Problem } from "../ui/problem";
 
 /** How many times in a row Desk asks for a new code by itself, when one
- *  expires or was already used, before it leaves it to the person. */
+ *  expires, before it leaves it to the person. A used code it never
+ *  replaces by itself: someone else may have used it. */
 export const AUTO_RESTARTS = 3;
 
 /** A pairing failure in Desk's one shape: Desk's own pairing words are the
@@ -30,7 +32,9 @@ export const AUTO_RESTARTS = 3;
 const pairProblem = (e: unknown, retry: () => void): Problem => {
   const raw = e instanceof Error ? e.message : String(e);
   const ours = raw.length <= 200 && !raw.includes("\n") && !/error sending request|invalid url|did not match the expected pattern/i.test(raw);
-  return ours ? { plain: raw, fix: { label: "Try again", run: retry }, what: "connecting a workspace" } : explain(e, { what: "connecting a workspace", retry });
+  // A code that ended asks for a new one; anything else, the same again.
+  const label = e instanceof PairingEnded && e.reason !== "rejected" ? "New code" : "Try again";
+  return ours ? { plain: raw, fix: { label, run: retry }, what: "connecting a workspace" } : explain(e, { what: "connecting a workspace", retry });
 };
 
 type Step =
@@ -97,6 +101,9 @@ export function PairHub({
   /** What Desk did by itself, said once (a new code asked for). */
   const [note, setNote] = useState<string | null>(null);
   const restarts = useRef(0);
+  /** Whether this pairing's approval page was opened: once, not again on
+   *  each new code Desk asks for by itself. */
+  const opened = useRef(false);
   const addressId = useId();
   const [busy, setBusy] = useState(false);
   const setError = (e: unknown, retry: () => void) => setProblem(e === null ? null : pairProblem(e, retry));
@@ -120,21 +127,34 @@ export function PairHub({
       (paired) => live && setStep({ kind: "done", paired }),
       (e: unknown) => {
         if (!live) return;
-        // An expired or used code: a new one, at the same address, by itself.
-        if (e instanceof PairingEnded && e.reason !== "rejected" && restarts.current < AUTO_RESTARTS) {
+        // An expired code: a new one, at the same address and for the same
+        // email, by itself.
+        if (e instanceof PairingEnded && e.reason === "expired" && restarts.current < AUTO_RESTARTS) {
           restarts.current += 1;
-          setNote(e.reason === "used" ? "That code was already used, so Desk asked for a new one." : "The code expired, so Desk asked for a new one.");
-          void requestPairing(pairing.url, "Desk").then(
-            (asked) => live && wait({ url: pairing.url, label: pairing.label || asked.name || "", code: asked.code, ...(asked.approveUrl ? { approveUrl: asked.approveUrl } : {}) }),
+          setNote(
+            pairing.approveUrl || opened.current
+              ? "The code expired, so Desk asked for a new one. Approve the new code on the page."
+              : "The code expired, so Desk asked for a new one.",
+          );
+          void requestPairing(pairing.url, "Desk", pairing.email).then(
+            (asked) =>
+              live &&
+              wait({
+                url: pairing.url,
+                label: pairing.label || asked.name || "",
+                code: asked.code,
+                ...(asked.approveUrl ? { approveUrl: asked.approveUrl } : {}),
+                ...(pairing.email ? { email: pairing.email } : {}),
+              }),
             (err: unknown) => {
               if (!live) return;
-              setError(err, () => void restart(pairing.url));
+              setError(err, () => void restart(pairing.url, pairing.email));
               setStep({ kind: "form" });
             },
           );
           return;
         }
-        setError(e, () => void restart(pairing.url));
+        setError(e, () => void restart(pairing.url, pairing.email));
         if (e instanceof PairingEnded) setStep({ kind: "form" });
       },
     );
@@ -146,20 +166,28 @@ export function PairHub({
   const wait = (pairing: PendingPairing) => {
     keepPending(deskState, pairing);
     setStep({ kind: "waiting", pairing });
-    if (pairing.approveUrl) openUrl(pairing.approveUrl);
+    if (pairing.approveUrl && !opened.current) {
+      opened.current = true;
+      openUrl(pairing.approveUrl);
+    }
   };
 
-  /** Asks `url` for a new code and waits for it, as Connect does. */
-  const restart = async (url: string) => {
+  /** Asks `url` for a new code and waits for it, as Connect does; an older
+   *  hub's by `email` again when it was asked for by one. */
+  const restart = async (url: string, email?: string) => {
+    // Asked for by the person: its page opens again.
+    opened.current = false;
     setProblem(null);
+    setNote(null);
     setBusy(true);
     try {
-      const asked = await requestPairing(url, "Desk");
-      const named = label || asked.name || nameOfHost(url);
+      const asked = await requestPairing(url, "Desk", email);
+      const named = capName(label) ?? asked.name ?? nameOfHost(url);
       if (asked.approveUrl) wait({ url, label: named, code: asked.code, approveUrl: asked.approveUrl });
+      else if (email) wait({ url, label: named, code: asked.code, email });
       else setStep({ kind: "email", url, label: named });
     } catch (err) {
-      setError(err, () => void restart(url));
+      setError(err, () => void restart(url, email));
     } finally {
       setBusy(false);
     }
@@ -176,12 +204,13 @@ export function PairHub({
     setProblem(null);
     setNote(null);
     restarts.current = 0;
+    opened.current = false;
     if (step.kind === "email") {
       setBusy(true);
       try {
         const { code, name } = await requestPairing(step.url, "Desk", email);
         rememberEmail(deskState, email);
-        return wait({ url: step.url, label: step.label || name || "", code });
+        return wait({ url: step.url, label: step.label || name || "", code, email: email.trim() });
       } catch (err) {
         setError(err, () => void start());
       } finally {

@@ -183,6 +183,9 @@ pub fn local_account(c: Connection) -> Option<HubAccount> {
 /// address again (to connect as yourself, say) replaces its token where it
 /// is: the id comes from the host, so it — and every grid, group and DM
 /// that names its agents — stays the same, and so does its place.
+/// The longest name a workspace is kept by (as the page's `NAME_MAX`).
+pub const LABEL_MAX: usize = 60;
+
 pub fn save(paths: &Paths, label: &str, url: &str, token: &str) -> Result<HubRecord> {
     save_with(&app_secrets(paths)?, paths, label, url, token)
 }
@@ -202,7 +205,14 @@ pub(crate) fn save_with(
         .to_string();
     let record = HubRecord {
         id: id_for(&url)?,
-        label: label.trim().to_string(),
+        // At most a name's length, whatever the workspace called itself.
+        label: label
+            .trim()
+            .chars()
+            .take(LABEL_MAX)
+            .collect::<String>()
+            .trim_end()
+            .to_string(),
         url,
     };
     if record.id == LOCAL_HUB_ID {
@@ -242,7 +252,7 @@ pub(crate) fn same_place(a: &str, b: &str) -> bool {
 /// say): only the name changes, never its id, address or token.
 pub fn rename(paths: &Paths, id: &str, label: &str) -> Result<HubRecord> {
     let label = label.trim();
-    if label.is_empty() || label.chars().count() > 60 {
+    if label.is_empty() || label.chars().count() > LABEL_MAX {
         eyre::bail!("A workspace's name is 1 to 60 characters.");
     }
     let mut records = read_records(paths)?;
@@ -556,6 +566,16 @@ mod tests {
         assert!(rename(&paths, &before.id, "  ").is_err());
         assert!(rename(&paths, &before.id, &"x".repeat(61)).is_err());
         assert!(rename(&paths, "nobody-example-com", "Acme").is_err());
+        // A name the workspace gave itself is kept at most so long.
+        let long = save_with(
+            &secrets,
+            &paths,
+            &"y".repeat(200),
+            "https://hub.globex.com",
+            "tok2",
+        )
+        .unwrap();
+        assert_eq!(long.label.chars().count(), LABEL_MAX);
     }
 
     #[test]

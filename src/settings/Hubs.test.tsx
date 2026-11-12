@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
 import { PairHub } from "../hubs/PairHub";
-import { keepPending } from "../hubs/pairing";
+import { keepPending, pendingPairing } from "../hubs/pairing";
 import { setDevToken } from "../hub/devTokens";
 import { hubAccounts, invoke, openUrl, renameHub } from "../platform";
 import { deskState } from "../restore/boot";
@@ -277,27 +277,60 @@ describe("Connect a workspace", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
-  it("asks for a new code by itself when one expires or was already used, keeping the address", async () => {
+  it("asks for a new code by itself when one expires, keeping the address, and opens its page once", async () => {
     let asked = 0;
     hubsAnswer({
       "/api/pair/device/request": () => json({ code: `EXP${++asked}`, approve_url: `https://hub.example.com/pair/EXP${asked}`, name: "Acme" }),
-      // The first expires, the second was used, the third goes through.
+      // The first expires, the second goes through.
       "/api/pair/device/status/EXP1": () => new Response(null, { status: 404 }),
-      "/api/pair/device/status/EXP2": () => json({ status: "approved" }),
-      "/api/pair/device/status/EXP3": () => json(approved),
+      "/api/pair/device/status/EXP2": () => json(approved),
     });
     render(<PairHub onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText("Workspace address"), { target: { value: "hub.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByText(/Connected to Acme as Kings\./, undefined, { timeout: 8000 })).toBeTruthy();
-    expect(asked).toBe(3);
+    expect(asked).toBe(2);
     expect(kept).toEqual([{ label: "Acme", url: "https://hub.example.com", token: "wfp_new" }]);
-    // Each new code's page opened, for the person to approve it.
-    expect(vi.mocked(openUrl).mock.calls.map((c) => c[0])).toEqual([
-      "https://hub.example.com/pair/EXP1",
-      "https://hub.example.com/pair/EXP2",
-      "https://hub.example.com/pair/EXP3",
-    ]);
+    // The approval page opened once for the pairing, not again for the
+    // code Desk asked for by itself (it says to approve the new one).
+    expect(vi.mocked(openUrl).mock.calls.map((c) => c[0])).toEqual(["https://hub.example.com/pair/EXP1"]);
+  }, 15000);
+
+  it("never replaces a used code by itself: it says someone may have used it and offers a new one", async () => {
+    let asked = 0;
+    hubsAnswer({
+      "/api/pair/device/request": () => json({ code: `USE${++asked}`, approve_url: `https://hub.example.com/pair/USE${asked}`, name: "Acme" }),
+      "/api/pair/device/status/USE1": () => json({ status: "approved" }),
+      "/api/pair/device/status/USE2": () => json(approved),
+    });
+    render(<PairHub onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Workspace address"), { target: { value: "hub.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText(/Someone may have used that code already/, undefined, { timeout: 8000 })).toBeTruthy();
+    expect(asked).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "New code" }));
+    expect(await screen.findByText(/Connected to Acme as Kings\./, undefined, { timeout: 8000 })).toBeTruthy();
+    expect(asked).toBe(2);
+    // Asked for by the person: its page opens.
+    expect(vi.mocked(openUrl).mock.calls.map((c) => c[0])).toEqual(["https://hub.example.com/pair/USE1", "https://hub.example.com/pair/USE2"]);
+  }, 20000);
+
+  it("asks an older workspace for a new code by the same email when one expires", async () => {
+    let asked = 0;
+    hubsAnswer({
+      "/api/pair/device/request": () => json({ code: `OLD${++asked}` }),
+      "/api/pair/device/status/OLD2": () => new Response(null, { status: 404 }),
+      "/api/pair/device/status/OLD3": () => json({ status: "pending" }),
+    });
+    render(<PairHub onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Workspace address"), { target: { value: "hub.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.change(await screen.findByLabelText(/Your email there/), { target: { value: "k@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Get a code" }));
+    expect(await screen.findByText("OLD3", undefined, { timeout: 8000 })).toBeTruthy();
+    expect(codeRequests()[2]).toEqual({ device_name: "Desk", device_kind: "desktop_device", identity_hint: "k@example.com" });
+    // And kept with the pairing, for a restart.
+    expect(pendingPairing(deskState)?.email).toBe("k@example.com");
   }, 15000);
 
   it("unpairs this computer from a workspace before it forgets it", async () => {

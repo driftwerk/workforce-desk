@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
 import { PairHub } from "../hubs/PairHub";
-import { whoAmI, type Who } from "../hubs/pairing";
+import { capName, normaliseHubUrl, whoAmI, type Who } from "../hubs/pairing";
 import { ProblemNote } from "../ui/ProblemNote";
 import { explain } from "../ui/problem";
 import { revokeSelf } from "../hubs/surface";
@@ -20,7 +20,7 @@ export const connectedAs = (who: Who | undefined): string | null => {
  *  keeps when they differ: a name typed by hand when it was connected, or a
  *  typo ("Driftwork"). An older hub says none: nothing is offered. */
 export const nameToOffer = (hub: Pick<HubAccount, "label">, who: Who | undefined): string | null => {
-  const named = who?.state === "person" ? who.workspace : null;
+  const named = who?.state === "person" ? capName(who.workspace) : null;
   return named && named !== hub.label.trim() ? named : null;
 };
 
@@ -143,7 +143,14 @@ export function Hubs() {
           again={connecting.again && { url: connecting.again.url, label: connecting.again.label }}
           onClose={() => setConnecting(null)}
           onAsYou={(paired) => {
-            const hub = useChat.getState().hubs.find((x) => x.url === paired.url);
+            const same = (a: string) => {
+              try {
+                return normaliseHubUrl(a) === normaliseHubUrl(paired.url);
+              } catch {
+                return a === paired.url;
+              }
+            };
+            const hub = useChat.getState().hubs.find((x) => same(x.url));
             setConnecting(hub ? { again: hub } : null);
           }}
         />

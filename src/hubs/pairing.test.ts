@@ -21,6 +21,8 @@ import {
   collectPairing,
   keepPending,
   lastEmail,
+  capName,
+  NAME_MAX,
   nameOfHost,
   normaliseHubUrl,
   NOT_AN_ADDRESS,
@@ -65,6 +67,9 @@ describe("pairing", () => {
       ["www.globex.co", "Globex"],
       ["workforce.driftwerk.xyz:8443", "Driftwerk"],
       ["agents.hub.initech.com", "Initech"],
+      ["hub.acme.co.uk", "Acme"],
+      ["globex.com.au", "Globex"],
+      ["workforce.co.uk", "workforce.co.uk"],
       ["localhost", "localhost"],
       ["localhost:4000", "localhost"],
       ["127.0.0.1", "127.0.0.1"],
@@ -73,6 +78,14 @@ describe("pairing", () => {
     ]) {
       expect(nameOfHost(`https://${host}`), host).toBe(name);
     }
+  });
+
+  it("keeps no more of a workspace's own name than fits", () => {
+    expect(capName("  Acme  ")).toBe("Acme");
+    expect(capName("")).toBeNull();
+    expect(capName(42)).toBeNull();
+    expect([...capName("x".repeat(200))!].length).toBe(NAME_MAX);
+    expect([...nameOfHost(`https://hub.${"a".repeat(80)}.com`)].length).toBe(NAME_MAX);
   });
 
   it("asks the native side for a code, with the page to approve it on", async () => {

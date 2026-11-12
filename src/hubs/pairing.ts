@@ -54,6 +54,21 @@ export const normaliseHubUrl = (raw: string): string => {
  *  it is. */
 const GENERIC = new Set(["www", "workforce", "hub", "app", "desk", "api", "gateway", "agents", "ai"]);
 
+/** Second-level labels that, under a two-letter country code, are part of
+ *  the public suffix (`acme.co.uk`): never a name. As the hub's. */
+const SECOND_LEVEL = new Set(["co", "com", "net", "org", "gov", "ac", "edu", "ltd", "plc", "ne", "or", "gen"]);
+
+/** The longest name a workspace is shown or kept by; longer is cut. */
+export const NAME_MAX = 60;
+
+/** `v` as a workspace's name: trimmed, cut to `NAME_MAX`; null when empty
+ *  or not text. Whatever a hub says of itself goes through this. */
+export const capName = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const t = [...v.trim()].slice(0, NAME_MAX).join("").trim();
+  return t || null;
+};
+
 /** What a workspace at `url` is called when it doesn't say (an older hub):
  *  the first part of its address that says whose it is —
  *  `workforce.driftwerk.xyz` → "Driftwerk". As the hub names itself
@@ -66,9 +81,11 @@ export const nameOfHost = (url: string): string => {
     return url;
   }
   const labels = host.split(".").filter(Boolean);
-  if (labels.length < 2 || labels.every((l) => /^\d+$/.test(l)) || host.startsWith("[")) return host;
-  const named = labels.slice(0, -1).find((l) => !GENERIC.has(l.toLowerCase()));
-  return named ? named[0]!.toUpperCase() + named.slice(1) : host;
+  if (labels.length < 2 || labels.every((l) => /^\d+$/.test(l)) || host.startsWith("[")) return capName(host) ?? host;
+  const n = labels.length;
+  const suffix = n >= 3 && labels[n - 1]!.length === 2 && SECOND_LEVEL.has(labels[n - 2]!.toLowerCase()) ? 2 : 1;
+  const named = labels.slice(0, n - suffix).find((l) => !GENERIC.has(l.toLowerCase()));
+  return capName(named ? named[0]!.toUpperCase() + named.slice(1) : host) ?? host;
 };
 
 const hostOf = (url: string): string => {
@@ -118,7 +135,7 @@ export const requestPairing = async (url: string, deviceName: string, email?: st
   if (res.status >= 500) throw new PairingRefused(`Something went wrong at ${host}. Try again in a moment.`, res.status);
   if (res.status < 200 || res.status >= 300) throw new PairingRefused(`${host} turned the request down.`, res.status);
   if (typeof res.body?.code !== "string" || !res.body.code) throw new PairingRefused(`${host} didn’t give Desk a code. Try again in a moment.`, res.status);
-  return { code: res.body.code, approveUrl: approvePage(res.body.approve_url, url), name: text(res.body.name) };
+  return { code: res.body.code, approveUrl: approvePage(res.body.approve_url, url), name: capName(res.body.name) };
 };
 
 /** How pairing `code` at `url` stands; once approved, the native side has
@@ -143,7 +160,7 @@ export const whoAmI = async (hub: HubRef): Promise<Who> => {
     if (res.status === 401) return { state: "nobody" };
     if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return { state: "unknown", why: `${res.status}` };
     const body = (await res.json()) as { display_name?: unknown; email?: unknown; workspace?: unknown };
-    return { state: "person", name: text(body.display_name), email: text(body.email), workspace: text(body.workspace) };
+    return { state: "person", name: text(body.display_name), email: text(body.email), workspace: capName(body.workspace) };
   } catch (e) {
     return { state: "unknown", why: e instanceof Error ? e.message : String(e) };
   }
@@ -158,6 +175,8 @@ export interface PendingPairing {
   code: string;
   /** The page it's approved on, to open again; none from an older hub. */
   approveUrl?: string;
+  /** The email an older hub's code was asked for with, to ask again by. */
+  email?: string;
 }
 
 const PENDING = "pairing.pending";
@@ -174,7 +193,14 @@ export const pendingPairing = (store: PendingStore): PendingPairing | null => {
   const p = store.get(PENDING) as Partial<PendingPairing> | undefined;
   if (!p || typeof p.url !== "string" || typeof p.code !== "string" || !p.code) return null;
   const page = approvePage(p.approveUrl, p.url);
-  return { url: p.url, label: typeof p.label === "string" ? p.label : "", code: p.code, ...(page ? { approveUrl: page } : {}) };
+  const email = typeof p.email === "string" && p.email.includes("@") ? p.email : null;
+  return {
+    url: p.url,
+    label: capName(p.label) ?? "",
+    code: p.code,
+    ...(page ? { approveUrl: page } : {}),
+    ...(email ? { email } : {}),
+  };
 };
 
 export const keepPending = (store: PendingStore, p: PendingPairing): void => store.set(PENDING, p);
@@ -204,7 +230,9 @@ export class PairingRefused extends Error {
 }
 
 /** A pairing that ended without a token: turned down, or its code expired
- *  or was already used (both of which Desk starts again with a new code). */
+ *  or was already used (an expired one Desk starts again with a new code by
+ *  itself; a used one it leaves to the person, as someone else may have
+ *  used it). */
 export class PairingEnded extends Error {
   constructor(
     message: string,
@@ -242,7 +270,7 @@ export function collectPairing(
   const running = collecting.get(p.code);
   if (running) return running;
   const run = (async () => {
-    const label = p.label || nameOfHost(p.url);
+    const label = capName(p.label) ?? nameOfHost(p.url);
     for (;;) {
       const s = await pairingStatus(p.url, p.code, label);
       if (s.status === "approved") {
@@ -252,7 +280,7 @@ export function collectPairing(
       }
       if (s.status === "used") {
         dropPending(store, p.code);
-        throw new PairingEnded("That code was already used.", "used");
+        throw new PairingEnded("Someone may have used that code already: if it wasn’t you, ask for a new one.", "used");
       }
       if (s.status !== "pending") {
         dropPending(store, p.code);
