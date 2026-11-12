@@ -150,7 +150,7 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
   const onRemove = useCallback((id: string) => discard(key, id), [key, discard]);
   const sentOn = useMemo<Parameters<typeof relayedOf>[1]>(() => ({ local: hub.local ?? false, crew: [], overseer: null, person: null }), [hub.local]);
   const origin = useMemo(() => ({ hub: agent.hubId, agent: agent.id }), [agent.hubId, agent.id]);
-  const count = summary?.replies ?? replies.length;
+  const count = Math.max(summary?.replies ?? 0, replies.length);
   return (
     <SidePanel
       className="thread-panel"

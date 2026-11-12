@@ -11,7 +11,7 @@ export const threadKey = (agent: string, parent: string): string => `${agent}#${
 
 /** The agent's key, and the parent of the thread when the key is one. */
 export const splitKey = (key: string): { agent: string; parent?: string } => {
-  const at = key.indexOf("#");
+  const at = key.lastIndexOf("#");
   return at < 0 ? { agent: key } : { agent: key.slice(0, at), parent: key.slice(at + 1) };
 };
 

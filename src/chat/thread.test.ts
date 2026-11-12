@@ -72,3 +72,16 @@ describe("The hub's threads", () => {
     expect(JSON.parse(body.data)).toEqual({ text: "yes, that one", thread_of: "p1" });
   });
 });
+
+describe("A DM's threads beside the DM", () => {
+  it("each keeps its own queue, and forgetting the DM forgets them", () => {
+    useChat.setState({ hubs: [hub], roster: [agent], queues: {}, conversations: {}, histories: {}, threads: {} });
+    useChat.getState().enqueue("acme/scout#p", "in the thread");
+    useChat.getState().enqueue("acme/scout", "in the chat");
+    const { queues } = useChat.getState();
+    expect(queues["acme/scout#p"]?.items.map((i) => i.text)).toEqual(["in the thread"]);
+    expect(queues["acme/scout"]?.items.map((i) => i.text)).toEqual(["in the chat"]);
+    useChat.getState().forget("acme/scout");
+    expect(Object.keys(useChat.getState().queues)).toEqual([]);
+  });
+});

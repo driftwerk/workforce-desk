@@ -393,6 +393,8 @@ const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
 /** Each DM's count of reads of its history begun, and the count of the one
  *  shown, so a read that began before the one shown changes nothing. */
 const readsBegun = new Map<string, number>();
+/** How many reads of each DM's threads have begun: only the newest is shown. */
+const threadsBegun = new Map<string, number>();
 const readShown = new Map<string, number>();
 
 /** Each hub's count of pictures you've set there, so a read of you that
@@ -456,6 +458,7 @@ const ensure = (key: string): boolean => {
     // Back after the hub restarted: what was said meanwhile is only in its copy.
     if (c.connected && !was?.connected) {
       if (everConnected) void useChat.getState().refreshHistory(key);
+      if (everConnected && !parent) void useChat.getState().loadThreads(key);
       everConnected = true;
     }
     settleEdits(key, c);
@@ -762,8 +765,12 @@ export const useChat = create<ChatStore>((set, get) => ({
   loadThreads: async (key) => {
     const target = whereIs(get(), key);
     if (!target || target.parent || !get().conversations[key]?.features?.has(FEATURES.dmThreads)) return;
+    const read = (threadsBegun.get(key) ?? 0) + 1;
+    threadsBegun.set(key, read);
     try {
       const threads = await fetchThreads(target.hub, target.agent.id);
+      // A later read, or the DM forgotten, meanwhile: this one is stale.
+      if (threadsBegun.get(key) !== read || !get().conversations[key]) return;
       set((s) => ({ threads: { ...s.threads, [key]: threads } }));
     } catch {
       // What's shown stays; the next change reads it again.
@@ -826,7 +833,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (get().queues[key]?.items.length) return "queued";
     const convo = live.get(key);
     const clientId = crypto.randomUUID();
-    const sent = text.trim() ? convo?.send(text, { turn: { ...dmTurn(), edit: { replaces }, message: clientId } }) : false;
+    const sent = text.trim() ? convo?.send(text, { turn: { ...turnOf(key), edit: { replaces }, message: clientId } }) : false;
     if (!sent || !convo) return "offline";
     if (sent.turnRef) edits.set(key, [...(edits.get(key) ?? []), { ref: sent.turnRef, clientId, text, aside }]);
     // The live copies of what's set aside go too: once the hub's read
@@ -887,7 +894,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     }),
   forget: (key) => {
     // A DM's threads go with it.
-    if (!splitKey(key).parent) for (const k of [...live.keys()]) if (k.startsWith(`${key}#`)) get().forget(k);
+    if (!splitKey(key).parent) {
+      const s = get();
+      const kept = [...live.keys(), ...Object.keys(s.conversations), ...Object.keys(s.histories), ...Object.keys(s.queues)];
+      for (const k of new Set(kept)) if (k.startsWith(`${key}#`)) get().forget(k);
+      threadsBegun.delete(key);
+    }
     live.get(key)?.close();
     keepQueue(key, emptyQueue());
     held.delete(key);
