@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { shownText } from "../chat/commands";
 import { useShallow } from "zustand/react/shallow";
 import { useChat } from "../chat/store";
@@ -42,6 +42,11 @@ function QueuedRow({ to, item, name, busy }: { to: string; item: Queued; name: s
     useShallow((s) => ({ edit: s.editQueued, remove: s.removeQueued, sendNow: s.sendQueuedNow, editingQueued: s.editingQueued })),
   );
   const [editing, setEditing] = useState<string | null>(null);
+  // ↑ in the composer asked for this one: it opens for editing here.
+  const asked = useChat((s) => s.queues[to]?.editing === item.id);
+  useEffect(() => {
+    if (asked && !item.sending) setEditing((was) => was ?? item.text);
+  }, [asked, item.sending, item.text]);
   const files = item.attachments ?? [];
   const label = shownText(item.text.trim()) || files.map((f) => f.filename).join(", ");
   const start = () => {
