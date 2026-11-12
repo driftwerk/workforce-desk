@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { Conversation, emptyConversation, type ConversationState, type QueuedOutcome } from "./conversation";
+import {
+  Conversation,
+  emptyConversation,
+  type ConversationState,
+  type QueuedOutcome,
+} from "./conversation";
 import { cursorIn, fetchHistory, prepend } from "./history";
 import { settle, type Reading } from "./legacy";
 import { keptOf } from "./reconcile";
@@ -19,7 +24,16 @@ import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
 import { deleteMessage } from "./remove";
 import { readAround, type Around } from "./search";
-import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
+import {
+  emptyQueue,
+  heldRetryMs,
+  keepQueue,
+  keptItems,
+  merged,
+  readQueue,
+  withKept,
+  type Queue,
+} from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
 import { pictureOf, type Picture } from "../pictures/pictures";
@@ -38,7 +52,13 @@ export interface History {
   loadedAt: string | null;
 }
 
-const blankHistory = (): History => ({ state: "loading", messages: [], more: false, earlier: "idle", loadedAt: null });
+const blankHistory = (): History => ({
+  state: "loading",
+  messages: [],
+  more: false,
+  earlier: "idle",
+  loadedAt: null,
+});
 
 interface ChatStore {
   hubs: HubAccount[];
@@ -53,7 +73,10 @@ interface ChatStore {
   /** Reads who you are on `hubId` again (after your picture changed elsewhere). */
   refreshMe: (hubId: string) => Promise<void>;
   /** Shows the picture an agent or you now have, until the hub is read again. */
-  setPicture: (who: { agent: string } | { me: string }, picture: Picture | null) => void;
+  setPicture: (
+    who: { agent: string } | { me: string },
+    picture: Picture | null,
+  ) => void;
   conversations: Record<string, ConversationState>;
   /** Each open DM's earlier messages, by agent key. */
   histories: Record<string, History>;
@@ -101,7 +124,11 @@ interface ChatStore {
    *  if need be); false if it couldn't be sent. */
   sendTo: (key: string, content: string) => Promise<boolean>;
   /** Answers a permission prompt in a DM. */
-  answerPrompt: (key: string, requestId: string, choice: PermissionChoice) => boolean;
+  answerPrompt: (
+    key: string,
+    requestId: string,
+    choice: PermissionChoice,
+  ) => boolean;
   /** Stops the agent's turn; what's queued for it then waits, paused. */
   cancel: (key: string) => void;
   /** What's queued in each DM for its agent's next turn, by agent key. */
@@ -128,7 +155,12 @@ interface ChatStore {
    *  setting aside it and what followed (`aside`, ids or client ids), and
    *  asks again; null once sent, else why not: the agent is busy, messages
    *  wait in the queue, or the hub can't be reached. */
-  editLast: (key: string, replaces: string, aside: string[], text: string) => EditRefusal | null;
+  editLast: (
+    key: string,
+    replaces: string,
+    aside: string[],
+    text: string,
+  ) => EditRefusal | null;
   /** By agent key: an edit the hub didn't take, its text to give back to
    *  the composer and the hub's reason. Taken once shown. */
   editBack: Record<string, { text: string; why: string }>;
@@ -147,7 +179,13 @@ interface ChatStore {
   /** Deletes your message `id` (its kept id; `ids` all it's known by) from
    *  the DM, forgetting the memories `forget`; `replies` are marked as
    *  answering a deleted message. Throws what the hub refused with. */
-  deleteMine: (key: string, id: string, ids: string[], replies: string[], forget: string[]) => Promise<void>;
+  deleteMine: (
+    key: string,
+    id: string,
+    ids: string[],
+    replies: string[],
+    forget: string[],
+  ) => Promise<void>;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -170,11 +208,19 @@ export type EditRefusal = "busy" | "queued" | "offline";
 
 /** Edits sent and not yet settled, by conversation: the turn each went
  *  as, the client id and text it was sent with, and what it set aside. */
-const edits = new Map<string, { ref: string; clientId: string; text: string; aside: string[] }[]>();
+const edits = new Map<
+  string,
+  { ref: string; clientId: string; text: string; aside: string[] }[]
+>();
 
 /** Whether turn `t` of an edit didn't take: refused, or never heard of. */
-const refusedTurn = (t: ConversationState["turns"][string] | undefined): boolean =>
-  !!t && (t.state === "failed" || (t.state === "ended" && !!t.error) || (t.state === "stalled" && !t.acked));
+const refusedTurn = (
+  t: ConversationState["turns"][string] | undefined,
+): boolean =>
+  !!t &&
+  (t.state === "failed" ||
+    (t.state === "ended" && !!t.error) ||
+    (t.state === "stalled" && !t.acked));
 
 /** An edit the hub refused (busy, or not your latest message) changed
  *  nothing there: what it set aside comes back, and the hub's copy is read
@@ -183,7 +229,9 @@ const settleEdits = (key: string, c: ConversationState) => {
   const pending = edits.get(key);
   if (!pending?.length) return;
   const refused = pending.filter((e) => refusedTurn(c.turns[e.ref]));
-  const left = pending.filter((e) => !refused.includes(e) && c.turns[e.ref]?.state !== "ended");
+  const left = pending.filter(
+    (e) => !refused.includes(e) && c.turns[e.ref]?.state !== "ended",
+  );
   if (left.length === pending.length) return;
   if (left.length) edits.set(key, left);
   else edits.delete(key);
@@ -193,11 +241,19 @@ const settleEdits = (key: string, c: ConversationState) => {
   queueMicrotask(() => {
     // The new version never took: it goes, and its words go back to you.
     const convo = live.get(key);
-    for (const e of refused) for (const m of useChat.getState().conversations[key]?.messages ?? []) if (m.role === "user" && m.clientId === e.clientId) convo?.remove(m.id);
+    for (const e of refused)
+      for (const m of useChat.getState().conversations[key]?.messages ?? [])
+        if (m.role === "user" && m.clientId === e.clientId) convo?.remove(m.id);
     const t = c.turns[last.ref];
     useChat.setState((s) => ({
-      setAside: { ...s.setAside, [key]: (s.setAside[key] ?? []).filter((id) => !back.has(id)) },
-      editBack: { ...s.editBack, [key]: { text: last.text, why: t?.error ?? "" } },
+      setAside: {
+        ...s.setAside,
+        [key]: (s.setAside[key] ?? []).filter((id) => !back.has(id)),
+      },
+      editBack: {
+        ...s.editBack,
+        [key]: { text: last.text, why: t?.error ?? "" },
+      },
     }));
     void useChat.getState().refreshHistory(key);
   });
@@ -261,12 +317,19 @@ const checkAgain = (key: string, ms: number) => {
  *  a turn the hub streams that hasn't said it ended, until a grace after
  *  its last frame (a stopped one ends silently). The composer reads the
  *  same, so a queue that waits always has Stop beside it. */
-export const isRunning = (c: ConversationState | undefined, now = Date.now()): boolean =>
+export const isRunning = (
+  c: ConversationState | undefined,
+  now = Date.now(),
+): boolean =>
   !!c &&
   (!!c.working ||
     (!!c.features?.has(FEATURES.stream) &&
       Object.values(c.turns).some(
-        (t) => t.acked && t.state === "live" && !stopped.has(t.ref) && now - (t.heardAt ?? now) < STREAM_END_GRACE_MS,
+        (t) =>
+          t.acked &&
+          t.state === "live" &&
+          !stopped.has(t.ref) &&
+          now - (t.heardAt ?? now) < STREAM_END_GRACE_MS,
       )));
 
 /** Sends what's queued for `key`'s agent, as one message, once nothing is
@@ -282,15 +345,27 @@ const drain = (key: string) => {
   const now = Date.now();
   // A turn whose answer has stopped streaming: after the grace it's done,
   // and until then it's looked at again when the grace is up.
-  const quiet = c.working ? [] : Object.values(c.turns).filter((t) => t.acked && t.state === "live" && !stopped.has(t.ref));
-  for (const t of quiet) if (now - (t.heardAt ?? now) >= STREAM_END_GRACE_MS) convo.lapse(t.ref);
+  const quiet = c.working
+    ? []
+    : Object.values(c.turns).filter(
+        (t) => t.acked && t.state === "live" && !stopped.has(t.ref),
+      );
+  for (const t of quiet)
+    if (now - (t.heardAt ?? now) >= STREAM_END_GRACE_MS) convo.lapse(t.ref);
   if (isRunning(useChat.getState().conversations[key], now)) {
-    if (quiet.length) checkAgain(key, STREAM_END_GRACE_MS - Math.min(...quiet.map((t) => now - (t.heardAt ?? now))) + 5);
+    if (quiet.length)
+      checkAgain(
+        key,
+        STREAM_END_GRACE_MS -
+          Math.min(...quiet.map((t) => now - (t.heardAt ?? now))) +
+          5,
+      );
     return;
   }
   // A queued message being edited that's gone (sent or taken out from
   // another window) holds nothing back.
-  if (q?.editing && !q.items.some((i) => i.id === q.editing)) return useChat.getState().editingQueued(key, null);
+  if (q?.editing && !q.items.some((i) => i.id === q.editing))
+    return useChat.getState().editingQueued(key, null);
   if (!q?.items.length || q.paused || q.editing || !c.connected) return;
   if (q.items.some((i) => i.sending)) return;
   const wait = held.get(key);
@@ -298,14 +373,27 @@ const drain = (key: string) => {
   // Another window may have sent some of it: only what the kept queue
   // still holds, not on its way, goes.
   const kept = deskState.get(draftKey.queue(key));
-  const keptIds = kept === undefined ? null : new Set(keptItems(kept).filter((i) => !i.sending).map((i) => i.id));
+  const keptIds =
+    kept === undefined
+      ? null
+      : new Set(
+          keptItems(kept)
+            .filter((i) => !i.sending)
+            .map((i) => i.id),
+        );
   const items = q.items.filter((i) => !keptIds || keptIds.has(i.id));
   if (!items.length) return;
   const ticket = crypto.randomUUID();
   const { text, attachments } = merged(items);
   // Marked first, so another window reading the kept queue holds off.
-  putQueue(key, (was) => ({ ...was, items: was.items.map((i) => (items.includes(i) ? { ...i, sending: ticket } : i)) }));
-  if (!convo.send(text, { turn: dmTurn(), attachments, queued: ticket })) putQueue(key, (was) => unmark(was, ticket));
+  putQueue(key, (was) => ({
+    ...was,
+    items: was.items.map((i) =>
+      items.includes(i) ? { ...i, sending: ticket } : i,
+    ),
+  }));
+  if (!convo.send(text, { turn: dmTurn(), attachments, queued: ticket }))
+    putQueue(key, (was) => unmark(was, ticket));
 };
 
 /** What became of queued send `ticket`: taken, it leaves the queue; held
@@ -314,10 +402,16 @@ const drain = (key: string) => {
 const settleQueued = (key: string, ticket: string, outcome: QueuedOutcome) => {
   if (outcome === "taken") {
     held.delete(key);
-    putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.sending !== ticket) }));
+    putQueue(key, (q) => ({
+      ...q,
+      items: q.items.filter((i) => i.sending !== ticket),
+    }));
     return;
   }
-  putQueue(key, (q) => ({ ...unmark(q, ticket), ...(outcome === "lost" ? { paused: true } : {}) }));
+  putQueue(key, (q) => ({
+    ...unmark(q, ticket),
+    ...(outcome === "lost" ? { paused: true } : {}),
+  }));
   if (outcome === "busy") {
     const times = (held.get(key)?.times ?? 0) + 1;
     const ms = heldRetryMs(times);
@@ -330,21 +424,38 @@ const settleQueued = (key: string, ticket: string, outcome: QueuedOutcome) => {
 const adopt = (key: string, value: unknown) => {
   const was = useChat.getState().queues[key] ?? emptyQueue();
   // What this window has on its way stays marked until the hub answers.
-  const mine = new Map(was.items.filter((i) => i.sending).map((i) => [i.id, i.sending!]));
-  const items = keptItems(value).map((i) => (!i.sending && mine.has(i.id) ? { ...i, sending: mine.get(i.id)! } : i));
-  useChat.setState((s) => ({ queues: { ...s.queues, [key]: { ...was, items } } }));
+  const mine = new Map(
+    was.items.filter((i) => i.sending).map((i) => [i.id, i.sending!]),
+  );
+  const items = keptItems(value).map((i) =>
+    !i.sending && mine.has(i.id) ? { ...i, sending: mine.get(i.id)! } : i,
+  );
+  useChat.setState((s) => ({
+    queues: { ...s.queues, [key]: { ...was, items } },
+  }));
 };
 
 /** The hub an agent key (`hub/agent`) is on. */
 const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
 
 interface AgentsResponse {
-  agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean; picture?: unknown }[];
+  agents: {
+    id: string;
+    name?: string | null;
+    model?: string | null;
+    provider?: string | null;
+    default?: boolean;
+    picture?: unknown;
+  }[];
 }
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   const res = await pairedHub(hub).fetch("GET", "/api/agents");
-  if (!res.ok) throw new HubError(res.status, `${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`);
+  if (!res.ok)
+    throw new HubError(
+      res.status,
+      `${hub.label}: ${res.status === 401 ? "not paired any more" : res.statusText}`,
+    );
   const body = (await res.json()) as AgentsResponse;
   return body.agents.map((a) => ({
     hubId: hub.id,
@@ -358,7 +469,8 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
 };
 
 /** The ids of the agents `hub` serves now, as the roster reads them. */
-export const agentIdsOn = async (hub: HubAccount): Promise<string[]> => (await fetchAgents(hub)).map((a) => a.id);
+export const agentIdsOn = async (hub: HubAccount): Promise<string[]> =>
+  (await fetchAgents(hub)).map((a) => a.id);
 
 /** A machine's agents aren't listed: its hub runs the sessions placed
  *  there and serves no agents (an older one's Desk agent is removed when
@@ -371,10 +483,18 @@ const fetchMe = async (hub: HubAccount): Promise<Me | null | undefined> => {
   try {
     const res = await pairedHub(hub).fetch("GET", "/api/me");
     if (res.status >= 500) return undefined;
-    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
-    const body = (await res.json()) as { id?: unknown; display_name?: unknown; picture?: unknown };
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json"))
+      return null;
+    const body = (await res.json()) as {
+      id?: unknown;
+      display_name?: unknown;
+      picture?: unknown;
+    };
     if (typeof body.id !== "string") return null;
-    const name = typeof body.display_name === "string" && body.display_name.trim() ? body.display_name.trim() : null;
+    const name =
+      typeof body.display_name === "string" && body.display_name.trim()
+        ? body.display_name.trim()
+        : null;
     return { id: body.id, name, picture: pictureOf(body.picture) };
   } catch {
     return undefined;
@@ -390,7 +510,10 @@ const readShown = new Map<string, number>();
  *  began before one doesn't put the old picture back. */
 const mySets = new Map<string, number>();
 
-const whereIs = (s: Pick<ChatStore, "roster" | "hubs">, key: string): { agent: Agent; hub: HubAccount } | null => {
+const whereIs = (
+  s: Pick<ChatStore, "roster" | "hubs">,
+  key: string,
+): { agent: Agent; hub: HubAccount } | null => {
   const agent = s.roster.find((a) => agentKey(a) === key);
   const hub = agent && s.hubs.find((h) => h.id === agent.hubId);
   return agent && hub ? { agent, hub } : null;
@@ -411,17 +534,27 @@ const ensure = (key: string): boolean => {
     const late = keptItems(deskState.get(draftKey.queue(key)));
     if (late.length) putQueue(key, (q) => withKept(q, late));
   });
-  if (!unwatch.has(key)) unwatch.set(key, deskState.watch(draftKey.queue(key), (v) => adopt(key, v)));
+  if (!unwatch.has(key))
+    unwatch.set(
+      key,
+      deskState.watch(draftKey.queue(key), (v) => adopt(key, v)),
+    );
   useChat.setState((s) => ({
-    conversations: { ...s.conversations, [key]: s.conversations[key] ?? emptyConversation() },
+    conversations: {
+      ...s.conversations,
+      [key]: s.conversations[key] ?? emptyConversation(),
+    },
     ...(kept ? { queues: { ...s.queues, [key]: kept } } : {}),
   }));
   let everConnected = false;
   const settling = new Set<string>();
   const convo = new Conversation(hub, agent.id, (c) => {
     const was = useChat.getState().conversations[key];
-    useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: c } }));
-    if (c.features && c.features !== was?.features) useChat.getState().learnFeatures(hub.id, c.features);
+    useChat.setState((s) => ({
+      conversations: { ...s.conversations, [key]: c },
+    }));
+    if (c.features && c.features !== was?.features)
+      useChat.getState().learnFeatures(hub.id, c.features);
     // Back after the hub restarted: what was said meanwhile is only in its copy.
     if (c.connected && !was?.connected) {
       if (everConnected) void useChat.getState().refreshHistory(key);
@@ -431,9 +564,13 @@ const ensure = (key: string): boolean => {
     // Free again: what's queued goes next.
     queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
-    if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
+    if (was?.unprompted && !c.unprompted && !c.working && c.connected)
+      void useChat.getState().refreshHistory(key);
     // A turn that ended is in the hub's copy, by the id it was saved under.
-    const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
+    const settled = Object.values(c.turns).filter(
+      (t) =>
+        (t.state === "ended" || t.state === "failed") && !settling.has(t.ref),
+    );
     if (!settled.length) return;
     settled.forEach((t) => {
       settling.add(t.ref);
@@ -445,7 +582,9 @@ const ensure = (key: string): boolean => {
       .finally(() => {
         // Its turn over and read, a message the hub kept no copy of (a
         // refusal, a command on a hub that doesn't say so) is settled here.
-        live.get(key)?.unkeep(settled.flatMap((t) => (t.clientId ? [t.clientId] : [])));
+        live
+          .get(key)
+          ?.unkeep(settled.flatMap((t) => (t.clientId ? [t.clientId] : [])));
         settled.forEach((t) => {
           settling.delete(t.ref);
           live.get(key)?.forget(t.ref);
@@ -469,10 +608,19 @@ const settleLive = (key: string, kept: ChatMessage[], read: Reading) => {
   }
   // An older hub's copies are matched by what they say and when.
   const now = new Date().toISOString();
-  const { ids, anchors, twins } = settle(kept, convo.messages, now, !!convo.features?.has(FEATURES.stream), read);
+  const { ids, anchors, twins } = settle(
+    kept,
+    convo.messages,
+    now,
+    !!convo.features?.has(FEATURES.stream),
+    read,
+  );
   live.get(key)?.place(anchors, twins);
   live.get(key)?.drop(ids);
 };
+
+/** The newest `showAround` ask for each DM, by key. */
+const arounds = new Map<string, number>();
 
 export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
@@ -485,7 +633,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (!hub) return;
     const sets = mySets.get(hubId) ?? 0;
     const me = await fetchMe(hub);
-    if (me === undefined || (mySets.get(hubId) ?? 0) !== sets || !get().hubs.some((h) => h.id === hubId)) return;
+    if (
+      me === undefined ||
+      (mySets.get(hubId) ?? 0) !== sets ||
+      !get().hubs.some((h) => h.id === hubId)
+    )
+      return;
     set((s) => {
       const { [hubId]: _was, ...others } = s.me;
       return { me: me ? { ...others, [hubId]: me } : others };
@@ -495,7 +648,11 @@ export const useChat = create<ChatStore>((set, get) => ({
     if ("me" in who) mySets.set(who.me, (mySets.get(who.me) ?? 0) + 1);
     set((s) =>
       "agent" in who
-        ? { roster: s.roster.map((a) => (agentKey(a) === who.agent ? { ...a, picture } : a)) }
+        ? {
+            roster: s.roster.map((a) =>
+              agentKey(a) === who.agent ? { ...a, picture } : a,
+            ),
+          }
         : s.me[who.me]
           ? { me: { ...s.me, [who.me]: { ...s.me[who.me]!, picture } } }
           : s,
@@ -509,8 +666,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   learnFeatures: (hubId, features) =>
     set((s) => {
       const had = s.hubFeatures[hubId];
-      const same = had && had.size === features.size && [...features].every((f) => had.has(f));
-      return same ? s : { hubFeatures: { ...s.hubFeatures, [hubId]: features } };
+      const same =
+        had &&
+        had.size === features.size &&
+        [...features].every((f) => had.has(f));
+      return same
+        ? s
+        : { hubFeatures: { ...s.hubFeatures, [hubId]: features } };
     }),
   rosterRead: false,
   setHubs: (hubs) => {
@@ -521,7 +683,10 @@ export const useChat = create<ChatStore>((set, get) => ({
     for (const [key, c] of live) {
       const hub = hubs.find((h) => key.startsWith(`${h.id}/`));
       const was = hub && before.find((h) => h.id === hub.id);
-      if (!hub || (was && (was.revision !== hub.revision || was.url !== hub.url))) {
+      if (
+        !hub ||
+        (was && (was.revision !== hub.revision || was.url !== hub.url))
+      ) {
         c.close();
         live.delete(key);
         if (hub) reopen.push(key);
@@ -529,27 +694,39 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
     set((s) => ({
       hubs,
-      histories: Object.fromEntries(Object.entries(s.histories).filter(([key]) => hubs.some((h) => key.startsWith(`${h.id}/`)))),
+      histories: Object.fromEntries(
+        Object.entries(s.histories).filter(([key]) =>
+          hubs.some((h) => key.startsWith(`${h.id}/`)),
+        ),
+      ),
       // On a hub that isn't paired any more, the side panel's agent is gone.
-      panelAgent: hubs.some((h) => s.panelAgent?.startsWith(`${h.id}/`)) ? s.panelAgent : null,
+      panelAgent: hubs.some((h) => s.panelAgent?.startsWith(`${h.id}/`))
+        ? s.panelAgent
+        : null,
       // Who you are on a hub reached with another token is read again.
       me: Object.fromEntries(
         Object.entries(s.me).filter(([id]) => {
           const now = hubs.find((h) => h.id === id);
           const was = before.find((h) => h.id === id);
-          return now && was && now.revision === was.revision && now.url === was.url;
+          return (
+            now && was && now.revision === was.revision && now.url === was.url
+          );
         }),
       ),
     }));
     for (const key of reopen) ensure(key);
     void get().refreshRoster();
-    for (const hub of hubs.filter((h) => !(h.id in get().me))) void get().refreshMe(hub.id);
+    for (const hub of hubs.filter((h) => !(h.id in get().me)))
+      void get().refreshMe(hub.id);
   },
   refreshRoster: async () => {
-    const results = await Promise.allSettled(get().hubs.map((h) => (h.machine ? machineAgents() : fetchAgents(h))));
+    const results = await Promise.allSettled(
+      get().hubs.map((h) => (h.machine ? machineAgents() : fetchAgents(h))),
+    );
     const roster: Agent[] = [];
     const rosterErrors: Record<string, string> = {};
-    const rosterTrouble: Record<string, "signedOut" | "unreachable" | "other"> = {};
+    const rosterTrouble: Record<string, "signedOut" | "unreachable" | "other"> =
+      {};
     const read = new Set<string>();
     results.forEach((r, i) => {
       const hub = get().hubs[i]!;
@@ -561,28 +738,48 @@ export const useChat = create<ChatStore>((set, get) => ({
         get()
           .roster.filter((a) => a.hubId === hub.id)
           .forEach((a, at) => {
-            if (settling[agentKey(a)] && !listed.has(agentKey(a))) fresh.splice(Math.min(at, fresh.length), 0, a);
+            if (settling[agentKey(a)] && !listed.has(agentKey(a)))
+              fresh.splice(Math.min(at, fresh.length), 0, a);
           });
         roster.push(...fresh);
         read.add(hub.id);
       } else {
         // This computer's hub being down doesn't make its agents vanish: the
         // last list stays (Desk marks it stale) until the hub answers.
-        if (hub.local) roster.push(...get().roster.filter((a) => a.hubId === hub.id));
-        rosterErrors[hub.id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        if (hub.local)
+          roster.push(...get().roster.filter((a) => a.hubId === hub.id));
+        rosterErrors[hub.id] =
+          r.reason instanceof Error ? r.reason.message : String(r.reason);
         rosterTrouble[hub.id] =
-          r.reason instanceof HubError ? (r.reason.status === 401 ? "signedOut" : "other") : r.reason instanceof TypeError || /reach/i.test(rosterErrors[hub.id]!) ? "unreachable" : "other";
+          r.reason instanceof HubError
+            ? r.reason.status === 401
+              ? "signedOut"
+              : "other"
+            : r.reason instanceof TypeError ||
+                /reach/i.test(rosterErrors[hub.id]!)
+              ? "unreachable"
+              : "other";
       }
     });
     // The side panel's agent goes once its hub has been read without it.
     const panel = get().panelAgent;
-    const gone = !!panel && read.has(hubOf(panel)) && !roster.some((a) => agentKey(a) === panel);
-    set({ roster, rosterErrors, rosterTrouble, rosterRead: true, ...(gone ? { panelAgent: null } : {}) });
+    const gone =
+      !!panel &&
+      read.has(hubOf(panel)) &&
+      !roster.some((a) => agentKey(a) === panel);
+    set({
+      roster,
+      rosterErrors,
+      rosterTrouble,
+      rosterRead: true,
+      ...(gone ? { panelAgent: null } : {}),
+    });
     get().reopenDm();
   },
   reopenDm: () => {
     const key = get().activeAgent;
-    if (key && !live.has(key) && get().roster.some((a) => agentKey(a) === key)) get().openDm(key);
+    if (key && !live.has(key) && get().roster.some((a) => agentKey(a) === key))
+      get().openDm(key);
   },
   setPanelAgent: (key) => {
     set((s) => (s.panelAgent === key ? s : { panelAgent: key }));
@@ -594,13 +791,19 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   watchDm: (key) => {
     if (!ensure(key)) return;
-    if (!get().histories[key] || get().histories[key]!.state === "failed") void get().loadHistory(key);
+    if (!get().histories[key] || get().histories[key]!.state === "failed")
+      void get().loadHistory(key);
   },
   loadHistory: async (key) => {
     const target = whereIs(get(), key);
     if (!target) return;
     const putHistory = (h: Partial<History>) =>
-      set((s) => ({ histories: { ...s.histories, [key]: { ...(s.histories[key] ?? blankHistory()), ...h } } }));
+      set((s) => ({
+        histories: {
+          ...s.histories,
+          [key]: { ...(s.histories[key] ?? blankHistory()), ...h },
+        },
+      }));
     putHistory({ state: "loading" });
     // What's sent from here on, the read may not have seen.
     const started = new Date().toISOString();
@@ -609,10 +812,17 @@ export const useChat = create<ChatStore>((set, get) => ({
       if (!get().histories[key]) return; // forgotten meanwhile
       putHistory(
         page
-          ? { state: "ready", messages: page.messages, more: page.more, earlier: "idle", loadedAt: started }
+          ? {
+              state: "ready",
+              messages: page.messages,
+              more: page.more,
+              earlier: "idle",
+              loadedAt: started,
+            }
           : { state: "absent", messages: [], more: false },
       );
-      if (page) settleLive(key, page.messages, { began: started, seen: new Set() });
+      if (page)
+        settleLive(key, page.messages, { began: started, seen: new Set() });
     } catch {
       if (get().histories[key]) putHistory({ state: "failed" });
     }
@@ -621,9 +831,26 @@ export const useChat = create<ChatStore>((set, get) => ({
     const history = get().histories[key];
     const target = whereIs(get(), key);
     const first = history && cursorIn(history.messages, "first");
-    if (!target || !history || history.state !== "ready" || !history.more || history.earlier === "loading" || !first) return;
+    if (
+      !target ||
+      !history ||
+      history.state !== "ready" ||
+      !history.more ||
+      history.earlier === "loading" ||
+      !first
+    )
+      return;
     const put = (f: (h: History) => Partial<History>) =>
-      set((s) => (s.histories[key] ? { histories: { ...s.histories, [key]: { ...s.histories[key]!, ...f(s.histories[key]!) } } } : {}));
+      set((s) =>
+        s.histories[key]
+          ? {
+              histories: {
+                ...s.histories,
+                [key]: { ...s.histories[key]!, ...f(s.histories[key]!) },
+              },
+            }
+          : {},
+      );
     put(() => ({ earlier: "loading" }));
     try {
       const page = await fetchHistory(target.hub, target.agent.id, first);
@@ -667,26 +894,38 @@ export const useChat = create<ChatStore>((set, get) => ({
         },
       },
     }));
-    settleLive(key, page.messages, { began: started, seen: new Set(was.messages.map((m) => m.id)) });
+    settleLive(key, page.messages, {
+      began: started,
+      seen: new Set(was.messages.map((m) => m.id)),
+    });
   },
   send: (key, content, opts = {}) =>
     (live.get(key)?.send(content, {
-      turn: { ...dmTurn(opts.voice), ...(opts.message ? { message: opts.message } : {}) },
+      turn: {
+        ...dmTurn(opts.voice),
+        ...(opts.message ? { message: opts.message } : {}),
+      },
       attachments: opts.attachments,
     }) ?? false) !== false,
   retry: (key, id) => {
-    const m = get().conversations[key]?.messages.find((x) => x.id === id && x.undelivered);
+    const m = get().conversations[key]?.messages.find(
+      (x) => x.id === id && x.undelivered,
+    );
     if (!m) return false;
     // Taken away first: the message sent again is the same one, by its id.
     live.get(key)?.remove(id);
-    const again = { ...(m.attachments?.length ? { attachments: m.attachments } : {}), ...(m.clientId ? { message: m.clientId } : {}) };
+    const again = {
+      ...(m.attachments?.length ? { attachments: m.attachments } : {}),
+      ...(m.clientId ? { message: m.clientId } : {}),
+    };
     if (get().send(key, m.content, again)) return true;
     live.get(key)?.restore(m);
     return false;
     return true;
   },
   discard: (key, id) => live.get(key)?.remove(id),
-  answerPrompt: (key, requestId, choice) => live.get(key)?.answer(requestId, choice) ?? false,
+  answerPrompt: (key, requestId, choice) =>
+    live.get(key)?.answer(requestId, choice) ?? false,
   sendTo: (key, content) =>
     new Promise((resolve) => {
       if (!ensure(key)) return resolve(false);
@@ -701,9 +940,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     }),
   cancel: (key) => {
     // Paused first, so the turn ending doesn't send the queue on.
-    putQueue(key, (q) => (q.items.length && !q.paused ? { ...q, paused: true } : q));
+    putQueue(key, (q) =>
+      q.items.length && !q.paused ? { ...q, paused: true } : q,
+    );
     const c = get().conversations[key];
-    for (const t of Object.values(c?.turns ?? {})) if (t.state === "live") stopped.add(t.ref);
+    for (const t of Object.values(c?.turns ?? {}))
+      if (t.state === "live") stopped.add(t.ref);
     live.get(key)?.cancel();
   },
   queues: {},
@@ -713,18 +955,28 @@ export const useChat = create<ChatStore>((set, get) => ({
   showAround: async (key, id) => {
     const target = whereIs(get(), key);
     if (!target) return;
+    const n = (arounds.get(key) ?? 0) + 1;
+    arounds.set(key, n);
     const page = await readAround(target.hub, target.agent.id, id);
+    // Only the newest ask is shown: a slower, older one resolving last
+    // would put up a stretch that doesn't hold the match chosen.
+    if (arounds.get(key) !== n) return;
     set((s) => ({ around: { ...s.around, [key]: page } }));
   },
-  leaveAround: (key) =>
+  leaveAround: (key) => {
+    arounds.set(key, (arounds.get(key) ?? 0) + 1);
     set((s) => {
       if (!s.around[key]) return {};
       const { [key]: _gone, ...around } = s.around;
       return { around };
-    }),
+    });
+  },
   deleteMine: async (key, id, ids, replies, forget) => {
     const target = whereIs(get(), key);
-    if (!target) throw new Error("This agent isn’t on a hub Desk is paired with right now.");
+    if (!target)
+      throw new Error(
+        "This agent isn’t on a hub Desk is paired with right now.",
+      );
     await deleteMessage(target.hub, target.agent.id, id, forget);
     set((s) => ({
       setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...ids] },
@@ -735,8 +987,15 @@ export const useChat = create<ChatStore>((set, get) => ({
     void get()
       .refreshHistory(key)
       .then(() => {
-        const kept = new Set((get().histories[key]?.messages ?? []).map((m) => m.id));
-        set((s) => ({ orphans: { ...s.orphans, [key]: (s.orphans[key] ?? []).filter((id) => !kept.has(id)) } }));
+        const kept = new Set(
+          (get().histories[key]?.messages ?? []).map((m) => m.id),
+        );
+        set((s) => ({
+          orphans: {
+            ...s.orphans,
+            [key]: (s.orphans[key] ?? []).filter((id) => !kept.has(id)),
+          },
+        }));
       });
   },
   editLast: (key, replaces, aside, text) => {
@@ -745,14 +1004,39 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (get().queues[key]?.items.length) return "queued";
     const convo = live.get(key);
     const clientId = crypto.randomUUID();
-    const sent = text.trim() ? convo?.send(text, { turn: { ...dmTurn(), edit: { replaces }, message: clientId } }) : false;
+    const sent = text.trim()
+      ? convo?.send(text, {
+          turn: { ...dmTurn(), edit: { replaces }, message: clientId },
+        })
+      : false;
     if (!sent || !convo) return "offline";
-    if (sent.turnRef) edits.set(key, [...(edits.get(key) ?? []), { ref: sent.turnRef, clientId, text, aside }]);
+    if (sent.turnRef)
+      edits.set(key, [
+        ...(edits.get(key) ?? []),
+        { ref: sent.turnRef, clientId, text, aside },
+      ]);
     // The live copies of what's set aside go too: once the hub's read
     // leaves the kept ones out, nothing would hide them.
     const gone = new Set(aside);
-    convo.drop(new Set((get().conversations[key]?.messages ?? []).filter((m) => m.clientId !== clientId && (gone.has(m.id) || (m.clientId && gone.has(m.clientId)) || (m.replyTo && gone.has(m.replyTo)))).map((m) => m.id)));
-    set((s) => ({ setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...aside] } }));
+    convo.drop(
+      new Set(
+        (get().conversations[key]?.messages ?? [])
+          .filter(
+            (m) =>
+              m.clientId !== clientId &&
+              (gone.has(m.id) ||
+                (m.clientId && gone.has(m.clientId)) ||
+                (m.replyTo && gone.has(m.replyTo))),
+          )
+          .map((m) => m.id),
+      ),
+    );
+    set((s) => ({
+      setAside: {
+        ...s.setAside,
+        [key]: [...(s.setAside[key] ?? []), ...aside],
+      },
+    }));
     return null;
   },
   editBack: {},
@@ -772,22 +1056,39 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   enqueue: (key, text, attachments) => {
     if (!text.trim() && !attachments?.length) return;
-    const item = { id: crypto.randomUUID(), text, ...(attachments?.length ? { attachments } : {}) };
+    const item = {
+      id: crypto.randomUUID(),
+      text,
+      ...(attachments?.length ? { attachments } : {}),
+    };
     putQueue(key, (q) => ({ ...q, items: [...q.items, item] }));
     drain(key);
   },
   editQueued: (key, id, text) =>
     putQueue(key, (q) => ({
       ...q,
-      items: q.items.flatMap((i) => (i.id !== id ? [i] : text.trim() || i.attachments?.length ? [{ ...i, text }] : [])),
+      items: q.items.flatMap((i) =>
+        i.id !== id
+          ? [i]
+          : text.trim() || i.attachments?.length
+            ? [{ ...i, text }]
+            : [],
+      ),
     })),
-  removeQueued: (key, id) => putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.id !== id) })),
+  removeQueued: (key, id) =>
+    putQueue(key, (q) => ({ ...q, items: q.items.filter((i) => i.id !== id) })),
   sendQueuedNow: (key, id) => {
     const item = get().queues[key]?.items.find((i) => i.id === id);
     const files = item?.attachments ?? [];
     // Files can't join a turn under way; with none running they go now.
-    if (!item || item.sending || (files.length && isRunning(get().conversations[key]))) return false;
-    if (!get().send(key, item.text, files.length ? { attachments: files } : {})) return false;
+    if (
+      !item ||
+      item.sending ||
+      (files.length && isRunning(get().conversations[key]))
+    )
+      return false;
+    if (!get().send(key, item.text, files.length ? { attachments: files } : {}))
+      return false;
     get().removeQueued(key, id);
     return true;
   },
@@ -796,7 +1097,10 @@ export const useChat = create<ChatStore>((set, get) => ({
     putQueue(key, (q) => (q.paused ? { ...q, paused: false } : q));
     drain(key);
   },
-  rename: (key, name) => set((s) => ({ roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)) })),
+  rename: (key, name) =>
+    set((s) => ({
+      roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)),
+    })),
   settling: {},
   settle: (key, on) =>
     set((s) => {
