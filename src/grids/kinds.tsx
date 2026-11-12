@@ -230,7 +230,7 @@ export function RoomPaneBody({ room: id }: { room: string }) {
   if (!room) {
     return (
       <div className="pane-note">
-        <p className="muted small">{loaded ? "This room is no longer on this computer's hub." : "Reading the room…"}</p>
+        <p className="muted small">{loaded ? "This room is no longer on this computer." : "Reading the room…"}</p>
       </div>
     );
   }
