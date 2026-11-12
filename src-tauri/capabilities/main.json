@@ -53,6 +53,7 @@
     "allow-machine-log",
     "allow-machine-remote-log",
     "allow-machine-ssh-hosts",
+    "allow-machine-desk-entry",
     "allow-machine-edit",
     "allow-machine-check-reach",
     "allow-machine-cancel-add",
