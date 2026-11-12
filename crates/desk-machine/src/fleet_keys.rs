@@ -50,6 +50,11 @@ pub struct SecretQuestion {
     /// Why it is asked again (the last one was wrong).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+    /// The host key this computer trusts for it (`SHA256:…`): shown in
+    /// Desk's own field, so the person can check it there, outside the
+    /// page, before their password goes to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -123,7 +128,7 @@ impl Fleet {
     /// password goes to no machine they haven't trusted. A wrong password
     /// is asked for again, up to three times. Blocking.
     pub fn install_key(&self, target: &str) -> Result<Unlocked, String> {
-        let (machine, settings, _) = self.admitted_machine(target)?;
+        let (machine, settings, files) = self.admitted_machine(target)?;
         let name = machine.name.clone();
         if hostkey::trouble(&self.ssh, &machine)?.is_some() {
             return Err(format!("Trust {name}'s host key first."));
@@ -143,6 +148,9 @@ impl Fleet {
                 .unwrap_or_else(|| probe::name_of(machine.target.as_str())),
             direct: settings.via.is_none(),
         };
+        // The key ssh will hold it to (StrictHostKeyChecking=yes): what
+        // the person checks in Desk's own field.
+        let fingerprint = hostkey::known_fingerprints(&files).into_iter().next();
         let mut problem = None;
         for _ in 0..TRIES {
             let question = SecretQuestion {
@@ -152,6 +160,7 @@ impl Fleet {
                 user: settings.user.clone(),
                 key: None,
                 problem: problem.take(),
+                fingerprint: fingerprint.clone(),
             };
             let Some(password) = self.ask_secret(&question)? else {
                 return Ok(Unlocked::Cancelled);
@@ -192,6 +201,7 @@ impl Fleet {
                 user: settings.user.clone(),
                 key: Some(key.to_string_lossy().into_owned()),
                 problem: problem.take(),
+                fingerprint: None,
             };
             let Some(passphrase) = self.ask_secret(&question)? else {
                 return Ok(Unlocked::Cancelled);
@@ -290,6 +300,7 @@ impl Fleet {
             user: user.clone(),
             key: None,
             problem: None,
+            fingerprint: None,
         };
         let Some(password) = self.ask_secret(&question)? else {
             return Ok(Unlocked::Cancelled);

@@ -980,6 +980,9 @@ fn desks_own_key_goes_with_a_machine_reached_at_another_address() {
     r.fleet.probe("devbox").unwrap();
     r.said.typed.answers.lock().unwrap().push_back("pw".into());
     r.fleet.install_key("devbox").unwrap();
+    // Desk's own field shows the host key the password will go to.
+    let asked = r.said.typed.asked.lock().unwrap().clone();
+    assert_eq!(asked[0].fingerprint.as_deref(), Some(FINGERPRINT));
     let id = r.fleet.add("devbox", "devbox").unwrap();
     until("ready", || r.fleet.state(&id) == Some(State::Ready));
     until("its key kept", || r.fleet.list()[0].host_key.is_some());

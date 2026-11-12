@@ -20,6 +20,8 @@ interface Question {
   user?: string;
   key?: string;
   problem?: string;
+  /** The host key this computer trusts for it, to check here. */
+  fingerprint?: string;
 }
 
 const words = (q: Question) => {
@@ -99,6 +101,11 @@ export function SecretWindow() {
           <h1 className="display-md">{w.title}</h1>
           <span className="mono small muted secret-target">{question.target}</span>
           {question.key && <span className="mono small muted secret-target">{question.key}</span>}
+          {question.fingerprint && (
+            <span className="small muted">
+              Its host key is <span className="mono secret-target">{question.fingerprint}</span>. If you know the machine’s, check they match before you sign in.
+            </span>
+          )}
           <p className="small">{w.body}</p>
           <div className="field">
             <label htmlFor={id} className="ov-label muted">
