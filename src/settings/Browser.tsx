@@ -149,7 +149,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
     return (
       <section className="settings-pane" aria-label="Browser">
         <h1 className="display-lg">Browser</h1>
-        <p className="faint small">Not connected to a hub.</p>
+        <p className="faint small">Desk isn’t ready yet.</p>
       </section>
     );
   }
@@ -168,7 +168,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
       </p>
       <BrowserPill place="band" />
       {view === "old" ? (
-        <p className="faint small">This hub doesn’t have the browser yet.</p>
+        <p className="faint small">This version of Desk doesn’t have the browser yet. Update Desk to use it.</p>
       ) : view === "failed" ? (
         <p className="state-blocked small">Couldn’t read the browser settings just now.</p>
       ) : !s || view === null ? (

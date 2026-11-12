@@ -378,6 +378,12 @@ export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
 /** What `desk-hubd.log` last said about the helper stopping; null if it says
  *  nothing or can't be read. */
 export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
+/** How far Desk Helper has got since it last started, from its log. */
+export type HelperStage = "starting" | "database" | "services" | "connecting";
+export const helperProgress = (): Promise<HelperStage | null> => invoke("helper_progress");
+/** Copies Desk into the Applications folder, quits, and opens the copy
+ *  (macOS). Resolves only if it couldn't: it rejects with why. */
+export const moveToApplications = (): Promise<void> => invoke("helper_move_to_applications");
 
 export type InstallProgress =
   | { state: "running"; line: string }

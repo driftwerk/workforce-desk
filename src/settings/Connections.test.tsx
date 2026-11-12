@@ -243,7 +243,7 @@ it("asks for the person's own Google client once, then signs in in the browser",
 it("says when the hub couldn't be asked, and asks again", async () => {
   const a = api([], { list: vi.fn(async () => Promise.reject(new Error("down"))) });
   await show(a);
-  expect(screen.getByRole("alert").textContent).toBe("Couldn’t ask the hub about connections just now.");
+  expect(screen.getByRole("alert").textContent).toBe("Desk couldn’t read your connections just now.");
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   });

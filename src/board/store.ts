@@ -118,7 +118,7 @@ export const useBoard = create<BoardState>((set, get) => {
     },
     createBoard: async (name, prefix) => {
       const hub = hubNow();
-      if (!hub) throw new Error("This computer's hub isn't running.");
+      if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
       const b = await hub.createBoard(prefix ? { name, prefix } : { name });
       heardCount++;
       set((s) => ({ boards: { ...s.boards, [b.id]: b }, shown: b.id, supported: true }));
@@ -126,7 +126,7 @@ export const useBoard = create<BoardState>((set, get) => {
     },
     createTicket: async (t) => {
       const hub = hubNow();
-      if (!hub) throw new Error("This computer's hub isn't running.");
+      if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
       const made = await hub.createTicket(t);
       if (!get().tickets[made.id]) answered(made, mark(made.id));
       return get().tickets[made.id] ?? made;
