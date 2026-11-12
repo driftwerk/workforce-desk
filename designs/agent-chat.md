@@ -56,7 +56,22 @@ Desk hides the set-aside messages as soon as you save, and the hub's next read l
 
 ## 3. Delete your own messages
 
-Delete is confirmed in place. The message leaves the chat and the agent's history. Memories saved from it are listed, with "also forget" ticked. The agent's reply stays, marked "answered a deleted message". This needs a hub PR.
+Hover a message you sent and choose Delete. You confirm in place, under the message, with no pop-up: "Delete this message? It leaves this chat and everything {agent} sees from now on."
+
+- **Memories:** Desk asks the hub which memories the agent saved from the message. It lists them, with "Also forget what {agent} saved from it" ticked.
+- **On confirm:** Desk calls the hub. The hub refuses while a turn is running in the DM.
+  - The message leaves the transcript.
+  - In the agent's context, its words are replaced by a note that you deleted it, so the turns around it stay well formed and the words can't come back in a later turn.
+  - The replies to it are marked `answered_deleted`, and the ticked memories are forgotten.
+- **What Desk shows:** Desk hides the message at once. Each reply to it stays, with a note that it "answered a deleted message".
+- **What can't be deleted:** the agent's own messages, a message the overseer sent on, and a command.
+- **On an older hub** (no `desk.delete`), no Delete is offered.
+
+### With the queue
+
+- **Deleting a queued message** takes it out of the queue: the queue's own × does this, and nothing reaches the hub.
+- **While the agent is replying,** a sent message can't be deleted. Delete says "…once {agent} has finished replying", because its turn may still be reading it.
+- **Queued messages waiting** don't block deleting an earlier message. The queue is untouched.
 
 ## 4. ⌘F search
 
