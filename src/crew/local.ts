@@ -93,23 +93,44 @@ const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: st
   await hub.saveIdentityFile(id, file, change(text));
 };
 
-/** A new agent on this computer, thinking with `brain`, with its files written
- *  from its name and what it's for. */
+/** Setting a new crew member up didn't finish, so nothing of it was kept:
+ *  the step that failed, and why, for Details. */
+export class NotSetUp extends Error {
+  constructor(
+    readonly who: string,
+    readonly cause: unknown,
+  ) {
+    super(`Desk couldn’t finish setting up ${who}, so nothing of them was kept. Try again.`);
+  }
+}
+
+/** A new agent on this computer, thinking with `brain` and sounding like
+ *  `voice`, with its files written from its name and what it's for: all of
+ *  it, or nothing. Should any step after it was made fail, the agent is
+ *  removed again, so no half-made crew member is ever left behind. */
 export async function createLocalAgent(
   hub: DeskHub,
   name: string,
   purpose: string,
   brain: Brain,
   taken: readonly string[],
+  voice?: { provider: string; model?: string; voice?: string },
 ): Promise<string> {
   const id = agentId(name, taken);
   const who = name.trim();
   await hub.createAgent({ id, name: who, system_prompt: instructions(who, purpose) });
-  await hub.saveAgentConfig(id, withDeskSettings(await hub.agentConfig(id), brain));
-  await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, who, purpose));
-  await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, who, purpose));
-  await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
-  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(withDeskWelcome(t), who, purpose));
+  try {
+    // One write of its settings: how it thinks and how it sounds.
+    const config = withDeskSettings(await hub.agentConfig(id), brain);
+    await hub.saveAgentConfig(id, voice ? withVoice(config, voice) : config);
+    await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, who, purpose));
+    await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, who, purpose));
+    await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
+    await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(withDeskWelcome(t), who, purpose));
+  } catch (e) {
+    await hub.deleteAgent(id).catch(() => undefined);
+    throw new NotSetUp(who, e);
+  }
   return id;
 }
 
