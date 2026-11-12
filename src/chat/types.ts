@@ -193,6 +193,9 @@ export const FEATURES = {
   /** Your own DM messages can be deleted, with the memories saved from
    *  them (./remove.ts); the replies to one are marked `answered_deleted`. */
   delete: "desk.delete",
+  /** A DM's whole history can be searched on the hub, and read around a
+   *  match (./search.ts). */
+  search: "desk.search",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */

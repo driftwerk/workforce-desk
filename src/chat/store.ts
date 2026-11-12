@@ -18,6 +18,7 @@ import {
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
 import { deleteMessage } from "./remove";
+import { readAround, type Around } from "./search";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
@@ -133,6 +134,13 @@ interface ChatStore {
   editBack: Record<string, { text: string; why: string }>;
   /** Clears `editBack` for `key`, once the composer has taken it. */
   tookEditBack: (key: string) => void;
+  /** In each DM, by agent key: the stretch of it shown around a search
+   *  match that isn't loaded, in place of its newest messages. */
+  around: Record<string, Around>;
+  /** Shows the DM around message `id`, read from the hub. */
+  showAround: (key: string, id: string) => Promise<void>;
+  /** Back to the DM's newest messages. */
+  leaveAround: (key: string) => void;
   /** In each DM, by agent key: the answers to messages you deleted, until
    *  the hub's next read marks them so. */
   orphans: Record<string, string[]>;
@@ -475,6 +483,9 @@ export const onRenamed = (f: (key: string, was: string, now: string) => void): v
   renamedTo = f;
 };
 
+/** The newest `showAround` ask for each DM, by key. */
+const arounds = new Map<string, number>();
+
 export const useChat = create<ChatStore>((set, get) => ({
   hubs: [],
   roster: [],
@@ -716,6 +727,26 @@ export const useChat = create<ChatStore>((set, get) => ({
   queues: {},
   setAside: {},
   orphans: {},
+  around: {},
+  showAround: async (key, id) => {
+    const target = whereIs(get(), key);
+    if (!target) return;
+    const n = (arounds.get(key) ?? 0) + 1;
+    arounds.set(key, n);
+    const page = await readAround(target.hub, target.agent.id, id);
+    // Only the newest ask is shown: a slower, older one resolving last
+    // would put up a stretch that doesn't hold the match chosen.
+    if (arounds.get(key) !== n) return;
+    set((s) => ({ around: { ...s.around, [key]: page } }));
+  },
+  leaveAround: (key) => {
+    arounds.set(key, (arounds.get(key) ?? 0) + 1);
+    set((s) => {
+      if (!s.around[key]) return {};
+      const { [key]: _gone, ...around } = s.around;
+      return { around };
+    });
+  },
   deleteMine: async (key, id, ids, replies, forget) => {
     const target = whereIs(get(), key);
     if (!target) throw new Error("This agent isn’t on a hub Desk is paired with right now.");
@@ -814,6 +845,7 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _queued, ...queues } = s.queues;
       const { [key]: _aside, ...setAside } = s.setAside;
       const { [key]: _orphans, ...orphans } = s.orphans;
+      const { [key]: _around, ...around } = s.around;
       const { [key]: _back, ...editBack } = s.editBack;
       return {
         conversations,
@@ -821,6 +853,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         queues,
         setAside,
         orphans,
+        around,
         editBack,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,

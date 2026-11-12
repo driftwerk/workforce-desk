@@ -31,6 +31,8 @@ import { Message } from "./Message";
 import { QueuedMessages } from "./QueuedMessages";
 import { relayedOf } from "../chat/relayed";
 import { memoriesFrom, type SavedMemory } from "../chat/remove";
+import { termsOf } from "../chat/search";
+import { SearchBar, SearchResults, useDmSearch, useSearchMarks } from "./DmSearch";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -176,13 +178,30 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     return () => clearTimeout(t);
   }, [editNote]);
   const seenThen = useRef<Set<string>>(new Set());
+  // ⌘F: the search, the stretch of the chat shown around a match not
+  // loaded, and the match to show once it's rendered.
+  const [searching, setSearching] = useState(false);
+  const search = useDmSearch(hub, agent?.id ?? "");
+  const around = useChat((s) => (activeAgent ? s.around[activeAgent] : undefined));
+  const showAround = useChat((s) => s.showAround);
+  const leaveAround = useChat((s) => s.leaveAround);
+  const toShowAt = useRef<string | null>(null);
+  const [paneEl, setPaneEl] = useState<HTMLDivElement | null>(null);
   const scrollerRef = useCallback(
     (el: HTMLDivElement | null) => {
       scroller.current = el;
+      setPaneEl(el);
       stay.pane(el);
     },
     [stay.pane],
   );
+  const chosen = search.current >= 0 ? (search.matches[search.current]?.id ?? null) : null;
+  useSearchMarks(paneEl, searching ? termsOf(search.q) : [], chosen, `${history?.messages.length}:${convo?.messages.length}:${around?.around}`);
+  /** The newest message, leaving a stretch shown around a match. */
+  const latest = useCallback(() => {
+    if (activeAgent) leaveAround(activeAgent);
+    stay.toLatest();
+  }, [activeAgent, leaveAround, stay.toLatest]);
   const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
   // The conversation is read while it's on screen, wherever this shows:
   // through the newest of the hub's copies of what the agent said, or the
@@ -206,7 +225,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // Every render may change what's shown: kept where it was, or at the end.
   // A DM opened with something unread opens at its New line.
   useLayoutEffect(() => {
-    if (typeof newLine.current === "string" && !openedAtLine.current) {
+    const match = toShowAt.current;
+    if (match && paneEl?.querySelector(`[data-message-id="${CSS.escape(match)}"]`)) {
+      toShowAt.current = null;
+      stay.showAt(match, Math.round((paneEl.clientHeight ?? 0) / 3));
+    } else if (typeof newLine.current === "string" && !openedAtLine.current) {
       openedAtLine.current = true;
       stay.showAt(newLine.current);
     } else stay.keep();
@@ -287,7 +310,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const liveShown = toShow(pending ? convo.messages.slice(0, -1) : convo.messages);
   // A hub with client ids says which kept row each live message became;
   // an older hub's are matched by words and times.
-  const all = convo.features?.has(FEATURES.clientIds)
+  const all = around
+    ? around.messages
+    : convo.features?.has(FEATURES.clientIds)
     ? shownWith(history?.messages ?? [], liveShown)
     : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
   const asideSet = new Set(aside ?? []);
@@ -296,9 +321,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // the overseer sent on, a command, or one that never got there.
   const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
   const mine = mineAt >= 0 ? shown[mineAt] : undefined;
-  // Only where the hub says which kept row each live message became: what's
-  // set aside is then known by id, not guessed from words.
-  const editable = !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
+  // Around a search match, the chat is a stretch of its past: nothing is
+  // edited or deleted from there. And only where the hub says which kept
+  // row each live message became: what's set aside is then known by id.
+  const editable = !around && !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
   const whyNot = !mine
     ? null
     : busy
@@ -310,7 +336,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           : mine.attachments?.length
             ? "A message with files can’t be edited. Send a new one instead."
             : null;
-  const deletable = !!convo.features?.has(FEATURES.delete);
+  const deletable = !around && !!convo.features?.has(FEATURES.delete);
   const yours = (m: ChatMessage) =>
     m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
   const keptIds = new Set((history?.messages ?? []).map((k) => k.id));
@@ -322,6 +348,29 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     setDeleting(m.id);
   };
   const orphanSet = new Set(orphans ?? []);
+  /** Shows match `i` in place: at once when it's shown, else once the
+   *  stretch around it is read. */
+  const pick = (i: number) => {
+    const m = search.matches[i];
+    if (!m) return;
+    search.setCurrent(i);
+    toShowAt.current = m.id;
+    if (shown.some((x) => x.id === m.id)) return stay.keep();
+    showAround(activeAgent, m.id).catch((e: unknown) => {
+      toShowAt.current = null;
+      setEditNote(e instanceof Error ? e.message : String(e));
+    });
+  };
+  const step = (by: 1 | -1) => {
+    const n = search.matches.length;
+    if (!n) return;
+    pick(Math.min(n - 1, Math.max(0, search.current + by)));
+  };
+  const closeSearch = () => {
+    toShowAt.current = null;
+    setSearching(false);
+    search.setQ("");
+  };
   const startEdit = () => {
     if (!mine || !editable) return;
     if (whyNot) return setEditNote(whyNot);
@@ -358,6 +407,17 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
       onKeyDown={(e) => {
+        if (searching && e.key === "Escape") {
+          e.preventDefault();
+          closeSearch();
+          return;
+        }
+        // ⌘F searches the chat's whole history, on a hub that can.
+        if (tab === "chat" && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && convo.features?.has(FEATURES.search)) {
+          e.preventDefault();
+          setSearching(true);
+          return;
+        }
         // End goes to the newest message: not from a field (where it moves
         // the caret), but from the composer when nothing's typed in it.
         if (tab !== "chat" || e.key !== "End" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -365,7 +425,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         const field = t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
         if (field && !(t instanceof HTMLTextAreaElement && t.closest("[data-composer]") && t.value === "")) return;
         e.preventDefault();
-        stay.toLatest();
+        latest();
       }}
     >
       {!inPane && (
@@ -416,6 +476,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         </div>
       ) : (
         <>
+          {searching && <SearchBar s={search} name={agent.name} onStep={step} onClose={closeSearch} />}
+          <div className={searching ? "dm-body dm-body-searching" : "dm-body"}>
           <div className="timeline">
             <div
               ref={scrollerRef}
@@ -528,12 +590,22 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 )}
               </div>
             </div>
-            {stay.away && (
-              <button type="button" className="jump-pill" title="Jump to latest (End)" aria-live="polite" onClick={stay.toLatest}>
+            {around && (
+              <div className="history-note timeline-older" role="status">
+                <span className="faint small">Viewing older messages · </span>
+                <button type="button" className="link small" onClick={latest}>
+                  Jump to latest
+                </button>
+              </div>
+            )}
+            {(stay.away || around) && (
+              <button type="button" className="jump-pill" title="Jump to latest (End)" aria-live="polite" onClick={latest}>
                 <span aria-hidden="true">↓</span> Jump to latest
                 {arrived > 0 && <small className="jump-pill-count">{arrived} new</small>}
               </button>
             )}
+          </div>
+          {searching && <SearchResults s={search} name={agent.name} onPick={pick} />}
           </div>
           {editNote && (
             <p className="composer-note small" role="status">
@@ -556,7 +628,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         : `Couldn’t reach ${agent.name}. Try again in a moment.`,
                   );
                 setEditing(null);
-                stay.toLatest();
+                latest();
               }}
             />
           ) : (
@@ -574,7 +646,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             inPane={!!inPane}
             files={files}
             sending={sending}
-            onSent={stay.toLatest}
+            onSent={latest}
             away={stay.away}
           />
           )}
