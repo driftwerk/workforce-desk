@@ -832,28 +832,6 @@ body.side-resizing * {
   text-overflow: ellipsis;
   padding: 1px 7px;
 }
-/* A session card's word on who runs it, under its goal. */
-.charge-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.charge-strip-quiet {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.charge-strip-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
 .charge-strip-buttons {
   display: flex;
   gap: 6px;
@@ -1323,20 +1301,6 @@ body.side-resizing * {
   flex-direction: column;
   min-width: 0;
 }
-.session-goal {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal > input,
-.session-goal > .goal-text,
-.session-goal > .goal-wrap {
-  flex: 1;
-  min-width: 0;
-}
 /* A long goal takes two lines, not the session's height: "more" shows the
    rest, scrolling past a third of the window. */
 .goal-wrap {
@@ -1363,11 +1327,6 @@ body.side-resizing * {
 .goal-more {
   flex: none;
   padding: 2px 0;
-}
-/* The session's whole line, read under its terminal. */
-.session-line-history {
-  flex: none;
-  white-space: nowrap;
 }
 /* Where the session already is in the grids, with a way to each. */
 .session-where {
@@ -1399,15 +1358,6 @@ body.side-resizing * {
 .session-where .link {
   flex: none;
 }
-.session-approvals {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal input,
 .goal-text {
   width: 100%;
   border: 0;
