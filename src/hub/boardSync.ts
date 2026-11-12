@@ -12,7 +12,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { deskCall, HubError, refusal } from "./client";
 import { jsonBody, pairedHub, type HubRef } from "./net";
-import type { Board, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncMember, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
+import type { Board, BoardSync, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncMember, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
 
 /** Where a person chooses who they are: the service, the hub it's reached
  *  through, and the board's agent there (tried first). */
@@ -129,7 +129,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "hubOffline":
       return `Paused: ${hub} is offline since ${hhmm(p.since)}; changes go out when it's back.`;
     case "hubUnpaired":
-      return `Paused: ${hub} isn't linked any more. Unlink the board to keep it here, unsynced.`;
+      return `Paused: ${hub} isn't linked any more.`;
     case "noToken":
       return `Paused: ${hub} needs a new token.`;
     case "missing":
@@ -137,8 +137,40 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "refused":
       return `Paused: ${hub} refused: ${p.reason}`;
     case "leftGroup":
-      return "Paused: this board left the group it was linked in; unlink it and link it again.";
+      return "Paused: this board left the group it was linked in.";
   }
+};
+
+/** The one button that mends a pause or problem: what it says and what it
+ *  does (`token`: a new token for the hub; `connections`: Settings → Connections
+ *  (this computer's own keys); `ask`: an agent on the hub is asked to switch
+ *  the service on; `unlink`: unlink, keeping the tickets; `retry`:
+ *  resume and sync again). A pause you chose has Resume already. */
+export type SyncFix = { kind: "token" | "connections" | "setup" | "ask" | "unlink" | "retry"; label: string };
+
+export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
+  const system = SYSTEM_TITLE[s.system];
+  if (s.paused) {
+    switch (s.paused.kind) {
+      case "byYou":
+        return null;
+      case "hubOffline":
+        return { kind: "retry", label: "Try again" };
+      case "hubUnpaired":
+        return { kind: "unlink", label: "Keep the tickets, unlink" };
+      case "noToken":
+        return s.via.kind === "hub" ? { kind: "token", label: "New token…" } : { kind: "connections", label: "Open connections" };
+      case "missing":
+        // On a hub, someone there switches it on: an agent is asked to. On
+        // this computer, Desk turns it on itself (with the person's key).
+        return s.via.kind === "hub" ? { kind: "ask", label: `Ask an agent on ${hub} to switch ${system} on` } : { kind: "setup", label: `Turn ${system} on here` };
+      case "refused":
+        return { kind: "retry", label: "Try again" };
+      case "leftGroup":
+        return { kind: "unlink", label: "Keep the tickets, unlink" };
+    }
+  }
+  return s.problem ? { kind: "retry", label: "Try again" } : null;
 };
 
 /** The status a synced board's chip shows: synced, paused (with why), or a
