@@ -4,6 +4,7 @@ import {
   convertToWsl2,
   detectWsl,
   fixWslForwarding,
+  forgetWslResume,
   installWsl,
   onWslSetup,
   openUrl,
@@ -16,7 +17,7 @@ import "../styles/setup.css";
 import { explain, type Problem } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { useSetup } from "./store";
-import { firstPick, LOOK_AGAIN_MS, onlyChoice, optionFor, problemText, STEPS, stepsAfter, whyNotYet } from "./wsl";
+import { firstPick, LOOK_AGAIN_MS, START_SOON_MS, onlyChoice, optionFor, problemText, STEPS, stepsAfter, whyNotYet } from "./wsl";
 
 const WSL_DOCS = "https://learn.microsoft.com/windows/wsl/networking";
 
@@ -27,7 +28,12 @@ type Stage = "finding" | "no-wsl" | "choose" | "setup";
  *  person choose a distro, and sets Desk up there; workspaces they connect
  *  work meanwhile, so it can wait. */
 export function WindowsSetup() {
-  const skip = useSetup((s) => s.skip);
+  const skipSetup = useSetup((s) => s.skip);
+  // Not now: nothing is coming that needs Desk to open after a restart.
+  const skip = () => {
+    void forgetWslResume().catch(() => undefined);
+    skipSetup();
+  };
   const [stage, setStage] = useState<Stage>("finding");
   const [found, setFound] = useState<WslDetection | null>(null);
   const [pick, setPick] = useState<string | null>(null);
@@ -37,20 +43,26 @@ export function WindowsSetup() {
   const [installing, setInstalling] = useState(false);
   // Set up by itself once, when there's only one Linux it could use.
   const started = useRef(false);
+  // The only Linux, about to be set up: a moment to cancel first.
+  const [soon, setSoon] = useState<string | null>(null);
+  const stageNow = useRef(stage);
+  stageNow.current = stage;
 
   /** Looks for WSL; `quietly` while waiting for it, without the
-   *  "Looking…" screen. */
-  const find = async (quietly = false) => {
+   *  "Looking…" screen. A quiet look that comes back after the stage moved
+   *  on (or the wait ended) is ignored. */
+  const find = async (quietly = false, gone: () => boolean = () => false) => {
     if (!quietly) setStage("finding");
     try {
       const d = await detectWsl();
+      if (quietly && (gone() || stageNow.current !== "no-wsl")) return;
       if (quietly && d.problem) return;
       setFound(d);
       setPick(firstPick(d.distros));
       setProblem(null);
       setStage(d.problem ? "no-wsl" : "choose");
     } catch (e) {
-      if (quietly) return;
+      if (quietly || gone()) return;
       setProblem(explain(e, { what: "looking for WSL", retry: () => void find() }));
       setStage("no-wsl");
     }
@@ -62,10 +74,12 @@ export function WindowsSetup() {
   // the restart, or the person installing it their own way.
   useEffect(() => {
     if (stage !== "no-wsl") return;
-    const look = () => void find(true);
+    let cancelled = false;
+    const look = () => void find(true, () => cancelled);
     const every = setInterval(look, LOOK_AGAIN_MS);
     window.addEventListener("focus", look);
     return () => {
+      cancelled = true;
       clearInterval(every);
       window.removeEventListener("focus", look);
     };
@@ -102,15 +116,24 @@ export function WindowsSetup() {
     );
   const setUp = () => (option && pick ? setUpIn(pick, option.convert) : Promise.resolve());
 
-  // Only one Linux Desk can use: nothing to choose, so it carries on.
+  // Only one Linux Desk can use: nothing to choose, so it carries on,
+  // after a moment in which the person can still say no.
   useEffect(() => {
     if (stage !== "choose" || !found || started.current) return;
     const only = onlyChoice(found.distros);
     if (!only) return;
     started.current = true;
     setPick(only);
-    void setUpIn(only, false);
+    setSoon(only);
   }, [stage, found]);
+  useEffect(() => {
+    if (!soon) return;
+    const go = setTimeout(() => {
+      setSoon(null);
+      void setUpIn(soon, false);
+    }, START_SOON_MS);
+    return () => clearTimeout(go);
+  }, [soon]);
 
   const fix = () =>
     run(
@@ -191,7 +214,21 @@ export function WindowsSetup() {
           </>
         )}
 
-        {stage === "choose" && found && (
+        {stage === "choose" && soon && (
+          <>
+            <h2 className="display-lg">Setting up Desk in {soon}…</h2>
+            <p className="muted wsl-measure">
+              It’s the only Linux Desk can use here, so Desk sets its helper, agents and memory up there now.
+            </p>
+            <span className="wsl-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setSoon(null)}>
+                Cancel
+              </button>
+            </span>
+          </>
+        )}
+
+        {stage === "choose" && found && !soon && (
           <>
             <h2 className="display-lg">Which Linux should Desk use?</h2>
             <p className="muted">

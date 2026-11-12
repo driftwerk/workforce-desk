@@ -1181,6 +1181,7 @@ pub fn run() {
             voice::voice_status,
             wsl::wsl_detect,
             wsl::wsl_install,
+            wsl::wsl_forget_resume,
             wsl::wsl_convert,
             wsl::wsl_setup,
             wsl::wsl_fix_forwarding,

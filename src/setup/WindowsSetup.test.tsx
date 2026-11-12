@@ -8,6 +8,7 @@ const platform = vi.hoisted(() => ({
   setUpInWsl: vi.fn(),
   convertToWsl2: vi.fn(),
   fixWslForwarding: vi.fn(),
+  forgetWslResume: vi.fn(),
 }));
 vi.mock("../platform", async (real) => ({
   ...(await real<typeof import("../platform")>()),
@@ -21,7 +22,7 @@ const { WindowsSetup } = await import("./WindowsSetup");
 const { LocalSetupCard } = await import("./LocalSetupCard");
 const { useSetup } = await import("./store");
 const { DEFAULT_HOST, useHost } = await import("../shell/host");
-const { LOOK_AGAIN_MS } = await import("./wsl");
+const { LOOK_AGAIN_MS, START_SOON_MS } = await import("./wsl");
 
 const probe = { arch: "x86_64", kernel: "6.6.36.6-microsoft-standard-WSL2", user: "sarah", home: "/home/sarah", automount: "/mnt/", glibc: "2.39" };
 const ubuntu: WslFound = { distro: { name: "Ubuntu", state: "Running", version: 2, default: true }, probe, problem: null };
@@ -36,6 +37,7 @@ beforeEach(() => {
   platform.detectWsl.mockReset().mockResolvedValue(none);
   platform.installWsl.mockReset().mockResolvedValue(undefined);
   platform.setUpInWsl.mockReset().mockResolvedValue(undefined);
+  platform.forgetWslResume.mockReset().mockResolvedValue(undefined);
   useSetup.setState({ open: true, skipped: false });
   useHost.setState({ ...DEFAULT_HOST, platform: "windows", host: null });
 });
@@ -62,8 +64,39 @@ describe("Windows' setup carries on by itself", () => {
     platform.detectWsl.mockResolvedValue({ problem: null, distros: [ubuntu] });
     await tick(LOOK_AGAIN_MS + 10);
     expect(platform.detectWsl).toHaveBeenCalledTimes(2);
+    // A moment to say no first.
+    expect(screen.getByText("Setting up Desk in Ubuntu…")).toBeTruthy();
+    expect(platform.setUpInWsl).not.toHaveBeenCalled();
+    await tick(START_SOON_MS + 10);
     expect(platform.setUpInWsl).toHaveBeenCalledWith("Ubuntu");
     expect(screen.getByText("Setting up Desk in Ubuntu")).toBeTruthy();
+  });
+
+  it("lets the person cancel setting up in the only Linux, and then asks", async () => {
+    platform.detectWsl.mockResolvedValue({ problem: null, distros: [ubuntu] });
+    render(<WindowsSetup />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await tick(START_SOON_MS + 10);
+    expect(platform.setUpInWsl).not.toHaveBeenCalled();
+    expect(screen.getByText("Which Linux should Desk use?")).toBeTruthy();
+  });
+
+  it("ignores a look for WSL that comes back after setup has begun", async () => {
+    let answer: (d: WslDetection) => void = () => {};
+    render(<WindowsSetup />);
+    await flush();
+    // A look starts, and is slow.
+    platform.detectWsl.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    await tick(LOOK_AGAIN_MS + 10);
+    // Meanwhile the person installs another way and Desk moves on.
+    platform.detectWsl.mockResolvedValue({ problem: null, distros: [ubuntu, debian] });
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await flush();
+    expect(screen.getByText("Which Linux should Desk use?")).toBeTruthy();
+    // The slow look's answer comes back late: it changes nothing.
+    await act(async () => answer(none));
+    expect(screen.getByText("Which Linux should Desk use?")).toBeTruthy();
   });
 
   it("looks again when Desk comes forward", async () => {
@@ -110,6 +143,7 @@ describe("Not now", () => {
     expect(screen.queryByRole("region", { name: "Set up local agents" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Not now/ }));
     expect(useSetup.getState()).toMatchObject({ open: false, skipped: true });
+    expect(platform.forgetWslResume).toHaveBeenCalled();
     expect(screen.getByRole("region", { name: "Set up local agents" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Set it up" }));
     expect(useSetup.getState()).toMatchObject({ open: true, skipped: false });

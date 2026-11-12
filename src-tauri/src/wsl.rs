@@ -82,21 +82,53 @@ pub async fn wsl_install() -> CommandResult<()> {
             args: vec![
                 "-NoProfile".into(),
                 "-Command".into(),
-                "Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','Ubuntu' -Verb RunAs -Wait".into(),
+                INSTALL_ELEVATED.into(),
             ],
         };
-        let status = elevated.command().status().map_err(text)?;
+        let status = elevated.command().status().map_err(|e| {
+            forget_resume();
+            text(e)
+        })?;
         if !status.success() {
-            return Err(
-                "WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks."
-                    .into(),
-            );
+            forget_resume();
+            return Err(install_refusal(status.code()));
         }
         Ok(())
     })
     .await
     .map_err(text)?
 }
+
+/// Runs `wsl --install -d Ubuntu` as an administrator and exits with its
+/// code, or with [`DECLINED`] when the person didn't give Windows the OK.
+const INSTALL_ELEVATED: &str = "try { $p = Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','Ubuntu' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 1223 }; exit $p.ExitCode";
+/// Windows' ERROR_CANCELLED: the administrator prompt was declined.
+const DECLINED: i32 = 1223;
+
+/// What the person reads when WSL didn't install: whichever happened.
+fn install_refusal(code: Option<i32>) -> String {
+    match code {
+        Some(DECLINED) => "WSL wasn't installed: Windows didn't get an administrator's OK. Try again, and choose Yes when Windows asks.".into(),
+        Some(code) => format!(
+            "Windows couldn't install WSL (it stopped with code {code}). Try again; if it keeps stopping, run “wsl --install -d Ubuntu” in PowerShell as an administrator."
+        ),
+        None => "Windows couldn't install WSL: the install was stopped before it finished. Try again.".into(),
+    }
+}
+
+/// Forgets opening Desk after a restart: nothing is coming that needs it.
+#[tauri::command]
+pub fn wsl_forget_resume() {
+    forget_resume();
+}
+
+#[cfg(windows)]
+fn forget_resume() {
+    desk_wsl::startup::forget_resume();
+}
+
+#[cfg(not(windows))]
+fn forget_resume() {}
 
 /// Moves `distro` to WSL 2, which takes a few minutes and keeps its files.
 #[tauri::command]
@@ -233,7 +265,7 @@ fn bundled(app: &AppHandle) -> eyre::Result<PathBuf> {
 /// and starts it at every sign-in. The app's next launch uses it.
 #[tauri::command]
 pub async fn wsl_setup(app: AppHandle, distro: String) -> CommandResult<()> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let set_up = tauri::async_runtime::spawn_blocking(move || {
         let wsl = WslExe::system();
         let found = detect(&wsl)
             .distros
@@ -265,12 +297,14 @@ pub async fn wsl_setup(app: AppHandle, distro: String) -> CommandResult<()> {
         })?;
         reach_hub(&app, &wsl, &w)?;
         say(&app, Step::Startup, State::Done, None);
-        #[cfg(windows)]
-        desk_wsl::startup::forget_resume();
         Ok(())
     })
     .await
-    .map_err(text)?
+    .map_err(text)
+    .and_then(|r| r);
+    // Set up, or given up on: either way Desk needn't open after a restart.
+    forget_resume();
+    set_up
 }
 
 /// Turns on WSL's localhost forwarding in `%UserProfile%\.wslconfig`, then
@@ -321,6 +355,19 @@ pub async fn wsl_installed(app: tauri::State<'_, crate::App>) -> CommandResult<O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_declined_prompt_and_a_failed_install_are_said_apart() {
+        assert!(install_refusal(Some(DECLINED)).contains("didn't get an administrator's OK"));
+        let failed = install_refusal(Some(1));
+        assert!(
+            failed.starts_with("Windows couldn't install WSL (it stopped with code 1)"),
+            "{failed}"
+        );
+        assert!(!failed.contains("administrator's OK"));
+        assert!(install_refusal(None).starts_with("Windows couldn't install WSL"));
+        assert!(INSTALL_ELEVATED.contains("exit 1223") && INSTALL_ELEVATED.contains("-PassThru"));
+    }
 
     #[test]
     fn the_check_is_said_as_the_setup_shows_it() {

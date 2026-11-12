@@ -473,6 +473,8 @@ export interface SetupEvent {
 export const detectWsl = (): Promise<WslDetection> => invoke("wsl_detect");
 /** Installs WSL and Ubuntu as an administrator; Windows then restarts. */
 export const installWsl = (): Promise<void> => invoke("wsl_install");
+/** Forgets opening Desk after the restart WSL's install asks for. */
+export const forgetWslResume = (): Promise<void> => invoke("wsl_forget_resume");
 export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_convert", { distro });
 /** Sets Desk up in `distro`; progress arrives through `onWslSetup`. */
 export const setUpInWsl = (distro: string): Promise<void> => invoke("wsl_setup", { distro });

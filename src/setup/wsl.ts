@@ -62,6 +62,10 @@ export const onlyChoice = (found: WslFound[]): string | null => {
 export const whyNotYet = (option: DistroOption | null, busy: boolean): string | null =>
   busy ? null : !option ? "Choose a Linux first." : !option.usable ? `Desk can’t run in ${option.name}: ${option.note}` : null;
 
+/** How long "Setting up Desk in …" shows, with Cancel, before Desk sets
+ *  up in the only Linux it can use. */
+export const START_SOON_MS = 3_000;
+
 /** How often Desk looks for WSL again while it isn't there. */
 export const LOOK_AGAIN_MS = 10_000;
 
