@@ -1697,6 +1697,9 @@ legend.set-label {
   inset: 0 0 auto 0;
   height: 28px;
 }
+.voices-nav-label {
+  padding: 14px 10px 4px;
+}
 
 /* "Desk 0.3.0 is ready. …" with Restart when nothing's working, on a
    machine's row or status card. */

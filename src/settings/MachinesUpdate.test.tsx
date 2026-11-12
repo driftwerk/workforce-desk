@@ -155,7 +155,7 @@ it("updates Desk on this Mac for a machine on a newer one, after saying what the
   act(() => useUpdates.setState({ state: { phase: "idle" } }));
   await act(async () => fireEvent.click(button()));
   expect(bb.textContent).toContain("The newest Desk out for this Mac is 0.2.1, still older than buildbox’s 0.2.2");
-  expect(useUpdates.getState().waiting).toBe(false);
+  expect(within(bb).queryByRole("group", { name: "Restart Desk on this Mac" })).toBeNull();
   // Out and newer: downloaded, what the restart does said, and only on yes.
   act(() => useUpdates.setState({ state: { phase: "idle" } }));
   vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.3");
@@ -163,8 +163,13 @@ it("updates Desk on this Mac for a machine on a newer one, after saying what the
   expect(platform.updateDownload).toHaveBeenCalled();
   const ask = within(bb).getByRole("group", { name: "Restart Desk on this Mac" });
   expect(ask.textContent).toContain("Desk 0.2.3 is ready. Desk restarts to update.");
+  fireEvent.click(within(ask).getByRole("button", { name: "Not now" }));
   expect(useUpdates.getState().waiting).toBe(false);
-  fireEvent.click(within(ask).getByRole("button", { name: "Restart when nothing’s working" }));
+  expect(useUpdates.getState().later).toEqual({ version: "0.2.3" });
+  act(() => useUpdates.setState({ state: { phase: "idle" }, later: null }));
+  vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.3");
+  await act(async () => fireEvent.click(button()));
+  fireEvent.click(within(within(bb).getByRole("group", { name: "Restart Desk on this Mac" })).getByRole("button", { name: "Restart when nothing’s working" }));
   expect(useUpdates.getState().waiting).toBe(true);
   expect(bb.textContent).toContain("Desk on this Mac restarts into 0.2.3 once nothing here is working.");
   act(() => useUpdates.setState({ state: { phase: "idle" }, waiting: false }));
@@ -203,5 +208,5 @@ it("names the machines that follow when Desk is ready to restart, and says their
   vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, sessionsKept: false });
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
-  expect(screen.getByRole("dialog").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
+  expect(screen.getByRole("status").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
 });

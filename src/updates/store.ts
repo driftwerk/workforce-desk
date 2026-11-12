@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { DeskEvent, Session } from "../hub/types";
 import { deskListeners, useDesk, localSessions } from "../hub/store";
 import { resumeLater, takeResume, updateCheck, updateDownload, updateInstall, updating } from "../platform";
+import { flushEverywhere } from "./away";
 
 /** How often Desk looks for a new version while it runs. */
 export const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -66,9 +67,13 @@ interface Updates {
 
 /** A session whose CLI is running. */
 export const isLive = (s: Session): boolean => s.live;
-/** One mid-task: worth waiting for. */
+/** One mid-task, or one Desk can't tell isn't: worth waiting for. Asking
+ *  the person, with background work still running, one whose engine says
+ *  nothing of its state, or one adopted from a terminal (idle as far as
+ *  Desk can tell). */
 export const isWorking = (s: Session): boolean =>
-  s.live && (["starting", "working", "blocked"].includes(s.state) || (s.background?.count ?? 0) > 0);
+  s.live &&
+  (["starting", "working", "blocked", "asking"].includes(s.state) || (s.background?.count ?? 0) > 0 || s.caps?.state === "none" || s.origin === "external");
 
 /** `a` older than `b`, by their numbered parts (`0.2.10` after `0.2.9`). */
 export const olderThan = (a: string, b: string): boolean => {
@@ -89,6 +94,9 @@ export const isPostponed = (later: Later | null, version: string): boolean => !!
 const shown = (state: UpdatePhase): string | null =>
   state.phase === "ready" || state.phase === "available" ? state.version : null;
 
+/** A restart is being started (between its probe and installing). */
+let restarting = false;
+
 export const useUpdates = create<Updates>((set, get) => ({
   state: { phase: "idle" },
   waiting: false,
@@ -98,7 +106,8 @@ export const useUpdates = create<Updates>((set, get) => ({
   check: async (opts) => {
     if (opts?.asked && get().later) {
       keepLater(null);
-      set({ later: null });
+      // Put off no longer: a version already here installs when idle again.
+      set({ later: null, waiting: get().state.phase === "ready" });
     }
     const phase = get().state.phase;
     if (phase === "downloading" || phase === "installing") return;
@@ -130,7 +139,9 @@ export const useUpdates = create<Updates>((set, get) => ({
     set({ state: { phase: "downloading", version } });
     try {
       await updateDownload();
-      set({ state: { phase: "ready", version } });
+      // It installs by itself once nothing is working and the person has
+      // stepped away (`useRestartWhenIdle`), unless they put it off.
+      set({ state: { phase: "ready", version }, waiting: !isPostponed(get().later, version) });
     } catch (e) {
       set({ state: { phase: "idle" }, waiting: false });
       throw e;
@@ -155,12 +166,20 @@ export const useUpdates = create<Updates>((set, get) => ({
   },
   restart: async (resume) => {
     const { state } = get();
-    if (state.phase !== "ready") return;
-    // As it is now, not as of the last check.
-    await get().probe();
-    if (get().state !== state) return;
-    set({ state: { phase: "installing", version: state.version }, waiting: false });
+    // One restart at a time: a second asked meanwhile is the same one.
+    if (state.phase !== "ready" || restarting) return;
+    restarting = true;
     try {
+      // As it is now, not as of the last check.
+      await get().probe();
+      if (get().state !== state) return;
+      set({ state: { phase: "installing", version: state.version }, waiting: false });
+    } finally {
+      restarting = false;
+    }
+    try {
+      // What every window hasn't written yet (drafts among it) goes first.
+      await flushEverywhere();
       if (resume.length) await resumeLater(resume);
       // Installs this version (refused unless it's the newest downloaded)
       // and restarts into it.

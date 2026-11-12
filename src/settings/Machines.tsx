@@ -78,8 +78,14 @@ export function UpdateDesk({ machine }: { machine: Pick<Machine, "name" | "versi
   };
   if (state.phase === "downloading") return <span className="small muted">Downloading Desk {state.version}…</span>;
   if (state.phase === "installing") return <span className="small muted">Restarting into Desk {state.version}…</span>;
-  if (state.phase === "ready" && waiting)
-    return <span className="small muted">Desk on {here} restarts into {state.version} once nothing here is working.</span>;
+  // Downloaded but still older than the machine's: restarting into it
+  // wouldn't let Desk drive it, so this button offers no restart.
+  if (state.phase === "ready" && behind(state.version))
+    return (
+      <span className="small muted">
+        The newest Desk out for {here} is {state.version}, still older than {machine.name}’s {machine.version}, so it wouldn’t catch up yet.
+      </span>
+    );
   if (state.phase === "ready" && asking)
     return (
       <span className="machine-update-ask" role="group" aria-label={`Restart Desk on ${here}`}>
@@ -96,11 +102,20 @@ export function UpdateDesk({ machine }: { machine: Pick<Machine, "name" | "versi
         >
           Restart when nothing’s working
         </button>
-        <button type="button" className="link small" onClick={() => setAsking(false)}>
+        <button
+          type="button"
+          className="link small"
+          onClick={() => {
+            setAsking(false);
+            useUpdates.getState().postpone();
+          }}
+        >
           Not now
         </button>
       </span>
     );
+  if (state.phase === "ready" && waiting)
+    return <span className="small muted">Desk on {here} restarts into {state.version} once nothing here is working.</span>;
   if (state.phase === "available")
     return state.download ? (
       <button type="button" className="btn btn-sm btn-signal" onClick={() => openUrl(state.download!)}>
