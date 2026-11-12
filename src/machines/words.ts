@@ -75,13 +75,21 @@ export const stateText = (m: Machine, deskVersion: string | null): string | null
     case "updating":
       return `Updating Desk${deskVersion ? ` to ${deskVersion}` : ""}… its sessions carry on`;
     case "newer":
-      return `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`;
+      return `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk on ${thisComputerLower(useHost.getState().platform)} to drive it; its sessions keep running.`;
     case "failed":
       return m.state.message || "Desk couldn’t set it up.";
     case "updateFailed":
       return `Couldn’t update${deskVersion ? ` to ${deskVersion}` : ""}: ${m.state.message}`;
   }
 };
+
+/** Whether `problem` is Desk refusing a config that forwards ports: what
+ *  "Give Desk its own entry" fixes. */
+export const forwardsRefused = (problem: string | null | undefined): boolean => !!problem && /forwards ports for/.test(problem);
+
+/** Whether `target` is one of Desk's own SSH entries (see the native
+ *  side's `entry.rs`). */
+export const isDesks = (target: string): boolean => target.startsWith("desk-m-");
 
 /** A machine's name from the address it was added by: an SSH config host
  *  as it is, `user@address` as its address. */
@@ -243,7 +251,7 @@ export const rowLines = (
         second: [m.state.from && `Still on ${m.state.from}, driven no further until it matches`, keep].filter(Boolean).join(" · ") || null,
       };
     case "newer":
-      return { first: `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk here to drive it; its sessions keep running.`, tone: "blocked", second: null };
+      return { first: `It runs a newer Desk${m.version ? ` (${m.version})` : ""}. Update Desk on ${thisComputerLower(useHost.getState().platform)} to drive it; its sessions keep running.`, tone: "blocked", second: null };
     case "failed":
       if (keyRefused(m))
         return { first: `Offline: ${m.name} won’t take the SSH key Desk signs in with. Remove it and add it again: Desk asks for its password once.`, tone: "blocked", second: keep };
