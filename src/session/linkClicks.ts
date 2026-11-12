@@ -27,7 +27,8 @@ export function linkClicks(
   const readsMouse = () => term.modes.mouseTrackingMode !== "none";
 
   const down = (e: MouseEvent) => {
-    if (e.button !== 0 || !hovered || !readsMouse()) return;
+    // Shift or Option is xterm's own: it selects, and tells the program nothing.
+    if (e.button !== 0 || e.shiftKey || e.altKey || !hovered || !readsMouse()) return;
     // Kept from xterm, so neither its mouse report nor its own activation
     // follows: the release below opens it.
     e.stopPropagation();

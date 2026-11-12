@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
  *  longer one says "more", and "less" again once open. All of it is in its
  *  tooltip; clicking it edits it, as before. */
 export function GoalText({ goal, onEdit }: { goal: string; onEdit: () => void }) {
-  const text = useRef<HTMLButtonElement>(null);
+  const text = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   /** Whether two lines cut it short, measured while it's clamped. */
   const [long, setLong] = useState(false);
@@ -28,14 +28,8 @@ export function GoalText({ goal, onEdit }: { goal: string; onEdit: () => void })
   }
   return (
     <span className="goal-wrap">
-      <button
-        ref={text}
-        type="button"
-        className={`goal-text ${open ? "goal-open" : "goal-clamped"}`}
-        title={goal}
-        onClick={onEdit}
-      >
-        {goal}
+      <button type="button" className={`goal-text ${open ? "goal-open" : "goal-clamped"}`} title={goal} onClick={onEdit}>
+        <span ref={text}>{goal}</span>
       </button>
       {(long || open) && (
         <button type="button" className="link small goal-more" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
