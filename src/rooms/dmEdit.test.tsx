@@ -181,6 +181,24 @@ describe("↑ with nothing queued", () => {
     expect(box()).toBeTruthy();
   });
 
+  it("brings back what was set aside when the hub refuses the edit", async () => {
+    const s = await open();
+    act(() => up());
+    const text = screen.getByRole("textbox", { name: "Your last message" });
+    fireEvent.change(text, { target: { value: "yes file it and assign to me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and ask again" }));
+    expect(screen.queryByText("Filed ATL-571 and assigned it to Sam Lee.")).toBeNull();
+    const ref = s.chats.at(-1)!.turn_ref as string;
+    await act(async () => {
+      s.receive({ type: "error", session_id: "s-allan", turn_ref: ref, error: "only your latest message can be edited" });
+      s.receive({ type: "turn_end", session_id: "s-allan", turn_ref: ref });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await vi.waitFor(() => expect(screen.getByText("Filed ATL-571 and assigned it to Sam Lee.")).toBeTruthy());
+    expect(screen.getByText("yes file it and assign to Sam")).toBeTruthy();
+    expect(useChat.getState().setAside[KEY]).toEqual([]);
+  });
+
   it("cancels with Esc, and an unchanged save asks nothing", async () => {
     const s = await open();
     act(() => up());

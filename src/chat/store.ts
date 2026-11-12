@@ -143,6 +143,32 @@ export interface SendOptions {
 }
 
 /** A turn in your DM with an agent. */
+/** Edits sent and not yet settled, by conversation: the turn each went
+ *  as, and what it set aside. */
+const edits = new Map<string, { ref: string; aside: string[] }[]>();
+
+/** An edit the hub refused (busy, or not your latest message) changed
+ *  nothing there: what it set aside comes back, and the hub's copy is read
+ *  again, in case an earlier try of it had landed. One that ended is done. */
+const settleEdits = (key: string, c: ConversationState) => {
+  const pending = edits.get(key);
+  if (!pending?.length) return;
+  const left = pending.filter((e) => {
+    const state = c.turns[e.ref]?.state;
+    return state !== "failed" && state !== "ended";
+  });
+  const refused = pending.filter((e) => c.turns[e.ref]?.state === "failed");
+  if (left.length === pending.length) return;
+  if (left.length) edits.set(key, left);
+  else edits.delete(key);
+  if (!refused.length) return;
+  const back = new Set(refused.flatMap((e) => e.aside));
+  queueMicrotask(() => {
+    useChat.setState((s) => ({ setAside: { ...s.setAside, [key]: (s.setAside[key] ?? []).filter((id) => !back.has(id)) } }));
+    void useChat.getState().refreshHistory(key);
+  });
+};
+
 export const dmTurn = (voice?: DeskVoice): DeskTurn => ({
   place: { kind: "dm" },
   speaker: { kind: "person" },
@@ -364,6 +390,7 @@ const ensure = (key: string): boolean => {
       if (everConnected) void useChat.getState().refreshHistory(key);
       everConnected = true;
     }
+    settleEdits(key, c);
     // Free again: what's queued goes next.
     queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
@@ -648,6 +675,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (!text.trim()) return false;
     const sent = live.get(key)?.send(text, { turn: { ...dmTurn(), edit: { replaces } } });
     if (!sent) return false;
+    if (sent.turnRef) edits.set(key, [...(edits.get(key) ?? []), { ref: sent.turnRef, aside }]);
     set((s) => ({ setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...aside] } }));
     return true;
   },
@@ -698,6 +726,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.close();
     keepQueue(key, emptyQueue());
     held.delete(key);
+    edits.delete(key);
     clearTimeout(later.get(key));
     later.delete(key);
     unwatch.get(key)?.();
