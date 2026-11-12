@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useUi, type Anchor } from "../shell/ui";
 
 /** How long after the last scroll its position is kept. */
@@ -186,4 +186,139 @@ export function useFollowEnd(live: boolean, startAtEnd: boolean) {
   /** Whether the pane is at its newest message now; false lets go of it. */
   const setAtEnd = useCallback((v: boolean) => (atEnd.current = v), []);
   return { pane, list, follow, setAtEnd, atEnd };
+}
+
+/** The first message in sight in `pane` and how far its top is from the
+ *  pane's, wherever the pane is scrolled. */
+const firstInSight = (pane: HTMLElement): Anchor | null => {
+  const top = pane.getBoundingClientRect().top;
+  for (const el of pane.querySelectorAll<HTMLElement>("[data-message-id]")) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom > top) return { id: el.dataset.messageId!, offset: Math.round(r.top - top) };
+  }
+  return null;
+};
+
+/** Whether `pane` is at (or within reach of) its newest message. */
+const nearEnd = (pane: HTMLElement): boolean => pane.scrollHeight - pane.scrollTop - pane.clientHeight <= AT_NEWEST_PX;
+
+/** A chat that stays where you put it. At its newest message, it follows
+ *  what arrives and anything that grows. Scrolled up, the message you're
+ *  reading keeps its place through any change of height above or below it:
+ *  an earlier page landing, a table or image finishing drawing, a reply
+ *  streaming, the composer or its queue taking room. Nothing but you moves
+ *  it, so the webview's own scroll anchoring (which WebKit lacks) is off
+ *  for it in CSS.
+ *
+ *  Where you were reading is kept as `place` and put back when the chat
+ *  opens again, once that message is shown. Until `settled` (the
+ *  conversation read), a place not shown yet is waited for; after, the chat
+ *  opens at its end. `showAt` opens it at a message instead (the New line). */
+export function useStayPut(place: string | null, settled: boolean) {
+  const node = useRef<HTMLElement | null>(null);
+  const atEnd = useRef(true);
+  const held = useRef<Anchor | null>(null);
+  const waiting = useRef<Anchor | null>(place ? (useUi.getState().anchors[place] ?? null) : null);
+  // What Desk set scrollTop to last: a scroll event at it is Desk's own.
+  const ours = useRef<number | null>(null);
+  const [away, setAway] = useState(false);
+  const settledNow = useRef(settled);
+  settledNow.current = settled;
+
+  const write = (el: HTMLElement, top: number) => {
+    el.scrollTop = top;
+    ours.current = el.scrollTop;
+  };
+  const keep = useCallback(() => {
+    const el = node.current;
+    if (!el) return;
+    if (waiting.current) {
+      if ([...el.querySelectorAll<HTMLElement>("[data-message-id]")].some((m) => m.dataset.messageId === waiting.current!.id)) {
+        held.current = waiting.current;
+        atEnd.current = false;
+        waiting.current = null;
+        setAway(true);
+      } else if (settledNow.current) waiting.current = null;
+    }
+    if (atEnd.current) return write(el, el.scrollHeight);
+    const h = held.current;
+    if (!h) return;
+    const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find((m) => m.dataset.messageId === h.id);
+    if (!row) return;
+    const off = row.getBoundingClientRect().top - el.getBoundingClientRect().top - h.offset;
+    if (Math.abs(off) >= 1) write(el, el.scrollTop + off);
+  }, []);
+
+  /** Goes to the newest message, and follows it from there. */
+  const toLatest = useCallback(() => {
+    atEnd.current = true;
+    held.current = null;
+    waiting.current = null;
+    setAway(false);
+    keep();
+    if (place) useUi.getState().setAnchor(place, null);
+  }, [keep, place]);
+
+  /** Shows message `id` near the top, and holds it there. */
+  const showAt = useCallback(
+    (id: string, offset = 24) => {
+      atEnd.current = false;
+      held.current = { id, offset };
+      waiting.current = null;
+      setAway(true);
+      keep();
+    },
+    [keep],
+  );
+
+  const offScroll = useRef<(() => void) | null>(null);
+  const pane = useCallback(
+    (el: HTMLElement | null) => {
+      offScroll.current?.();
+      offScroll.current = null;
+      node.current = el;
+      if (!el) return;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onScroll = () => {
+        if (ours.current !== null && Math.abs(el.scrollTop - ours.current) <= 1) return;
+        ours.current = null;
+        // Yours: where you are now is where to stay.
+        waiting.current = null;
+        atEnd.current = nearEnd(el);
+        held.current = atEnd.current ? null : firstInSight(el);
+        setAway(!atEnd.current);
+        if (!place) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => useUi.getState().setAnchor(place, atEnd.current ? null : held.current), SETTLE_MS);
+      };
+      const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => keep());
+      // The pane itself resizing: the composer, or its queue, taking room.
+      ro?.observe(el);
+      el.addEventListener("scroll", onScroll, { passive: true });
+      offScroll.current = () => {
+        clearTimeout(timer);
+        ro?.disconnect();
+        el.removeEventListener("scroll", onScroll);
+      };
+      keep();
+    },
+    [keep, place],
+  );
+  useEffect(() => () => offScroll.current?.(), []);
+
+  /** What grows inside the pane, watched for heights no render changed. */
+  const observer = useRef<ResizeObserver | null>(null);
+  const list = useCallback(
+    (el: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      if (!el || typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(() => keep());
+      observer.current.observe(el);
+    },
+    [keep],
+  );
+  useEffect(() => () => observer.current?.disconnect(), []);
+
+  return { pane, list, keep, toLatest, showAt, away };
 }
