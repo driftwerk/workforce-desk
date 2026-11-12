@@ -242,14 +242,31 @@ fn refusal(status: reqwest::StatusCode, said: &serde_json::Value) -> String {
         .unwrap_or_else(|| format!("the hub said {status}"))
 }
 
+/// An account's id as the hub makes them: a UUID, in its one written form
+/// (lowercase, hyphenated). Anything else is none: it never reaches a path.
+fn account_id(raw: &str) -> Option<String> {
+    let id = raw.trim().to_ascii_lowercase();
+    let groups: Vec<&str> = id.split('-').collect();
+    let shaped = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups
+            .iter()
+            .all(|g| g.chars().all(|c| c.is_ascii_hexdigit()));
+    shaped.then_some(id)
+}
+
 /// What keeping a Claude token as a Desk account sends: a new account, or
-/// the one signed in again.
-fn account_request(account: &AccountUse, token: &str) -> (String, serde_json::Value) {
-    match &account.again {
-        Some(id) => (
-            format!("/api/desk/accounts/{id}/sign-in"),
-            serde_json::json!({ "token": token }),
-        ),
+/// the one signed in again. An account to sign in again whose id isn't one
+/// is refused before anything is sent.
+fn account_request(account: &AccountUse, token: &str) -> eyre::Result<(String, serde_json::Value)> {
+    Ok(match &account.again {
+        Some(raw) => {
+            let id =
+                account_id(raw).ok_or_else(|| eyre::eyre!("that isn't one of your accounts"))?;
+            (
+                format!("/api/desk/accounts/{id}/sign-in"),
+                serde_json::json!({ "token": token }),
+            )
+        }
         None => (
             "/api/desk/accounts".to_string(),
             serde_json::json!({
@@ -264,20 +281,20 @@ fn account_request(account: &AccountUse, token: &str) -> (String, serde_json::Va
                 "makeDefault": account.make_default,
             }),
         ),
-    }
+    })
 }
 
 /// Keeps a Claude token as a Desk account on this computer's hub (which
 /// checks Claude Code signs in by it first). Its id.
 fn keep_account(backend: &Backend, account: &AccountUse, token: &str) -> eyre::Result<String> {
-    let (path, body) = account_request(account, token);
+    let (path, body) = account_request(account, token)?;
     let (status, said) = post(backend, &path, &body)?;
     if !status.is_success() {
         eyre::bail!(refusal(status, &said));
     }
     said.pointer("/account/id")
         .and_then(|v| v.as_str())
-        .map(str::to_string)
+        .and_then(account_id)
         .ok_or_else(|| eyre::eyre!("the hub didn't say which account it kept"))
 }
 
@@ -673,7 +690,7 @@ mod tests {
         }))
         .unwrap();
         let account = to.account.unwrap();
-        let (path, body) = account_request(&account, "sk-ant-oat01-x");
+        let (path, body) = account_request(&account, "sk-ant-oat01-x").unwrap();
         assert_eq!(path, "/api/desk/accounts");
         assert_eq!(
             body,
@@ -682,11 +699,29 @@ mod tests {
         let again = AccountUse {
             name: None,
             make_default: false,
-            again: Some("7b1e".into()),
+            again: Some(" 7B1E0D2C-3F4A-4B5C-8D6E-0F1A2B3C4D5E ".into()),
         };
-        let (path, body) = account_request(&again, "sk-ant-oat01-y");
-        assert_eq!(path, "/api/desk/accounts/7b1e/sign-in");
+        let (path, body) = account_request(&again, "sk-ant-oat01-y").unwrap();
+        assert_eq!(
+            path,
+            "/api/desk/accounts/7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/sign-in"
+        );
         assert_eq!(body, serde_json::json!({ "token": "sk-ant-oat01-y" }));
+        // An id that isn't an account's never reaches a path.
+        for bad in [
+            "7b1e",
+            "../../vault/x",
+            "7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/../x",
+            "7b1e0d2c3f4a4b5c8d6e0f1a2b3c4d5e",
+            "g7b1e0d2-3f4a-4b5c-8d6e-0f1a2b3c4d5e",
+        ] {
+            let bad = AccountUse {
+                name: None,
+                make_default: false,
+                again: Some(bad.into()),
+            };
+            assert!(account_request(&bad, "sk-ant-oat01-y").is_err());
+        }
         // Done says which account it went to, only when it went to one.
         assert_eq!(
             serde_json::to_value(Progress::Done { account: None }).unwrap(),

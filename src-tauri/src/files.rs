@@ -141,6 +141,30 @@ pub struct Settings {
     pub push_to_talk_shortcut: Option<String>,
     #[serde(default, skip_serializing)]
     pub ask_shortcut: Option<String>,
+    /// Where the first-run setup stands: whether it has been offered, closed,
+    /// and the steps skipped. Older files have none (never offered).
+    #[serde(default)]
+    pub setup: Setup,
+}
+
+/// The first-run setup's progress, kept so it can be picked up again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Setup {
+    /// It has been offered once; it isn't opened by itself again.
+    #[serde(default)]
+    pub started: bool,
+    /// The person closed it; it shows again only when reopened.
+    #[serde(default)]
+    pub closed: bool,
+    /// Steps skipped, by id (`plan`, `helper`, …). Kept as text so a newer
+    /// Desk's steps survive.
+    #[serde(default)]
+    pub skipped: Vec<String>,
+    /// When it last changed (RFC 3339): of two windows' writes, the later
+    /// one's setup is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
 }
 
 fn default_theme() -> String {
@@ -185,6 +209,7 @@ impl Default for Settings {
             image_sites: Vec::new(),
             push_to_talk_shortcut: None,
             ask_shortcut: None,
+            setup: Setup::default(),
         }
     }
 }
@@ -238,8 +263,30 @@ fn migrated(mut settings: Settings) -> Settings {
     settings
 }
 
+/// Writes `settings`, keeping the setup the file already holds when it
+/// changed later than the one written: a window whose store is older (it
+/// read the file before another moved the setup on) never rolls it back.
 pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<()> {
-    desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(settings)?)
+    let mut settings = settings.clone();
+    if let Ok(Some(held)) = std::fs::read_to_string(paths.settings())
+        .ok()
+        .map(|s| serde_json::from_str::<Settings>(&s).map(|s| s.setup))
+        .transpose()
+    {
+        settings.setup = later_setup(settings.setup, held);
+    }
+    desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(&settings)?)
+}
+
+/// The later of two setups by when each last changed (RFC 3339, so they
+/// compare as text); `mine` on a tie or when neither says.
+fn later_setup(mine: Setup, held: Setup) -> Setup {
+    match (&mine.at, &held.at) {
+        (_, None) => mine,
+        (None, Some(_)) => held,
+        (Some(a), Some(b)) if b > a => held,
+        _ => mine,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -317,6 +364,73 @@ mod tests {
         .unwrap();
         assert!(load_settings(&paths).unwrap().tuple);
         assert_eq!(load_settings(&paths).unwrap().theme, "harbour");
+    }
+
+    #[test]
+    fn the_setup_is_kept_and_an_older_file_never_offered_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"harbour"}"#).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, Setup::default());
+        let settings = Settings {
+            setup: Setup {
+                started: true,
+                closed: false,
+                skipped: vec!["machines".into(), "a-newer-step".into()],
+                at: Some("2026-11-12T08:00:00.000Z".into()),
+            },
+            ..Settings::default()
+        };
+        save_settings(&paths, &settings).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, settings.setup);
+    }
+
+    #[test]
+    fn a_window_with_an_older_setup_never_rolls_back_a_later_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let setup = |closed, at: &str| Setup {
+            started: true,
+            closed,
+            skipped: Vec::new(),
+            at: Some(at.into()),
+        };
+        let later = setup(true, "2026-11-12T09:00:00.000Z");
+        save_settings(
+            &paths,
+            &Settings {
+                setup: later.clone(),
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        // Another window, read before that, writes its theme with the older setup.
+        save_settings(
+            &paths,
+            &Settings {
+                theme: "night".into(),
+                setup: setup(false, "2026-11-12T08:00:00.000Z"),
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        let read = load_settings(&paths).unwrap();
+        assert_eq!(read.theme, "night", "the rest of the write is kept");
+        assert_eq!(read.setup, later);
+        // A newer setup is written as it is.
+        let newest = setup(false, "2026-11-12T10:00:00.000Z");
+        save_settings(
+            &paths,
+            &Settings {
+                setup: newest.clone(),
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, newest);
+        // One that never said when (an older Desk's) doesn't undo a stamped one.
+        save_settings(&paths, &Settings::default()).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().setup, newest);
     }
 
     #[test]

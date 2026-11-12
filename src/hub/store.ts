@@ -118,6 +118,9 @@ export interface RoomDraft {
    *  stopped it. */
   state: "queued" | "connecting" | "busy" | "live" | "stalled" | "stopped" | "interrupted" | "failed";
   error?: string;
+  /** Why it failed, as a code a fix is chosen by: `workspace_gone`, its
+   *  member's workspace isn't connected to Desk any more. */
+  reason?: "workspace_gone";
   /** What its answer is posted under, once the hub has said its id. */
   source?: string;
 }

@@ -13,13 +13,10 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
   const [lead, setLead] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const crew = useChat((s) => s.roster.length);
-  const toggle = (k: string) => {
-    const next = picked.includes(k) ? picked.filter((x) => x !== k) : [...picked, k];
-    setPicked(next);
-    // Someone answers what @-mentions no one from the start: the first picked,
-    // until you choose another.
-    if (!lead || !next.includes(lead)) setLead(next[0] ?? null);
-  };
+  const toggle = (k: string) => setPicked((was) => (was.includes(k) ? was.filter((x) => x !== k) : [...was, k]));
+  // Someone answers what @-mentions no one from the start: the first picked,
+  // until you choose another (and again when that one is unpicked).
+  useEffect(() => setLead((lead) => (lead && picked.includes(lead) ? lead : (picked[0] ?? null))), [picked]);
   // What a second go reads: the form as it is then, not as it was when it failed.
   const latest = useRef({ name, picked, lead, hub });
   latest.current = { name, picked, lead, hub };

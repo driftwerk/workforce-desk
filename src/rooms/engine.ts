@@ -124,6 +124,9 @@ const draftOf = (a: Ask, patch: Partial<RoomDraft> = {}): RoomDraft => {
     state: "queued",
     ...was,
     ...patch,
+    // A reason is the failure's that gave it: any other state, or another
+    // failure, has none.
+    reason: patch.state === undefined ? was?.reason : patch.state === "failed" ? patch.reason : undefined,
     took: a.took.length,
   };
   if (a.sentAt) next.since = a.sentAt;
@@ -223,7 +226,11 @@ const placeSoFar = (roomId: string, thread: string | null) => {
 function send(a: Ask) {
   const gone = () => {
     a.state = "held";
-    show(a, { state: "failed", error: `${displayName(a.member)} is on a workspace Desk isn’t connected to any more.` });
+    show(a, {
+      state: "failed",
+      reason: "workspace_gone",
+      error: `${displayName(a.member)} is on a workspace Desk isn’t connected to any more.`,
+    });
   };
   const room = useDesk.getState().rooms[a.roomId];
   if (!room || !lineFor(room, a.member)) return gone();
