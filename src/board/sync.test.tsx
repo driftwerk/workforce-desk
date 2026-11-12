@@ -292,8 +292,8 @@ describe("the link dialog", () => {
     expect((via().getByRole("radio", { name: /^Globex/ }) as HTMLInputElement).disabled).toBe(true);
     fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
     fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "JQL" }));
-    fireEvent.change(screen.getByLabelText("The query"), { target: { value: "project = ACME ORDER BY created" } });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A Jira search" }));
+    fireEvent.change(screen.getByLabelText("The search"), { target: { value: "project = ACME ORDER BY created" } });
     await screen.findByText("JQL here can't sort: leave out ORDER BY.", undefined, { timeout: 2000 });
     expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
@@ -327,6 +327,66 @@ describe("the link dialog", () => {
     const cleared = await linkUp(/Clear them first/);
     expect(cleared.keepTickets).toBeUndefined();
     expect(deleteTicket.mock.calls.map((c) => c[0]).sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("offers a new board for the link when this one has tickets, leaving this one as it is", async () => {
+    const created: BoardT[] = [];
+    const createBoard = vi.fn(async (b: { name: string }) => {
+      const nb = { ...ACME, id: "b-new", name: b.name, prefix: null } as BoardT;
+      created.push(nb as never);
+      return nb;
+    });
+    const updateBoard = vi.fn(async (_id: string, _p: unknown) => ({ ...ACME, id: "b-new", name: "Acme · Jira", group: "g1" }) as BoardT);
+    useDesk.setState({ hub: { createBoard, updateBoard } as never });
+    useBoard.setState({ tickets: { t1: ticket(1) } });
+    render(<LinkBoardDialog board={{ ...ACME, group: "g1" }} tickets={1} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Make a new board and link it/ }));
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Link to ACME" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+    fireEvent.click(screen.getByRole("button", { name: "Link to ACME" }));
+    await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === "/api/desk/boards/b-new/link")).toBe(true));
+    expect(createBoard).toHaveBeenCalledWith({ name: "Acme · Jira" });
+    expect(updateBoard).toHaveBeenCalledWith("b-new", { group: "g1" });
+    expect(native.asked.some((a) => a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(false);
+    expect(native.asked.find((a) => a.path === "/api/desk/boards/b-new/link")!.body!.keepTickets).toBeUndefined();
+  });
+
+  it("says its import choices in plain words, with no JQL or JSON", async () => {
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    await screen.findByLabelText("Atlas’s Jira project key");
+    fireEvent.change(screen.getByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
+    await screen.findByRole("radiogroup", { name: "Import" });
+    for (const name of ["Assigned to me", "The current sprint", "A Jira search"]) {
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name }));
+      expect(document.querySelector(".sync-link")!.textContent).not.toMatch(/JQL|JSON|currentUser|openSprints/);
+    }
+    cleanup();
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    expect(document.body.textContent).not.toMatch(/JSON/);
+  });
+
+  it("lists the Jira projects to pick from when the hub says them, else takes a typed key", async () => {
+    native.route = (hub, method, path, body) => {
+      const r = localRoutes(method, path, body);
+      if (hub === "local" && path === "/api/desk/boards/link/check" && r.status === 200) return { status: 200, body: { ...(r.body as object), projects: [{ key: "ACME", name: "Acme web" }, { key: "OPS", name: "Operations" }] } };
+      return r;
+    };
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    const pick = (await screen.findByLabelText("Atlas’s Jira project")) as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.textContent)).toEqual(["Pick a project", "ACME · Acme web", "OPS · Operations"]);
+    expect(screen.queryByLabelText("Atlas’s Jira project key")).toBeNull();
+    fireEvent.change(pick, { target: { value: "OPS" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Link to OPS" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
   });
 
   it("links a whole team by default, and asks for a member id only where the hub can't say who you are", async () => {

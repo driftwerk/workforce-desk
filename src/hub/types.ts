@@ -1474,6 +1474,9 @@ export interface LinkCheck {
   agent?: { id: string; name: string } | null;
   /** Linear: the hub's teams. */
   teams?: { id: string; key: string; name: string }[];
+  /** Jira: the projects the person can reach, when the hub lists them
+   *  (absent from an older hub: the key is then typed). */
+  projects?: { key: string; name: string }[];
   /** The states an issue in the target can be in. */
   states?: string[];
   /** The state map the dialog starts from. */
