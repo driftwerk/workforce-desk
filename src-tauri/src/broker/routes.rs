@@ -129,6 +129,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/breakers/continue"),
     route("POST", "/api/desk/breakers/keep"),
     route("GET", "/api/desk/engines"),
+    route("GET", "/api/desk/features"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.
     route("GET", "/api/desk/accounts"),

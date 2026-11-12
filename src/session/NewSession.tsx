@@ -169,12 +169,19 @@ export function NewSession({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** What the hub there can do; null until it says. */
+  const [features, setFeatures] = useState<string[] | null>(null);
   useEffect(() => {
     let live = true;
     hub
       ?.engines()
       .then((e) => live && setEngines(e))
       .catch(() => live && setEngines(null));
+    setFeatures(null);
+    hub
+      ?.features?.()
+      .then((f) => live && setFeatures(f))
+      .catch(() => live && setFeatures([]));
     return () => {
       live = false;
     };
@@ -228,7 +235,10 @@ export function NewSession({
   // A folder the hub says isn't a git project has no separate copy; one it
   // doesn't say of may, and the hub says so if not.
   const noCopy = here.git === false;
-  const useCopy = copy && !noCopy;
+  // Only a hub that always makes the copy a new branch is asked for one: an
+  // older one would take an existing branch of that name.
+  const copyOld = features !== null && !features.includes("fresh-worktree");
+  const useCopy = copy && !noCopy && !copyOld && features !== null;
 
   // Recent folders here, each with where its project comes from.
   const recent = useRecentFolders(runOn, null);
@@ -410,12 +420,14 @@ export function NewSession({
             )}
           </div>
         )}
-        <label className={`ns-copy${noCopy ? " ns-copy-off" : ""}`}>
-          <input type="checkbox" checked={useCopy} disabled={noCopy} onChange={(e) => setCopy(e.target.checked)} />
+        <label className={`ns-copy${noCopy || copyOld ? " ns-copy-off" : ""}`}>
+          <input type="checkbox" checked={useCopy} disabled={noCopy || copyOld || features === null} onChange={(e) => setCopy(e.target.checked)} />
           <span className="ns-copy-main">
             <span>Work on a separate copy</span>
             <span className="muted small">
-              {noCopy
+              {copyOld
+                ? `Desk on ${where} needs an update before it can make a separate copy.`
+                : noCopy
                 ? "That folder isn’t a git project, so there’s no separate copy to make."
                 : useCopy
                   ? `Desk makes a new branch, ${branch}, and works there; the folder stays as it is.`

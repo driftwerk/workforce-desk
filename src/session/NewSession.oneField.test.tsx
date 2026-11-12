@@ -59,8 +59,12 @@ const engine = (e: Partial<EngineInfo> & Pick<EngineInfo, "engine" | "title">): 
 });
 const ENGINES = [engine({ engine: "claude", title: "Claude Code", views: ["terminal"] }), engine({ engine: "codex", title: "Codex", views: ["terminal"] })];
 
-const hubWith = (start: ReturnType<typeof vi.fn>) => {
-  useDesk.setState({ hub: { start, engines: vi.fn(async () => ENGINES), sessions: vi.fn(async () => []) } as unknown as DeskHub, openId: null, sessions: {} });
+const hubWith = (start: ReturnType<typeof vi.fn>, features = ["fresh-worktree", "folder-remotes", "keep-tickets"]) => {
+  useDesk.setState({
+    hub: { start, engines: vi.fn(async () => ENGINES), features: vi.fn(async () => features), sessions: vi.fn(async () => []) } as unknown as DeskHub,
+    openId: null,
+    sessions: {},
+  });
 };
 
 it("names a session from its goal, and a separate copy's branch too", () => {
@@ -134,4 +138,17 @@ it("reads git's and the folder's refusals as what to do", () => {
   expect(p?.fix?.label).toBe("Start without a copy");
   expect(startProblem("/work/gone is not a folder", { copy: false, offCopy, makeIt: () => {} })?.fix?.label).toBe("Make it and start");
   expect(startProblem("git worktree add: fatal: something", { copy: true, offCopy, makeIt: null })).toBeNull();
+});
+
+it("never asks an older Desk helper for a copy, which could take an existing branch: it says it needs an update", async () => {
+  remember("local", "/work/atlas", { copy: true });
+  const start = vi.fn(async () => ({ id: "s-4" }));
+  hubWith(start, []);
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.getByText(/^Desk on .+ needs an update before it can make a separate copy\.$/)).toBeTruthy();
+  const copy = screen.getByLabelText(/Work on a separate copy/) as HTMLInputElement;
+  expect([copy.checked, copy.disabled]).toEqual([false, true]);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.not.objectContaining({ worktree: expect.anything() }));
 });

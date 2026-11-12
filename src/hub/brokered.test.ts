@@ -42,6 +42,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   start: (h) => h.start({ engine: "claude", cwd: "/w" } as never),
   spend: (h) => h.spend("week" as never, "engine" as never, 10),
   engines: (h) => h.engines(),
+  features: (h) => h.features(),
   budgets: (h) => h.budgets(),
   putBudget: (h) => h.putBudget({ scope: { kind: "desk" }, group: null, period: "day", unit: "usd", amount: 11 }),
   patchBudget: (h) => h.patchBudget("b1", { amount: 12 }),
