@@ -1080,7 +1080,7 @@ function ItemRow({
       onHover={onHover}
     >
       {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
-      <ChargeBadge charge={charge} short className="gi-charge" />
+      <ChargeBadge charge={charge} session={local ? session.id : undefined} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />
     </SortRow>

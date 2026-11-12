@@ -22,6 +22,7 @@ vi.mock("../rooms/engine", async (real) => ({ ...(await real<object>()), say: vi
 vi.mock("../floor/Floor", async (real) => ({ ...(await real<object>()), useFloorReads: () => {} }));
 
 const { useDesk } = await import("../hub/store");
+const { emitTo } = await import("@tauri-apps/api/event");
 const { useChat } = await import("../chat/store");
 const { useUi } = await import("../shell/ui");
 const { useBoard } = await import("../board/store");
@@ -36,7 +37,8 @@ const { SEEN_MS } = await import("../unread/seen");
 const { GridCanvas } = await import("./GridView");
 const { MAIN_GRID } = await import("./model");
 const { layOut, startGrids, toggleFill, useGrids } = await import("./store");
-const { columnDroppedOn } = await import("../board/BoardView");
+const { Board, columnDroppedOn } = await import("../board/BoardView");
+const { TicketPopup } = await import("../board/TicketDetail");
 const { landing, columns } = await import("../board/board");
 const { NARROW_PANE, SHORT_PANE } = await import("./kinds");
 const { ACME, ticket } = await import("../board/testing");
@@ -166,6 +168,7 @@ beforeEach(() => {
       ].map((t) => [t.id, t]),
     ),
     open: null,
+    popup: null,
   });
   // Platform holds acme-web and Allan; acme-api and Lattice are in no group.
   useSettings.setState({
@@ -308,10 +311,17 @@ describe("a board in a pane", () => {
     expect(within(counts).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["To do2", "Doing1", "Review1", "Waiting on me2"]);
   });
 
-  it("opens a ticket in its panel", () => {
+  it("opens a ticket as a popup over the grid; a grid's own window has it opened in the main window", () => {
     grid("halves", acme);
     fireEvent.click(within(pane("Acme")).getByText("Ticket 4"));
-    expect(useBoard.getState().open).toBe("t4");
+    expect(useBoard.getState().popup).toBe("t4");
+    expect(useBoard.getState().open).toBeNull();
+    act(() => useBoard.setState({ popup: null }));
+    useDesk.setState({ detached: true });
+    fireEvent.click(within(pane("Acme")).getByText("Ticket 4"));
+    expect(useBoard.getState().popup).toBeNull();
+    expect(vi.mocked(emitTo)).toHaveBeenCalledWith("main", "desk-open", { kind: "ticket", id: "t4" });
+    useDesk.setState({ detached: false });
   });
 });
 
@@ -476,5 +486,203 @@ describe("a board pane's column tabs", () => {
     width = NARROW_PANE - 1;
     act(() => observers.forEach((o) => o()));
     expect(within(pane("Acme")).getByRole("tablist", { name: "Column" })).toBeTruthy();
+  });
+});
+
+describe("a board pane's columns scroll sideways whenever they don't fit", () => {
+  const boardCss = fs.readFileSync(`${cwd}/src/styles/board.css`, "utf8");
+  const rule = (src: string, selector: string): string => {
+    const at = src.indexOf(`${selector} {`);
+    return at < 0 ? "" : src.slice(at, src.indexOf("}", at));
+  };
+
+  it("a sideways swipe over a column's cards goes on to the columns: its cards hold up and down only", () => {
+    const cards = rule(boardCss, ".board-cards");
+    expect(cards).toMatch(/overscroll-behavior-y: contain;/);
+    expect(cards).not.toMatch(/overscroll-behavior: contain;/);
+  });
+
+  it("a pane's columns don't snap, so a small step isn't pulled back", () => {
+    expect(rule(css, ".board-in-pane .board-cols")).toMatch(/scroll-snap-type: none;/);
+  });
+
+  it("their scrollbar is in sight, in the theme's colours", () => {
+    expect(boardCss).toMatch(/\.board-cols::-webkit-scrollbar \{\s*height: 8px;/);
+    expect(rule(boardCss, ".board-cols::-webkit-scrollbar-thumb")).toMatch(/var\(--faint\)/);
+    expect(rule(boardCss, ".board-cols::-webkit-scrollbar-thumb:hover")).toMatch(/var\(--faint\)/);
+    // scrollbar-color would override the rules above in Chromium.
+    expect(boardCss).not.toMatch(/scrollbar-color/);
+  });
+
+  it("Shift+wheel left vertical scrolls them sideways; one the system already turned sideways is left to it", () => {
+    grid("halves", acme);
+    const cols = pane("Acme").querySelector<HTMLElement>(".board-cols")!;
+    Object.defineProperty(cols, "scrollWidth", { configurable: true, value: 1500 });
+    Object.defineProperty(cols, "clientWidth", { configurable: true, value: 600 });
+    const by: number[] = [];
+    cols.scrollBy = ((o: ScrollToOptions) => by.push(o.left ?? 0)) as typeof cols.scrollBy;
+    const shifted = new WheelEvent("wheel", { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(shifted);
+    expect(by).toEqual([120]);
+    expect(shifted.defaultPrevented).toBe(true);
+    const turned = new WheelEvent("wheel", { deltaX: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(turned);
+    const plain = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    cols.dispatchEvent(plain);
+    expect(by).toEqual([120]);
+    expect(turned.defaultPrevented || plain.defaultPrevented).toBe(false);
+    // Columns that snap (the Board view's) are left to the browser.
+    cols.style.scrollSnapType = "x mandatory";
+    const snapping = new WheelEvent("wheel", { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(snapping);
+    expect(by).toEqual([120]);
+    expect(snapping.defaultPrevented).toBe(false);
+  });
+});
+
+describe("a ticket opened from a board pane", () => {
+  beforeEach(() => {
+    // The same hub, which a ticket's view also reads (a new one would read
+    // the board again).
+    Object.assign(useDesk.getState().hub!, {
+      ticketHistory: vi.fn(async () => ({ events: [], more: false })),
+      ledger: vi.fn(async () => ({ rows: [], next: null })),
+      searchTickets: vi.fn(async () => []),
+    });
+  });
+  const withPopup = () => {
+    layOut(MAIN_GRID, "halves", { slot: 0, content: acme });
+    return render(
+      <>
+        <Canvas />
+        <TicketPopup />
+      </>,
+    );
+  };
+  const card = (key: string) => within(pane("Acme")).getByText(key).closest("button")!;
+  const dialog = () => screen.queryByRole("dialog", { name: /^Ticket / });
+
+  it("opens as a popup over the grid, not in the side panel", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    expect(dialog()).toBeTruthy();
+    expect(dialog()!.getAttribute("aria-modal")).toBe("true");
+    expect(dialog()!.getAttribute("aria-label")).toBe("Ticket ACM-1");
+    expect(useBoard.getState().popup).toBe("t1");
+    expect(useBoard.getState().open).toBeNull();
+    // The same ticket view as the side panel's.
+    expect(within(dialog()!).getByRole("button", { name: "Ticket 1" })).toBeTruthy();
+    expect(within(dialog()!).getByRole("combobox", { name: "State" })).toBeTruthy();
+  });
+
+  it("closes on Esc, and focus goes back to its card (opened by a click, which focuses nothing in WebKit)", () => {
+    withPopup();
+    const c = card("ACM-1");
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(c);
+    expect(dialog()!.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(dialog()).toBeNull();
+    expect(useBoard.getState().popup).toBeNull();
+    expect(document.activeElement).toBe(card("ACM-1"));
+  });
+
+  it("closes on a click outside it, not on one inside", () => {
+    withPopup();
+    fireEvent.click(card("ACM-2"));
+    fireEvent.mouseDown(within(dialog()!).getByRole("button", { name: "Ticket 2" }));
+    expect(dialog()).toBeTruthy();
+    fireEvent.mouseDown(dialog()!.parentElement!);
+    expect(dialog()).toBeNull();
+  });
+
+  it("keeps Tab inside it", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    const inside = [...dialog()!.querySelectorAll<HTMLElement>("button:not([disabled]), select, input, textarea")];
+    inside.at(-1)!.focus();
+    fireEvent.keyDown(inside.at(-1)!, { key: "Tab" });
+    expect(document.activeElement).toBe(inside[0]);
+    fireEvent.keyDown(inside[0]!, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(inside.at(-1));
+  });
+
+  it("goes back to its card when that card was redrawn meanwhile", () => {
+    withPopup();
+    const c = card("ACM-1");
+    c.focus();
+    fireEvent.click(c);
+    // Moved to Review elsewhere: its card is drawn again in another column.
+    act(() => useBoard.getState().heard({ ...useBoard.getState().tickets.t1!, state: "review" }));
+    expect(c.isConnected).toBe(false);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(card("ACM-1"));
+  });
+
+  it("Open in side panel moves it to the side panel", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Open in side panel" }));
+    expect(dialog()).toBeNull();
+    expect(useBoard.getState().popup).toBeNull();
+    expect(useBoard.getState().open).toBe("t1");
+  });
+
+  it("a ticket it needs opens in the popup too", () => {
+    act(() => useBoard.getState().heard({ ...useBoard.getState().tickets.t1!, needs: ["t2"] }));
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(dialog()!.querySelector<HTMLElement>(".ticket-need-open")!);
+    expect(useBoard.getState().popup).toBe("t2");
+    expect(useBoard.getState().open).toBeNull();
+    expect(dialog()!.getAttribute("aria-label")).toBe("Ticket ACM-2");
+  });
+
+  it("Esc in its Snooze menu closes the menu, not the popup", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Snooze" }));
+    const menu = screen.getByRole("menu", { name: "Snooze" });
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0]!, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Snooze" })).toBeNull();
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("Esc in its Delete confirmation closes only that", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Delete ticket…" }));
+    const confirm = screen.getByRole("dialog", { name: "Delete ACM-1?" });
+    fireEvent.keyDown(document.activeElement ?? confirm, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Delete ACM-1?" })).toBeNull();
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("after a need opened in it, focus is still in it, so Esc still closes it", () => {
+    act(() => useBoard.getState().heard({ ...useBoard.getState().tickets.t1!, needs: ["t2"] }));
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    const need = dialog()!.querySelector<HTMLElement>(".ticket-need-open")!;
+    need.focus();
+    fireEvent.click(need);
+    expect(dialog()!.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(dialog()).toBeNull();
+  });
+
+  it("a ticket that can't be read closes it rather than reading forever", () => {
+    withPopup();
+    useDesk.setState({ hub: null });
+    act(() => useBoard.getState().openPopup("t-unknown"));
+    expect(dialog()).toBeNull();
+    expect(useBoard.getState().popup).toBeNull();
+  });
+
+  it("the Board view itself still opens it in the side panel", () => {
+    useBoard.setState({ shown: ACME.id });
+    render(<Board />);
+    fireEvent.click(screen.getByText("ACM-1").closest("button")!);
+    expect(useBoard.getState().open).toBe("t1");
+    expect(useBoard.getState().popup).toBeNull();
   });
 });

@@ -9,16 +9,7 @@ import { addToGrid } from "./windows";
  *  sends it, and is shown there; `onShown` then closes the panel. */
 export function PutInGrid({ content, label, onShown }: { content: PaneContent; label: string; onShown: () => void }) {
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement } | null>(null);
-  const order = useGrids((s) => s.order);
-  const grids = useGrids((s) => s.grids);
-  const put = (gridId: string | null) => {
-    if (addToGrid(content, gridId).shown) onShown();
-  };
-  const entries: MenuEntry[] = [
-    ...order.flatMap((id): MenuEntry[] => (grids[id] ? [{ kind: "item", label: grids[id]!.name, onSelect: () => put(id) }] : [])),
-    ...(order.some((id) => grids[id]) ? [{ kind: "separator" as const }] : []),
-    { kind: "item", label: "New grid", onSelect: () => put(null) },
-  ];
+  const entries = usePutInGrid(content, onShown);
   return (
     <>
       <button
@@ -52,4 +43,19 @@ export function PutInGrid({ content, label, onShown }: { content: PaneContent; l
       )}
     </>
   );
+}
+
+/** The grids to put `content` in, and a new one: for "Put in grid ▾" and
+ *  for a menu's "Put in grid" submenu. `onShown` runs once it's shown. */
+export function usePutInGrid(content: PaneContent, onShown: () => void): MenuEntry[] {
+  const order = useGrids((s) => s.order);
+  const grids = useGrids((s) => s.grids);
+  const put = (gridId: string | null) => {
+    if (addToGrid(content, gridId).shown) onShown();
+  };
+  return [
+    ...order.flatMap((id): MenuEntry[] => (grids[id] ? [{ kind: "item", label: grids[id]!.name, onSelect: () => put(id) }] : [])),
+    ...(order.some((id) => grids[id]) ? [{ kind: "separator" as const }] : []),
+    { kind: "item", label: "New grid", onSelect: () => put(null) },
+  ];
 }

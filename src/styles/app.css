@@ -832,28 +832,6 @@ body.side-resizing * {
   text-overflow: ellipsis;
   padding: 1px 7px;
 }
-/* A session card's word on who runs it, under its goal. */
-.charge-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.charge-strip-quiet {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.charge-strip-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
 .charge-strip-buttons {
   display: flex;
   gap: 6px;
@@ -1323,20 +1301,6 @@ body.side-resizing * {
   flex-direction: column;
   min-width: 0;
 }
-.session-goal {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal > input,
-.session-goal > .goal-text,
-.session-goal > .goal-wrap {
-  flex: 1;
-  min-width: 0;
-}
 /* A long goal takes two lines, not the session's height: "more" shows the
    rest, scrolling past a third of the window. */
 .goal-wrap {
@@ -1363,11 +1327,6 @@ body.side-resizing * {
 .goal-more {
   flex: none;
   padding: 2px 0;
-}
-/* The session's whole line, read under its terminal. */
-.session-line-history {
-  flex: none;
-  white-space: nowrap;
 }
 /* Where the session already is in the grids, with a way to each. */
 .session-where {
@@ -1399,15 +1358,6 @@ body.side-resizing * {
 .session-where .link {
   flex: none;
 }
-.session-approvals {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal input,
 .goal-text {
   width: 100%;
   border: 0;
@@ -2700,6 +2650,43 @@ button.thread-bar:hover {
   content: "";
   flex: 1;
   border-top: 1px solid var(--blocked);
+}
+.jump-pill-count {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+/* A DM keeps its reader in place itself (see useStayPut): the webview's own
+   anchoring, which only some engines have, would move it twice. */
+.dm-scroll {
+  overflow-anchor: none;
+}
+.dm-list {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+.composer-hint {
+  align-self: center;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--faint);
+}
+.composer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+}
+@container chat (max-width: 560px) {
+  .composer-hint {
+    display: none;
+  }
 }
 .jump-pill {
   position: absolute;

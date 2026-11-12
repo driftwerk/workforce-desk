@@ -20,6 +20,9 @@ pub struct SshExe {
     /// Desk's own key, and the machines (by target) it was put on: those
     /// also sign in with it. Shared by every clone.
     own: Arc<OwnKey>,
+    /// Desk's own SSH entries ([`crate::entry`]): read with `-F` for a
+    /// machine reached by one.
+    desk_config: Option<PathBuf>,
 }
 
 /// Desk's own SSH key ([`crate::own_key`]): its file, and the targets of
@@ -55,7 +58,19 @@ impl SshExe {
             program: program.into(),
             until: None,
             own: Arc::default(),
+            desk_config: None,
         }
+    }
+
+    /// This `ssh`, with Desk's own SSH entries in `file` (`machine_desk_entry`).
+    pub fn with_desk_config(mut self, file: impl Into<PathBuf>) -> Self {
+        self.desk_config = Some(file.into());
+        self
+    }
+
+    /// Where Desk keeps its own SSH entries, when it does.
+    pub fn desk_config(&self) -> Option<&Path> {
+        self.desk_config.as_deref()
     }
 
     /// This `ssh`, with Desk's own key kept at `file` (made when first
@@ -95,6 +110,8 @@ impl SshExe {
     /// `args` with Desk's own key offered (`-i`) before the target, when
     /// the machine they name takes it and the key is there.
     fn with_identity(&self, args: &[String]) -> Vec<String> {
+        let args = self.with_desk_entries(args);
+        let args = args.as_slice();
         let Some(file) = self.own.file.as_ref().filter(|f| f.is_file()) else {
             return args.to_vec();
         };
@@ -112,6 +129,23 @@ impl SshExe {
         }
     }
 
+    /// `args` reading Desk's own entries first (`-F`), when its target is
+    /// one of them; anything else as it is.
+    fn with_desk_entries(&self, args: &[String]) -> Vec<String> {
+        let target = args
+            .iter()
+            .position(|a| a == "--")
+            .and_then(|dash| args.get(dash + 1));
+        match (&self.desk_config, target) {
+            (Some(file), Some(t)) if crate::entry::is_desks(t) => {
+                let mut out = vec!["-F".to_string(), file.to_string_lossy().into_owned()];
+                out.extend_from_slice(args);
+                out
+            }
+            _ => args.to_vec(),
+        }
+    }
+
     /// This `ssh`, with every command it runs ended at `at` (said to have
     /// run out of time): one deadline over several commands.
     pub fn until(&self, at: std::time::Instant) -> Self {
@@ -119,6 +153,7 @@ impl SshExe {
             program: self.program.clone(),
             until: Some(at),
             own: Arc::clone(&self.own),
+            desk_config: self.desk_config.clone(),
         }
     }
 
@@ -494,6 +529,17 @@ pub fn openssh_version(said: &str) -> Option<(u32, u32)> {
 }
 
 impl SshExe {
+    /// What ssh makes of `host` with the config `file` (`ssh -F file -G
+    /// host`, which connects nowhere).
+    pub fn settings_with(&self, file: &Path, host: &str) -> std::io::Result<std::process::Output> {
+        Command::new(&self.program)
+            .arg("-F")
+            .arg(file)
+            .args(["-G", "--", host])
+            .stdin(Stdio::null())
+            .output()
+    }
+
     /// This ssh's OpenSSH version (`ssh -V`, which connects nowhere); none
     /// when it can't say.
     pub fn version(&self) -> Option<(u32, u32)> {
@@ -526,7 +572,7 @@ pub fn no_forwards(machine: &Machine, settings: &Settings) -> Result<(), String>
         return Ok(());
     }
     Err(format!(
-        "Your SSH config forwards ports for {} ({}). Desk keeps its connection open all the time, so it won't carry them: give Desk a Host entry without forwards.",
+        "Your SSH config forwards ports for {} ({}). Desk keeps its connection open all the time, so it won't carry them.",
         machine.name,
         settings.forwards.join(", ")
     ))
@@ -535,6 +581,36 @@ pub fn no_forwards(machine: &Machine, settings: &Settings) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_machine_reached_by_desks_own_entry_reads_desks_file() {
+        let ssh = SshExe::at("ssh").with_desk_config("/d/machines/ssh/config");
+        let args = |target: &str| -> Vec<String> {
+            vec!["-T".into(), "--".into(), target.into(), "true".into()]
+        };
+        assert_eq!(
+            ssh.with_desk_entries(&args("desk-m-devbox-a1b2c3")),
+            [
+                "-F",
+                "/d/machines/ssh/config",
+                "-T",
+                "--",
+                "desk-m-devbox-a1b2c3",
+                "true"
+            ]
+        );
+        assert_eq!(ssh.with_desk_entries(&args("devbox")), args("devbox"));
+        assert_eq!(
+            SshExe::at("ssh").with_desk_entries(&args("desk-m-x-1")),
+            args("desk-m-x-1")
+        );
+        // Its clones keep it.
+        let later = ssh.until(std::time::Instant::now());
+        assert_eq!(
+            later.desk_config(),
+            Some(Path::new("/d/machines/ssh/config"))
+        );
+    }
     use desk_core::machine::{MachineId, Target};
 
     fn devbox() -> Machine {
