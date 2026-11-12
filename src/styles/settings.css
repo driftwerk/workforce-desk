@@ -1710,3 +1710,14 @@ legend.set-label {
   gap: 8px;
   max-width: 420px;
 }
+
+/* "Also sign Codex out on devbox", under the uninstall choice. */
+.remove-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0 28px;
+}
+.remove-option input {
+  accent-color: var(--signal);
+}

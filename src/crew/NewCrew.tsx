@@ -13,7 +13,7 @@ import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../setti
 import { accountsOf, freeName, useAccounts } from "../engines/accounts";
 import { useProviders } from "../providers/store";
 import { useUi } from "../shell/ui";
-import { createLocalAgent, NotSetUp } from "./local";
+import { createLocalAgent, NAME_TAKEN, nameTaken, NotSetUp } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 import { NEW_CREW_LINE } from "../shell/newLines";
 
@@ -21,7 +21,7 @@ import { NEW_CREW_LINE } from "../shell/newLines";
  *  think and sound starting on Desk's defaults. */
 export function NewCrew({ onClose }: { onClose: () => void }) {
   const { hub, fail, openRoom } = useDesk();
-  const { refreshRoster, openDm } = useChat();
+  const { roster, refreshRoster, openDm } = useChat();
   const { newAgent, defaultVoice, agentVoices, set } = useSettings();
   const { providers, loaded } = useProviderList({ fresh: true });
   const [name, setName] = useState("");
@@ -32,6 +32,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
 
   const who = name.trim();
+  const clash = nameTaken(who, roster, "local");
   const brain = chosenBrain ?? (loaded ? newAgentBrain(newAgent, providers) : null);
   const provider = brain ? providers.find((p) => p.id === brain.provider) : undefined;
   // Checked before they're made: on a provider that isn't connected, their
@@ -40,7 +41,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hub || !who || !purpose.trim()) return;
+    if (!hub || !who || !purpose.trim() || clash) return;
     setBusy(true);
     let id: string;
     try {
@@ -50,6 +51,11 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
         .getState()
         .roster.filter((a) => a.hubId === "local")
         .map((a) => a.id);
+      // A name taken since the roster was last read is taken all the same.
+      if (nameTaken(who, useChat.getState().roster, "local")) {
+        setBusy(false);
+        return;
+      }
       // All of them in one go, or none of them: see `createLocalAgent`.
       id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken, voice ?? defaultVoice);
       if (voice) set({ agentVoices: { ...agentVoices, [`local/${id}`]: voice } });
@@ -97,7 +103,20 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
           <div className="dialog-scroll">
             <label className="field-stack">
               <span className="field-label">Name</span>
-              <input data-autofocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Scout" required />
+              <input
+                data-autofocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Scout"
+                required
+                aria-invalid={clash || undefined}
+                aria-describedby={clash ? "new-crew-name-taken" : undefined}
+              />
+              {clash && (
+                <span id="new-crew-name-taken" className="small state-blocked" role="status">
+                  {NAME_TAKEN}
+                </span>
+              )}
             </label>
             <label className="field-stack">
               <span className="field-label">What they’re for</span>
@@ -127,7 +146,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-signal" disabled={busy || !who || !purpose.trim() || !ready} title={ready ? undefined : `Connect ${provider?.name ?? "their provider"} first`}>
+            <button type="submit" className="btn btn-signal" disabled={busy || !who || !purpose.trim() || !ready || clash} title={ready ? undefined : `Connect ${provider?.name ?? "their provider"} first`}>
               {busy ? `Setting up ${who}…` : who ? `Create ${who}` : "Create"}
             </button>
           </footer>
