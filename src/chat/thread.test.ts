@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { emptyConversation } from "./conversation";
 import { useChat, turnOf } from "./store";
 import { contextBefore, copyToChat, CONTEXT_LINES, fetchThreads, splitKey, threadChannel, threadKey } from "./thread";
 import type { Agent, ChatMessage, HubAccount } from "./types";
@@ -90,14 +91,32 @@ describe("A DM's threads beside the DM", () => {
       hubs: [hub],
       roster: [agent],
       // Held with no live conversation of their own: only the store's maps know them.
-      histories: { "acme/scout": history, "acme/scout#q": history, "acme/other#q": history },
+      // One thread only in histories, one only in queues, one only in conversations.
+      histories: { "acme/scout": history, "acme/scout#h": history, "acme/other#q": history },
       queues: { "acme/scout#q": queue, "acme/other#q": queue },
+      conversations: { "acme/scout#c": emptyConversation() },
       threads: { "acme/scout": [], "acme/other": [] },
     });
     useChat.getState().forget("acme/scout");
     const s = useChat.getState();
     expect(Object.keys(s.histories)).toEqual(["acme/other#q"]);
     expect(Object.keys(s.queues)).toEqual(["acme/other#q"]);
+    expect(Object.keys(s.conversations)).toEqual([]);
     expect(Object.keys(s.threads)).toEqual(["acme/other"]);
+  });
+
+  it("are not set by a read begun before the DM was forgotten, once it is opened again", async () => {
+    const open = () =>
+      useChat.setState({ conversations: { "acme/scout": { ...emptyConversation(), features: new Set(["desk.dm_threads"]) } } });
+    useChat.setState({ hubs: [hub], roster: [agent], threads: {} });
+    open();
+    let late!: (r: unknown) => void;
+    net.fetch.mockReturnValueOnce(new Promise((resolve) => (late = resolve)));
+    const stale = useChat.getState().loadThreads("acme/scout");
+    useChat.getState().forget("acme/scout");
+    open();
+    late({ ok: true, json: async () => ({ threads: [{ parent: "old", replies: 9 }] }) });
+    await stale;
+    expect(useChat.getState().threads["acme/scout"]).toBeUndefined();
   });
 });

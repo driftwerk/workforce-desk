@@ -900,6 +900,8 @@ export const useChat = create<ChatStore>((set, get) => ({
       for (const k of new Set(kept)) if (k.startsWith(`${key}#`)) get().forget(k);
     }
     live.get(key)?.close();
+    // A read of its threads still out is stale once it is forgotten, even if it is opened again.
+    threadsBegun.set(key, (threadsBegun.get(key) ?? 0) + 1);
     keepQueue(key, emptyQueue());
     held.delete(key);
     edits.delete(key);
