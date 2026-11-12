@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Machine } from "../machines/engines";
 import type { Checked, HostEntry, MachineNative } from "../machines/native";
-import { forwardsRefused, thisComputerLower } from "../machines/words";
+import { forwardsRefused, isDesks, thisComputerLower } from "../machines/words";
 import { useHost } from "../shell/host";
 import { plainError } from "../ui/plainError";
 
@@ -265,7 +265,7 @@ export function EditReach({
         {said?.kind === "problem" && (
           <p className="small state-blocked" role="alert">
             {said.text}
-            {forwardsRefused(said.text) && (
+            {forwardsRefused(said.text) && !isDesks(target) && (
               <>
                 {" "}
                 <button type="button" className="btn btn-sm btn-signal" disabled={!!busy} onClick={() => void giveEntry()}>

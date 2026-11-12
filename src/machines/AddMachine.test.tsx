@@ -212,11 +212,22 @@ it("gives Desk its own SSH entry for a machine whose config forwards ports, then
   await typeAndGo("devbox");
   const box = screen.getByRole("alert", { name: "Desk can’t add it" });
   expect(box.textContent).toContain("forwards ports for devbox");
+  // One primary button: Continue steps back while the offer stands.
+  expect(screen.getByRole("button", { name: "Continue" }).className).not.toContain("btn-signal");
   await act(async () => fireEvent.click(within(box).getByRole("button", { name: "Give Desk its own entry" })));
   expect(fake.deskEntry).toHaveBeenCalledWith("devbox");
   // Looked at again, by Desk's entry.
-  expect(fake.probe).toHaveBeenLastCalledWith("desk-devbox");
-  expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("desk-devbox");
+  expect(fake.probe).toHaveBeenLastCalledWith("desk-m-devbox-a1b2c3");
+  expect((screen.getByLabelText("Address") as HTMLInputElement).value).toBe("desk-m-devbox-a1b2c3");
+});
+
+it("never offers Desk's entry again for one of its own", async () => {
+  const { native, fake } = fakeNative();
+  fake.probe.mockRejectedValue(new Error("Your SSH config forwards ports for desk-m-devbox-a1b2c3 (localforward). Desk keeps its connection open all the time, so it won't carry them."));
+  render(<AddMachine native={native} onClose={() => {}} />);
+  await typeAndGo("desk-m-devbox-a1b2c3");
+  expect(screen.getByRole("alert", { name: "Desk can’t add it" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Give Desk its own entry" })).toBeNull();
 });
 
 it("leaves it as it was when the person says no to Desk's entry, and says why one can't help", async () => {

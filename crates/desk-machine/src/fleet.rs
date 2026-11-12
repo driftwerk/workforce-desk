@@ -2334,71 +2334,105 @@ impl Fleet {
     }
 
     /// "Give Desk its own entry" (`machine_desk_entry`): for `target`, whose
-    /// SSH config forwards ports, an entry of Desk's own at the top of the
-    /// config with the same address, account, port, jump and keys but none
-    /// of the forwards, after the person's yes to its exact lines. Its name
-    /// (`desk-…`), to add or reach the machine by; `target` itself when it
-    /// forwards nothing; none when the person said no. Checked with ssh
-    /// before it is written: refused when the forwards would reach it too
-    /// (set under `Host *`). Blocking.
+    /// SSH config forwards ports, an entry in Desk's own file (never the
+    /// person's config) with every setting their config gives the machine
+    /// but the forwards, after the person's yes to its exact lines. Its
+    /// name (`desk-m-…`), to add or reach the machine by; `target` itself
+    /// when it forwards nothing; none when the person said no. One made
+    /// before for `target` is used again while it still reaches the same
+    /// place. Checked with ssh before it is kept: refused when the forwards
+    /// would reach it too (set under `Host *`). Blocking.
     pub fn desk_entry(&self, target: &str) -> Result<Option<String>, String> {
         let machine = Self::looked_at(target)?;
+        if entry::is_desks(machine.target.as_str()) {
+            return Err("That's already Desk's own SSH entry, and it still forwards ports: the forwards come from your SSH config's Host * (or a pattern). Move them under the hosts that use them, then try again.".into());
+        }
+        let file = self
+            .ssh
+            .desk_config()
+            .ok_or("Desk can't keep SSH entries of its own here.")?
+            .to_path_buf();
+        let user_config = self.home.join(".ssh").join("config");
         // Reading the config can run what it says (`Match exec`).
         self.ask(&machine)?;
         let said = self.settings_said(&machine)?;
-        if ssh::Settings::parse(&said).forwards.is_empty() {
+        let theirs = ssh::Settings::parse(&said);
+        if theirs.forwards.is_empty() {
             return Ok(Some(machine.target.to_string()));
         }
-        let alias = entry::alias_for(&machine.name);
-        let file = entry::config_file(&self.home);
-        let before = std::fs::read_to_string(&file).unwrap_or_default();
-        let forwards_of = |config: &std::path::Path| -> Result<Vec<String>, String> {
+        let read = |config: &std::path::Path, host: &str| -> Result<String, String> {
             let out = self
                 .ssh
-                .settings_with(config, &alias)
+                .settings_with(config, host)
                 .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
             if !out.status.success() {
                 return Err(ssh::problem(&machine, &out.stderr));
             }
-            Ok(ssh::Settings::parse(&String::from_utf8_lossy(&out.stdout)).forwards)
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
         };
-        let carried = "Your SSH config forwards ports for every host it reaches (under Host * or a pattern), so an entry of Desk's would carry them too. Move those forwards under the hosts that use them, then try again.";
-        if entry::has_entry(&before, &alias) {
-            // One Desk (or the person) made before: used when it forwards nothing.
-            return if forwards_of(&file)?.is_empty() {
-                Ok(Some(alias))
-            } else {
-                Err(format!(
-                    "Your SSH config has an entry called {alias} that forwards ports: take its forwards out, or rename it, and try again."
-                ))
-            };
+        let same_place = |s: &ssh::Settings| {
+            s.hostname == theirs.hostname && s.port == theirs.port && s.user == theirs.user
+        };
+        let mut entries = entry::read(&file);
+        // One made before for this target: used again while it still goes
+        // to the same address, as the same account, forwarding nothing
+        // (connecting checks it's the same host key).
+        if let Some(e) = entries.iter().find(|e| e.target == machine.target.as_str()) {
+            let now = ssh::Settings::parse(&read(&file, &e.alias)?);
+            if now.forwards.is_empty() && same_place(&now) {
+                return Ok(Some(e.alias.clone()));
+            }
+            let stale = e.alias.clone();
+            entries.retain(|x| x.alias != stale);
         }
-        let block = entry::block(&alias, &machine.name, &said);
-        // What ssh would make of it, before anything is written.
+        let nonce = format!("{:06x}", rand::random::<u32>() & 0xff_ffff);
+        let alias = entry::alias_for(&machine.name, &nonce);
+        // What the person's config gives a name it has no entry for: what
+        // the machine's own settings are told apart from.
+        let fresh = {
+            let out = self
+                .ssh
+                .settings_with(&user_config, &alias)
+                .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let lines = entry::lines(&said, &fresh);
+        let text = entry::block(&alias, machine.target.as_str(), &lines);
+        let mut with = entries.clone();
+        with.push(entry::Entry {
+            alias: alias.clone(),
+            target: machine.target.to_string(),
+            text: text.clone(),
+        });
+        // What ssh would make of it, before it is kept.
         let dir = file
             .parent()
             .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(|| self.home.join(".ssh"));
-        let trial = dir.join(format!(".config.desk-check-{}", std::process::id()));
+            .unwrap_or_else(|| self.home.clone());
         let _ = std::fs::create_dir_all(&dir);
-        std::fs::write(&trial, format!("{block}\n{before}"))
-            .map_err(|_| "Desk couldn't check the entry with ssh.".to_string())?;
-        let forwards = forwards_of(&trial);
+        let trial = dir.join(format!(".config.check-{}", std::process::id()));
+        std::fs::write(&trial, entry::file_text(&with, &user_config))
+            .map_err(|_| "Desk couldn't check its SSH entry with ssh.".to_string())?;
+        let checked = read(&trial, &alias);
         let _ = std::fs::remove_file(&trial);
-        if !forwards?.is_empty() {
-            return Err(carried.into());
+        let checked = ssh::Settings::parse(&checked?);
+        if !checked.forwards.is_empty() {
+            return Err("Your SSH config forwards ports for every host it reaches (under Host * or a pattern), so an entry of Desk's would carry them too. Move those forwards under the hosts that use them, then try again.".into());
+        }
+        if !same_place(&checked) {
+            return Err("Desk's entry wouldn't reach the same place as yours. Give Desk an address instead.".into());
         }
         let question = EntryQuestion {
             name: machine.name.clone(),
-            file: entry::shown(&file, &self.home),
-            block: block.clone(),
+            file: entry_shown(&file, &self.home),
+            block: text,
         };
         let confirm = &self.trust;
         if !self.trust_gate.ask(|| confirm.desk_entry(&question))? {
             return Ok(None);
         }
-        entry::write(&self.home, &block)?;
-        tracing::info!(machine = %machine.name, entry = %alias, "added Desk's own SSH entry");
+        entry::write(&file, &with, &user_config)?;
+        tracing::info!(machine = %machine.name, entry = %alias, "kept Desk's own SSH entry");
         Ok(Some(alias))
     }
 
@@ -2708,6 +2742,14 @@ impl Fleet {
         if row.saved {
             self.save();
         }
+        // Desk's own SSH entry for it goes with it.
+        let target = row.kept.machine.target.as_str();
+        if entry::is_desks(target)
+            && let Some(file) = self.ssh.desk_config()
+            && let Err(e) = entry::remove(file, target, &self.home.join(".ssh").join("config"))
+        {
+            tracing::warn!(machine = id, error = %e, "couldn't take Desk's SSH entry for a removed machine away");
+        }
         self.drop_link(id);
         self.host.changed();
         Ok(())
@@ -2956,6 +2998,20 @@ impl Fleet {
     pub fn home(&self) -> &Path {
         &self.home
     }
+}
+
+/// `file` as the person names it: `~/…` under their home.
+fn entry_shown(file: &Path, home: &Path) -> String {
+    file.strip_prefix(home).map_or_else(
+        |_| file.display().to_string(),
+        |rest| {
+            let parts: Vec<String> = rest
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            format!("~/{}", parts.join("/"))
+        },
+    )
 }
 
 #[cfg(test)]

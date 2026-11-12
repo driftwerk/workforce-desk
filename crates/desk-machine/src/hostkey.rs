@@ -311,7 +311,7 @@ pub struct EntryQuestion {
 impl EntryQuestion {
     pub fn text(&self) -> String {
         format!(
-            "Give Desk its own SSH entry for {name}?\n\nDesk adds these lines at the top of {file}. Your entry for {name} and its port forwards stay as they are; Desk reaches {name} by this one.\n\n{block}",
+            "Give Desk its own SSH entry for {name}?\n\nDesk keeps these lines in its own file ({file}) and reaches {name} by them: the same machine, without its port forwards. Your ~/.ssh/config isn't changed.\n\n{block}",
             name = self.name,
             file = self.file,
             block = self.block.trim_end()

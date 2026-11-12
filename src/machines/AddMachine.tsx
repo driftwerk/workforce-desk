@@ -7,7 +7,7 @@ import { plainError } from "../ui/plainError";
 import { CANCELLED, setUp, START, step, type Item } from "./addFlow";
 import { useMachines } from "./engines";
 import { native as realNative, type HostEntry, type LogLine, type MachineNative } from "./native";
-import { clock, forwardsRefused, sameHostAs, suggestedName, thisComputerLower, userOf } from "./words";
+import { clock, forwardsRefused, isDesks, sameHostAs, suggestedName, thisComputerLower, userOf } from "./words";
 
 /** Copies `text`, saying so on the button for a moment. */
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
@@ -249,6 +249,9 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
   // system's ssh: not on Windows.
   const canPassword = platform !== "windows";
   const taken = machines.map((m) => m.name);
+  // Desk's own entry, offered once: never again for one of its own (the
+  // forwards then come from the person's Host *, which it can't avoid).
+  const offerEntry = flow.at === "address" && !!flow.refused && forwardsRefused(flow.problem) && !isDesks(flow.target);
   const name = "name" in flow ? (flow.name ?? "") : "";
   const asking = editing || flow.at === "checking";
   const user = asking ? userOf(target, entryUser) : null;
@@ -457,9 +460,9 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
           <div className="machine-box" role="alert" aria-label="Desk can’t add it">
             <span className="ov-label state-blocked">Desk can’t add it</span>
             <span>{flow.problem}</span>
-            {forwardsRefused(flow.problem) ? (
+            {offerEntry ? (
               <div className="machine-actions">
-                <span className="small muted">Desk can add an entry of its own to your SSH config: the same machine, without the forwards. Yours stays as it is.</span>
+                <span className="small muted">Desk can keep an SSH entry of its own, in its own file: the same machine, without the forwards. Your SSH config isn’t changed.</span>
                 <button type="button" className="btn btn-sm btn-signal" disabled={entering} onClick={() => void giveEntry()}>
                   {entering ? "Adding…" : "Give Desk its own entry"}
                 </button>
@@ -683,7 +686,11 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
                 Cancel
               </button>
               {(editing || flow.at === "checking") && (
-                <button type="submit" className="btn btn-signal" disabled={!editing || !target.trim() || !name.trim()}>
+                <button
+                  type="submit"
+                  className={offerEntry ? "btn" : "btn btn-signal"}
+                  disabled={!editing || !target.trim() || !name.trim()}
+                >
                   Continue
                 </button>
               )}

@@ -87,6 +87,10 @@ export const stateText = (m: Machine, deskVersion: string | null): string | null
  *  "Give Desk its own entry" fixes. */
 export const forwardsRefused = (problem: string | null | undefined): boolean => !!problem && /forwards ports for/.test(problem);
 
+/** Whether `target` is one of Desk's own SSH entries (see the native
+ *  side's `entry.rs`). */
+export const isDesks = (target: string): boolean => target.startsWith("desk-m-");
+
 /** A machine's name from the address it was added by: an SSH config host
  *  as it is, `user@address` as its address. */
 export const nameFromTarget = (target: string): string => {
