@@ -31,7 +31,7 @@ describe("a conversation in a narrow pane", () => {
   });
 
   it("keeps the composer at the bottom: only the messages scroll", () => {
-    expect(rule(flat, ".room:has(> .room-scroll), .room:has(> .timeline)")).toContain("overflow: clip");
+    expect(rule(flat, ".room:has(> .room-scroll), .room:has(> .timeline), .room:has(> .dm-body)")).toContain("overflow: clip");
     expect(rule(flat, ".room-scroll")).toMatch(/flex: 1 1 0px; min-height: 0;/);
     expect(rule(flat, ".room > .composer, .room > .dm-voice-bar, .thread-body > .composer")).toContain("flex: none");
   });

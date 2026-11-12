@@ -75,7 +75,21 @@ Hover a message you sent and choose Delete. You confirm in place, under the mess
 
 ## 4. ⌘F search
 
-Search covers the whole history, on the hub. Results are listed on the right, newest first. Choosing one loads the chat around it and highlights the match.
+⌘F in a DM, on a hub with `desk.search`, opens a bar over the chat and the matches beside it.
+
+**Where it searches.** The search runs on the hub (`GET …/conversations/{agent}/search?q=`), over the DM's whole history. That includes what isn't loaded and what was said from another device.
+
+**The results.**
+- Matches are listed newest first, with older pages on request.
+- ↑ ↓, Enter and Shift+Enter step through them. Esc or Done closes the search.
+
+**Choosing a match.**
+- **Already shown:** the chat scrolls to it and holds it there.
+- **Not shown:** Desk reads the stretch of the DM around it (`?around=<id>`) and shows that instead of the newest messages, under "Viewing older messages · Jump to latest". Edit and Delete aren't offered there.
+
+**Marking.** The words found are marked in place with the CSS Custom Highlight API, so the messages' own rendering is untouched. The chosen match is marked strongest.
+
+**With the queue.** Searching never touches it: queued messages stay queued, and go when the turn ends. While you're looking around a match, what's sent shows once you're back at the latest. Jump to latest and End leave the stretch around a match.
 
 ## 5. Threads in a DM
 
