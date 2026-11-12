@@ -1623,3 +1623,35 @@ legend.set-label {
 .settings-setup {
   margin: 12px 8px 0;
 }
+
+/* A budget said in a sentence, and what Desk heard. */
+.budget-say {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.budget-say .field-row {
+  width: 100%;
+  max-width: 640px;
+}
+.budget-say input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+  font: inherit;
+}
+.budget-say input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.budget-more {
+  align-self: flex-start;
+  margin-top: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
