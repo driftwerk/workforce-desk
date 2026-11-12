@@ -478,3 +478,54 @@ describe("a board pane's column tabs", () => {
     expect(within(pane("Acme")).getByRole("tablist", { name: "Column" })).toBeTruthy();
   });
 });
+
+describe("a board pane's columns scroll sideways whenever they don't fit", () => {
+  const boardCss = fs.readFileSync(`${cwd}/src/styles/board.css`, "utf8");
+  const rule = (src: string, selector: string): string => {
+    const at = src.indexOf(`${selector} {`);
+    return at < 0 ? "" : src.slice(at, src.indexOf("}", at));
+  };
+
+  it("a sideways swipe over a column's cards goes on to the columns: its cards hold up and down only", () => {
+    const cards = rule(boardCss, ".board-cards");
+    expect(cards).toMatch(/overscroll-behavior-y: contain;/);
+    expect(cards).not.toMatch(/overscroll-behavior: contain;/);
+  });
+
+  it("a pane's columns don't snap, so a small step isn't pulled back", () => {
+    expect(rule(css, ".board-in-pane .board-cols")).toMatch(/scroll-snap-type: none;/);
+  });
+
+  it("their scrollbar is in sight, in the theme's colours", () => {
+    expect(boardCss).toMatch(/\.board-cols::-webkit-scrollbar \{\s*height: 8px;/);
+    expect(rule(boardCss, ".board-cols::-webkit-scrollbar-thumb")).toMatch(/var\(--faint\)/);
+    expect(rule(boardCss, ".board-cols::-webkit-scrollbar-thumb:hover")).toMatch(/var\(--faint\)/);
+    // scrollbar-color would override the rules above in Chromium.
+    expect(boardCss).not.toMatch(/scrollbar-color/);
+  });
+
+  it("Shift+wheel left vertical scrolls them sideways; one the system already turned sideways is left to it", () => {
+    grid("halves", acme);
+    const cols = pane("Acme").querySelector<HTMLElement>(".board-cols")!;
+    Object.defineProperty(cols, "scrollWidth", { configurable: true, value: 1500 });
+    Object.defineProperty(cols, "clientWidth", { configurable: true, value: 600 });
+    const by: number[] = [];
+    cols.scrollBy = ((o: ScrollToOptions) => by.push(o.left ?? 0)) as typeof cols.scrollBy;
+    const shifted = new WheelEvent("wheel", { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(shifted);
+    expect(by).toEqual([120]);
+    expect(shifted.defaultPrevented).toBe(true);
+    const turned = new WheelEvent("wheel", { deltaX: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(turned);
+    const plain = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    cols.dispatchEvent(plain);
+    expect(by).toEqual([120]);
+    expect(turned.defaultPrevented || plain.defaultPrevented).toBe(false);
+    // Columns that snap (the Board view's) are left to the browser.
+    cols.style.scrollSnapType = "x mandatory";
+    const snapping = new WheelEvent("wheel", { deltaY: 120, shiftKey: true, bubbles: true, cancelable: true });
+    cols.dispatchEvent(snapping);
+    expect(by).toEqual([120]);
+    expect(snapping.defaultPrevented).toBe(false);
+  });
+});

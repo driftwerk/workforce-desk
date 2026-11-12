@@ -256,8 +256,14 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
           ? { problem: { kind: "not_installed" }, distros: [] }
           : params.wsl === "one"
             ? { ...WSL_FIXTURE, distros: WSL_FIXTURE.distros.slice(0, 1) }
-            : WSL_FIXTURE,
+            : params.wsl === "fixable"
+              ? { problem: null, distros: FIXABLE }
+              : params.wsl === "old"
+                ? { problem: null, distros: FIXABLE.slice(2) }
+                : WSL_FIXTURE,
       );
+    case "wsl_user_name":
+      return answer("sarah");
     case "wsl_install":
       if (params.wsl === "refused")
         throw new Error("WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks.");
@@ -349,6 +355,13 @@ const WSL_FIXTURE = {
     { distro: { name: "Ubuntu-20.04", state: "Stopped", version: 1, default: false }, probe: null, problem: { kind: "wsl1", distro: "Ubuntu-20.04" } },
   ],
 };
+
+/** Linux Desk puts right first: root only, WSL 1, and too old. */
+const FIXABLE = [
+  { distro: { name: "Debian", state: "Stopped", version: 2, default: true }, probe: { ...probe("2.36"), user: "root" }, problem: { kind: "root_user", distro: "Debian" } },
+  { distro: { name: "Ubuntu-20.04", state: "Stopped", version: 1, default: false }, probe: null, problem: { kind: "wsl1", distro: "Ubuntu-20.04" } },
+  { distro: { name: "Ubuntu", state: "Stopped", version: 2, default: false }, probe: probe("2.31"), problem: { kind: "old_linux", glibc: "2.31" } },
+];
 
 // ── Providers, until the hub has them ──────────────────────────────────────
 // Answers `/api/desk/providers` (see hub/client.ts `desk`) while the running
