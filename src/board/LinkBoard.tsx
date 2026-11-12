@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { openTarget } from "../shell/navigate";
 import { ProblemNote } from "../ui/ProblemNote";
+import { openSettingsAt } from "../ui/problem";
 import type { Problem } from "../ui/problem";
 import { HubError } from "../hub/client";
 import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
@@ -75,7 +76,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [me, setMe] = useState("");
   /** Who the hub says the person is on the target's system (null: it
    *  can't say), by the system, hub and target it was asked for. */
-  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string } | null>(null);
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; byEmail?: boolean } | null>(null);
   /** The person said the hub's answer isn't them: it isn't kept. */
   const [notMe, setNotMe] = useState(false);
   /** Bumped to ask the hub again. */
@@ -178,7 +179,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // hub that wants the id says so as a refusal.
   useEffect(() => {
     if (!now || !targetKey) return;
-    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy });
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, byEmail: now.check.meBy === "email" });
     else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
@@ -409,7 +410,15 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
             {knownMe && (
               <span className="move-opt-sub sync-me">
-                {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.{" "}
+                {heard?.byEmail ? (
+                  <>
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there by your verified email: Mine and Take it go by that.
+                  </>
+                ) : (
+                  <>
+                    {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
+                  </>
+                )}{" "}
                 <button type="button" className="link" onClick={() => setNotMe(true)}>
                   That’s not me
                 </button>
@@ -420,6 +429,14 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 {notMe
                   ? `Desk won’t go by ${viaName}’s answer: Take it waits until you check who you are on the board.`
                   : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
+                {!notMe && heard?.why && /shared/.test(heard.why) && (
+                  <>
+                    <button type="button" className="link" onClick={() => openSettingsAt("connections")}>
+                      Set up your own {SYSTEM_TITLE[system]} key
+                    </button>
+                    {" · "}
+                  </>
+                )}
                 <button
                   type="button"
                   className="link"

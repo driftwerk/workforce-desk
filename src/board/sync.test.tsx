@@ -69,6 +69,7 @@ import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
+import { useUi } from "../shell/ui";
 import { ACME, ticket } from "./testing";
 
 const LOCAL = { id: "local", label: "This computer", url: "http://127.0.0.1:50148", local: true, revision: "" };
@@ -494,6 +495,17 @@ describe("the board, synced", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(document.querySelector(".board-sync-me")?.textContent).toMatch(/Atlas uses a shared Jira key, so it can't say who you are\./));
     expect(screen.getByRole("button", { name: "Check who you are" })).toBeTruthy();
+    // A shared key: their own key is the way to be known there.
+    fireEvent.click(screen.getByRole("button", { name: "Set up your own Jira key" }));
+    expect(useUi.getState().settings).toBe("connections");
+  });
+
+  it("says when a shared key knows you by your verified email, and Take it goes by it", () => {
+    const b = synced({ me: "557058:sam", meName: "Sam", meSource: "vouchedByEmail" });
+    show(b, [ticket(31, { key: "ACME-31", external: ext("ACME-31", { assignee: null }), state: "todo" })]);
+    expect(screen.getByText(/you're Sam there, by your verified email/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Take ACME-31" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Set up your own/ })).toBeNull();
   });
 
   it("says why Take it didn't, and shows who took it meanwhile", async () => {
