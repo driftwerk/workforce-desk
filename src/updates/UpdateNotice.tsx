@@ -4,7 +4,6 @@ import { useSeenWhole } from "../unread/seen";
 import { useSessionNames } from "../groups/names";
 import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
-import { CloseButton, Dialog } from "../ui/Dialog";
 import { useMachines } from "../hub/engines";
 import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
 import type { Session } from "../hub/types";
@@ -23,9 +22,23 @@ export function useUpdateChecks() {
   }, [check]);
 }
 
-/** "When idle": restarts into the update once no session on this computer
- *  is working. Called once from the shell, so it runs whichever view is
- *  open (Settings included), not only while the notice shows. */
+/** How long since the person last typed or clicked in Desk before it may
+ *  restart into an update by itself. */
+export const AWAY_MS = 2 * 60 * 1000;
+
+let lastInput = Date.now();
+if (typeof window !== "undefined") {
+  for (const e of ["keydown", "pointerdown", "wheel"]) window.addEventListener(e, () => (lastInput = Date.now()), { capture: true, passive: true });
+}
+/** For tests: when the person last did something. */
+export const setLastInput = (at: number): void => {
+  lastInput = at;
+};
+
+/** Installs a ready update by itself once no session on this computer is
+ *  working and the person has stepped away from Desk for a couple of
+ *  minutes, unless they put it off. Called once from the shell, so it runs
+ *  whichever view is open (Settings included). */
 export function useRestartWhenIdle() {
   const waiting = useUpdates((s) => s.waiting);
   const phase = useUpdates((s) => s.state.phase);
@@ -34,10 +47,17 @@ export function useRestartWhenIdle() {
   const fail = useDesk((s) => s.fail);
   const live = Object.values(sessions).filter(isLive);
   const working = live.filter(isWorking).length;
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    if (waiting && phase === "ready" && working === 0) void restart(live.map((s) => s.id)).catch(fail);
+    if (!waiting || phase !== "ready") return;
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [waiting, phase]);
+  useEffect(() => {
+    if (waiting && phase === "ready" && working === 0 && Date.now() - lastInput >= AWAY_MS)
+      void restart(live.map((s) => s.id)).catch((e: unknown) => fail(e, { what: "restarting into the update" }));
     // The sessions current at this render.
-  }, [waiting, phase, working]);
+  }, [waiting, phase, working, tick]);
 }
 
 /** Says where the band ends (`--update-band-bottom` on the page), for the
@@ -79,16 +99,20 @@ export function whatHappens(live: Session[], kept: boolean): string {
   return `${stop}: ${lost} of them can’t be picked up again, the rest pick up where they left off.`;
 }
 
-/** "Desk … is ready" once a new version is downloaded, in the stage's
- *  flow (it covers nothing), with what the restart does to the sessions.
- *  Update now, When idle (once none is working), or Later (hidden for this
- *  version until a newer one is out, or the person checks). */
+/** A downloaded version, in the stage's flow (it covers nothing): it
+ *  installs by itself once the sessions finish and the person has stepped
+ *  away, said with what the restart does to the sessions. Update now
+ *  (asking once, in place, when it would stop sessions that are working),
+ *  or Not now (hidden for this version until a newer one is out, or the
+ *  person checks). */
 export function UpdateNotice() {
-  const { state, waiting, wait, restart, postpone, probe, later, sessionsKept } = useUpdates();
+  const { state, waiting, restart, postpone, probe, later, sessionsKept } = useUpdates();
   // This computer's: a machine updates on its own.
   const sessions = useDesk((s) => localSessions(s.sessions));
   const names = useSessionNames();
   const fail = useDesk((s) => s.fail);
+  // Update now would stop sessions that are working: said in the notice
+  // itself, once, before it does.
   const [asking, setAsking] = useState(false);
   // The machines Desk drives follow it: each updates to match as it connects.
   const all = useMachines((m) => m.machines);
@@ -104,7 +128,8 @@ export function UpdateNotice() {
   const acted = () => point && void advance({ kind: "update" }, point);
   const go = () => {
     acted();
-    void restart(live.map((s) => s.id)).catch(fail);
+    setAsking(false);
+    void restart(live.map((s) => s.id)).catch((e: unknown) => fail(e, { what: "restarting into the update", retry: go }));
   };
 
   const postponed = (state.phase === "ready" || state.phase === "available") && isPostponed(later, state.version);
@@ -121,7 +146,7 @@ export function UpdateNotice() {
         postpone();
       }}
     >
-      Later
+      Not now
     </button>
   );
 
@@ -141,110 +166,52 @@ export function UpdateNotice() {
     );
   if (state.phase !== "ready" && state.phase !== "installing") return null;
   const installing = state.phase === "installing";
+  const stopping = working.map((s) => names[s.id] ?? s.name);
   return (
-    <>
-      <div ref={notice} className="update-notice" role="status">
-        <span className="update-notice-text">
-          {installing ? (
-            `Updating to Desk ${state.version}…`
-          ) : (
-            <>
-              <b>{waiting ? `Desk ${state.version} installs when your sessions finish.` : `Desk ${state.version} is ready.`}</b>{" "}
-              {whatHappens(live, sessionsKept)}
-              {machines.length > 0 && ` ${list(machines)} ${machines.length === 1 ? "updates" : "update"} to match after.`}
-            </>
-          )}
-        </span>
-        {!installing && (
-          <span className="update-notice-actions">
-            {waiting ? (
-              <button type="button" className="link small" onClick={() => wait(false)}>
-                Don’t wait
-              </button>
-            ) : (
-              laterButton
-            )}
-            {!waiting && working.length > 0 && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                title="Restarts once no session is working"
-                onClick={() => {
-                  acted();
-                  wait(true);
-                }}
-              >
-                When idle
-              </button>
-            )}
-            <button type="button" className="btn btn-sm btn-signal" onClick={() =>
-                // Whether the holder keeps them now, not as of the last check.
-                void probe().then((kept) => (!kept && working.length > 0 ? setAsking(true) : go()))
-              }>
-              Update now
-            </button>
-          </span>
+    <div ref={notice} className="update-notice" role="status">
+      <span className="update-notice-text">
+        {installing ? (
+          `Updating to Desk ${state.version}…`
+        ) : asking ? (
+          <>
+            <b>{`${list(stopping)} ${stopping.length === 1 ? "is" : "are"} working right now.`}</b> {whatHappens(live, sessionsKept)}
+            {machines.length > 0 && ` Your machines’ sessions don’t stop. Each machine updates to ${state.version} when Desk reconnects to it.`}
+          </>
+        ) : (
+          <>
+            <b>
+              {waiting
+                ? `Desk ${state.version} installs by itself once your sessions finish and you’ve stepped away.`
+                : `Desk ${state.version} is ready.`}
+            </b>{" "}
+            {whatHappens(live, sessionsKept)}
+            {machines.length > 0 && ` ${list(machines)} ${machines.length === 1 ? "updates" : "update"} to match after.`}
+          </>
         )}
-      </div>
-      {asking && (
-        <Dialog
-          onClose={() => setAsking(false)}
-          title={(id) => (
-            <header className="dialog-head">
-              <span className="dialog-title">
-                <h1 id={id} className="display-lg">
-                  Update now
-                </h1>
-                <p>{`${list(working.map((s) => names[s.id] ?? s.name))} ${working.length === 1 ? "is" : "are"} working right now.`}</p>
-              </span>
-              <CloseButton onClose={() => setAsking(false)} />
-            </header>
+      </span>
+      {!installing && (
+        <span className="update-notice-actions">
+          {asking ? (
+            <button type="button" className="link small" onClick={() => setAsking(false)}>
+              Wait for them
+            </button>
+          ) : (
+            laterButton
           )}
-        >
-          <div className="dialog-scroll">
-            <p className="muted">{whatHappens(live, sessionsKept)}</p>
-            <ul className="update-sessions">
-              {live.map((s) => (
-                <li key={s.id}>
-                  <span className="mono">{names[s.id] ?? s.name}</span>
-                  <span className="faint small">
-                    {cantResume(s) ? "Can’t be picked up again. " : ""}
-                    {s.goal || s.lastPrompt || s.cwd}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {machines.length > 0 && (
-              <p className="muted">Your machines’ sessions don’t stop. Each machine updates to {state.version} when Desk reconnects to it.</p>
-            )}
-          </div>
-          <div className="dialog-foot">
-            <span className="dialog-foot-note" />
-            <button
-              type="button"
-              className="btn"
-              data-autofocus
-              onClick={() => {
-                acted();
-                wait(true);
-                setAsking(false);
-              }}
-            >
-              Restart when they finish
-            </button>
-            <button
-              type="button"
-              className="btn btn-signal"
-              onClick={() => {
-                setAsking(false);
-                go();
-              }}
-            >
-              Restart now
-            </button>
-          </div>
-        </Dialog>
+          <button
+            type="button"
+            className="btn btn-sm btn-signal"
+            onClick={() =>
+              asking
+                ? go()
+                : // Whether the holder keeps them now, not as of the last check.
+                  void probe().then((kept) => (!kept && working.length > 0 ? setAsking(true) : go()))
+            }
+          >
+            {asking ? "Restart now" : "Update now"}
+          </button>
+        </span>
       )}
-    </>
+    </div>
   );
 }

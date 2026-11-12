@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import * as platform from "../platform";
-import { UpdateNotice, useRestartWhenIdle } from "./UpdateNotice";
+import { AWAY_MS, setLastInput, UpdateNotice, useRestartWhenIdle } from "./UpdateNotice";
 import { useUpdates } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -54,13 +54,14 @@ const ready = async () => {
   expect(useUpdates.getState().state).toEqual({ phase: "ready", version: "0.2.1" });
 };
 
-it("says the sessions keep running when the PTY holder has them, with Later, When idle and Update now", async () => {
+it("installs by itself by default, says so and what happens, and offers Not now and Update now", async () => {
   await ready();
+  expect(useUpdates.getState().waiting).toBe(true);
   render(<UpdateNotice />);
   const notice = screen.getByRole("status");
-  expect(notice.textContent).toContain("Desk 0.2.1 is ready.");
+  expect(notice.textContent).toContain("Desk 0.2.1 installs by itself once your sessions finish and you’ve stepped away.");
   expect(notice.textContent).toContain("Desk restarts to update. Your sessions keep running and are picked up again.");
-  for (const name of ["Later", "When idle", "Update now"]) screen.getByRole("button", { name });
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Not now", "Update now"]);
   // Nothing they're doing stops, so nothing is asked: it updates.
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
@@ -68,7 +69,7 @@ it("says the sessions keep running when the PTY holder has them, with Later, Whe
   expect(platform.updateInstall).toHaveBeenCalledWith("0.2.1");
 });
 
-it("says how many sessions stop, and which can't be picked up again, without the holder", async () => {
+it("asks once, in the notice, before Update now stops a session that's working", async () => {
   vi.mocked(platform.updating).mockResolvedValue(how({ sessionsKept: false }));
   useDesk.setState({
     sessions: { a: session("a", "working"), b: session("b", "idle", { caps: { resume: "none" } }), c: session("c", "idle", { live: false }) },
@@ -78,37 +79,66 @@ it("says how many sessions stop, and which can't be picked up again, without the
   expect(screen.getByRole("status").textContent).toContain(
     "Desk restarts to update. 2 sessions stop for the restart: 1 of them can’t be picked up again, the rest pick up where they left off.",
   );
-  // One is working: Update now asks first.
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
-  expect(screen.getByRole("dialog").textContent).toContain("a is working right now.");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("status").textContent).toContain("a is working right now.");
   expect(platform.updateInstall).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Wait for them" }));
+  expect(screen.getByRole("status").textContent).toContain("installs by itself");
+  fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+  await act(async () => {});
+  expect(platform.updateInstall).toHaveBeenCalledWith("0.2.1");
 });
 
-/** The shell: the notice, and the restart When idle waits for, which
- *  runs whatever view is open. */
+/** The shell: the notice, and the restart that waits for idle, which runs
+ *  whatever view is open. */
 function Shell({ notice = true }: { notice?: boolean }) {
   useRestartWhenIdle();
   return notice ? <UpdateNotice /> : null;
 }
 
-it("waits for no session to be working on When idle, with or without the notice on screen", async () => {
+it("waits for no session working and the person away, with or without the notice on screen", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    await ready();
+    setLastInput(Date.now());
+    const { rerender } = render(<Shell />);
+    // Settings open: the stage, and the notice with it, is gone.
+    rerender(<Shell notice={false} />);
+    // Nothing working, but the person typed just now: not yet.
+    act(() => useDesk.setState({ sessions: { a: session("a", "idle") } }));
+    await act(async () => {});
+    expect(platform.updateInstall).not.toHaveBeenCalled();
+    // Away a while: the next look installs it.
+    setLastInput(Date.now() - AWAY_MS - 1000);
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    await act(async () => {});
+    expect(platform.updateInstall).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("says a restart that failed in the shared problem shape, with Retry", async () => {
   await ready();
-  const { rerender } = render(<Shell />);
-  fireEvent.click(screen.getByRole("button", { name: "When idle" }));
-  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 installs when your sessions finish.");
-  expect(platform.updateInstall).not.toHaveBeenCalled();
-  // Settings open: the stage, and the notice with it, is gone.
-  rerender(<Shell notice={false} />);
-  act(() => useDesk.setState({ sessions: { a: session("a", "idle") } }));
+  vi.mocked(platform.updateInstall).mockRejectedValueOnce(new Error("the bundle was moved"));
+  render(<UpdateNotice />);
+  fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
-  expect(platform.updateInstall).toHaveBeenCalledTimes(1);
+  const problem = useDesk.getState().error;
+  expect(problem?.what).toBe("restarting into the update");
+  expect(problem?.fix?.label).toBe("Retry");
 });
 
 it("hides on Later until a newer version is out, through restarts and the checks every few hours", async () => {
   await ready();
   render(<UpdateNotice />);
-  fireEvent.click(screen.getByRole("button", { name: "Later" }));
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(screen.queryByRole("status")).toBeNull();
   expect(JSON.parse(localStorage.getItem("desk.update.later")!)).toEqual({ version: "0.2.1" });
 
@@ -126,17 +156,17 @@ it("hides on Later until a newer version is out, through restarts and the checks
   // A newer one is out: shown, and downloaded.
   vi.mocked(platform.updateCheck).mockResolvedValue("0.2.2");
   await act(() => useUpdates.getState().check());
-  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.2 is ready.");
+  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.2 installs by itself");
   expect(localStorage.getItem("desk.update.later")).toBeNull();
 });
 
 it("shows a version put off again when the person checks for updates", async () => {
   await ready();
   render(<UpdateNotice />);
-  fireEvent.click(screen.getByRole("button", { name: "Later" }));
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(screen.queryByRole("status")).toBeNull();
   await act(() => useUpdates.getState().check({ asked: true }));
-  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 is ready.");
+  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 installs by itself");
   expect(localStorage.getItem("desk.update.later")).toBeNull();
 });
 
@@ -147,7 +177,7 @@ it("keeps checking while a version is ready, and installs only the newest", asyn
   vi.mocked(platform.updateCheck).mockResolvedValue("0.2.2");
   await act(() => useUpdates.getState().check());
   expect(platform.updateDownload).toHaveBeenCalledTimes(2);
-  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.2 is ready.");
+  expect(screen.getByRole("status").textContent).toContain("Desk 0.2.2 installs by itself");
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
   expect(platform.updateInstall).toHaveBeenCalledWith("0.2.2");
@@ -162,7 +192,7 @@ it("asks again whether the holder keeps the sessions before Update now restarts"
   vi.mocked(platform.updating).mockResolvedValue(how({ sessionsKept: false }));
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
-  expect(screen.getByRole("dialog").textContent).toContain("a is working right now.");
+  expect(screen.getByRole("status").textContent).toContain("a is working right now.");
   expect(screen.getByRole("status").textContent).toContain("2 sessions stop for the restart");
   expect(platform.updateInstall).not.toHaveBeenCalled();
 });

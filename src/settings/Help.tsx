@@ -9,6 +9,7 @@ import {
   helperStatus,
   inApp,
   openLoginItems,
+  openUrl,
   removeDeskData,
   saveReport,
   wslBackendVersion,
@@ -19,6 +20,7 @@ import { problemText } from "../setup/wsl";
 import { useHost, type BackendHost, type Platform } from "../shell/host";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useUpdates } from "../updates/store";
+import { plainError } from "../ui/plainError";
 
 /** Where each system lists what starts at login. */
 export const STARTUP: Record<Platform, string> = { macos: "Login Items", windows: "Startup apps", linux: "your session’s autostart" };
@@ -141,7 +143,7 @@ export function Help() {
       const s = useUpdates.getState().state;
       setChecked(s.phase === "idle" ? "Desk is up to date." : null);
     } catch (e) {
-      setChecked(`Couldn’t check for updates: ${errorText(e)}`);
+      setChecked(`Couldn’t check for updates. ${plainError(e)}`);
     }
   };
 
@@ -171,19 +173,25 @@ export function Help() {
           <b>Desk {version}</b>
           <span>
             {update.phase === "available"
-              ? `Desk ${update.version} is out. Your package manager installs it, or download it from the releases page.`
+              ? `Desk ${update.version} is out. ${update.download ? "Download it, or let your package manager install it." : "Your package manager installs it."}`
               : update.phase === "downloading"
                 ? `Downloading Desk ${update.version}…`
                 : update.phase === "ready"
-                  ? `Desk ${update.version} is ready — restart to update.`
+                  ? `Desk ${update.version} is ready. It installs by itself once your sessions finish and you’ve stepped away.`
                   : never !== null
                     ? `This Desk doesn’t look for updates: ${never || "it isn’t an install"}.`
                     : (checked ?? "Desk updates itself.")}
           </span>
         </span>
-        <button type="button" className="btn" disabled={!inApp || update.phase !== "idle"} onClick={() => void checkNow()}>
-          Check for updates
-        </button>
+        {update.phase === "available" && update.download ? (
+          <button type="button" className="btn btn-signal" onClick={() => void openUrl(update.download!)}>
+            Download
+          </button>
+        ) : (
+          <button type="button" className="btn" disabled={!inApp || update.phase !== "idle"} onClick={() => void checkNow()}>
+            Check for updates
+          </button>
+        )}
       </div>
 
       <div className="setting-card">

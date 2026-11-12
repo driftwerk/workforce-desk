@@ -86,7 +86,8 @@ export const useUpdates = create<Updates>((set, get) => ({
   check: async (opts) => {
     if (opts?.asked && get().later) {
       keepLater(null);
-      set({ later: null });
+      // Put off no longer: a version already here installs when idle again.
+      set({ later: null, waiting: get().state.phase === "ready" });
     }
     const phase = get().state.phase;
     if (phase === "downloading" || phase === "installing") return;
@@ -118,7 +119,9 @@ export const useUpdates = create<Updates>((set, get) => ({
     set({ state: { phase: "downloading", version } });
     try {
       await updateDownload();
-      set({ state: { phase: "ready", version } });
+      // It installs by itself once nothing is working and the person has
+      // stepped away (`useRestartWhenIdle`), unless they put it off.
+      set({ state: { phase: "ready", version }, waiting: !isPostponed(get().later, version) });
     } catch (e) {
       set({ state: { phase: "idle" }, waiting: false });
       throw e;
