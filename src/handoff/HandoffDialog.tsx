@@ -10,10 +10,10 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, defaultChoice, hasAccounts, ownSignInWorks, useAccounts } from "../engines/accounts";
 import { ENGINE_TITLE, defaultCaps, startable } from "../engines/engines";
 import { useSessionName } from "../groups/names";
-import { HubError } from "../hub/client";
+import { HubError, noRoute } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo, HandoffPlace, HandoffPreview, HandoffSource, Session } from "../hub/types";
-import { CloseButton, Dialog } from "../ui/Dialog";
+import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { openSettingsAt } from "../ui/problem";
 import { LOCAL } from "../machines/engines";
@@ -36,18 +36,9 @@ const NOT_CONNECTED = "Desk isn’t ready just now; try again in a moment.";
 
 const TOO_OLD = "This version of Desk can’t continue sessions in another engine yet. Update Desk to use it.";
 
-/** A refusal as the hub says it: its own words, whole. */
-const said = (e: unknown): string => {
-  if (e instanceof HubError && (e.status === 404 || e.status === 405)) return TOO_OLD;
-  return plainError(e);
-};
-
-/** Update Desk, where the refusal is that this one is too old: Help, with
- *  a check for the update asked. */
-const updateDesk = () => {
-  void useUpdates.getState().check({ asked: true });
-  openSettingsAt("help");
-};
+/** A refusal as the hub says it: its own words, whole. Only a hub without
+ *  the route at all is too old; any other refusal is its own. */
+const said = (e: unknown): string => (noRoute(e) ? TOO_OLD : plainError(e));
 
 /** The dialog, while a handoff is asked for. */
 export function HandoffDialog() {
@@ -71,8 +62,10 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const [engine, setEngine] = useState<Engine | null>(ask.engine ?? null);
   const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
   const [place, setPlace] = useState<HandoffPlace>("same_folder");
-  // Desk can't stop one running in another terminal: it is kept.
-  const [source, setSource] = useState<HandoffSource>(runsElsewhere(session) ? "keep" : defaultSource(session));
+  /** The person's own choice of what becomes of this one; until they make
+   *  one, it follows the session as it is now (a turn starting while the
+   *  dialog is open stops it after that turn, never mid-turn). */
+  const [sourcePicked, setSourcePicked] = useState<HandoffSource | null>(null);
   const [back, setBack] = useState(!!ask.back);
   const [goalOnly, setGoalOnly] = useState(false);
   const [preview, setPreview] = useState<HandoffPreview | null>(null);
@@ -90,6 +83,8 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const [choosing, setChoosing] = useState(false);
   /** Whether the folder is a git project; undefined while unknown. */
   const [git, setGit] = useState<boolean | undefined>(undefined);
+  /** The accounts were read (or couldn't be): until then the line waits. */
+  const [accountsRead, setAccountsRead] = useState(false);
   /** When the engines were read again, after one was installed here. */
   const [readAt, setReadAt] = useState(0);
 
@@ -97,7 +92,10 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   // once one is installed from it.
   useEffect(() => {
     let live = true;
-    void useAccounts.getState().load();
+    void useAccounts
+      .getState()
+      .load()
+      .finally(() => live && setAccountsRead(true));
     if (!hub) return setEngines(null);
     (readAt ? hub.enginesNow() : hub.engines())
       .then((e) => live && setEngines(e))
@@ -118,12 +116,18 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
     };
   }, [localHub, session.cwd]);
   const noWorktree = git === false;
+  // Picked before the folder was known not to be a git project: it can't be.
+  useEffect(() => {
+    if (noWorktree) setPlace((p) => (p === "new_worktree" ? "same_folder" : p));
+  }, [noWorktree]);
   const offered = engines === undefined ? [] : enginesFor(startable(engines), session.engine);
   const target: Engine | null = engine ?? offered[0] ?? null;
   const info = engines?.find((e) => e.engine === target);
   const accounts = target && hasAccounts(defaultCaps(info)) ? accountsOf(allAccounts, target) : [];
   const ownWorks = ownSignInWorks(info?.signIn);
   const account = target ? (picked[target] ?? defaultChoice(allAccounts, target, ownWorks)) : OWN_SIGN_IN;
+  /** The accounts to choose from, this computer's own sign-in last where it works. */
+  const accountChoices = [...accounts.map((a) => ({ id: a.id, name: a.name })), ...(ownWorks ? [{ id: OWN_SIGN_IN, name: OWN_SIGN_IN_LABEL }] : [])];
   /** The account as the hub takes it: absent, the engine's default. */
   const accountAsked = !back && accounts.length > 0 ? accountOfChoice(account) : undefined;
 
@@ -234,7 +238,8 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const accountName =
     accounts.length === 0 ? null : account === OWN_SIGN_IN ? OWN_SIGN_IN_LABEL.replace(/^\w/, (c) => c.toLowerCase()) : (accounts.find((a) => a.id === account)?.name ?? null);
   const noEngine = !back && engines !== undefined && offered.length === 0;
-  const inTerminal = !!session.terminalId;
+  // A Desk terminal's session is the person's to end, while it runs.
+  const inTerminal = !!session.terminalId && runs(session);
   const sources: { value: HandoffSource; label: string; sub: string }[] = inTerminal
     ? [{ value: "keep", label: "Keep it running", sub: "it runs in a Desk terminal: end it there when you’re done" }]
     : runsElsewhere(session)
@@ -247,6 +252,11 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
               : [{ value: "stop" as const, label: "Stop it now", sub: "it’s idle" }]),
             { value: "keep", label: "Keep it running", sub: "two engines will then edit one folder" },
           ];
+  // Desk can't stop one running in another terminal: it is kept.
+  const followed: HandoffSource = runsElsewhere(session) ? "keep" : defaultSource(session);
+  // A choice the session's state has since taken away (Stop it now, once
+  // it's in a turn) gives way to what it now is.
+  const source: HandoffSource = sourcePicked && sources.some((o) => o.value === sourcePicked) ? sourcePicked : followed;
 
   return (
     <Dialog
@@ -297,95 +307,117 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
             <span>
               {back
                 ? backLine({ to: backName, source, running: runs(session) })
-                : engines === undefined
+                : engines === undefined || !accountsRead
                   ? "Looking at the engines…"
-                  : defaultsLine({ engine: targetTitle, account: accountName, place, source, running: runs(session) })}
+                  : defaultsLine({ engine: targetTitle, account: accountName, place, source, running: runs(session), goalOnly })}
             </span>
-            <button type="button" className="link small" aria-expanded={choosing} disabled={busy} onClick={() => setChoosing((c) => !c)}>
-              {choosing ? "Hide the choices" : "Change"}
+            <button
+              type="button"
+              className="link small"
+              aria-expanded={choosing}
+              aria-controls={`${ids}-choices`}
+              disabled={busy}
+              onClick={() => setChoosing((c) => !c)}
+            >
+              {choosing ? "Hide the choices" : back ? "Change what becomes of this one" : "Change where it goes"}
             </button>
           </p>
         )}
 
-        {choosing && !back && !noEngine && (
-          <fieldset className="move-field">
-            <legend>Engine</legend>
-            {engines === undefined ? (
-              <p className="faint small">Looking at the engines…</p>
-            ) : (
-              <div className="seg handoff-seg" role="radiogroup" aria-label="Engine">
-                {offered.map((e) => (
-                  <button key={e} type="button" role="radio" aria-checked={target === e} disabled={busy} onClick={() => setEngine(e)}>
-                    {ENGINE_TITLE[e]}
+        <div id={`${ids}-choices`} className="handoff-choices" hidden={!choosing}>
+          {!back && !noEngine && (
+            <fieldset className="move-field">
+              <legend>Engine</legend>
+              {engines === undefined ? (
+                <p className="faint small">Looking at the engines…</p>
+              ) : (
+                <div className="seg handoff-seg" role="radiogroup" aria-label="Engine">
+                  {offered.map((e, i) => (
+                    <button
+                      key={e}
+                      type="button"
+                      role="radio"
+                      aria-checked={target === e}
+                      tabIndex={target === e ? 0 : -1}
+                      disabled={busy}
+                      onClick={() => setEngine(e)}
+                      onKeyDown={(k) => radioKeys(k, offered, i, setEngine)}
+                    >
+                      {ENGINE_TITLE[e]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </fieldset>
+          )}
+
+          {!back && accounts.length > 0 && target && (
+            <fieldset className="move-field">
+              <legend>Account</legend>
+              <div className="seg handoff-seg" role="radiogroup" aria-label="Account">
+                {accountChoices.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={account === c.id}
+                    tabIndex={account === c.id ? 0 : -1}
+                    disabled={busy}
+                    onClick={() => setPicked((p) => ({ ...p, [target]: c.id }))}
+                    onKeyDown={(k) => radioKeys(k, accountChoices, i, (next) => setPicked((p) => ({ ...p, [target]: next.id })))}
+                  >
+                    {c.name}
                   </button>
                 ))}
               </div>
-            )}
-          </fieldset>
-        )}
+            </fieldset>
+          )}
 
-        {choosing && !back && accounts.length > 0 && target && (
-          <fieldset className="move-field">
-            <legend>Account</legend>
-            <div className="seg handoff-seg" role="radiogroup" aria-label="Account">
-              {accounts.map((a) => (
-                <button key={a.id} type="button" role="radio" aria-checked={account === a.id} disabled={busy} onClick={() => setPicked((p) => ({ ...p, [target]: a.id }))}>
-                  {a.name}
-                </button>
-              ))}
-              {ownWorks && (
-                <button type="button" role="radio" aria-checked={account === OWN_SIGN_IN} disabled={busy} onClick={() => setPicked((p) => ({ ...p, [target]: OWN_SIGN_IN }))}>
-                  {OWN_SIGN_IN_LABEL}
-                </button>
-              )}
-            </div>
-          </fieldset>
-        )}
-
-        {choosing && !back && !noEngine && (
-          <fieldset className="move-field">
-            <legend>Where</legend>
-            <div className="move-opts" role="radiogroup" aria-label="Where">
-              <label className="move-opt">
-                <input type="radio" name={`${ids}-place`} checked={place === "same_folder"} disabled={busy} onChange={() => setPlace("same_folder")} />
-                <span className="move-opt-main">
-                  <span>Same folder</span>
-                  <span className="move-opt-sub mono">{session.cwd}</span>
-                </span>
-              </label>
-              <label className="move-opt">
-                <input type="radio" name={`${ids}-place`} checked={place === "new_worktree"} disabled={busy || noWorktree} onChange={() => setPlace("new_worktree")} />
-                <span className="move-opt-main">
-                  <span>New worktree from its branch</span>
-                  <span className="move-opt-sub">
-                    {noWorktree
-                      ? "this folder isn’t in a git repository, so there’s no branch to start from"
-                      : session.branch
-                        ? `a new branch from ${session.branch}`
-                        : "a new branch from where it is now"}
-                  </span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
-        )}
-
-        {choosing && !noEngine && (
-          <fieldset className="move-field">
-            <legend>This one</legend>
-            <div className="move-opts" role="radiogroup" aria-label="This one">
-              {sources.map((o) => (
-                <label key={o.value} className="move-opt">
-                  <input type="radio" name={`${ids}-source`} checked={source === o.value} disabled={busy} onChange={() => setSource(o.value)} />
+          {!back && !noEngine && (
+            <fieldset className="move-field">
+              <legend>Where</legend>
+              <div className="move-opts" role="radiogroup" aria-label="Where">
+                <label className="move-opt">
+                  <input type="radio" name={`${ids}-place`} checked={place === "same_folder"} disabled={busy} onChange={() => setPlace("same_folder")} />
                   <span className="move-opt-main">
-                    <span>{o.label}</span>
-                    <span className="move-opt-sub">{o.sub}</span>
+                    <span>Same folder</span>
+                    <span className="move-opt-sub mono">{session.cwd}</span>
                   </span>
                 </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
+                <label className="move-opt">
+                  <input type="radio" name={`${ids}-place`} checked={place === "new_worktree"} disabled={busy || noWorktree} onChange={() => setPlace("new_worktree")} />
+                  <span className="move-opt-main">
+                    <span>New worktree from its branch</span>
+                    <span className="move-opt-sub">
+                      {noWorktree
+                        ? "this folder isn’t in a git repository, so there’s no branch to start from"
+                        : session.branch
+                          ? `a new branch from ${session.branch}`
+                          : "a new branch from where it is now"}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+          )}
+
+          {!noEngine && (
+            <fieldset className="move-field">
+              <legend>This one</legend>
+              <div className="move-opts" role="radiogroup" aria-label="This one">
+                {sources.map((o) => (
+                  <label key={o.value} className="move-opt">
+                    <input type="radio" name={`${ids}-source`} checked={source === o.value} disabled={busy} onChange={() => setSourcePicked(o.value)} />
+                    <span className="move-opt-main">
+                      <span>{o.label}</span>
+                      <span className="move-opt-sub">{o.sub}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+        </div>
 
         {!noEngine && (
           <section className="move-field" aria-label="What it gets">
@@ -400,7 +432,16 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
                   {problem}
                 </p>
                 {problem === TOO_OLD && (
-                  <button type="button" className="btn handoff-goal-only" onClick={updateDesk}>
+                  <button
+                    type="button"
+                    className="btn handoff-goal-only"
+                    onClick={() => {
+                      // Help, over the dialog it would sit behind: closed first.
+                      onClose();
+                      void useUpdates.getState().check({ asked: true });
+                      openSettingsAt("help");
+                    }}
+                  >
                     Update Desk
                   </button>
                 )}

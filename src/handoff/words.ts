@@ -2,6 +2,7 @@
 
 import { ENGINE_TITLE } from "../engines/engines";
 import { clock } from "../floor/time";
+import { runs } from "../session/actions";
 import type { Continued, Engine, HandoffPlace, HandoffPreview, HandoffSource, Hop, Session } from "../hub/types";
 
 /** "Claude Code · 10:42", or the engine alone when the time isn't known. */
@@ -36,8 +37,8 @@ export const busyNow = (s: Pick<Session, "state" | "live">): boolean =>
 /** What happens to the source when the person picks nothing: a session in a
  *  Desk terminal is the person's to end, one in a turn stops after it, an
  *  idle one now. */
-export const defaultSource = (s: Pick<Session, "terminalId" | "state" | "live">): "stop" | "after_turn" | "keep" =>
-  s.terminalId ? "keep" : busyNow(s) ? "after_turn" : "stop";
+export const defaultSource = (s: Session): "stop" | "after_turn" | "keep" =>
+  s.terminalId && runs(s) ? "keep" : busyNow(s) ? "after_turn" : "stop";
 
 /** "across Claude Code and Codex", or "in Codex" for one engine. */
 export const acrossText = (engines: readonly (Engine | null | undefined)[]): string => {
@@ -53,8 +54,8 @@ export const sourceSaid = (source: HandoffSource, running: boolean): string =>
 
 /** The handoff as it goes when nothing is changed: "Continues in Codex on
  *  Work, in this folder; this one stops now." */
-export const defaultsLine = (o: { engine: string; account?: string | null; place: HandoffPlace; source: HandoffSource; running: boolean }): string =>
-  `Continues in ${o.engine}${o.account ? ` on ${o.account}` : ""}, ${o.place === "new_worktree" ? "in a new worktree" : "in this folder"}; ${sourceSaid(o.source, o.running)}.`;
+export const defaultsLine = (o: { engine: string; account?: string | null; place: HandoffPlace; source: HandoffSource; running: boolean; goalOnly?: boolean }): string =>
+  `${o.goalOnly ? `Starts ${o.engine} with the goal` : `Continues in ${o.engine}`}${o.account ? ` on ${o.account}` : ""}, ${o.place === "new_worktree" ? "in a new worktree" : "in this folder"}; ${sourceSaid(o.source, o.running)}.`;
 
 /** A hand back as it goes when nothing is changed: "Hands the work back to
  *  acme-api; this one stops now." */
