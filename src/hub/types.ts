@@ -1252,6 +1252,24 @@ export interface BossView {
   /** True only while it is unbound in force: false once its budget is
    *  spent; absent from older hubs. */
   unbound?: boolean;
+  /** Act fully's daily budget and the real money spent against it today,
+   *  while it chose Act fully with a budget; absent otherwise and from
+   *  older hubs. */
+  actFully?: FullBudget | null;
+}
+
+/** Act fully's daily budget as the hub counts it: real money only (calls
+ *  an API key, Bedrock or Vertex paid for), never your Claude or ChatGPT
+ *  plans. */
+export interface FullBudget {
+  /** Real money spent today in its scope; null until the hub has read it. */
+  spentUsd: number | null;
+  budgetUsd: number;
+  /** Spent: Act fully is held, and it acts as Act, until tomorrow, a
+   *  higher budget, or you clear today's count. */
+  spent: boolean;
+  /** When you last cleared today's count: it counts from then. */
+  clearedAt?: string | null;
 }
 
 export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";

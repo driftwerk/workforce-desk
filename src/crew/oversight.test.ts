@@ -2,6 +2,7 @@ import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_OVERSIGHT,
+  fullBudgetText,
   fullMissing,
   isUnbound,
   oversightOf,
@@ -32,7 +33,7 @@ describe("[oversight] in an agent's config", () => {
     );
     expect(o.level).toBe("full");
     expect(o.wake.holdMinutes).toBe(5);
-    expect(o.full).toEqual({ anywhere: false, repos: ["acme/acme-web", "~/dev/globex-api"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 });
+    expect(o.full).toEqual({ anywhere: false, repos: ["acme/acme-web", "~/dev/globex-api"], workflows: ["deploy.yml"], budgetUsdPerDay: 25, budgetClearedAt: null });
     expect(fullMissing(o)).toEqual([]);
     const written = parse(withOversight(CONFIG, { ...o, full: { ...o.full, budgetUsdPerDay: 7.5 } })) as {
       oversight: { level: string; wake: { hold_minutes: number }; full: Record<string, unknown> };
@@ -42,14 +43,25 @@ describe("[oversight] in an agent's config", () => {
     expect(written.oversight.full).toEqual({ anywhere: false, repos: ["acme/acme-web", "~/dev/globex-api"], workflows: ["deploy.yml"], budget_usd_per_day: 7.5 });
     // Nothing of Act fully set: no table written; a budget never set stays absent.
     expect("full" in (parse(withOversight(CONFIG, DEFAULT_OVERSIGHT)) as { oversight: object }).oversight).toBe(false);
-    const noBudget = { ...DEFAULT_OVERSIGHT, level: "full" as const, full: { anywhere: false, repos: ["acme/acme-web"], workflows: [], budgetUsdPerDay: null } };
+    const noBudget = { ...DEFAULT_OVERSIGHT, level: "full" as const, full: { anywhere: false, repos: ["acme/acme-web"], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null } };
     expect((parse(withOversight(CONFIG, noBudget)) as { oversight: { full: object } }).oversight.full).toEqual({ anywhere: false, repos: ["acme/acme-web"], workflows: [] });
-    expect(fullMissing(noBudget)).toEqual(["budget"]);
-    expect(fullMissing({ ...DEFAULT_OVERSIGHT, level: "full" })).toEqual(["repos", "budget"]);
+    expect(fullMissing(noBudget)).toEqual([]);
+    expect(fullMissing({ ...DEFAULT_OVERSIGHT, level: "full" })).toEqual(["repos"]);
     // What the hub would refuse reads as the defaults.
     const bad = oversightOf(`[oversight]\nwake = { hold_minutes = 61 }\n[oversight.full]\nbudget_usd_per_day = 0\n`);
     expect(bad.wake.holdMinutes).toBe(2);
     expect(bad.full.budgetUsdPerDay).toBeNull();
+  });
+
+  it("keeps when today's count was cleared, as the hub writes it, and says the budget in real money", () => {
+    const o = oversightOf(`${CONFIG}\n[oversight]\nlevel = "full"\n[oversight.full]\nanywhere = true\nbudget_usd_per_day = 200\nbudget_cleared_at = "2026-11-11T14:02:00.000Z"\n`);
+    expect(o.full.budgetClearedAt).toBe("2026-11-11T14:02:00.000Z");
+    const kept = parse(withOversight(CONFIG, o)) as { oversight: { full: Record<string, unknown> } };
+    expect(kept.oversight.full.budget_cleared_at).toBe("2026-11-11T14:02:00.000Z");
+    expect(oversightOf(`[oversight.full]\nbudget_cleared_at = "today"\n`).full.budgetClearedAt).toBeNull();
+    expect(fullBudgetText({ spentUsd: 0, budgetUsd: 200, spent: false })).toBe("Act fully: $0.00 of $200.00 real money today");
+    expect(fullBudgetText({ spentUsd: 1210.5, budgetUsd: 200, spent: true })).toBe("Act fully stopped: $1,210.50 of $200.00 real money spent today");
+    expect(fullBudgetText({ spentUsd: null, budgetUsd: 25, spent: false })).toBe("Act fully: today’s real money not read yet, of $25.00");
   });
 
   it("checks repos, workflows, a budget and the hold as typed, in the hub's words", () => {
@@ -117,7 +129,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         setMode: false,
       },
       work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
-      full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null },
+      full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
     });
   });
 
@@ -322,7 +334,7 @@ describe("checking what's typed, in plain words", () => {
     expect(DEFAULT_OVERSIGHT.full.anywhere).toBe(false);
     expect(DEFAULT_OVERSIGHT.act.setMode).toBe(false);
     const on = oversightOf(`[oversight]\nlevel = "full"\n[oversight.act]\nset_mode = true\n[oversight.full]\nanywhere = true\n`);
-    expect(on.full).toEqual({ anywhere: true, repos: [], workflows: [], budgetUsdPerDay: null });
+    expect(on.full).toEqual({ anywhere: true, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null });
     expect(on.act.setMode).toBe(true);
     // Anywhere needs neither repos nor a budget.
     expect(fullMissing(on)).toEqual([]);
