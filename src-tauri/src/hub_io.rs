@@ -548,8 +548,22 @@ async fn pairing_json(mut response: reqwest::Response) -> Result<PairingAnswer, 
     })
 }
 
-fn unreachable(e: reqwest::Error) -> String {
-    format!("Couldn't reach the workspace: {}", e.without_url())
+/// Why a workspace couldn't be reached, in the person's words: what to
+/// check first. The client's own words ("error sending request…") stay in
+/// Desk's log, never on screen.
+fn unreachable(url: &str, e: reqwest::Error) -> String {
+    let host = Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| url.to_string());
+    let timed_out = e.is_timeout();
+    tracing::info!(%host, error = %e.without_url(), "couldn't reach a workspace to pair with");
+    let why = if timed_out {
+        "it didn't answer in time"
+    } else {
+        "check the address, your internet or VPN"
+    };
+    format!("Can't reach {host}: {why}.")
 }
 
 /// Asks the hub at `url` for a pairing code, as a desktop device named
@@ -571,7 +585,7 @@ pub async fn request_pairing(
         .json(&body)
         .send()
         .await
-        .map_err(unreachable)?;
+        .map_err(|e| unreachable(url, e))?;
     pairing_json(response).await
 }
 
@@ -618,7 +632,11 @@ pub async fn pairing_standing(url: &str, code: &str) -> Result<Standing, String>
     }
     let (base, client) = pairing_client(url)?;
     let target = desk_core::net::at(&base, &format!("/api/pair/device/status/{code}"), None)?;
-    let mut response = client.get(target).send().await.map_err(unreachable)?;
+    let mut response = client
+        .get(target)
+        .send()
+        .await
+        .map_err(|e| unreachable(url, e))?;
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(Standing::Expired);
     }
@@ -804,6 +822,30 @@ mod tests {
                 .contains("authorization: bearer sentinel-device")
         );
         assert!(!head.contains("local-token"));
+    }
+
+    #[tokio::test]
+    async fn a_workspace_that_cant_be_reached_is_said_plainly_with_what_to_check() {
+        // A port nothing listens on: refused at once.
+        let free = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        let url = format!("http://127.0.0.1:{port}");
+        let Err(why) = request_pairing(&url, "Desk", None).await else {
+            panic!("nothing listens there");
+        };
+        assert_eq!(
+            why,
+            "Can't reach 127.0.0.1: check the address, your internet or VPN."
+        );
+        assert!(!why.contains("error sending request"));
+        let Err(why) = pairing_standing(&url, "ABC1").await else {
+            panic!("nothing listens there");
+        };
+        assert_eq!(
+            why,
+            "Can't reach 127.0.0.1: check the address, your internet or VPN."
+        );
     }
 
     #[tokio::test]

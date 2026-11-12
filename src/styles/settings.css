@@ -1570,6 +1570,15 @@ legend.set-label {
 .dialog-foot-note.state-blocked {
   color: var(--blocked);
 }
+/* "Rename to Driftwerk": the name the workspace gives itself. */
+.hub-name .hub-rename {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.hub-row-warning .problem {
+  margin: 0;
+}
+
 
 /* A row's sign-in again, or its rename: across the whole row. */
 .account-row > .account-add {
