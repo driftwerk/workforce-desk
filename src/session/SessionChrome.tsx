@@ -195,6 +195,8 @@ export function SessionChrome({
         <SessionTabs name={name} tab={tab} onTab={onTab} ids={tabIds} />
       </div>
       {menu && (
+        // As with a popover: what's pressed in the menu stays in it.
+        <span className="sc-menu-host" onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
         <Menu
           label={`${name} options`}
           at={menu}
@@ -204,6 +206,7 @@ export function SessionChrome({
             setMenu(null);
           }}
         />
+        </span>
       )}
     </header>
   );

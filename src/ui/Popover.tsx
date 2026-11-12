@@ -46,6 +46,11 @@ export function Popover({ label, from, onClose, children, className = "" }: { la
       role="dialog"
       aria-label={label}
       className={`popover ${className}`}
+      // It's drawn over everything, but React passes its events up to what
+      // opened it: a press in it never drags a pane, a right click never
+      // opens the menu behind it.
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
       style={pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: "hidden" }}
     >
       {children}
