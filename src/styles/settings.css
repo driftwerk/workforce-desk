@@ -1700,3 +1700,14 @@ legend.set-label {
 .voices-nav-label {
   padding: 14px 10px 4px;
 }
+
+/* "Also sign Codex out on devbox", under the uninstall choice. */
+.remove-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0 28px;
+}
+.remove-option input {
+  accent-color: var(--signal);
+}

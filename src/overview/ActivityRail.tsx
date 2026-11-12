@@ -182,15 +182,18 @@ export function ActivityRail({
   const activity = useUnread((s) => s.local?.activity);
   const brief = useUnread((s) => s.local?.brief);
   const floorBadge = badgeOfFloor(allNeeds, activity, brief);
+  // Who allowed or denied it, as they are called now.
+  const roster = useChat((s) => s.roster);
   const states = useMemo(
     () =>
       floorOn && shown === "all"
         ? needStates(
             events,
             needs.filter((n) => n.hubId === localId),
+            agentNamer(roster, localId),
           )
         : new Map<string, NeedState>(),
-    [floorOn, shown, events, needs, localId],
+    [floorOn, shown, events, needs, localId, roster],
   );
 
   const log = (
