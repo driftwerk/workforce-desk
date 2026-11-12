@@ -65,6 +65,17 @@ esac
 
 const ENGINE: &str = "#!/bin/sh\necho \"9.9.9 (fake)\"\n";
 
+/// `sudo -S -k -p '' <command…>`: the password on its input, checked
+/// against the account's; then the command, which may now turn linger on.
+const SUDO: &str = r#"#!/bin/sh
+f="$HOME/.fake"
+read -r pw
+[ -e "$f/sudo-password" ] && [ "$pw" = "$(cat "$f/sudo-password")" ] || exit 1
+while [ $# -gt 0 ] && [ "$1" != loginctl ]; do shift; done
+touch "$f/linger-allowed"
+exec "$@"
+"#;
+
 /// `curl -fsSL <installer> -o <file>`: an installer that puts its engine
 /// in `~/.local/bin`, as Claude Code's and Codex's do.
 const CURL: &str = r#"#!/bin/sh
@@ -161,8 +172,9 @@ impl Box_ {
         let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let exe = dir.path().join("ssh");
         place(Path::new(env!("CARGO_BIN_EXE_fake-ssh")), &exe);
+        let own = dir.path().join("mac/desk/id_ed25519");
         let b = Box_ {
-            ssh: SshExe::at(exe),
+            ssh: SshExe::at(exe).with_own_key(own),
             dir,
         };
         for d in ["home/.fake", "fakebin", "mac/.ssh", "backends"] {
@@ -172,6 +184,7 @@ impl Box_ {
         script(&b.dir.path().join("fakebin/loginctl"), LOGINCTL);
         script(&b.dir.path().join("fakebin/claude"), ENGINE);
         script(&b.dir.path().join("fakebin/codex"), ENGINE);
+        script(&b.dir.path().join("fakebin/sudo"), SUDO);
         b.say(None);
         b
     }
@@ -195,7 +208,13 @@ impl Box_ {
 
     /// As [`Box_::say`], with `more` in its SSH settings.
     fn say_with(&self, key: Option<&str>, more: &str) {
-        let host = json!({
+        self.say_full(key, more, json!({}));
+    }
+
+    /// As [`Box_::say_with`], with `extra` in devbox's scenario (its
+    /// `password`, a `jump_prompt`, a `refuse`).
+    fn say_full(&self, key: Option<&str>, more: &str, extra: Value) {
+        let mut host = json!({
             "target": "devbox",
             "settings": format!(
                 "user dev\nhostname 203.0.113.7\nport 22\nidentityfile {}\nuserknownhostsfile {} {}\n{more}",
@@ -206,6 +225,9 @@ impl Box_ {
             "exec": {"home": self.home(), "path": self.dir.path().join("fakebin")},
             "host_key": key,
         });
+        for (k, v) in extra.as_object().unwrap() {
+            host[k] = v.clone();
+        }
         std::fs::write(
             self.dir.path().join("scenario.json"),
             json!({"log": self.dir.path().join("calls.jsonl"), "hosts": [host]}).to_string(),
@@ -340,12 +362,21 @@ struct Said {
     events: Mutex<Vec<SetupEvent>>,
     dropped: Mutex<Vec<String>>,
     removing: Mutex<Vec<desk_machine::fleet::RemoveEvent>>,
+    typed: Typed,
 }
 
 struct TestHost {
     said: Arc<Said>,
     wanted: String,
     tarball: PathBuf,
+}
+
+/// What the person types into Desk's own field, in turn; and what they
+/// were asked.
+#[derive(Default)]
+struct Typed {
+    answers: Mutex<std::collections::VecDeque<String>>,
+    asked: Mutex<Vec<desk_machine::fleet::keys::SecretQuestion>>,
 }
 
 impl Host for TestHost {
@@ -379,6 +410,18 @@ impl Host for TestHost {
     fn removing(&self, event: &desk_machine::fleet::RemoveEvent) {
         self.said.removing.lock().unwrap().push(event.clone());
     }
+    fn ask_secret(
+        &self,
+        question: &desk_machine::fleet::keys::SecretQuestion,
+    ) -> Option<desk_machine::askpass::Secret> {
+        let typed = &self.said.typed;
+        typed.asked.lock().unwrap().push(question.clone());
+        let next = typed.answers.lock().unwrap().pop_front()?;
+        desk_machine::askpass::Secret::new(zeroize::Zeroizing::new(next)).ok()
+    }
+    fn askpass(&self) -> Option<PathBuf> {
+        Some(PathBuf::from(env!("CARGO_BIN_EXE_desk-askpass")))
+    }
 }
 
 struct Yes(AtomicUsize, bool);
@@ -400,6 +443,14 @@ impl TrustConfirm for Yes {
         self.1
     }
     fn uninstall(&self, _: &desk_machine::hostkey::UninstallQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
+    fn forget_key(&self, _: &desk_machine::hostkey::ForgetQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
+    fn linger(&self, _: &desk_machine::hostkey::LingerQuestion) -> bool {
         self.0.fetch_add(1, Ordering::SeqCst);
         self.1
     }
@@ -779,7 +830,11 @@ fn a_new_host_key_is_shown_then_trusted_only_as_it_was_shown() {
     assert_eq!(r.asked.0.load(Ordering::SeqCst), 1);
 
     r.fleet.trust("devbox", FINGERPRINT).unwrap();
-    assert_eq!(r.asked.0.load(Ordering::SeqCst), 2, "the trust question");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        1,
+        "the yes to adding it was the one question: no second to trust its key"
+    );
     assert_eq!(
         std::fs::read_to_string(b.known_hosts()).unwrap(),
         format!("devbox {KEY}\n")
@@ -789,7 +844,7 @@ fn a_new_host_key_is_shown_then_trusted_only_as_it_was_shown() {
     assert!(matches!(p.access, Some(Access::Ok { .. })), "{p:?}");
     assert_eq!(
         r.asked.0.load(Ordering::SeqCst),
-        2,
+        1,
         "the yes to look stands"
     );
 }
@@ -820,6 +875,308 @@ fn a_changed_host_key_is_never_trusted() {
             .count(),
         1
     );
+}
+
+/// Everything a password could have reached: ssh's calls, the setup
+/// events, the machine's log here, and machines.json.
+fn nowhere(b: &Box_, r: &Run, secret: &str) {
+    let calls = std::fs::read_to_string(b.dir.path().join("calls.jsonl")).unwrap_or_default();
+    assert!(!calls.contains(secret), "in ssh's calls");
+    let events = serde_json::to_string(&*r.said.events.lock().unwrap()).unwrap();
+    assert!(!events.contains(secret), "in an event");
+    for m in r.fleet.list() {
+        let log = serde_json::to_string(&r.fleet.log(&m.id).unwrap()).unwrap();
+        assert!(!log.contains(secret), "in its log");
+    }
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap_or_default();
+    assert!(!kept.contains(secret), "in machines.json");
+}
+
+#[test]
+fn a_machine_that_turns_this_computers_key_away_takes_desks_with_its_password_once() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    b.say_full(None, "", json!({"password": "correct horse"}));
+    std::fs::write(b.fake("sudo-password"), "correct horse").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(matches!(p.access, Some(Access::Refused { .. })), "{p:?}");
+
+    // Wrong first: asked again, saying so; then right.
+    r.said
+        .typed
+        .answers
+        .lock()
+        .unwrap()
+        .extend(["battery staple".to_string(), "correct horse".to_string()]);
+    let done = r.fleet.install_key("devbox").unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done", "linger": true}),
+        "linger turned on with sudo in the same session"
+    );
+    let asked = r.said.typed.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2);
+    assert_eq!(asked[0].target, "devbox");
+    assert_eq!(asked[0].problem, None);
+    assert!(
+        asked[1]
+            .problem
+            .as_deref()
+            .unwrap()
+            .contains("didn't take that password")
+    );
+    let authorized = std::fs::read_to_string(b.home().join(".ssh/authorized_keys")).unwrap();
+    assert!(authorized.contains("Desk on "), "{authorized}");
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        1,
+        "one native question in all"
+    );
+
+    // Its own key gets in from now on, and it is added with it.
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(matches!(p.access, Some(Access::Ok { .. })), "{p:?}");
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap();
+    assert!(kept.contains("\"own_key\": true"), "{kept}");
+    nowhere(&b, &r, "correct horse");
+    nowhere(&b, &r, "battery staple");
+
+    // Uninstalling takes Desk's key away again.
+    assert!(r.fleet.uninstall(&id).unwrap());
+    let authorized = std::fs::read_to_string(b.home().join(".ssh/authorized_keys")).unwrap();
+    assert!(!authorized.contains("Desk on "), "{authorized}");
+}
+
+#[test]
+fn desks_own_key_goes_with_a_machine_reached_at_another_address() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let host = |target: &str| {
+        json!({
+            "target": target,
+            "settings": format!(
+                "user dev\nhostname 203.0.113.7\nport 22\nuserknownhostsfile {}\n",
+                b.known_hosts().display()
+            ),
+            "exec": {"home": b.home(), "path": b.dir.path().join("fakebin")},
+            "host_key": KEY,
+            "password": "pw",
+        })
+    };
+    let say = |hosts: Vec<Value>| {
+        std::fs::write(
+            b.dir.path().join("scenario.json"),
+            json!({"log": b.dir.path().join("calls.jsonl"), "hosts": hosts}).to_string(),
+        )
+        .unwrap()
+    };
+    say(vec![host("devbox")]);
+    std::fs::write(
+        b.known_hosts(),
+        format!("devbox {KEY}\n203.0.113.7 {KEY}\n"),
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.probe("devbox").unwrap();
+    r.said.typed.answers.lock().unwrap().push_back("pw".into());
+    r.fleet.install_key("devbox").unwrap();
+    // Desk's own field shows the host key the password will go to.
+    let asked = r.said.typed.asked.lock().unwrap().clone();
+    assert_eq!(asked[0].fingerprint.as_deref(), Some(FINGERPRINT));
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("its key kept", || r.fleet.list()[0].host_key.is_some());
+
+    say(vec![host("devbox"), host("devbox-new")]);
+    let done = r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done"})
+    );
+    // Reached at the new address with Desk's key: it gets in there too.
+    until("ready at the new address", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && b.calls()
+                .iter()
+                .any(|c| c.iter().any(|a| a == "devbox-new") && c.iter().any(|a| a == "-i"))
+    });
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap();
+    assert!(kept.contains("\"own_key\": true"), "{kept}");
+}
+
+#[test]
+fn a_jump_hosts_prompt_gets_nothing_and_a_machine_that_takes_no_password_is_said() {
+    let b = Box_::new();
+    b.say_full(
+        None,
+        "proxyjump bastion\n",
+        json!({"password": "pw", "jump_prompt": "dev@bastion's password: "}),
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.probe("devbox").unwrap();
+    r.said.typed.answers.lock().unwrap().push_back("pw".into());
+    // The fake exits 99 had the jump host been given it.
+    let done = r.fleet.install_key("devbox").unwrap();
+    assert_eq!(serde_json::to_value(&done).unwrap()["kind"], "done");
+    // An ssh before 8.4 can't tell the jump host's prompt from the
+    // machine's: no password through a jump host then.
+    let scenario = b.dir.path().join("scenario.json");
+    let mut said: Value =
+        serde_json::from_str(&std::fs::read_to_string(&scenario).unwrap()).unwrap();
+    said["version"] = json!("OpenSSH_8.2p1 Ubuntu-4ubuntu0.11, OpenSSL 1.1.1f");
+    std::fs::write(&scenario, said.to_string()).unwrap();
+    let asked = r.said.typed.asked.lock().unwrap().len();
+    let old = r.fleet.install_key("devbox").unwrap_err();
+    assert!(old.contains("older than OpenSSH 8.4"), "{old}");
+    assert_eq!(
+        r.said.typed.asked.lock().unwrap().len(),
+        asked,
+        "never asked"
+    );
+
+    let b = Box_::new();
+    b.say_full(
+        None,
+        "",
+        json!({"refuse": {"stderr": "dev@203.0.113.7: Permission denied (publickey).", "code": 255}}),
+    );
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.probe("devbox").unwrap();
+    r.said.typed.answers.lock().unwrap().push_back("pw".into());
+    let no = r.fleet.install_key("devbox").unwrap_err();
+    assert!(no.contains("only lets keys sign in"), "{no}");
+
+    // Closing Desk's field sends nothing.
+    let none = r.fleet.install_key("devbox").unwrap();
+    assert_eq!(serde_json::to_value(&none).unwrap()["kind"], "cancelled");
+    // And it can't be made to pop up again straight away.
+    let asked = r.said.typed.asked.lock().unwrap().len();
+    let quiet = r.fleet.install_key("devbox").unwrap_err();
+    assert!(quiet.contains("was cancelled. Try again in"), "{quiet}");
+    assert_eq!(r.said.typed.asked.lock().unwrap().len(), asked, "not asked");
+}
+
+#[test]
+fn a_password_is_asked_only_for_an_address_said_yes_to_with_a_known_key() {
+    let b = Box_::new();
+    b.say_full(Some(KEY), "", json!({"password": "pw"}));
+    let r = fleet(&b, "0.2.0", true);
+    assert!(r.fleet.install_key("devbox").is_err(), "no yes yet");
+    r.fleet.probe("devbox").unwrap();
+    let no = r.fleet.install_key("devbox").unwrap_err();
+    assert!(no.contains("Trust devbox's host key first"), "{no}");
+    assert!(r.said.typed.asked.lock().unwrap().is_empty(), "never asked");
+}
+
+#[test]
+fn a_reinstalled_machines_old_key_is_forgotten_only_after_a_yes_to_both() {
+    let b = Box_::new();
+    // Known by the name ssh looks it up by.
+    let old = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOZhZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleWY=";
+    let host = json!({
+        "target": "devbox",
+        "settings": format!(
+            "user dev\nhostname devbox\nport 22\nuserknownhostsfile {}\n",
+            b.known_hosts().display()
+        ),
+        "exec": {"home": b.home(), "path": b.dir.path().join("fakebin")},
+        "host_key": KEY,
+    });
+    std::fs::write(
+        b.dir.path().join("scenario.json"),
+        json!({"log": b.dir.path().join("calls.jsonl"), "hosts": [host]}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(b.known_hosts(), format!("devbox {old}\nother {old}\n")).unwrap();
+    let no = fleet(&b, "0.2.0", false);
+    assert!(
+        no.fleet.forget_key("devbox", FINGERPRINT).is_err(),
+        "no yes to look"
+    );
+
+    let r = fleet(&b, "0.2.0", true);
+    let p = r.fleet.probe("devbox").unwrap();
+    assert!(matches!(p.host_key, ProbeKey::Changed { .. }), "{p:?}");
+    assert!(
+        r.fleet
+            .forget_key(
+                "devbox",
+                "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            )
+            .unwrap_err()
+            .contains("another key")
+    );
+    assert!(r.fleet.forget_key("devbox", FINGERPRINT).unwrap());
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        2,
+        "the look, then forgetting"
+    );
+    let known = std::fs::read_to_string(b.known_hosts()).unwrap();
+    assert!(known.contains(&format!("devbox {KEY}")), "{known}");
+    assert!(!known.contains(&format!("devbox {old}")), "{known}");
+    assert!(
+        known.contains(&format!("other {old}")),
+        "every other line stays: {known}"
+    );
+    let p = r.fleet.probe("devbox").unwrap();
+    assert_eq!(p.host_key, ProbeKey::Known);
+}
+
+#[test]
+fn linger_is_turned_on_with_the_machines_password_once_and_desk_moves_to_its_service() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("sudo-password"), "s3cret pass").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("blocked", || {
+        step(&r, "install", StepState::Blocked).is_some()
+    });
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    // A wrong one: said, with the line an administrator runs. Asked
+    // natively first: the yes to adding it was used up.
+    let asked_before = r.asked.0.load(Ordering::SeqCst);
+    r.said
+        .typed
+        .answers
+        .lock()
+        .unwrap()
+        .push_back("nope".into());
+    let no = r.fleet.linger_with_password(&id).unwrap_err();
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked_before + 1,
+        "a native yes first"
+    );
+    assert!(no.contains("sudo loginctl enable-linger"), "{no}");
+    r.said
+        .typed
+        .answers
+        .lock()
+        .unwrap()
+        .push_back("s3cret pass".into());
+    let done = r.fleet.linger_with_password(&id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done", "linger": true})
+    );
+    let asked = r.said.typed.asked.lock().unwrap().clone();
+    assert_eq!(
+        serde_json::to_value(asked[0].kind).unwrap(),
+        json!("linger")
+    );
+    // The account the machine said it is (here, whoever runs the test).
+    assert!(asked[0].user.as_deref().is_some_and(|u| !u.is_empty()));
+    until("the service", || {
+        step(&r, "install", StepState::Done).is_some()
+    });
+    assert!(b.fake("enabled").exists());
+    nowhere(&b, &r, "s3cret pass");
 }
 
 #[test]

@@ -48,7 +48,7 @@ function Check({ item, text, children }: { item: Item; text: string; children?: 
       <span className="machine-check-text">
         <span className={item.state === "waiting" ? "faint" : item.state === "failed" ? "state-blocked" : undefined}>{text}</span>
         {item.message && item.state !== "failed" && <span className="small muted">{item.message}</span>}
-        {item.line && <Line text={item.line} />}
+        {item.line && item.state !== "blocked" && <Line text={item.line} />}
         {children}
       </span>
     </li>
@@ -181,6 +181,16 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         .publicKey()
         .then((k) => live && setPublicKey(k))
         .catch(() => undefined);
+    // Desk's own field asks: the page never sees what is typed.
+    if (flow.at === "signingIn")
+      (flow.with === "password" ? native.installKey(flow.target) : native.unlockKey(flow.target))
+        .then((r) => live && dispatch(r.kind === "done" ? { type: "keyed" } : { type: "signInCancelled" }))
+        .catch((e: unknown) => live && dispatch({ type: "signInFailed", message: plainError(e) }));
+    if (flow.at === "forgetting")
+      native
+        .forgetKey(flow.target, flow.fingerprint)
+        .then((yes) => live && dispatch(yes ? { type: "forgotten" } : { type: "forgetCancelled" }))
+        .catch((e: unknown) => live && dispatch({ type: "forgetFailed", message: plainError(e) }));
     return () => {
       live = false;
     };
@@ -214,6 +224,9 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
   const editing = flow.at === "address";
   const ready = setUp(flow);
   const here = thisComputerLower(platform);
+  // Desk signs in with a password where it reaches machines with the
+  // system's ssh: not on Windows.
+  const canPassword = platform !== "windows";
   const taken = machines.map((m) => m.name);
   const name = "name" in flow ? (flow.name ?? "") : "";
   const asking = editing || flow.at === "checking";
@@ -264,6 +277,22 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
       what: "adding a machine in Settings → Machines",
       details: [redact(i.message ?? ""), ...lines.slice(-40).map((l) => redact(`${clock(l.at)} ${l.text}`))].filter(Boolean).join("\n"),
     });
+  };
+
+  /** Linger waits on an administrator: Desk turns it on with sudo and the
+   *  machine's password, typed into Desk's own field. */
+  const [lingering, setLingering] = useState<{ state: "asking" } | { state: "failed"; problem: string } | null>(null);
+  const lingerWithPassword = () => {
+    if (flow.at !== "setup" || !flow.machine) return;
+    setLingering({ state: "asking" });
+    native
+      .lingerWithPassword(flow.machine)
+      .then((r) => {
+        setLingering(null);
+        if (r.kind === "done" && flow.at === "setup" && flow.machine)
+          dispatch({ type: "setup", event: { machine: flow.machine, step: "install", state: "done", detail: "Desk installed, and set to start when it boots" } });
+      })
+      .catch((e: unknown) => setLingering({ state: "failed", problem: plainError(e) }));
   };
 
   /** A failed step's way out, in place. */
@@ -437,15 +466,18 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         {(flow.at === "trust" || flow.at === "trusting") && (
           <div className="machine-box" role="group" aria-label="New machine">
             <span className="ov-label muted">New machine</span>
-            <span>Desk hasn’t connected to {flow.name} before. Its fingerprint is</span>
-            <span className="mono small muted">
-              {flow.fingerprint}
-              {flow.at === "trust" && ` (${flow.keyType})`}
-            </span>
-            <span className="small muted">If you know it, check it matches what the machine shows (ssh-keygen -lf on its host key).</span>
+            <span>Desk hasn’t connected to {flow.name} before. Trust it to go on.</span>
+            <details className="problem-details">
+              <summary className="small faint">Its fingerprint</summary>
+              <span className="mono small muted">
+                {flow.fingerprint}
+                {flow.at === "trust" && ` (${flow.keyType})`}
+              </span>
+              <span className="small muted">If you know the machine’s fingerprint, check they match.</span>
+            </details>
             <div className="machine-actions">
               <button type="button" className="btn btn-sm btn-signal" disabled={flow.at === "trusting"} onClick={() => dispatch({ type: "trust" })}>
-                Trust this machine
+                {flow.at === "trusting" ? "Trusting…" : "Trust and continue"}
               </button>
               <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: "back" })}>
                 Cancel
@@ -453,60 +485,94 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
             </div>
           </div>
         )}
-        {(flow.at === "trust" || flow.at === "trusting") && (
-          <span className="small faint">Trusting asks you once more, in a {platform === "macos" ? "macOS" : "system"} dialog.</span>
-        )}
 
-        {flow.at === "changed" && (
+        {(flow.at === "changed" || flow.at === "forgetting") && (
           <div className="machine-box" role="alert" aria-label="Its key has changed">
             <span className="ov-label state-blocked">Its key has changed</span>
             <span>
-              {flow.name} shows a different key from the one this computer knows ({flow.fingerprint}). Desk won’t connect to it. If the machine was reinstalled, remove
-              its old key and add it again:
+              {flow.name} shows a different key from the one {here} knows, so Desk won’t connect yet. That happens when a machine is reinstalled or replaced. If you
+              don’t know why it changed, don’t go on.
             </span>
-            <Line text={flow.forgetKey ?? `ssh-keygen -R ${nameFromTargetOf(flow.target)}`} />
+            <span className="mono small muted">Now: {flow.fingerprint}</span>
+            {flow.at === "changed" && flow.problem && (
+              <span className="small state-blocked" role="alert">
+                {flow.problem}
+              </span>
+            )}
             <div className="machine-actions">
+              <button type="button" className="btn btn-sm btn-signal" disabled={flow.at === "forgetting"} onClick={() => dispatch({ type: "forget" })}>
+                {flow.at === "forgetting" ? "Waiting for your yes…" : "Forget the old key and trust the new one"}
+              </button>
               <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: "back" })}>
                 Back
               </button>
             </div>
+            <span className="small faint">Desk shows you both fingerprints before it changes anything.</span>
+            {flow.forgetKey && (
+              <details className="problem-details">
+                <summary className="small faint">Or remove it yourself</summary>
+                <Line text={flow.forgetKey} />
+              </details>
+            )}
           </div>
         )}
 
-        {flow.at === "key" && (
-          <div className="machine-box" role="group" aria-label="This computer’s key">
-            <span className="ov-label muted">{flow.why === "locked" ? "Your SSH key is locked" : `${flow.name} doesn’t know this computer yet`}</span>
+        {(flow.at === "key" || flow.at === "signingIn") && (
+          <div className="machine-box" role="group" aria-label={`Sign in to ${flow.name}`}>
+            <span className="ov-label muted">{flow.why === "locked" ? "Your SSH key is locked" : `Sign in to ${flow.name} once`}</span>
             {flow.why === "locked" ? (
-              <>
-                <span>Your SSH key needs its passphrase, and no SSH agent holds it. Unlock it in a terminal, then try again:</span>
-                <Line text="ssh-add" />
-              </>
+              <span>Your SSH key needs its passphrase. Desk asks for it in its own window and adds the key to your SSH agent; it doesn’t keep the passphrase.</span>
             ) : (
-              <>
-                <span>
-                  {flow.name} didn’t take any of this computer’s SSH keys. Put yours in {flow.user ? `${flow.user}’s` : "its"} ~/.ssh/authorized_keys there, from a
-                  terminal that can already sign in:
-                </span>
+              <span>
+                {flow.name} doesn’t know {here} yet. Desk asks for {flow.user ? `${flow.user}’s` : "the account’s"} password there once, in its own window, puts its own
+                key on {flow.name}, then forgets the password.
+              </span>
+            )}
+            {flow.at === "key" && flow.problem && (
+              <span className="small state-blocked" role="alert">
+                {flow.problem}
+              </span>
+            )}
+            <div className="machine-actions">
+              {flow.why === "locked" ? (
+                <>
+                  <button type="button" className="btn btn-sm btn-signal" disabled={flow.at === "signingIn"} onClick={() => dispatch({ type: "signIn", with: "passphrase" })}>
+                    {flow.at === "signingIn" && flow.with === "passphrase" ? "Waiting for the passphrase…" : "Unlock your key"}
+                  </button>
+                  {canPassword && (
+                    <button type="button" className="btn btn-sm" disabled={flow.at === "signingIn"} onClick={() => dispatch({ type: "signIn", with: "password" })}>
+                      Use {flow.name}’s password instead
+                    </button>
+                  )}
+                </>
+              ) : canPassword ? (
+                <button type="button" className="btn btn-sm btn-signal" disabled={flow.at === "signingIn"} onClick={() => dispatch({ type: "signIn", with: "password" })}>
+                  {flow.at === "signingIn" ? "Waiting for the password…" : `Sign in with ${flow.name}’s password`}
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-sm" disabled={flow.at === "signingIn"} onClick={() => dispatch({ type: "back" })}>
+                Back
+              </button>
+            </div>
+            {flow.at === "key" && flow.why === "refused" && (
+              <details className="problem-details" open={!canPassword}>
+                <summary className="small faint">Or put {here}’s key there yourself</summary>
+                <span className="small muted">From a terminal that can already sign in there:</span>
                 <Line text={`ssh-copy-id ${target}`} />
                 {publicKey && (
                   <>
-                    <span className="small muted">Or add this line to that file yourself:</span>
+                    <span className="small muted">Or add this line to {flow.user ? `${flow.user}’s` : "its"} ~/.ssh/authorized_keys:</span>
                     <span className="machine-line">
                       <code className="mono small machine-key">{publicKey}</code>
                       <CopyButton text={publicKey} />
                     </span>
                   </>
                 )}
-              </>
+                <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: "retry" })}>
+                  Try again
+                </button>
+              </details>
             )}
-            <div className="machine-actions">
-              <button type="button" className="btn btn-sm btn-signal" onClick={() => dispatch({ type: "retry" })}>
-                Try again
-              </button>
-              <button type="button" className="btn btn-sm" onClick={() => dispatch({ type: "back" })}>
-                Back
-              </button>
-            </div>
           </div>
         )}
 
@@ -519,6 +585,24 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
               </Check>
               <Check item={flow.steps.install} text={checkText.install(flow.steps.install)}>
                 {wayOut(flow.steps.install)}
+                {flow.steps.install.state === "blocked" && flow.machine && (
+                  <span className="machine-actions">
+                    <button type="button" className="btn btn-sm btn-signal" disabled={lingering?.state === "asking"} onClick={lingerWithPassword}>
+                      {lingering?.state === "asking" ? "Waiting for the password…" : `Turn it on with ${flow.name}’s password`}
+                    </button>
+                    {lingering?.state === "failed" && (
+                      <span className="small state-blocked" role="alert">
+                        {lingering.problem}
+                      </span>
+                    )}
+                    {flow.steps.install.line && (
+                      <details className="problem-details">
+                        <summary className="small faint">Or an administrator runs this there</summary>
+                        <Line text={flow.steps.install.line} />
+                      </details>
+                    )}
+                  </span>
+                )}
               </Check>
               <Check item={flow.steps.engines} text={checkText.engines(flow.steps.engines)}>
                 {wayOut(flow.steps.engines)}
