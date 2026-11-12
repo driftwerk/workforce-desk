@@ -27,6 +27,7 @@ pub const COMMANDS: &[&str] = &[
     "machine_log",
     "machine_remote_log",
     "machine_ssh_hosts",
+    "machine_desk_entry",
     "machine_edit",
     "machine_check_reach",
     "machine_cancel_add",

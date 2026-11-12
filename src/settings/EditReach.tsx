@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Machine } from "../machines/engines";
 import type { Checked, HostEntry, MachineNative } from "../machines/native";
-import { thisComputerLower } from "../machines/words";
+import { forwardsRefused, isDesks, thisComputerLower } from "../machines/words";
 import { useHost } from "../shell/host";
 import { plainError } from "../ui/plainError";
 
@@ -83,19 +83,41 @@ export function EditReach({
     onClose();
   };
   /** Checks the new address: nothing changes yet. */
-  const check = async () => {
+  const check = async (to: string = target) => {
     const mine = ++run.current;
     setBusy("checking");
     setSaid(null);
     try {
-      const r = await native.checkReach(machine.id, target);
+      const r = await native.checkReach(machine.id, to);
       if (run.current !== mine) return;
-      if (r.kind === "same") setSaid({ kind: "same", result: r, target });
-      if (r.kind === "differentKey") setSaid({ kind: "different", result: r, target });
+      if (r.kind === "same") setSaid({ kind: "same", result: r, target: to });
+      if (r.kind === "differentKey") setSaid({ kind: "different", result: r, target: to });
     } catch (e) {
       if (run.current === mine) setSaid({ kind: "problem", text: plainError(e) });
     } finally {
       if (run.current === mine) setBusy(false);
+    }
+  };
+  /** "Give Desk its own entry": the same machine without the forwards
+   *  the person's entry has, under a name of Desk's (after a native yes),
+   *  picked and checked. */
+  const giveEntry = async () => {
+    const mine = ++run.current;
+    setBusy("checking");
+    try {
+      const alias = await native.deskEntry(target);
+      if (run.current !== mine) return;
+      setBusy(false);
+      if (!alias) return;
+      read();
+      setTab("config");
+      setPicked(alias);
+      await check(alias);
+    } catch (e) {
+      if (run.current === mine) {
+        setSaid({ kind: "problem", text: plainError(e) });
+        setBusy(false);
+      }
     }
   };
   /** Saves the name, and switches to an address checked just now. */
@@ -134,7 +156,12 @@ export function EditReach({
           (hosts === null ? (
             <p className="small faint">Reading your SSH config…</p>
           ) : hosts.length === 0 ? (
-            <p className="small faint">Your SSH config has no Host entries Desk can list. Add one there, then Read it again, or type an address.</p>
+            <p className="small faint">
+              Your SSH config has no Host entries Desk can list.{" "}
+              <button type="button" className="btn btn-sm" onClick={() => setTab("address")}>
+                Type an address
+              </button>
+            </p>
           ) : (
             <div className="pick-list" role="radiogroup" aria-label="SSH config entries">
               {hosts.map((h) => (
@@ -238,6 +265,14 @@ export function EditReach({
         {said?.kind === "problem" && (
           <p className="small state-blocked" role="alert">
             {said.text}
+            {forwardsRefused(said.text) && !isDesks(target) && (
+              <>
+                {" "}
+                <button type="button" className="btn btn-sm btn-signal" disabled={!!busy} onClick={() => void giveEntry()}>
+                  Give Desk its own entry
+                </button>
+              </>
+            )}
           </p>
         )}
         {checked && said?.kind === "same" && (
