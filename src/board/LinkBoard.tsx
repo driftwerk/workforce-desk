@@ -14,6 +14,11 @@ import { STATE_TITLE } from "./board";
 import { ChooseMe } from "./ChooseMe";
 import { useBoard } from "./store";
 import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
+import { connectionsOf, type Listing } from "../hub/connections";
+import { useDesk } from "../hub/store";
+import { Connect } from "../settings/Connections";
+import { useAgentConfigs } from "../crew/agentBrain";
+import { bindingOf, choose, setAgentConnectors, throughOf, todayOf } from "../crew/connectors";
 
 /** What a hub (or this computer) said when asked whether it offers the
  *  system's tools. */
@@ -96,6 +101,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
   // ── Which hubs offer the system ─────────────────────────────────────────
   const probeRun = useRef(0);
+  /** Bumped once this computer has the system turned on: asked again. */
+  const [reprobe, setReprobe] = useState(0);
   const keptKey = (kept ?? []).map((h) => `${h.id}:${h.hasToken}`).join(",");
   useEffect(() => {
     if (!system) return;
@@ -121,7 +128,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     for (const c of choices) if (c.kept?.hasToken) void ask(c.id, { kind: "hub", hub: c.id });
     void ask(THIS, { kind: "thisHub" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [system, keptKey, choices.length]);
+  }, [system, keptKey, choices.length, reprobe]);
 
   const choice = choices.find((c) => c.id === viaKey) ?? null;
   const via: SyncVia | null = viaKey === THIS ? { kind: "thisHub" } : choice ? { kind: "hub", hub: choice.id } : null;
@@ -335,6 +342,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
               const p = probes[c.id];
               return p?.state === "no" && p.noAgent ? <NoAgent key={c.id} choice={c} system={system} words={p.error} /> : null;
             })}
+            {probes[THIS]?.state === "no" && !hubOffers && !choices.some((c) => probes[c.id]?.state === "checking") && (
+              <ThisComputerSetup key={system} system={system} disabled={busy} onReady={() => setReprobe((n) => n + 1)} />
+            )}
             {choices.length === 0 && <span className="move-opt-sub">No workspace is connected to Desk: link one in Settings → Workspaces to sync through its {SYSTEM_TITLE[system]}.</span>}
             {choice && (probe?.state === "needsToken" || (probe?.state === "no" && probe.noToken)) && (
               <TokenPanel key={choice.id} choice={choice} again={probe.state === "no"} />
@@ -681,6 +691,97 @@ function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick
         <span className="move-opt-sub">{sub}</span>
       </span>
     </label>
+  );
+}
+
+/** This computer hasn't the system's tools for the person, and no hub
+ *  offers them: Desk turns them on itself. A board here syncs through this
+ *  computer's default agent's tools with the person's own connection, so
+ *  Desk turns the connector on for that agent; the one thing it can't make
+ *  up is the person's key, so with no connection yet it asks for one in
+ *  place first. Then the dialog asks this computer again. */
+function ThisComputerSetup({ system, disabled, onReady }: { system: SyncSystem; disabled: boolean; onReady: () => void }) {
+  const title = SYSTEM_TITLE[system];
+  const desk = useDesk((s) => s.hub);
+  const local = localHubRef();
+  const agent = useChat((s) => (local ? s.roster.find((a) => a.hubId === local.id && a.isDefault) : undefined));
+  const key = agent ? agentKey(agent) : "";
+  const config = useAgentConfigs((s) => s.configs[key]);
+  const [api] = useState(() => (local ? connectionsOf(local) : null));
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    api.list().then(setListing, () => setListing(null));
+  }, [api]);
+  // Read fresh each time: it may have changed since it was last read.
+  useEffect(() => {
+    if (desk && agent) void useAgentConfigs.getState().load(desk, agent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desk, agent?.id]);
+
+  const connector = listing?.connectors.find((c) => c.id === system);
+  if (!api || !desk || !agent || !connector || config === undefined) return null;
+  // The person's own connection, for all their agents: a board here syncs
+  // with their keys, never one kept just for an agent.
+  const connected = connector.connections.some((x) => x.status === "connected" && x.level === "all");
+  const on = throughOf(bindingOf(config), system) !== "off";
+  // Connected and on, yet not offered: nothing here Desk can change; the
+  // row says why.
+  if (connected && on) return null;
+
+  const turnOn = async () => {
+    setWorking(true);
+    setProblem(null);
+    try {
+      if (!on) {
+        const fresh = await api.list();
+        const toml = await setAgentConnectors(desk, agent.id, (b) =>
+          throughOf(b, system) === "off" ? choose(b, system, "mine", todayOf(fresh, agent.id)) : b,
+        );
+        useAgentConfigs.getState().put(key, toml);
+      }
+      // A connection just made shows as made, should this computer still
+      // not offer it.
+      api.list().then(setListing, () => {});
+      onReady();
+    } catch (e) {
+      setProblem(saidOf(e));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="move-callout sync-this-computer">
+      {connected ? (
+        <ProblemNote
+          problem={{
+            plain: `${title} is connected on this computer, but it’s off for ${agent.name}, whose tools a board here syncs through.`,
+            ...(working || disabled ? {} : { fix: { label: `Turn ${title} on for ${agent.name}`, run: () => void turnOn() } }),
+          }}
+        />
+      ) : (
+        <>
+          <p className="move-opt-sub">
+            Connect {title} to sync through this computer{on ? "" : `; Desk turns it on for ${agent.name}`}.
+          </p>
+          <Connect api={api} connector={connector} at={{ level: "all" }} label={`Connect ${title}`} onDone={turnOn} />
+        </>
+      )}
+      {working && (
+        <p className="move-opt-sub" role="status">
+          Turning {title} on…
+        </p>
+      )}
+      {problem && (
+        <p className="small state-blocked" role="alert">
+          {problem}
+        </p>
+      )}
+    </div>
   );
 }
 
