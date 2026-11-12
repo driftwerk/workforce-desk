@@ -2651,6 +2651,43 @@ button.thread-bar:hover {
   flex: 1;
   border-top: 1px solid var(--blocked);
 }
+.jump-pill-count {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+/* A DM keeps its reader in place itself (see useStayPut): the webview's own
+   anchoring, which only some engines have, would move it twice. */
+.dm-scroll {
+  overflow-anchor: none;
+}
+.dm-list {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+.composer-hint {
+  align-self: center;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--faint);
+}
+.composer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+}
+@container chat (max-width: 560px) {
+  .composer-hint {
+    display: none;
+  }
+}
 .jump-pill {
   position: absolute;
   bottom: 12px;

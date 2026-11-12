@@ -5,6 +5,8 @@ import { useSessionNames } from "../groups/names";
 import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { useMachines } from "../hub/engines";
+import { LOCAL } from "../hub/machines";
+import { accountsOn } from "../engines/accounts";
 import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
 import { lastInputAt } from "./away";
 import { isRunning, useChat } from "../chat/store";
@@ -54,7 +56,11 @@ export function useRestartWhenIdle() {
   const voiceOff = useVoiceStore((v) => v.status.state === "off" && Object.keys(v.waiting).length === 0);
   const fail = useDesk((s) => s.fail);
   const live = Object.values(sessions).filter(isLive);
-  const quiet = restartsQuietly({ live, kept, voiceOff, turns: roomTurns || dmTurns });
+  // A machine being set up or updated, or an account signing in anywhere,
+  // goes through this Desk: it isn't cut off by the restart either.
+  const machineBusy = useMachines((m) => m.machines.some((x) => x.state.kind === "adding" || x.state.kind === "updating"));
+  const signingIn = useSigningIn(waiting);
+  const quiet = restartsQuietly({ live, kept, voiceOff, turns: roomTurns || dmTurns }) && !machineBusy && !signingIn;
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!waiting || phase !== "ready") return;
@@ -71,6 +77,23 @@ export function useRestartWhenIdle() {
     go();
     // The sessions current at this render.
   }, [waiting, phase, quiet, tick, restart, fail]);
+}
+
+/** Whether an account signs in on this computer or any machine now, asked
+ *  every 2 s while `watching`. */
+function useSigningIn(watching: boolean): boolean {
+  const [now, setNow] = useState(false);
+  useEffect(() => {
+    if (!watching) return;
+    const look = () => {
+      const ids = [LOCAL, ...useMachines.getState().machines.map((m) => m.id)];
+      setNow(ids.some((id) => Object.values(accountsOn(id).getState().signIns).some((s) => s.state !== "done" && s.state !== "failed")));
+    };
+    look();
+    const every = setInterval(look, 2000);
+    return () => clearInterval(every);
+  }, [watching]);
+  return now;
 }
 
 /** Says where the band ends (`--update-band-bottom` on the page), for the

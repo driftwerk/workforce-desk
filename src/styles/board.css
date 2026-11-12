@@ -72,6 +72,22 @@
 .board-col {
   scroll-snap-align: start;
 }
+/* Its sideways scrollbar stays in sight, thin, in the theme's colours: on
+   macOS the system's own hides until it's used, and columns that end at
+   the edge would look like all there is. */
+.board-cols::-webkit-scrollbar {
+  height: 8px;
+}
+.board-cols::-webkit-scrollbar-track {
+  background: transparent;
+}
+.board-cols::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--faint) 55%, transparent);
+}
+.board-cols::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+}
 /* 4, 3, 2 or 1 columns in view: (width - padding - gaps) / count. */
 @container (max-width: 1011px) {
   .board-cols {
@@ -115,7 +131,9 @@
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* Up and down only: a sideways swipe or Shift+wheel over a column's
+     cards goes on to the columns' own sideways scroll. */
+  overscroll-behavior-y: contain;
 }
 .board-cards > .ghost {
   opacity: 0.35;
@@ -343,6 +361,29 @@ button.ticket-chip:hover {
 
 /* ── The ticket's panel ─────────────────────────────────────────────────── */
 
+/* A ticket over a grid: the panel's header and body in a dialog, centred
+   over the dimmed grid, its body scrolling inside. */
+.dialog.ticket-popup {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(90vh, calc(100vh - 32px));
+}
+.ticket-popup .rpanel {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.ticket-popup .rpanel-head {
+  padding: 14px 14px 14px 22px;
+}
+.ticket-popup .ticket-body {
+  padding: 20px 26px 24px;
+}
+.ticket-popup-note {
+  padding: 28px;
+  background: var(--surface);
+}
 .ticket-body {
   flex: 1;
   min-height: 0;
@@ -790,4 +831,51 @@ button.ticket-chip:hover {
   display: block;
   margin-top: 8px;
   font-size: 12px;
+}
+/* Choosing who you are on a shared key: a name to type, the members whose
+   names have it, and a choice that's yours. */
+.choose-me {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.choose-me-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.choose-me-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.choose-me-row:hover:not(:disabled),
+.choose-me-row:focus-visible {
+  border-color: var(--border);
+  background: var(--sunken);
+}
+.choose-me-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

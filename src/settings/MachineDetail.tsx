@@ -12,7 +12,7 @@ import { UpdateSteps } from "../machines/UpdateSteps";
 import { EngineBlocks } from "./EngineBlocks";
 import { ForgetOldKey, LingerWithPassword } from "../machines/KeyActions";
 import { EditReach, shortPrint } from "./EditReach";
-import { CheckForUpdates, useNow } from "./Machines";
+import { UpdateDesk, useNow } from "./Machines";
 
 /** How often Desk looks at a ready machine's link (fleet `check_every`). */
 const CHECKS_EVERY_S = 5;
@@ -264,7 +264,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
         ? "Being set up… Each step stops after 3 minutes and says why; its log is below."
         : s === "updating"
           ? `Updating Desk${machine.update ? ` to ${machine.update.to}` : ""}… its sessions carry on.`
-          : `It runs a newer Desk (${machine.version}). Update Desk here to drive it; its sessions keep running.`;
+          : `It runs a newer Desk (${machine.version}): update Desk on ${thisComputerLower(useHost.getState().platform)} to drive it. Its sessions keep running.`;
   return (
     <div className="setting-card machine-status" role="status">
       <span className="prov-text">
@@ -289,7 +289,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
         </button>
       )}
       {s === "updating" && <UpdateSteps machine={machine} native={native} />}
-      {s === "newer" && <CheckForUpdates />}
+      {s === "newer" && <UpdateDesk machine={machine} />}
     </div>
   );
 }

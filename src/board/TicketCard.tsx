@@ -170,6 +170,7 @@ export function TicketCard({
     <button
       ref={buttonRef}
       type="button"
+      data-ticket-card={t.id}
       className={`floor-item board-card ${look}`}
       onContextMenu={
         movable || canTake
