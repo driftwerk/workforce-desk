@@ -554,7 +554,7 @@ function BoardPaneNote({ supported }: { supported: boolean | null }) {
           ? "This version of Desk keeps no boards. Update Desk to keep tickets here."
           : supported === null
             ? "Reading the board…"
-            : "This board is no longer on this computer's hub."}
+            : "This board is no longer on this computer."}
       </p>
     </div>
   );
