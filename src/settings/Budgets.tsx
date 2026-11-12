@@ -120,7 +120,7 @@ export function Budgets() {
             )}
           </section>
 
-          <section className="prov-section" aria-label="Add a budget">
+          <section className="prov-section budget-add" aria-label="Add a budget">
             <h2 className="field-label">Add a budget</h2>
             <SayBudget names={names} onAdd={(b) => run(hub!.putBudget(b))} />
             <button type="button" className="link small budget-more" aria-expanded={byField} onClick={() => setByField(!byField)}>

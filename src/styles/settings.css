@@ -1630,9 +1630,12 @@ legend.set-label {
   flex-direction: column;
   gap: 6px;
 }
+/* The pane lines its parts up at the start: this one takes the row. */
+.settings-pane > .budget-add {
+  align-self: stretch;
+}
 .budget-say .field-row {
   width: 100%;
-  max-width: 640px;
 }
 .budget-say input {
   flex: 1;
