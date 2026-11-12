@@ -137,6 +137,20 @@ describe("Settings → This computer", () => {
     expect(await screen.findByText("Full Disk Access is on.")).toBeTruthy();
   });
 
+  it("opens Full Disk Access natively, and the card goes once it's on and Desk is back in front", async () => {
+    const { invoke } = await import("../platform");
+    let state: "missing" | "granted" = "missing";
+    setUp(fakeHub({ diskAccess: vi.fn(() => Promise.resolve(state)) }));
+    render(<Computer />);
+    fireEvent.click(await screen.findByRole("button", { name: "Grant Full Disk Access" }));
+    // Not a link the page's opener refuses: the native command, by pane.
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("privacy_open", { pane: "fullDiskAccess" });
+    state = "granted";
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(await screen.findByText("Full Disk Access is on.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Grant Full Disk Access" })).toBeNull();
+  });
+
   it("says when there's nothing yet, and when the hub can't be read", async () => {
     setUp(fakeHub({ computerGrants: vi.fn(() => Promise.resolve([])), computerActivity: vi.fn(() => Promise.resolve({ rows: [], next: null })) }));
     render(<Computer />);

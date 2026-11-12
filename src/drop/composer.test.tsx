@@ -94,4 +94,31 @@ describe("a composer, with the system's drag and drop", () => {
     expect(sent).toEqual([]);
     off();
   });
+
+  it("asks to be allowed a file the system kept from Desk, and attaches it once it is", async () => {
+    let allowed = false;
+    invoke.mockImplementation(async (cmd: string, args: { paths?: string[]; path?: string }) => {
+      if (cmd === "dropped_files") {
+        if (!allowed) throw "Desk isn’t allowed to read shot.png. Allow it in Files and Folders.";
+        return args.paths!.map((path) => ({ path, name: path.split("/").pop()!, size: 4, folder: false }));
+      }
+      if (cmd === "dropped_file_read") return new TextEncoder().encode("data").buffer;
+      if (cmd === "privacy_open") return undefined;
+    });
+    const sent: File[][] = [];
+    render(<Box sent={sent} />);
+    const box = screen.getByTestId("box");
+    const r = new DropRouter(() => zoneOf(box));
+    act(() => r.handle({ type: "drop", paths: ["/Users/me/Desktop/shot.png"], position: { x: 1, y: 1 } }));
+    expect(await screen.findByText("Allow Desk to read shot.png.")).toBeTruthy();
+    expect(screen.queryByText(/os error|Operation not permitted/)).toBeNull();
+    act(() => screen.getByRole("button", { name: "Open Files and Folders settings" }).click());
+    expect(invoke).toHaveBeenCalledWith("privacy_open", { pane: "filesAndFolders" });
+    // Allowed, and Desk back in front: read again without a new drop.
+    allowed = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(screen.getByText("shot.png")).toBeTruthy());
+    expect(screen.queryByText("Allow Desk to read shot.png.")).toBeNull();
+    expect(sent).toHaveLength(1);
+  });
 });

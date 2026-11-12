@@ -20,6 +20,7 @@ mod machines;
 mod navigation;
 mod pair_gate;
 mod paired;
+mod privacy;
 mod remote_images;
 mod repos;
 mod reread;
@@ -1161,6 +1162,8 @@ pub fn run() {
             attachments::attachment_save,
             attachments::attachment_upload,
             drops::dropped_files,
+            privacy::privacy_open,
+            privacy::privacy_check,
             drops::dropped_file_read,
             drops::terminal_drop,
             drops::terminal_drop_cancel,

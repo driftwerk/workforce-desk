@@ -233,9 +233,22 @@ export const monitorsNow = (): Promise<MonitorInfo[]> => invoke("grid_monitors")
 export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 
 /** Opens a page in the default browser; in the browser preview, a new tab. */
+/** Where a link or setting that wouldn't open is said: the window's toast,
+ *  set by the shell (a test may leave it unset). */
+let openFailed: ((e: unknown) => void) | null = null;
+export const setOpenReporter = (run: ((e: unknown) => void) | null): void => {
+  openFailed = run;
+};
+export const reportOpenFailure = (e: unknown): void => openFailed?.(e);
+
 export const openUrl = (url: string): void => {
   if (preview) window.open(url, "_blank", "noopener");
-  else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
+  else
+    openExternal(url).catch((e: unknown) => {
+      console.warn(`couldn't open ${url} in the browser:`, e);
+      // The person pressed something: nothing opening must say why.
+      reportOpenFailure(new Error("Desk couldn’t open that link."));
+    });
 };
 
 /** A link clicked in a terminal, decided natively: Claude's and OpenAI's

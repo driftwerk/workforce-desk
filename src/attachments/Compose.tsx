@@ -3,6 +3,8 @@ import { droppedFiles, readDropped, type DroppedFile } from "../drop/native";
 import { nativeDrops, registerZone, useDropOver, ZONE_ATTR } from "../drop/route";
 import { describe, formatSize, kindOf } from "./kinds";
 import { MAX_FILE_BYTES, MAX_FILES, tooBig } from "./upload";
+import { ProblemNote } from "../ui/ProblemNote";
+import { permissionOf, permissionProblem, useRecheckOnFocus } from "../ui/privacy";
 
 /** A file waiting to go with your next message. */
 export interface Pending {
@@ -91,7 +93,11 @@ export function PendingFiles({ pending, problem, onRemove }: { pending: Pending[
           </span>
         );
       })}
-      {problem && (
+      {problem && permissionProblem(problem, "attaching a file") ? (
+        <div className="pending-problem" role="alert">
+          <ProblemNote problem={permissionProblem(problem, "attaching a file")!} />
+        </div>
+      ) : problem && (
         <span className="small state-blocked pending-problem" role="alert">
           {problem}
         </span>
@@ -132,6 +138,20 @@ export function useFileDrop(onFiles: (files: File[]) => void, onProblem?: (probl
   const latest = useRef({ onFiles, onProblem });
   latest.current = { onFiles, onProblem };
   const native = nativeDrops();
+  // A drop the system kept from Desk: read again once Desk is back in
+  // front and the person allowed it, without dropping it again.
+  const [kept, setKept] = useState<{ paths: string[]; pane: NonNullable<ReturnType<typeof permissionOf>>["pane"] } | null>(null);
+  useRecheckOnFocus(kept?.pane ?? null, kept !== null, () => setKept(null), async () => {
+    if (!kept) return false;
+    try {
+      const { files, problem } = await filesOfDrop(kept.paths);
+      if (files.length) latest.current.onFiles(files);
+      latest.current.onProblem?.(problem);
+      return true;
+    } catch {
+      return false;
+    }
+  });
   useEffect(
     () =>
       native
@@ -143,7 +163,12 @@ export function useFileDrop(onFiles: (files: File[]) => void, onProblem?: (probl
                   if (files.length) latest.current.onFiles(files);
                   if (problem) latest.current.onProblem?.(problem);
                 },
-                (e: unknown) => latest.current.onProblem?.(e instanceof Error ? e.message : String(e)),
+                (e: unknown) => {
+                  const said = e instanceof Error ? e.message : String(e);
+                  const pane = permissionOf(said)?.pane;
+                  if (pane) setKept({ paths, pane });
+                  latest.current.onProblem?.(said);
+                },
               ),
           })
         : undefined,

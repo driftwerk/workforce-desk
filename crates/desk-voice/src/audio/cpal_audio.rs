@@ -254,6 +254,11 @@ impl AudioOut for CpalAudio {
     }
 }
 
+/// Whether Desk may use the microphone: these systems don't say.
+pub fn mic_access() -> super::MicAccess {
+    super::MicAccess::Unknown
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

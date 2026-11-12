@@ -14,7 +14,7 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { setStarter } from "../ui/problem";
 import { startLocalHelper } from "../hub/helperNote";
 import { HubDownBanner, useHubDown } from "../hub/HubDownBanner";
-import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, subscribe, windowBackground } from "../platform";
+import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, setOpenReporter, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
@@ -139,6 +139,11 @@ export function App() {
   useEffect(() => {
     setStarter(startLocalHelper);
     return () => setStarter(null);
+  }, []);
+  // A privacy pane that wouldn't open is said, not only logged.
+  useEffect(() => {
+    setOpenReporter((e) => useDesk.getState().fail(e, { what: "opening a link or a setting" }));
+    return () => setOpenReporter(null);
   }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
