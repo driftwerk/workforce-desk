@@ -63,6 +63,12 @@ interface ChatStore {
   learnFeatures: (hubId: string, features: ReadonlySet<string>) => void;
   setHubs: (hubs: HubAccount[]) => void;
   refreshRoster: () => Promise<void>;
+  /** Agents being built again on their hub (a new name or instructions),
+   *  by key: until they serve, the hub doesn't list them, and a roster read
+   *  keeps them as they were rather than losing them. */
+  settling: Readonly<Record<string, true>>;
+  /** Marks agent `key` as being built again (`on`), or done. */
+  settle: (key: string, on: boolean) => void;
   openDm: (key: string) => void;
   /** Opens the DM that's shown (`activeAgent`, as restored) once its agent
    *  is on the roster; until then it stays chosen. */
@@ -281,6 +287,9 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   }));
 };
 
+/** The ids of the agents `hub` serves now, as the roster reads them. */
+export const agentIdsOn = async (hub: HubAccount): Promise<string[]> => (await fetchAgents(hub)).map((a) => a.id);
+
 /** A machine's agents aren't listed: its hub runs the sessions placed
  *  there and serves no agents (an older one's Desk agent is removed when
  *  its Desk Helper is updated). */
@@ -474,7 +483,16 @@ export const useChat = create<ChatStore>((set, get) => ({
     results.forEach((r, i) => {
       const hub = get().hubs[i]!;
       if (r.status === "fulfilled") {
-        roster.push(...r.value);
+        // An agent being built again is kept, where it was, until it serves.
+        const settling = get().settling;
+        const listed = new Set(r.value.map(agentKey));
+        const fresh = [...r.value];
+        get()
+          .roster.filter((a) => a.hubId === hub.id)
+          .forEach((a, at) => {
+            if (settling[agentKey(a)] && !listed.has(agentKey(a))) fresh.splice(Math.min(at, fresh.length), 0, a);
+          });
+        roster.push(...fresh);
         read.add(hub.id);
       } else {
         // This computer's hub being down doesn't make its agents vanish: the
@@ -654,6 +672,13 @@ export const useChat = create<ChatStore>((set, get) => ({
     drain(key);
   },
   rename: (key, name) => set((s) => ({ roster: s.roster.map((a) => (agentKey(a) === key ? { ...a, name } : a)) })),
+  settling: {},
+  settle: (key, on) =>
+    set((s) => {
+      if (!!s.settling[key] === on) return s;
+      const { [key]: _done, ...rest } = s.settling;
+      return { settling: on ? { ...rest, [key]: true } : rest };
+    }),
   forget: (key) => {
     live.get(key)?.close();
     keepQueue(key, emptyQueue());

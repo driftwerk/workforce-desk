@@ -9,6 +9,7 @@
 //! tested against a fake `wsl.exe` on every platform.
 
 pub mod detect;
+pub mod fix;
 pub mod install;
 pub mod launcher;
 pub mod reach;

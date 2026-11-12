@@ -135,9 +135,21 @@ struct Refusal {
     error: String,
 }
 
-/// The hub's `{"error": ...}`, or the body itself when it isn't that.
+/// The most of a refusal the person is shown: a page of HTML from a proxy
+/// is not a message.
+const REFUSAL_CHARS: usize = 300;
+
+/// The hub's `{"error": ...}`, or the body itself when it isn't that, cut
+/// to [`REFUSAL_CHARS`].
 fn refusal(body: &str) -> String {
-    serde_json::from_str::<Refusal>(body).map_or_else(|_| body.trim().to_string(), |r| r.error)
+    let said =
+        serde_json::from_str::<Refusal>(body).map_or_else(|_| body.trim().to_string(), |r| r.error);
+    if said.chars().count() <= REFUSAL_CHARS {
+        return said;
+    }
+    let mut cut: String = said.chars().take(REFUSAL_CHARS).collect();
+    cut.push('…');
+    cut
 }
 
 /// What the hub's speech endpoint said, as an error for the person.
@@ -147,7 +159,13 @@ pub fn speech_error(status: u16, body: &str) -> SpeechError {
         503 => SpeechError::NoKey(message),
         400 => SpeechError::Rejected(message),
         502 => SpeechError::Provider(message),
-        _ => SpeechError::Hub(format!("Desk couldn't speak ({status}): {message}")),
+        _ => {
+            // The status is for the log; the person reads what went wrong.
+            tracing::warn!(status, %message, "the hub's speech endpoint refused");
+            // A 5xx passes; anything else won't by waiting.
+            let when = if status >= 500 { " just now" } else { "" };
+            SpeechError::Hub(format!("Desk couldn't speak{when}: {message}"))
+        }
     }
 }
 
@@ -357,8 +375,12 @@ mod tests {
         );
         let (hub, _) = fake(500, "text/plain", "boom".into());
         assert!(
-            matches!(hub.speak(&fish(), "hi"), Err(SpeechError::Hub(m)) if m.contains("500") && m.contains("boom"))
+            matches!(hub.speak(&fish(), "hi"), Err(SpeechError::Hub(m)) if m == "Desk couldn't speak just now: boom")
         );
+        let (hub, _) = fake(404, "text/plain", "x".repeat(5000).into_bytes());
+        let said = hub.speak(&fish(), "hi").unwrap_err().to_string();
+        assert!(said.starts_with("Desk couldn't speak: xxx"), "{said}");
+        assert!(said.chars().count() < 340, "cut to a sentence's length");
         let (hub, _) = fake(200, "audio/mpeg", "not audio".into());
         assert!(matches!(
             hub.speak(&fish(), "hi"),

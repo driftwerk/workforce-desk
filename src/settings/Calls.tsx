@@ -14,8 +14,8 @@ export function Calls() {
     void tupleAvailable().then(setHasTuple, () => setHasTuple(false));
   }, []);
   return (
-    <section className="settings-pane" aria-label="Calls">
-      <h1 className="display-lg">Calls and voice</h1>
+    <section className="settings-pane voices-detail" aria-label="Talking to agents">
+      <h1 className="display-lg">Talking to agents</h1>
       <label className="toggle-row">
         <input type="checkbox" checked={voice} onChange={(e) => set({ voice: e.target.checked })} />
         <span>

@@ -30,7 +30,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
   const layout = useLayout();
   const boardGroup = useBoard((s) => s.boards[t.board]?.group);
   const [group, setGroup] = useState(() => boardStartGroup(layout, boardGroup, lastBoardGroup()));
-  const [engine, setEngine] = useState<Engine>((from.engine as Engine | null) ?? "claude");
+  const [picked, setEngine] = useState<Engine>((from.engine as Engine | null) ?? "claude");
   const [cwd, setCwd] = useState(from.cwd);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,6 +47,10 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
       live = false;
     };
   }, [hub]);
+  // What it went by may not start here (not installed, or no view): then
+  // the first engine that does.
+  const choices = startable(engines);
+  const engine: Engine = choices.includes(picked) ? picked : (choices[0] ?? picked);
   const start = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cwd.trim()) return;
@@ -76,7 +80,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
         <h2 className="display-md">Start a session on {t.key ?? "it"}</h2>
         <p className="muted small">It starts with “{t.title}” as its goal and first prompt, and the ticket moves to Doing.</p>
         <div className="seg" role="radiogroup" aria-label="Engine">
-          {startable(engines).map((k) => (
+          {choices.map((k) => (
             <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
               {ENGINE_TITLE[k]}
             </button>

@@ -1,7 +1,7 @@
 mod attachments;
 mod badge;
 mod broker;
-mod chrome;
+mod chrome_host;
 #[cfg(test)]
 mod commands;
 mod drops;
@@ -195,15 +195,6 @@ fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
         return Err("Desk hasn't written its log on this computer yet.".into());
     }
     tauri_plugin_opener::reveal_item_in_dir(&log).map_err(text)
-}
-
-/// Opens the person's Chrome, or brings it forward, for "Connect my
-/// Chrome" (see `chrome.rs`).
-#[tauri::command]
-async fn open_chrome() -> CommandResult<()> {
-    tauri::async_runtime::spawn_blocking(chrome::open)
-        .await
-        .map_err(text)?
 }
 
 #[tauri::command]
@@ -973,6 +964,15 @@ pub fn run() {
     if let Err(e) = desk_core::process::raise_open_files(4096) {
         eprintln!("Couldn't raise the open-files limit: {e}");
     }
+    // Chrome starting the AppImage as Desk's native messaging host: a relay
+    // to the local hub (see desk-chrome-host), never the app.
+    #[cfg(target_os = "linux")]
+    {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if desk_chrome_host::is_chrome_launch(&args) {
+            std::process::exit(desk_chrome_host::run(&args, chrome_host::native_hub));
+        }
+    }
     // `Desk.AppImage --helper`: what the AppImage's login service runs.
     #[cfg(target_os = "linux")]
     if std::env::args().any(|a| a == "--helper") {
@@ -1033,6 +1033,15 @@ pub fn run() {
             app.manage(store);
             let backend = backend_of(&paths)?;
             tracing::info!(host = ?backend.as_ref().map(|b| &b.host), version = %app.package_info().version, "Desk starting");
+            // Where Chrome finds Desk's host, for Desk's extension.
+            {
+                let paths = paths.clone();
+                tauri::async_runtime::spawn_blocking(move || match chrome_host::install(&paths) {
+                    Ok(Some(file)) => tracing::info!(manifest = %file.display(), "Chrome can reach Desk"),
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!(error = %format!("{e:#}"), "couldn't tell Chrome where Desk is"),
+                });
+            }
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
             app.manage(voice::Voice::new(&paths, backend.clone()));
             // Every hub socket the page holds, the local hub's admin ones
@@ -1043,7 +1052,9 @@ pub fn run() {
             // One ssh for every machine, which knows Desk's own key and
             // the machines it was put on.
             let ssh = desk_machine::SshExe::system()
-                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"));
+                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"))
+                // Desk's own SSH entries, for machines whose entry forwards ports.
+                .with_desk_config(paths.root.join("machines").join("ssh").join("config"));
             let machines = Arc::new(desk_machine::Machines::new(
                 ssh.clone(),
                 &paths.root.join("machines"),
@@ -1161,6 +1172,7 @@ pub fn run() {
             machine_setup::machine_log,
             machine_setup::machine_remote_log,
             machine_setup::machine_ssh_hosts,
+            machine_setup::machine_desk_entry,
             machine_setup::machine_edit,
             machine_setup::machine_check_reach,
             machine_setup::machine_cancel_add,
@@ -1169,7 +1181,6 @@ pub fn run() {
             machine_setup::machine_uninstall,
             machine_setup::machine_cancel_uninstall,
             machine_reveal_log,
-            open_chrome,
             broker::socket_send,
             broker::socket_ack,
             broker::socket_close,
@@ -1261,6 +1272,9 @@ pub fn run() {
             wsl::wsl_install,
             wsl::wsl_forget_resume,
             wsl::wsl_convert,
+            wsl::wsl_create_user,
+            wsl::wsl_user_name,
+            wsl::wsl_install_alongside,
             wsl::wsl_setup,
             wsl::wsl_fix_forwarding,
             wsl::wsl_installed

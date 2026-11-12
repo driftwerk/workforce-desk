@@ -100,3 +100,95 @@ it("signs the Claude plan in once for the crew and coding sessions, unless the p
   const chatgpt = screen.getByText("ChatGPT plan").closest(".prov-row") as HTMLElement;
   expect(within(chatgpt).queryByRole("checkbox")).toBeNull();
 });
+
+it("won't make a second crew member of a name already on this computer, its case aside", async () => {
+  const { useChat } = await import("../chat/store");
+  providers = [plan("claude-code", "Claude plan", true)];
+  useChat.setState({ roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false }] });
+  try {
+    render(<NewCrew onClose={() => {}} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: " scout " } });
+    fireEvent.change(screen.getByRole("textbox", { name: /What they’re for/ }), { target: { value: "Watch CI" } });
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Scout").getAttribute("aria-invalid")).toBe("true");
+    expect((screen.getByRole("button", { name: "Create scout" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Ranger" } });
+    expect(screen.queryByText("That name is taken.")).toBeNull();
+    expect((screen.getByRole("button", { name: "Create Ranger" }) as HTMLButtonElement).disabled).toBe(false);
+  } finally {
+    useChat.setState({ roster: [] });
+  }
+});
+
+it("won't make a crew member of a name taken since the roster was last read", async () => {
+  providers = [plan("claude-code", "Claude plan", true)];
+  const { useChat } = await import("../chat/store");
+  const hub = { providers: vi.fn(async () => providers), accounts: vi.fn(async () => ({ accounts: [], store: "the keychain", signIns: [] })), createAgent: vi.fn(async () => {}) };
+  useDesk.setState({ hub: hub as unknown as DeskHub });
+  const refreshRoster = vi.fn(async () => useChat.setState({ roster: [{ id: "scout", hubId: "local", name: "Scout" }] as never }));
+  useChat.setState({ roster: [], refreshRoster });
+  try {
+    render(<NewCrew onClose={() => {}} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Scout" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /What they’re for/ }), { target: { value: "Watch CI" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Scout" })));
+    expect(hub.createAgent).not.toHaveBeenCalled();
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+  } finally {
+    useChat.setState({ roster: [] });
+  }
+});
+
+it("closes once the crew member is made whole: their chat failing to open never offers to make them again", async () => {
+  providers = [plan("claude-code", "Claude plan", true), plan("chatgpt", "ChatGPT plan", false)];
+  const { useChat } = await import("../chat/store");
+  const fail = vi.fn();
+  const hub = {
+    providers: vi.fn(async () => providers),
+    accounts: vi.fn(async () => ({ accounts: [], store: "the keychain", signIns: [] })),
+    createAgent: vi.fn(async () => {}),
+    agentConfig: vi.fn(async () => ""),
+    saveAgentConfig: vi.fn(async () => {}),
+    identityFile: vi.fn(async () => "# x\n"),
+    saveIdentityFile: vi.fn(async () => {}),
+    deleteAgent: vi.fn(async () => {}),
+  };
+  useDesk.setState({ hub: hub as unknown as DeskHub, fail, openRoom: vi.fn(async () => Promise.reject(new Error("no room"))) as never });
+  // The roster as the hub has it now: the id "scout" taken elsewhere since it was last read (by one since renamed).
+  const refreshRoster = vi.fn(async () => useChat.setState({ roster: [{ id: "scout", hubId: "local", name: "Lookout" }] as never }));
+  useChat.setState({ roster: [], refreshRoster, openDm: vi.fn() });
+  const onClose = vi.fn();
+  render(<NewCrew onClose={onClose} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Scout" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "What they’re for" }), { target: { value: "Watch CI" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Scout" })));
+  expect(hub.createAgent).toHaveBeenCalledWith(expect.objectContaining({ id: "scout-2" }));
+  expect(hub.deleteAgent).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalled();
+  expect(fail).toHaveBeenCalledWith(expect.any(Error), { what: "opening Scout’s chat" });
+  expect(useDesk.getState().error?.plain ?? "").not.toContain("couldn’t finish");
+});
+
+it("signs the Claude plan in once from an agent's brain too, with coding sessions on unless unticked", async () => {
+  const { ConnectForm } = await import("../providers/ConnectForm");
+  render(<ConnectForm provider={plan("claude-code", "Claude plan", false)} submitLabel="Connect" />);
+  await act(async () => {});
+  const also = screen.getByRole("checkbox", { name: "Use this for coding sessions too" }) as HTMLInputElement;
+  expect(also.checked).toBe(true);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  expect(startLogin).toHaveBeenLastCalledWith("claude", { agents: true, account: { name: "Claude", makeDefault: true } });
+  cleanup();
+  render(<ConnectForm provider={plan("claude-code", "Claude plan", false)} submitLabel="Connect" />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("checkbox", { name: "Use this for coding sessions too" }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
+  expect(startLogin).toHaveBeenLastCalledWith("claude", { agents: true, account: null });
+  // ChatGPT's is the agents' alone: no such choice.
+  cleanup();
+  render(<ConnectForm provider={plan("chatgpt", "ChatGPT plan", false)} submitLabel="Connect" />);
+  await act(async () => {});
+  expect(screen.queryByRole("checkbox", { name: "Use this for coding sessions too" })).toBeNull();
+});

@@ -50,6 +50,16 @@ describe("Start a session on a ticket: what it goes by", () => {
     render(<StartSession ticket={t} onClose={() => {}} />);
     expect(folder()).toBe("/w/api");
   });
+  it("starts an engine this computer has, when the one it went by isn't", async () => {
+    const installed = ["claude", "codex"].map((engine) => ({ engine, views: ["chat"], installed: true }));
+    useDesk.setState({ hub: { engines: async () => installed, assignTicket: assign } as never, sessions: { z: sess("z", "/w/api", "gemini", "2026-11-12T10:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect((await screen.findByRole("radio", { name: "Claude Code" })).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("radio", { name: "Gemini CLI" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    expect(JSON.stringify(assign.mock.calls[0])).toContain('"engine":"claude"');
+  });
   it("falls back to what the board's last start used, then asks nothing it can know", async () => {
     useDesk.setState({ sessions: {} });
     localStorage.setItem(`desk.board.start.${t.board}`, JSON.stringify({ cwd: "/w/saved", engine: "claude" }));

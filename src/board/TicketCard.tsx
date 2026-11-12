@@ -31,7 +31,7 @@ export function Assignee({ who, waiting }: { who: ActivityParty; waiting: boolea
       {waiting && session && (session.state === "blocked" || session.state === "asking") ? (
         <span className="state-blocked">{session.state === "asking" ? "asked you something" : "needs you"}</span>
       ) : (
-        <ChargeBadge charge={charge} />
+        <ChargeBadge charge={charge} session={who.kind === "session" ? who.id : null} />
       )}
     </span>
   );
@@ -170,6 +170,7 @@ export function TicketCard({
     <button
       ref={buttonRef}
       type="button"
+      data-ticket-card={t.id}
       className={`floor-item board-card ${look}`}
       onContextMenu={
         movable || canTake
