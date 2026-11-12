@@ -2,7 +2,8 @@
 // for checking screens without the app: open
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
 // (and &platform=linux or windows to see another system's screens; with
-// &wsl=none, WSL isn't installed yet, and &wsl=refused, installing it fails;
+// &wsl=none, WSL isn't installed yet, &wsl=one, there's one Linux, and
+// &wsl=refused, installing it fails;
 // with &helper=needs-approval, move-to-applications, failed or development,
 // Desk Helper stands that way, for the banner shown while Desk gets ready).
 // Only reachable from development builds.
@@ -175,7 +176,13 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
           : { ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform },
       );
     case "wsl_detect":
-      return answer(params.wsl === "none" || params.wsl === "refused" ? { problem: { kind: "not_installed" }, distros: [] } : WSL_FIXTURE);
+      return answer(
+        params.wsl === "none" || params.wsl === "refused"
+          ? { problem: { kind: "not_installed" }, distros: [] }
+          : params.wsl === "one"
+            ? { ...WSL_FIXTURE, distros: WSL_FIXTURE.distros.slice(0, 1) }
+            : WSL_FIXTURE,
+      );
     case "wsl_install":
       if (params.wsl === "refused")
         throw new Error("WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks.");
