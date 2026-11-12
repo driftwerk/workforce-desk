@@ -282,7 +282,8 @@ describe("keeping the setup's progress", () => {
 
 describe("Settings search", () => {
   it("finds a section by its name, then by what's in it", () => {
-    expect(searchSections("")).toHaveLength(17);
+    expect(searchSections("")).toHaveLength(16);
+    expect(searchSections("calls")[0]).toBe("voices");
     expect(searchSections("machines")[0]).toBe("machines");
     expect(searchSections("github")).toEqual(["connections"]);
     expect(searchSections("api key")[0]).toBe("providers");
