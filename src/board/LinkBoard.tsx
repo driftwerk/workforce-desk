@@ -1,11 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
-import { agentKey } from "../chat/types";
-import { openTarget } from "../shell/navigate";
-import { ProblemNote } from "../ui/ProblemNote";
 import { openSettingsAt } from "../ui/problem";
-import type { Problem } from "../ui/problem";
 import { HubError } from "../hub/client";
+import { useDesk } from "../hub/store";
 import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
 import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
 import { openUrl } from "../platform";
@@ -14,20 +11,17 @@ import { STATE_TITLE } from "./board";
 import { ChooseMe } from "./ChooseMe";
 import { useBoard } from "./store";
 import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
-import { connectionsOf, type Listing } from "../hub/connections";
-import { useDesk } from "../hub/store";
-import { Connect } from "../settings/Connections";
-import { useAgentConfigs } from "../crew/agentBrain";
-import { bindingOf, choose, setAgentConnectors, throughOf, todayOf } from "../crew/connectors";
+import { NoAgent, ThisComputerSetup } from "./syncSetup";
 
 /** What a hub (or this computer) said when asked whether it offers the
  *  system's tools. */
 type Probe =
   | { state: "checking" }
-  | { state: "offered"; teams: Team[]; agent: string | null }
+  | { state: "offered"; teams: Team[]; projects: Project[]; agent: string | null }
   | { state: "no"; error: string; noToken: boolean; noAgent: boolean }
   | { state: "needsToken" };
 type Team = { id: string; key: string; name: string };
+type Project = { key: string; name: string };
 
 type FilterKind = SyncFilter["kind"];
 
@@ -37,16 +31,16 @@ type FilterKind = SyncFilter["kind"];
 const FILTERS: Record<SyncSystem, { kind: FilterKind; label: string; sub: string }[]> = {
   jira: [
     { kind: "all", label: "Whole project", sub: "every open issue, whoever has it: pick up work and see who has what" },
-    { kind: "assignedToMe", label: "Assigned to me", sub: "assignee = currentUser()" },
-    { kind: "currentCycle", label: "The current sprint", sub: "sprint in openSprints()" },
+    { kind: "assignedToMe", label: "Assigned to me", sub: "issues assigned to you in the project" },
+    { kind: "currentCycle", label: "The current sprint", sub: "issues in the sprint that is open now" },
     { kind: "label", label: "A label", sub: "issues with one label" },
-    { kind: "query", label: "JQL", sub: "kept inside the project" },
+    { kind: "query", label: "A Jira search", sub: "a search you wrote in Jira’s issue search, kept inside the project" },
   ],
   linear: [
     { kind: "all", label: "Whole team", sub: "every open issue, whoever has it: pick up work and see who has what" },
     { kind: "assignedToMe", label: "Assigned to me", sub: "your issues in the team" },
     { kind: "label", label: "A label", sub: "issues with one label" },
-    { kind: "query", label: "A Linear filter", sub: "as JSON, kept inside the team" },
+    { kind: "query", label: "An advanced filter", sub: "a filter written for Linear, kept inside the team" },
   ],
 };
 
@@ -58,7 +52,35 @@ const linearId = (s: string): boolean => /^[0-9a-fA-F-]{1,64}$/.test(s);
 
 /** A refusal in the hub's words, or why it couldn't be asked. */
 const saidOf = (e: unknown): string =>
-  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+  e instanceof HubError ? plainLinkError(e.message) : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+
+/** A hub's refusal of a search, in words that don't need JQL. */
+const plainLinkError = (said: string): string => (/ORDER BY/i.test(said) && /JQL/i.test(said) ? "A Jira search here can’t sort the issues: leave out its “order by” part." : said);
+
+/** A board made for a link that failed: taken away again, here and on the
+ *  hub, and the original shown. If the failure was a lost answer and the
+ *  link did apply, the board is kept (`linked`) instead. `stuck`: the hub
+ *  wouldn't delete it. */
+const undoMade = async (made: string, original: string): Promise<"removed" | "linked" | "stuck"> => {
+  const hub = useDesk.getState().hub;
+  if (!hub) return "stuck";
+  const now = await hub.boards().catch(() => null);
+  const there = now?.find((b) => b.id === made);
+  if (there?.sync) {
+    useBoard.setState((st) => ({ boards: { ...st.boards, [made]: there }, shown: made }));
+    return "linked";
+  }
+  try {
+    await hub.deleteBoard(made);
+  } catch {
+    return "stuck";
+  }
+  useBoard.setState((st) => {
+    const { [made]: _, ...boards } = st.boards;
+    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: original };
+  });
+  return "removed";
+};
 
 /** The link dialog, from a board's menu: the system, then a hub that offers
  *  it (or this computer), then the project or team, the import filter with
@@ -75,6 +97,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [viaKey, setViaKey] = useState<string | null>(null);
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [target, setTarget] = useState("");
+  /** The project key typed though the hub lists projects. */
+  const [typedKey, setTypedKey] = useState(false);
   const [teamId, setTeamId] = useState("");
   const [filterKind, setFilterKind] = useState<FilterKind>("all");
   const [filterValue, setFilterValue] = useState("");
@@ -115,7 +139,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         .then(
           (r): Probe =>
             r.ok
-              ? { state: "offered", teams: r.check.teams ?? [], agent: r.check.agent?.name ?? null }
+              ? { state: "offered", teams: r.check.teams ?? [], projects: r.check.projects ?? [], agent: r.check.agent?.name ?? null }
               : { state: "no", error: r.error, noToken: r.paused?.kind === "noToken", noAgent: r.paused?.kind === "missing" },
         )
         .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }));
@@ -139,6 +163,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
   // ── The target, the filter and what they match ──────────────────────────
   const teams = probe?.state === "offered" ? probe.teams : [];
+  const projects = probe?.state === "offered" ? probe.projects : [];
   const team = teams.find((t) => t.id === teamId) ?? null;
   const targetKey = system === "linear" ? (team?.key ?? "") : target;
   const targetGood = !!system && !!targetKey && targetOk(system, targetKey);
@@ -205,7 +230,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const hasTickets = tickets > 0;
   /** What happens to the board's own tickets: kept beside the issues, or
    *  cleared first. */
-  const [own, setOwn] = useState<"keep" | "clear" | null>(null);
+  const [own, setOwn] = useState<"keep" | "clear" | "new" | null>(null);
   const canLink = (!hasTickets || !!own) && !!system && !!via && offered && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
   /** Why Link can't be pressed yet: the first thing missing, in plain words. */
   const waitingOn: { words: string; failed: boolean } | null = (() => {
@@ -219,10 +244,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (probe.state === "needsToken") return { words: `${viaName} needs a token first.`, failed: false };
       if (probe.state === "no") return { words: probe.noToken ? `${viaName} needs a new token.` : probe.error, failed: true };
     }
-    if (!targetGood) return { words: system === "linear" ? "Pick a team." : "Enter the Jira project key.", failed: false };
+    if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 && !typedKey ? "Pick a project." : "Enter the Jira project key."), failed: false };
     if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
     if (!now) return { words: "Waiting for the match count…", failed: false };
-    if (!now.ok) return { words: `The match check failed: ${now.error}`, failed: true };
+    if (!now.ok) return { words: `The match check failed: ${plainLinkError(now.error)}`, failed: true };
     if (now.check.matches === undefined) return { words: "Waiting for the match count…", failed: false };
     return null;
   })();
@@ -232,6 +257,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     if (!canLink || !sync || !system || !via || !filter) return;
     setBusy(true);
     setProblem(null);
+    let made: Board | null = null;
     try {
       // Cleared first: they're Desk's own, and nothing there changes.
       if (hasTickets && own === "clear") {
@@ -239,7 +265,20 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         for (const t of mine) await useBoard.getState().remove(t.id);
       }
       const mapped = Object.fromEntries(Object.entries(states).filter(([, v]) => !!v));
-      const b = await sync.link(board.id, {
+      // A new board takes the link and this one stays as it is.
+      let into = board;
+      if (hasTickets && own === "new") {
+        made = await useBoard.getState().createBoard(`${board.name} · ${SYSTEM_TITLE[system]}`);
+        into = made;
+        if (board.group) {
+          const hub = useDesk.getState().hub;
+          if (hub) {
+            made = await hub.updateBoard(made.id, { group: board.group }).catch(() => made as Board);
+            useBoard.setState((s) => ({ boards: { ...s.boards, [made!.id]: made! } }));
+          }
+        }
+      }
+      const b = await sync.link(into.id, {
         system,
         target: targetKey,
         ...(team ? { targetId: team.id } : {}),
@@ -254,7 +293,17 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       void sync.syncNow(b.id).catch(() => {});
       onClose();
     } catch (e) {
-      setProblem(saidOf(e));
+      let words = saidOf(e);
+      if (made) {
+        const outcome = await undoMade(made.id, board.id);
+        if (outcome === "linked") {
+          void sync.syncNow(made.id).catch(() => {});
+          onClose();
+          return;
+        }
+        if (outcome === "stuck") words = `${words} The new board “${made.name}” couldn’t be removed either: delete it from its menu.`;
+      }
+      setProblem(words);
       setBusy(false);
     }
   };
@@ -293,6 +342,13 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 <span className="move-opt-main">
                   <span>Keep {tickets === 1 ? "it" : "them"} beside the issues</span>
                   <span className="move-opt-sub">{tickets === 1 ? "It stays" : "They stay"} on Desk only, with {tickets === 1 ? "its" : "their"} own keys; the project’s issues come in alongside.</span>
+                </span>
+              </label>
+              <label className="move-opt">
+                <input type="radio" name={`${ids}-own`} checked={own === "new"} disabled={busy} onChange={() => setOwn("new")} />
+                <span className="move-opt-main">
+                  <span>Make a new board and link it</span>
+                  <span className="move-opt-sub">{board.name} stays as it is, with {tickets === 1 ? "its ticket" : "its tickets"}; the project’s issues go on the new board.</span>
                 </span>
               </label>
               <label className="move-opt">
@@ -355,7 +411,25 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         {system && via && offered && (
           <fieldset className="move-field">
             <legend>{system === "jira" ? "Project" : "Team"}</legend>
-            {system === "jira" ? (
+            {system === "jira" && projects.length > 0 && !typedKey ? (
+              <>
+              <label className="field">
+                <span>{viaName}’s Jira project</span>
+                <select className="board-select sync-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">Pick a project</option>
+                  {projects.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.key} · {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="link small" onClick={() => { setTypedKey(true); setTarget(""); }}>
+                Not listed? Type the key
+              </button>
+              </>
+            ) : system === "jira" ? (
+              <>
               <label className="field">
                 <span>
                   {viaName}’s Jira project key
@@ -372,6 +446,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 />
                 {!!target && !targetGood && <span className="move-opt-sub state-blocked">A project key is capitals and digits, like ACME.</span>}
               </label>
+              {projects.length > 0 && (
+                <button type="button" className="link small" onClick={() => { setTypedKey(false); setTarget(""); }}>
+                  Pick from the list
+                </button>
+              )}
+              </>
             ) : teams.length === 0 ? (
               <p className="faint small">{viaName} has no Linear team you can reach.</p>
             ) : (
@@ -437,7 +517,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             )}
             {filterKind === "query" && (
               <label className="field">
-                <span>{system === "jira" ? "The query" : "The filter"}</span>
+                <span>{system === "jira" ? "The search" : "The filter"}</span>
                 <textarea
                   className="move-note mono sync-query"
                   value={filterValue}
@@ -625,51 +705,6 @@ function HubRow({ name, choice, system, probe, picked, disabled, onPick }: { nam
   );
 }
 
-/** What to say to an agent there so someone switches the system on. */
-export const switchOnText = (system: SyncSystem, hub: string): string =>
-  `Could you switch ${SYSTEM_TITLE[system]} on for an agent I can use on ${hub}? Desk needs it to sync one of my boards with ${SYSTEM_TITLE[system]}. If you can't, please tell me who can.`;
-
-/** No agent on a hub has the system switched on: said in the one shape
- *  errors take, with asking an agent there to switch it on (in a DM, as the
- *  person), or whom to ask when there's no agent there to ask. */
-function NoAgent({ choice, system, words }: { choice: SyncChoice; system: SyncSystem; words: string }) {
-  const title = SYSTEM_TITLE[system];
-  const roster = useChat((s) => s.roster);
-  const there = roster.filter((a) => a.hubId === choice.paired).sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
-  const agent = there[0];
-  const [asked, setAsked] = useState(false);
-  const problem: Problem = {
-    plain: words,
-    ...(agent
-      ? {
-          fix: {
-            label: `Ask ${agent.name} to switch ${title} on`,
-            run: () => {
-              const key = agentKey(agent);
-              openTarget({ kind: "agent", key }, { beside: true });
-              void useChat
-                .getState()
-                .sendTo(key, switchOnText(system, choice.name))
-                .then((sent) => setAsked(sent));
-            },
-          },
-        }
-      : {}),
-  };
-  if (asked)
-    return (
-      <p className="move-callout" role="status">
-        Asked {agent?.name} on {choice.name} to switch {title} on. Link again once it’s on.
-      </p>
-    );
-  return (
-    <div className="move-callout sync-no-agent">
-      <ProblemNote problem={problem} />
-      {!agent && <p className="move-opt-sub">Ask whoever runs {choice.name} to switch {title} on for an agent you can use.</p>}
-    </div>
-  );
-}
-
 /** This computer's own Jira or Linear keys: only when no hub offers them. */
 function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick }: { name: string; system: SyncSystem; probe: Probe | undefined; hubOffers: string | null; picked: boolean; disabled: boolean; onPick: () => void }) {
   const title = SYSTEM_TITLE[system];
@@ -691,97 +726,6 @@ function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick
         <span className="move-opt-sub">{sub}</span>
       </span>
     </label>
-  );
-}
-
-/** This computer hasn't the system's tools for the person, and no hub
- *  offers them: Desk turns them on itself. A board here syncs through this
- *  computer's default agent's tools with the person's own connection, so
- *  Desk turns the connector on for that agent; the one thing it can't make
- *  up is the person's key, so with no connection yet it asks for one in
- *  place first. Then the dialog asks this computer again. */
-function ThisComputerSetup({ system, disabled, onReady }: { system: SyncSystem; disabled: boolean; onReady: () => void }) {
-  const title = SYSTEM_TITLE[system];
-  const desk = useDesk((s) => s.hub);
-  const local = localHubRef();
-  const agent = useChat((s) => (local ? s.roster.find((a) => a.hubId === local.id && a.isDefault) : undefined));
-  const key = agent ? agentKey(agent) : "";
-  const config = useAgentConfigs((s) => s.configs[key]);
-  const [api] = useState(() => (local ? connectionsOf(local) : null));
-  const [listing, setListing] = useState<Listing | null>(null);
-  const [working, setWorking] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!api) return;
-    api.list().then(setListing, () => setListing(null));
-  }, [api]);
-  // Read fresh each time: it may have changed since it was last read.
-  useEffect(() => {
-    if (desk && agent) void useAgentConfigs.getState().load(desk, agent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desk, agent?.id]);
-
-  const connector = listing?.connectors.find((c) => c.id === system);
-  if (!api || !desk || !agent || !connector || config === undefined) return null;
-  // The person's own connection, for all their agents: a board here syncs
-  // with their keys, never one kept just for an agent.
-  const connected = connector.connections.some((x) => x.status === "connected" && x.level === "all");
-  const on = throughOf(bindingOf(config), system) !== "off";
-  // Connected and on, yet not offered: nothing here Desk can change; the
-  // row says why.
-  if (connected && on) return null;
-
-  const turnOn = async () => {
-    setWorking(true);
-    setProblem(null);
-    try {
-      if (!on) {
-        const fresh = await api.list();
-        const toml = await setAgentConnectors(desk, agent.id, (b) =>
-          throughOf(b, system) === "off" ? choose(b, system, "mine", todayOf(fresh, agent.id)) : b,
-        );
-        useAgentConfigs.getState().put(key, toml);
-      }
-      // A connection just made shows as made, should this computer still
-      // not offer it.
-      api.list().then(setListing, () => {});
-      onReady();
-    } catch (e) {
-      setProblem(saidOf(e));
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  return (
-    <div className="move-callout sync-this-computer">
-      {connected ? (
-        <ProblemNote
-          problem={{
-            plain: `${title} is connected on this computer, but it’s off for ${agent.name}, whose tools a board here syncs through.`,
-            ...(working || disabled ? {} : { fix: { label: `Turn ${title} on for ${agent.name}`, run: () => void turnOn() } }),
-          }}
-        />
-      ) : (
-        <>
-          <p className="move-opt-sub">
-            Connect {title} to sync through this computer{on ? "" : `; Desk turns it on for ${agent.name}`}.
-          </p>
-          <Connect api={api} connector={connector} at={{ level: "all" }} label={`Connect ${title}`} onDone={turnOn} />
-        </>
-      )}
-      {working && (
-        <p className="move-opt-sub" role="status">
-          Turning {title} on…
-        </p>
-      )}
-      {problem && (
-        <p className="small state-blocked" role="alert">
-          {problem}
-        </p>
-      )}
-    </div>
   );
 }
 

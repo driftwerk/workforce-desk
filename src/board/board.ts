@@ -352,3 +352,27 @@ export const recentFolders = (sessions: readonly Pick<Session, "cwd" | "updatedA
   }
   return [...seen].slice(0, max);
 };
+
+/** The folder and engine a session on a board starts with: those of the
+ *  newest session that worked on the ticket, else on any of the board's
+ *  tickets, else what the board's last start used, else the newest session
+ *  Desk has. Nothing is typed unless there is nothing to go by. */
+export const startDefaults = (
+  ticket: Pick<Ticket, "assignee" | "links">,
+  boardTickets: readonly Pick<Ticket, "assignee" | "links">[],
+  sessions: Readonly<Record<string, Pick<Session, "cwd" | "engine" | "updatedAt">>>,
+  stored: { cwd: string; engine: string } | null,
+): { cwd: string; engine: string | null } => {
+  const newest = (ids: readonly string[]) =>
+    ids
+      .map((id) => sessions[id])
+      .filter((s): s is NonNullable<typeof s> => !!s?.cwd)
+      .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0];
+  const own = newest(sessionsOf(ticket));
+  if (own) return { cwd: own.cwd, engine: own.engine };
+  const board = newest(boardTickets.flatMap((x) => sessionsOf(x)));
+  if (board) return { cwd: board.cwd, engine: board.engine };
+  if (stored?.cwd) return { cwd: stored.cwd, engine: stored.engine };
+  const any = newest(Object.keys(sessions));
+  return { cwd: any?.cwd ?? "", engine: any?.engine ?? null };
+};
