@@ -50,3 +50,25 @@ Press **Submit for review**.
 ## Each update
 
 Bump `version` in `extension/manifest.json`, build and zip as above, then **Package → Upload new package** on the item, and submit.
+
+## Until the store listing exists: testing the unpacked extension
+
+1. **Build the extension.**
+   ```sh
+   npm run extension
+   ```
+2. **Load it into Chrome.**
+   - Open `chrome://extensions` and turn on **Developer mode**.
+   - Press **Load unpacked** and choose `extension/dist`.
+   - Copy the extension's ID from its card.
+3. **Build Desk with that ID.**
+   ```sh
+   DESK_DEV_EXTENSION_ID=<the id> cargo build
+   ```
+   Then start the development app, which writes the host manifest for that ID. A release never takes a development ID.
+4. **Confirm the code.**
+   - Open Desk's popup in Chrome; it says "Waiting for you to confirm this Chrome in Desk".
+   - In Desk, open Settings → Browser and check the code there matches the one in the popup.
+   - Press **It's my Chrome**.
+
+The unpacked ID depends on the folder's path. To keep it fixed across checkouts, set `DESK_EXTENSION_KEY` once the store's public key is known (step 2 of "Tie Desk to the item" above).

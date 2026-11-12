@@ -85,6 +85,17 @@ const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]
 };
 
 describe("the protocol", () => {
+  it("is the same file the hub reads, where the hub at hub.ref has it", async () => {
+    const fsName = "node:fs";
+    const { existsSync, readFileSync } = (await import(/* @vite-ignore */ fsName)) as {
+      existsSync(p: URL): boolean;
+      readFileSync(p: URL, encoding: string): string;
+    };
+    const hub = new URL("../../../workforce-public-desk/crates/hub/src/desk_chrome/protocol-v1.json", import.meta.url);
+    if (!existsSync(hub)) return;
+    expect(JSON.parse(readFileSync(hub, "utf8"))).toEqual(fixture);
+  });
+
   it("reads every message the hub sends, and nothing else", () => {
     expect(fixture.protocol).toBe(PROTOCOL);
     expect(fixture.proof_prefix).toBe(PROOF_PREFIX);
