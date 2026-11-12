@@ -3,18 +3,29 @@ import { useDesk } from "../hub/store";
 import type { ChargeView, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
-import { badgeOf, called, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
+import { badgeOf, called, chargeChoices, driving, howText, wheelText, type ChargeChoice } from "./charge";
 import { useBossOf, useCharge, useCharges } from "./chargeStore";
 import { Popover } from "../ui/Popover";
 import { sessionKey } from "../hub/machines";
 
+/** Why what the session `charge` is for waits on the person though its
+ *  boss runs it, as the hub says; nothing while the boss has it. */
+const useWaitsOnYou = (charge: ChargeView | undefined): string | undefined =>
+  useDesk((s) => (charge ? s.sessions[charge.session]?.waitsOnYou : undefined));
+
+/** What the badge's title says: why it waits on you, when it does, then
+ *  how the boss came to run it and who has the wheel. */
+const titleOf = (charge: ChargeView, waits: string | undefined): string => `${waits && !driving(charge) ? `Waiting on you: ${waits} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
+
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
- *  `short`), dashed "You're driving" while the person has the wheel. */
+ *  `short`), dashed "You're driving" while the person has the wheel, and
+ *  "Waiting on you" while what it waits on is the person's to answer. */
 export function ChargeBadge({ charge, short = false, className = "" }: { charge: ChargeView | undefined; short?: boolean; className?: string }) {
-  const badge = badgeOf(charge, short);
+  const waits = useWaitsOnYou(charge);
+  const badge = badgeOf(charge, short, waits);
   if (!charge || !badge) return null;
   return (
-    <span className={`charge-badge charge-${badge.look} ${className}`} title={`${howText(charge)}. ${wheelText(charge)}`}>
+    <span className={`charge-badge charge-${badge.look} ${className}`} title={titleOf(charge, waits)}>
       {badge.text}
     </span>
   );
@@ -61,8 +72,9 @@ export function DriverChip({ session }: { session: Session }) {
   const [busy, setBusy] = useState<string | null>(null);
   const going = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const badge = badgeOf(charge);
-  const short = badgeOf(charge, true);
+  const waits = session.waitsOnYou;
+  const badge = badgeOf(charge, false, waits);
+  const short = badgeOf(charge, true, waits);
   if (!charge || !badge || !short) return null;
   const choices = chargeChoices(session, charge, boss);
   const run = (c: ChargeChoice) => {
@@ -90,7 +102,7 @@ export function DriverChip({ session }: { session: Session }) {
         aria-haspopup="dialog"
         aria-expanded={!!from}
         aria-label={`Who runs it: ${badge.text}${suggested ? `, ${suggested} suggested` : ""}`}
-        title={`${howText(charge)}. ${wheelText(charge)}`}
+        title={titleOf(charge, waits)}
         onClick={(e) => setFrom(from ? null : e.currentTarget)}
       >
         <span className="sc-long">{badge.text}</span>
@@ -104,6 +116,7 @@ export function DriverChip({ session }: { session: Session }) {
             <ChargeBadge charge={charge} />
             <span className="small faint">{howText(charge)}</span>
           </span>
+          {waits && !driving(charge) && <p className="driver-pop-text">Waiting on you: {waits}</p>}
           <p className="driver-pop-text">{wheelText(charge)}</p>
           {problem && (
             <p className="small state-blocked" role="alert">

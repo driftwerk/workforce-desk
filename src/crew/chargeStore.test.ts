@@ -82,6 +82,14 @@ describe("the charges Desk keeps", () => {
     expect(useCharges.getState().supported).toBe(true);
   });
 
+  it("says a session waits on you, never that the boss has it, while what it asks is yours to answer", () => {
+    expect(badgeOf(charge())?.text).toBe("Sarah has it");
+    expect(badgeOf(charge(), false, "Sarah left this to you.")).toEqual({ text: "Waiting on you", look: "you" });
+    expect(badgeOf(charge(), true, "Sarah only suggests: you decide.")).toEqual({ text: "Yours", look: "you" });
+    expect(badgeOf(charge({ wheel: "person" }), false, "You're driving it.")?.text).toBe("You’re driving");
+    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z" }), false, "x")).toBeNull();
+  });
+
   it("names a boss the hub only knows by id as your overseer, and by its name once the roster has it", () => {
     useCharges.getState().heard(charge({ bossName: "sarah" }));
     const shown = () => useCharges.getState().bySession.s1!;

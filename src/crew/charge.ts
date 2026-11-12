@@ -31,11 +31,16 @@ export const called = (name: string, start = false): string => name || (start ? 
 export const driving = (c: ChargeView): boolean => c.wheel !== "boss";
 
 /** The badge on a session a boss runs: "Sarah has it", or "You're
- *  driving" while the person has the wheel; `short` where space is tight
- *  (the sidebar): "Sarah's" or "Yours". */
-export const badgeOf = (c: ChargeView | null | undefined, short = false): { text: string; look: "boss" | "you" } | null => {
+ *  driving" while the person has the wheel, or "Waiting on you" while what
+ *  it waits on is the person's though the boss has the wheel (`waitsOnYou`,
+ *  the hub's reason: the boss only suggests, left it to them, or only its
+ *  terminal can answer); `short` where space is tight (the sidebar):
+ *  "Sarah's" or "Yours". It never says the boss has it while nobody but
+ *  the person will answer. */
+export const badgeOf = (c: ChargeView | null | undefined, short = false, waitsOnYou?: string | null): { text: string; look: "boss" | "you" } | null => {
   if (!c || c.releasedAt) return null;
   if (driving(c)) return { text: short ? "Yours" : "You’re driving", look: "you" };
+  if (waitsOnYou) return { text: short ? "Yours" : "Waiting on you", look: "you" };
   return { text: short ? `${called(c.bossName, true)}’s` : `${called(c.bossName, true)} has it`, look: "boss" };
 };
 

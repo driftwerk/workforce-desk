@@ -164,6 +164,9 @@ export interface Session {
   mode?: "auto" | "bypassPermissions";
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
+  /** Why what it waits on is the person's though a boss runs it ("Desk
+   *  left this to you."); absent while the boss has it, and from older hubs. */
+  waitsOnYou?: string;
   createdAt: string;
   updatedAt: string;
 }
