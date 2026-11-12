@@ -53,7 +53,7 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
         )}
         <Attachments files={draft.attachments} home={home} />
         {draft.prompts.map((p) => (
-          <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(roomId, draft.id, p.requestId, choice)} />
+          <PromptCard key={p.requestId} prompt={p} agent={draft.member} onAnswer={(choice) => answerPrompt(roomId, draft.id, p.requestId, choice)} />
         ))}
         <span className="small faint draft-note" role="status">
           {!stopped && note}

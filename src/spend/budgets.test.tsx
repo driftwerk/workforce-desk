@@ -208,7 +208,7 @@ describe("Settings → Budgets", () => {
 
   it("says when the hub keeps no budgets", async () => {
     await show(null);
-    expect(screen.getByText("This workspace's hub doesn't keep budgets yet.")).toBeTruthy();
+    expect(screen.getByText("This version of Desk doesn't keep budgets yet. Update Desk to set them.")).toBeTruthy();
   });
 
   it("starts with none, and nothing stops for spend", async () => {
@@ -232,9 +232,27 @@ describe("Settings → Budgets", () => {
     expect(hub.deleteBudget).toHaveBeenCalledWith("b-2");
   });
 
-  it("adds a budget for one agent, and refuses an amount of nothing", async () => {
+  it("adds a budget said in a sentence, saying back what it heard first", async () => {
     const hub = await show(budgetsView());
-    const form = within(screen.getByRole("region", { name: "Add a budget" }));
+    const part = within(screen.getByRole("region", { name: "Add a budget" }));
+    const add = part.getByRole("button", { name: "Add budget" }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    const said = part.getByLabelText("Budget, in your words");
+    fireEvent.change(said, { target: { value: "keep me under $20" } });
+    expect(part.getByRole("status").textContent).toBe("Say how often: a day, a week, a month or every five hours.");
+    expect(add.disabled).toBe(true);
+    fireEvent.change(said, { target: { value: "Atlas under $8 a day, just warn" } });
+    expect(part.getByRole("status").textContent).toBe("Atlas: $8 a day · warns at 80% · only warns.");
+    await act(async () => fireEvent.click(add));
+    expect(hub.putBudget).toHaveBeenCalledWith({ scope: { kind: "agent", id: "atlas" }, group: null, period: "day", unit: "usd", amount: 8, warnAt: 0.8, onExceed: "warn" });
+    expect((said as HTMLInputElement).value).toBe("");
+  });
+
+  it("adds a budget for one agent field by field, and refuses an amount of nothing", async () => {
+    const hub = await show(budgetsView());
+    const part = within(screen.getByRole("region", { name: "Add a budget" }));
+    fireEvent.click(part.getByRole("button", { name: "Set it up field by field" }));
+    const form = within(part.getByDisplayValue("Everything together").closest("form")!);
     const add = form.getByRole("button", { name: "Add budget" }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     fireEvent.change(form.getByDisplayValue("Everything together"), { target: { value: "agent:atlas" } });
@@ -260,7 +278,7 @@ describe("Settings → Budgets", () => {
     fireEvent.change(list.getByDisplayValue("11"), { target: { value: "15" } });
     await act(async () => fireEvent.click(list.getByRole("button", { name: "Save" })));
     expect(list.getByDisplayValue("15")).toBeTruthy();
-    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["a budget's amount is more than nothing", "Not saved: see why above."]);
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["a budget's amount is more than nothing", "Not saved. Desk said why at the top of Budgets."]);
   });
 
   it("says what went wrong when the hub refuses", async () => {
