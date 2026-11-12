@@ -293,6 +293,15 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       return answer(undefined);
     case "themes_list":
       return answer([]);
+    case "machine_probe":
+      // `desk.dev.forwards` = "1": the SSH config forwards ports for it.
+      if (localStorage.getItem("desk.dev.forwards") === "1")
+        throw new Error(
+          `Your SSH config forwards ports for ${String(args?.target)} (localforward). Desk keeps its connection open all the time, so it won't carry them.`,
+        );
+      throw new Error("Machines are reached over SSH by the app.");
+    case "machine_ssh_hosts":
+      return answer([]);
     case "machines_list":
       // Machines are reached over SSH by the app; the preview has none.
       return answer([]);

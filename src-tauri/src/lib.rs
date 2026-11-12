@@ -1052,7 +1052,9 @@ pub fn run() {
             // One ssh for every machine, which knows Desk's own key and
             // the machines it was put on.
             let ssh = desk_machine::SshExe::system()
-                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"));
+                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"))
+                // Desk's own SSH entries, for machines whose entry forwards ports.
+                .with_desk_config(paths.root.join("machines").join("ssh").join("config"));
             let machines = Arc::new(desk_machine::Machines::new(
                 ssh.clone(),
                 &paths.root.join("machines"),
@@ -1170,6 +1172,7 @@ pub fn run() {
             machine_setup::machine_log,
             machine_setup::machine_remote_log,
             machine_setup::machine_ssh_hosts,
+            machine_setup::machine_desk_entry,
             machine_setup::machine_edit,
             machine_setup::machine_check_reach,
             machine_setup::machine_cancel_add,

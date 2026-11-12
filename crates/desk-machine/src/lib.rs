@@ -27,6 +27,7 @@ pub mod admit;
 #[cfg(unix)]
 pub mod askpass;
 pub mod callback;
+pub mod entry;
 pub mod fleet;
 pub mod hostkey;
 pub mod link;
