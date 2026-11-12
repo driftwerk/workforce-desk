@@ -3,7 +3,8 @@
 // agent and person, named by the hub) has a tab there. The extension only
 // ever acts on a tab it opened and still holds: a session's tab, or a tab
 // one of those opened (a page's popup). There is no way to name any other
-// tab.
+// tab. A page an agent opens *for* the person is handed over: its tab moves
+// to the person's own window and Desk lets go of it for good.
 
 /** The parts of Chrome's API Desk's tabs use, so tests can stand in. */
 export interface ChromeTabs {
@@ -16,6 +17,13 @@ export interface ChromeTabs {
   removeWindow(windowId: number): Promise<void>;
   activate(tabId: number): Promise<void>;
   focusWindow(windowId: number): Promise<void>;
+  /** The person's own window to hand a tab to: the normal window they used
+   *  last that isn't `desk`, else any other; null when there's none. */
+  personsWindow(desk: number): Promise<number | null>;
+  /** Moves `tabId`, out of Desk's group, to the end of `windowId`. */
+  moveTab(tabId: number, windowId: number): Promise<void>;
+  /** A new normal window holding `tabId`, out of Desk's group. */
+  windowWith(tabId: number): Promise<number>;
   load(): Promise<Kept | null>;
   save(kept: Kept): Promise<void>;
 }
@@ -147,6 +155,37 @@ export class DeskTabs {
     await this.chrome.removeWindow(k.windowId).catch(() => undefined);
     await this.keep(null);
     return n;
+  }
+
+  /** Hands `session`'s tab to the person: it moves to their own window
+   *  (a new one when they have none but Desk's), and is no session's from
+   *  then on. Nothing Desk does closes or drives it again, and what it opens
+   *  isn't adopted. Desk's window goes once it holds no session. Where the
+   *  tab went; null when the session has no tab. */
+  async handOver(session: string): Promise<{ tabId: number; windowId: number } | null> {
+    const k = await this.state();
+    const tabId = k?.sessions[session];
+    if (!k || tabId === undefined || !(await this.chrome.tabExists(tabId))) return null;
+    const into = await this.chrome.personsWindow(k.windowId);
+    let windowId: number;
+    if (into === null) windowId = await this.chrome.windowWith(tabId);
+    else {
+      await this.chrome.moveTab(tabId, into);
+      windowId = into;
+    }
+    // Moved: it is the person's now, whatever happens to Desk's books.
+    delete k.sessions[session];
+    delete k.opened[tabId];
+    for (const [t, by] of Object.entries(k.opened)) if (by === session) delete k.opened[Number(t)];
+    try {
+      if (Object.keys(k.sessions).length === 0) {
+        await this.chrome.removeWindow(k.windowId).catch(() => undefined);
+        await this.keep(null);
+      } else await this.keep(k);
+    } catch {
+      // What is kept couldn't be saved; it is kept in memory all the same.
+    }
+    return { tabId, windowId };
   }
 
   /** Whether Desk's window is minimised: no picture is taken of it then,

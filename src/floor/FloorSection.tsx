@@ -182,7 +182,7 @@ function Whose({ work }: { work: FloorWork }) {
   const key = sessionKeyOfItem(work);
   const charge = useCharge(key);
   if (work.who.kind !== "session") return null;
-  if (charge && !charge.releasedAt) return <ChargeBadge charge={charge} short />;
+  if (charge && !charge.releasedAt) return <ChargeBadge charge={charge} session={key} short />;
   return <span className="charge-badge charge-you">yours</span>;
 }
 
@@ -320,7 +320,7 @@ export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; n
           </span>
         )}
         {item.who.kind === "session" &&
-          (charge && !charge.releasedAt ? <ChargeBadge charge={charge} short /> : <span className="charge-badge charge-you">yours</span>)}
+          (charge && !charge.releasedAt ? <ChargeBadge charge={charge} session={item.who.id} short /> : <span className="charge-badge charge-you">yours</span>)}
       </div>
     </article>
   );

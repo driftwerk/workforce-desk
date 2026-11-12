@@ -13,11 +13,14 @@ interface BoardState {
   shown: string | null;
   /** The ticket open in its panel. */
   open: string | null;
+  /** The ticket open as a popup over a grid (see TicketPopup). */
+  popup: string | null;
   /** Reads every board and its tickets; read again (`tries` more times)
    *  when a change came meanwhile. */
   load: (tries?: number) => Promise<void>;
   show: (board: string) => void;
   openTicket: (id: string | null) => void;
+  openPopup: (id: string | null) => void;
   /** A ticket the hub announced. */
   heard: (t: Ticket) => void;
   /** Reads ticket `id` again, kept unless it changed meanwhile. */
@@ -78,6 +81,7 @@ export const useBoard = create<BoardState>((set, get) => {
     supported: null,
     shown: null,
     open: null,
+    popup: null,
     load: async (tries = LOAD_TRIES) => {
       const hub = hubNow();
       if (!hub) return;
@@ -111,6 +115,7 @@ export const useBoard = create<BoardState>((set, get) => {
     },
     show: (shown) => set({ shown }),
     openTicket: (open) => set({ open }),
+    openPopup: (popup) => set({ popup }),
     heard: (t) => {
       bump(t.id);
       set((s) => ({ tickets: { ...s.tickets, [t.id]: t } }));
@@ -199,7 +204,7 @@ const forget = (id: string) => {
   useBoard.setState((s) => {
     if (!(id in s.tickets)) return s;
     const { [id]: _, ...rest } = s.tickets;
-    return { tickets: rest, open: s.open === id ? null : s.open };
+    return { tickets: rest, open: s.open === id ? null : s.open, popup: s.popup === id ? null : s.popup };
   });
 };
 

@@ -322,8 +322,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
   const mine = mineAt >= 0 ? shown[mineAt] : undefined;
   // Around a search match, the chat is a stretch of its past: nothing is
-  // edited or deleted from there.
-  const editable = !around && !!convo.features?.has(FEATURES.edit);
+  // edited or deleted from there. And only where the hub says which kept
+  // row each live message became: what's set aside is then known by id.
+  const editable = !around && !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
   const whyNot = !mine
     ? null
     : busy
@@ -332,14 +333,18 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         ? "You can edit your last message once your queued messages have gone."
         : !(history?.messages ?? []).some((k) => k.id === mine.id)
           ? `You can edit your last message once ${agent.name}’s hub has saved it.`
-          : null;
+          : mine.attachments?.length
+            ? "A message with files can’t be edited. Send a new one instead."
+            : null;
   const deletable = !around && !!convo.features?.has(FEATURES.delete);
-  const yours = (m: ChatMessage) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn);
+  const yours = (m: ChatMessage) =>
+    m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
   const keptIds = new Set((history?.messages ?? []).map((k) => k.id));
   const startDelete = (m: ChatMessage) => {
     // Its turn may still be reading it; and the hub knows it only once kept.
     if (busy) return setEditNote(`You can delete a message once ${agent.name} has finished replying.`);
     if (!keptIds.has(m.id)) return setEditNote(`You can delete it once ${agent.name}’s hub has saved it.`);
+    setEditing(null);
     setDeleting(m.id);
   };
   const orphanSet = new Set(orphans ?? []);
@@ -365,6 +370,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const startEdit = () => {
     if (!mine || !editable) return;
     if (whyNot) return setEditNote(whyNot);
+    setDeleting(null);
     const after = shown.slice(mineAt);
     setEditing({
       id: mine.id,
@@ -603,7 +609,15 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               editing={editing}
               onCancel={() => setEditing(null)}
               onSave={(text) => {
-                if (!editLast(activeAgent, editing.id, editing.aside, text)) return setEditNote(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+                const why = editLast(activeAgent, editing.id, editing.aside, text);
+                if (why)
+                  return setEditNote(
+                    why === "busy"
+                      ? `You can edit your last message once ${agent.name} has finished replying.`
+                      : why === "queued"
+                        ? "You can edit your last message once your queued messages have gone."
+                        : `Couldn’t reach ${agent.name}. Try again in a moment.`,
+                  );
                 setEditing(null);
                 latest();
               }}
@@ -611,6 +625,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           ) : (
           <DmComposer
             onEditLast={startEdit}
+            onEditBack={(why, restored) =>
+              setEditNote(`${agent.name}’s hub didn’t take your edit${why ? ` (${why})` : ""}.${restored ? " Your words are back in the box." : ""}`)
+            }
             to={activeAgent}
             agent={agent}
             hub={hub}
@@ -669,11 +686,16 @@ const DmMessage = memo(function DmMessage({
 /** The answers to your message `m` in `shown`: those its turn said, by its
  *  client id, else what follows it until your next message. */
 const repliesTo = (shown: readonly ChatMessage[], m: ChatMessage): string[] => {
-  const said = m.clientId ? shown.filter((x) => x.role !== "user" && x.replyTo === m.clientId) : [];
+  const said = m.clientId ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId) : [];
   if (said.length) return said.map((x) => x.id);
+  // Not said: what the agent said after it, until your next message, that
+  // answers nothing else. The hub's next read says for sure.
   const from = shown.indexOf(m) + 1;
   const next = shown.findIndex((x, i) => i >= from && x.role === "user");
-  return shown.slice(from, next < 0 ? undefined : next).map((x) => x.id);
+  return shown
+    .slice(from, next < 0 ? undefined : next)
+    .filter((x) => x.role === "assistant" && !x.replyTo)
+    .map((x) => x.id);
 };
 
 /** Deleting your message, confirmed in place: what the agent saved from it,
@@ -697,6 +719,7 @@ function DeleteConfirm({
 }) {
   const deleteMine = useChat((s) => s.deleteMine);
   const [memories, setMemories] = useState<SavedMemory[] | null>(null);
+  const [unchecked, setUnchecked] = useState(false);
   const [forget, setForget] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -704,8 +727,13 @@ function DeleteConfirm({
     let live = true;
     memoriesFrom(hub, agentId, message.id).then(
       (m) => live && setMemories(m),
-      // Not known: nothing to offer forgetting, and the message still goes.
-      () => live && setMemories([]),
+      // Not known: nothing to offer forgetting, said so, and the message
+      // may still go.
+      () => {
+        if (!live) return;
+        setMemories([]);
+        setUnchecked(true);
+      },
     );
     return () => {
       live = false;
@@ -727,7 +755,7 @@ function DeleteConfirm({
       role="group"
       aria-label="Delete this message?"
       onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
+        if (e.key !== "Escape" || busy) return;
         e.preventDefault();
         e.stopPropagation();
         onClose();
@@ -754,6 +782,11 @@ function DeleteConfirm({
             </span>
           </label>
         )
+      )}
+      {unchecked && (
+        <span className="faint small">
+          Couldn’t check what {name} saved from it, so nothing {name} saved will be forgotten.
+        </span>
       )}
       {problem && <span className="small state-blocked">{problem}</span>}
       <div className="msg-confirm-row">
@@ -879,6 +912,7 @@ function DmComposer({
   onSent,
   away,
   onEditLast,
+  onEditBack,
 }: {
   /** The agent's key. */
   to: string;
@@ -898,6 +932,9 @@ function DmComposer({
   /** ↑ with nothing queued to edit: edits your latest sent message, or
    *  says why it can't be. */
   onEditLast: () => void;
+  /** An edit the hub didn't take: why, and whether its words went back
+   *  into the box. */
+  onEditBack: (why: string, restored: boolean) => void;
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
@@ -908,6 +945,18 @@ function DmComposer({
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
+  // An edit the hub didn't take: its words come back here, if the box is
+  // empty, and you're told.
+  const editBack = useChat((s) => s.editBack[to]);
+  useEffect(() => {
+    if (!editBack) return;
+    const restored = !draft.trim();
+    if (restored) setDraft(editBack.text);
+    useChat.getState().tookEditBack(to);
+    onEditBack(editBack.why, restored);
+    // Once per edit given back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editBack]);
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
   const emoji = useEmojiInput({
