@@ -17,6 +17,7 @@ import {
 } from "./types";
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
+import { deleteMessage } from "./remove";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
@@ -126,6 +127,13 @@ interface ChatStore {
    *  setting aside it and what followed (`aside`, ids or client ids), and
    *  asks again; false if it couldn't be sent. */
   editLast: (key: string, replaces: string, aside: string[], text: string) => boolean;
+  /** In each DM, by agent key: the answers to messages you deleted, until
+   *  the hub's next read marks them so. */
+  orphans: Record<string, string[]>;
+  /** Deletes your message `id` (its kept id; `ids` all it's known by) from
+   *  the DM, forgetting the memories `forget`; `replies` are marked as
+   *  answering a deleted message. Throws what the hub refused with. */
+  deleteMine: (key: string, id: string, ids: string[], replies: string[], forget: string[]) => Promise<void>;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -644,6 +652,17 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   queues: {},
   setAside: {},
+  orphans: {},
+  deleteMine: async (key, id, ids, replies, forget) => {
+    const target = whereIs(get(), key);
+    if (!target) throw new Error("This agent isn’t on a hub Desk is paired with right now.");
+    await deleteMessage(target.hub, target.agent.id, id, forget);
+    set((s) => ({
+      setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...ids] },
+      orphans: { ...s.orphans, [key]: [...(s.orphans[key] ?? []), ...replies] },
+    }));
+    void get().refreshHistory(key);
+  },
   editLast: (key, replaces, aside, text) => {
     if (!text.trim()) return false;
     const sent = live.get(key)?.send(text, { turn: { ...dmTurn(), edit: { replaces } } });
@@ -708,11 +727,13 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _kept, ...histories } = s.histories;
       const { [key]: _queued, ...queues } = s.queues;
       const { [key]: _aside, ...setAside } = s.setAside;
+      const { [key]: _orphans, ...orphans } = s.orphans;
       return {
         conversations,
         histories,
         queues,
         setAside,
+        orphans,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,
       };

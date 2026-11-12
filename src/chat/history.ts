@@ -60,6 +60,7 @@ export const fromHub = (m: HubMessage): ChatMessage => {
     ...(typeof m.seq === "number" ? { seq: m.seq } : {}),
     ...(m.mark?.in_reply_to ? { replyTo: m.mark.in_reply_to } : {}),
     ...(m.mark?.edited ? { edited: true } : {}),
+    ...(m.mark?.answered_deleted ? { answeredDeleted: true } : {}),
     ...(m.mark?.steps?.length ? { steps: m.mark.steps } : {}),
     ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
     ...(author ? { author } : {}),

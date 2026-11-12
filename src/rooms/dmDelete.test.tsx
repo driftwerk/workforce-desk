@@ -1,0 +1,193 @@
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeSocket } from "../testing/sockets";
+
+// Deleting a message of yours from a DM, confirmed in place: what the agent
+// saved from it is listed, to forget too; the message goes from the chat
+// and the agent's history, and the reply to it stays, marked as answering
+// a deleted message. A queued message is deleted by taking it out of the
+// queue, and nothing reaches the hub.
+
+const kept = vi.hoisted(() => ({ state: new Map<string, unknown>() }));
+vi.mock("../restore/boot", () => ({
+  deskState: {
+    get: (k: string) => kept.state.get(k),
+    set: (k: string, v: unknown) => void kept.state.set(k, v),
+    setSoon: (k: string, v: unknown) => void kept.state.set(k, v),
+    remove: (k: string) => void kept.state.delete(k),
+    watch: () => () => {},
+    loaded: Promise.resolve(),
+  },
+}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/plugin-notification", () => ({}));
+vi.mock("@workforce/rich", () => ({
+  RichMarkdown: ({ text }: { text: string }) => text,
+  RichHostProvider: ({ children }: { children: ReactNode }) => children,
+}));
+
+const { useChat } = await import("../chat/store");
+const { useDesk } = await import("../hub/store");
+const { useReads } = await import("../unread/reads");
+const { Rooms } = await import("./Rooms");
+
+Element.prototype.scrollIntoView = () => {};
+
+const KEY = "dw/allan";
+const FEATURES = ["desk.place", "desk.stream", "desk.queue", "desk.client_ids", "desk.edit", "desk.delete"];
+const at = (min: number) => new Date(Date.parse("2026-11-10T09:00:00Z") + min * 60_000).toISOString();
+
+/** You asked to file a bug; Allan's reply filed and assigned it. */
+const history = [
+  { id: "k0", from: "assistant", text: "Want me to file the leads bug?", at: at(0) },
+  { id: "k1", from: "user", text: "the staging password is on the old wiki page", at: at(1), client_id: "c1" },
+  {
+    id: "k2",
+    from: "assistant",
+    text: "Filed ATL-571 and assigned it to Sam Lee.",
+    at: at(2),
+  },
+];
+
+/** What the hub was asked, by method and path. */
+let asked: { method: string; path: string; body: unknown }[] = [];
+let refuse: string | null = null;
+const MEMORY = { id: "mem-1", text: "staging password is on the old wiki page" };
+
+const connect = async (features = FEATURES) => {
+  await vi.waitFor(() => expect(FakeSocket.find("/ws", "allan")).toBeDefined());
+  const s = FakeSocket.find("/ws", "allan")!;
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    s.receive({ type: "connected", session_id: "s-allan", features });
+  });
+  return s;
+};
+
+const box = () => screen.getByPlaceholderText("Message Allan") as HTMLTextAreaElement;
+const type = (text: string) => {
+  fireEvent.change(box(), { target: { value: text } });
+  fireEvent.keyDown(box(), { key: "Enter" });
+};
+const queued = () => [...document.querySelectorAll(".queued-text")].map((e) => e.textContent);
+const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+
+const open = async (features = FEATURES) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = new URL(String(url));
+      const method = init?.method ?? "GET";
+      asked.push({ method, path: u.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (u.pathname.endsWith("/memories")) return json({ memories: [MEMORY] });
+      if (method === "DELETE") return refuse ? json({ error: refuse }, 409) : json({ deleted: true, forgot: [] });
+      return json({ messages: history, more: false });
+    }),
+  );
+  render(<Rooms />);
+  act(() => useChat.getState().openDm(KEY));
+  const s = await connect(features);
+  await vi.waitFor(() => expect(screen.getByText("Filed ATL-571 and assigned it to Sam Lee.")).toBeTruthy());
+  return s;
+};
+
+const rowOf = (text: string) => screen.getByText(text).closest(".room-msg") as HTMLElement;
+const deletes = () => asked.filter((a) => a.method === "DELETE");
+
+beforeEach(() => {
+  vi.stubGlobal("WebSocket", FakeSocket);
+  FakeSocket.reset();
+  kept.state.clear();
+  asked = [];
+  refuse = null;
+  useDesk.setState({ view: "rooms", activeRoom: null, inbox: false, hub: null });
+  for (const key of Object.keys(useChat.getState().conversations)) useChat.getState().forget(key);
+  useChat.setState({
+    hubs: [{ id: "dw", label: "Acme", url: "https://acme.example.com", local: false, revision: "t" }],
+    roster: [{ hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
+    rosterRead: true,
+    queues: {},
+    histories: {},
+    setAside: {},
+    orphans: {},
+  });
+  useReads.setState({ local: {}, dms: {}, loaded: true });
+});
+afterEach(cleanup);
+
+describe("deleting your message", () => {
+  it("is confirmed in place, forgets what was saved from it, and leaves the reply marked", async () => {
+    await open();
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    const confirm = await screen.findByRole("group", { name: "Delete this message?" });
+    const forget = await within(confirm).findByRole("checkbox");
+    expect((forget as HTMLInputElement).checked).toBe(true);
+    expect(confirm.textContent).toContain("“staging password is on the old wiki page”");
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    expect(deletes()).toEqual([{ method: "DELETE", path: "/api/desk/conversations/allan/messages/k1", body: { forget: ["mem-1"] } }]);
+    expect(screen.queryByText("the staging password is on the old wiki page")).toBeNull();
+    expect(rowOf("Filed ATL-571 and assigned it to Sam Lee.").textContent).toContain("Answered a deleted message");
+  });
+
+  it("keeps the memories when you untick them, and Cancel deletes nothing", async () => {
+    await open();
+    const mine = () => rowOf("the staging password is on the old wiki page");
+    fireEvent.click(within(mine()).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Delete this message?" })).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Delete this message?" })).toBeNull();
+    expect(deletes()).toEqual([]);
+    fireEvent.click(within(mine()).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Delete this message?" });
+    fireEvent.click(await within(confirm).findByRole("checkbox"));
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    expect(deletes()[0]!.body).toEqual({ forget: [] });
+  });
+
+  it("says what the hub refused, and keeps the message", async () => {
+    await open();
+    refuse = "Allan is answering in this conversation right now.";
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Delete this message?" });
+    await within(confirm).findByRole("checkbox");
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    await vi.waitFor(() => expect(confirm.textContent).toContain("Allan is answering"));
+    expect(screen.getByText("the staging password is on the old wiki page")).toBeTruthy();
+  });
+
+  it("offers no Delete on the agent's messages, nor on a hub that can't", async () => {
+    await open();
+    expect(within(rowOf("Filed ATL-571 and assigned it to Sam Lee.")).queryByRole("button", { name: "Delete" })).toBeNull();
+    cleanup();
+    for (const key of Object.keys(useChat.getState().conversations)) useChat.getState().forget(key);
+    FakeSocket.reset();
+    await open(FEATURES.filter((f) => f !== "desk.delete"));
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+});
+
+describe("deleting with the queue", () => {
+  it("says why not while the agent is replying, and queued messages stay", async () => {
+    const s = await open();
+    act(() => type("check the deploy"));
+    act(() => s.receive({ type: "typing", session_id: "s-allan", turn_ref: s.chats[0]!.turn_ref }));
+    act(() => type("and staging"));
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    expect(screen.queryByRole("group", { name: "Delete this message?" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("You can delete a message once Allan has finished replying.");
+    expect(queued()).toEqual(["and staging"]);
+  });
+
+  it("takes a queued message out of the queue, and nothing reaches the hub", async () => {
+    const s = await open();
+    act(() => type("check the deploy"));
+    act(() => s.receive({ type: "typing", session_id: "s-allan", turn_ref: s.chats[0]!.turn_ref }));
+    act(() => type("and staging"));
+    act(() => type("then tell me"));
+    fireEvent.click(within(screen.getAllByRole("listitem")[0]!).getByRole("button", { name: "Remove queued message" }));
+    expect(queued()).toEqual(["then tell me"]);
+    expect(deletes()).toEqual([]);
+    expect(s.chats).toHaveLength(1);
+  });
+});
