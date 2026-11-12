@@ -340,6 +340,30 @@ describe("the link dialog", () => {
       expect(document.body.textContent).not.toMatch(/admin|remote MCP/);
     });
 
+    it("asks for the person's own key where only an agent's own connection is kept", async () => {
+      native.route = (hub, method, path, body) =>
+        hub === "local" && method === "GET" && path === "/api/desk/connections"
+          ? {
+              status: 200,
+              body: {
+                connectors: [
+                  {
+                    ...jiraConnector(true),
+                    connections: [{ ...jiraConnector(true).connections[0], level: "agent", agent: "max", agentName: "Max" }],
+                  },
+                ],
+                adapters: [],
+              },
+            }
+          : hub === "local"
+            ? localRoutes(method, path, body)
+            : { status: 404 };
+      render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("Jira");
+      expect(await screen.findByRole("button", { name: "Connect Jira" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Turn Jira on for Max" })).toBeNull();
+    });
+
     it("asks for the person's own key in place where there's no connection yet", async () => {
       withConnections(false);
       render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);

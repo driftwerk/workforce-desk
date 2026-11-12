@@ -692,13 +692,17 @@ function ThisComputerSetup({ system, disabled, onReady }: { system: SyncSystem; 
     if (!api) return;
     api.list().then(setListing, () => setListing(null));
   }, [api]);
+  // Read fresh each time: it may have changed since it was last read.
   useEffect(() => {
-    if (desk && agent && config === undefined) void useAgentConfigs.getState().load(desk, agent);
-  }, [desk, agent, config]);
+    if (desk && agent) void useAgentConfigs.getState().load(desk, agent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desk, agent?.id]);
 
   const connector = listing?.connectors.find((c) => c.id === system);
   if (!api || !desk || !agent || !connector || config === undefined) return null;
-  const connected = connector.connections.some((x) => x.status === "connected" && (x.level === "all" || x.agent === agent.id));
+  // The person's own connection, for all their agents: a board here syncs
+  // with their keys, never one kept just for an agent.
+  const connected = connector.connections.some((x) => x.status === "connected" && x.level === "all");
   const on = throughOf(bindingOf(config), system) !== "off";
   // Connected and on, yet not offered: nothing here Desk can change; the
   // row says why.
