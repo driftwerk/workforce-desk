@@ -93,16 +93,25 @@ const rewrite = async (hub: DeskHub, id: string, file: string, change: (text: st
   await hub.saveIdentityFile(id, file, change(text));
 };
 
-/** Setting a new crew member up didn't finish, so nothing of it was kept:
- *  the step that failed, and why, for Details. */
+/** Setting a new crew member up didn't finish: the step that failed, and
+ *  why, for Details. `left` names what Desk made and couldn't remove again
+ *  (null: nothing of them was kept). */
 export class NotSetUp extends Error {
   constructor(
     readonly who: string,
     readonly cause: unknown,
+    readonly left: string | null = null,
   ) {
-    super(`Desk couldn’t finish setting up ${who}, so nothing of them was kept. Try again.`);
+    super(
+      left
+        ? `Desk couldn’t finish setting up ${who}, nor remove what it had made: “${left}” is still on this computer. Remove it from its Settings before trying again.`
+        : `Desk couldn’t finish setting up ${who}, so nothing of them was kept.`,
+    );
   }
 }
+
+/** Ids tried before giving up when each is taken on the hub already. */
+const ID_TRIES = 5;
 
 /** A new agent on this computer, thinking with `brain` and sounding like
  *  `voice`, with its files written from its name and what it's for: all of
@@ -116,9 +125,21 @@ export async function createLocalAgent(
   taken: readonly string[],
   voice?: { provider: string; model?: string; voice?: string },
 ): Promise<string> {
-  const id = agentId(name, taken);
   const who = name.trim();
-  await hub.createAgent({ id, name: who, system_prompt: instructions(who, purpose) });
+  // The roster may be behind the hub: an id it says is taken goes to the
+  // next free one.
+  const tried = [...taken];
+  let id = agentId(name, tried);
+  for (let n = 1; ; n++) {
+    try {
+      await hub.createAgent({ id, name: who, system_prompt: instructions(who, purpose) });
+      break;
+    } catch (e) {
+      if (!(e instanceof HubError && e.status === 409) || n >= ID_TRIES) throw e;
+      tried.push(id);
+      id = agentId(name, tried);
+    }
+  }
   try {
     // One write of its settings: how it thinks and how it sounds.
     const config = withDeskSettings(await hub.agentConfig(id), brain);
@@ -128,8 +149,11 @@ export async function createLocalAgent(
     await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
     await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(withDeskWelcome(t), who, purpose));
   } catch (e) {
-    await hub.deleteAgent(id).catch(() => undefined);
-    throw new NotSetUp(who, e);
+    const removed = await hub.deleteAgent(id).then(
+      () => true,
+      () => false,
+    );
+    throw new NotSetUp(who, e, removed ? null : id);
   }
   return id;
 }

@@ -187,8 +187,24 @@ describe("making a crew member", () => {
     expect(h.calls).toEqual(["create", "config", "SOUL.md", "delete"]);
     // Not made at all: nothing to remove.
     const g = fakeHub();
-    (g.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(409, "agent 'scout' already exists"));
+    (g.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "disk full"));
     await expect(createLocalAgent(g.hub, "Scout", "Watch CI.", brain, [])).rejects.toBeInstanceOf(HubError);
     expect(g.hub.deleteAgent).not.toHaveBeenCalled();
+  });
+
+  it("takes the next free id when the hub has one the roster didn't know of", async () => {
+    const h = fakeHub();
+    (h.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(409, "agent 'scout' already exists"));
+    const id = await createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    expect(id).toBe("scout-2");
+    expect((h.hub.createAgent as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as { id: string }).id)).toEqual(["scout", "scout-2"]);
+  });
+
+  it("says what was left when it couldn't remove a half-made one, and never that nothing was kept", async () => {
+    const h = fakeHub("SOUL.md");
+    (h.hub.deleteAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "busy"));
+    const made = createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    await expect(made).rejects.toMatchObject({ left: "scout" });
+    await expect(made).rejects.toThrow("nor remove what it had made: “scout” is still on this computer");
   });
 });

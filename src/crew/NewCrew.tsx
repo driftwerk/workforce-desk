@@ -21,7 +21,7 @@ import { NEW_CREW_LINE } from "../shell/newLines";
  *  think and sound starting on Desk's defaults. */
 export function NewCrew({ onClose }: { onClose: () => void }) {
   const { hub, fail, openRoom } = useDesk();
-  const { roster, refreshRoster, openDm } = useChat();
+  const { refreshRoster, openDm } = useChat();
   const { newAgent, defaultVoice, agentVoices, set } = useSettings();
   const { providers, loaded } = useProviderList({ fresh: true });
   const [name, setName] = useState("");
@@ -42,24 +42,38 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     if (!hub || !who || !purpose.trim()) return;
     setBusy(true);
+    let id: string;
     try {
-      const taken = roster.filter((a) => a.hubId === "local").map((a) => a.id);
+      // The ids taken as the hub has them now, not as the roster last read.
+      await refreshRoster().catch(() => undefined);
+      const taken = useChat
+        .getState()
+        .roster.filter((a) => a.hubId === "local")
+        .map((a) => a.id);
       // All of them in one go, or none of them: see `createLocalAgent`.
-      const id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken, voice ?? defaultVoice);
+      id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken, voice ?? defaultVoice);
       if (voice) set({ agentVoices: { ...agentVoices, [`local/${id}`]: voice } });
+    } catch (err) {
+      setBusy(false);
+      if (err instanceof NotSetUp) {
+        // Said as it is, with the step that failed under Details; Retry only
+        // where nothing was left behind.
+        const cause = err.cause instanceof Error ? err.cause.message : String(err.cause);
+        useDesk.setState({
+          error: { plain: err.message, ...(err.left ? {} : { fix: { label: "Retry", run: () => void submit(e) } }), details: cause, what: `making ${who} a crew member` },
+        });
+      } else fail(err, { what: `making ${who} a crew member`, retry: () => void submit(e) });
+      return;
+    }
+    // Made whole: opening their chat is no part of making them, and never
+    // offers to make them again.
+    onClose();
+    try {
       await refreshRoster();
       await openRoom(null);
       openDm(`local/${id}`);
-      onClose();
     } catch (err) {
-      const retry = () => void submit(e);
-      if (err instanceof NotSetUp) {
-        // Said as it is, with the step that failed under Details.
-        const cause = err.cause instanceof Error ? err.cause.message : String(err.cause);
-        useDesk.setState({ error: { plain: err.message, fix: { label: "Retry", run: retry }, details: cause, what: `making ${who} a crew member` } });
-      } else fail(err, { what: `making ${who} a crew member`, retry });
-    } finally {
-      setBusy(false);
+      fail(err, { what: `opening ${who}’s chat` });
     }
   };
 
