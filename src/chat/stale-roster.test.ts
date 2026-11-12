@@ -13,7 +13,7 @@ const local: HubAccount = { id: "local", label: "This computer", url: "http://12
 const acme: HubAccount = { id: "acme", label: "Acme", url: "https://hub.example.com", local: false, revision: "t" };
 const agent = (hubId: string, id: string): Agent => ({ hubId, id, name: id, model: null, provider: null, isDefault: false });
 
-afterEach(() => useChat.setState({ hubs: [], roster: [], rosterErrors: {} }));
+afterEach(() => useChat.setState({ hubs: [], roster: [], rosterErrors: {}, settling: {} }));
 
 describe("The agent list while a hub can't be read", () => {
   it("keeps this computer's agents from before, and drops a remote workspace's", async () => {
@@ -30,6 +30,20 @@ describe("The agent list while a hub can't be read", () => {
     fetches.fetch.mockResolvedValue({ ok: true, json: async () => ({ agents: [{ id: "scribe" }] }) });
     await useChat.getState().refreshRoster();
     expect(useChat.getState().roster.map((a) => a.id)).toEqual(["scribe"]);
+  });
+});
+
+describe("An agent being built again (a new name)", () => {
+  it("stays on the list while its hub leaves it out, and goes once it's done if the hub still does", async () => {
+    useChat.setState({ hubs: [local], roster: [{ ...agent("local", "ledger"), name: "Penny" }, agent("local", "scout")] });
+    useChat.getState().settle("local/ledger", true);
+    fetches.fetch.mockResolvedValue({ ok: true, json: async () => ({ agents: [{ id: "scout" }] }) });
+    await useChat.getState().refreshRoster();
+    expect(useChat.getState().roster.map((a) => `${a.id} ${a.name}`)).toEqual(["scout scout", "ledger Penny"]);
+
+    useChat.getState().settle("local/ledger", false);
+    await useChat.getState().refreshRoster();
+    expect(useChat.getState().roster.map((a) => a.id)).toEqual(["scout"]);
   });
 });
 

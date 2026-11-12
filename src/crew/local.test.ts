@@ -6,8 +6,8 @@ import {
   instructions,
   purposeOf,
   RENAME_UNAVAILABLE,
-  renameAgentFiles,
   renameLocalAgent,
+  servingAgain,
   setAgentPurpose,
   withJob,
   withName,
@@ -82,26 +82,53 @@ describe("local crew", () => {
 });
 
 /** A hub keeping identity files in memory. */
-const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> = () => Promise.resolve({})) => {
+/** A hub with an agent's files, which builds it again on a new name or new
+ *  instructions: `rebuild` reads of its agents leave it out after that,
+ *  and its files can't be read meanwhile, as the hub does. */
+const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> = () => Promise.resolve({}), rebuild = 2) => {
+  const calls: string[] = [];
+  let away = 0;
   const hub = {
-    renameAgent: vi.fn(rename),
-    identityFile: vi.fn(async (_id: string, f: string) => files[f] ?? ""),
-    saveIdentityFile: vi.fn(async (_id: string, f: string, t: string) => void (files[f] = t)),
+    calls,
+    renameAgent: vi.fn(async () => {
+      calls.push("rename");
+      const out = await rename();
+      away = rebuild;
+      return out;
+    }),
+    identityFile: vi.fn(async (_id: string, f: string) => {
+      if (away > 0) throw new HubError(404, "Not Found");
+      return files[f] ?? "";
+    }),
+    saveIdentityFile: vi.fn(async (_id: string, f: string, t: string) => {
+      if (away > 0) throw new HubError(404, "Not Found");
+      calls.push(`write ${f}`);
+      files[f] = t;
+    }),
+    listed: vi.fn(async () => {
+      calls.push("list");
+      if (away > 0) {
+        away--;
+        return ["other"];
+      }
+      return ["other", "ledger"];
+    }),
   };
   return hub as typeof hub & DeskHub;
 };
 
+const LEDGER = (): Record<string, string> => ({
+  "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
+  "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
+  "AGENTS.md": withJob("# Guidelines\n", "Ledger", "Watch the bill."),
+  "WELCOME.md": withWelcome("Keep it short.\n", "Ledger", "Watch the bill."),
+});
+
 describe("renaming an agent", () => {
-  it("renames it, and puts the new name in its identity and the sections written from what it's for", async () => {
-    const files: Record<string, string> = {
-      "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
-      "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
-      "AGENTS.md": withJob("# Guidelines\n", "Ledger", "Watch the bill."),
-      "WELCOME.md": withWelcome("Keep it short.\n", "Ledger", "Watch the bill."),
-    };
+  it("puts the new name in its identity and the sections written from what it's for, and its instructions", async () => {
+    const files = LEDGER();
     const hub = filesHub(files);
-    await renameLocalAgent(hub, "ledger", "  Penny ");
-    await renameAgentFiles(hub, "ledger", "  Penny ");
+    await renameLocalAgent(hub, "ledger", "  Penny ", undefined, hub.listed);
     expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny", instructions("Penny", "Watch the bill."));
     expect(files["IDENTITY.md"]).toBe("# Identity\n- **Name:** Penny\n- **Vibe:** calm\n");
     expect(files["SOUL.md"]).toContain("You are Penny.");
@@ -111,18 +138,41 @@ describe("renaming an agent", () => {
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch the bill.");
   });
 
+  it("writes every file before the new name builds the agent again, while its files can still be read", async () => {
+    const files = LEDGER();
+    const hub = filesHub(files);
+    await renameLocalAgent(hub, "ledger", "Penny", undefined, hub.listed);
+    const renamed = hub.calls.indexOf("rename");
+    expect(hub.calls.slice(0, renamed).sort()).toEqual(["write AGENTS.md", "write IDENTITY.md", "write SOUL.md", "write WELCOME.md"]);
+    expect(hub.calls.slice(renamed + 1).every((c) => c === "list")).toBe(true);
+  });
+
+  it("waits until the hub serves the agent again before it's done", async () => {
+    const hub = filesHub(LEDGER(), undefined, 3);
+    await renameLocalAgent(hub, "ledger", "Penny", undefined, hub.listed);
+    // Left out three times while it was built again, then listed.
+    expect(hub.calls.filter((c) => c === "list")).toHaveLength(4);
+  });
+
   it("writes a new purpose along with the new name", async () => {
     const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill."), "AGENTS.md": "# G\n" };
-    await renameAgentFiles(filesHub(files), "ledger", "Penny", "Watch deploys.");
+    await renameLocalAgent(filesHub(files), "ledger", "Penny", "Watch deploys.");
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
     expect(files["SOUL.md"]).toContain("You are Penny.");
   });
 
-  it("tells the hub the agent's new instructions along with a new purpose, and copes with a hub that can't", async () => {
+  it("keeps a missing AGENTS.md missing: the hub's own guidelines apply", async () => {
+    const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill.") };
+    await renameLocalAgent(filesHub(files), "ledger", "Penny");
+    expect(files["AGENTS.md"]).toBeUndefined();
+  });
+
+  it("tells the hub the agent's new instructions along with a new purpose, files first, and copes with a hub that can't", async () => {
     const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill.") };
     const hub = filesHub(files);
-    await setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.");
+    await setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.", hub.listed);
     expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Ledger", instructions("Ledger", "Watch deploys."));
+    expect(hub.calls.indexOf("write SOUL.md")).toBeLessThan(hub.calls.indexOf("rename"));
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
 
     const old = filesHub(files, () => Promise.reject(new HubError(405, "Method Not Allowed")));
@@ -130,14 +180,46 @@ describe("renaming an agent", () => {
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch costs.");
   });
 
-  it("leaves the files alone and says so plainly when the hub can't rename yet", async () => {
+  it("puts the files back and says so plainly when the hub can't rename yet", async () => {
     for (const status of [404, 405]) {
-      const files: Record<string, string> = { "IDENTITY.md": "- **Name:** Ledger\n" };
+      const files = LEDGER();
+      const before = { ...files };
       const hub = filesHub(files, () => Promise.reject(new HubError(status, "not found")));
       await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow(RENAME_UNAVAILABLE);
-      expect(hub.saveIdentityFile).not.toHaveBeenCalled();
-      expect(files["IDENTITY.md"]).toBe("- **Name:** Ledger\n");
+      expect(files).toEqual(before);
     }
     expect(RENAME_UNAVAILABLE).not.toMatch(/hub|api|http|40\d/i);
+  });
+
+  it("puts the files back when the hub refuses the name, and says why", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files, () => Promise.reject(new HubError(400, "an agent's name is 1 to 64 characters")));
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("an agent's name is 1 to 64 characters");
+    expect(files).toEqual(before);
+  });
+});
+
+describe("waiting for an agent to serve again", () => {
+  it("is done at once for an agent the hub doesn't build again, after a moment", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = servingAgain(async () => ["desk"], "desk");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(done).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after a while, without an error", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = servingAgain(async () => [], "ledger", 3_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(done).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

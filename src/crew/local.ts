@@ -113,43 +113,108 @@ export async function createLocalAgent(
   return id;
 }
 
-/** A new description of what an agent is for, in every file that says it
- *  and in its instructions (a hub that can't update those keeps the old). */
-export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string): Promise<void> {
-  try {
-    await hub.renameAgent(id, name.trim(), instructions(name.trim(), purpose));
-  } catch (e) {
-    if (!(e instanceof HubError && (e.status === 404 || e.status === 405))) throw e;
+/** A file of an agent's, as it is and as a change leaves it. */
+interface Change {
+  file: string;
+  was: string;
+  now: string;
+}
+
+/** What the files that say an agent's job become, for `who` doing `job`.
+ *  A missing AGENTS.md is left missing: the hub's own guidelines apply. */
+const jobChanges = async (hub: DeskHub, id: string, who: string, job: string, soul?: string): Promise<Change[]> => {
+  const soulWas = soul ?? (await hub.identityFile(id, "SOUL.md"));
+  const agents = await hub.identityFile(id, "AGENTS.md");
+  const welcome = await hub.identityFile(id, "WELCOME.md");
+  return [
+    { file: "SOUL.md", was: soulWas, now: withPurpose(soulWas, who, job) },
+    ...(agents.trim() ? [{ file: "AGENTS.md", was: agents, now: withJob(agents, who, job) }] : []),
+    { file: "WELCOME.md", was: welcome, now: withWelcome(welcome, who, job) },
+  ];
+};
+
+/** Writes each change; `back` writes what was there instead. */
+const write = async (hub: DeskHub, id: string, changes: readonly Change[], back = false): Promise<void> => {
+  for (const c of changes) if (c.was !== c.now) await hub.saveIdentityFile(id, c.file, back ? c.was : c.now);
+};
+
+/** Puts the files back as they were, as far as it can: the error that
+ *  brought it here is the one that's said. */
+const undo = (hub: DeskHub, id: string, changes: readonly Change[]): Promise<void> => write(hub, id, changes, true).catch(() => undefined);
+
+/** How long Desk waits for the hub to serve an agent again after a new
+ *  name or new instructions, which build it again. */
+export const SERVE_AGAIN_MS = 20_000;
+/** How long a build may take to begin after the hub took the change. */
+export const REBUILD_STARTS_MS = 1_500;
+const POLL_MS = 250;
+
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** The ids of the agents a hub serves now (the roster's own read): one it
+ *  is building again isn't among them until it serves. */
+export type Serving = () => Promise<readonly string[]>;
+
+/** Waits until the hub serves agent `id` again after a change that builds
+ *  it again: while that runs it isn't listed and its files can't be read,
+ *  so the roster read then would lose it. First (for a moment) until it
+ *  goes, then until it's back; an agent the hub never builds again (its
+ *  default) is simply still there. True once it serves. */
+export async function servingAgain(listed: Serving, id: string, within = SERVE_AGAIN_MS): Promise<boolean> {
+  const serving = () => listed().then((ids) => ids.includes(id), () => false);
+  const start = Date.now();
+  while (Date.now() - start < REBUILD_STARTS_MS && (await serving())) await pause(POLL_MS);
+  while (Date.now() - start < within) {
+    if (await serving()) return true;
+    await pause(POLL_MS);
   }
-  await rewrite(hub, id, "SOUL.md", (t) => withPurpose(t, name, purpose));
-  await rewrite(hub, id, "AGENTS.md", (t) => withJob(t, name, purpose));
-  await rewrite(hub, id, "WELCOME.md", (t) => withWelcome(t, name, purpose));
+  return false;
+}
+
+/** A new description of what an agent is for, in every file that says it
+ *  and in its instructions (a hub that can't update those keeps the old).
+ *  The files are written first, while the agent serves; the instructions
+ *  then build it again, and (given `listed`) this waits until it serves. */
+export async function setAgentPurpose(hub: DeskHub, id: string, name: string, purpose: string, listed?: Serving): Promise<void> {
+  const who = name.trim();
+  const job = purpose.trim();
+  const changes = await jobChanges(hub, id, who, job);
+  await write(hub, id, changes);
+  try {
+    await hub.renameAgent(id, who, instructions(who, job));
+  } catch (e) {
+    if (e instanceof HubError && (e.status === 404 || e.status === 405)) return;
+    await undo(hub, id, changes);
+    throw e;
+  }
+  if (listed) await servingAgain(listed, id);
 }
 
 /** Said when the hub can't rename agents yet. */
 export const RENAME_UNAVAILABLE = "Renaming isn’t available yet: Desk needs an update first. Their name is unchanged.";
 
-/** Renames an agent on the hub, its instructions included when Desk knows
- *  what it's for (`purpose`, or what SOUL.md says). */
-export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string): Promise<void> {
+/** Renames an agent on this computer in one go: its new name goes in every
+ *  file that says it (IDENTITY.md, and the sections Desk wrote from what
+ *  it's for: `purpose`, or what SOUL.md says), then to the hub with the
+ *  instructions that say it. Files first, while the agent serves: the new
+ *  name builds it again, and while that runs its files can't be read. If
+ *  the hub doesn't take the name, the files go back. Given how to read the
+ *  agents the hub serves (`listed`), waits until it serves again. */
+export async function renameLocalAgent(hub: DeskHub, id: string, name: string, purpose?: string, listed?: Serving): Promise<void> {
   const who = name.trim();
-  const job = purpose?.trim() || purposeOf(await hub.identityFile(id, "SOUL.md").catch(() => ""));
+  const soul = await hub.identityFile(id, "SOUL.md");
+  const job = purpose?.trim() || purposeOf(soul);
+  const identity = await hub.identityFile(id, "IDENTITY.md");
+  const changes: Change[] = [{ file: "IDENTITY.md", was: identity, now: withName(identity, who) }, ...(job ? await jobChanges(hub, id, who, job, soul) : [])];
+  await write(hub, id, changes);
   try {
     await hub.renameAgent(id, who, job ? instructions(who, job) : undefined);
   } catch (e) {
+    await undo(hub, id, changes);
     if (e instanceof HubError && (e.status === 404 || e.status === 405)) throw new Error(RENAME_UNAVAILABLE);
     throw e;
   }
-}
-
-/** Puts an agent's new name in every file that says it: IDENTITY.md, and
- *  the sections Desk wrote from what it's for (`purpose`, or what SOUL.md
- *  says when not given). */
-export async function renameAgentFiles(hub: DeskHub, id: string, name: string, purpose?: string): Promise<void> {
-  const who = name.trim();
-  await rewrite(hub, id, "IDENTITY.md", (t) => withName(t, who));
-  const job = purpose?.trim() || purposeOf(await hub.identityFile(id, "SOUL.md"));
-  if (job) await setAgentPurpose(hub, id, who, job);
+  if (listed) await servingAgain(listed, id);
 }
 
 /** Writes `brain` to the agent's config; answers with the config as written. */
