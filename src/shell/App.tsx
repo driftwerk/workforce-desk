@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { SetupLauncher } from "../setup/SetupLauncher";
+import { ShareAsk } from "../rooms/share";
 import { useChat } from "../chat/store";
 import { Floor } from "../floor/Floor";
 import { watchFloor } from "../floor/store";
@@ -115,7 +117,8 @@ export function App() {
   const [asking, setAsking] = useState(false);
   const [recalling, setRecalling] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
-  const [newCrew, setNewCrew] = useState(false);
+  const newCrew = useUi((s) => s.newCrew);
+  const setNewCrew = useUi((s) => s.setNewCrew);
   const rooms = useDesk((s) => s.rooms);
   const hubs = useChat((s) => s.hubs);
   useEffect(() => {
@@ -427,6 +430,8 @@ export function App() {
       <MoveDialog />
       <HandoffDialog />
       <LifecycleDialogs />
+      <ShareAsk />
+      <SetupLauncher />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <HubDownBanner down={hubDown} />
       {error && (

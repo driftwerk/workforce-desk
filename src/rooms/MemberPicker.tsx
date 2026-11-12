@@ -1,6 +1,7 @@
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { AgentMark } from "../ui/Mark";
+import { useUi } from "../shell/ui";
 
 /** Crew to pick from, each with a checkbox, and with `lead` a round
  *  button for who answers what @-mentions no one. Those in `leaveOut`
@@ -17,8 +18,19 @@ export function MemberPicker({
   leaveOut?: readonly string[];
 }) {
   const roster = useChat((s) => s.roster);
+  const rosterRead = useChat((s) => s.rosterRead);
   const hubs = useChat((s) => s.hubs);
   const offered = roster.filter((a: Agent) => !leaveOut.includes(agentKey(a)));
+  // Only once the crew has been read: before then, empty says nothing.
+  if (!roster.length && rosterRead)
+    return (
+      <p className="faint small">
+        You have no crew yet.{" "}
+        <button type="button" className="link small" onClick={() => useUi.getState().setNewCrew(true)}>
+          New crew member
+        </button>
+      </p>
+    );
   if (!offered.length) return <p className="faint small">Everyone in your crew is in it.</p>;
   return (
     <div className="quick-list">

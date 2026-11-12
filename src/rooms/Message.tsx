@@ -61,7 +61,7 @@ function Linked({ text }: { text: string }) {
 
 /** An error a turn ended with, in plain words: signing in where that's what
  *  would help, and the hub's own words folded away. */
-function TurnError({ raw }: { raw: string }) {
+export function TurnError({ raw }: { raw: string }) {
   const said = readableError(raw);
   return (
     <>

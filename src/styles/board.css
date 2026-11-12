@@ -754,3 +754,40 @@ button.ticket-chip:hover {
 .sync-token-field input {
   color: var(--text);
 }
+/* A ticket's description as markdown (the renderer chat uses). */
+.ticket-md {
+  white-space: normal;
+  cursor: text;
+}
+.ticket-md > :first-child {
+  margin-top: 0;
+}
+.ticket-md > :last-child {
+  margin-bottom: 0;
+}
+.ticket-md h1,
+.ticket-md h2,
+.ticket-md h3,
+.ticket-md h4 {
+  margin: 14px 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.ticket-md ul,
+.ticket-md ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.ticket-md ul:has(> .task-list-item) {
+  padding-left: 4px;
+  list-style: none;
+}
+.ticket-md input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  vertical-align: -1px;
+}
+.ticket-md-edit {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+}

@@ -22,6 +22,24 @@ const UNTIL = /usage limit until (\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:
 /** Ids and other machine names a person needn't read. */
 const IDS = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
+const PROVIDER = String.raw`(?:anthropic|openai|bedrock|vertex|gemini|openrouter|model provider|provider)`;
+const REFUSED = String.raw`(?:401|403|forbidden|unauthori[sz]ed)`;
+/** A model provider refusing the key or account: a provider named near a
+ *  refusal, its common wordings ("API error 401 Unauthorized", "403
+ *  Forbidden: model not allowed"), or its own words for a bad key. */
+const PROVIDER_REFUSED = new RegExp(
+  [
+    String.raw`\b${PROVIDER}\b[^\n]{0,80}\b${REFUSED}\b`,
+    String.raw`\b${REFUSED}\b[^\n]{0,80}\b${PROVIDER}\b`,
+    String.raw`\bAPI error:?\s*(?:401|403)\b`,
+    String.raw`\b403 Forbidden\b[^\n]{0,40}\bmodel\b`,
+    String.raw`invalid x-api-key|invalid api[ _-]?key|incorrect api key`,
+  ].join("|"),
+  "i",
+);
+/** A tool's own service refusing, not the model's: its words stand. */
+const TOOL_SERVICE = /\b(?:github|gitlab|jira|atlassian|linear|slack|notion|confluence)\b/i;
+
 /** The plan the hub's words are about, if they say. */
 const planOf = (raw: string): PlanKind | null => {
   const login = /no (Claude|ChatGPT) login/i.exec(raw);
@@ -60,6 +78,14 @@ export const readableError = (raw: string, now = Date.now()): ReadableError => {
     if (/no (?:Claude|ChatGPT) login/i.test(said)) {
       return { text: `Couldn’t answer: no ${name} account is signed in for this agent. Sign in to ${name} to go on.`, signIn: plan, details: said };
     }
+  }
+  // A model provider that refused its key or its account: what to change.
+  if (PROVIDER_REFUSED.test(said) && !TOOL_SERVICE.test(said) && !/subscription unavailable/i.test(said)) {
+    return {
+      text: "Couldn’t answer: its model provider refused the key or account it uses. Switch its model, or its key, in its settings.",
+      signIn: null,
+      details: said,
+    };
   }
   const first = (said.split("\n")[0] ?? "").replace(TURN_FAILED, "").replace(IDS, "").replace(/\s+/g, " ").replace(/ ([:;,])/g, "$1").trim();
   const text = failed ? `Couldn’t answer: ${first}` : first;
