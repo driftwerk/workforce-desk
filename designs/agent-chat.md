@@ -37,7 +37,22 @@ When you send to an agent that's busy, the message waits in a queue under the co
 
 ## 2. ↑ edits your last message, and re-asks
 
-In an empty composer, ↑ opens your last message for editing. Saving replaces it, marks it "(edited)", sets aside the agent's reply to it, and asks again. If that reply took actions, the edit box lists them, and the agent is told they happened. This needs the hub to replace a turn, as a hub PR.
+In an empty composer, ↑ opens your last message for editing. Edit on the message's hover bar does the same.
+
+What ↑ edits depends on the queue:
+
+1. **A message waiting in the queue, not yet on its way:** ↑ edits the last such message in place, the way the queue's own Edit does. It hasn't been sent, so nothing is asked again.
+2. **Otherwise, your latest sent message:** the composer becomes the edit box, labelled "Editing your last message". This is only possible once the agent has finished replying and nothing queued is waiting behind it. When it isn't possible, ↑ and Edit say why instead ("…once Desk has finished replying", "…once your queued messages have gone"). A message the hub hasn't kept yet waits the same way.
+
+**The edit box.** If the reply being set aside took actions (its steps), the box lists them first, with a note that editing won't undo them. Esc or Cancel leaves the edit. "Save and ask again" sends the new text as a DM turn carrying `edit: { replaces: <kept id> }` on a hub with `desk.edit`. The hub then does three things:
+
+- It sets aside your old message and everything after it, in the transcript and in the agent's context.
+- It tells the agent what the set-aside reply had done.
+- It marks the new message `edited`, so it reads "(edited)".
+
+Desk hides the set-aside messages as soon as you save, and the hub's next read leaves them out.
+
+**On an older hub** (no `desk.edit`), ↑ only edits queued messages, and the last sent message offers no Edit.
 
 ## 3. Delete your own messages
 

@@ -119,6 +119,19 @@ interface ChatStore {
   /** Marks the queued message being edited (null: none), so nothing goes
    *  until the edit is saved. */
   editingQueued: (key: string, id: string | null) => void;
+  /** In each DM, by agent key: the messages an edit set aside (by id or
+   *  client id), hidden at once, before the hub's next read leaves them out. */
+  setAside: Record<string, string[]>;
+  /** Replaces your latest sent message, kept as `replaces`, with `text`,
+   *  setting aside it and what followed (`aside`, ids or client ids), and
+   *  asks again; null once sent, else why not: the agent is busy, messages
+   *  wait in the queue, or the hub can't be reached. */
+  editLast: (key: string, replaces: string, aside: string[], text: string) => EditRefusal | null;
+  /** By agent key: an edit the hub didn't take, its text to give back to
+   *  the composer and the hub's reason. Taken once shown. */
+  editBack: Record<string, { text: string; why: string }>;
+  /** Clears `editBack` for `key`, once the composer has taken it. */
+  tookEditBack: (key: string) => void;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -136,6 +149,44 @@ export interface SendOptions {
 }
 
 /** A turn in your DM with an agent. */
+/** Why an edit wasn't sent. */
+export type EditRefusal = "busy" | "queued" | "offline";
+
+/** Edits sent and not yet settled, by conversation: the turn each went
+ *  as, the client id and text it was sent with, and what it set aside. */
+const edits = new Map<string, { ref: string; clientId: string; text: string; aside: string[] }[]>();
+
+/** Whether turn `t` of an edit didn't take: refused, or never heard of. */
+const refusedTurn = (t: ConversationState["turns"][string] | undefined): boolean =>
+  !!t && (t.state === "failed" || (t.state === "ended" && !!t.error) || (t.state === "stalled" && !t.acked));
+
+/** An edit the hub refused (busy, or not your latest message) changed
+ *  nothing there: what it set aside comes back, and the hub's copy is read
+ *  again, in case an earlier try of it had landed. One that ended is done. */
+const settleEdits = (key: string, c: ConversationState) => {
+  const pending = edits.get(key);
+  if (!pending?.length) return;
+  const refused = pending.filter((e) => refusedTurn(c.turns[e.ref]));
+  const left = pending.filter((e) => !refused.includes(e) && c.turns[e.ref]?.state !== "ended");
+  if (left.length === pending.length) return;
+  if (left.length) edits.set(key, left);
+  else edits.delete(key);
+  if (!refused.length) return;
+  const back = new Set(refused.flatMap((e) => e.aside));
+  const last = refused.at(-1)!;
+  queueMicrotask(() => {
+    // The new version never took: it goes, and its words go back to you.
+    const convo = live.get(key);
+    for (const e of refused) for (const m of useChat.getState().conversations[key]?.messages ?? []) if (m.role === "user" && m.clientId === e.clientId) convo?.remove(m.id);
+    const t = c.turns[last.ref];
+    useChat.setState((s) => ({
+      setAside: { ...s.setAside, [key]: (s.setAside[key] ?? []).filter((id) => !back.has(id)) },
+      editBack: { ...s.editBack, [key]: { text: last.text, why: t?.error ?? "" } },
+    }));
+    void useChat.getState().refreshHistory(key);
+  });
+};
+
 export const dmTurn = (voice?: DeskVoice): DeskTurn => ({
   place: { kind: "dm" },
   speaker: { kind: "person" },
@@ -221,6 +272,9 @@ const drain = (key: string) => {
     if (quiet.length) checkAgain(key, STREAM_END_GRACE_MS - Math.min(...quiet.map((t) => now - (t.heardAt ?? now))) + 5);
     return;
   }
+  // A queued message being edited that's gone (sent or taken out from
+  // another window) holds nothing back.
+  if (q?.editing && !q.items.some((i) => i.id === q.editing)) return useChat.getState().editingQueued(key, null);
   if (!q?.items.length || q.paused || q.editing || !c.connected) return;
   if (q.items.some((i) => i.sending)) return;
   const wait = held.get(key);
@@ -357,6 +411,7 @@ const ensure = (key: string): boolean => {
       if (everConnected) void useChat.getState().refreshHistory(key);
       everConnected = true;
     }
+    settleEdits(key, c);
     // Free again: what's queued goes next.
     queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
@@ -636,6 +691,29 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.cancel();
   },
   queues: {},
+  setAside: {},
+  editLast: (key, replaces, aside, text) => {
+    // Checked again as it goes: the editor may have been open a while.
+    if (isRunning(get().conversations[key])) return "busy";
+    if (get().queues[key]?.items.length) return "queued";
+    const convo = live.get(key);
+    const clientId = crypto.randomUUID();
+    const sent = text.trim() ? convo?.send(text, { turn: { ...dmTurn(), edit: { replaces }, message: clientId } }) : false;
+    if (!sent || !convo) return "offline";
+    if (sent.turnRef) edits.set(key, [...(edits.get(key) ?? []), { ref: sent.turnRef, clientId, text, aside }]);
+    // The live copies of what's set aside go too: once the hub's read
+    // leaves the kept ones out, nothing would hide them.
+    const gone = new Set(aside);
+    convo.drop(new Set((get().conversations[key]?.messages ?? []).filter((m) => m.clientId !== clientId && (gone.has(m.id) || (m.clientId && gone.has(m.clientId)) || (m.replyTo && gone.has(m.replyTo)))).map((m) => m.id)));
+    set((s) => ({ setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...aside] } }));
+    return null;
+  },
+  editBack: {},
+  tookEditBack: (key) =>
+    set((s) => {
+      const { [key]: _took, ...editBack } = s.editBack;
+      return { editBack };
+    }),
   editingQueued: (key, id) => {
     putQueue(key, (q) => {
       if ((q.editing ?? null) === id) return q;
@@ -683,6 +761,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.close();
     keepQueue(key, emptyQueue());
     held.delete(key);
+    edits.delete(key);
     clearTimeout(later.get(key));
     later.delete(key);
     unwatch.get(key)?.();
@@ -692,10 +771,14 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _gone, ...conversations } = s.conversations;
       const { [key]: _kept, ...histories } = s.histories;
       const { [key]: _queued, ...queues } = s.queues;
+      const { [key]: _aside, ...setAside } = s.setAside;
+      const { [key]: _back, ...editBack } = s.editBack;
       return {
         conversations,
         histories,
         queues,
+        setAside,
+        editBack,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,
       };

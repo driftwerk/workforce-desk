@@ -176,6 +176,7 @@ export const Message = memo(function Message({
             {home ? `${home} · ` : ""}
             {time(message.at)}
           </span>
+          {message.edited && <span className="faint small msg-edited"> (edited)</span>}
           {chips}
         </span>
         <ToolChips tools={message.tools} live={message.status === "streaming"} />
