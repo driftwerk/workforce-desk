@@ -709,7 +709,14 @@ export const useChat = create<ChatStore>((set, get) => ({
       setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...ids] },
       orphans: { ...s.orphans, [key]: [...(s.orphans[key] ?? []), ...replies] },
     }));
-    void get().refreshHistory(key);
+    // Once the hub's read is in, it says which replies answered it: what
+    // was guessed here goes.
+    void get()
+      .refreshHistory(key)
+      .then(() => {
+        const kept = new Set((get().histories[key]?.messages ?? []).map((m) => m.id));
+        set((s) => ({ orphans: { ...s.orphans, [key]: (s.orphans[key] ?? []).filter((id) => !kept.has(id)) } }));
+      });
   },
   editLast: (key, replaces, aside, text) => {
     // Checked again as it goes: the editor may have been open a while.

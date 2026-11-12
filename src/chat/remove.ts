@@ -29,5 +29,7 @@ export async function memoriesFrom(hub: HubAccount, agentId: string, messageId: 
  *  the memories `forget` saved from it. */
 export async function deleteMessage(hub: HubAccount, agentId: string, messageId: string, forget: string[]): Promise<void> {
   const res = await pairedHub(hub).fetch("DELETE", path(agentId, messageId), jsonBody({ forget }));
+  // Not found: gone already (deleted from another window), as asked.
+  if (res.status === 404) return;
   if (!res.ok) throw await refusal(res);
 }

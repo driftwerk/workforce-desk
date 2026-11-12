@@ -54,6 +54,12 @@ const history = [
 /** What the hub was asked, by method and path. */
 let asked: { method: string; path: string; body: unknown }[] = [];
 let refuse: string | null = null;
+/** The status the hub's DELETE answers with, and whether its memories read fails. */
+let status = 200;
+let memoriesFail = false;
+/** What the hub's read returns: after a delete, without the message, and
+ *  its reply marked. */
+let read: object[] = history;
 const MEMORY = { id: "mem-1", text: "staging password is on the old wiki page" };
 
 const connect = async (features = FEATURES) => {
@@ -81,9 +87,14 @@ const open = async (features = FEATURES) => {
       const u = new URL(String(url));
       const method = init?.method ?? "GET";
       asked.push({ method, path: u.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      if (u.pathname.endsWith("/memories")) return json({ memories: [MEMORY] });
-      if (method === "DELETE") return refuse ? json({ error: refuse }, 409) : json({ deleted: true, forgot: [] });
-      return json({ messages: history, more: false });
+      if (u.pathname.endsWith("/memories")) return memoriesFail ? json({ error: "no" }, 503) : json({ memories: [MEMORY] });
+      if (method === "DELETE") {
+        if (refuse) return json({ error: refuse }, 409);
+        if (status !== 200) return json({ error: "message not found" }, status);
+        read = [history[0]!, { ...history[2]!, mark: { answered_deleted: true } }];
+        return json({ deleted: true, forgot: [] });
+      }
+      return json({ messages: read, more: false });
     }),
   );
   render(<Rooms />);
@@ -102,6 +113,9 @@ beforeEach(() => {
   kept.state.clear();
   asked = [];
   refuse = null;
+  status = 200;
+  memoriesFail = false;
+  read = history;
   useDesk.setState({ view: "rooms", activeRoom: null, inbox: false, hub: null });
   for (const key of Object.keys(useChat.getState().conversations)) useChat.getState().forget(key);
   useChat.setState({
@@ -129,6 +143,41 @@ describe("deleting your message", () => {
     expect(deletes()).toEqual([{ method: "DELETE", path: "/api/desk/conversations/allan/messages/k1", body: { forget: ["mem-1"] } }]);
     expect(screen.queryByText("the staging password is on the old wiki page")).toBeNull();
     expect(rowOf("Filed ATL-571 and assigned it to Sam Lee.").textContent).toContain("Answered a deleted message");
+    // The hub's read leaves it out and marks the reply: what Desk guessed goes.
+    await vi.waitFor(() => expect(useChat.getState().orphans[KEY]).toEqual([]));
+    expect(screen.queryByText("the staging password is on the old wiki page")).toBeNull();
+    expect(rowOf("Filed ATL-571 and assigned it to Sam Lee.").textContent).toContain("Answered a deleted message");
+  });
+
+  it("takes a message the hub has already lost as deleted", async () => {
+    await open();
+    status = 404;
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Delete this message?" });
+    await within(confirm).findByRole("checkbox");
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    await vi.waitFor(() => expect(screen.queryByText("the staging password is on the old wiki page")).toBeNull());
+    expect(screen.queryByRole("group", { name: "Delete this message?" })).toBeNull();
+  });
+
+  it("says so when what was saved from it can't be checked, and still deletes", async () => {
+    await open();
+    memoriesFail = true;
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Delete this message?" });
+    await vi.waitFor(() => expect(confirm.textContent).toContain("Couldn’t check what Allan saved from it"));
+    expect(within(confirm).queryByRole("checkbox")).toBeNull();
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    expect(deletes()[0]!.body).toEqual({ forget: [] });
+  });
+
+  it("closes the confirm when ↑ opens the edit of the same message", async () => {
+    await open();
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("group", { name: "Delete this message?" })).toBeTruthy();
+    act(() => void fireEvent.keyDown(box(), { key: "ArrowUp" }));
+    expect(screen.getByRole("form", { name: "Editing your last message" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Delete this message?" })).toBeNull();
   });
 
   it("keeps the memories when you untick them, and Cancel deletes nothing", async () => {
@@ -177,6 +226,30 @@ describe("deleting with the queue", () => {
     expect(screen.queryByRole("group", { name: "Delete this message?" })).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("You can delete a message once Allan has finished replying.");
     expect(queued()).toEqual(["and staging"]);
+  });
+
+  it("deletes an earlier message while queued messages wait, and leaves the queue as it was", async () => {
+    const s = await open();
+    act(() => type("check the deploy"));
+    const ref = s.chats[0]!.turn_ref as string;
+    act(() => s.receive({ type: "typing", session_id: "s-allan", turn_ref: ref }));
+    act(() => type("and staging"));
+    // Stopped: the turn ends, and the queue waits, paused.
+    act(() => useChat.getState().cancel(KEY));
+    await act(async () => {
+      s.receive({ type: "turn_end", session_id: "s-allan", turn_ref: ref });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const before = useChat.getState().queues[KEY];
+    fireEvent.click(within(rowOf("the staging password is on the old wiki page")).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("group", { name: "Delete this message?" });
+    await within(confirm).findByRole("checkbox");
+    await act(async () => fireEvent.click(within(confirm).getByRole("button", { name: "Delete" })));
+    expect(deletes()).toHaveLength(1);
+    await vi.waitFor(() => expect(screen.queryByText("the staging password is on the old wiki page")).toBeNull());
+    expect(useChat.getState().queues[KEY]).toEqual(before);
+    expect(queued()).toEqual(["and staging"]);
+    expect(s.chats).toHaveLength(1);
   });
 
   it("takes a queued message out of the queue, and nothing reaches the hub", async () => {
