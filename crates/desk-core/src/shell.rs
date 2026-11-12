@@ -151,11 +151,15 @@ pub fn install_dirs(env: &BTreeMap<String, String>) -> Vec<std::path::PathBuf> {
         dirs.push(home.join(".npm-global/bin"));
         dirs.push(home.join(".volta/bin"));
     }
+    // Only an absolute prefix: a relative one would be looked in wherever
+    // Desk happens to run from.
     if let Some(prefix) = env
         .get("NPM_CONFIG_PREFIX")
         .or_else(|| env.get("npm_config_prefix"))
+        .map(std::path::Path::new)
+        .filter(|p| p.is_absolute())
     {
-        dirs.push(std::path::Path::new(prefix).join("bin"));
+        dirs.push(prefix.join("bin"));
     }
     dirs.push("/opt/homebrew/bin".into());
     dirs.push("/usr/local/bin".into());
@@ -308,5 +312,20 @@ mod tests {
             ("PATH".to_string(), "/usr/bin".to_string()),
         ]);
         assert_eq!(find_program("codex", &env), Some(npm.join("codex")));
+    }
+
+    #[test]
+    fn only_an_absolute_npm_prefix_is_looked_in() {
+        let env = |prefix: &str| {
+            BTreeMap::from([
+                ("HOME".to_string(), "/Users/k".to_string()),
+                ("NPM_CONFIG_PREFIX".to_string(), prefix.to_string()),
+            ])
+        };
+        assert!(install_dirs(&env("/opt/npm")).contains(&std::path::PathBuf::from("/opt/npm/bin")));
+        for relative in ["npm", "./npm", "../npm", ""] {
+            let dirs = install_dirs(&env(relative));
+            assert!(dirs.iter().all(|d| d.is_absolute()), "{relative}: {dirs:?}");
+        }
     }
 }
