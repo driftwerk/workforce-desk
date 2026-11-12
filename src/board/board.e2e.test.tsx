@@ -320,6 +320,16 @@ describe("a ticket's panel", () => {
     expect(within(panel).getByRole("heading", { name: "Hash every partner key at rest" })).toBeTruthy();
     expect((within(panel).getByLabelText("State") as HTMLSelectElement).value).toBe("doing");
     expect(within(panel).getByText("acme-web", { selector: ".board-who-name" })).toBeTruthy();
+    // A reading column (its description, files and comments) and a details
+    // column (what to do with it, its facts, needs and history).
+    expect(within(panel).getByRole("article", { name: "Description" })).toBeTruthy();
+    expect(within(panel).getByRole("region", { name: "Comments" })).toBeTruthy();
+    const side = within(panel).getByRole("complementary", { name: "Details" });
+    expect(within(side).getByRole("button", { name: "Start a session" })).toBeTruthy();
+    expect(within(side).getByRole("button", { name: "Hand to…" })).toBeTruthy();
+    expect(within(side).getByRole("combobox", { name: "State" })).toBeTruthy();
+    expect(within(side).getByRole("button", { name: "Copy link" })).toBeTruthy();
+    expect(within(side).getByRole("button", { name: "Drop" })).toBeTruthy();
     const needs = within(panel).getByRole("region", { name: "Needs" });
     expect(within(needs).getByRole("button", { name: /ACM-10.*Note service.*Done/ })).toBeTruthy();
     expect(within(needs).getByRole("button", { name: /ACM-15.*Retire the legacy routes.*Backlog/ })).toBeTruthy();

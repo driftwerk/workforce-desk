@@ -1430,6 +1430,62 @@ export interface TicketExternal {
   /** Who has the issue there; null when no one does, absent from an older
    *  hub. */
   assignee?: SyncAssignee | null;
+  /** What the issue says of itself besides its words: shown, never pushed. */
+  details?: TicketDetails;
+}
+
+/** A synced ticket's issue's priority, labels, project and due date there,
+ *  and when it was last read whole. */
+export interface TicketDetails {
+  priority?: string;
+  labels?: string[];
+  project?: string;
+  /** `2026-11-14`. */
+  due?: string;
+  readAt?: string;
+  commentsAt?: string;
+}
+
+/** Where a ticket's file comes from: dropped on a ticket of your own, a
+ *  Jira attachment, a file uploaded to Linear, or a Linear link. */
+export type TicketFileSource = "upload" | "jira" | "linear_upload" | "linear_link";
+
+/** A ticket's file. Its bytes are at `GET /api/desk/tickets/{ticket}/files/{id}`
+ *  (`?thumb=1` for Jira's small picture, when `thumb`); a link has none. */
+export interface TicketFile {
+  id: string;
+  source: TicketFileSource;
+  name: string;
+  mediaType: string;
+  size: number | null;
+  /** A link's address, or a Linear upload's, which its description shows. */
+  url: string | null;
+  thumb: boolean;
+  addedBy: ActivityParty;
+  addedAt: string;
+}
+
+/** Who wrote a comment: a person, an agent or app, or Desk's own note. */
+export interface CommentAuthor {
+  kind: "person" | "agent" | "desk";
+  name: string;
+  /** Where: "Linear", "Jira" or "Desk". */
+  on: string;
+}
+
+export interface TicketComment {
+  id: string;
+  author: CommentAuthor;
+  /** Who in Desk posted it, when Desk did. */
+  postedBy?: ActivityParty;
+  /** Markdown, or Jira's words. */
+  body: string;
+  /** The hub warned its words read as instructions to an AI. */
+  flagged: boolean;
+  at: string;
+  editedAt?: string;
+  /** On a synced ticket, it stays in Desk: a session's or an agent's note. */
+  onlyHere: boolean;
 }
 
 /** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */
@@ -1531,6 +1587,9 @@ export interface Ticket {
   leftFilter?: boolean;
   /** What stops its change going out to its issue, in plain words. */
   pushProblem?: string | null;
+  /** Its files: its issue's, or what you dropped on it; absent from an
+   *  older hub. */
+  files?: TicketFile[];
 }
 
 export interface NewTicket {
