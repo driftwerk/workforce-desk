@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { plainError } from "../ui/plainError";
+import { NotShared } from "./share";
 import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
@@ -84,8 +86,10 @@ function Composer({ room, threadId, placeholder, files }: { room: Room; threadId
       .then(() => files.sent(picked))
       .catch((err: unknown) => {
         setDraft(text);
-        if (picked.length) files.setProblem(err instanceof Error ? err.message : String(err));
-        else fail(err);
+        // You said no to sharing the room: the message waits, unsent.
+        if (err instanceof NotShared) return;
+        if (picked.length) files.setProblem(plainError(err));
+        else fail(err, { what: "sending your message" });
       })
       .finally(() => setSending(false));
   };

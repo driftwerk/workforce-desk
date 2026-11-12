@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserPill } from "../browser/BrowserPill";
+import { CONNECT_POLL_MS, GET_CHROME, openChrome, TURN_ON } from "../browser/chrome";
 import { backendLabel, useLocalBrowser } from "../browser/store";
 import type { BrowserOf } from "../hub/browser";
 import { useChat } from "../chat/store";
@@ -17,6 +18,10 @@ export interface BrowserApi {
   save: (s: BrowserSettings) => Promise<BrowserSettingsView>;
   activity: () => Promise<ComputerActivityRow[]>;
   shot: (file: string) => Promise<Blob>;
+  /** Opens the person's Chrome, or brings it forward. */
+  openChrome?: () => Promise<void>;
+  /** Puts `text` on the clipboard. */
+  copy?: (text: string) => Promise<void>;
 }
 
 /** Which browsers Desk uses, as the setting offers them. */
@@ -39,8 +44,8 @@ export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; to
   c.connected
     ? { text: "Connected. Desk is working in a window of its own in your Chrome.", tone: "done" }
     : c.available
-      ? { text: "Not connected. Remote debugging is on, so Desk connects when it needs to, and Chrome asks you first.", tone: "" }
-      : { text: `Not connected. Turn on remote debugging in Chrome ${c.min_version} or later so Desk can use it.`, tone: "" };
+      ? { text: "Ready. Desk connects when it needs your Chrome, and Chrome asks you to Allow it first.", tone: "done" }
+      : { text: `Desk can work in the Chrome you’re signed in to (Chrome ${c.min_version} or later). Connect it once and Chrome remembers.`, tone: "" };
 
 /** The browser's settings and screenshots are the person's: asked of this
  *  computer's hub as them. Its activity is the computer's list. */
@@ -70,6 +75,11 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   const [block, setBlock] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  /** The guide to Chrome's switch is open, and what opening Chrome said. */
+  const [connecting, setConnecting] = useState(false);
+  const [noChrome, setNoChrome] = useState<string | null>(null);
+  /** Whether the address is on the clipboard: said only when it is. */
+  const [copied, setCopied] = useState(false);
 
   const shown = (v: BrowserSettingsView) => {
     setView(v);
@@ -88,6 +98,40 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
       .catch(() => setRows("failed"));
   }, [api]);
   useEffect(reload, [reload]);
+
+  // While the guide is open, Desk watches for Chrome's switch and says so.
+  useEffect(() => {
+    if (!connecting || !api) return;
+    const t = setInterval(() => {
+      api
+        .settings()
+        .then((v) => {
+          if (!v.chrome.available) return;
+          shown(v);
+          setConnecting(false);
+        })
+        .catch(() => undefined);
+    }, CONNECT_POLL_MS);
+    return () => clearInterval(t);
+  }, [connecting, api]);
+
+  const copy = (text: string): Promise<void> =>
+    Promise.resolve()
+      .then(() => (api?.copy ?? ((t: string) => navigator.clipboard.writeText(t)))(text))
+      .then(
+        () => setCopied(true),
+        () => setCopied(false),
+      );
+  const connect = async () => {
+    setNoChrome(null);
+    await copy(TURN_ON);
+    try {
+      await (api?.openChrome ?? openChrome)();
+      setConnecting(true);
+    } catch (e) {
+      setNoChrome(plainError(e));
+    }
+  };
 
   const save = async (next: BrowserSettings) => {
     if (!api) return;
@@ -119,8 +163,8 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
     <section className="settings-pane" aria-label="Browser">
       <h1 className="display-lg">Browser</h1>
       <p className="muted small">
-        Desk can use a web browser for you: its own, which you sign in to once by hand, or your own Chrome, where you’re already signed in. Below
-        unbound it asks you before it clicks or types on a page.
+        Desk can use a web browser for you: its own, where it asks you to sign in when a site needs it, or your own Chrome, where you’re already
+        signed in. Unless you let it act fully, it asks you before it clicks or types on a page.
       </p>
       <BrowserPill place="band" />
       {view === "old" ? (
@@ -151,7 +195,9 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
             />
             <span>
               <label htmlFor="browser-show">Show Desk’s browser</label>
-              <span className="small muted">On screen, so you can watch it and sign in to a site once by hand. It shows from the next time it opens.</span>
+              <span className="small muted">
+                {usesOwn ? "On screen, so you can watch it. It shows from the next time it opens." : "Choose Desk’s own browser first."}
+              </span>
             </span>
           </div>
 
@@ -159,11 +205,40 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
             <>
               <h2 className="field-label">My Chrome</h2>
               <p className={`small ${chromeLine(chrome).tone === "done" ? "state-done" : "muted"}`}>{chromeLine(chrome).text}</p>
-              {!chrome.connected && (
+              {!chrome.available && !connecting && (
                 <div className="browser-chrome-on">
-                  <span className="chip">{chrome.turn_on}</span>
-                  <button type="button" className="btn btn-sm" onClick={() => openUrl(chrome.turn_on)}>
-                    Open in Chrome
+                  <button type="button" className="btn btn-sm btn-signal" onClick={() => void connect()}>
+                    Connect my Chrome
+                  </button>
+                </div>
+              )}
+              {noChrome && (
+                <p className="small state-blocked" role="alert">
+                  {noChrome}{" "}
+                  <button type="button" className="link small" onClick={() => openUrl(GET_CHROME)}>
+                    Get Chrome
+                  </button>
+                </p>
+              )}
+              {!chrome.available && connecting && (
+                <div className="browser-connect" role="group" aria-label="Connect my Chrome">
+                  <p className="small">Chrome is open. Two steps there, once:</p>
+                  <ol className="browser-connect-steps small">
+                    <li>
+                      Click Chrome’s address bar, paste this address and press Return{copied ? " (Desk copied it)" : ""}:{" "}
+                      <span className="chip">{TURN_ON}</span>{" "}
+                      <button type="button" className="link small" onClick={() => void copy(TURN_ON)}>
+                        {copied ? "Copy again" : "Copy"}
+                      </button>
+                    </li>
+                    <li>Tick “Allow remote debugging for this browser instance”.</li>
+                  </ol>
+                  <p className="small muted">
+                    <span className="dot dot-working" aria-hidden="true" /> Waiting for Chrome… Chrome remembers this, and asks you to Allow
+                    Desk the first time it connects.
+                  </p>
+                  <button type="button" className="btn btn-sm" onClick={() => setConnecting(false)}>
+                    Cancel
                   </button>
                 </div>
               )}

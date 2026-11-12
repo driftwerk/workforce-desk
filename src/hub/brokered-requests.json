@@ -26,6 +26,11 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/engines/read"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/budgets"
   },
@@ -78,6 +83,11 @@
     "kind": "http",
     "method": "POST",
     "path": "/api/desk/accounts"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/accounts/a1/sign-in"
   },
   {
     "kind": "http",

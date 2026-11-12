@@ -11,6 +11,7 @@ import { native as realNative, type MachineNative } from "../machines/native";
 import { openTerminalOn } from "../machines/watch";
 import { thisComputerLower } from "../machines/words";
 import { useHost } from "../shell/host";
+import { installCli, onInstallProgress, subscribe, type PlanName } from "../platform";
 import { Accounts, useHasAccount } from "./Accounts";
 
 export type SignedInEngine = "claude" | "codex";
@@ -90,10 +91,12 @@ export function EngineBlocks({
   // The list stays through a reload and a reconnect: "Reading…" only
   // before there is one.
   const [engines, setEngines] = useState<EngineInfo[] | null | { failed: string }>(null);
-  const reload = useCallback(async () => {
+  /** Reads the list; `now`: the hub reads each engine again first (after an
+   *  install or a sign-in), else it says what it last read. */
+  const reload = useCallback(async (now = false) => {
     if (!hub) return;
     try {
-      const list = await within(hub.engines(), ENGINES_WITHIN_MS, `${asked} didn’t answer within ${ENGINES_WITHIN_MS / 1000} s.`);
+      const list = await within(now ? hub.enginesNow() : hub.engines(), ENGINES_WITHIN_MS, `${asked} didn’t answer within ${ENGINES_WITHIN_MS / 1000} s.`);
       setEngines(list);
     } catch (e) {
       setEngines((now) => (Array.isArray(now) ? now : { failed: e instanceof Error ? e.message : String(e) }));
@@ -110,9 +113,9 @@ export function EngineBlocks({
     const t = setTimeout(() => setSlowConnect(true), CONNECT_WITHIN_MS);
     return () => clearTimeout(t);
   }, [hub]);
-  // A machine's Codex signs in here; this computer's is as it always was
-  // (its own `codex login`), with no sign-in of Desk's.
-  const codex = useCodexSignIn(machine, where, native, () => void reload());
+  // Codex signs in to ChatGPT through its device page, run by its engine's
+  // hub: a machine's, or this computer's own `codex login`.
+  const codex = useCodexSignIn(machine, where, native, () => void reload(true));
 
   // Each engine signed in there, said once.
   const told = useRef(new Set<SignedInEngine>());
@@ -170,16 +173,17 @@ export function EngineBlocks({
           <span className="engine-head">
             <b>{e.title}</b>
             <span className="muted small">{installedText(e)}</span>
-            {e.engine === "codex" && machine !== LOCAL && e.installed && e.signIn.state !== "in" && codex.run.at === "idle" && (
+            {e.engine === "codex" && e.installed && e.signIn.state !== "in" && codex.run.at === "idle" && (
               <button type="button" className="btn btn-sm engine-head-action" onClick={() => void codex.begin()}>
                 Sign in…
               </button>
             )}
+            {e.installed === false && INSTALLS[e.engine] && <InstallEngine engine={e} machine={machine} where={where} native={native} onInstalled={() => void reload(true)} />}
           </span>
           {e.installed && (
             <span className="small">
               {codex.run.at === "done" && e.engine === "codex" ? "Signed in" : signInText(e.signIn)}
-              {e.engine === "codex" && e.signIn.state !== "in" && machine !== LOCAL && <span className="muted"> · optional, for Codex sessions</span>}
+              {e.engine === "codex" && e.signIn.state !== "in" && <span className="muted"> · optional, for Codex sessions</span>}
             </span>
           )}
           <span className="faint small">{runsText(e)}</span>
@@ -210,6 +214,85 @@ export function EngineBlocks({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The engines Desk can install, by their installers' plan names. */
+const INSTALLS: Partial<Record<string, PlanName>> = { claude: "claude", codex: "chatgpt" };
+
+/** "Install" on an engine that isn't there: on this computer, its own
+ *  installer, run by Desk (as signing in to a plan does); on a machine,
+ *  Desk installs Claude Code and Codex there over its connection, as adding
+ *  it did, and its Desk starts again to find them. Then the list is read
+ *  again, so the row says it's installed. */
+export function InstallEngine({
+  engine,
+  machine,
+  where,
+  native,
+  onInstalled,
+}: {
+  engine: EngineInfo;
+  machine: MachineId;
+  where: string;
+  native: MachineNative;
+  onInstalled: () => void;
+}) {
+  const plan = INSTALLS[engine.engine]!;
+  const [state, setState] = useState<{ at: "idle" } | { at: "running"; line: string } | { at: "failed"; why: string; command?: string }>({ at: "idle" });
+  const done = useRef(onInstalled);
+  done.current = onInstalled;
+  useEffect(() => {
+    if (machine === LOCAL)
+      return subscribe(
+        onInstallProgress((p, next) => {
+          if (p !== plan) return;
+          if (next.state === "running") setState({ at: "running", line: next.line });
+          else if (next.state === "done") {
+            setState({ at: "idle" });
+            done.current();
+          } else setState({ at: "failed", why: next.message, command: next.command });
+        }),
+      );
+    return native.setup((e) => {
+      if (e.machine !== machine || e.step !== "engines") return;
+      if (e.state === "running") setState({ at: "running", line: "" });
+      else if (e.state === "done") {
+        setState({ at: "idle" });
+        done.current();
+      } else setState({ at: "failed", why: e.message ?? `Desk couldn’t install them on ${where}.` });
+    });
+  }, [machine, plan, native, where]);
+  const install = () => {
+    setState({ at: "running", line: "" });
+    const started = machine === LOCAL ? installCli(plan) : native.retryEngines(machine);
+    started.catch((e: unknown) => setState({ at: "failed", why: e instanceof Error ? e.message : String(e) }));
+  };
+  if (state.at === "running")
+    return (
+      <span className="engine-install small" role="status">
+        <span className="muted">
+          Installing {machine === LOCAL ? engine.title : `Claude Code and Codex on ${where}`}…{state.line ? ` ${state.line}` : ""}
+        </span>
+      </span>
+    );
+  return (
+    <span className="engine-install">
+      {state.at === "failed" && (
+        <span className="small state-blocked" role="alert">
+          {state.why}
+          {state.command && (
+            <>
+              {" "}
+              <CopyButton text={state.command} label="Copy command" />
+            </>
+          )}
+        </span>
+      )}
+      <button type="button" className="btn btn-sm btn-signal engine-head-action" onClick={install}>
+        {state.at === "failed" ? "Try again" : `Install ${engine.title}`}
+      </button>
+    </span>
   );
 }
 

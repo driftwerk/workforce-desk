@@ -32,7 +32,8 @@ export const useAgentConfigs = create<ConfigsState>((set) => ({
  *  for agents elsewhere (their hub decides) or until the config is read. */
 export function useAgentBrain(agent: Agent | undefined, local: boolean): { brain: Brain | null; provider: Provider | undefined } {
   const hub = useDesk((s) => s.hub);
-  const { providers } = useProviderList();
+  // Fresh, as the brain dialog's list is: a model the plan lists since is there.
+  const { providers } = useProviderList({ fresh: true });
   const key = agent ? agentKey(agent) : "";
   const config = useAgentConfigs((s) => s.configs[key]);
   useEffect(() => {

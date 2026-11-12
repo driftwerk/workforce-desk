@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, issueUrl, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
+import { boardSyncOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -80,6 +80,8 @@ const SECRET = "wfr_SENTINELpastedtoken0123456789";
 /** The local hub's board sync, as far as the dialog goes. */
 let kept: SyncHub[] = [];
 let offers: Record<string, boolean> = {};
+/** The agent each hub offers its tools through, when not its default. */
+let agents: Record<string, string> = {};
 
 const localRoutes = (method: string, path: string, body: Record<string, unknown> | null): { status: number; body?: unknown } => {
   if (method === "GET" && path === "/api/desk/sync-hubs") return { status: 200, body: { hubs: kept } };
@@ -92,8 +94,8 @@ const localRoutes = (method: string, path: string, body: Record<string, unknown>
   if (method === "POST" && path === "/api/desk/boards/link/check") {
     const via = body!.via as { kind: string; hub?: string };
     const key = via.kind === "thisHub" ? "this" : via.hub!;
-    if (!offers[key]) return { status: 422, body: { error: `${key} doesn't offer its Jira tools to your own apps. Ask its admin to add \`jira.*\` to remote MCP.`, paused: { kind: "missing", tools: ["jira.search"] } } };
-    const out: Record<string, unknown> = { offered: true };
+    if (!offers[key]) return { status: 422, body: { error: `No agent on ${key} you can reach has Jira switched on.`, paused: { kind: "missing", tools: ["jira.search"] } } };
+    const out: Record<string, unknown> = { offered: true, ...(agents[key] ? { agent: { id: agents[key], name: agents[key]![0]!.toUpperCase() + agents[key]!.slice(1) } } : {}) };
     if (!body!.target) return { status: 200, body: out };
     out.states = ["Backlog", "To Do", "In Progress", "In Review", "Done"];
     out.prefill = { backlog: "Backlog", todo: "To Do", doing: "In Progress", review: "In Review", done: "Done" };
@@ -120,6 +122,7 @@ beforeEach(() => {
   native.commands.length = 0;
   kept = [{ id: "atlas-acme-example", name: "Atlas", url: ATLAS.url, hasToken: true }];
   offers = { "atlas-acme-example": true };
+  agents = {};
   native.route = (hub, method, path, body) => (hub === "local" ? localRoutes(method, path, body) : { status: 404 });
   native.mint = () => ({ kind: "notAllowed", status: 403, error: "this hub's admin hasn't let paired devices make remote MCP tokens" });
   useChat.setState({ hubs: [LOCAL, ATLAS, GLOBEX, MACHINE] as never });
@@ -262,11 +265,29 @@ describe("the link dialog", () => {
     await waitFor(() => expect(native.asked.some((a) => a.path === `/api/desk/boards/${ACME.id}/sync`)).toBe(true));
   });
 
+  it("says which agent there has Jira, and offers to ask one to switch it on where none has", async () => {
+    agents = { "atlas-acme-example": "lattice" };
+    kept = [...kept, { id: "hub-globex-example", name: "Globex", url: GLOBEX.url, hasToken: true }];
+    useChat.setState({ roster: [{ hubId: GLOBEX.id, id: "helper", name: "Helper", model: null, provider: null, isDefault: true }] as never });
+    const sendTo = vi.fn(async () => true);
+    const was = useChat.getState().sendTo;
+    useChat.setState({ sendTo });
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Jira");
+    await waitFor(() => expect(within(via().getByText("Atlas").closest("label")!).getByText("Offers Jira through Lattice")).toBeTruthy());
+    expect(within(via().getByText("Globex").closest("label")!).getByText("No agent there you can reach has Jira switched on")).toBeTruthy();
+    expect(screen.getByText("No agent on hub-globex-example you can reach has Jira switched on.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Helper to switch Jira on" }));
+    await waitFor(() => expect(sendTo).toHaveBeenCalledWith(`${GLOBEX.id}/helper`, expect.stringContaining("switch Jira on for an agent I can use on Globex")));
+    await screen.findByText(/Asked Helper on Globex to switch Jira on/);
+    useChat.setState({ sendTo: was, roster: [] as never });
+  });
+
   it("says the hub's refusals in its words: tools missing, a filter it won't take, a board with tickets", async () => {
     kept = [...kept, { id: "hub-globex-example", name: "Globex", url: GLOBEX.url, hasToken: true }];
     render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
     pickSystem("Jira");
-    await screen.findByText(/hub-globex-example doesn't offer its Jira tools/);
+    await screen.findByText("No agent on hub-globex-example you can reach has Jira switched on.");
     expect((via().getByRole("radio", { name: /^Globex/ }) as HTMLInputElement).disabled).toBe(true);
     fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
     fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: "ACME" } });
@@ -602,7 +623,10 @@ describe("the board, synced", () => {
 describe("board sync's words and checks", () => {
   it("says each pause as the hub does", () => {
     expect(pausedWords({ kind: "byYou" }, "Atlas")).toBe("Paused by you; changes go out when you resume it.");
-    expect(pausedWords({ kind: "missing", tools: ["jira.search", "jira.add_comment"] }, "Atlas")).toBe("Paused: Atlas no longer offers jira.search, jira.add_comment.");
+    expect(pausedWords({ kind: "missing", tools: ["jira.search", "jira.add_comment"] }, "Atlas")).toBe("Paused: no agent on Atlas you can reach has Jira switched on any more.");
+    const through = { ...ACME, sync: { link: "l", system: "jira", target: "ACME", via: { kind: "hub", hub: "atlas" }, agent: "lattice", person: "p", filter: { kind: "assignedToMe" }, states: {} } } as BoardT;
+    expect(linkedTo(through, "Atlas")).toBe("Jira ACME through Lattice on Atlas");
+    expect(linkedTo({ ...through, sync: { ...through.sync!, agent: undefined } }, "Atlas")).toBe("Jira ACME via Atlas");
     expect(pausedWords({ kind: "refused", reason: "policy denied" }, "Atlas")).toBe("Paused: Atlas refused: policy denied");
     expect(pausedWords({ kind: "hubUnpaired" }, "Atlas")).toMatch(/isn't linked any more/);
     expect(pausedWords({ kind: "leftGroup" }, "Atlas")).toMatch(/left the group/);

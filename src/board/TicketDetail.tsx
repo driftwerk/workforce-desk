@@ -18,6 +18,7 @@ import { mergeEvents } from "../overview/activity";
 import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
+import { TicketBody } from "./TicketBody";
 import { useBoard } from "./store";
 import { Assignee, TakeIt, Upstream } from "./TicketCard";
 import { issueUrl, SYSTEM_TITLE, takeable } from "../hub/boardSync";
@@ -360,14 +361,11 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
               }
             }}
           />
+        ) : t.body ? (
+          <TicketBody text={t.body} onEdit={() => startEditing("body")} />
         ) : (
-          <button
-            type="button"
-            className="ticket-edit ticket-text"
-            title="Change what it's about"
-            onClick={() => startEditing("body")}
-          >
-            {t.body || <span className="faint">Add what it's about, and what done looks like</span>}
+          <button type="button" className="ticket-edit ticket-text" title="Change what it's about" onClick={() => startEditing("body")}>
+            <span className="faint">Add what it's about, and what done looks like</span>
           </button>
         )}
         <Needs ticket={t} neededBy={neededBy} onProblem={setProblem} />
