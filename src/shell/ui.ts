@@ -91,6 +91,9 @@ interface UiState {
   setAnchor: (pane: string, anchor: Anchor | null) => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
+  /** New crew member is open (only the main window shows it). */
+  newCrew: boolean;
+  setNewCrew: (open: boolean) => void;
   setAgentTab: (agent: string, tab: AgentTab) => void;
   setScroll: (pane: string, top: number) => void;
 }
@@ -149,6 +152,8 @@ export const useUi = create<UiState>((set) => ({
     }),
   openSettings: (section = "appearance") => set({ settings: section }),
   closeSettings: () => set({ settings: null }),
+  newCrew: false,
+  setNewCrew: (open) => set({ newCrew: open }),
   setAgentTab: (agent, tab) => set((s) => ({ agentTabs: { ...s.agentTabs, [agent]: tab } })),
   setScroll: (pane, top) => set((s) => (s.scroll[pane] === top ? s : { scroll: { ...s.scroll, [pane]: top } })),
 }));

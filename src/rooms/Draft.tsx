@@ -8,6 +8,12 @@ import { answerPrompt, cancelAsk, dismiss, retry, stop } from "./engine";
 import { Progress } from "./ProgressCard";
 import { memberOf } from "./routing";
 import { ImageBudget } from "../shell/RemoteImage";
+import { TurnError } from "./Message";
+import { openSettingsAt } from "../ui/problem";
+
+/** A member's workspace Desk lost its connection to: reconnecting it
+ *  in Settings lets it answer again. */
+const GONE = /isn’t connected to any more/;
 
 /** What a draft says when it isn't going: why, and what can be done. */
 const NOTE: Partial<Record<RoomDraft["state"], string>> = {
@@ -61,9 +67,20 @@ export function Draft({ roomId, draft, name }: { roomId: string; draft: RoomDraf
             </button>
           )}
         </span>
+        {/* A failed turn says why as the DM does, with signing in where that would help. */}
+        {draft.state === "failed" && draft.error && (
+          <div role="alert">
+            <TurnError raw={draft.error} />
+            {GONE.test(draft.error) && (
+              <button type="button" className="btn btn-sm" onClick={() => openSettingsAt("hubs")}>
+                Reconnect
+              </button>
+            )}
+          </div>
+        )}
         {stopped && (
-          <span className="small state-blocked draft-note" role="alert">
-            {note}{" "}
+          <span className={`small draft-note ${draft.state === "failed" ? "" : "state-blocked"}`} role={draft.state === "failed" ? undefined : "alert"}>
+            {draft.state === "failed" ? (draft.error ? null : "Couldn’t answer.") : note}{" "}
             <button type="button" className="link small" onClick={() => retry(roomId, draft.id)}>
               Retry
             </button>{" "}

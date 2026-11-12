@@ -1,4 +1,5 @@
 import { BUSY, Conversation, type ConversationState, type Turn } from "../chat/conversation";
+import { savingShared } from "./share";
 import { readConversation } from "../chat/history";
 import { useChat } from "../chat/store";
 import { FEATURES, type Attachment, type DeskMember, type DeskSpeaker, type DeskTurn, type HubAccount, type PermissionChoice } from "../chat/types";
@@ -650,7 +651,8 @@ async function bringIn(desk: DeskHub, room: Room, text: string): Promise<Room> {
   if (ambiguous.length) throw new Error(ambiguity(ambiguous[0]!));
   if (!outsiders.length) return room;
   const members: RoomMemberRef[] = [...room.members, ...outsiders.map((a) => ({ hub: a.hubId, agent: a.id }))];
-  const updated = await desk.updateRoom(room.id, { members });
+  // A room of a group with a boss asks the person before it reaches a new workspace.
+  const updated = await savingShared(room.name, (shareWith) => desk.updateRoom(room.id, { members, ...(shareWith.length ? { shareWith } : {}) }));
   // Kept at once, so nothing prunes the new members' conversations before
   // the hub's own room event arrives.
   useDesk.setState((s) => ({ rooms: { ...s.rooms, [updated.id]: updated } }));
