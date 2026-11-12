@@ -72,6 +72,22 @@
 .board-col {
   scroll-snap-align: start;
 }
+/* Its sideways scrollbar stays in sight, thin, in the theme's colours: on
+   macOS the system's own hides until it's used, and columns that end at
+   the edge would look like all there is. */
+.board-cols::-webkit-scrollbar {
+  height: 8px;
+}
+.board-cols::-webkit-scrollbar-track {
+  background: transparent;
+}
+.board-cols::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--faint) 55%, transparent);
+}
+.board-cols::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+}
 /* 4, 3, 2 or 1 columns in view: (width - padding - gaps) / count. */
 @container (max-width: 1011px) {
   .board-cols {
@@ -115,7 +131,9 @@
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* Up and down only: a sideways swipe or Shift+wheel over a column's
+     cards goes on to the columns' own sideways scroll. */
+  overscroll-behavior-y: contain;
 }
 .board-cards > .ghost {
   opacity: 0.35;

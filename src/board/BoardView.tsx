@@ -64,6 +64,26 @@ const useNarrow = (el: HTMLElement | null): boolean => {
   return narrow;
 };
 
+/** Shift+wheel scrolls the columns sideways where the system left it
+ *  vertical (`deltaX` 0, as on Windows); where it already turned it
+ *  sideways (macOS), and for a trackpad's own sideways swipe, the browser
+ *  scrolls them and this does nothing. */
+export const useShiftWheel = (el: HTMLElement | null): void => {
+  useEffect(() => {
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.deltaX !== 0 || e.deltaY === 0) return;
+      if (el.scrollWidth <= el.clientWidth) return;
+      // Lines and pages as pixels, roughly as a browser counts them.
+      const by = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * el.clientWidth : e.deltaY;
+      e.preventDefault();
+      el.scrollBy({ left: by });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [el]);
+};
+
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
 /** The plan each ticket is in, by its goal, for the board's cards. */
@@ -420,6 +440,8 @@ function Columns({
   const has = (state: TicketState) => every.some((c) => c.state === state && c.cards.length > 0);
   const on = picked ?? (has("doing") ? "doing" : has("todo") ? "todo" : (every.find((c) => c.cards.length)?.state ?? every[0]?.state ?? null));
   const dragged = useRef(false);
+  const [colsEl, setColsEl] = useState<HTMLDivElement | null>(null);
+  useShiftWheel(colsEl);
   // A column of hundreds draws its first cards, and the rest a page at a
   // time: drops land among what is drawn.
   const [limits, setLimits] = useState<Partial<Record<TicketState, number>>>({});
@@ -470,7 +492,7 @@ function Columns({
           ))}
         </div>
       )}
-      <div className="board-cols">
+      <div ref={setColsEl} className="board-cols">
         {cols.map((c, i) => (
           <ColumnView
             key={c.state}
