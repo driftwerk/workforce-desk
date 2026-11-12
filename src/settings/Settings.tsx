@@ -4,7 +4,6 @@ import "../styles/settings.css";
 import { Appearance } from "./Appearance";
 import { Browser } from "./Browser";
 import { Budgets } from "./Budgets";
-import { Calls } from "./Calls";
 import { Chat } from "./Chat";
 import { Computer } from "./Computer";
 import { Connections } from "./Connections";
@@ -100,7 +99,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
       {section === "memory" && <Memory />}
       {section === "budgets" && <Budgets />}
       {section === "voices" && <Voices />}
-      {section === "calls" && <Calls />}
       {section === "shortcuts" && <Shortcuts />}
       {section === "help" && <Help />}
     </div>

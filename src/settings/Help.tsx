@@ -9,6 +9,7 @@ import {
   helperStatus,
   inApp,
   openLoginItems,
+  openUrl,
   removeDeskData,
   saveReport,
   wslBackendVersion,
@@ -18,7 +19,8 @@ import { useSetup } from "../setup/store";
 import { problemText } from "../setup/wsl";
 import { useHost, type BackendHost, type Platform } from "../shell/host";
 import { CloseButton, Dialog } from "../ui/Dialog";
-import { useUpdates } from "../updates/store";
+import { useUpdates, type UpdatePhase } from "../updates/store";
+import { plainError } from "../ui/plainError";
 
 /** Where each system lists what starts at login. */
 export const STARTUP: Record<Platform, string> = { macos: "Login Items", windows: "Startup apps", linux: "your session’s autostart" };
@@ -103,6 +105,21 @@ function WhereDeskRuns({ host, helper }: { host: BackendHost | null; helper: Hel
   );
 }
 
+/** Where Desk's updates stand, in Help: a version ready says whether it
+ *  installs by itself or was put off. */
+export const updateLine = (update: UpdatePhase, waiting: boolean, never: string | null, checked: string | null): string =>
+  update.phase === "available"
+    ? `Desk ${update.version} is out. ${update.download ? "Download it, or let your package manager install it." : "Your package manager installs it."}`
+    : update.phase === "downloading"
+      ? `Downloading Desk ${update.version}…`
+      : update.phase === "ready"
+        ? waiting
+          ? `Desk ${update.version} is ready. It installs by itself once your sessions finish and you’ve stepped away.`
+          : `Desk ${update.version} is ready, put off for now. Check for updates to have it install by itself again.`
+        : never !== null
+          ? `This Desk doesn’t look for updates: ${never || "it isn’t an install"}.`
+          : (checked ?? "Desk updates itself.");
+
 export function Help() {
   const { platform, keys, host } = useHost();
   const openStartup = OPEN_STARTUP[platform];
@@ -113,6 +130,7 @@ export function Help() {
   const update = useUpdates((s) => s.state);
   const check = useUpdates((s) => s.check);
   const never = useUpdates((s) => s.never);
+  const waiting = useUpdates((s) => s.waiting);
   const [checked, setChecked] = useState<string | null>(null);
 
   useEffect(() => {
@@ -141,7 +159,7 @@ export function Help() {
       const s = useUpdates.getState().state;
       setChecked(s.phase === "idle" ? "Desk is up to date." : null);
     } catch (e) {
-      setChecked(`Couldn’t check for updates: ${errorText(e)}`);
+      setChecked(`Couldn’t check for updates. ${plainError(e)}`);
     }
   };
 
@@ -170,20 +188,23 @@ export function Help() {
         <span className="card-text">
           <b>Desk {version}</b>
           <span>
-            {update.phase === "available"
-              ? `Desk ${update.version} is out. Your package manager installs it, or download it from the releases page.`
-              : update.phase === "downloading"
-                ? `Downloading Desk ${update.version}…`
-                : update.phase === "ready"
-                  ? `Desk ${update.version} is ready — restart to update.`
-                  : never !== null
-                    ? `This Desk doesn’t look for updates: ${never || "it isn’t an install"}.`
-                    : (checked ?? "Desk updates itself.")}
+            {updateLine(update, waiting, never, checked)}
           </span>
         </span>
-        <button type="button" className="btn" disabled={!inApp || update.phase !== "idle"} onClick={() => void checkNow()}>
-          Check for updates
-        </button>
+        {update.phase === "available" && update.download ? (
+          <button type="button" className="btn btn-signal" onClick={() => void openUrl(update.download!)}>
+            Download
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            disabled={!inApp || !(update.phase === "idle" || (update.phase === "ready" && !waiting))}
+            onClick={() => void checkNow()}
+          >
+            Check for updates
+          </button>
+        )}
       </div>
 
       <div className="setting-card">

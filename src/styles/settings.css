@@ -1633,6 +1633,41 @@ legend.set-label {
   margin: 12px 8px 0;
 }
 
+/* A budget said in a sentence, and what Desk heard. */
+.budget-say {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The pane lines its parts up at the start: this one takes the row. */
+.settings-pane > .budget-add {
+  align-self: stretch;
+}
+.budget-say .field-row {
+  width: 100%;
+}
+.budget-say input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+  font: inherit;
+}
+.budget-say input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.budget-more {
+  align-self: flex-start;
+  margin-top: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* Desk's own field for a machine's password (its own window). */
 .secret-window {
   min-height: 100vh;
@@ -1661,4 +1696,7 @@ legend.set-label {
   position: fixed;
   inset: 0 0 auto 0;
   height: 28px;
+}
+.voices-nav-label {
+  padding: 14px 10px 4px;
 }
