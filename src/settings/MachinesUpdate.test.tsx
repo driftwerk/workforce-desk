@@ -156,6 +156,11 @@ it("updates this Desk for a machine on a newer one, and says when there's none y
   expect(useUpdates.getState().waiting).toBe(true);
   expect(bb.textContent).toContain("Desk restarts into 0.2.2 once no session here is working.");
   act(() => useUpdates.setState({ state: { phase: "idle" }, waiting: false }));
+  // A build that never updates says so, not that none is out.
+  vi.mocked(platform.updating).mockResolvedValueOnce({ how: "never", neverBecause: "It’s a development build.", download: null, sessionsKept: true });
+  await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Update Desk" })));
+  expect(bb.textContent).toContain("This Desk can’t update itself: It’s a development build.");
+  act(() => useUpdates.setState({ never: null }));
   // Its own page has the same way out, on its status card.
   fireEvent.click(within(bb).getByRole("button", { name: "Open buildbox" }));
   const status = within(screen.getByRole("region", { name: "buildbox" })).getByRole("status");

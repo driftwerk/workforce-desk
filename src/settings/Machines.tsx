@@ -54,8 +54,9 @@ export function UpdateDesk() {
     try {
       const updates = useUpdates.getState();
       if (updates.state.phase !== "ready") await updates.check({ asked: true });
-      const now = useUpdates.getState().state;
+      const { state: now, never } = useUpdates.getState();
       if (now.phase === "ready") useUpdates.getState().wait(true);
+      else if (never !== null) setSaid(`This Desk can’t update itself${never ? `: ${never.replace(/\.$/, "")}` : ""}.`);
       else if (now.phase === "idle") setSaid("No newer Desk is out for this computer yet. Desk looks again every few hours.");
     } catch (e) {
       setSaid(plainError(e));
