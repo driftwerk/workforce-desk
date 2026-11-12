@@ -110,12 +110,16 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
   {
     id: "gemini-live",
     name: "Gemini Live",
-    blurb: "Google’s live conversation engine, with its own voices.",
+    blurb: "Google’s live conversation engine, with its own voices. Uses your Gemini key from Providers, or one saved here.",
     keyPath: "speech/gemini/api_key",
     models: [{ id: "gemini-live", name: "Gemini Live", note: "Talks back as you speak" }],
     voices: "engine",
   },
 ];
+
+/** The key a provider's vault path names (`speech/<name>/api_key`), as the
+ *  hub's voice-key route takes it. */
+export const keyName = (keyPath: string): string => keyPath.split("/")[1] ?? keyPath;
 
 export const providerById = (id: string): VoiceProvider | undefined => VOICE_PROVIDERS.find((p) => p.id === id);
 

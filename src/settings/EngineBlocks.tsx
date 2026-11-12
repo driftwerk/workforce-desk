@@ -239,7 +239,9 @@ export function InstallEngine({
   onInstalled: () => void;
 }) {
   const plan = INSTALLS[engine.engine]!;
-  const [state, setState] = useState<{ at: "idle" } | { at: "running"; line: string } | { at: "failed"; why: string; command?: string }>({ at: "idle" });
+  const [state, setState] = useState<{ at: "idle" } | { at: "running"; line: string } | { at: "failed"; why: string; command?: string; details?: string }>({
+    at: "idle",
+  });
   const done = useRef(onInstalled);
   done.current = onInstalled;
   useEffect(() => {
@@ -251,7 +253,7 @@ export function InstallEngine({
           else if (next.state === "done") {
             setState({ at: "idle" });
             done.current();
-          } else setState({ at: "failed", why: next.message, command: next.command });
+          } else setState({ at: "failed", why: next.message, command: next.command, details: next.details });
         }),
       );
     return native.setup((e) => {
@@ -286,6 +288,12 @@ export function InstallEngine({
               {" "}
               <CopyButton text={state.command} label="Copy command" />
             </>
+          )}
+          {state.details && (
+            <details className="problem-details">
+              <summary className="small faint">Details</summary>
+              <pre className="problem-raw mono small">{state.details}</pre>
+            </details>
           )}
         </span>
       )}

@@ -13,6 +13,12 @@ name = "fake-ssh"
 path = "src/bin/fake-ssh.rs"
 test = false
 
+# Desk's askpass as a program, for the tests (Desk itself is the askpass).
+[[bin]]
+name = "desk-askpass"
+path = "src/bin/desk-askpass.rs"
+test = false
+
 # The add flow's native steps as a command, for the live check against a
 # real machine (designs §12; built for macOS by machine-live.yml).
 [[bin]]
@@ -23,6 +29,7 @@ test = false
 [dependencies]
 desk-core = { workspace = true }
 eyre = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10.9"
@@ -30,6 +37,7 @@ socket2 = { version = "0.6", features = ["all"] }
 tempfile = { workspace = true }
 tracing = { workspace = true }
 url = "2.5"
+zeroize = "1.9.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

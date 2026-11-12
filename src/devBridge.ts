@@ -2,8 +2,10 @@
 // for checking screens without the app: open
 // http://localhost:5183/?hub=<gateway url>&admin=<gateway token>&device=<device token>
 // (and &platform=linux or windows to see another system's screens; with
-// &helper=needs-approval, move-to-applications, failed or development, Desk
-// Helper stands that way, for the banner shown while Desk gets ready).
+// &wsl=none, WSL isn't installed yet, &wsl=one, there's one Linux, and
+// &wsl=refused, installing it fails;
+// with &helper=needs-approval, move-to-applications, failed or development,
+// Desk Helper stands that way, for the banner shown while Desk gets ready).
 // Only reachable from development builds.
 
 import { HubError } from "./hub/client";
@@ -12,7 +14,7 @@ import { setDevToken } from "./hub/devTokens";
 import { DEFAULT_HOST } from "./shell/host";
 
 const params = (() => {
-  const keys = ["hub", "admin", "device", "platform", "helper"] as const;
+  const keys = ["hub", "admin", "device", "platform", "wsl", "helper"] as const;
   const fromUrl = new URLSearchParams(location.search);
   const read = (k: string) => {
     const v = fromUrl.get(k);
@@ -173,8 +175,41 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
           ? { ...DEFAULT_HOST, platform: "windows", host: null, keys: "Credential Manager" }
           : { ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform },
       );
+    case "privacy_open": {
+      // No System Settings in a browser: say which pane would open.
+      console.info(`[preview] opens the ${String(args?.pane)} settings`);
+      return answer(undefined);
+    }
+    case "privacy_check": {
+      // `desk.dev.access` = {"microphone":"granted",…} stands in for the system.
+      let access: Record<string, string> = {};
+      try {
+        access = JSON.parse(localStorage.getItem("desk.dev.access") ?? "{}") as Record<string, string>;
+      } catch {
+        access = {};
+      }
+      return answer(access[String(args?.pane)] ?? "unknown");
+    }
+    case "dropped_files": {
+      // `desk.dev.keptFiles` = "1": the system keeps dropped files from Desk.
+      const paths = (args?.paths as string[] | undefined) ?? [];
+      const name = (p: string) => p.split("/").pop() ?? p;
+      if (localStorage.getItem("desk.dev.keptFiles") === "1")
+        throw new Error(`Desk isn’t allowed to read ${name(paths[0] ?? "")}. Allow it in Files and Folders.`);
+      return answer(paths.map((path) => ({ path, name: name(path), size: 4, folder: false })));
+    }
     case "wsl_detect":
-      return answer(WSL_FIXTURE);
+      return answer(
+        params.wsl === "none" || params.wsl === "refused"
+          ? { problem: { kind: "not_installed" }, distros: [] }
+          : params.wsl === "one"
+            ? { ...WSL_FIXTURE, distros: WSL_FIXTURE.distros.slice(0, 1) }
+            : WSL_FIXTURE,
+      );
+    case "wsl_install":
+      if (params.wsl === "refused")
+        throw new Error("WSL didn't install: Windows needs an administrator's OK for it. Try again, and choose Yes when Windows asks.");
+      return answer(new Promise(() => {}));
     case "hubs_list":
       // The preview reaches the hub itself, with this token (in the app the
       // native side holds every hub's, and the page has none).
@@ -215,6 +250,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       // Voice and Tuple live in the app process; in the preview they are off.
       if (cmd === "voice_status") return answer({ state: "off" });
       if (cmd === "voice_lookup") return answer({ state: "failed", message: "Looking a voice up needs the Desk app." });
+      if (cmd === "voice_engine_voices" || cmd === "voice_kokoro_voices") return answer([]);
       if (/^(voice|tuple)_/.test(cmd)) return answer(undefined);
       throw new Error(`${cmd} is only available in the Desk app`);
   }

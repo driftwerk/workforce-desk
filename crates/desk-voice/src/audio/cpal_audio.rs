@@ -254,6 +254,68 @@ impl AudioOut for CpalAudio {
     }
 }
 
+/// Whether Desk may use the microphone: on Windows, Settings → Privacy →
+/// Microphone (for every app, and for desktop apps); elsewhere the system
+/// doesn't say.
+pub fn mic_access() -> super::MicAccess {
+    #[cfg(windows)]
+    {
+        windows_mic::access()
+    }
+    #[cfg(not(windows))]
+    {
+        super::MicAccess::Unknown
+    }
+}
+
+#[cfg(windows)]
+mod windows_mic {
+    use super::super::MicAccess;
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
+
+    const STORE: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// The consent store's `Value` under `key`: "Allow" or "Deny".
+    fn value(key: &str) -> Option<String> {
+        let (key, name) = (wide(key), wide("Value"));
+        let mut buf = [0u16; 32];
+        let mut len = std::mem::size_of_val(&buf) as u32;
+        // SAFETY: both names end in NUL; the buffer and its length in bytes
+        // are ours, and RegGetValueW writes no more than `len` bytes.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut len,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return None;
+        }
+        let chars = (len as usize / 2).min(buf.len());
+        Some(
+            String::from_utf16_lossy(&buf[..chars])
+                .trim_end_matches('\0')
+                .to_string(),
+        )
+    }
+
+    pub fn access() -> MicAccess {
+        let all = value(STORE);
+        let desktop = value(&format!(r"{STORE}\NonPackaged"));
+        super::super::decide(all.as_deref(), desktop.as_deref())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

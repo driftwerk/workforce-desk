@@ -218,3 +218,15 @@ describe("inline errors past what they show", () => {
     expect(fullDetailsOf(plainError(new Error("boom\nshort")))).toBeNull();
   });
 });
+
+describe("a key the provider refused", () => {
+  it("is shown in the hub's own words, which already say the fix", async () => {
+    const { HubError, KEY_REFUSED } = await import("../hub/client");
+    const said = "Anthropic didn't accept that key. Check it was copied whole, or make a new one: create a key at console.anthropic.com under API keys.";
+    const p = explain(new HubError(400, said, KEY_REFUSED), { what: "saving the key" });
+    expect(p.plain).toBe(said);
+    expect(p.details).toBeUndefined();
+    // Without the mark, the same words are treated as any refusal.
+    expect(explain(new HubError(400, said)).plain).not.toBe(said);
+  });
+});
