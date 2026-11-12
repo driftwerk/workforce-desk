@@ -3,18 +3,33 @@ import { useDesk } from "../hub/store";
 import type { ChargeView, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
-import { badgeOf, called, chargeChoices, howText, wheelText, type ChargeChoice } from "./charge";
+import { badgeOf, called, chargeChoices, driving, howText, wheelText, type ChargeChoice } from "./charge";
 import { useBossOf, useCharge, useCharges } from "./chargeStore";
 import { Popover } from "../ui/Popover";
 import { sessionKey } from "../hub/machines";
 
+/** Why the session whose key is `key` (as Desk keeps its sessions, a
+ *  machine's prefixed) waits on the person though its boss runs it, as the
+ *  hub says; nothing while the boss has it. */
+const useWaitsOnYou = (key: string | null | undefined): string | undefined => useDesk((s) => (key ? s.sessions[key]?.waitsOnYou : undefined));
+
+/** `why` as a sentence of its own, ending in a full stop. */
+const sentence = (why: string): string => `${why.trim().replace(/[.!?]+$/, "")}.`;
+
+/** What the badge's title says: why it waits on you, when it does, then
+ *  how the boss came to run it and who has the wheel. */
+const titleOf = (charge: ChargeView, waits: string | undefined): string => `${waits && !driving(charge) ? `Waiting on you: ${sentence(waits)} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
+
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
- *  `short`), dashed "You're driving" while the person has the wheel. */
-export function ChargeBadge({ charge, short = false, className = "" }: { charge: ChargeView | undefined; short?: boolean; className?: string }) {
-  const badge = badgeOf(charge, short);
+ *  `short`), dashed "You're driving" while the person has the wheel, and
+ *  "Waiting on you" while what it waits on is the person's to answer.
+ *  `session` is the session's key, as its charge was looked up by. */
+export function ChargeBadge({ charge, session, short = false, className = "" }: { charge: ChargeView | undefined; session: string | null | undefined; short?: boolean; className?: string }) {
+  const waits = useWaitsOnYou(session);
+  const badge = badgeOf(charge, short, waits);
   if (!charge || !badge) return null;
   return (
-    <span className={`charge-badge charge-${badge.look} ${className}`} title={`${howText(charge)}. ${wheelText(charge)}`}>
+    <span className={`charge-badge charge-${badge.look} ${className}`} title={titleOf(charge, waits)}>
       {badge.text}
     </span>
   );
@@ -61,8 +76,9 @@ export function DriverChip({ session }: { session: Session }) {
   const [busy, setBusy] = useState<string | null>(null);
   const going = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const badge = badgeOf(charge);
-  const short = badgeOf(charge, true);
+  const waits = session.waitsOnYou;
+  const badge = badgeOf(charge, false, waits);
+  const short = badgeOf(charge, true, waits);
   if (!charge || !badge || !short) return null;
   const choices = chargeChoices(session, charge, boss);
   const run = (c: ChargeChoice) => {
@@ -90,7 +106,7 @@ export function DriverChip({ session }: { session: Session }) {
         aria-haspopup="dialog"
         aria-expanded={!!from}
         aria-label={`Who runs it: ${badge.text}${suggested ? `, ${suggested} suggested` : ""}`}
-        title={`${howText(charge)}. ${wheelText(charge)}`}
+        title={titleOf(charge, waits)}
         onClick={(e) => setFrom(from ? null : e.currentTarget)}
       >
         <span className="sc-long">{badge.text}</span>
@@ -101,9 +117,10 @@ export function DriverChip({ session }: { session: Session }) {
       {from && (
         <Popover label={`Who runs ${name}`} from={from} onClose={() => setFrom(null)} className="driver-pop">
           <span className="driver-pop-head">
-            <ChargeBadge charge={charge} />
+            <ChargeBadge charge={charge} session={sessionKey(session)} />
             <span className="small faint">{howText(charge)}</span>
           </span>
+          {waits && !driving(charge) && <p className="driver-pop-text">Waiting on you: {sentence(waits)}</p>}
           <p className="driver-pop-text">{wheelText(charge)}</p>
           {problem && (
             <p className="small state-blocked" role="alert">
