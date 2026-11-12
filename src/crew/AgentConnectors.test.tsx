@@ -194,5 +194,5 @@ it("says when its settings file can't be changed", async () => {
 
 it("says when the hub couldn't be asked", async () => {
   await show(api([], { list: vi.fn(async () => Promise.reject(new Error("down"))) }));
-  expect(screen.getByRole("alert").textContent).toContain("Couldn’t ask the hub about connections just now.");
+  expect(screen.getByRole("alert").textContent).toContain("Desk couldn’t read your connections just now.");
 });

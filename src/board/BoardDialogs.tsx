@@ -24,7 +24,7 @@ export function BoardDialog({ board, onClose, onMade }: { board?: Board; onClose
       const p = prefix.trim().toUpperCase();
       if (board) {
         const hub = useDesk.getState().hub;
-        if (!hub) throw new Error("This computer's hub isn't running.");
+        if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
         const changed = await hub.updateBoard(board.id, { name: name.trim(), ...(p && p !== board.prefix ? { prefix: p } : {}) });
         useBoard.setState((s) => ({ boards: { ...s.boards, [changed.id]: changed } }));
       } else onMade?.(await useBoard.getState().createBoard(name.trim(), p || undefined));
@@ -73,7 +73,7 @@ export function DeleteBoard({ board, count, onClose }: { board: Board; count: nu
       action="Delete board"
       onConfirm={async () => {
         const hub = useDesk.getState().hub;
-        if (!hub) throw new Error("This computer's hub isn't running.");
+        if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
         await hub.deleteBoard(board.id);
         useBoard.setState((s) => {
           const { [board.id]: _, ...boards } = s.boards;

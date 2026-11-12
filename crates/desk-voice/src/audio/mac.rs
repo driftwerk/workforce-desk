@@ -80,6 +80,22 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
     }
 }
 
+/// Whether Desk may use the microphone: AVAudioApplication's record
+/// permission (macOS 14 and later; before, the system doesn't say).
+pub fn mic_access() -> super::MicAccess {
+    use objc2_avf_audio::{AVAudioApplication, AVAudioApplicationRecordPermission as P};
+    if objc2::runtime::AnyClass::get(c"AVAudioApplication").is_none() {
+        return super::MicAccess::Unknown;
+    }
+    // SAFETY: the shared instance and a plain read of its permission.
+    match unsafe { AVAudioApplication::sharedInstance().recordPermission() } {
+        P::Granted => super::MicAccess::Granted,
+        P::Denied => super::MicAccess::Denied,
+        P::Undetermined => super::MicAccess::NotAsked,
+        _ => super::MicAccess::Unknown,
+    }
+}
+
 /// Just the speaker side: for playing a sample while voice is off.
 pub fn output() -> Result<SharedAudioOut> {
     Ok(Arc::new(build(None)?))

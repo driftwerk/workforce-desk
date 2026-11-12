@@ -37,6 +37,15 @@ export const REPLY_SILENCE_MS = 10_000;
 
 const failed = (e: unknown) => useVoiceStore.setState({ error: e instanceof Error ? e.message : String(e) });
 
+/** Starts voice again as turning it on does, when it's on: once the person
+ *  let Desk use the microphone. */
+export const retryVoice = (): void => {
+  const { voice, voiceEngine: engine } = useSettings.getState();
+  if (!voice) return;
+  useVoiceStore.setState({ error: null });
+  enableVoice(voiceEngine(engine).id).catch(failed);
+};
+
 /** Where an answer goes: read aloud (the cascade), back to the cloud voice
  *  model that asked, which says it in its own words, or nowhere but the
  *  DM, where it's read. */

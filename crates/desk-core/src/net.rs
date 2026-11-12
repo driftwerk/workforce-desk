@@ -136,7 +136,7 @@ fn bare(url: &Url) -> bool {
 /// The address of the hub on this computer: plain `http` to a loopback
 /// address, with nothing else in it.
 pub fn loopback_url(raw: &str) -> Result<Url, String> {
-    let refuse = || "This computer's hub isn't at an address on this computer.".to_string();
+    let refuse = || "Desk's helper isn't at an address on this computer.".to_string();
     let url = Url::parse(raw).map_err(|_| refuse())?;
     if url.scheme() != "http" || !is_loopback(&url) || !bare(&url) {
         return Err(refuse());

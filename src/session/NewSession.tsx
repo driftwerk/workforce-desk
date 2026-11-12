@@ -4,6 +4,7 @@ import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useChat } from "../chat/store";
+import { GroupChoice } from "./GroupChoice";
 import { groupOf, sessionItem, UNGROUPED, type ItemKey, type Layout } from "../groups/model";
 import { moveItem, useLayout } from "../groups/store";
 import { pairedHub } from "../hub/net";
@@ -558,13 +559,7 @@ export function NewSession({
             {layout.groups.length > 0 && (
               <div className="field">
                 <span className="ov-label muted">Group</span>
-                <div className="chip-row" role="radiogroup" aria-label="Group">
-                  {[...layout.groups, { id: UNGROUPED, name: "Ungrouped" }].map((g) => (
-                    <button key={g.id} type="button" role="radio" className="chip-btn" aria-checked={group === g.id} aria-pressed={group === g.id} onClick={() => setGroup(g.id)}>
-                      {g.name}
-                    </button>
-                  ))}
-                </div>
+                <GroupChoice group={group} onPick={setGroup} groups={layout.groups} />
                 <span className="muted small">{groupSays(group, startedIn, groupName, remote ? where : null)}</span>
               </div>
             )}

@@ -341,7 +341,7 @@ describe("moving a session between groups, against the hub", () => {
     );
     moveFromMenu("acme-docs", "Globex");
     const dialog = await screen.findByRole("dialog", { name: "Move acme-docs" });
-    await within(dialog).findByText("Only the person who holds this computer’s hub can move things between groups.");
+    await within(dialog).findByText("Only the person whose Desk this is can move things between groups.");
     expect((within(dialog).getByRole("button", { name: "Move to Globex" }) as HTMLButtonElement).disabled).toBe(true);
     expect(moves.asked).toEqual([]);
     expect(layoutPuts()).toEqual([]);

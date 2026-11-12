@@ -1,5 +1,6 @@
 import { HubError } from "../hub/client";
 import { useUi, type SettingsSection } from "../shell/ui";
+import { paneFix, permissionOf } from "./privacy";
 
 /** What the person can press to put it right. `ask` hands the problem to Desk's
  *  chat so the agent can act on it; otherwise `run` does the fix. */
@@ -74,7 +75,7 @@ export const readable = (text: string): boolean => {
 
 /** Known texts (Desk's app, its helper, git, the sign-in CLIs), by what they
  *  mean to the person. */
-const KNOWN: { match: RegExp; plain: (m: RegExpExecArray) => string; fix: (o: ExplainOptions) => Fix }[] = [
+const KNOWN: { match: RegExp; plain: (m: RegExpExecArray) => string; fix: (o: ExplainOptions, m: RegExpExecArray) => Fix }[] = [
   {
     match: /Claude sign-in ended without a token/i,
     plain: () => "Claude sign-in didn’t finish.",
@@ -121,6 +122,17 @@ const KNOWN: { match: RegExp; plain: (m: RegExpExecArray) => string; fix: (o: Ex
     fix: () => ASK,
   },
   {
+    // The system withholding a permission, which Desk's native side names
+    // (src-tauri/src/privacy.rs): the pane that grants it.
+    match: /isn.t allowed to (?:use the microphone|read .+)/i,
+    // A file's name trips the headline's backstop: the name stays in Details.
+    plain: (m) => (permissionOf(m.input)?.pane === "microphone" ? "Allow Desk to use the microphone." : "Allow Desk to read that file."),
+    fix: (_o, m) => {
+      const pane = permissionOf(m.input)?.pane;
+      return pane ? paneFix(pane) : ASK;
+    },
+  },
+  {
     match: /permission denied|operation not permitted/i,
     plain: () => "This computer wouldn’t let Desk do that.",
     fix: () => settings("Open settings", "computer"),
@@ -153,7 +165,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     if (s === 408 || s === 429) return done({ plain: "Desk is being asked for too much at once.", fix: withRetry(o), details: raw });
     if (s >= 500) return done({ plain: "Something broke while Desk was doing that.", fix: withRetry(o), details: raw });
     const m = known ? known.match.exec(raw) : null;
-    if (known && m) return done({ plain: known.plain(m), fix: known.fix(o) });
+    if (known && m) return done({ plain: known.plain(m), fix: known.fix(o, m) });
     if (readable(scrub(raw))) return done({ plain: scrub(raw), ...(scrub(raw) !== raw ? { details: raw } : {}), ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });
     return done({ plain: GENERIC[0], fix: ASK, details: raw });
   }
@@ -165,7 +177,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     });
   }
   const m = known ? known.match.exec(raw) : null;
-  if (known && m) return done({ plain: known.plain(m), fix: known.fix(o) });
+  if (known && m) return done({ plain: known.plain(m), fix: known.fix(o, m) });
   if (readable(scrub(raw))) return done({ plain: scrub(raw), ...(scrub(raw) !== raw ? { details: raw } : {}), ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });
   // Several lines (a CLI's tail, git's stderr): the first sentence leads.
   return done({ plain: GENERIC[1], fix: withRetry(o), details: raw });
