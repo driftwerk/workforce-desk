@@ -20,6 +20,7 @@ import {
   setGridWindowMode,
   windowBackground,
   subscribe,
+  setOpenReporter,
 } from "../platform";
 import { deskState } from "../restore/boot";
 import { useSettings } from "../settings/store";
@@ -82,6 +83,10 @@ export function GridWindow({ gridId }: { gridId: string }) {
   useEffect(() => {
     setSettingsOpener((section) => void emitTo("main", "open-settings", { section }).catch(() => undefined));
     return () => setSettingsOpener(null);
+  }, []);
+  useEffect(() => {
+    setOpenReporter((e) => useDesk.getState().fail(e, { what: "opening a link or a setting" }));
+    return () => setOpenReporter(null);
   }, []);
 
   useEffect(() => {

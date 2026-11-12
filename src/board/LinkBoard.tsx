@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { openTarget } from "../shell/navigate";
 import { ProblemNote } from "../ui/ProblemNote";
+import { openSettingsAt } from "../ui/problem";
 import type { Problem } from "../ui/problem";
 import { HubError } from "../hub/client";
 import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
@@ -75,7 +76,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [me, setMe] = useState("");
   /** Who the hub says the person is on the target's system (null: it
    *  can't say), by the system, hub and target it was asked for. */
-  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string } | null>(null);
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; byEmail?: boolean } | null>(null);
   /** The person said the hub's answer isn't them: it isn't kept. */
   const [notMe, setNotMe] = useState(false);
   /** Bumped to ask the hub again. */
@@ -178,7 +179,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // hub that wants the id says so as a refusal.
   useEffect(() => {
     if (!now || !targetKey) return;
-    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy });
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, byEmail: now.check.meBy === "email" });
     else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
@@ -192,11 +193,14 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   }, [found, system, viaKey, targetKey]);
 
   const hasTickets = tickets > 0;
-  const canLink = !hasTickets && !!system && !!via && offered && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
+  /** What happens to the board's own tickets: kept beside the issues, or
+   *  cleared first. */
+  const [own, setOwn] = useState<"keep" | "clear" | null>(null);
+  const canLink = (!hasTickets || !!own) && !!system && !!via && offered && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
   /** Why Link can't be pressed yet: the first thing missing, in plain words. */
   const waitingOn: { words: string; failed: boolean } | null = (() => {
     if (busy) return null;
-    if (hasTickets) return { words: `Linking needs an empty board: ${board.name} has tickets.`, failed: true };
+    if (hasTickets && !own) return { words: `Say what happens to ${board.name}’s ${tickets === 1 ? "ticket" : `${tickets} tickets`}.`, failed: false };
     if (!system) return { words: "Pick Jira or Linear.", failed: false };
     if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
@@ -219,6 +223,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setBusy(true);
     setProblem(null);
     try {
+      // Cleared first: they're Desk's own, and nothing there changes.
+      if (hasTickets && own === "clear") {
+        const mine = Object.values(useBoard.getState().tickets).filter((t) => t.board === board.id);
+        for (const t of mine) await useBoard.getState().remove(t.id);
+      }
       const mapped = Object.fromEntries(Object.entries(states).filter(([, v]) => !!v));
       const b = await sync.link(board.id, {
         system,
@@ -228,6 +237,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         filter,
         ...(meNeeded ? { me: me.trim() } : {}),
         ...(notMe ? { notMe: true } : {}),
+        ...(hasTickets && own === "keep" ? { keepTickets: true } : {}),
         states: mapped,
       });
       useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
@@ -263,9 +273,27 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     >
       <div className="dialog-scroll move-body sync-link">
         {hasTickets && (
-          <p className="move-callout move-refused" role="alert">
-            {board.name} has tickets of its own. Link an empty board, or make a new one for the project.
-          </p>
+          <fieldset className="move-field">
+            <legend>
+              Its {tickets === 1 ? "ticket" : `${tickets} tickets`}
+            </legend>
+            <div className="move-opts" role="radiogroup" aria-label={`${board.name}’s tickets`}>
+              <label className="move-opt">
+                <input type="radio" name={`${ids}-own`} checked={own === "keep"} disabled={busy} onChange={() => setOwn("keep")} />
+                <span className="move-opt-main">
+                  <span>Keep {tickets === 1 ? "it" : "them"} beside the issues</span>
+                  <span className="move-opt-sub">{tickets === 1 ? "It stays" : "They stay"} on Desk only, with {tickets === 1 ? "its" : "their"} own keys; the project’s issues come in alongside.</span>
+                </span>
+              </label>
+              <label className="move-opt">
+                <input type="radio" name={`${ids}-own`} checked={own === "clear"} disabled={busy} onChange={() => setOwn("clear")} />
+                <span className="move-opt-main">
+                  <span>Clear {tickets === 1 ? "it" : "them"} first</span>
+                  <span className="move-opt-sub">Deleted from this board before it links. Nothing in Jira or Linear changes.</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
         )}
 
         <fieldset className="move-field">
@@ -409,7 +437,15 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
             {knownMe && (
               <span className="move-opt-sub sync-me">
-                {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.{" "}
+                {heard?.byEmail ? (
+                  <>
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there by your verified email: Mine and Take it go by that.
+                  </>
+                ) : (
+                  <>
+                    {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
+                  </>
+                )}{" "}
                 <button type="button" className="link" onClick={() => setNotMe(true)}>
                   That’s not me
                 </button>
@@ -420,6 +456,14 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 {notMe
                   ? `Desk won’t go by ${viaName}’s answer: Take it waits until you check who you are on the board.`
                   : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
+                {!notMe && heard?.why && /shared/.test(heard.why) && (
+                  <>
+                    <button type="button" className="link" onClick={() => openSettingsAt("connections")}>
+                      Set up your own {SYSTEM_TITLE[system]} key
+                    </button>
+                    {" · "}
+                  </>
+                )}
                 <button
                   type="button"
                   className="link"

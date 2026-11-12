@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use desk_core::machine_backend::{self, Arch, Backend, Source};
 use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, RemoveEvent, SetupEvent};
-use desk_machine::hostkey::{SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion};
+use desk_machine::hostkey::{
+    ForgetQuestion, LingerQuestion, SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion,
+};
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
 
@@ -112,6 +114,28 @@ impl Host for AppHost {
     fn person(&self) -> Person {
         person(&self.home)
     }
+
+    #[cfg(unix)]
+    fn ask_secret(
+        &self,
+        question: &desk_machine::fleet::keys::SecretQuestion,
+    ) -> Option<desk_machine::askpass::Secret> {
+        let field = self
+            .app
+            .try_state::<Arc<crate::machine_secret::SecretField>>()?;
+        let field = Arc::clone(&field);
+        field.ask(&self.app, question)
+    }
+
+    /// Desk itself: run by ssh as its askpass, it asks this Desk for the
+    /// answer (`main.rs`).
+    fn askpass(&self) -> Option<PathBuf> {
+        if cfg!(unix) {
+            std::env::current_exe().ok()
+        } else {
+            None
+        }
+    }
 }
 
 /// What `from` gives, up to `max` bytes: refused as soon as it gives more,
@@ -179,6 +203,20 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
             "Uninstall",
         )
     }
+    fn forget_key(&self, question: &ForgetQuestion) -> bool {
+        self.ask(
+            "Forget a machine's old key",
+            question.text(),
+            "Forget Old Key",
+        )
+    }
+    fn linger(&self, question: &LingerQuestion) -> bool {
+        self.ask(
+            "Keep Desk running on a machine",
+            question.text(),
+            "Continue",
+        )
+    }
 }
 
 /// Runs `f` on a blocking thread.
@@ -212,6 +250,75 @@ pub async fn machine_trust(
 ) -> CommandResult<()> {
     let fleet = Arc::clone(&fleet);
     blocking(move || fleet.trust(&target, &fingerprint)).await
+}
+
+/// "Sign in with {name}'s password": Desk's own field asks for it, and
+/// Desk puts its own key there and turns linger on with it (`Fleet::install_key`).
+#[tauri::command]
+pub async fn machine_install_key(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    target: String,
+) -> CommandResult<desk_machine::fleet::keys::Unlocked> {
+    let fleet = Arc::clone(&fleet);
+    #[cfg(unix)]
+    return blocking(move || fleet.install_key(&target)).await;
+    #[cfg(not(unix))]
+    {
+        let _ = (fleet, target);
+        Err("Desk can't sign in to a machine with a password on this computer.".into())
+    }
+}
+
+/// "Unlock your key": Desk's own field asks for its passphrase, and it is
+/// added to the SSH agent (`Fleet::unlock_key`).
+#[tauri::command]
+pub async fn machine_unlock_key(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    target: String,
+) -> CommandResult<desk_machine::fleet::keys::Unlocked> {
+    let fleet = Arc::clone(&fleet);
+    #[cfg(unix)]
+    return blocking(move || fleet.unlock_key(&target)).await;
+    #[cfg(not(unix))]
+    {
+        let _ = (fleet, target);
+        Err("Desk can't unlock an SSH key on this computer.".into())
+    }
+}
+
+/// "Forget the old key": after a native yes showing both fingerprints
+/// (`Fleet::forget_key`); whether the person said yes.
+#[tauri::command]
+pub async fn machine_forget_key(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    target: String,
+    fingerprint: String,
+) -> CommandResult<bool> {
+    let fleet = Arc::clone(&fleet);
+    #[cfg(unix)]
+    return blocking(move || fleet.forget_key(&target, &fingerprint)).await;
+    #[cfg(not(unix))]
+    {
+        let _ = (fleet, target, fingerprint);
+        Err("Desk can't change known hosts on this computer.".into())
+    }
+}
+
+/// "Turn it on with {name}'s password": `sudo` turns linger on there
+/// (`Fleet::linger_with_password`).
+#[tauri::command]
+pub async fn machine_linger_with_password(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    id: String,
+) -> CommandResult<desk_machine::fleet::keys::Unlocked> {
+    let fleet = Arc::clone(&fleet);
+    #[cfg(unix)]
+    return blocking(move || fleet.linger_with_password(&id)).await;
+    #[cfg(not(unix))]
+    {
+        let _ = (fleet, id);
+        Err("Desk can't do that on this computer.".into())
+    }
 }
 
 #[tauri::command]

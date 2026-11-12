@@ -1,7 +1,8 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
-import { linkedTo, SYSTEM_TITLE, syncStatus } from "../hub/boardSync";
+import { linkedTo, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { openSettingsAt } from "../ui/problem";
 import type { Board, Ticket } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
@@ -69,7 +70,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     try {
       const b = await api.recheckMe(board.id);
       kept_(b);
-      setSaid(b.sync?.meSource === "vouched" ? `${hub} knows you as ${b.sync.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
+      setSaid(vouched(b.sync?.meSource) ? `${hub} knows you as ${b.sync?.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
     } catch (e) {
       fail(new Error(saidOf(e)));
     } finally {
@@ -80,6 +81,8 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
   const who =
     sync.meSource === "vouched" && sync.meName
       ? `you're ${sync.meName} there`
+      : sync.meSource === "vouchedByEmail" && sync.meName
+        ? `you're ${sync.meName} there, by your verified email`
       : sync.meSource === "typed"
         ? "your id as you typed it: Take it needs the hub to say who you are"
         : (sync.meNote ?? null);
@@ -105,8 +108,14 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           </button>
         )}
         <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${hub} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
-          {busy === "me" ? "Checking…" : sync.meSource === "vouched" ? "Check again" : "Check who you are"}
+          {busy === "me" ? "Checking…" : vouched(sync.meSource) ? "Check again" : "Check who you are"}
         </button>
+        {/* A shared key that couldn't be matched to them: their own key fixes it. */}
+        {!vouched(sync.meSource) && sync.meNote && /shared/.test(sync.meNote) && (
+          <button type="button" className="btn btn-sm" onClick={() => openSettingsAt("connections")}>
+            Set up your own {SYSTEM_TITLE[sync.system]} key
+          </button>
+        )}
         <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => void pause()}>
           {paused ? "Resume" : "Pause"}
         </button>

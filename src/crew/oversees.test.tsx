@@ -139,7 +139,7 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { hand_out_work: false }, track: { workspaces: true } }));
   });
 
-  it("offers Act fully after Act, acting as Act until repos and a budget are set, and says what stays yours", async () => {
+  it("offers Act fully after Act, acting as Act until a repo is named, and says what stays yours", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     const hub = fakeHub();
     // The hub runs it at Act until Act fully is in force.
@@ -154,7 +154,7 @@ describe("Oversees the crew", () => {
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ level: "full" }));
     expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
-    expect(screen.getByText("Acting as Act: Act fully needs repos to work in and a daily budget.")).toBeTruthy();
+    expect(screen.getByText("Acting as Act: Act fully needs a repo to work in.")).toBeTruthy();
     // Act's own rules hold at Act fully too.
     expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
     expect(screen.getByText("Always yours, at every level")).toBeTruthy();
@@ -170,9 +170,11 @@ describe("Oversees the crew", () => {
     fireEvent.change(repo, { target: { value: "acme/acme-web" } });
     await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"] } }));
-    expect(screen.getByText("Acting as Act: Act fully needs a daily budget.")).toBeTruthy();
+    // A repo is all it needs: the budget is optional.
+    expect(screen.queryByText(/Act fully needs/)).toBeNull();
+    expect(screen.getByText(/^Optional \(blank: no budget, so only the check-in ceilings and Stop bound it\)/)).toBeTruthy();
 
-    // The budget is required, in the hub's words when it's wrong.
+    // The budget, in the hub's words when it's wrong.
     const budget = screen.getByRole("textbox", { name: "Daily budget in US dollars" });
     fireEvent.change(budget, { target: { value: "0" } });
     fireEvent.blur(budget);
@@ -183,6 +185,10 @@ describe("Oversees the crew", () => {
     expect(screen.queryByText(/Act fully needs/)).toBeNull();
     // Set, but the hub still runs it at Act: it says why, as far as Desk can tell.
     expect(screen.getByText(/Acting as Act until the hub has read today’s spend/)).toBeTruthy();
+    // Blank is no budget.
+    fireEvent.change(budget, { target: { value: "" } });
+    await act(async () => fireEvent.keyDown(budget, { key: "Enter" }));
+    await waitFor(() => expect("budget_usd_per_day" in (oversight()!.full as object)).toBe(false));
 
     // Workflows: plain file names only.
     const workflow = screen.getByRole("textbox", { name: "Add a workflow" });
@@ -197,6 +203,44 @@ describe("Oversees the crew", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove acme/acme-web" })));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: [] } }));
     expect(screen.getByText("Acting as Act: Act fully needs a repo to work in.")).toBeTruthy();
+  });
+
+  it("shows the real money Act fully has spent today, and once it's spent says what stopped and offers Raise or Clear", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = fakeHub();
+    (hub.manager as ReturnType<typeof vi.fn>).mockImplementation(() => Promise.resolve({ agentId: "ledger", level: "act" }));
+    const atFull = (actFully: object) =>
+      useFloor.setState({
+        hubs: {
+          local: {
+            state: "ready",
+            floor: { bosses: [{ scope: { kind: "ungrouped" }, agent: "ledger", name: "Ledger", level: "act", state: "idle", actFully }] },
+            usage: null,
+            offset: 0,
+            stale: false,
+            at: null,
+          },
+        } as never,
+      });
+    atFull({ spentUsd: 12.5, budgetUsd: 200, spent: false });
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 200\n`);
+    expect(screen.getByText(/Real money spent today: \$12\.50 of \$200\.00 \(your plans aren’t counted\)/)).toBeTruthy();
+    expect(screen.getByText(/Your Claude and ChatGPT plans aren’t counted/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    cleanup();
+
+    atFull({ spentUsd: 210, budgetUsd: 200, spent: true });
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 200\n`);
+    const spent = screen.getByRole("alert");
+    expect(spent.textContent).toContain("Act fully stopped: today’s budget is spent.");
+    expect(spent.textContent).toContain("$210 of $200 in real money today (your plans aren’t counted), so it no longer merges, tags, releases or runs workflows on its own.");
+    expect(screen.queryByText(/until the hub has read today’s spend/)).toBeNull();
+    await act(async () => fireEvent.click(within(spent).getByRole("button", { name: "Raise to $315 a day" })));
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { budget_usd_per_day: 315 } }));
+    expect((screen.getByRole("textbox", { name: "Daily budget in US dollars" }) as HTMLInputElement).value).toBe("315");
+    await act(async () => fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Clear today’s count" })));
+    await waitFor(() => expect(typeof (oversight()!.full as Record<string, unknown>).budget_cleared_at).toBe("string"));
+    expect((oversight()!.full as Record<string, unknown>).budget_usd_per_day).toBe(315);
   });
 
   it("says nothing of acting as Act once the hub runs it at Act fully", async () => {
@@ -222,14 +266,15 @@ describe("Oversees the crew", () => {
     expect(anywhere.checked).toBe(false);
     expect(screen.getByText("Not limited to the repos, folders and workflows listed")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(false);
-    expect(screen.getByText(/Required\./)).toBeTruthy();
+    expect(screen.getByText(/^Optional \(blank: no budget/)).toBeTruthy();
+    expect(screen.queryByText(/Acting as Act until/)).toBeNull();
     await act(async () => fireEvent.click(anywhere));
     await waitFor(() => expect(oversight()).toMatchObject({ full: { anywhere: true } }));
     expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("textbox", { name: "Add a workflow" }) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Remove acme/acme-web" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("The repos and workflows below don’t apply while Anywhere is on.")).toBeTruthy();
-    expect(screen.getByText(/Optional \(blank: no budget\)/)).toBeTruthy();
+    expect(screen.getByText(/^Optional \(blank: no budget, so/)).toBeTruthy();
     expect(screen.queryByText(/Acting as Act until/)).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: true }, full: { anywhere: true } }));

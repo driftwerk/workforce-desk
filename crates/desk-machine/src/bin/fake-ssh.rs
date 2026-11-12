@@ -35,7 +35,14 @@
 //!   may learn it (`StrictHostKeyChecking=accept-new`) writes it into the
 //!   `UserKnownHostsFile` it was given and then is refused, as one signing
 //!   in with nothing is; any other is checked against the first
-//!   `userknownhostsfile` its `settings` name, as ssh checks it.
+//!   `userknownhostsfile` its `settings` name, as ssh checks it;
+//! - `password`: the account's password, which it signs in with (with
+//!   `exec`): a connection that may prompt (`PubkeyAuthentication=no`)
+//!   asks `$SSH_ASKPASS` for `user@hostname's password: ` (its `settings`'
+//!   `user` and `hostname`), after `jump_prompt` first when there is one
+//!   (as a jump host would), and is refused when the answer isn't it; any
+//!   other gets in only with an `-i` key whose public half is in the
+//!   home's `~/.ssh/authorized_keys`.
 
 use std::io::Write;
 #[cfg(unix)]
@@ -47,6 +54,8 @@ use serde::Deserialize;
 struct Scenario {
     log: std::path::PathBuf,
     hosts: Vec<Host>,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -62,6 +71,8 @@ struct Host {
     host_key: Option<String>,
     forward_to: Option<u16>,
     hang: bool,
+    password: Option<String>,
+    jump_prompt: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -104,6 +115,14 @@ fn main() {
     let line = format!("{}\n", serde_json::to_string(&args).expect("the call"));
     log.write_all(line.as_bytes()).expect("logging");
     drop(log);
+    // `ssh -V`, as OpenSSH says it (`version` in the scenario, else 9.6).
+    if args.iter().any(|a| a == "-V") {
+        eprintln!(
+            "{}",
+            scenario.version.as_deref().unwrap_or("OpenSSH_9.6p1, fake")
+        );
+        std::process::exit(0);
+    }
     let dash = args
         .iter()
         .position(|a| a == "--")
@@ -130,6 +149,9 @@ fn main() {
     eprint!("{}", host.banner);
     if let Some(key) = &host.host_key {
         check_host_key(options, target, key, &host.settings);
+    }
+    if let Some(password) = &host.password {
+        sign_in(options, target, host, password);
     }
     if let Some(refuse) = &host.refuse {
         fail(&refuse.stderr, refuse.code);
@@ -164,6 +186,70 @@ fn main() {
     print!("{}", answer.stdout);
     eprint!("{}", answer.stderr);
     std::process::exit(answer.code);
+}
+
+/// A setting `ssh -G` prints for the host.
+fn setting<'a>(settings: &'a str, name: &str) -> Option<&'a str> {
+    settings
+        .lines()
+        .find_map(|l| l.strip_prefix(name)?.strip_prefix(' '))
+}
+
+/// What `$SSH_ASKPASS` answers to `prompt`; none when it gives nothing.
+fn askpass(prompt: &str) -> Option<String> {
+    let program = std::env::var_os("SSH_ASKPASS")?;
+    let out = std::process::Command::new(program)
+        .arg(prompt)
+        .output()
+        .ok()?;
+    let said = String::from_utf8(out.stdout).ok()?;
+    (out.status.success() && !said.is_empty()).then(|| said.trim_end_matches('\n').to_string())
+}
+
+/// Signs in to a host that has a password, as sshd would.
+fn sign_in(options: &[String], target: &str, host: &Host, password: &str) {
+    let user = setting(&host.settings, "user").unwrap_or("dev");
+    let hostname = setting(&host.settings, "hostname").unwrap_or(target);
+    if option(options, "PubkeyAuthentication") == Some("no") {
+        if let Some(jump) = &host.jump_prompt {
+            // A jump host's prompt: Desk must give it nothing.
+            if askpass(jump).is_some() {
+                fail("fake ssh: a jump host was given a password", 99);
+            }
+        }
+        match askpass(&format!("{user}@{hostname}'s password: ")) {
+            Some(answer) if answer == password => return,
+            _ => fail(
+                &format!("{user}@{hostname}: Permission denied (publickey,password)."),
+                255,
+            ),
+        }
+    }
+    let home = host.exec.as_ref().map(|e| e.home.clone());
+    let keys = home
+        .and_then(|h| std::fs::read_to_string(h.join(".ssh/authorized_keys")).ok())
+        .unwrap_or_default();
+    // As sshd reads a line: options first, perhaps, then the key's type and
+    // base64; a comment line is none.
+    let holds = |line: &str, public: &str| {
+        let mut p = public.split_whitespace();
+        let (Some(t), Some(k)) = (p.next(), p.next()) else {
+            return false;
+        };
+        let w: Vec<&str> = line.split_whitespace().collect();
+        !line.trim_start().starts_with('#') && w.windows(2).any(|f| f[0] == t && f[1] == k)
+    };
+    let offered = options
+        .windows(2)
+        .filter(|w| w[0] == "-i")
+        .filter_map(|w| std::fs::read_to_string(format!("{}.pub", w[1])).ok())
+        .any(|p| keys.lines().any(|k| holds(k, &p)));
+    if !offered {
+        fail(
+            &format!("{user}@{hostname}: Permission denied (publickey,password)."),
+            255,
+        );
+    }
 }
 
 /// The value of `-o <name>=<value>`, if given.

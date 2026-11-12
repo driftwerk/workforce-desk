@@ -7,14 +7,11 @@ import { ActivityList, EMPTY_ACTIVITY, GrantList } from "../computer/Lists";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { HubError, type ComputerActivityPage, type ComputerGrant, type DiskAccess } from "../hub/client";
 import { useDesk } from "../hub/store";
-import { openUrl } from "../platform";
 import { openAgent } from "../rooms/AgentPanel";
 import { useUi } from "../shell/ui";
 import { plainError } from "../ui/plainError";
+import { openPane, useRecheckOnFocus } from "../ui/privacy";
 import "../styles/computer.css";
-
-/** Where macOS lets you allow Full Disk Access. */
-export const FULL_DISK_ACCESS = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
 
 /** Settings → This computer: whether agents may use it at all, how far each
  *  local agent reaches, what is always allowed, and what they did here. */
@@ -57,6 +54,16 @@ export function Computer() {
       .catch(() => setGrants("failed"));
   }, [hub]);
   useEffect(reload, [reload]);
+  // Back from System Settings: read Full Disk Access again, so the banner
+  // goes once it's on.
+  useRecheckOnFocus("fullDiskAccess", disk === "missing" && !!hub, () => undefined, async () => {
+    if (!hub) return false;
+    // The hub not answering says nothing new: the card stays as it was.
+    const now = await hub.diskAccess().catch(() => null);
+    if (now === null || now === "unknown") return false;
+    setDisk(now);
+    return now === "granted";
+  });
   useEffect(() => {
     if (!hub) return;
     hub
@@ -148,7 +155,7 @@ export function Computer() {
           {disk === "missing" && reaching && (
             <div className="computer-banner" aria-label="Full Disk Access">
               <span>macOS keeps Mail, Messages, Safari and other apps’ files from your agents until you allow Full Disk Access.</span>
-              <button type="button" className="btn btn-signal" onClick={() => openUrl(FULL_DISK_ACCESS)}>
+              <button type="button" className="btn btn-signal" onClick={() => void openPane("fullDiskAccess")}>
                 Grant Full Disk Access
               </button>
             </div>

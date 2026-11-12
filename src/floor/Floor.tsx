@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { LocalSetupCard } from "../setup/LocalSetupCard";
 import { SetupFloor } from "../setup/slot";
 import { sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -105,6 +106,7 @@ export function SessionsFloor() {
       </header>
       <RestoreBanner />
       <SetupFloor />
+      <LocalSetupCard />
       {groups.length === 0 ? (
         <p className="empty muted">No sessions yet. Start one with “New session”, or open Claude Code in any terminal and it appears here.</p>
       ) : (

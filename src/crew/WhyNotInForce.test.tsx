@@ -40,7 +40,7 @@ afterEach(cleanup);
 describe("Why the level chosen isn't in force", () => {
   it("fills what Act fully is missing from Desk's suggestions", async () => {
     const r = shown(withPreset(DEFAULT_OVERSIGHT, "full"), true);
-    expect(screen.getByText("Acting as Act: Act fully needs repos to work in and a daily budget.")).toBeTruthy();
+    expect(screen.getByText("Acting as Act: Act fully needs a repo to work in.")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "See Desk’s suggestions" })));
     // Shown first: nothing written until said yes to.
     const found = await screen.findByRole("group", { name: "Desk’s suggestions" });
@@ -56,7 +56,8 @@ describe("Why the level chosen isn't in force", () => {
     const ready = { ...withPreset(DEFAULT_OVERSIGHT, "full"), full: { anywhere: false, repos: ["acme/a"], workflows: [], budgetUsdPerDay: 20 } };
     const r = shown(ready, true, hubWith(day(25)));
     const raise = await screen.findByRole("button", { name: "Raise to $40.00 a day" });
-    expect(screen.getByText("Acting as Act: today’s spend ($25.00) reached its $20.00 daily budget.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Act fully stopped: today’s budget is spent. $25.00 of $20.00 in real money today, so it no longer merges");
+    expect(screen.queryByRole("button", { name: "Clear today’s count" })).toBeNull();
     fireEvent.click(raise);
     expect(r.now().full.budgetUsdPerDay).toBe(40);
     cleanup();
@@ -72,6 +73,24 @@ describe("Why the level chosen isn't in force", () => {
     // In force: nothing to say.
     shown(ready, false, hubWith(day(25)));
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("takes the hub's count of real money over Desk's reckoning, and offers Clear with it", () => {
+    const ready = { ...withPreset(DEFAULT_OVERSIGHT, "full"), full: { anywhere: false, repos: ["acme/a"], workflows: [], budgetUsdPerDay: 200, budgetClearedAt: null } };
+    // Plans' calls at API prices would be over it; the hub counts none of them.
+    const hub = hubWith(day(1000));
+    const r = shown(ready, false, hub);
+    expect(screen.queryByRole("alert")).toBeNull();
+    cleanup();
+    useDesk.setState({ hub, sessions: {} });
+    let now: Oversight = ready;
+    render(<WhyNotInForce o={ready} held budget={{ spentUsd: 210, budgetUsd: 200, spent: true }} onChange={(c) => (now = c(now))} />);
+    const spent = screen.getByRole("alert");
+    expect(spent.textContent).toContain("$210 of $200 in real money today (your plans aren’t counted)");
+    fireEvent.click(screen.getByRole("button", { name: "Clear today’s count" }));
+    expect(typeof now.full.budgetClearedAt).toBe("string");
+    expect(hub.spend).not.toHaveBeenCalled();
+    void r;
   });
 
   it("turns every switch on for Unbound", () => {
