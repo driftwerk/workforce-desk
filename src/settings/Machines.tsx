@@ -14,7 +14,7 @@ import { shortPrint } from "./EditReach";
 import { inApp } from "../platform";
 import { NewSession } from "../session/NewSession";
 import { useHost } from "../shell/host";
-import { CopyButton } from "./EngineBlocks";
+import { ForgetOldKey } from "../machines/KeyActions";
 import { MachineDetail } from "./MachineDetail";
 
 /** This Desk's version; null outside the app or until it's read (`given`
@@ -223,6 +223,7 @@ function MachineRow({
   const blocked = lines.tone === "blocked";
   const look = ready && summary.claudeIn === false ? "blocked" : dotOf(machine.state);
   const changed = keyChanged(machine);
+  const here = thisComputerLower(useHost((h) => h.platform));
   return (
     <li className="machine-row" aria-label={machine.name}>
       {/* Beside its name, not the middle of its steps, while it updates. */}
@@ -235,7 +236,7 @@ function MachineRow({
         </span>
         <span className={`small ${blocked ? "state-blocked" : "muted"}`}>
           {changed
-            ? `${machine.name} shows a different host key from the one this computer knows, so Desk won’t connect. If it was reinstalled, remove its old key, then Reconnect:`
+            ? `${machine.name} shows a different host key from the one ${here} knows, so Desk won’t connect. If it was reinstalled, forget the old key:`
             : lines.first}
         </span>
         {changed && (
@@ -245,10 +246,7 @@ function MachineRow({
                 {[machine.shownKey && `shows ${shortPrint(machine.shownKey.fingerprint)}`, machine.hostKey && `Desk knew ${shortPrint(machine.hostKey.fingerprint)}`].filter(Boolean).join(" · ")}
               </span>
             )}
-            <span className="machine-line">
-              <code className="mono small">{forgetKeyLine(machine)}</code>
-              <CopyButton text={forgetKeyLine(machine)} />
-            </span>
+            <ForgetOldKey machine={machine} native={native} line={forgetKeyLine(machine)} />
           </>
         )}
         {lines.second && <span className="small faint">{lines.second}</span>}

@@ -44,11 +44,19 @@ export type Flow =
   | { at: "trust"; target: string; name: string; fingerprint: string; keyType: string }
   /** Trusting it, then looking again. */
   | { at: "trusting"; target: string; name: string; fingerprint: string }
-  /** Its host key isn't the one this computer knows: refused, with the
-   *  line that removes the old one (`forgetKey`, made natively). */
-  | { at: "changed"; target: string; name: string; fingerprint: string; keyType: string; forgetKey?: string }
-  /** It doesn't take this computer's key, or the key is locked. */
-  | { at: "key"; target: string; name: string; user: string | null; why: "refused" | "locked" }
+  /** Its host key isn't the one this computer knows: refused until the
+   *  person forgets the old one (a native yes showing both), with the line
+   *  that removes it by hand (`forgetKey`, made natively) as a fallback;
+   *  `problem` when forgetting it didn't work. */
+  | { at: "changed"; target: string; name: string; fingerprint: string; keyType: string; forgetKey?: string; problem?: string }
+  /** Forgetting the old key, after the person's native yes. */
+  | { at: "forgetting"; target: string; name: string; fingerprint: string; keyType: string; forgetKey?: string }
+  /** It doesn't take this computer's key, or the key is locked; `problem`
+   *  when signing in with a password or unlocking didn't work. */
+  | { at: "key"; target: string; name: string; user: string | null; why: "refused" | "locked"; problem?: string }
+  /** Desk's own field is asking for the machine's password (`password`:
+   *  Desk then puts its own key there) or the key's passphrase. */
+  | { at: "signingIn"; target: string; name: string; user: string | null; why: "refused" | "locked"; with: "password" | "passphrase" }
   /** Added (once `machine` is known) and being set up; `cancelling` once
    *  the person asked to stop. */
   | {
@@ -87,6 +95,17 @@ export type FlowEvent =
   | { type: "trusted" }
   /** Try again after putting the key there (or unlocking it). */
   | { type: "retry" }
+  /** Sign in with the machine's password, or unlock the key. */
+  | { type: "signIn"; with: "password" | "passphrase" }
+  /** Desk's field answered: done (look again), closed, or why not. */
+  | { type: "keyed" }
+  | { type: "signInCancelled" }
+  | { type: "signInFailed"; message: string }
+  /** Forget the old host key (asked natively), and what came of it. */
+  | { type: "forget" }
+  | { type: "forgotten" }
+  | { type: "forgetCancelled" }
+  | { type: "forgetFailed"; message: string }
   | { type: "added"; machine: MachineId }
   | { type: "setup"; event: SetupEvent }
   | { type: "signedIn"; engine: "claude" | "codex" }
@@ -156,6 +175,33 @@ export const step = (f: Flow, e: FlowEvent): Flow => {
       return f.at === "trusting" ? { at: "checking", target: f.target, name: f.name } : f;
     case "retry":
       return f.at === "key" ? { at: "checking", target: f.target, name: f.name } : f;
+    case "signIn":
+      return f.at === "key" ? { at: "signingIn", target: f.target, name: f.name, user: f.user, why: f.why, with: e.with } : f;
+    case "keyed":
+      return f.at === "signingIn" ? { at: "checking", target: f.target, name: f.name } : f;
+    case "signInCancelled":
+      return f.at === "signingIn" ? { at: "key", target: f.target, name: f.name, user: f.user, why: f.why } : f;
+    case "signInFailed":
+      return f.at === "signingIn" ? { at: "key", target: f.target, name: f.name, user: f.user, why: f.why, problem: e.message } : f;
+    case "forget":
+      return f.at === "changed"
+        ? { at: "forgetting", target: f.target, name: f.name, fingerprint: f.fingerprint, keyType: f.keyType, ...(f.forgetKey ? { forgetKey: f.forgetKey } : {}) }
+        : f;
+    case "forgotten":
+      return f.at === "forgetting" ? { at: "checking", target: f.target, name: f.name } : f;
+    case "forgetCancelled":
+    case "forgetFailed":
+      return f.at === "forgetting"
+        ? {
+            at: "changed",
+            target: f.target,
+            name: f.name,
+            fingerprint: f.fingerprint,
+            keyType: f.keyType,
+            ...(f.forgetKey ? { forgetKey: f.forgetKey } : {}),
+            ...(e.type === "forgetFailed" ? { problem: e.message } : {}),
+          }
+        : f;
     case "cancelling":
       return f.at === "setup" ? { ...f, cancelling: true, cancelProblem: undefined } : f;
     case "cancelFailed":

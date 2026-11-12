@@ -29,6 +29,9 @@ use crate::setup::{self, Person};
 use crate::ssh::{self, SshExe};
 use crate::suggest;
 
+#[path = "fleet_keys.rs"]
+pub mod keys;
+
 /// Where a machine stands, as the page reads it (`readState`): a word, or
 /// `{"failed": {"message": …}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -121,6 +124,10 @@ pub struct Kept {
     /// When Desk last reached it (Unix ms).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_connected: Option<i64>,
+    /// Desk put its own SSH key there (with the person's password once):
+    /// it signs in with that key too, and takes it away when uninstalled.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_key: bool,
 }
 
 /// A machine's host key, as Desk keeps and shows it.
@@ -346,6 +353,17 @@ pub trait Host: Send + Sync + 'static {
     /// A step of uninstalling Desk from a machine moved.
     fn removing(&self, event: &RemoveEvent) {
         let _ = event;
+    }
+    /// Asks the person for the secret `question` names, in Desk's own field
+    /// (never the page), and waits; none when they cancelled.
+    #[cfg(unix)]
+    fn ask_secret(&self, question: &keys::SecretQuestion) -> Option<crate::askpass::Secret> {
+        let _ = question;
+        None
+    }
+    /// Desk itself, to run as ssh's askpass; none where it can't be.
+    fn askpass(&self) -> Option<PathBuf> {
+        None
     }
 }
 
@@ -742,6 +760,9 @@ impl Fleet {
         let ids: Vec<String> = {
             let mut rows = self.rows();
             for k in kept {
+                if k.own_key {
+                    self.ssh.uses_own_key(k.machine.target.as_str(), true);
+                }
                 rows.insert(
                     k.machine.id.to_string(),
                     Row::new(k, State::Connecting, true, false),
@@ -1045,8 +1066,11 @@ impl Fleet {
     }
 
     /// Trusts `target`'s host key (`machine_trust`), when it is the one with
-    /// `fingerprint` and the person says yes to it natively. Only for an
-    /// address the person said yes to looking at. Blocking.
+    /// `fingerprint` (read again as it is written). Only for an address the
+    /// person said yes to adding natively, in the last few minutes: that
+    /// one question is the approval (it says Desk trusts a new machine's
+    /// key), not a second one. A changed key is never trusted here
+    /// ([`Fleet::forget_key`] asks for that). Blocking.
     pub fn trust(&self, target: &str, fingerprint: &str) -> Result<(), String> {
         let machine = Self::looked_at(target)?;
         if !self.admitted.has(machine.target.as_str()) {
@@ -1056,11 +1080,16 @@ impl Fleet {
         // Nothing connects to a machine whose config would carry forwards.
         ssh::no_forwards(&machine, &ssh::Settings::parse(&said))?;
         let files = Files::parse(&said, &self.home);
-        let confirm = hostkey::Gated {
-            gate: &self.trust_gate,
-            confirm: self.trust.as_ref(),
-        };
-        if let Some(key) = hostkey::trust(&self.ssh, &machine, &files, fingerprint, &confirm)? {
+        if let Some(key) = hostkey::trust(&self.ssh, &machine, &files, fingerprint, None)? {
+            self.kept_trusted(&machine, key);
+        }
+        Ok(())
+    }
+
+    /// `key` is the one Desk trusted for `machine` (at its address): kept
+    /// for the machine it is added as, and for any of Desk's there now.
+    fn kept_trusted(&self, machine: &Machine, key: desk_core::machine::HostKey) {
+        {
             let kept = KeptKey {
                 kind: key.kind(),
                 fingerprint: key.fingerprint,
@@ -1083,7 +1112,6 @@ impl Fleet {
                 self.set_now(&id, |n| n.shown_key = None);
             }
         }
-        Ok(())
     }
 
     /// This computer's public SSH key (`machine_public_key`): for the
@@ -1167,6 +1195,7 @@ impl Fleet {
                         system: None,
                         host_key: trusted,
                         last_connected: None,
+                        own_key: self.ssh.has_own_key(machine.target.as_str()),
                     },
                     State::Adding,
                     false,
@@ -1401,15 +1430,19 @@ impl Fleet {
     fn missed(machine: &Machine, missed: Missed) -> String {
         match missed {
             Missed::Key(hostkey::KeyTrouble::Changed) => format!(
-                "{}'s host key isn't the one your Mac knows. Desk won't connect until you've checked why and fixed known_hosts.",
+                "{} shows a different host key from the one {} knows, so Desk won't connect. If it was reinstalled, Forget the old key on its page.",
+                machine.name,
+                crate::this_computer()
+            ),
+            Missed::Key(hostkey::KeyTrouble::Unknown) => format!(
+                "{} doesn't know {}'s host key yet.",
+                ssh::capital(crate::this_computer()),
                 machine.name
             ),
-            Missed::Key(hostkey::KeyTrouble::Unknown) => {
-                format!("Your Mac doesn't know {}'s host key yet.", machine.name)
-            }
             Missed::Refused => format!(
-                "{} turned your SSH key away, or it needs unlocking first (ssh-add).",
-                machine.name
+                "{} turned {}'s SSH key away. Remove it and add it again to sign in with your password once.",
+                machine.name,
+                crate::this_computer()
             ),
             Missed::Unreachable(m) => m,
         }
@@ -2554,7 +2587,8 @@ impl Fleet {
                 Some(hostkey::KeyTrouble::Unknown) => hostkey::learn(&at.files, &at.line)?,
                 Some(hostkey::KeyTrouble::Changed) => {
                     return Err(format!(
-                        "Your known_hosts has another key for {t}. Desk won't change it: remove that line (ssh-keygen -R), then try again."
+                        "{} knows another host key for {t}, so Desk won't switch to it.",
+                        ssh::capital(crate::this_computer())
                     ));
                 }
             }
@@ -2783,6 +2817,11 @@ impl Fleet {
             }
         }
         say(RemoveStep::Forget, StepState::Running, None, None);
+        // Desk's own key goes last: it may be what reached it until now.
+        #[cfg(unix)]
+        if self.rows().get(id).is_some_and(|r| r.kept.own_key) {
+            self.take_own_key_away(id, &machine);
+        }
         drop(held);
         self.remove(id)?;
         say(RemoveStep::Forget, StepState::Done, None, None);
@@ -2900,6 +2939,7 @@ mod tests {
             system: None,
             host_key: None,
             last_connected: None,
+            own_key: false,
         }
     }
 

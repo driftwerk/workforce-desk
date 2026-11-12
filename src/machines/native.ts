@@ -48,6 +48,11 @@ export interface Probe {
   forgetKey?: string;
 }
 
+/** What a step that asked for a password or passphrase in Desk's own field
+ *  did: done (`linger` as it is there now, when it was asked about), or the
+ *  field was closed and nothing was sent. */
+export type Unlocked = { kind: "done"; linger?: boolean } | { kind: "cancelled" };
+
 /** One step of setting a machine up, after it's been added. */
 export type SetupStep = "connect" | "install" | "engines";
 
@@ -134,6 +139,19 @@ export interface MachineNative {
   /** Adds the host key with `fingerprint` to this computer's known hosts,
    *  after the native confirm; refused when the machine now shows another. */
   trust(target: string, fingerprint: string): Promise<void>;
+  /** "Sign in with {name}'s password": Desk's own field (a window of the
+   *  native side's, never this page) asks for it; Desk puts its own key
+   *  there and turns linger on with it. The page never sees the password. */
+  installKey(target: string): Promise<Unlocked>;
+  /** "Unlock your key": Desk's own field asks for the passphrase of the key
+   *  ssh would use, which is added to the SSH agent; never stored. */
+  unlockKey(target: string): Promise<Unlocked>;
+  /** "Forget the old key": after a native yes showing the old and new
+   *  fingerprints, the old one goes from known_hosts and the one with
+   *  `fingerprint` is trusted. False when the person said no. */
+  forgetKey(target: string, fingerprint: string): Promise<boolean>;
+  /** "Turn it on with {name}'s password": `sudo` turns linger on there. */
+  lingerWithPassword(id: MachineId): Promise<Unlocked>;
   /** This computer's public SSH key, to put in the machine's
    *  `~/.ssh/authorized_keys`; null when it has none. */
   publicKey(): Promise<string | null>;
@@ -203,6 +221,10 @@ export const native: MachineNative = {
   probe: (target) => invoke<Probe>("machine_probe", { target }),
   trust: (target, fingerprint) => invoke<void>("machine_trust", { target, fingerprint }),
   publicKey: () => invoke<string | null>("machine_public_key"),
+  installKey: (target) => invoke<Unlocked>("machine_install_key", { target }),
+  unlockKey: (target) => invoke<Unlocked>("machine_unlock_key", { target }),
+  forgetKey: (target, fingerprint) => invoke<boolean>("machine_forget_key", { target, fingerprint }),
+  lingerWithPassword: (id) => invoke<Unlocked>("machine_linger_with_password", { id }),
   add: (target, name) => invoke<MachineId>("machine_add", { target, name }),
   setup: (f) => subscribe(listen<SetupEvent>("machine-setup", (e) => f(e.payload))),
   remove: (id) => invoke<void>("machine_remove", { id }),

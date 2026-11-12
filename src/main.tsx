@@ -18,6 +18,8 @@ import { mainUi } from "./restore/ui";
 import { followRooms, roomOrder, ROOMS_PREFIX } from "./rooms/order";
 import { boardOrder } from "./board/order";
 import { App } from "./shell/App";
+import { SECRET_WINDOW, SecretWindow } from "./machines/SecretWindow";
+import { thisWindow } from "./grids/windows";
 import { loadHost } from "./shell/host";
 import { DeskRichHost } from "./shell/richHost";
 import "./styles/app.css";
@@ -43,13 +45,19 @@ function Ready() {
   return null;
 }
 
+// Desk's own field for a machine's password is a window of its own: its
+// theme, and nothing else of the app.
+const secret = thisWindow() === SECRET_WINDOW;
+
 // Grids, the rooms' order (and the boards', under the sidebar's), how far each conversation has been drained and
 // the machines' sessions in the sidebar are kept with the rest of what Desk
 // restores.
-void deskState.register(GRID_PREFIX);
-void deskState.register(ROOMS_PREFIX);
-void deskState.register(DRAIN_PREFIX);
-void deskState.register(SIDEBAR_PREFIX);
+if (!secret) {
+  void deskState.register(GRID_PREFIX);
+  void deskState.register(ROOMS_PREFIX);
+  void deskState.register(DRAIN_PREFIX);
+  void deskState.register(SIDEBAR_PREFIX);
+}
 
 // A detached grid's window shows that grid alone (see grids/GridWindow).
 const grid = detachedGrid();
@@ -59,7 +67,17 @@ const grid = detachedGrid();
 // What this computer is (its platform, where the backend runs) is read then
 // too, so every screen words itself for it from the start.
 // The theme too: the window first shows in the one chosen.
-void Promise.all([
+if (secret)
+  void paintSavedTheme()
+    .catch(() => undefined)
+    .then(() =>
+      createRoot(document.getElementById("root")!).render(
+        <StrictMode>
+          <SecretWindow />
+        </StrictMode>,
+      ),
+    );
+else void Promise.all([
   restoreBeforeRender(grid ? [] : [mainUi, roomOrder, boardOrder, machineSessions]),
   loadHost().catch(() => undefined),
   paintSavedTheme().catch(() => undefined),
