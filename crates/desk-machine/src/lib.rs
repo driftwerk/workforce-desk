@@ -33,6 +33,7 @@ pub mod link;
 #[cfg(unix)]
 pub mod own_key;
 pub mod probe;
+pub mod secret;
 pub mod setup;
 pub mod ssh;
 pub mod suggest;

@@ -340,6 +340,8 @@ const MAX_QUIET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 pub struct TrustGate {
     quiet: std::time::Duration,
     asking: std::sync::Mutex<Asking>,
+    /// What it asks about, as its refusals say it ("Trusting a machine").
+    what: &'static str,
 }
 
 #[derive(Default)]
@@ -360,6 +362,16 @@ impl TrustGate {
         Self {
             quiet,
             asking: Default::default(),
+            what: "Trusting a machine",
+        }
+    }
+
+    /// The same gate for another kind of question, `what` naming it
+    /// ("Asking for a machine's password").
+    pub fn named(what: &'static str) -> Self {
+        Self {
+            what,
+            ..Self::default()
         }
     }
 
@@ -373,7 +385,10 @@ impl TrustGate {
         {
             let mut a = self.lock();
             if a.open {
-                return Err("Desk is already asking about trusting a machine.".into());
+                return Err(format!(
+                    "Desk is already asking you something about a machine: {} waits until you answer it.",
+                    self.what.to_lowercase()
+                ));
             }
             if let Some(left) = a
                 .quiet_until
@@ -381,7 +396,8 @@ impl TrustGate {
                 .filter(|l| !l.is_zero())
             {
                 return Err(format!(
-                    "Trusting a machine was cancelled. Try again in {} seconds.",
+                    "{} was cancelled. Try again in {} seconds.",
+                    self.what,
                     left.as_secs().max(1)
                 ));
             }

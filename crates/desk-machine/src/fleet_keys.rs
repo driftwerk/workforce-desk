@@ -78,6 +78,20 @@ pub enum Unlocked {
 
 #[cfg(unix)]
 impl Fleet {
+    /// Asks the person in Desk's own field, through its gate: one at a
+    /// time, and refused for a while after a Cancel, the wait doubling.
+    fn ask_secret(
+        &self,
+        question: &SecretQuestion,
+    ) -> Result<Option<crate::askpass::Secret>, String> {
+        let mut got = None;
+        self.secret_gate.ask(|| {
+            got = self.host.ask_secret(question);
+            got.is_some()
+        })?;
+        Ok(got)
+    }
+
     fn askpass_program(&self) -> Result<std::path::PathBuf, String> {
         self.host
             .askpass()
@@ -124,8 +138,8 @@ impl Fleet {
         let prompted = Prompted {
             user: settings.user.clone().unwrap_or_default(),
             hostname: settings
-                .hostname
-                .clone()
+                .prompted_host()
+                .map(str::to_string)
                 .unwrap_or_else(|| probe::name_of(machine.target.as_str())),
             direct: settings.via.is_none(),
         };
@@ -139,7 +153,7 @@ impl Fleet {
                 key: None,
                 problem: problem.take(),
             };
-            let Some(password) = self.host.ask_secret(&question) else {
+            let Some(password) = self.ask_secret(&question)? else {
                 return Ok(Unlocked::Cancelled);
             };
             let step = ssh::Step::new(Default::default(), INSTALL_WITHIN);
@@ -179,7 +193,7 @@ impl Fleet {
                 key: Some(key.to_string_lossy().into_owned()),
                 problem: problem.take(),
             };
-            let Some(passphrase) = self.host.ask_secret(&question) else {
+            let Some(passphrase) = self.ask_secret(&question)? else {
                 return Ok(Unlocked::Cancelled);
             };
             match own_key::add_to_agent(&key, passphrase, &askpass) {
@@ -277,7 +291,7 @@ impl Fleet {
             key: None,
             problem: None,
         };
-        let Some(password) = self.host.ask_secret(&question) else {
+        let Some(password) = self.ask_secret(&question)? else {
             return Ok(Unlocked::Cancelled);
         };
         let step = ssh::Step::new(Default::default(), INSTALL_WITHIN);

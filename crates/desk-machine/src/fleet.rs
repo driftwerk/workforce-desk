@@ -561,6 +561,10 @@ pub struct Fleet {
     trust: Arc<dyn TrustConfirm>,
     /// One trust question at a time, none for a while after a Cancel.
     trust_gate: hostkey::TrustGate,
+    /// Desk's own password field the same: one at a time, and none for a
+    /// while after a Cancel (page script can't keep it popping up).
+    #[cfg_attr(not(unix), allow(dead_code))]
+    secret_gate: hostkey::TrustGate,
     timing: Timing,
     rows: Mutex<BTreeMap<String, Row>>,
     /// Held from a save's snapshot of the rows through its rename, so an
@@ -723,6 +727,7 @@ impl Fleet {
             admitted,
             trust,
             trust_gate: hostkey::TrustGate::default(),
+            secret_gate: hostkey::TrustGate::named("Asking for a password"),
             timing,
             rows: Mutex::default(),
             saving: Mutex::default(),
@@ -2593,6 +2598,11 @@ impl Fleet {
                 }
             }
             self.update_kept(id, |k| k.machine.target = t.clone());
+            // Desk's own key goes with it: the same machine takes it.
+            if self.rows().get(id).is_some_and(|r| r.kept.own_key) {
+                self.ssh.uses_own_key(t.as_str(), true);
+                self.ssh.uses_own_key(machine.target.as_str(), false);
+            }
             self.note(
                 id,
                 LogKind::Info,

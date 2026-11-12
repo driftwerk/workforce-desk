@@ -12,8 +12,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use desk_machine::askpass::Secret;
 use desk_machine::fleet::keys::SecretQuestion;
+use desk_machine::secret::Secret;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use zeroize::Zeroizing;
 
@@ -36,6 +36,7 @@ pub struct SecretField {
     asking: Mutex<Option<Asking>>,
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 impl SecretField {
     /// Opens the field for `question` and waits for the person; none when
     /// they cancelled or closed it, or another question is open. Blocking:
@@ -104,6 +105,7 @@ impl SecretField {
 }
 
 /// Makes the field's window, centred over Desk, in front.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn open<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     title: &str,

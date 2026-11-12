@@ -947,6 +947,61 @@ fn a_machine_that_turns_this_computers_key_away_takes_desks_with_its_password_on
 }
 
 #[test]
+fn desks_own_key_goes_with_a_machine_reached_at_another_address() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let host = |target: &str| {
+        json!({
+            "target": target,
+            "settings": format!(
+                "user dev\nhostname 203.0.113.7\nport 22\nuserknownhostsfile {}\n",
+                b.known_hosts().display()
+            ),
+            "exec": {"home": b.home(), "path": b.dir.path().join("fakebin")},
+            "host_key": KEY,
+            "password": "pw",
+        })
+    };
+    let say = |hosts: Vec<Value>| {
+        std::fs::write(
+            b.dir.path().join("scenario.json"),
+            json!({"log": b.dir.path().join("calls.jsonl"), "hosts": hosts}).to_string(),
+        )
+        .unwrap()
+    };
+    say(vec![host("devbox")]);
+    std::fs::write(
+        b.known_hosts(),
+        format!("devbox {KEY}\n203.0.113.7 {KEY}\n"),
+    )
+    .unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    r.fleet.probe("devbox").unwrap();
+    r.said.typed.answers.lock().unwrap().push_back("pw".into());
+    r.fleet.install_key("devbox").unwrap();
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    until("its key kept", || r.fleet.list()[0].host_key.is_some());
+
+    say(vec![host("devbox"), host("devbox-new")]);
+    let done = r.fleet.edit(&id, Some("devbox-new"), None).unwrap();
+    assert_eq!(
+        serde_json::to_value(&done).unwrap(),
+        json!({"kind": "done"})
+    );
+    // Reached at the new address with Desk's key: it gets in there too.
+    until("ready at the new address", || {
+        r.fleet.state(&id) == Some(State::Ready)
+            && b.calls()
+                .iter()
+                .any(|c| c.iter().any(|a| a == "devbox-new") && c.iter().any(|a| a == "-i"))
+    });
+    let kept = std::fs::read_to_string(b.dir.path().join("mac/machines.json")).unwrap();
+    assert!(kept.contains("\"own_key\": true"), "{kept}");
+}
+
+#[test]
 fn a_jump_hosts_prompt_gets_nothing_and_a_machine_that_takes_no_password_is_said() {
     let b = Box_::new();
     b.say_full(
@@ -976,6 +1031,11 @@ fn a_jump_hosts_prompt_gets_nothing_and_a_machine_that_takes_no_password_is_said
     // Closing Desk's field sends nothing.
     let none = r.fleet.install_key("devbox").unwrap();
     assert_eq!(serde_json::to_value(&none).unwrap()["kind"], "cancelled");
+    // And it can't be made to pop up again straight away.
+    let asked = r.said.typed.asked.lock().unwrap().len();
+    let quiet = r.fleet.install_key("devbox").unwrap_err();
+    assert!(quiet.contains("was cancelled. Try again in"), "{quiet}");
+    assert_eq!(r.said.typed.asked.lock().unwrap().len(), asked, "not asked");
 }
 
 #[test]

@@ -450,6 +450,17 @@ pub struct Settings {
     pub via: Option<String>,
     /// Forwards the config sets for it, by name (`localforward`, …).
     pub forwards: Vec<String>,
+    /// The name its host key is kept under, when the config sets one:
+    /// what ssh names the machine by in its password prompt too.
+    pub host_key_alias: Option<String>,
+}
+
+impl Settings {
+    /// The host ssh names in its password prompt (`user@<this>'s
+    /// password:`): its `HostKeyAlias`, else its `HostName`.
+    pub fn prompted_host(&self) -> Option<&str> {
+        self.host_key_alias.as_deref().or(self.hostname.as_deref())
+    }
 }
 
 impl Settings {
@@ -467,6 +478,7 @@ impl Settings {
             port: value("port"),
             via: value("proxyjump").or_else(|| value("proxycommand")),
             forwards: desk_core::machine::config_forwards(said),
+            host_key_alias: value("hostkeyalias"),
         }
     }
 }
