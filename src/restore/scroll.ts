@@ -199,6 +199,13 @@ const firstInSight = (pane: HTMLElement): Anchor | null => {
   return null;
 };
 
+/** The row of message `id` in `pane`. */
+const messageRow = (pane: HTMLElement, id: string): HTMLElement | null =>
+  pane.querySelector<HTMLElement>(`[data-message-id="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&")}"]`);
+
+/** How far up you scroll to leave the newest message while it grows. */
+const LEAVE_PX = 4;
+
 /** Whether `pane` is at (or within reach of) its newest message. */
 const nearEnd = (pane: HTMLElement): boolean => pane.scrollHeight - pane.scrollTop - pane.clientHeight <= AT_NEWEST_PX;
 
@@ -225,15 +232,18 @@ export function useStayPut(place: string | null, settled: boolean) {
   const settledNow = useRef(settled);
   settledNow.current = settled;
 
+  // Where the pane was last, by Desk or you: a scroll above it is up.
+  const lastTop = useRef(0);
   const write = (el: HTMLElement, top: number) => {
     el.scrollTop = top;
     ours.current = el.scrollTop;
+    lastTop.current = el.scrollTop;
   };
   const keep = useCallback(() => {
     const el = node.current;
     if (!el) return;
     if (waiting.current) {
-      if ([...el.querySelectorAll<HTMLElement>("[data-message-id]")].some((m) => m.dataset.messageId === waiting.current!.id)) {
+      if (messageRow(el, waiting.current.id)) {
         held.current = waiting.current;
         atEnd.current = false;
         waiting.current = null;
@@ -243,8 +253,13 @@ export function useStayPut(place: string | null, settled: boolean) {
     if (atEnd.current) return write(el, el.scrollHeight);
     const h = held.current;
     if (!h) return;
-    const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find((m) => m.dataset.messageId === h.id);
-    if (!row) return;
+    const row = messageRow(el, h.id);
+    // Its message gone (a kept copy took its place, under another id): what's
+    // in sight now is held from here on.
+    if (!row) {
+      held.current = firstInSight(el);
+      return;
+    }
     const off = row.getBoundingClientRect().top - el.getBoundingClientRect().top - h.offset;
     if (Math.abs(off) >= 1) write(el, el.scrollTop + off);
   }, []);
@@ -279,24 +294,35 @@ export function useStayPut(place: string | null, settled: boolean) {
       node.current = el;
       if (!el) return;
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const save = () => {
+        timer = undefined;
+        if (place) useUi.getState().setAnchor(place, atEnd.current ? null : held.current);
+      };
       const onScroll = () => {
         if (ours.current !== null && Math.abs(el.scrollTop - ours.current) <= 1) return;
         ours.current = null;
-        // Yours: where you are now is where to stay.
+        // Yours: where you are now is where to stay. Any scroll up leaves
+        // the newest message, however near it; back within reach, you're
+        // at it again.
         waiting.current = null;
-        atEnd.current = nearEnd(el);
+        const up = el.scrollTop < lastTop.current - LEAVE_PX;
+        lastTop.current = el.scrollTop;
+        atEnd.current = !up && nearEnd(el);
         held.current = atEnd.current ? null : firstInSight(el);
         setAway(!atEnd.current);
-        if (!place) return;
         clearTimeout(timer);
-        timer = setTimeout(() => useUi.getState().setAnchor(place, atEnd.current ? null : held.current), SETTLE_MS);
+        timer = setTimeout(save, SETTLE_MS);
       };
       const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => keep());
       // The pane itself resizing: the composer, or its queue, taking room.
       ro?.observe(el);
       el.addEventListener("scroll", onScroll, { passive: true });
       offScroll.current = () => {
-        clearTimeout(timer);
+        // A place not saved yet is saved as the pane goes (another tab).
+        if (timer !== undefined) {
+          clearTimeout(timer);
+          save();
+        }
         ro?.disconnect();
         el.removeEventListener("scroll", onScroll);
       };

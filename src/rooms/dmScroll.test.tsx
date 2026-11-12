@@ -413,6 +413,47 @@ describe("a DM scrolled up", () => {
   });
 });
 
+describe("a DM as its live messages become the hub's copies", () => {
+  it("doesn't count a reply you'd seen as new when its kept copy takes its place", async () => {
+    const s = await open();
+    act(() => type("two things"));
+    const ref = s.chats[0]!.turn_ref as string;
+    await streams(s, ref, "a1", ["first"]);
+    scrollTo(600);
+    // The turn ends and the hub's copy of the reply (another id, its time)
+    // comes back with the conversation.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              messages: [...kept20(), { id: "kept-a1", from: "assistant", text: "first", at: new Date(Date.now() + 5000).toISOString() }],
+              more: false,
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+    await ends(s, ref, "a1");
+    await vi.waitFor(() => expect(rows(pane).some((r) => r.dataset.messageId === "kept-a1")).toBe(true));
+    const pill = screen.getByRole("button", { name: /Jump to latest/ });
+    expect(pill.textContent).not.toMatch(/new/);
+  });
+
+  it("leaves the end on any scroll up while a reply grows, however small", async () => {
+    const s = await open();
+    act(() => type("and now?"));
+    await streams(s, s.chats[0]!.turn_ref as string, "a1", ["one"]);
+    scrollTo(pane.scrollTop - 30);
+    const was = offsetOf("k19");
+    tall.set("a1", 400);
+    resized();
+    expect(offsetOf("k19")).toBe(was);
+    expect(atEnd()).toBe(false);
+  });
+});
+
 describe("coming back to a DM", () => {
   it("opens at a New line before what you haven't read", async () => {
     useReads.setState({ dms: { [KEY]: { at: at(15), message: "k15" } } });

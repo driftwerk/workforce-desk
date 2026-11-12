@@ -51,6 +51,9 @@ import type { ReadPoint } from "../hub/types";
 
 const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act", full: "Act fully" };
 
+/** Who said a message and what, as one key. */
+const saidKey = (m: ChatMessage): string => `${m.role}\u0000${m.content.trim()}`;
+
 /** A message's time in ms; 0 when it has none. */
 const ms = (iso: string): number => Date.parse(iso) || 0;
 
@@ -275,11 +278,13 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   }
   if (!stay.away) {
     leftAt.current = shown.reduce((t, m) => Math.max(t, ms(m.at)), 0);
-    seenThen.current = new Set(shown.map((m) => m.id));
+    // By id and by what it says: a kept copy that takes a live message's
+    // place (another id, the hub's time) isn't new.
+    seenThen.current = new Set(shown.flatMap((m) => [m.id, saidKey(m)]));
   }
   // Only what the agent said counts: not what you sent, nor your queue
   // going as a message.
-  const arrived = stay.away ? shown.filter((m) => m.role === "assistant" && !seenThen.current.has(m.id) && ms(m.at) >= leftAt.current).length : 0;
+  const arrived = stay.away ? shown.filter((m) => m.role === "assistant" && !seenThen.current.has(m.id) && !seenThen.current.has(saidKey(m)) && ms(m.at) >= leftAt.current).length : 0;
 
   const chat = tab !== "settings" && !((tab === "files" || tab === "access" || tab === "connectors") && local);
   return (
@@ -291,16 +296,12 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       aria-label={`Conversation with ${agent.name}`}
       {...(chat ? drop.handlers : {})}
       onKeyDown={(e) => {
-        // End goes to the newest message, from anywhere in the chat but a
-        // field with something typed in it.
+        // End goes to the newest message: not from a field (where it moves
+        // the caret), but from the composer when nothing's typed in it.
         if (tab !== "chat" || e.key !== "End" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
         const t = e.target;
-        if (
-          t instanceof Element &&
-          t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])") &&
-          (t as HTMLTextAreaElement).value !== ""
-        )
-          return;
+        const field = t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+        if (field && !(t instanceof HTMLTextAreaElement && t.closest("[data-composer]") && t.value === "")) return;
         e.preventDefault();
         stay.toLatest();
       }}
