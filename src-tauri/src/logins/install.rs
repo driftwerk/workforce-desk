@@ -37,7 +37,33 @@ impl Plan {
             Plan::Chatgpt => "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
         }
     }
+
+    /// The other ways each one's own docs give, tried in turn when the
+    /// installer can't be downloaded: npm into `~/.local` (no sudo; its
+    /// `bin` is where Desk looks), then Homebrew. Each exits 127 when its
+    /// tool isn't there, and is passed over.
+    fn alternatives(self) -> [(&'static str, String); 2] {
+        let (package, cask) = match self {
+            Plan::Claude => ("@anthropic-ai/claude-code", "claude-code"),
+            Plan::Chatgpt => ("@openai/codex", "codex"),
+        };
+        [
+            (
+                "npm",
+                format!(
+                    "command -v npm >/dev/null 2>&1 || exit 127; npm install -g --prefix \"$HOME/.local\" {package}"
+                ),
+            ),
+            (
+                "Homebrew",
+                format!("command -v brew >/dev/null 2>&1 || exit 127; brew install --cask {cask}"),
+            ),
+        ]
+    }
 }
+
+/// The exit code a way to install gives when its tool isn't there.
+const NOT_THERE: i32 = 127;
 
 /// Whether the plan's CLI can be found where the backend runs: on the
 /// login PATH or in `~/.local/bin`, where both installers put it.
@@ -60,6 +86,9 @@ pub enum Progress {
         command: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         hint: Option<String>,
+        /// What the installer last printed, for Details.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<String>,
     },
 }
 
@@ -69,6 +98,7 @@ impl Progress {
             message,
             command: None,
             hint: None,
+            details: None,
         }
     }
 }
@@ -85,23 +115,19 @@ fn offline(code: Option<i32>) -> bool {
     matches!(code, Some(6 | 7 | 28 | 35 | 52 | 56))
 }
 
-/// What to tell the person when the installer stops.
-fn failure(plan: Plan, code: Option<i32>, last: &str) -> String {
+/// What to tell the person when the installer stops. What it last said
+/// goes under Details, never in the sentence.
+fn failure(plan: Plan, code: Option<i32>, _last: &str) -> String {
     if offline(code) {
         return format!(
             "Couldn't download {}. Check this computer is online and try again.",
             plan.cli_name()
         );
     }
-    let last = last.trim();
-    if last.is_empty() {
-        format!(
-            "{}'s installer stopped before it finished.",
-            plan.cli_name()
-        )
-    } else {
-        format!("{}'s installer stopped: {last}", plan.cli_name())
-    }
+    format!(
+        "{}'s installer stopped before it finished.",
+        plan.cli_name()
+    )
 }
 
 /// How long one run of an installer may take before it is stopped.
@@ -175,9 +201,20 @@ impl Installs {
                 }
                 break;
             }
+            // Still not there: the other ways the docs give, before Desk
+            // hands out a command to run by hand. Not when offline, where
+            // they'd fail the same way.
+            let offline_now = matches!(&outcome.status, Ok(s) if offline(s.code()));
+            if !outcome.ok()
+                && !offline_now
+                && let Some(other) = other_ways(&backend, plan, &report)
+            {
+                outcome = other;
+            }
             running.lock().expect("installs").retain(|p| *p != plan);
             let by_hand =
                 !outcome.ok() && (outcome.timed_out || probe::is_download_failure(&outcome.last));
+            let last = outcome.last.trim().to_string();
             let mut progress = match &outcome.status {
                 _ if outcome.timed_out => Progress::failed(format!(
                     "{}'s installer didn't finish within {} minutes.",
@@ -195,6 +232,9 @@ impl Installs {
                 ),
                 Err(e) => Progress::failed(failure(plan, None, e)),
             };
+            if let Progress::Failed { details, .. } = &mut progress {
+                *details = (!last.is_empty()).then_some(last);
+            }
             if let (true, Progress::Failed { command, hint, .. }) = (by_hand, &mut progress) {
                 *command = Some(plan.installer().to_string());
                 *hint = match &backend.host {
@@ -206,6 +246,39 @@ impl Installs {
         });
         Ok(())
     }
+}
+
+/// Tries `plan`'s other ways to install in turn: the first that installs
+/// it, else the last that was there and failed; none when no other way's
+/// tool is there.
+fn other_ways(
+    backend: &Backend,
+    plan: Plan,
+    report: &(impl Fn(Progress) + Clone + Send + 'static),
+) -> Option<Outcome> {
+    let mut tried = None;
+    for (name, way) in plan.alternatives() {
+        let Ok(child) = spawn_script(backend, &format!("{}{way}", clear_dead_link(plan))) else {
+            continue;
+        };
+        report(Progress::Running {
+            line: format!("Trying {name} instead…"),
+        });
+        let outcome = drain(child, report, INSTALL_DEADLINE);
+        if passed_over(&outcome) {
+            continue;
+        }
+        if outcome.ok() && installed(backend, plan) {
+            return Some(outcome);
+        }
+        tried = Some(outcome);
+    }
+    tried
+}
+
+/// A way whose tool isn't there.
+fn passed_over(outcome: &Outcome) -> bool {
+    matches!(&outcome.status, Ok(s) if s.code() == Some(NOT_THERE))
 }
 
 fn script(plan: Plan) -> String {
@@ -228,7 +301,11 @@ fn clear_dead_link(plan: Plan) -> String {
 }
 
 fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
-    let c = cli::installer(backend, &script(plan))?;
+    spawn_script(backend, &script(plan))
+}
+
+fn spawn_script(backend: &Backend, script: &str) -> eyre::Result<std::process::Child> {
+    let c = cli::installer(backend, script)?;
     let mut command = c.command();
     deadline::isolate(&mut command);
     Ok(command
@@ -331,7 +408,8 @@ mod tests {
         );
         assert_eq!(
             failure(Plan::Chatgpt, Some(1), "  Unsupported architecture  "),
-            "Codex's installer stopped: Unsupported architecture"
+            "Codex's installer stopped before it finished.",
+            "what it printed is for Details"
         );
         assert_eq!(
             failure(Plan::Chatgpt, Some(1), ""),
@@ -361,6 +439,7 @@ mod tests {
             message: "The download stalled.".into(),
             command: Some(Plan::Claude.installer().into()),
             hint: Some("Run it in Ubuntu (WSL).".into()),
+            details: Some("curl: (56) Recv failure".into()),
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["state"], "failed");
@@ -410,6 +489,59 @@ mod tests {
         assert!(
             script(Plan::Claude)
                 .ends_with("set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash")
+        );
+    }
+
+    #[test]
+    fn each_cli_has_its_docs_other_ways_npm_into_home_then_homebrew() {
+        let [npm, brew] = Plan::Claude.alternatives();
+        assert_eq!(npm.0, "npm");
+        assert!(
+            npm.1
+                .ends_with(r#"npm install -g --prefix "$HOME/.local" @anthropic-ai/claude-code"#)
+        );
+        assert_eq!(brew.0, "Homebrew");
+        assert!(brew.1.ends_with("brew install --cask claude-code"));
+        let [npm, brew] = Plan::Chatgpt.alternatives();
+        assert!(npm.1.ends_with("@openai/codex"));
+        assert!(brew.1.ends_with("brew install --cask codex"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_way_whose_tool_isnt_there_is_passed_over_and_one_that_is_runs() {
+        let bin = tempfile::tempdir().unwrap();
+        let run = |path: &str| {
+            let [(_, npm), _] = Plan::Claude.alternatives();
+            let mut command = std::process::Command::new("/bin/bash");
+            command
+                .args(["-c", &npm])
+                .env("PATH", path)
+                .env("HOME", bin.path())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            drain(
+                command.spawn().unwrap(),
+                &|_: Progress| {},
+                std::time::Duration::from_secs(10),
+            )
+        };
+        // No npm on PATH: passed over, never a failure of its own.
+        let none = run(bin.path().to_str().unwrap());
+        assert!(passed_over(&none));
+        // A stand-in npm that says what it was asked.
+        let npm = bin.path().join("npm");
+        std::fs::write(&npm, "#!/bin/sh\necho \"npm $*\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let ran = run(&format!("{}:/usr/bin:/bin", bin.path().display()));
+        assert!(ran.ok() && !passed_over(&ran));
+        assert_eq!(
+            ran.last,
+            format!(
+                "npm install -g --prefix {}/.local @anthropic-ai/claude-code",
+                bin.path().display()
+            )
         );
     }
 
