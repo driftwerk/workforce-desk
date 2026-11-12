@@ -6,7 +6,6 @@ import { BrainDialog } from "../providers/BrainDialog";
 import { useProviderList } from "../providers/store";
 import { useSettings } from "../settings/store";
 import { Dialog } from "../ui/Dialog";
-import { plainError } from "../ui/plainError";
 import { BrainCard } from "./BrainCard";
 import { brainReady, newAgentBrain, type Brain } from "./brain";
 import { PLAN_OF, type Provider } from "../hub/providers";
@@ -14,7 +13,7 @@ import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../setti
 import { accountsOf, freeName, useAccounts } from "../engines/accounts";
 import { useProviders } from "../providers/store";
 import { useUi } from "../shell/ui";
-import { createLocalAgent, setAgentVoice } from "./local";
+import { createLocalAgent, NotSetUp } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 import { NEW_CREW_LINE } from "../shell/newLines";
 
@@ -22,7 +21,7 @@ import { NEW_CREW_LINE } from "../shell/newLines";
  *  think and sound starting on Desk's defaults. */
 export function NewCrew({ onClose }: { onClose: () => void }) {
   const { hub, fail, openRoom } = useDesk();
-  const { roster, refreshRoster, openDm } = useChat();
+  const { refreshRoster, openDm } = useChat();
   const { newAgent, defaultVoice, agentVoices, set } = useSettings();
   const { providers, loaded } = useProviderList({ fresh: true });
   const [name, setName] = useState("");
@@ -43,19 +42,38 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     if (!hub || !who || !purpose.trim()) return;
     setBusy(true);
+    let id: string;
     try {
-      const taken = roster.filter((a) => a.hubId === "local").map((a) => a.id);
-      const id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken);
+      // The ids taken as the hub has them now, not as the roster last read.
+      await refreshRoster().catch(() => undefined);
+      const taken = useChat
+        .getState()
+        .roster.filter((a) => a.hubId === "local")
+        .map((a) => a.id);
+      // All of them in one go, or none of them: see `createLocalAgent`.
+      id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken, voice ?? defaultVoice);
       if (voice) set({ agentVoices: { ...agentVoices, [`local/${id}`]: voice } });
-      await setAgentVoice(hub, id, voice ?? defaultVoice);
+    } catch (err) {
+      setBusy(false);
+      if (err instanceof NotSetUp) {
+        // Said as it is, with the step that failed under Details; Retry only
+        // where nothing was left behind.
+        const cause = err.cause instanceof Error ? err.cause.message : String(err.cause);
+        useDesk.setState({
+          error: { plain: err.message, ...(err.left ? {} : { fix: { label: "Retry", run: () => void submit(e) } }), details: cause, what: `making ${who} a crew member` },
+        });
+      } else fail(err, { what: `making ${who} a crew member`, retry: () => void submit(e) });
+      return;
+    }
+    // Made whole: opening their chat is no part of making them, and never
+    // offers to make them again.
+    onClose();
+    try {
       await refreshRoster();
       await openRoom(null);
       openDm(`local/${id}`);
-      onClose();
     } catch (err) {
-      fail(plainError(err));
-    } finally {
-      setBusy(false);
+      fail(err, { what: `opening ${who}’s chat` });
     }
   };
 
@@ -101,8 +119,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
               <VoiceCard who={who || "your new crew member"} spec={voice ?? defaultVoice} isDefault={!voice} onChange={() => setEditing("voice")} />
             </div>
             <p className="small faint">
-              Desk writes their Soul, Agents, Identity and Welcome files from the description above. Fine-tune them any time in their
-              Settings → Files.
+              Desk shapes who they are and how they greet you from what they’re for. Change any of it later in their Settings.
             </p>
           </div>
           <footer className="dialog-foot">
@@ -111,7 +128,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
               Cancel
             </button>
             <button type="submit" className="btn btn-signal" disabled={busy || !who || !purpose.trim() || !ready} title={ready ? undefined : `Connect ${provider?.name ?? "their provider"} first`}>
-              {busy ? "Creating…" : who ? `Create ${who}` : "Create"}
+              {busy ? `Setting up ${who}…` : who ? `Create ${who}` : "Create"}
             </button>
           </footer>
         </form>
