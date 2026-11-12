@@ -48,14 +48,18 @@ impl WslExe {
     }
 
     /// Like [`WslExe::invoke`], and its standard output when it succeeds.
+    /// What WSL said when it fails goes to the log (a report has it), not
+    /// into the words the person reads.
     pub fn answer(&self, invocation: &Invocation) -> Result<String> {
         let out = self.invoke(invocation)?;
         if !out.status.success() {
-            eyre::bail!(
-                "{} failed: {}",
-                invocation.args.join(" "),
-                String::from_utf8_lossy(&out.stderr).trim()
+            tracing::warn!(
+                args = %invocation.args.join(" "),
+                code = ?out.status.code(),
+                said = %crate::detect::decode(&out.stderr).trim(),
+                "a command in WSL failed"
             );
+            eyre::bail!("Linux said no (Settings → Help can save a report with what it said)");
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }

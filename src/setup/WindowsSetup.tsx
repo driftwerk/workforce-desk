@@ -2,9 +2,11 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { useEffect, useRef, useState } from "react";
 import {
   convertToWsl2,
+  createWslUser,
   detectWsl,
   fixWslForwarding,
   forgetWslResume,
+  installUbuntuAlongside,
   installWsl,
   onWslSetup,
   openUrl,
@@ -17,7 +19,7 @@ import "../styles/setup.css";
 import { explain, type Problem } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { useSetup } from "./store";
-import { firstPick, LOOK_AGAIN_MS, START_SOON_MS, onlyChoice, optionFor, problemText, STEPS, stepsAfter, whyNotYet } from "./wsl";
+import { firstPick, LOOK_AGAIN_MS, START_SOON_MS, offerAlongside, onlyChoice, optionFor, problemText, STEPS, stepsAfter, whyNotYet, type DistroOption } from "./wsl";
 
 const WSL_DOCS = "https://learn.microsoft.com/windows/wsl/networking";
 
@@ -103,18 +105,52 @@ export function WindowsSetup() {
     }
   };
 
-  const setUpIn = (name: string, convert: boolean) =>
+  /** What Desk is doing before it sets up, said while it runs. */
+  const [fixing, setFixing] = useState<string | null>(null);
+  const setUpIn = (name: string, fix: DistroOption["fix"]) =>
     run(
       `setting Desk up in ${name}`,
       async () => {
-        if (convert) await convertToWsl2(name);
+        try {
+          if (fix === "convert") {
+            setFixing(`Moving ${name} to WSL 2… This takes a few minutes; your files stay.`);
+            await convertToWsl2(name);
+          }
+          if (fix === "user") {
+            setFixing(`Making you a user in ${name}…`);
+            await createWslUser(name);
+          }
+        } finally {
+          setFixing(null);
+        }
         setEvents([]);
         setStage("setup");
         await setUpInWsl(name);
       },
-      () => void setUpIn(name, convert),
+      () => void setUpIn(name, fix),
     );
-  const setUp = () => (option && pick ? setUpIn(pick, option.convert) : Promise.resolve());
+  const setUp = () => (option && pick ? setUpIn(pick, option.fix) : Promise.resolve());
+  /** "Install Ubuntu alongside": a current Ubuntu beside a Linux too old
+   *  for Desk (which stays as it is), with a user of the person's, then
+   *  Desk is set up there. */
+  const alongside = () =>
+    run(
+      "installing Ubuntu alongside",
+      async () => {
+        let name: string;
+        try {
+          setFixing("Installing Ubuntu 24.04… About 5 minutes. Your Linux stays as it is.");
+          name = await installUbuntuAlongside();
+        } finally {
+          setFixing(null);
+        }
+        setPick(name);
+        setEvents([]);
+        setStage("setup");
+        await setUpInWsl(name);
+      },
+      () => void alongside(),
+    );
 
   // Only one Linux Desk can use: nothing to choose, so it carries on,
   // after a moment in which the person can still say no.
@@ -130,7 +166,7 @@ export function WindowsSetup() {
     if (!soon) return;
     const go = setTimeout(() => {
       setSoon(null);
-      void setUpIn(soon, false);
+      void setUpIn(soon, null);
     }, START_SOON_MS);
     return () => clearTimeout(go);
   }, [soon]);
@@ -255,18 +291,39 @@ export function WindowsSetup() {
                 </button>
               ))}
             </div>
-            <span className="wsl-actions">
-              <button
-                type="button"
-                className="btn btn-signal"
-                disabled={!!notYet || busy}
-                title={notYet ?? undefined}
-                onClick={() => void setUp()}
-              >
-                {option?.convert ? "Convert to WSL 2, then set up" : `Set up Desk in ${pick ?? "Linux"}`}
-              </button>
-              <span className="muted small">{notYet ?? "Desk keeps its files in your Linux home, never on C:."}</span>
-            </span>
+            {!offerAlongside(found.distros) && (
+              <span className="wsl-actions">
+                <button
+                  type="button"
+                  className="btn btn-signal"
+                  disabled={!!notYet || busy}
+                  title={notYet ?? undefined}
+                  onClick={() => void setUp()}
+                >
+                  {option?.fix === "convert"
+                    ? "Convert to WSL 2, then set up"
+                    : option?.fix === "user"
+                      ? "Create a user, then set up"
+                      : `Set up Desk in ${pick ?? "Linux"}`}
+                </button>
+                <span className="muted small">{fixing ?? notYet ?? "Desk keeps its files in your Linux home, never on C:."}</span>
+              </span>
+            )}
+            {offerAlongside(found.distros) && (
+              <div className="wsl-card wsl-measure" aria-label="Install Ubuntu alongside">
+                <b>Install Ubuntu alongside</b>
+                <span className="muted small">
+                  Desk installs Ubuntu 24.04 beside your Linux, which stays as it is, makes you a user there and sets itself up in it.
+                  About 5 minutes.
+                </span>
+                <span className="wsl-actions">
+                  <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void alongside()}>
+                    {fixing && busy ? "Installing…" : "Install Ubuntu alongside"}
+                  </button>
+                  {fixing && <span className="muted small">{fixing}</span>}
+                </span>
+              </div>
+            )}
           </>
         )}
 

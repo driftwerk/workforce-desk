@@ -499,6 +499,12 @@ export const installWsl = (): Promise<void> => invoke("wsl_install");
 /** Forgets opening Desk after the restart WSL's install asks for. */
 export const forgetWslResume = (): Promise<void> => invoke("wsl_forget_resume");
 export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_convert", { distro });
+/** "Create a user": a normal user named after the Windows one, made the
+ *  distro's default (it restarts; its files stay). Its name. */
+export const createWslUser = (distro: string): Promise<string> => invoke("wsl_create_user", { distro });
+/** "Install Ubuntu alongside": a current Ubuntu beside a Linux too old for
+ *  Desk, with a normal user. Its name, to set Desk up in. */
+export const installUbuntuAlongside = (): Promise<string> => invoke("wsl_install_alongside");
 /** Sets Desk up in `distro`; progress arrives through `onWslSetup`. */
 export const setUpInWsl = (distro: string): Promise<void> => invoke("wsl_setup", { distro });
 /** Turns on WSL's localhost forwarding and restarts WSL. */
