@@ -5,7 +5,8 @@ import { openAgentBeside } from "../rooms/AgentPanel";
 import { useSettings } from "../settings/store";
 import { SetupGuide } from "./SetupGuide";
 import { useSetupViews } from "./slot";
-import { leftOf, openSetup, STEPS, useDeskAgent, useProgress, useSetupOpen, useSteps } from "./steps";
+import { leftOf, openSetup, setupSeen, STEPS, useDeskAgent, useProgress, useSetupOpen, useSteps } from "./steps";
+import { useDesk } from "../hub/store";
 
 /** Opens Desk's agent's DM with the setup in it: on first run by itself,
  *  and whenever "Set up with an agent" is pressed. */
@@ -17,8 +18,22 @@ export const startSetup = (): void => {
   if (agent) openAgentBeside(agentKey(agent));
 };
 
-/** On first run (a settings file that has never offered it), once the crew
- *  has been read: the setup opens in Desk's agent's DM. */
+/** Whether this is a first run: no provider connected and no session
+ *  Desk knows. Anyone who has either (someone updating Desk) is set up
+ *  already; when the hub can't say, it isn't counted as a first run. */
+export const firstRun = async (): Promise<boolean> => {
+  const { hub, sessions } = useDesk.getState();
+  if (!hub || Object.keys(sessions).length > 0) return false;
+  try {
+    return !(await hub.providers()).some((p) => p.connected);
+  } catch {
+    return false;
+  }
+};
+
+/** On a settings file that has never offered it, once the crew has been
+ *  read: a first run opens the setup in Desk's agent's DM; anyone already
+ *  set up has it marked as offered, quietly, and finds it in Settings. */
 export function SetupLauncher() {
   // The main window's: it puts the setup's views where the DM and the Floor show them.
   useEffect(() => {
@@ -29,7 +44,16 @@ export function SetupLauncher() {
   const started = useSettings((s) => !!s.setup?.started);
   const rosterRead = useChat((s) => s.rosterRead);
   useEffect(() => {
-    if (loaded && rosterRead && !started) startSetup();
+    if (!loaded || !rosterRead || started) return;
+    let live = true;
+    void firstRun().then((first) => {
+      if (!live || useSettings.getState().setup?.started) return;
+      if (first) startSetup();
+      else setupSeen();
+    });
+    return () => {
+      live = false;
+    };
   }, [loaded, rosterRead, started]);
   return null;
 }

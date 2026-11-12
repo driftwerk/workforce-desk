@@ -7,17 +7,29 @@ import { openLoginItems, startHelper } from "../platform";
 import { useDesk } from "../hub/store";
 import { AgentMark } from "../ui/Mark";
 import { openSettingsAt } from "../ui/problem";
-import { closeSetup, leftOf, skip, STEP_TEXT, STEPS, unskip, useFacts, useProgress, useSteps, type StepId, type StepState } from "./steps";
+import { useUi } from "../shell/ui";
+import {
+  closeSetup,
+  leftOf,
+  skip,
+  STEP_TEXT,
+  STEPS,
+  unskip,
+  useFacts,
+  useProgress,
+  useSteps,
+  watchFacts,
+  type StepId,
+  type StepState,
+} from "./steps";
 
-/** How often what the steps stand on is read again while the setup shows,
- *  so a step done elsewhere (a sign-in in the browser) ticks itself. */
-const REREAD_MS = 5000;
-
-/** What Desk's agent is asked to help with, by the steps left. */
-export const helpText = (left: readonly StepId[]): string =>
+/** What Desk's agent is asked to help with: the steps left, and those
+ *  skipped (so it neither redoes them nor thinks them forgotten). */
+export const helpText = (left: readonly StepId[], skipped: readonly StepId[] = []): string =>
   [
     "Help me finish setting up Desk. What's left:",
     ...left.map((s) => `- ${STEP_TEXT[s].title}`),
+    ...(skipped.length ? ["", "I skipped these for now:", ...skipped.map((s) => `- ${STEP_TEXT[s].title}`)] : []),
     "",
     "Do what you can yourself, and tell me what only I can do.",
   ].join("\n");
@@ -30,17 +42,15 @@ export const helpText = (left: readonly StepId[]): string =>
 export function SetupGuide({ agent }: { agent?: Agent }) {
   const progress = useProgress();
   const steps = useSteps();
-  const read = useFacts((s) => s.read);
-  useEffect(() => {
-    void read();
-    const t = setInterval(() => void read(), REREAD_MS);
-    return () => clearInterval(t);
-  }, [read]);
+  const allDone = STEPS.every((s) => steps[s] === "done");
+  // Read again every few seconds until every step is done.
+  useEffect(() => (allDone ? undefined : watchFacts()), [allDone]);
   const left = leftOf(steps, progress.skipped);
   const done = STEPS.filter((s) => steps[s] === "done").length;
   const name = agent?.name ?? "Desk";
   const key = agent ? agentKey(agent) : null;
-  const ask = () => key && useChat.getState().send(key, helpText(left));
+  const skippedNow = STEPS.filter((s) => steps[s] !== "done" && progress.skipped.includes(s));
+  const ask = () => key && useChat.getState().send(key, helpText(left, skippedNow));
   return (
     <article className="msg msg-assistant setup-guide" aria-label="Set up Desk">
       {key ? <AgentMark agent={key} name={name} /> : <span className="setup-mark" aria-hidden="true" />}
@@ -159,7 +169,7 @@ function Actions({ id, agentName, agentKey: key }: { id: StepId; agentName: stri
         </button>
       );
     case "overseer":
-      return <OverseerCard inSetup />;
+      return <OverseerStep />;
     case "connections":
       return (
         <>
@@ -190,4 +200,21 @@ function Actions({ id, agentName, agentKey: key }: { id: StepId; agentName: stri
         </button>
       );
   }
+}
+
+/** The overseer step: #175's card, or, with no agent here to oversee yet,
+ *  a crew member to make first. */
+function OverseerStep() {
+  const local = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
+  const anyone = useChat((s) => s.roster.some((a) => a.hubId === local));
+  if (!anyone)
+    return (
+      <>
+        <span className="small muted">You have no crew member to oversee it yet.</span>
+        <button type="button" className="btn btn-sm btn-signal" onClick={() => useUi.getState().setNewCrew(true)}>
+          New crew member
+        </button>
+      </>
+    );
+  return <OverseerCard inSetup />;
 }

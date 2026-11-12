@@ -62,6 +62,9 @@ export interface SetupProgress {
   closed: boolean;
   /** Steps skipped, by id. */
   skipped: string[];
+  /** When it last changed (ISO): of two windows' writes, the later one's
+   *  setup is kept. */
+  at?: string;
 }
 
 export interface Settings {

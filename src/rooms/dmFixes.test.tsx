@@ -135,7 +135,9 @@ describe("a member's turn that failed in a room", () => {
   it("offers Reconnect for a member on a workspace Desk lost", () => {
     const opened = vi.fn();
     useUi.setState({ openSettings: opened } as never);
-    render(<Draft roomId="r1" name="Scout" draft={{ ...draft("Scout is on a workspace Desk isn’t connected to any more."), reason: "workspace_gone" }} />);
+    render(
+      <Draft roomId="r1" name="Scout" draft={{ ...draft("Scout is on a workspace Desk isn’t connected to any more."), reason: "workspace_gone" }} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     expect(opened).toHaveBeenCalledWith("hubs");
     cleanup();
@@ -151,8 +153,22 @@ describe("a member's turn that failed in a room", () => {
     expect(readableError("Agent error: Permission denied (os error 13)").text).toBe("Couldn’t answer: Permission denied (os error 13)");
     expect(readableError("Agent error: Bedrock returned 403 Forbidden: not subscribed to this model").text).toMatch(/model provider refused/);
     // A 403 from a tool, not the model's provider: its own words.
-    for (const other of ["Agent error: GitHub API returned 403: Resource not accessible by integration", "Agent error: jira api key expired (403)"]) {
-      expect(readableError(other).text).not.toMatch(/model provider/);
+    for (const said of [
+      "Agent error: API error 401 Unauthorized",
+      "Agent error: provider returned 401",
+      "Agent error: 403 Forbidden: model not allowed for this key",
+      "Agent error: OpenAI says Unauthorized: incorrect api key",
+    ]) {
+      expect(readableError(said).text, said).toMatch(/model provider refused/);
+    }
+    // A 403 from a tool's own service, not the model's provider: its own words.
+    for (const other of [
+      "Agent error: GitHub API returned 403: Resource not accessible by integration",
+      "Agent error: jira api key expired (403)",
+      "Agent error: Jira API error 401 Unauthorized",
+      "Agent error: Linear returned 403 Forbidden",
+    ]) {
+      expect(readableError(other).text, other).not.toMatch(/model provider/);
     }
   });
 });

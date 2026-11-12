@@ -4,6 +4,12 @@ import { loadSettings, saveSettings, type CustomVoice, type Settings, type Setup
 
 /** The setup as an older file has it: never offered. */
 export const NO_SETUP: SetupProgress = { started: false, closed: false, skipped: [] };
+
+/** The later of two setups by when each last changed; `mine` on a tie.
+ *  Desk's native side keeps the later one on every write (`save_settings`),
+ *  so a window holding an older one never rolls it back. */
+export const laterSetup = (mine: SetupProgress, theirs: SetupProgress | undefined): SetupProgress =>
+  theirs?.at && (!mine.at || theirs.at > mine.at) ? theirs : mine;
 import { choose, defaultShortcuts, resolve, type ShortcutId } from "../shortcuts/keys";
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 

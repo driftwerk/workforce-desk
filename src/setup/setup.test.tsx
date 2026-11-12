@@ -30,12 +30,27 @@ const { NO_SETUP, useSettings } = await import("../settings/store");
 const { useUi } = await import("../shell/ui");
 const { SetupGuide, helpText } = await import("./SetupGuide");
 const { SetupLauncher, SetupOnFloor } = await import("./SetupLauncher");
-const { leftOf, useFacts } = await import("./steps");
+const { leftOf, useFacts, watchFacts } = await import("./steps");
+const { laterSetup } = await import("../settings/store");
 const { SetupInDm, useSetupViews } = await import("./slot");
 const { searchSections } = await import("../settings/search");
 
-const desk = { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true };
-const scout = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
+const desk = {
+  hubId: "local",
+  id: "desk",
+  name: "Desk",
+  model: null,
+  provider: null,
+  isDefault: true,
+};
+const scout = {
+  hubId: "local",
+  id: "scout",
+  name: "Scout",
+  model: null,
+  provider: null,
+  isDefault: false,
+};
 
 const sent: [string, string][] = [];
 beforeEach(() => {
@@ -43,7 +58,15 @@ beforeEach(() => {
   platform.helper = { state: "not-registered" };
   platform.started = 0;
   useChat.setState({
-    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
+    hubs: [
+      {
+        id: "local",
+        label: "This computer",
+        url: "http://127.0.0.1:1",
+        local: true,
+        revision: "t",
+      },
+    ],
     roster: [scout, desk],
     rosterRead: true,
     panelAgent: null,
@@ -59,7 +82,10 @@ beforeEach(() => {
     } as never,
     sessions: {},
   });
-  useOverview.setState({ manager: { agentId: null, level: null }, managerSupport: "yes" });
+  useOverview.setState({
+    manager: { agentId: null, level: null },
+    managerSupport: "yes",
+  });
   useMachines.setState({ machines: [], listed: true });
   useFacts.setState({ plan: null, helper: null, connections: null });
   useSettings.setState({ loaded: true, setup: NO_SETUP });
@@ -67,9 +93,45 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("first-run setup", () => {
-  it("opens once, by itself, in Desk's own agent's DM, and isn't opened again", async () => {
+  it("on an update for someone already set up, is marked offered quietly and doesn't open", async () => {
+    useDesk.setState({
+      hub: {
+        providers: vi.fn(async () => [{ id: "claude-code", connected: true }]),
+      } as never,
+    });
     render(<SetupLauncher />);
-    await waitFor(() => expect(useSettings.getState().setup).toMatchObject({ started: true, closed: false }));
+    await waitFor(() =>
+      expect(useSettings.getState().setup).toMatchObject({
+        started: true,
+        closed: true,
+      }),
+    );
+    expect(useChat.getState().panelAgent).toBeNull();
+    cleanup();
+    // Sessions alone say so too.
+    useSettings.setState({ setup: NO_SETUP });
+    useDesk.setState({
+      hub: { providers: vi.fn(async () => []) } as never,
+      sessions: { s1: { id: "s1" } as never },
+    });
+    render(<SetupLauncher />);
+    await waitFor(() =>
+      expect(useSettings.getState().setup).toMatchObject({
+        started: true,
+        closed: true,
+      }),
+    );
+    expect(useChat.getState().panelAgent).toBeNull();
+  });
+
+  it("opens once, by itself, in Desk's own agent's DM on a first run, and isn't opened again", async () => {
+    render(<SetupLauncher />);
+    await waitFor(() =>
+      expect(useSettings.getState().setup).toMatchObject({
+        started: true,
+        closed: false,
+      }),
+    );
     expect(useChat.getState().panelAgent).toBe("local/desk");
     useChat.setState({ panelAgent: null });
     useSettings.getState().set({ setup: { started: true, closed: true, skipped: [] } });
@@ -82,7 +144,9 @@ describe("first-run setup", () => {
   it("says each step as Desk's agent, ticks what's done, and each card does its step", async () => {
     render(<SetupGuide agent={desk} />);
     expect(screen.getByText(/Hi, I’m Desk\. Let’s get Desk ready/)).toBeTruthy();
-    const helper = await screen.findByRole("listitem", { name: "Keep Desk's helper running" });
+    const helper = await screen.findByRole("listitem", {
+      name: "Keep Desk's helper running",
+    });
     await act(async () => fireEvent.click(within(helper).getByRole("button", { name: "Start it" })));
     expect(platform.started).toBe(1);
     await waitFor(() => expect(within(screen.getByRole("listitem", { name: "Keep Desk's helper running" })).getByText("Done")).toBeTruthy());
@@ -114,7 +178,10 @@ describe("first-run setup", () => {
     fireEvent.click(within(screen.getByRole("listitem", { name: "Add a machine" })).getByRole("button", { name: "Do it now" }));
     expect(useSettings.getState().setup.skipped).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Close setup" }));
-    expect(useSettings.getState().setup).toMatchObject({ started: true, closed: true });
+    expect(useSettings.getState().setup).toMatchObject({
+      started: true,
+      closed: true,
+    });
   });
 
   it("shows in Desk's agent's DM and on the Floor only once the main window put it there", () => {
@@ -143,9 +210,73 @@ describe("first-run setup", () => {
   });
 
   it("leaves out what's done and skipped, and asks for the rest in plain words", () => {
-    const steps = { plan: "done", helper: "todo", overseer: "unknown", connections: "todo", workspaces: "todo", machines: "todo" } as const;
+    const steps = {
+      plan: "done",
+      helper: "todo",
+      overseer: "unknown",
+      connections: "todo",
+      workspaces: "todo",
+      machines: "todo",
+    } as const;
     expect(leftOf(steps, ["machines"])).toEqual(["helper", "overseer", "connections", "workspaces"]);
     expect(helpText(["plan"])).toMatch(/^Help me finish setting up Desk/);
+    const both = helpText(["plan"], ["machines"]);
+    expect(both).toContain("I skipped these for now:\n- Add a machine");
+    expect(helpText(["plan"])).not.toContain("skipped");
+  });
+});
+
+describe("keeping the setup's progress", () => {
+  it("keeps the later of two windows' setups, never rolling one back", () => {
+    const older = {
+      started: true,
+      closed: false,
+      skipped: [],
+      at: "2026-11-12T08:00:00.000Z",
+    };
+    const newer = {
+      started: true,
+      closed: true,
+      skipped: ["machines"],
+      at: "2026-11-12T09:00:00.000Z",
+    };
+    expect(laterSetup(older, newer)).toBe(newer);
+    expect(laterSetup(newer, older)).toBe(newer);
+    expect(laterSetup(older, undefined)).toBe(older);
+    expect(laterSetup(NO_SETUP, newer)).toBe(newer);
+  });
+
+  it("reads again on one timer however many watch, skips while hidden, and stops when none do", async () => {
+    vi.useFakeTimers();
+    const read = vi.fn(async () => undefined);
+    useFacts.setState({ read });
+    const stopA = watchFacts();
+    const stopB = watchFacts();
+    expect(read).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(read).toHaveBeenCalledTimes(3);
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => true,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(read).toHaveBeenCalledTimes(3);
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => false,
+    });
+    stopA();
+    stopB();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(read).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it("offers a new crew member when there's no one to oversee", () => {
+    useChat.setState({ roster: [] });
+    render(<SetupGuide />);
+    fireEvent.click(within(screen.getByRole("listitem", { name: "Pick who oversees your crew" })).getByRole("button", { name: "New crew member" }));
+    expect(useUi.getState().newCrew).toBe(true);
   });
 });
 
