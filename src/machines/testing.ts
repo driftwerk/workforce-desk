@@ -6,7 +6,7 @@ import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DeskTransport } from "../hub/transport";
 import type { Machine } from "./engines";
-import type { Checked, Edited, HostEntry, LogLine, MachineNative, Probe, RemoveEvent, SetupEvent, Shared } from "./native";
+import type { Checked, Edited, HostEntry, LogLine, MachineNative, Probe, RemoveEvent, SetupEvent, Shared, Unlocked } from "./native";
 
 export const machine = (m: Partial<Machine> & Pick<Machine, "id">): Machine => ({
   name: m.id,
@@ -49,6 +49,10 @@ export function fakeNative(over: Partial<MachineNative> = {}) {
     probe: vi.fn(async (_target: string) => probeOf()),
     trust: vi.fn(async (_target: string, _fingerprint: string) => undefined),
     publicKey: vi.fn(async () => "ssh-ed25519 AAAAC3NzaExampleKey you@laptop" as string | null),
+    installKey: vi.fn(async (_target: string): Promise<Unlocked> => ({ kind: "done", linger: true })),
+    unlockKey: vi.fn(async (_target: string): Promise<Unlocked> => ({ kind: "done" })),
+    forgetKey: vi.fn(async (_target: string, _fingerprint: string) => true),
+    lingerWithPassword: vi.fn(async (_id: string): Promise<Unlocked> => ({ kind: "done", linger: true })),
     add: vi.fn(async (_target: string, _name: string) => "devbox"),
     setup: vi.fn((f: (e: SetupEvent) => void) => {
       heard.add(f);

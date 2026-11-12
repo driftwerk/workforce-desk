@@ -54,7 +54,7 @@ impl Question {
     /// line, so a name can't stand in for where Desk will connect.
     pub fn text(&self) -> String {
         format!(
-            "Let Desk run sessions on {}?\n\n{}\n\nDesk installs its engine there. Anything you start runs on that machine as the account your SSH settings use for it, with full access to it.",
+            "Let Desk run sessions on {}?\n\n{}\n\nDesk installs its engine there. Anything you start runs on that machine as the account your SSH settings use for it, with full access to it. If Desk hasn't connected to it before, it shows you the machine's fingerprint next and trusts it when you continue.",
             self.name, self.target
         )
     }
