@@ -95,6 +95,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   diskAccess: (h) => h.diskAccess(),
   vaultPaths: (h) => h.vaultPaths(),
   saveVault: (h) => h.saveVault("speech/openai/api_key", "k"),
+  saveVoiceKey: (h) => h.saveVoiceKey("elevenlabs", "k"),
   createAgent: (h) => h.createAgent({ id: "a", name: "A", system_prompt: "" }),
   deleteAgent: (h) => h.deleteAgent("a b"),
   renameAgent: (h) => h.renameAgent("a", "B", "p"),
