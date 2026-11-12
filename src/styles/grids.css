@@ -686,7 +686,9 @@ body.gsplitting-h * {
   --board-col: calc((100cqw - 20px - 32px) / 5);
   gap: 8px;
   padding: 10px 10px 12px;
-  scroll-padding-inline: 10px;
+  /* No snapping in a pane: a column is wide for it, and a small sideways
+     step pulled back to where it was reads as no scroll at all. */
+  scroll-snap-type: none;
 }
 .board-in-pane .board-col {
   padding: 12px 10px;
