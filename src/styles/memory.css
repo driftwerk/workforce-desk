@@ -350,3 +350,48 @@
 .memory-recall p {
   padding: 0 4px;
 }
+
+/* A number the person sets in Settings → Memory: as wide as its value. */
+.memory-number {
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.memory-number input {
+  width: 10ch;
+  text-align: right;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 12px;
+  outline: none;
+  font: inherit;
+}
+.memory-number input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.memory-number input[aria-invalid="true"] {
+  border-color: var(--blocked);
+}
+
+/* "Noting is turned off" with its way to turn it on. */
+.memory-off {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* Keeping conversations for less: what goes, said before it's kept. */
+.memory-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
