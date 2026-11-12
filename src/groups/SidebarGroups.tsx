@@ -720,7 +720,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                   }
                   meta={metaOf(item)}
                   boss={tagged(item)}
-                  title={titleOf(item)}
+                  title={item.kind === "agent" ? titleOf(item) : `${nameOf(item)} · ${titleOf(item)}`}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
                   onOpen={() => {
