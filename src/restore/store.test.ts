@@ -37,7 +37,7 @@ const fakeHub = (rows: Record<string, unknown> = {}, missing = false) => {
   const kept = new Map(Object.entries(rows).map(([k, v]) => [k, { value: v, updatedAt: "t0" }]));
   let n = 0;
   let down = false;
-  const no = () => new HubError(404, "This hub doesn’t have that yet.");
+  const no = () => new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it.");
   const hub: HubState & { kept: typeof kept; setDown: (d: boolean) => void } = {
     kept,
     setDown: (d) => (down = d),

@@ -32,7 +32,7 @@ const fakeFile = (initial: Record<string, StateEntry> = {}) => {
 /** A hub with a Desk state store, or (`missing`) one without the route. */
 const fakeHub = (missing = false) => {
   const kept = new Map<string, unknown>();
-  const no = () => new HubError(404, "This hub doesn’t have that yet.");
+  const no = () => new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it.");
   const hub: HubState & { kept: typeof kept } = {
     kept,
     list: async (prefix) => {

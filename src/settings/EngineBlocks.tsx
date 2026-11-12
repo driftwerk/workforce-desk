@@ -87,7 +87,7 @@ export function EngineBlocks({
   const hub = useHubOf(machine);
   const platform = useHost((h) => h.platform);
   const where = machine === LOCAL ? thisComputerLower(platform) : (name ?? machine);
-  const asked = machine === LOCAL ? "the hub" : where;
+  const asked = machine === LOCAL ? "Desk" : where;
   // The list stays through a reload and a reconnect: "Reading…" only
   // before there is one.
   const [engines, setEngines] = useState<EngineInfo[] | null | { failed: string }>(null);
@@ -136,7 +136,7 @@ export function EngineBlocks({
   });
 
   if (!hub && !Array.isArray(engines)) {
-    if (machine === LOCAL) return <p className="faint small">Not connected yet.</p>;
+    if (machine === LOCAL) return <p className="faint small">Desk isn’t ready yet.</p>;
     return (
       <p className={`small ${slowConnect ? "state-blocked" : "faint"}`}>
         {slowConnect ? `${where} hasn’t connected in a minute.` : `Waiting for ${where} to connect…`}{" "}
