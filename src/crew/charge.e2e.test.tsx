@@ -268,9 +268,10 @@ describe("a session Sarah runs", () => {
     act(() => hub.events!.say({ type: "line", message: later }));
     expect(screen.getAllByText(/Waiting: you're driving/)).toHaveLength(2);
 
-    // Hand back, from the pane's header: Sarah has it, and her message goes in.
-    // Clicked twice before the hub answers, it's asked once.
-    const handBack = within(pane).getByRole("button", { name: "Hand back" });
+    // Hand back, from the pane's driver chip: Sarah has it, and her message
+    // goes in. Clicked twice before the hub answers, it's asked once.
+    fireEvent.click(within(pane).getByRole("button", { name: /^Who runs it: You’re driving/ }));
+    const handBack = within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Hand back" });
     await act(async () => {
       fireEvent.click(handBack);
       fireEvent.click(handBack);

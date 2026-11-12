@@ -59,13 +59,16 @@ export function DriverChip({ session }: { session: Session }) {
   const suggested = useSuggested(charge && charge.wheel !== "boss" ? session.id : null).length;
   const [from, setFrom] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const going = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
   const badge = badgeOf(charge);
   const short = badgeOf(charge, true);
   if (!charge || !badge || !short) return null;
   const choices = chargeChoices(session, charge, boss);
   const run = (c: ChargeChoice) => {
-    if (busy) return;
+    // Asked once, however quickly it's clicked again.
+    if (going.current) return;
+    going.current = true;
     setBusy(c.verb);
     setProblem(null);
     useCharges
@@ -73,7 +76,10 @@ export function DriverChip({ session }: { session: Session }) {
       .act(sessionKey(session), c.verb)
       .then(() => setFrom(null))
       .catch((e: unknown) => setProblem(plainError(e)))
-      .finally(() => setBusy(null));
+      .finally(() => {
+        going.current = false;
+        setBusy(null);
+      });
   };
   const name = session.displayName ?? session.name;
   return (
