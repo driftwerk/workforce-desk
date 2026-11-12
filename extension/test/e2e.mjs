@@ -111,9 +111,18 @@ async function main() {
     const exited = new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
     proc.kill();
     await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+    // Still writing: made to stop, and its helpers given a moment to go.
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+    await new Promise((r) => setTimeout(r, 1000));
     site.close();
     hub.close();
-    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    // A throwaway folder Chrome still writes to is left to the system's
+    // temp clean-up: it never fails the test.
+    try {
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (e) {
+      console.warn(`e2e: left ${work} behind: ${e.message}`);
+    }
     rmSync(join(here, ".e2e-socket"), { force: true });
     process.exit(code);
   };
