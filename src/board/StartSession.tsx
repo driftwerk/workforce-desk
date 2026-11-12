@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ENGINE_TITLE, startable } from "../engines/engines";
-import { sortedSessions, useDesk, localSessions } from "../hub/store";
+import { useDesk, localSessions } from "../hub/store";
 import type { Engine, EngineInfo, Ticket } from "../hub/types";
 import { pickFolder } from "../platform";
 import { useModal } from "../ui/Dialog";
@@ -8,8 +8,8 @@ import { plainError } from "../ui/plainError";
 import { GroupChoice } from "../session/GroupChoice";
 import { sessionItem, UNGROUPED } from "../groups/model";
 import { moveItem, nameSession, useLayout } from "../groups/store";
-import { recentFolders, sessionNameFor, sessionsOf } from "./board";
-import { boardStartGroup, lastBoardGroup, rememberBoardGroup } from "./startGroup";
+import { recentFolders, sessionNameFor, sessionsOf, startDefaults } from "./board";
+import { boardStartGroup, lastBoardGroup, lastBoardStart, rememberBoardGroup, rememberBoardStart } from "./startGroup";
 import { useBoard } from "./store";
 
 /** A folder as a chip says it: its own name. */
@@ -20,16 +20,18 @@ const folderName = (dir: string): string => dir.split("/").filter(Boolean).pop()
 export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: () => void }) {
   const hub = useDesk((s) => s.hub);
   const sessions = useDesk((s) => localSessions(s.sessions));
-  // The folder its sessions worked in, else the newest session's.
-  const usual = sessionsOf(t)
-    .map((id) => sessions[id]?.cwd)
-    .find(Boolean) ?? sortedSessions(sessions)[0]?.cwd ?? "";
+  // The folder and engine to go by: the ticket's own sessions', else the
+  // board's, else its last start's: nothing is typed unless there is nothing.
+  const boardTickets = useBoard((s) => s.tickets);
+  const [from] = useState(() =>
+    startDefaults(t, Object.values(boardTickets).filter((x) => x.board === t.board), sessions, lastBoardStart(t.board)),
+  );
   const recent = recentFolders(Object.values(sessions));
   const layout = useLayout();
   const boardGroup = useBoard((s) => s.boards[t.board]?.group);
   const [group, setGroup] = useState(() => boardStartGroup(layout, boardGroup, lastBoardGroup()));
-  const [engine, setEngine] = useState<Engine>("claude");
-  const [cwd, setCwd] = useState(usual);
+  const [picked, setEngine] = useState<Engine>((from.engine as Engine | null) ?? "claude");
+  const [cwd, setCwd] = useState(from.cwd);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -45,6 +47,10 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
       live = false;
     };
   }, [hub]);
+  // What it went by may not start here (not installed, or no view): then
+  // the first engine that does.
+  const choices = startable(engines);
+  const engine: Engine = choices.includes(picked) ? picked : (choices[0] ?? picked);
   const start = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cwd.trim()) return;
@@ -54,6 +60,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
       const had = new Set(sessionsOf(t));
       const now = await useBoard.getState().assign(t.id, { newSession: { path: cwd.trim(), engine } });
       rememberBoardGroup(group);
+      rememberBoardStart(t.board, { cwd: cwd.trim(), engine });
       // The new session: the one the ticket gained, else the one it is given to.
       const made = now ? (sessionsOf(now).find((id) => !had.has(id)) ?? (now.assignee?.kind === "session" ? now.assignee.id : null)) : null;
       if (made) {
@@ -73,7 +80,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
         <h2 className="display-md">Start a session on {t.key ?? "it"}</h2>
         <p className="muted small">It starts with “{t.title}” as its goal and first prompt, and the ticket moves to Doing.</p>
         <div className="seg" role="radiogroup" aria-label="Engine">
-          {startable(engines).map((k) => (
+          {choices.map((k) => (
             <button key={k} type="button" role="radio" aria-checked={engine === k} onClick={() => setEngine(k)}>
               {ENGINE_TITLE[k]}
             </button>
