@@ -1,4 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { useUi } from "../shell/ui";
+import { startSetup } from "../setup/SetupLauncher";
 import { save } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
 import { useEffect, useState } from "react";
@@ -146,6 +148,23 @@ export function Help() {
   return (
     <section className="settings-pane" aria-label="Help">
       <h1 className="display-lg">Help</h1>
+
+      <div className="setting-card">
+        <span className="card-text">
+          <b>Set up with an agent</b>
+          <span>Desk’s agent walks you through signing in, its helper, your overseer, connections, workspaces and machines.</span>
+        </span>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => {
+            useUi.getState().closeSettings();
+            startSetup();
+          }}
+        >
+          Set up with an agent
+        </button>
+      </div>
 
       <div className="setting-card">
         <span className="card-text">

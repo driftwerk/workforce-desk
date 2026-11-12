@@ -1602,3 +1602,21 @@ legend.set-label {
   margin-top: 4px;
   color: var(--muted);
 }
+
+/* Search and "Set up with an agent", at the head and foot of the list. */
+.settings-search {
+  margin: 4px 8px 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.settings-none {
+  padding: 4px 12px;
+}
+.settings-setup {
+  margin: 12px 8px 0;
+}
