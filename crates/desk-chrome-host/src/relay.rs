@@ -38,8 +38,17 @@ pub const MAX_TO_CHROME: usize = 1024 * 1024;
 /// a screenshot is the largest Desk asks for).
 pub const MAX_FROM_CHROME: usize = 32 * 1024 * 1024;
 
-/// Reads one native message; `None` when Chrome closed stdin.
-pub fn read_frame(input: &mut impl Read) -> Result<Option<Vec<u8>>> {
+/// One native message from Chrome.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Frame {
+    Body(Vec<u8>),
+    /// One over [`MAX_FROM_CHROME`], read past and dropped: its length.
+    TooBig(usize),
+}
+
+/// Reads one native message; `None` when Chrome closed stdin. One too big
+/// is read past, not kept, and the next is read as usual.
+pub fn read_frame(input: &mut impl Read) -> Result<Option<Frame>> {
     let mut len = [0u8; 4];
     match input.read_exact(&mut len) {
         Ok(()) => {}
@@ -48,13 +57,25 @@ pub fn read_frame(input: &mut impl Read) -> Result<Option<Vec<u8>>> {
     }
     let n = u32::from_ne_bytes(len) as usize;
     if n > MAX_FROM_CHROME {
-        return Err(eyre!(
-            "a message from Chrome of {n} bytes is more than Desk takes"
-        ));
+        let skipped = std::io::copy(&mut input.take(n as u64), &mut std::io::sink())?;
+        if (skipped as usize) < n {
+            return Ok(None);
+        }
+        return Ok(Some(Frame::TooBig(n)));
     }
     let mut body = vec![0u8; n];
     input.read_exact(&mut body)?;
-    Ok(Some(body))
+    Ok(Some(Frame::Body(body)))
+}
+
+/// What the host says to the hub in place of a call too big for Chrome:
+/// that call's failure, so the hub isn't left waiting.
+fn too_big_for_chrome(call: &str) -> Option<String> {
+    let id = serde_json::from_str::<serde_json::Value>(call).ok()?["id"].as_u64()?;
+    Some(
+        serde_json::json!({ "type": "result", "id": id, "ok": false, "error": "That call is more than Chrome takes in one message, so it wasn't made." })
+            .to_string(),
+    )
 }
 
 /// Writes one native message.
@@ -130,6 +151,12 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
     std::thread::spawn(move || {
         let mut stdin = std::io::stdin().lock();
         while let Ok(Some(frame)) = read_frame(&mut stdin) {
+            let frame = match frame {
+                Frame::Body(b) => b,
+                // Dropped; the hub's call it answered fails on its own
+                // timeout, and the relay goes on.
+                Frame::TooBig(_) => continue,
+            };
             if from_chrome.blocking_send(frame).is_err() {
                 break;
             }
@@ -198,6 +225,15 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
                 },
                 m = from_hub.next() => match m {
                     Some(Ok(Message::Text(t))) => {
+                        if t.len() > MAX_TO_CHROME {
+                            // Never sent, and the hub told so; the relay goes on.
+                            if let Some(failed) = too_big_for_chrome(&t)
+                                && to_hub.send(Message::text(failed)).await.is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
                         if write_frame(&mut std::io::stdout(), t.as_bytes()).is_err() {
                             return 0;
                         }
@@ -243,7 +279,7 @@ mod tests {
         let mut input = std::io::Cursor::new(out);
         assert_eq!(
             read_frame(&mut input).unwrap().unwrap(),
-            br#"{"type":"ready"}"#
+            Frame::Body(br#"{"type":"ready"}"#.to_vec())
         );
         assert_eq!(read_frame(&mut input).unwrap(), None, "Chrome closed stdin");
     }
@@ -251,9 +287,26 @@ mod tests {
     #[test]
     fn nothing_too_big_goes_either_way() {
         assert!(write_frame(&mut Vec::new(), &vec![b' '; MAX_TO_CHROME + 1]).is_err());
-        let mut huge = ((MAX_FROM_CHROME + 1) as u32).to_ne_bytes().to_vec();
-        huge.extend_from_slice(b"{}");
-        assert!(read_frame(&mut std::io::Cursor::new(huge)).is_err());
+        // One too big from Chrome is read past, and the next still read.
+        let n = MAX_FROM_CHROME + 1;
+        let mut stream = (n as u32).to_ne_bytes().to_vec();
+        stream.resize(4 + n, b' ');
+        write_frame(&mut stream, b"{}").unwrap();
+        let mut input = std::io::Cursor::new(stream);
+        assert_eq!(read_frame(&mut input).unwrap(), Some(Frame::TooBig(n)));
+        assert_eq!(
+            read_frame(&mut input).unwrap(),
+            Some(Frame::Body(b"{}".to_vec()))
+        );
+        // Cut short: Chrome went away.
+        let mut cut = (n as u32).to_ne_bytes().to_vec();
+        cut.extend_from_slice(b"{}");
+        assert_eq!(read_frame(&mut std::io::Cursor::new(cut)).unwrap(), None);
+        // One too big for Chrome is answered to the hub as that call's failure.
+        let failed = too_big_for_chrome(r#"{"type":"call","id":9,"cmd":"upload"}"#).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&failed).unwrap();
+        assert_eq!(v["id"], 9);
+        assert_eq!(v["ok"], false);
     }
 
     #[test]
