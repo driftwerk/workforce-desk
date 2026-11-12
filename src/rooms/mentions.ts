@@ -27,6 +27,17 @@ export const parseMentions = (text: string): Mention[] =>
 
 const hubLabel = (hubs: readonly HubAccount[], id: string) => hubs.find((h) => h.id === id)?.label;
 
+/** The names an agent had before, newest first: set by `formerNames`. */
+let formerly: (a: Agent) => readonly string[] = () => [];
+export const setFormerly = (f: (a: Agent) => readonly string[]): void => {
+  formerly = f;
+};
+
+/** Whether `m` names `a` by a name it had before, as `names` does by its
+ *  name now. */
+export const namedBefore = (m: Mention, a: Agent, hubs: readonly HubAccount[] = []): boolean =>
+  formerly(a).some((was) => names(m, { ...a, name: was, id: "" }, hubs) && handle(was) !== "");
+
 /** Whether `m` names `a`: by name or id, and by its hub's id or name when
  *  it says one. */
 export const names = (m: Mention, a: Agent, hubs: readonly HubAccount[] = []): boolean => {
@@ -80,12 +91,14 @@ export const resolveMentions = (
     };
   const out: Resolved = { members: [], outsiders: [], ambiguous: [] };
   for (const mention of parseMentions(text)) {
-    const here = members.filter((m) => names(mention, known(m), hubs));
+    // A name an agent has now first; else one an agent had before a rename.
+    const by = [names, namedBefore].find((named) => members.some((m) => named(mention, known(m), hubs)) || roster.some((a) => named(mention, a, hubs))) ?? names;
+    const here = members.filter((m) => by(mention, known(m), hubs));
     if (here.length) {
       for (const m of here) if (!out.members.some((x) => x.hub === m.hub && x.agent === m.agent)) out.members.push(m);
       continue;
     }
-    const crew = roster.filter((a) => !isMember(members, a) && names(mention, a, hubs));
+    const crew = roster.filter((a) => !isMember(members, a) && by(mention, a, hubs));
     if (crew.length === 1) {
       const a = crew[0]!;
       if (!out.outsiders.some((x) => x.hubId === a.hubId && x.id === a.id)) out.outsiders.push(a);

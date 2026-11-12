@@ -35,7 +35,10 @@ export function useDmSearch(hub: HubAccount | undefined, agentId: string): DmSea
   useEffect(() => {
     const words = q.trim();
     setProblem(null);
+    setCurrent(-1);
     if (!hub || !words) {
+      asked.current++;
+      setLoading(false);
       setMatches([]);
       setMore(false);
       setCurrent(-1);
@@ -91,7 +94,17 @@ export const marked = (text: string, terms: string[]): ReactNode[] => {
 export function SearchBar({ s, name, onStep, onClose }: { s: DmSearchState; name: string; onStep: (by: 1 | -1) => void; onClose: () => void }) {
   const n = s.matches.length;
   return (
-    <div className="dm-search" role="search">
+    <div
+      className="dm-search"
+      role="search"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <label className="dm-search-field">
         <span aria-hidden="true">⌕</span>
         <input
@@ -101,11 +114,8 @@ export function SearchBar({ s, name, onStep, onClose }: { s: DmSearchState; name
           aria-label={`Search your chat with ${name}`}
           onChange={(e) => s.setQ(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              onClose();
-            } else if (e.key === "ArrowDown" || (e.key === "Enter" && !e.shiftKey)) {
+            if (e.key === "Escape") return;
+            if (e.key === "ArrowDown" || (e.key === "Enter" && !e.shiftKey)) {
               e.preventDefault();
               onStep(1);
             } else if (e.key === "ArrowUp" || (e.key === "Enter" && e.shiftKey)) {
@@ -177,6 +187,23 @@ const HIGHLIGHTS = "CSS" in globalThis && "highlights" in CSS;
  *  engine without it marks nothing). Cleared when the search closes. */
 export function useSearchMarks(pane: HTMLElement | null, terms: string[], current: string | null, version: unknown): void {
   const key = terms.join("\u0000");
+  // Edits, deletes, a reply growing and markdown rendered late all change the
+  // text under the marks, which `version` alone doesn't see.
+  const [changed, setChanged] = useState(0);
+  useEffect(() => {
+    if (!pane || !terms.length || typeof MutationObserver === "undefined") return;
+    let frame = 0;
+    const seen = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setChanged((n) => n + 1));
+    });
+    seen.observe(pane, { childList: true, subtree: true, characterData: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      seen.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane, key]);
   useEffect(() => {
     if (!HIGHLIGHTS || !pane) return;
     const all: Range[] = [];
@@ -199,14 +226,20 @@ export function useSearchMarks(pane: HTMLElement | null, terms: string[], curren
       }
     }
     const reg = (CSS as unknown as { highlights: Map<string, unknown> }).highlights;
-    const H = (globalThis as unknown as { Highlight: new (...r: Range[]) => unknown }).Highlight;
-    reg.set("dm-search", new H(...all));
-    reg.set("dm-search-current", new H(...cur));
+    const H = (globalThis as unknown as { Highlight: new () => unknown }).Highlight;
+    if (!terms.length) return;
+    const add = (all: Range[]) => {
+      const h = new H();
+      for (const r of all) (h as unknown as { add: (r: Range) => void }).add(r);
+      return h;
+    };
+    reg.set("dm-search", add(all));
+    reg.set("dm-search-current", add(cur));
     return () => {
       reg.delete("dm-search");
       reg.delete("dm-search-current");
     };
     // `terms` is read through `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane, key, current, version]);
+  }, [pane, key, current, version, changed]);
 }

@@ -83,8 +83,8 @@ const open = async (features = FEATURES) => {
       if (u.pathname.endsWith("/search"))
         return json({
           matches: [
-            { id: "k2", from: "assistant", at: at(2), excerpt: "Filed ATL-571 and assigned it to Sam Lee." },
-            { id: "o2", from: "assistant", at: at(-599), excerpt: "Started Ledger Migration in the atlas monorepo." },
+            { id: "k2", from: "agent", at: at(2), excerpt: "Filed ATL-571 and assigned it to Sam Lee." },
+            { id: "o2", from: "agent", at: at(-599), excerpt: "Started Ledger Migration in the atlas monorepo." },
           ],
           more: false,
         });
