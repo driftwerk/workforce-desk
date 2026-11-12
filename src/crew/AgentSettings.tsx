@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useChat } from "../chat/store";
+import { agentIdsOn, useChat } from "../chat/store";
 import { agentKey, providerLabel, type Agent, type HubAccount } from "../chat/types";
 import { effortName } from "../hub/providers";
 import { useDesk } from "../hub/store";
@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { purposeOf, renameAgentFiles, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { useUi } from "../shell/ui";
 import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
@@ -85,9 +85,11 @@ function SectionLinks() {
 function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefined; local: boolean }) {
   const desk = useDesk((s) => s.hub);
   const refreshDrafts = useDrafts((s) => s.refresh);
-  const { rename, refreshRoster, setPicture } = useChat();
+  const { rename, refreshRoster, setPicture, settle } = useChat();
   const src = useAgentImage(agentKey(agent));
   const [saved, setSaved] = useState<string | null>(null);
+  // Saved, but their hub hadn't served them again when Desk stopped waiting.
+  const [starting, setStarting] = useState(false);
   const [purpose, setPurpose] = useState("");
   // The name as saved, kept while a rename is in flight so it can go back.
   const [savedName, setSavedName] = useState(agent.name);
@@ -130,42 +132,45 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
     const purposeChanged = saved !== null && purpose.trim() !== saved;
     setState("saving");
     setProblem(null);
-    if (renaming) {
-      // Everywhere at once; put back if the hub doesn't take it.
-      const was = savedName;
-      rename(key, nextName);
-      try {
-        await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
-      } catch (e) {
-        rename(key, was);
-        setProblem(plainError(e));
-        setState("idle");
-        return;
+    // A new name or new instructions build the agent again on its hub: until
+    // it serves, the roster keeps it, so it stays where it is shown.
+    settle(key, true);
+    const listed = hub ? () => agentIdsOn(hub) : undefined;
+    let served = true;
+    try {
+      if (renaming) {
+        // Shown everywhere at once; put back if the hub doesn't take it.
+        const was = savedName;
+        rename(key, nextName);
+        try {
+          served = await renameLocalAgent(desk, agent.id, nextName, purposeChanged ? purpose : undefined, listed);
+        } catch (e) {
+          rename(key, was);
+          setProblem(plainError(e));
+          setState("idle");
+          return;
+        }
+        setSavedName(nextName);
+        setName(nextName);
+      } else if (purposeChanged) {
+        try {
+          served = await setAgentPurpose(desk, agent.id, agent.name, purpose, listed);
+        } catch (e) {
+          setProblem(plainError(e));
+          setState("idle");
+          return;
+        }
       }
-      setSavedName(nextName);
-      setName(nextName);
-      void refreshRoster();
-      try {
-        await renameAgentFiles(desk, agent.id, nextName, purposeChanged ? purpose : undefined);
-      } catch (e) {
-        setProblem(`Renamed, but their files still say ${was}: ${lower(plainError(e))}`);
-        setState("idle");
-        return;
-      }
-    } else if (purposeChanged) {
-      try {
-        await setAgentPurpose(desk, agent.id, agent.name, purpose);
-      } catch (e) {
-        setProblem(plainError(e));
-        setState("idle");
-        return;
-      }
+      await refreshRoster();
+    } finally {
+      settle(key, false);
     }
     refreshDrafts(key);
     if (purposeChanged) {
       setSaved(purpose.trim());
       setPurpose(purpose.trim());
     }
+    setStarting(!served);
     setState("saved");
   };
 
@@ -245,7 +250,9 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
               </button>
             </>
           )}
-          {!changed && state === "saved" && <span className="small state-done">Saved into their files.</span>}
+          {!changed && state === "saved" && (
+            <span className="small state-done">{starting ? `Saved into their files. ${savedName} is still starting: they’ll be back in a moment.` : "Saved into their files."}</span>
+          )}
           {problem && <span className="small state-blocked">{problem}</span>}
         </div>
       )}

@@ -12,6 +12,14 @@ import { AgentSettings } from "./AgentSettings";
 import { useDrafts } from "./files";
 import { useSettings } from "../settings/store";
 
+// The roster's read of a hub's agents: the agent is built again after a
+// new name (left out once), then serves.
+const listed = vi.hoisted(() => ({ ids: vi.fn(async (): Promise<string[]> => ["ledger"]) }));
+vi.mock("../chat/store", async (original) => ({
+  ...(await original<typeof import("../chat/store")>()),
+  agentIdsOn: () => listed.ids(),
+}));
+
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
   onLoginProgress: () => Promise.resolve(() => {}),
@@ -239,6 +247,7 @@ describe("Renaming in Settings", () => {
   const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
 
   const renderSettings = (hub: DeskHub) => {
+    listed.ids.mockReset().mockResolvedValueOnce([]).mockResolvedValue(["ledger"]);
     useDesk.setState({ hub });
     useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
     const view = () => render(<AgentSettings agent={useChat.getState().roster[0]!} hub={local} onOpenFiles={() => {}} />);
@@ -268,12 +277,14 @@ describe("Renaming in Settings", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
     expect(await screen.findByText(/Renaming isn’t available yet/)).toBeTruthy();
     expect(useChat.getState().roster[0]!.name).toBe("Ledger");
-    expect(hub.saveIdentityFile).not.toHaveBeenCalled();
+    // Its files were written first, and are put back as they were.
+    const writes = vi.mocked(hub.saveIdentityFile).mock.calls.filter(([, f]) => f === "IDENTITY.md").map(([, , t]) => t);
+    expect(writes.at(-1)).toBe("# Soul\n");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(name.value).toBe("Ledger");
   });
 
-  it("keeps the new name when only their files couldn't be updated, and says so", async () => {
+  it("keeps their name, and doesn't ask the hub, when their files can't be written; says why", async () => {
     const hub = fakeHub({
       renameAgent: vi.fn(() => Promise.resolve({})),
       saveIdentityFile: vi.fn(() => Promise.reject(new HubError(500, "disk full"))),
@@ -282,9 +293,28 @@ describe("Renaming in Settings", () => {
     const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
-    expect(await screen.findByText(/Renamed, but their files still say Ledger/)).toBeTruthy();
-    expect(useChat.getState().roster[0]!.name).toBe("Penny");
-    expect(name.value).toBe("Penny");
+    const about = screen.getByRole("region", { name: "About" });
+    await waitFor(() => expect(about.querySelector(".state-blocked")?.textContent).toBeTruthy());
+    expect(screen.queryByText("Saved into their files.")).toBeNull();
+    expect(hub.renameAgent).not.toHaveBeenCalled();
+    expect(useChat.getState().roster[0]!.name).toBe("Ledger");
+  });
+
+  it("keeps showing the agent while its hub builds it again, and reads the roster once it serves", async () => {
+    const refreshRoster = vi.fn(() => Promise.resolve());
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.resolve({})) } as Partial<DeskHub>);
+    renderSettings(hub);
+    useChat.setState({ refreshRoster });
+    listed.ids.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValue(["ledger"]);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(useChat.getState().settling["local/ledger"]).toBe(true));
+    expect(refreshRoster).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy(), { timeout: 3000 });
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+    expect(listed.ids.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(useChat.getState().settling["local/ledger"]).toBeUndefined();
   });
 });
 

@@ -60,11 +60,15 @@ export interface Line {
   parts: { text: string; session?: boolean; name?: boolean }[];
 }
 
+/** An agent or an overseer (an agent too): named as it is called now,
+ *  whatever it was called when the event was kept. */
+const isAgent = (p: ActivityParty): boolean => p.kind === "agent" || p.kind === "manager";
+
 /** An event as a sentence: "Desk asked workforce-e7 …", "Scout asked which
  *  branch to deploy". Sessions you've named in Desk (`names`, by session
  *  id) go by that name; the hub's text is still split at the name it used. */
 export const lineOf = (e: ActivityEvent, names: Readonly<Record<string, string>> = {}, agentName: (id: string) => string | undefined = () => undefined): Line => {
-  const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : p.kind === "agent" ? (agentName(p.id) ?? p.name) : p.name);
+  const shown = (p: ActivityParty) => (p.kind === "session" ? (names[p.id] ?? p.name) : isAgent(p) ? (agentName(p.id) ?? p.name) : p.name);
   const acting = e.actor.kind === "manager" || e.actor.kind === "you" || e.actor.kind === "desk" || !e.subject;
   const who = acting ? e.actor : e.subject!;
   const lead = who.kind === "you" ? { name: "You", session: false } : { name: shown(who), session: who.kind === "session" };
@@ -96,8 +100,8 @@ const isNeedOf = (e: ActivityEvent, n: Pick<Need, "id" | "kind" | "who">): boole
 
 const RESOLVED_BY = new Set<ActivityKind>(["approved", "denied", "answered"]);
 
-const howResolved = (e: ActivityEvent): string => {
-  const by = e.actor.kind === "you" ? "you" : e.actor.name;
+const howResolved = (e: ActivityEvent, agentName: (id: string) => string | undefined): string => {
+  const by = e.actor.kind === "you" ? "you" : isAgent(e.actor) ? (agentName(e.actor.id) ?? e.actor.name) : e.actor.name;
   return e.kind === "approved" ? `allowed by ${by}` : e.kind === "denied" ? `denied by ${by}` : "answered in its terminal";
 };
 
@@ -105,7 +109,11 @@ const howResolved = (e: ActivityEvent): string => {
  *  `needs`, this hub's open needs), or resolved — by the later event that
  *  answered its approval (when, and how), else no longer waiting. Only a
  *  subject's latest question can be its open one. */
-export const needStates = (events: readonly ActivityEvent[], needs: readonly Pick<Need, "id" | "kind" | "who">[]): Map<string, NeedState> => {
+export const needStates = (
+  events: readonly ActivityEvent[],
+  needs: readonly Pick<Need, "id" | "kind" | "who">[],
+  agentName: (id: string) => string | undefined = () => undefined,
+): Map<string, NeedState> => {
   const latestQuestion = new Map<string, ActivityEvent>();
   for (const e of events)
     if (e.kind === "question" && e.subject && (latestQuestion.get(e.subject.id)?.at ?? "") < e.at) latestQuestion.set(e.subject.id, e);
@@ -116,7 +124,7 @@ export const needStates = (events: readonly ActivityEvent[], needs: readonly Pic
         const current = e.kind === "needs_you" || (e.subject && latestQuestion.get(e.subject.id)?.id === e.id);
         if (current && needs.some((n) => isNeedOf(e, n))) return [e.id, { open: true }];
         const answer = e.approvalId ? events.find((a) => a.approvalId === e.approvalId && RESOLVED_BY.has(a.kind) && a.at >= e.at && a.id !== e.id) : undefined;
-        return [e.id, answer ? { open: false, at: answer.at, how: howResolved(answer) } : { open: false, at: null, how: "no longer waiting" }];
+        return [e.id, answer ? { open: false, at: answer.at, how: howResolved(answer, agentName) } : { open: false, at: null, how: "no longer waiting" }];
       }),
   );
 };
