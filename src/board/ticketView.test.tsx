@@ -30,6 +30,7 @@ import { useOverview } from "../overview/store";
 import { askDeskAbout, FileViewer } from "./FileViewer";
 import { TicketComments, whereSaid } from "./TicketComments";
 import { TicketFiles, useUploads } from "./TicketFiles";
+import { useFileDrop } from "../attachments/Compose";
 import { fileKind, fileLine } from "./ticketView";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -119,15 +120,24 @@ describe("a ticket's files", () => {
     expect(document.querySelector(".file-viewer-image")).toBeNull();
   });
 
-  it("drops files on a ticket of your own, and takes one off", async () => {
+  it("adds files to a ticket of your own, dropped (as the shared drop hook gives them) or picked, and takes one off", async () => {
     hub.upload.mockResolvedValue(file("new", { source: "upload" }));
     hub.removeFile.mockResolvedValue(undefined);
     const t = ticket(2, { files: [file("mine", { source: "upload" })] });
-    render(<Files t={t} local />);
-    const drop = screen.getByRole("button", { name: /Add a file/ });
+    function Dropping() {
+      const uploads = useUploads(t, () => {});
+      const drop = useFileDrop((files) => void uploads.add(files));
+      return (
+        <div data-testid="read" {...drop.handlers}>
+          <TicketFiles ticket={t} local uploads={uploads} />
+        </div>
+      );
+    }
+    render(<Dropping />);
     const shot = new File([PNG], "shot.png", { type: "image/png" });
-    fireEvent.drop(drop, { dataTransfer: { types: ["Files"], files: [shot] } });
+    fireEvent.drop(screen.getByTestId("read"), { dataTransfer: { types: ["Files"], files: [shot] } });
     await waitFor(() => expect(hub.upload).toHaveBeenCalledWith("t2", shot));
+    expect(screen.getByRole("button", { name: /Add a file/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Take mine.png off" }));
     expect(hub.removeFile).toHaveBeenCalledWith("t2", "mine");
   });

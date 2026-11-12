@@ -21,6 +21,7 @@ import { StartSession } from "./StartSession";
 import { TicketBody } from "./TicketBody";
 import { TicketComments } from "./TicketComments";
 import { TicketFiles, useUploads } from "./TicketFiles";
+import { useFileDrop } from "../attachments/Compose";
 import { localTicketView } from "./ticketView";
 import { useBoard } from "./store";
 import { Assignee, TakeIt, Upstream } from "./TicketCard";
@@ -216,7 +217,9 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const agentName = (id: string) => roster.find((a) => a.id === id)?.name;
   const local = !t.external && !sync;
   const uploads = useUploads(t, setProblem);
-  const [dropping, setDropping] = useState(false);
+  // Files dropped on a ticket of your own: the system's drag and drop in
+  // the app, the page's in the browser preview (drop/route.ts).
+  const drop = useFileDrop((files) => void uploads.add(files), setProblem);
   const issue = t.external ? issueUrl(t) : null;
   const details = t.external?.details;
   const labels = details?.labels?.length ? details.labels : null;
@@ -265,23 +268,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
       }
     >
       <div className="ticket-body ticket-view">
-        <div
-          className={`ticket-read${dropping ? " is-dropping" : ""}`}
-          onDragOver={(e) => {
-            if (!local || ![...e.dataTransfer.types].includes("Files")) return;
-            e.preventDefault();
-            setDropping(true);
-          }}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
-          }}
-          onDrop={(e) => {
-            if (!local || !e.dataTransfer.files.length) return;
-            e.preventDefault();
-            setDropping(false);
-            void uploads.add([...e.dataTransfer.files]);
-          }}
-        >
+        <div className={`ticket-read${local && drop.dragging ? " is-dropping" : ""}`} {...(local ? drop.handlers : {})}>
           {editing === "title" ? (
             <input
               className="ticket-title-edit display"

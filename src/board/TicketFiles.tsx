@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Ticket, TicketFile } from "../hub/types";
 import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
@@ -123,7 +123,7 @@ export function TicketFiles({ ticket: t, local, uploads }: { ticket: Ticket; loc
             onRemove={local && f.source === "upload" ? () => remove(f) : undefined}
           />
         ))}
-        {local && <DropCard onFiles={(fs) => void add(fs)} onPick={() => pick.current?.click()} />}
+        {local && <DropCard onPick={() => pick.current?.click()} />}
       </div>
       {local && (
         <input
@@ -173,28 +173,11 @@ function FileCard({ ticket, file: f, onOpen, onRemove }: { ticket: string; file:
   );
 }
 
-/** Where files are dropped on a ticket of your own, or picked. */
-function DropCard({ onFiles, onPick }: { onFiles: (files: File[]) => void; onPick: () => void }) {
-  const [over, setOver] = useState(false);
-  const hasFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
+/** Where files are added to a ticket of your own: picked here, or dropped
+ *  anywhere on its reading column. */
+function DropCard({ onPick }: { onPick: () => void }) {
   return (
-    <button
-      type="button"
-      className={`ticket-file ticket-file-drop${over ? " is-over" : ""}`}
-      onClick={onPick}
-      onDragOver={(e) => {
-        if (!hasFiles(e)) return;
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        if (!hasFiles(e)) return;
-        e.preventDefault();
-        setOver(false);
-        onFiles([...e.dataTransfer.files]);
-      }}
-    >
+    <button type="button" className="ticket-file ticket-file-drop" onClick={onPick}>
       <span className="ticket-file-drop-plus" aria-hidden="true">
         +
       </span>
