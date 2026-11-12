@@ -544,6 +544,36 @@ describe("the board, synced", () => {
     expect(useUi.getState().settings).toBe("connections");
   });
 
+  it("lets you choose who you are on a shared key, by name only, and says so", async () => {
+    const b = synced({ meNote: "Atlas uses a shared Jira key, so it can't say who you are." });
+    const chosen = { ...b, sync: { ...b.sync!, me: "557058:kay", meName: "K. Hendrickse", meSource: "chosen" as const, meNote: undefined } };
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && path === "/api/desk/boards/link/members")
+        return { status: 200, body: { members: [{ id: "557058:kay", name: "K. Hendrickse", avatar: null }] } };
+      if (hub === "local" && path === "/api/desk/boards/link/me") return { status: 200, body: { chosen: { id: body?.id, name: body?.name } } };
+      if (hub === "local" && path === `/api/desk/boards/${ACME.id}/me`) return { status: 200, body: chosen };
+      return localRoutes(method, path, body);
+    };
+    show(b, []);
+    fireEvent.click(screen.getByRole("button", { name: "Choose who you are" }));
+    fireEvent.change(screen.getByPlaceholderText("Part of your name there"), { target: { value: "hendr" } });
+    fireEvent.click(await screen.findByRole("button", { name: "I'm K. Hendrickse" }));
+    await waitFor(() => expect(document.querySelector(".board-sync-me")?.textContent).toMatch(/you're K\. Hendrickse there, you chose this/));
+    const asked = native.asked.filter((a) => a.hub === "local");
+    expect(asked.find((a) => a.path === "/api/desk/boards/link/members")?.body).toMatchObject({ system: "jira", name: "hendr" });
+    expect(asked.find((a) => a.path === "/api/desk/boards/link/me")?.body).toMatchObject({ system: "jira", id: "557058:kay", name: "K. Hendrickse" });
+    // Changed, or cleared: back to the email.
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Go by my email instead" }));
+    await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/me" && a.body?.clear === true)).toBe(true));
+  });
+
+  it("says a Slack email's match as such", () => {
+    show(synced({ me: "557058:sam", meName: "Sam", meSource: "vouchedBySlack" }), []);
+    expect(screen.getByText(/you're Sam there, by your Slack email/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "That’s not me" })).toBeTruthy();
+  });
+
   it("says why Take it didn't, and shows who took it meanwhile", async () => {
     const free = ticket(21, { key: "ACME-21", external: ext("ACME-21", { assignee: null }), state: "todo" });
     const fail = vi.fn();
