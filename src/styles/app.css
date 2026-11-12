@@ -1037,7 +1037,10 @@ button {
   min-width: 0;
 }
 .room-scroll {
-  flex: 1;
+  /* A length, not 0%: the messages take what the composer leaves, in a
+     pane as it resizes too. */
+  flex: 1 1 0px;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 28px 16px;
   display: flex;
@@ -1060,6 +1063,13 @@ button {
   font-size: var(--font-size-chat);
   line-height: 1.55;
   white-space: pre-wrap;
+  /* A long link or path breaks rather than widening the conversation. */
+  overflow-wrap: anywhere;
+}
+/* Code keeps its lines: it scrolls in its own box, never the messages. */
+.msg-text.rich pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 /* The rich renderer draws code in the system's monospace: the emoji fonts
    go after it, as they do in every stack. */
@@ -1151,6 +1161,7 @@ button {
 }
 .composer textarea {
   flex: 1;
+  min-width: 0;
   border: 0;
   outline: none;
   background: transparent;
@@ -1158,6 +1169,98 @@ button {
   max-height: 200px;
   field-sizing: content;
   padding: 8px 0;
+}
+
+/* ── A conversation, at the width it has ───────────────────────────────── */
+
+/* A conversation (a DM, a room, a thread) lays itself out for its own width:
+   a grid's narrow pane, a side column or a small window. */
+.room,
+.thread-body {
+  container: chat / inline-size;
+}
+/* While it shows the conversation, only the messages scroll: the composer
+   stays at the bottom, in a pane, a filled pane and the main view. (Its
+   other tabs, Settings and Files, still scroll as the room.) */
+.room:has(> .room-scroll),
+.room:has(> .timeline) {
+  overflow: hidden;
+}
+.room > .composer,
+.room > .dm-voice-bar,
+.thread-body > .composer {
+  flex: none;
+}
+/* Shown only while the composer is narrow, for the buttons it folds. */
+.composer .composer-more {
+  display: none;
+}
+@container chat (max-width: 520px) {
+  .room-scroll {
+    padding: 8px 14px 12px;
+    gap: 16px;
+  }
+  .composer {
+    margin: 0 12px 12px;
+    padding: 6px 8px;
+    row-gap: 2px;
+  }
+  /* What's typed has the whole width; the buttons go on a line below,
+     Send at its end. */
+  .composer > textarea {
+    flex: 1 1 100%;
+    order: -1;
+    padding: 6px 4px;
+  }
+  .composer > .pending-files,
+  .composer > .pending-problem {
+    order: -2;
+  }
+  .composer > :not(.btn) + .btn {
+    margin-left: auto;
+  }
+  .dm-voice-bar {
+    margin: 0 12px 8px;
+  }
+}
+@container chat (max-width: 360px) {
+  .room-scroll {
+    padding: 6px 10px 10px;
+  }
+  /* The emoji and voice buttons fold into the one overflow menu. */
+  .composer:has(.composer-more) .composer-emoji,
+  .composer:has(.composer-more) > .dm-voice {
+    display: none;
+  }
+  .composer .composer-more {
+    display: inline-grid;
+    place-items: center;
+  }
+  /* A message without its picture, its name and time on one line. */
+  .msg > .mark {
+    display: none;
+  }
+  .msg-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .msg-head > * {
+    flex: none;
+  }
+  .msg-head > .faint {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .typing,
+  .thread-bar {
+    margin-left: 0;
+  }
 }
 
 /* ── Session card ───────────────────────────────────────────────────────── */
@@ -1179,9 +1282,35 @@ button {
   border-top: 1px solid var(--border);
 }
 .session-goal > input,
-.session-goal > .goal-text {
+.session-goal > .goal-text,
+.session-goal > .goal-wrap {
   flex: 1;
   min-width: 0;
+}
+/* A long goal takes two lines, not the session's height: "more" shows the
+   rest, scrolling past a third of the window. */
+.goal-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.goal-wrap > .goal-text {
+  flex: 1;
+  min-width: 0;
+}
+.goal-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.goal-open {
+  max-height: 33vh;
+  overflow-y: auto;
+}
+.goal-more {
+  flex: none;
+  padding: 2px 0;
 }
 /* The session's whole line, read under its terminal. */
 .session-line-history {
@@ -1467,6 +1596,30 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* A sheet is never taller than the window: what it asks scrolls inside it,
+   and its buttons stay at its foot, always reachable. */
+.sheet {
+  max-height: calc(100vh - 12vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sheet .sheet-foot {
+  position: sticky;
+  bottom: -20px;
+  z-index: 1;
+  margin: 0 -20px -20px;
+  padding: 12px 20px 20px;
+  background: var(--raised);
+  border-top: 1px solid var(--border);
+}
+@media (max-height: 640px) {
+  .sheet-backdrop {
+    padding-top: 16px;
+  }
+  .sheet {
+    max-height: calc(100vh - 32px);
+  }
 }
 .quick-ask input {
   font-size: 17px;
@@ -2373,7 +2526,7 @@ button.thread-bar:hover {
 }
 .timeline {
   position: relative;
-  flex: 1;
+  flex: 1 1 0px;
   min-height: 0;
   display: flex;
   flex-direction: column;
