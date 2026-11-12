@@ -5,9 +5,11 @@ vi.mock("../hubs/surface", () => ({ decideApproval: vi.fn() }));
 
 const { decideApproval } = await import("../hubs/surface");
 const { useChat } = await import("./store");
+const { useUi } = await import("../shell/ui");
 const { PromptCard, RoutedApproval } = await import("./Approvals");
 
 beforeEach(() => {
+  localStorage.clear();
   useChat.setState({ hubs: [{ id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, revision: "t" }] });
   vi.mocked(decideApproval).mockReset();
 });
@@ -29,6 +31,15 @@ describe("an approval routed to a conversation", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("offers Reconnect when its workspace isn't connected any more", () => {
+    const opened = vi.fn();
+    useUi.setState({ openSettings: opened } as never);
+    render(<RoutedApproval hubId="gone" requestId="q1" />);
+    expect(screen.getByText("Its workspace isn’t connected to Desk any more.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(opened).toHaveBeenCalledWith("hubs");
+  });
+
   it("alerts you when the answer didn't go through, and keeps its buttons", async () => {
     vi.mocked(decideApproval).mockRejectedValue(new Error("Desk said no."));
     render(<RoutedApproval hubId="dw" requestId="q1" />);
@@ -39,11 +50,94 @@ describe("an approval routed to a conversation", () => {
 });
 
 describe("a tool call waiting on you", () => {
-  it("alerts you when the agent can't be reached to answer", () => {
+  it("alerts you when the agent can't be reached to answer, and tries the same answer again", () => {
     const prompt = { requestId: "q1", content: "Run npm test", tool: "bash", options: { allow_once: true, deny_once: true, allow_always: false, deny_always: false }, turnRef: null };
-    render(<PromptCard prompt={prompt} onAnswer={() => false} />);
+    const onAnswer = vi.fn(() => false);
+    render(<PromptCard prompt={prompt} onAnswer={onAnswer} />);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     expect(screen.getByRole("alert").textContent).toMatch(/isn’t connected/);
+    onAnswer.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onAnswer).toHaveBeenLastCalledWith("allow_once");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  const call = (tool: string, content = "") => ({
+    requestId: "q1",
+    content,
+    tool,
+    options: { allow_once: true, deny_once: true, allow_always: true, deny_always: false },
+    turnRef: null,
+  });
+
+  it("names a tool as a person reads it, and an MCP server as it named itself", () => {
+    render(<PromptCard prompt={call("github.issue_create")} onAnswer={() => true} />);
+    const card = screen.getByRole("group", { name: "Asks you first" });
+    expect(card.textContent).toContain("Wants to use GitHub: issue create");
+    expect(card.textContent).not.toContain("github.issue_create");
+    cleanup();
+    render(<PromptCard prompt={call("mcp__github__create_issue")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent).toContain("Wants to use GitHub: create issue");
+    expect(screen.getByRole("group").textContent).toContain("through the MCP server “github”");
+    cleanup();
+    render(<PromptCard prompt={call("exec.run")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent).toContain("Wants to run a command");
+    expect(screen.getByRole("group").textContent).not.toContain("Run a command: run");
+    cleanup();
+    // The hub's words lead; the tool isn't said twice.
+    render(<PromptCard prompt={call("github.issue_create", "Open an issue in acme/web")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent!.match(/GitHub: issue create/g)).toHaveLength(1);
+  });
+
+  const allow = (prompt: ReturnType<typeof call>, agent = "dw/sarah") => {
+    render(<PromptCard prompt={prompt} agent={agent} onAnswer={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    cleanup();
+  };
+  const said = (prompt: ReturnType<typeof call>, agent = "dw/sarah") => {
+    render(<PromptCard prompt={prompt} agent={agent} onAnswer={() => true} />);
+    const note = screen.queryByText(/You’ve allowed exactly this/);
+    const buttons = screen.getAllByRole("button").map((b) => [b.textContent, b.className.includes("btn-approve")]);
+    cleanup();
+    return { note: note !== null, buttons };
+  };
+
+  it("learns exactly this call, and only says so: Allow once stays first and primary", () => {
+    const issue = call("github.issue_create", "Open an issue “Flaky test” in acme/web");
+    allow(issue);
+    allow(issue);
+    const now = said(issue);
+    expect(now.note).toBe(true);
+    expect(now.buttons).toEqual([
+      ["Allow once", true],
+      ["Always allow", false],
+      ["Deny", false],
+    ]);
+    // Other words are another call; another agent or workspace counts its own.
+    expect(said(call("github.issue_create", "Open an issue “Delete prod” in acme/web")).note).toBe(false);
+    expect(said(issue, "dw/allan").note).toBe(false);
+    expect(said(issue, "acme/sarah").note).toBe(false);
+    // Denying forgets it.
+    render(<PromptCard prompt={issue} agent="dw/sarah" onAnswer={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    cleanup();
+    expect(said(issue).note).toBe(false);
+  });
+
+  it("never learns what runs a command, sends to people or can't say what it does", () => {
+    for (const p of [call("bash", "npm test"), call("messaging.send", "Tell #general we shipped"), call("github.issue_create")]) {
+      allow(p);
+      allow(p);
+      allow(p);
+      expect(said(p).note, p.tool).toBe(false);
+    }
+  });
+
+  it("keeps no command or argument, only a digest of it", () => {
+    const secret = call("github.issue_create", "Use token ghp_SECRETSECRETSECRET");
+    allow(secret);
+    expect(localStorage.getItem("desk.approvals.allowed")).not.toContain("SECRET");
+    expect(localStorage.getItem("desk.approvals.allowed")).not.toContain("github");
   });
 });
 
@@ -69,10 +163,10 @@ describe("Desk's own card for a call on this computer", () => {
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
       "Allow once",
       "Allow for this session",
-      "Always allow in acme-web",
+      "Allow every command in acme-web",
       "Deny",
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Always allow in acme-web" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow every command in acme-web" }));
     expect(onAnswer).toHaveBeenCalledWith("allow_in_folder");
     fireEvent.click(screen.getByRole("button", { name: "Allow for this session" }));
     expect(onAnswer).toHaveBeenCalledWith("allow_session");
@@ -96,6 +190,18 @@ describe("Desk's own card for a call on this computer", () => {
     allow.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
     expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("never learns a call on this computer, and says a folder's command grant is for every command", () => {
+    const run = ask({ allow_session: true, allow_in_folder: "~/dev/acme-web", facts });
+    for (let i = 0; i < 3; i++) {
+      render(<PromptCard prompt={run} agent="local/desk" onAnswer={() => true} />);
+      fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+      cleanup();
+    }
+    render(<PromptCard prompt={run} agent="local/desk" onAnswer={() => true} />);
+    expect(screen.queryByText(/You’ve allowed/)).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Allow once", "Allow for this session", "Allow every command in acme-web", "Deny"]);
   });
 
   it("makes no answer primary for what can't be undone, and offers deleting in its folder", () => {
