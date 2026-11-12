@@ -101,6 +101,37 @@ it("signs the Claude plan in once for the crew and coding sessions, unless the p
   expect(within(chatgpt).queryByRole("checkbox")).toBeNull();
 });
 
+it("closes once the crew member is made whole: their chat failing to open never offers to make them again", async () => {
+  providers = [plan("claude-code", "Claude plan", true), plan("chatgpt", "ChatGPT plan", false)];
+  const { useChat } = await import("../chat/store");
+  const fail = vi.fn();
+  const hub = {
+    providers: vi.fn(async () => providers),
+    accounts: vi.fn(async () => ({ accounts: [], store: "the keychain", signIns: [] })),
+    createAgent: vi.fn(async () => {}),
+    agentConfig: vi.fn(async () => ""),
+    saveAgentConfig: vi.fn(async () => {}),
+    identityFile: vi.fn(async () => "# x\n"),
+    saveIdentityFile: vi.fn(async () => {}),
+    deleteAgent: vi.fn(async () => {}),
+  };
+  useDesk.setState({ hub: hub as unknown as DeskHub, fail, openRoom: vi.fn(async () => Promise.reject(new Error("no room"))) as never });
+  // The roster as the hub has it now: a scout made elsewhere since it was last read.
+  const refreshRoster = vi.fn(async () => useChat.setState({ roster: [{ id: "scout", hubId: "local" }] as never }));
+  useChat.setState({ roster: [], refreshRoster, openDm: vi.fn() });
+  const onClose = vi.fn();
+  render(<NewCrew onClose={onClose} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Scout" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "What they’re for" }), { target: { value: "Watch CI" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Scout" })));
+  expect(hub.createAgent).toHaveBeenCalledWith(expect.objectContaining({ id: "scout-2" }));
+  expect(hub.deleteAgent).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalled();
+  expect(fail).toHaveBeenCalledWith(expect.any(Error), { what: "opening Scout’s chat" });
+  expect(useDesk.getState().error?.plain ?? "").not.toContain("couldn’t finish");
+});
+
 it("signs the Claude plan in once from an agent's brain too, with coding sessions on unless unticked", async () => {
   const { ConnectForm } = await import("../providers/ConnectForm");
   render(<ConnectForm provider={plan("claude-code", "Claude plan", false)} submitLabel="Connect" />);
