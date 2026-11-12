@@ -173,13 +173,18 @@ export class DeskTabs {
       await this.chrome.moveTab(tabId, into);
       windowId = into;
     }
+    // Moved: it is the person's now, whatever happens to Desk's books.
     delete k.sessions[session];
     delete k.opened[tabId];
     for (const [t, by] of Object.entries(k.opened)) if (by === session) delete k.opened[Number(t)];
-    if (Object.keys(k.sessions).length === 0) {
-      await this.chrome.removeWindow(k.windowId).catch(() => undefined);
-      await this.keep(null);
-    } else await this.keep(k);
+    try {
+      if (Object.keys(k.sessions).length === 0) {
+        await this.chrome.removeWindow(k.windowId).catch(() => undefined);
+        await this.keep(null);
+      } else await this.keep(k);
+    } catch {
+      // What is kept couldn't be saved; it is kept in memory all the same.
+    }
     return { tabId, windowId };
   }
 

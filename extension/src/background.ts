@@ -9,6 +9,8 @@ import { HOST, Link, type LinkState, type Port } from "./link";
 import type { ToHub } from "./protocol";
 
 const KEPT = "desk";
+/** The person's own window they used last (`storage.session`). */
+const PERSONS = "persons";
 
 const tabsApi: ChromeTabs = {
   async createWindow() {
@@ -52,6 +54,11 @@ const tabsApi: ChromeTabs = {
   focusWindow: async (windowId) => void (await chrome.windows.update(windowId, { focused: true })),
   async personsWindow(desk) {
     const theirs = (w: chrome.windows.Window | null | undefined): w is chrome.windows.Window & { id: number } => !!w && w.id !== undefined && w.id !== desk && w.type === "normal" && !w.incognito;
+    // The window the person last used that isn't Desk's, as noted when it
+    // took the focus; Chrome's own "last focused" may be Desk's.
+    const noted = ((await chrome.storage.session.get(PERSONS))[PERSONS] as number | undefined) ?? null;
+    const was = noted === null ? null : await chrome.windows.get(noted).catch(() => null);
+    if (theirs(was)) return was.id;
     const last = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
     if (theirs(last)) return last.id;
     const all = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter(theirs);
@@ -152,6 +159,16 @@ link.onChange(badge);
 // A tab a page of Desk's opens joins Desk; any other is left alone.
 chrome.tabs.onCreated.addListener((t) => {
   if (t.id !== undefined) void tabs.adopt(t.id, t.openerTabId);
+});
+// The person's own window, each time one takes the focus: where a page
+// opened for them goes.
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  void tabs.windowId().then(async (desk) => {
+    if (windowId === desk) return;
+    const w = await chrome.windows.get(windowId).catch(() => null);
+    if (w?.type === "normal" && !w.incognito) await chrome.storage.session.set({ [PERSONS]: windowId });
+  });
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   void tabs.closed(tabId).then((session) => {

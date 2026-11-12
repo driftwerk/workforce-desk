@@ -407,6 +407,24 @@ describe("handing a page to the person", () => {
   });
 });
 
+describe("handing a page over when Desk's books can't be saved", () => {
+  it("still says where the tab went, and forgets it", async () => {
+    const c = new FakeChrome().withPersonsWindow();
+    const tabs = new DeskTabs(c);
+    await tabs.tabFor("other");
+    const tab = await tabs.tabFor("s");
+    const save = c.save.bind(c);
+    c.save = async () => {
+      throw new Error("storage is full");
+    };
+    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, execOn())).toMatchObject({ handed: true });
+    expect(c.windows.get(50)!.tabs).toContain(tab);
+    expect(await tabs.existing("s")).toBeNull();
+    c.save = save;
+    expect(await tabs.closed(tab)).toBeNull();
+  });
+});
+
 describe("the link to Desk", () => {
   const port = () => {
     const sent: ToHub[] = [];

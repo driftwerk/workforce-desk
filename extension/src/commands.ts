@@ -183,6 +183,8 @@ const FRONT_MS = 1_500;
  *  window. The answer says whether Chrome confirmed it's in front; once
  *  moved, the tab is theirs either way. */
 async function handOver(session: string, tabs: DeskTabs, exec: Exec): Promise<unknown> {
+  // The hub makes one call at a time per session, so nothing else acts on
+  // this tab while it is handed over.
   // Never a fresh tab: only a page the hub just opened is handed over.
   const tab = await tabs.existing(session);
   if (tab === null) throw new Fail("Desk has no page open to hand over.");
