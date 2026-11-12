@@ -141,17 +141,25 @@ it("says why an update stopped, held until Update to match, with View log", asyn
   expect(within(status).getByRole("list", { name: "Updating hel-1" }).textContent).toContain("Copy it to hel-1: ~ on hel-1 has 180 MB free");
 });
 
-it("checks for a newer Desk for a machine on one, and says when there's none", async () => {
+it("updates this Desk for a machine on a newer one, and says when there's none yet", async () => {
+  const platform = await import("../platform");
   render(<Machines native={fakeNative().native} />);
   await act(async () => {});
   const bb = row("buildbox");
-  expect(bb.textContent).toContain("It runs a newer Desk (0.2.2). Update Desk here to drive it; its sessions keep running.");
-  await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Check for updates" })));
-  expect(bb.textContent).toContain("This Desk is up to date for now.");
+  expect(bb.textContent).toContain("It runs a newer Desk (0.2.2). Update this one to drive it; its sessions keep running.");
+  await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Update Desk" })));
+  expect(bb.textContent).toContain("No newer Desk is out for this computer yet.");
+  // Out: it downloads it and restarts into it once no session is working.
+  vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.2");
+  await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Update Desk" })));
+  expect(platform.updateDownload).toHaveBeenCalled();
+  expect(useUpdates.getState().waiting).toBe(true);
+  expect(bb.textContent).toContain("Desk restarts into 0.2.2 once no session here is working.");
+  act(() => useUpdates.setState({ state: { phase: "idle" }, waiting: false }));
   // Its own page has the same way out, on its status card.
   fireEvent.click(within(bb).getByRole("button", { name: "Open buildbox" }));
   const status = within(screen.getByRole("region", { name: "buildbox" })).getByRole("status");
-  expect(within(status).getByRole("button", { name: "Check for updates" })).toBeTruthy();
+  expect(within(status).getByRole("button", { name: "Update Desk" })).toBeTruthy();
 });
 
 it("says once that Desk updated and what its machines do about it", async () => {

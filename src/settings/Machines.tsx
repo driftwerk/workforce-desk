@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { useEngineSummary } from "../machines/summary";
 import { dotOf, forgetKeyLine, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower, twinNote } from "../machines/words";
 import { shortPrint } from "./EditReach";
-import { inApp } from "../platform";
+import { inApp, openUrl } from "../platform";
 import { NewSession } from "../session/NewSession";
 import { useHost } from "../shell/host";
 import { ForgetOldKey } from "../machines/KeyActions";
@@ -38,26 +38,48 @@ export const useNow = (ticking: boolean): number => {
   return now;
 };
 
-/** "Check for updates": a machine on a newer Desk is driven again once
- *  this Desk updates to it. */
-export function CheckForUpdates() {
-  const phase = useUpdates((s) => s.state.phase);
+/** "Update Desk": a machine on a newer Desk is driven again once this Desk
+ *  runs that version too, so the button updates it: it downloads the
+ *  update and restarts into it as soon as no session here is working
+ *  (sessions carry on, as with the update notice). A package-managed
+ *  install gets its download. */
+export function UpdateDesk() {
+  const state = useUpdates((s) => s.state);
+  const waiting = useUpdates((s) => s.waiting);
   const [said, setSaid] = useState<string | null>(null);
-  const check = async () => {
+  const [busy, setBusy] = useState(false);
+  const update = async () => {
     setSaid(null);
+    setBusy(true);
     try {
-      await useUpdates.getState().check({ asked: true });
-      if (useUpdates.getState().state.phase === "idle") setSaid("This Desk is up to date for now.");
+      const updates = useUpdates.getState();
+      if (updates.state.phase !== "ready") await updates.check({ asked: true });
+      const now = useUpdates.getState().state;
+      if (now.phase === "ready") useUpdates.getState().wait(true);
+      else if (now.phase === "idle") setSaid("No newer Desk is out for this computer yet. Desk looks again every few hours.");
     } catch (e) {
       setSaid(plainError(e));
+    } finally {
+      setBusy(false);
     }
   };
-  if (phase !== "idle") return <span className="small muted">Desk is updating: see the notice.</span>;
+  if (state.phase === "downloading") return <span className="small muted">Downloading Desk {state.version}…</span>;
+  if (state.phase === "installing") return <span className="small muted">Restarting into Desk {state.version}…</span>;
+  if (state.phase === "ready" && waiting)
+    return <span className="small muted">Desk restarts into {state.version} once no session here is working.</span>;
+  if (state.phase === "available")
+    return state.download ? (
+      <button type="button" className="btn btn-sm btn-signal" onClick={() => openUrl(state.download!)}>
+        Get Desk {state.version}
+      </button>
+    ) : (
+      <span className="small muted">Desk {state.version} is out: update it the way you installed it.</span>
+    );
   return (
     <>
       {said && <span className="small muted">{said}</span>}
-      <button type="button" className="btn btn-sm" onClick={() => void check()}>
-        Check for updates
+      <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => void update()}>
+        {busy ? "Looking…" : "Update Desk"}
       </button>
     </>
   );
@@ -174,7 +196,7 @@ function RowActions({
           View log
         </button>
       )}
-      {s === "newer" && <CheckForUpdates />}
+      {s === "newer" && <UpdateDesk />}
       {/* Being set up after "Do this later": its progress, and stopping it. */}
       {s === "adding" && (
         <>
