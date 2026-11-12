@@ -2377,6 +2377,7 @@ impl Fleet {
             s.hostname == theirs.hostname && s.port == theirs.port && s.user == theirs.user
         };
         let mut entries = entry::read(&file);
+        let mut stale: Option<String> = None;
         // One made before for this target: used again while it still goes
         // to the same address, as the same account, forwarding nothing
         // (connecting checks it's the same host key).
@@ -2385,11 +2386,16 @@ impl Fleet {
             if now.forwards.is_empty() && same_place(&now) {
                 return Ok(Some(e.alias.clone()));
             }
-            let stale = e.alias.clone();
-            entries.retain(|x| x.alias != stale);
+            stale = Some(e.alias.clone());
+            entries.retain(|x| Some(&x.alias) != stale.as_ref());
         }
-        let nonce = format!("{:06x}", rand::random::<u32>() & 0xff_ffff);
-        let alias = entry::alias_for(&machine.name, &nonce);
+        let alias = loop {
+            let nonce = format!("{:06x}", rand::random::<u32>() & 0xff_ffff);
+            let alias = entry::alias_for(&machine.name, &nonce);
+            if !entries.iter().any(|e| e.alias == alias) {
+                break alias;
+            }
+        };
         // What the person's config gives a name it has no entry for: what
         // the machine's own settings are told apart from.
         let fresh = {
@@ -2401,12 +2407,13 @@ impl Fleet {
         };
         let lines = entry::lines(&said, &fresh);
         let text = entry::block(&alias, machine.target.as_str(), &lines);
-        let mut with = entries.clone();
-        with.push(entry::Entry {
+        let made = entry::Entry {
             alias: alias.clone(),
             target: machine.target.to_string(),
             text: text.clone(),
-        });
+        };
+        let mut with = entries.clone();
+        with.push(made.clone());
         // What ssh would make of it, before it is kept.
         let dir = file
             .parent()
@@ -2434,7 +2441,8 @@ impl Fleet {
         if !self.trust_gate.ask(|| confirm.desk_entry(&question))? {
             return Ok(None);
         }
-        entry::write(&file, &with, &user_config)?;
+        // The file as it is now: another change may have come in meanwhile.
+        entry::add(&file, made, stale.as_deref(), &user_config)?;
         tracing::info!(machine = %machine.name, entry = %alias, "kept Desk's own SSH entry");
         Ok(Some(alias))
     }
@@ -2705,6 +2713,18 @@ impl Fleet {
                 }
             }
             self.update_kept(id, |k| k.machine.target = t.clone());
+            // Desk's own SSH entry for the address it leaves goes with it.
+            if entry::is_desks(machine.target.as_str())
+                && machine.target.as_str() != t.as_str()
+                && let Some(file) = self.ssh.desk_config()
+                && let Err(e) = entry::remove(
+                    file,
+                    machine.target.as_str(),
+                    &self.home.join(".ssh").join("config"),
+                )
+            {
+                tracing::warn!(machine = id, error = %e, "couldn't take Desk's SSH entry for an address left away");
+            }
             // Desk's own key goes with it: the same machine takes it.
             if self.rows().get(id).is_some_and(|r| r.kept.own_key) {
                 self.ssh.uses_own_key(t.as_str(), true);

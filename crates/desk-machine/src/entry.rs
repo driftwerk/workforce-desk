@@ -81,6 +81,35 @@ fn settings(said: &str) -> Vec<(String, Vec<String>)> {
     out
 }
 
+/// Settings that take exactly one word, as `ssh -G` prints them: unquoted,
+/// so a path with a space in it (`~/Library/Group Containers/…/agent.sock`,
+/// a 1Password agent) reads back as two words and ssh refuses the file.
+const ONE_WORD: &[&str] = &[
+    "hostname",
+    "user",
+    "hostkeyalias",
+    "bindaddress",
+    "bindinterface",
+    "identityfile",
+    "identityagent",
+    "certificatefile",
+    "pkcs11provider",
+    "securitykeyprovider",
+    "xauthlocation",
+    "revokedhostkeys",
+];
+
+/// `key value` as one config line: a one-word setting whose value has
+/// white space is quoted, as ssh reads a quoted word back.
+fn line(key: &str, value: &str) -> String {
+    if ONE_WORD.contains(&key) && value.contains(char::is_whitespace) {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("{key} \"{escaped}\"")
+    } else {
+        format!("{key} {value}")
+    }
+}
+
 /// The lines of Desk's entry: every setting where what the person's config
 /// makes of the machine (`said`, `ssh -G <target>`) differs from what it
 /// makes of a name it has no entry for (`fresh`), but the forwards.
@@ -92,7 +121,7 @@ pub fn lines(said: &str, fresh: &str) -> Vec<String> {
             !NOT_COPIED.contains(&key.as_str())
                 && fresh.iter().find(|(k, _)| k == key).map(|(_, v)| v) != Some(values)
         })
-        .flat_map(|(key, values)| values.into_iter().map(move |v| format!("{key} {v}")))
+        .flat_map(|(key, values)| values.into_iter().map(move |v| line(&key, &v)))
         .collect()
 }
 
@@ -191,8 +220,29 @@ pub fn write(file: &Path, entries: &[Entry], user_config: &Path) -> Result<(), S
     })
 }
 
+/// One change to Desk's file at a time: each reads the file again under it,
+/// so two at once (a machine added as another is forgotten) never write
+/// over one another's.
+static CHANGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Keeps `new` in Desk's file at `file`, as it is now (not as it was when
+/// `new` was made), taking `replaces` out of it.
+pub fn add(
+    file: &Path,
+    new: Entry,
+    replaces: Option<&str>,
+    user_config: &Path,
+) -> Result<(), String> {
+    let _one = CHANGING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = read(file);
+    all.retain(|e| e.alias != new.alias && Some(e.alias.as_str()) != replaces);
+    all.push(new);
+    write(file, &all, user_config)
+}
+
 /// Takes entry `alias` out of Desk's file at `file`, when it is there.
 pub fn remove(file: &Path, alias: &str, user_config: &Path) -> Result<(), String> {
+    let _one = CHANGING.lock().unwrap_or_else(|e| e.into_inner());
     let all = read(file);
     if !all.iter().any(|e| e.alias == alias) {
         return Ok(());
@@ -231,6 +281,20 @@ mod tests {
         let b = block("desk-m-devbox-a1b2c3", "devbox", &l);
         assert!(b.starts_with("# desk-entry desk-m-devbox-a1b2c3 for devbox\nHost desk-m-devbox-a1b2c3\n    user ec2-user\n"));
         assert!(!b.contains("localforward"));
+    }
+
+    #[test]
+    fn a_one_word_setting_with_a_space_in_it_is_quoted_and_the_rest_left_as_is() {
+        let said = "host devbox\nidentityagent /Users/k/Library/Group Containers/x/agent.sock\nidentityfile C:\\Users\\J Smith\\.ssh\\id\nproxycommand ssh -W %h:%p \"jump host\"\nsetenv A=b\n";
+        assert_eq!(
+            lines(said, "host x\n"),
+            [
+                "identityagent \"/Users/k/Library/Group Containers/x/agent.sock\"",
+                "identityfile \"C:\\\\Users\\\\J Smith\\\\.ssh\\\\id\"",
+                "proxycommand ssh -W %h:%p \"jump host\"",
+                "setenv A=b",
+            ]
+        );
     }
 
     #[test]
@@ -300,7 +364,7 @@ mod tests {
         std::fs::write(
             &config,
             format!(
-                "Include {}\nServerAliveInterval 17\nHost devbox\n    HostName 10.0.1.20\n    User ec2-user\n    Port 2222\n    LocalForward 5432 10.0.1.30:5432\nHost *\n    Compression yes\n",
+                "Include {}\nServerAliveInterval 17\nHost devbox\n    HostName 10.0.1.20\n    User ec2-user\n    Port 2222\n    IdentityAgent \"~/Library/Group Containers/x/agent.sock\"\n    LocalForward 5432 10.0.1.30:5432\nHost *\n    Compression yes\n",
                 ssh_dir.join("extra.conf").display()
             ),
         )
@@ -342,6 +406,13 @@ mod tests {
         ] {
             assert!(desk.lines().any(|l| l == line), "{line} in {desk}");
         }
+        // A path with a space in it (a 1Password agent) is read back whole.
+        let agent = said
+            .lines()
+            .find(|l| l.starts_with("identityagent "))
+            .unwrap();
+        assert!(agent.contains("Group Containers"), "{said}");
+        assert!(desk.lines().any(|l| l == agent), "{agent} in {desk}");
         let other = g(Some(&file), "otherhost");
         for line in ["user other", "serveraliveinterval 17", "compression yes"] {
             assert!(other.lines().any(|l| l == line), "{line} in {other}");
