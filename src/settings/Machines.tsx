@@ -1,12 +1,13 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useState } from "react";
-import { useDesk } from "../hub/store";
+import { localSessions, useDesk } from "../hub/store";
 import { AddMachine } from "../machines/AddMachine";
 import { LOCAL, sessionsOn, useMachines, type Machine, type MachineId } from "../machines/engines";
 import { native as realNative, type MachineNative } from "../machines/native";
 import { OpenTerminal } from "../machines/OpenTerminal";
 import { UpdateSteps } from "../machines/UpdateSteps";
-import { useUpdates } from "../updates/store";
+import { isLive, olderThan, useUpdates } from "../updates/store";
+import { whatHappens } from "../updates/UpdateNotice";
 import { plainError } from "../ui/plainError";
 import { useEngineSummary } from "../machines/summary";
 import { dotOf, forgetKeyLine, keyChanged, rowLines, sessionsCount, thisComputer, thisComputerLower, twinNote } from "../machines/words";
@@ -38,16 +39,25 @@ export const useNow = (ticking: boolean): number => {
   return now;
 };
 
-/** "Update Desk": a machine on a newer Desk is driven again once this Desk
- *  runs that version too, so the button updates it: it downloads the
- *  update and restarts into it as soon as no session here is working
- *  (sessions carry on, as with the update notice). A package-managed
- *  install gets its download. */
-export function UpdateDesk() {
+/** "Update Desk on this Mac": a machine on a newer Desk is driven again
+ *  once this computer's Desk runs that version too (the machine itself is
+ *  as it should be). It downloads the update, says what the restart does to
+ *  this computer's sessions, and on the person's yes restarts into it once
+ *  nothing here is working. An update that wouldn't catch up with the
+ *  machine is said, and not restarted into. A package-managed install gets
+ *  its download. */
+export function UpdateDesk({ machine }: { machine: Pick<Machine, "name" | "version"> }) {
   const state = useUpdates((s) => s.state);
   const waiting = useUpdates((s) => s.waiting);
+  const kept = useUpdates((s) => s.sessionsKept);
+  const sessions = useDesk((s) => s.sessions);
+  const live = Object.values(localSessions(sessions)).filter(isLive);
+  const here = thisComputerLower(useHost((h) => h.platform));
   const [said, setSaid] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Downloaded, and asked whether to restart into it. */
+  const [asking, setAsking] = useState(false);
+  const behind = (v: string) => !!machine.version && olderThan(v, machine.version);
   const update = async () => {
     setSaid(null);
     setBusy(true);
@@ -55,9 +65,11 @@ export function UpdateDesk() {
       const updates = useUpdates.getState();
       if (updates.state.phase !== "ready") await updates.check({ asked: true });
       const { state: now, never } = useUpdates.getState();
-      if (now.phase === "ready") useUpdates.getState().wait(true);
-      else if (never !== null) setSaid(`This Desk can’t update itself${never ? `: ${never.replace(/\.$/, "")}` : ""}.`);
-      else if (now.phase === "idle") setSaid("No newer Desk is out for this computer yet. Desk looks again every few hours.");
+      if (never !== null) setSaid(`Desk on ${here} can’t update itself${never ? `: ${never.replace(/\.$/, "")}` : ""}.`);
+      else if (now.phase === "ready" && behind(now.version))
+        setSaid(`The newest Desk out for ${here} is ${now.version}, still older than ${machine.name}’s ${machine.version}, so it wouldn’t catch up yet.`);
+      else if (now.phase === "ready") setAsking(true);
+      else if (now.phase === "idle") setSaid(`No newer Desk is out for ${here} yet. Desk looks again every few hours.`);
     } catch (e) {
       setSaid(plainError(e));
     } finally {
@@ -67,7 +79,28 @@ export function UpdateDesk() {
   if (state.phase === "downloading") return <span className="small muted">Downloading Desk {state.version}…</span>;
   if (state.phase === "installing") return <span className="small muted">Restarting into Desk {state.version}…</span>;
   if (state.phase === "ready" && waiting)
-    return <span className="small muted">Desk restarts into {state.version} once no session here is working.</span>;
+    return <span className="small muted">Desk on {here} restarts into {state.version} once nothing here is working.</span>;
+  if (state.phase === "ready" && asking)
+    return (
+      <span className="machine-update-ask" role="group" aria-label={`Restart Desk on ${here}`}>
+        <span className="small">
+          Desk {state.version} is ready. {whatHappens(live, kept)}
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm btn-signal"
+          onClick={() => {
+            setAsking(false);
+            useUpdates.getState().wait(true);
+          }}
+        >
+          Restart when nothing’s working
+        </button>
+        <button type="button" className="link small" onClick={() => setAsking(false)}>
+          Not now
+        </button>
+      </span>
+    );
   if (state.phase === "available")
     return state.download ? (
       <button type="button" className="btn btn-sm btn-signal" onClick={() => openUrl(state.download!)}>
@@ -80,7 +113,7 @@ export function UpdateDesk() {
     <>
       {said && <span className="small muted">{said}</span>}
       <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => void update()}>
-        {busy ? "Looking…" : "Update Desk"}
+        {busy ? "Looking…" : `Update Desk on ${here}`}
       </button>
     </>
   );
@@ -197,7 +230,7 @@ function RowActions({
           View log
         </button>
       )}
-      {s === "newer" && <UpdateDesk />}
+      {s === "newer" && <UpdateDesk machine={machine} />}
       {/* Being set up after "Do this later": its progress, and stopping it. */}
       {s === "adding" && (
         <>

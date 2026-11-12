@@ -105,6 +105,28 @@ it("waits for no session to be working on When idle, with or without the notice 
   expect(platform.updateInstall).toHaveBeenCalledTimes(1);
 });
 
+it("waits, too, for a machine being set up or updated, and an account signing in", async () => {
+  const { useMachines } = await import("../hub/engines");
+  const { accountsOn } = await import("../engines/accounts");
+  await ready();
+  act(() => useDesk.setState({ sessions: {} }));
+  act(() =>
+    useMachines.setState({ listed: true, machines: [{ id: "devbox", name: "devbox", target: "devbox", version: "0.2.0", state: { kind: "updating" }, system: null }] as never }),
+  );
+  act(() => accountsOn("devbox").setState({ signIns: { s1: { id: "s1", engine: "claude", name: "Work", state: "open", url: null } } }));
+  render(<Shell notice={false} />);
+  act(() => useUpdates.getState().wait(true));
+  await act(async () => {});
+  expect(platform.updateInstall).not.toHaveBeenCalled();
+  act(() => useMachines.setState({ machines: [] }));
+  await act(async () => {});
+  expect(platform.updateInstall).not.toHaveBeenCalled();
+  act(() => accountsOn("devbox").setState({ signIns: {} }));
+  act(() => accountsOn("local").setState({ signIns: {} }));
+  await act(async () => void (await new Promise((r) => setTimeout(r, 2100))));
+  expect(platform.updateInstall).toHaveBeenCalledTimes(1);
+});
+
 it("hides on Later until a newer version is out, through restarts and the checks every few hours", async () => {
   await ready();
   render(<UpdateNotice />);

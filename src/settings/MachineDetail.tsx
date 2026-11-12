@@ -264,7 +264,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
         ? "Being set up… Each step stops after 3 minutes and says why; its log is below."
         : s === "updating"
           ? `Updating Desk${machine.update ? ` to ${machine.update.to}` : ""}… its sessions carry on.`
-          : `It runs a newer Desk (${machine.version}): update this one to drive it. Its sessions keep running.`;
+          : `It runs a newer Desk (${machine.version}): update Desk on ${thisComputerLower(useHost.getState().platform)} to drive it. Its sessions keep running.`;
   return (
     <div className="setting-card machine-status" role="status">
       <span className="prov-text">
@@ -289,7 +289,7 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
         </button>
       )}
       {s === "updating" && <UpdateSteps machine={machine} native={native} />}
-      {s === "newer" && <UpdateDesk />}
+      {s === "newer" && <UpdateDesk machine={machine} />}
     </div>
   );
 }

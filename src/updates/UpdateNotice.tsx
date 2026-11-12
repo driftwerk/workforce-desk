@@ -6,6 +6,8 @@ import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useMachines } from "../hub/engines";
+import { LOCAL } from "../hub/machines";
+import { accountsOn } from "../engines/accounts";
 import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
 import type { Session } from "../hub/types";
 
@@ -34,10 +36,31 @@ export function useRestartWhenIdle() {
   const fail = useDesk((s) => s.fail);
   const live = Object.values(sessions).filter(isLive);
   const working = live.filter(isWorking).length;
+  // A machine being set up or updated, or an account signing in anywhere,
+  // goes through this Desk: it isn't cut off by the restart either.
+  const machineBusy = useMachines((m) => m.machines.some((x) => x.state.kind === "adding" || x.state.kind === "updating"));
+  const signingIn = useSigningIn(waiting);
   useEffect(() => {
-    if (waiting && phase === "ready" && working === 0) void restart(live.map((s) => s.id)).catch(fail);
+    if (waiting && phase === "ready" && working === 0 && !machineBusy && !signingIn) void restart(live.map((s) => s.id)).catch(fail);
     // The sessions current at this render.
-  }, [waiting, phase, working]);
+  }, [waiting, phase, working, machineBusy, signingIn]);
+}
+
+/** Whether an account signs in on this computer or any machine now, asked
+ *  every 2 s while `watching`. */
+function useSigningIn(watching: boolean): boolean {
+  const [now, setNow] = useState(false);
+  useEffect(() => {
+    if (!watching) return;
+    const look = () => {
+      const ids = [LOCAL, ...useMachines.getState().machines.map((m) => m.id)];
+      setNow(ids.some((id) => Object.values(accountsOn(id).getState().signIns).some((s) => s.state !== "done" && s.state !== "failed")));
+    };
+    look();
+    const every = setInterval(look, 2000);
+    return () => clearInterval(every);
+  }, [watching]);
+  return now;
 }
 
 /** Says where the band ends (`--update-band-bottom` on the page), for the
