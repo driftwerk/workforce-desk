@@ -82,8 +82,10 @@ export function UpdateDesk({ machine }: { machine: Pick<Machine, "name" | "versi
   // wouldn't let Desk drive it, so this button offers no restart.
   if (state.phase === "ready" && behind(state.version))
     return (
-      <span className="small muted">
-        The newest Desk out for {here} is {state.version}, still older than {machine.name}’s {machine.version}, so it wouldn’t catch up yet.
+      <span className="machine-update-ask">
+        <span className="small muted">
+          The newest Desk out for {here} is {state.version}, still older than {machine.name}’s {machine.version}, so it wouldn’t catch up yet.
+        </span>
       </span>
     );
   if (state.phase === "ready" && asking)
