@@ -1401,7 +1401,7 @@ export interface BoardSync {
   meName?: string;
   /** Where `me` came from: the hub vouched for it with the person's own
    *  key, or they typed it. Take it needs a vouched one. */
-  meSource?: "vouched" | "typed";
+  meSource?: "vouched" | "vouchedByEmail" | "typed";
   /** Why the hub can't vouch for who the person is. */
   meNote?: string;
   /** The remote state each column moves an issue to. */
@@ -1474,6 +1474,9 @@ export interface LinkCheck {
   /** Why the hub can't say who the person is (a shared key, an older
    *  hub), when it can't. */
   meWhy?: string;
+  /** How the hub knows who the person is, when not by their own key: the
+   *  one user there with the email their sign-in verified. */
+  meBy?: "email";
 }
 
 /** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */
