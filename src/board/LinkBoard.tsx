@@ -52,7 +52,7 @@ const linearId = (s: string): boolean => /^[0-9a-fA-F-]{1,64}$/.test(s);
 
 /** A refusal in the hub's words, or why it couldn't be asked. */
 const saidOf = (e: unknown): string =>
-  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk can't reach this computer's hub right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
 
 /** The link dialog, from a board's menu: the system, then a hub that offers
  *  it (or this computer), then the project or team, the import filter with
@@ -199,7 +199,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     if (busy) return null;
     if (hasTickets) return { words: `Linking needs an empty board: ${board.name} has tickets.`, failed: true };
     if (!system) return { words: "Pick Jira or Linear.", failed: false };
-    if (!localSync()) return { words: "This computer’s hub isn’t running, so nothing can be checked or linked yet.", failed: true };
+    if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
     if (!offered) {
       if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
@@ -716,7 +716,7 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
         {refused
           ? `${choice.name} doesn’t let Desk make this token itself yet — its admin can turn that on, or make a token on ${choice.name} and paste it here.`
           : `Paste a token made on ${choice.name}.`}{" "}
-        <span className="muted">Desk sends it to this computer’s hub once, and never shows it again.</span>
+        <span className="muted">Desk keeps it on this computer, and never shows it again.</span>
       </p>
       <label className="field sync-token-field">
         <span>{choice.name}’s token for you</span>

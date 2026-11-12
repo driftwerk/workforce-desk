@@ -291,3 +291,8 @@
     animation: none;
   }
 }
+/* "Allow Desk to use the microphone", with the setting that allows it. */
+.voice-problem {
+  padding: 4px 2px 2px;
+  font-size: 12.5px;
+}

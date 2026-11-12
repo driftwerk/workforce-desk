@@ -56,4 +56,31 @@ describe("VoicePill", () => {
     );
     expect(screen.getByText("Say an agent's name · ⌃⌥K is taken by another app, change it in Settings")).toBeTruthy();
   });
+
+  it("asks to be allowed the microphone, with the setting, and starts again once it is", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const calls = vi.mocked(invoke);
+    calls.mockClear();
+    let access = "denied";
+    calls.mockImplementation(((cmd: string) => Promise.resolve(cmd === "privacy_check" ? access : undefined)) as typeof invoke);
+    act(() => {
+      useSettings.setState({ voice: true });
+      useVoiceStore.setState({ status: { state: "off" }, error: "starting audio: Desk isn’t allowed to use the microphone." });
+    });
+    render(<VoicePill />);
+    expect(screen.getByText("Allow Desk to use the microphone.")).toBeTruthy();
+    // The raw text only under Details.
+    expect(document.querySelector(".voice-detail")?.textContent).not.toContain("starting audio");
+    fireEvent.click(screen.getByRole("button", { name: "Open Microphone settings" }));
+    expect(calls).toHaveBeenCalledWith("privacy_open", { pane: "microphone" });
+    // Still not allowed: the problem stays.
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(screen.getByText("Allow Desk to use the microphone.")).toBeTruthy();
+    // Allowed, and Desk back in front: voice starts again and the problem goes.
+    access = "granted";
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(useVoiceStore.getState().error).toBeNull());
+    expect(calls.mock.calls.some(([cmd]) => cmd === "voice_enable")).toBe(true);
+    expect(screen.queryByText("Allow Desk to use the microphone.")).toBeNull();
+  });
 });

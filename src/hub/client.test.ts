@@ -69,6 +69,6 @@ describe("a hub's refusals", () => {
       expect((await caught(hub.saveAgentConfig("scout", "x = 1")))?.message).toBe("Bad Request");
     }
     refuse(400, "", "text/plain", "");
-    expect((await caught(hub.saveAgentConfig("scout", "x = 1")))?.message).toBe("The hub refused that.");
+    expect((await caught(hub.saveAgentConfig("scout", "x = 1")))?.message).toBe("Desk couldn’t do that.");
   });
 });

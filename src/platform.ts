@@ -233,9 +233,22 @@ export const monitorsNow = (): Promise<MonitorInfo[]> => invoke("grid_monitors")
 export const hubAccounts = (): Promise<HubAccount[]> => invoke("hubs_list");
 
 /** Opens a page in the default browser; in the browser preview, a new tab. */
+/** Where a link or setting that wouldn't open is said: the window's toast,
+ *  set by the shell (a test may leave it unset). */
+let openFailed: ((e: unknown) => void) | null = null;
+export const setOpenReporter = (run: ((e: unknown) => void) | null): void => {
+  openFailed = run;
+};
+export const reportOpenFailure = (e: unknown): void => openFailed?.(e);
+
 export const openUrl = (url: string): void => {
   if (preview) window.open(url, "_blank", "noopener");
-  else openExternal(url).catch((e: unknown) => console.warn(`couldn't open ${url} in the browser:`, e));
+  else
+    openExternal(url).catch((e: unknown) => {
+      console.warn(`couldn't open ${url} in the browser:`, e);
+      // The person pressed something: nothing opening must say why.
+      reportOpenFailure(new Error("Desk couldn’t open that link."));
+    });
 };
 
 /** A link clicked in a terminal, decided natively: Claude's and OpenAI's
@@ -378,12 +391,19 @@ export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
 /** What `desk-hubd.log` last said about the helper stopping; null if it says
  *  nothing or can't be read. */
 export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
+/** How far Desk Helper has got since it last started, from its log. */
+export type HelperStage = "starting" | "database" | "services" | "connecting";
+export const helperProgress = (): Promise<HelperStage | null> => invoke("helper_progress");
+/** Copies Desk into the Applications folder, quits, and opens the copy
+ *  (macOS). Resolves only if it couldn't: it rejects with why. */
+export const moveToApplications = (): Promise<void> => invoke("helper_move_to_applications");
 
 export type InstallProgress =
   | { state: "running"; line: string }
   | { state: "done" }
-  /** `command` is what to run in a terminal by hand; `hint` says where. */
-  | { state: "failed"; message: string; command?: string; hint?: string };
+  /** `command` is what to run in a terminal by hand; `hint` says where;
+   *  `details` is what the installer last printed. */
+  | { state: "failed"; message: string; command?: string; hint?: string; details?: string };
 
 /** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
 export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
@@ -473,6 +493,8 @@ export interface SetupEvent {
 export const detectWsl = (): Promise<WslDetection> => invoke("wsl_detect");
 /** Installs WSL and Ubuntu as an administrator; Windows then restarts. */
 export const installWsl = (): Promise<void> => invoke("wsl_install");
+/** Forgets opening Desk after the restart WSL's install asks for. */
+export const forgetWslResume = (): Promise<void> => invoke("wsl_forget_resume");
 export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_convert", { distro });
 /** Sets Desk up in `distro`; progress arrives through `onWslSetup`. */
 export const setUpInWsl = (distro: string): Promise<void> => invoke("wsl_setup", { distro });

@@ -154,7 +154,7 @@ describe("what Desk remembers of a session", () => {
   it("says what a note is for when asked, naming whose model wrote it", async () => {
     await show(fakeHub(remembered()));
     fireEvent.click(screen.getByRole("button", { name: /noted by Desk/ }));
-    expect(screen.getByText(/may be wrong/).textContent).toContain("sent to Anthropic, under the hub's own account");
+    expect(screen.getByText(/may be wrong/).textContent).toContain("sent to Anthropic, under Desk's own account");
   });
 
   it("confirms, corrects inline and drops a note, and reads again after each", async () => {

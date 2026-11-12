@@ -187,7 +187,7 @@ export function UnlinkBoard({ board, onClose }: { board: Board; onClose: () => v
       action="Unlink"
       onConfirm={async () => {
         const api = localSync();
-        if (!api) throw new Error("This computer's hub isn't running.");
+        if (!api) throw new Error("Desk isn't ready yet. Try again in a moment.");
         const b = await api.unlink(board.id);
         useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
       }}

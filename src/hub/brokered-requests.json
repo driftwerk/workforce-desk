@@ -302,6 +302,11 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/voice/keys/elevenlabs"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/agents"
   },
   {

@@ -187,7 +187,7 @@ export interface ComputerActivityPage {
 export type DiskAccess = "granted" | "missing" | "unknown";
 
 /** What a hub without a route is taken to have said. */
-const NO_ROUTE = "This part of Desk doesn’t have that yet.";
+const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
 
 /** One key of Desk's state on a hub. */
 export interface StateRow {
@@ -213,7 +213,7 @@ export const stateRows = (body: unknown): StateRow[] => {
   if (!Array.isArray(list)) throw new HubError(404, NO_ROUTE);
   const rows = list.flatMap((x) => stateRow(x) ?? []);
   if (rows.length < list.length) {
-    throw new HubError(502, `The hub's Desk state listing has ${list.length - rows.length} rows Desk can't read.`);
+    throw new HubError(502, `Desk's saved state has ${list.length - rows.length} rows Desk can't read.`);
   }
   return rows;
 };
@@ -247,6 +247,9 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** A key the provider refused when the hub tried it: its error is written
+ *  for the person, the fix included. */
+export const KEY_REFUSED = "key_refused";
 
 /** Whether `e` is the hub refusing a change only a move may make. */
 export const crossesBoss = (e: unknown): boolean => e instanceof HubError && e.status === 409 && e.code === CROSSES_BOSS;
@@ -270,7 +273,7 @@ export const refusal = async (res: Response): Promise<HubError> => {
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "The hub refused that.", code, hubs);
+  return new HubError(res.status, message || res.statusText || "Desk couldn’t do that.", code, hubs);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
@@ -435,7 +438,7 @@ export class DeskHub {
   /** Signs account `id` in again, its sign-in gone: a pasted token is kept
    *  for it, else its sign-in begins (as adding one does). */
   signInAgain = (id: string, a: { token?: string; remote?: boolean } = {}): Promise<AccountAdded> =>
-    this.call("POST", `/api/desk/accounts/${id}/sign-in`, a);
+    this.call("POST", `/api/desk/accounts/${encodeURIComponent(id)}/sign-in`, a);
 
   updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
     this.call("PATCH", `/api/desk/accounts/${id}`, patch);
@@ -544,6 +547,11 @@ export class DeskHub {
   /** Vault paths (never values) on this hub. */
   vaultPaths = async (): Promise<string[]> => (await this.call<{ keys: string[] }>("GET", "/api/vault")).keys;
   saveVault = (path: string, value: string): Promise<void> => this.call("POST", `/api/vault/${path}`, { value });
+  /** Tries a voice key (`fish_audio`, `elevenlabs`, `openai`, `soniox`,
+   *  `gemini`) with the smallest call its provider takes, and keeps it only
+   *  if the provider takes it; a refusal says why in the person's words. */
+  saveVoiceKey = (provider: string, key: string): Promise<void> =>
+    this.call("POST", `/api/desk/voice/keys/${encodeURIComponent(provider)}`, { key });
 
   /** The local agents themselves, created and configured on the person's behalf. */
   createAgent = (agent: { id: string; name: string; system_prompt: string }): Promise<unknown> =>

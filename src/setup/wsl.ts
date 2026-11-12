@@ -51,6 +51,24 @@ export const optionFor = (f: WslFound): DistroOption => {
   return { name, note: parts.join(" · "), tag: f.distro.default ? "Recommended" : "WSL 2", usable: true, convert: false };
 };
 
+/** The one distro Desk can set up in without asking anything: the only
+ *  usable one on WSL 2. Null when there is a choice to make, or none. */
+export const onlyChoice = (found: WslFound[]): string | null => {
+  const usable = found.map(optionFor).filter((o) => o.usable);
+  return usable.length === 1 && !usable[0]!.convert ? usable[0]!.name : null;
+};
+
+/** Why "Set up" can't be pressed yet, or null when it can. */
+export const whyNotYet = (option: DistroOption | null, busy: boolean): string | null =>
+  busy ? null : !option ? "Choose a Linux first." : !option.usable ? `Desk can’t run in ${option.name}: ${option.note}` : null;
+
+/** How long "Setting up Desk in …" shows, with Cancel, before Desk sets
+ *  up in the only Linux it can use. */
+export const START_SOON_MS = 3_000;
+
+/** How often Desk looks for WSL again while it isn't there. */
+export const LOOK_AGAIN_MS = 10_000;
+
 /** The distro picked first: the default when Desk can use it, else the
  *  first it can. */
 export const firstPick = (found: WslFound[]): string | null => {
@@ -60,7 +78,7 @@ export const firstPick = (found: WslFound[]): string | null => {
 };
 
 export const STEPS: { step: SetupStep; label: (distro: string) => string; note: string }[] = [
-  { step: "copy", label: (d) => `Copy Desk into ${d}`, note: "desk-helper, the agents and memory, into ~/.local/share/Desk/bin" },
+  { step: "copy", label: (d) => `Copy Desk into ${d}`, note: "Desk’s helper, agents and memory, into your Linux home" },
   { step: "check", label: () => "Check it runs there", note: "" },
   { step: "start", label: () => "Start the database and memory", note: "The first time takes about a minute" },
   { step: "reach", label: () => "Reach it from Windows", note: "" },

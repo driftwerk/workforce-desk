@@ -221,17 +221,49 @@ fn post(
     Ok((status, said))
 }
 
-/// Saves a login where the agents on this computer read it.
+/// How long Desk waits before each further try at keeping a sign-in.
+const SAVE_RETRIES: [std::time::Duration; 2] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(3),
+];
+
+/// Saves a login where the agents on this computer read it. A sign-in the
+/// person just finished is kept and the save tried again while Desk's
+/// helper is busy or briefly away, rather than lost to one bad answer.
 fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
-    let (status, _) = post(
-        backend,
-        &format!("/api/vault/{}", plan.vault_path()),
-        &serde_json::json!({ "value": value }),
-    )?;
-    if !status.is_success() {
-        eyre::bail!("saving the login failed ({status})");
+    keep_trying(&SAVE_RETRIES, std::thread::sleep, || {
+        post(
+            backend,
+            &format!("/api/vault/{}", plan.vault_path()),
+            &serde_json::json!({ "value": value }),
+        )
+        .map(|(status, _)| status)
+    })
+}
+
+/// Runs `attempt` once, then again after each of `waits` while it fails in
+/// a way worth trying again (no answer, or a 5xx).
+fn keep_trying(
+    waits: &[std::time::Duration],
+    sleep: impl Fn(std::time::Duration),
+    mut attempt: impl FnMut() -> eyre::Result<reqwest::StatusCode>,
+) -> eyre::Result<()> {
+    let mut waits = waits.iter();
+    loop {
+        let again = match attempt() {
+            Ok(status) if status.is_success() => return Ok(()),
+            Ok(status) if !status.is_server_error() => {
+                eyre::bail!("Desk couldn't keep the sign-in ({status}).")
+            }
+            Ok(_) | Err(_) => waits.next(),
+        };
+        match again {
+            Some(wait) => sleep(*wait),
+            None => eyre::bail!(
+                "Desk couldn't keep the sign-in just now: its helper didn't answer. Sign in again in a moment."
+            ),
+        }
     }
-    Ok(())
 }
 
 /// What a hub refusal says, in its words.
@@ -242,14 +274,31 @@ fn refusal(status: reqwest::StatusCode, said: &serde_json::Value) -> String {
         .unwrap_or_else(|| format!("the hub said {status}"))
 }
 
+/// An account's id as the hub makes them: a UUID, in its one written form
+/// (lowercase, hyphenated). Anything else is none: it never reaches a path.
+fn account_id(raw: &str) -> Option<String> {
+    let id = raw.trim().to_ascii_lowercase();
+    let groups: Vec<&str> = id.split('-').collect();
+    let shaped = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups
+            .iter()
+            .all(|g| g.chars().all(|c| c.is_ascii_hexdigit()));
+    shaped.then_some(id)
+}
+
 /// What keeping a Claude token as a Desk account sends: a new account, or
-/// the one signed in again.
-fn account_request(account: &AccountUse, token: &str) -> (String, serde_json::Value) {
-    match &account.again {
-        Some(id) => (
-            format!("/api/desk/accounts/{id}/sign-in"),
-            serde_json::json!({ "token": token }),
-        ),
+/// the one signed in again. An account to sign in again whose id isn't one
+/// is refused before anything is sent.
+fn account_request(account: &AccountUse, token: &str) -> eyre::Result<(String, serde_json::Value)> {
+    Ok(match &account.again {
+        Some(raw) => {
+            let id =
+                account_id(raw).ok_or_else(|| eyre::eyre!("that isn't one of your accounts"))?;
+            (
+                format!("/api/desk/accounts/{id}/sign-in"),
+                serde_json::json!({ "token": token }),
+            )
+        }
         None => (
             "/api/desk/accounts".to_string(),
             serde_json::json!({
@@ -264,20 +313,20 @@ fn account_request(account: &AccountUse, token: &str) -> (String, serde_json::Va
                 "makeDefault": account.make_default,
             }),
         ),
-    }
+    })
 }
 
 /// Keeps a Claude token as a Desk account on this computer's hub (which
 /// checks Claude Code signs in by it first). Its id.
 fn keep_account(backend: &Backend, account: &AccountUse, token: &str) -> eyre::Result<String> {
-    let (path, body) = account_request(account, token);
+    let (path, body) = account_request(account, token)?;
     let (status, said) = post(backend, &path, &body)?;
     if !status.is_success() {
         eyre::bail!(refusal(status, &said));
     }
     said.pointer("/account/id")
         .and_then(|v| v.as_str())
-        .map(str::to_string)
+        .and_then(account_id)
         .ok_or_else(|| eyre::eyre!("the hub didn't say which account it kept"))
 }
 
@@ -659,6 +708,66 @@ impl Logins {
 }
 
 #[cfg(test)]
+mod save_tests {
+    use std::cell::{Cell, RefCell};
+    use std::time::Duration;
+
+    use reqwest::StatusCode;
+
+    use super::{SAVE_RETRIES, keep_trying};
+
+    #[test]
+    fn a_sign_in_is_kept_by_trying_again_while_the_helper_is_busy() {
+        let answers = RefCell::new(vec![
+            Ok(StatusCode::OK),
+            Err(eyre::eyre!("connection refused")),
+            Ok(StatusCode::INTERNAL_SERVER_ERROR),
+        ]);
+        let slept = RefCell::new(Vec::new());
+        keep_trying(
+            &SAVE_RETRIES,
+            |d| slept.borrow_mut().push(d),
+            || answers.borrow_mut().pop().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(*slept.borrow(), SAVE_RETRIES.to_vec());
+    }
+
+    #[test]
+    fn it_gives_up_plainly_and_never_retries_a_refusal() {
+        let tries = Cell::new(0);
+        let e = keep_trying(
+            &SAVE_RETRIES,
+            |_| {},
+            || {
+                tries.set(tries.get() + 1);
+                Ok(StatusCode::BAD_GATEWAY)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(tries.get(), 3);
+        assert!(
+            e.to_string()
+                .starts_with("Desk couldn't keep the sign-in just now"),
+            "{e}"
+        );
+        assert!(!e.to_string().contains("502"));
+
+        let tries = Cell::new(0);
+        let _ = keep_trying(
+            &[Duration::ZERO; 2],
+            |_| {},
+            || {
+                tries.set(tries.get() + 1);
+                Ok(StatusCode::FORBIDDEN)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(tries.get(), 1, "a refusal isn't tried again");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -673,7 +782,7 @@ mod tests {
         }))
         .unwrap();
         let account = to.account.unwrap();
-        let (path, body) = account_request(&account, "sk-ant-oat01-x");
+        let (path, body) = account_request(&account, "sk-ant-oat01-x").unwrap();
         assert_eq!(path, "/api/desk/accounts");
         assert_eq!(
             body,
@@ -682,11 +791,29 @@ mod tests {
         let again = AccountUse {
             name: None,
             make_default: false,
-            again: Some("7b1e".into()),
+            again: Some(" 7B1E0D2C-3F4A-4B5C-8D6E-0F1A2B3C4D5E ".into()),
         };
-        let (path, body) = account_request(&again, "sk-ant-oat01-y");
-        assert_eq!(path, "/api/desk/accounts/7b1e/sign-in");
+        let (path, body) = account_request(&again, "sk-ant-oat01-y").unwrap();
+        assert_eq!(
+            path,
+            "/api/desk/accounts/7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/sign-in"
+        );
         assert_eq!(body, serde_json::json!({ "token": "sk-ant-oat01-y" }));
+        // An id that isn't an account's never reaches a path.
+        for bad in [
+            "7b1e",
+            "../../vault/x",
+            "7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/../x",
+            "7b1e0d2c3f4a4b5c8d6e0f1a2b3c4d5e",
+            "g7b1e0d2-3f4a-4b5c-8d6e-0f1a2b3c4d5e",
+        ] {
+            let bad = AccountUse {
+                name: None,
+                make_default: false,
+                again: Some(bad.into()),
+            };
+            assert!(account_request(&bad, "sk-ant-oat01-y").is_err());
+        }
         // Done says which account it went to, only when it went to one.
         assert_eq!(
             serde_json::to_value(Progress::Done { account: None }).unwrap(),
