@@ -161,8 +161,21 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
 
           <h2 className="field-label">Desk in Chrome</h2>
           {line && <p className={`small ${line.tone === "done" ? "state-done" : line.tone === "blocked" ? "state-blocked" : "muted"}`}>{line.text}</p>}
+          {pending.length > 1 && (
+            <p className="small state-blocked" role="alert">
+              More than one Chrome is asking at once. Unless you just added Desk’s extension in each of them, choose Not mine for every one: something
+              else on this computer may be asking.
+            </p>
+          )}
           {pending.map((p) => (
-            <ConfirmProfile key={p.id} profile={p} busy={busy} onConfirm={() => void act(() => api.confirm(p.id))} onRefuse={() => void act(() => api.forget(p.id))} />
+            <ConfirmProfile
+              key={p.id}
+              profile={p}
+              using={confirmed.find((c) => c.chosen) ?? null}
+              busy={busy}
+              onConfirm={() => void act(() => api.confirm(p.id))}
+              onRefuse={() => void act(() => api.forget(p.id))}
+            />
           ))}
           {confirmed.length === 0 && pending.length === 0 && <AddToChrome storeUrl={chrome.store_url} />}
           {confirmed.length > 0 && (
@@ -237,7 +250,20 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
 /** A Chrome profile asking to connect: the person checks its code matches
  *  the one Desk's extension shows in that Chrome, then confirms it. Until
  *  then it reaches nothing. */
-function ConfirmProfile({ profile, busy, onConfirm, onRefuse }: { profile: ChromeProfile; busy: boolean; onConfirm: () => void; onRefuse: () => void }) {
+function ConfirmProfile({
+  profile,
+  using,
+  busy,
+  onConfirm,
+  onRefuse,
+}: {
+  profile: ChromeProfile;
+  /** The Chrome Desk uses now, which stays the one it uses. */
+  using: ChromeProfile | null;
+  busy: boolean;
+  onConfirm: () => void;
+  onRefuse: () => void;
+}) {
   return (
     <div className="browser-connect" role="group" aria-label="A Chrome asks to connect">
       <p className="small">
@@ -247,7 +273,15 @@ function ConfirmProfile({ profile, busy, onConfirm, onRefuse }: { profile: Chrom
         Its code is <code className="mono browser-code">{profile.label}</code>. Click Desk’s icon in that Chrome’s toolbar: confirm only if it shows
         the same code.
       </p>
-      <p className="small faint">Desk’s extension {profile.version}. Once confirmed, Desk can open pages in that Chrome, signed in as you.</p>
+      <p className="small faint">
+        It says it’s extension {profile.version}: only the code shows it’s Desk’s. Once confirmed, Desk can open pages in that Chrome, signed in as
+        you.
+      </p>
+      {using && (
+        <p className="small muted">
+          Desk keeps using Chrome <code className="mono">{using.label}</code>. To switch to this one once it’s confirmed, choose Use this one.
+        </p>
+      )}
       <div className="browser-connect-actions">
         <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={onConfirm}>
           It’s my Chrome

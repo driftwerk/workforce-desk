@@ -117,6 +117,25 @@ it("refuses a Chrome that isn't the person's", async () => {
   expect(a.forget).toHaveBeenCalledWith("p1");
 });
 
+it("warns when more than one Chrome asks at once, and says a new one doesn't take over", async () => {
+  const a = api(
+    view({}, {
+      connected: true,
+      profiles: [
+        profile(),
+        profile({ id: "p2", label: "1111-2222-3333-4444", state: "pending", connected: true, chosen: false }),
+        profile({ id: "p3", label: "5555-6666-7777-8888", state: "pending", connected: true, chosen: false }),
+      ],
+    }),
+  );
+  await show(a);
+  expect(screen.getByRole("alert").textContent).toContain("More than one Chrome is asking at once");
+  const cards = screen.getAllByRole("group", { name: "A Chrome asks to connect" });
+  expect(cards).toHaveLength(2);
+  expect(cards[0]!.textContent).toContain("Desk keeps using Chrome 1A2B-3C4D-5E6F-7A8B");
+  expect(cards[0]!.textContent).toContain("only the code shows it’s Desk’s");
+});
+
 it("lists the confirmed Chromes: which is connected, which Desk uses, and forgetting one", async () => {
   const a = api(view({}, { connected: true, profiles: [profile(), profile({ id: "p2", label: "9999-8888-7777-6666", connected: false, chosen: false })] }));
   await show(a);
