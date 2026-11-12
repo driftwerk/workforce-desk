@@ -70,41 +70,74 @@ describe("a tool call waiting on you", () => {
     turnRef: null,
   });
 
-  it("names a tool as a person reads it, never by its id", () => {
+  it("names a tool as a person reads it, and an MCP server as it named itself", () => {
     render(<PromptCard prompt={call("github.issue_create")} onAnswer={() => true} />);
     const card = screen.getByRole("group", { name: "Asks you first" });
     expect(card.textContent).toContain("Wants to use GitHub: issue create");
     expect(card.textContent).not.toContain("github.issue_create");
     cleanup();
-    render(<PromptCard prompt={call("mcp__linear__create_issue")} onAnswer={() => true} />);
-    expect(screen.getByRole("group").textContent).toContain("Linear: create issue");
+    render(<PromptCard prompt={call("mcp__github__create_issue")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent).toContain("Wants to use GitHub: create issue");
+    expect(screen.getByRole("group").textContent).toContain("through the MCP server “github”");
+    cleanup();
+    render(<PromptCard prompt={call("exec.run")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent).toContain("Wants to run a command");
+    expect(screen.getByRole("group").textContent).not.toContain("Run a command: run");
+    cleanup();
+    // The hub's words lead; the tool isn't said twice.
+    render(<PromptCard prompt={call("github.issue_create", "Open an issue in acme/web")} onAnswer={() => true} />);
+    expect(screen.getByRole("group").textContent!.match(/GitHub: issue create/g)).toHaveLength(1);
   });
 
-  it("learns: once allowed twice, it offers to allow it always, first, and still asks", () => {
-    const onAnswer = vi.fn(() => true);
-    for (let i = 0; i < 2; i++) {
-      render(<PromptCard prompt={call("github.issue_create")} onAnswer={onAnswer} />);
-      expect(screen.getAllByRole("button")[0]!.textContent).toBe("Allow once");
-      fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-      cleanup();
-    }
-    render(<PromptCard prompt={call("github.issue_create")} onAnswer={onAnswer} />);
-    expect(screen.getByText(/You’ve allowed this 2 times/)).toBeTruthy();
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Always allow", "Allow once", "Deny"]);
-    expect(screen.getByRole("button", { name: "Always allow" }).className).toContain("btn-approve");
-    expect(screen.getByRole("button", { name: "Allow once" }).className).not.toContain("btn-approve");
-    expect(onAnswer).toHaveBeenCalledTimes(2);
-    // Another tool hasn't been learned.
+  const allow = (prompt: ReturnType<typeof call>, agent = "dw/sarah") => {
+    render(<PromptCard prompt={prompt} agent={agent} onAnswer={() => true} />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     cleanup();
-    render(<PromptCard prompt={call("github.repo_delete")} onAnswer={onAnswer} />);
-    expect(screen.queryByText(/You’ve allowed this/)).toBeNull();
-    // Denying forgets what was learned.
+  };
+  const said = (prompt: ReturnType<typeof call>, agent = "dw/sarah") => {
+    render(<PromptCard prompt={prompt} agent={agent} onAnswer={() => true} />);
+    const note = screen.queryByText(/You’ve allowed exactly this/);
+    const buttons = screen.getAllByRole("button").map((b) => [b.textContent, b.className.includes("btn-approve")]);
     cleanup();
-    render(<PromptCard prompt={call("github.issue_create")} onAnswer={onAnswer} />);
+    return { note: note !== null, buttons };
+  };
+
+  it("learns exactly this call, and only says so: Allow once stays first and primary", () => {
+    const issue = call("github.issue_create", "Open an issue “Flaky test” in acme/web");
+    allow(issue);
+    allow(issue);
+    const now = said(issue);
+    expect(now.note).toBe(true);
+    expect(now.buttons).toEqual([
+      ["Allow once", true],
+      ["Always allow", false],
+      ["Deny", false],
+    ]);
+    // Other words are another call; another agent or workspace counts its own.
+    expect(said(call("github.issue_create", "Open an issue “Delete prod” in acme/web")).note).toBe(false);
+    expect(said(issue, "dw/allan").note).toBe(false);
+    expect(said(issue, "acme/sarah").note).toBe(false);
+    // Denying forgets it.
+    render(<PromptCard prompt={issue} agent="dw/sarah" onAnswer={() => true} />);
     fireEvent.click(screen.getByRole("button", { name: "Deny" }));
     cleanup();
-    render(<PromptCard prompt={call("github.issue_create")} onAnswer={onAnswer} />);
-    expect(screen.queryByText(/You’ve allowed this/)).toBeNull();
+    expect(said(issue).note).toBe(false);
+  });
+
+  it("never learns what runs a command, sends to people or can't say what it does", () => {
+    for (const p of [call("bash", "npm test"), call("messaging.send", "Tell #general we shipped"), call("github.issue_create")]) {
+      allow(p);
+      allow(p);
+      allow(p);
+      expect(said(p).note, p.tool).toBe(false);
+    }
+  });
+
+  it("keeps no command or argument, only a digest of it", () => {
+    const secret = call("github.issue_create", "Use token ghp_SECRETSECRETSECRET");
+    allow(secret);
+    expect(localStorage.getItem("desk.approvals.allowed")).not.toContain("SECRET");
+    expect(localStorage.getItem("desk.approvals.allowed")).not.toContain("github");
   });
 });
 
@@ -130,10 +163,10 @@ describe("Desk's own card for a call on this computer", () => {
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
       "Allow once",
       "Allow for this session",
-      "Always allow in acme-web",
+      "Allow every command in acme-web",
       "Deny",
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Always allow in acme-web" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow every command in acme-web" }));
     expect(onAnswer).toHaveBeenCalledWith("allow_in_folder");
     fireEvent.click(screen.getByRole("button", { name: "Allow for this session" }));
     expect(onAnswer).toHaveBeenCalledWith("allow_session");
@@ -159,29 +192,16 @@ describe("Desk's own card for a call on this computer", () => {
     expect(onAnswer).not.toHaveBeenCalled();
   });
 
-  it("learns a command in its folder, never what can't be undone, and not another command", () => {
-    const onAnswer = vi.fn(() => true);
-    const run = (command: string, why = "Runs on this computer") =>
-      ask({ allow_session: true, allow_in_folder: "~/dev/acme-web", facts: { ...facts, command, why } });
-    for (let i = 0; i < 2; i++) {
-      render(<PromptCard prompt={run("npm test")} onAnswer={onAnswer} />);
-      fireEvent.click(screen.getByRole("button", { name: "Allow for this session" }));
-      cleanup();
-    }
-    render(<PromptCard prompt={run("npm test")} onAnswer={onAnswer} />);
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Always allow in acme-web", "Allow once", "Allow for this session", "Deny"]);
-    cleanup();
-    render(<PromptCard prompt={run("npm publish")} onAnswer={onAnswer} />);
-    expect(screen.getAllByRole("button")[0]!.textContent).toBe("Allow once");
-    cleanup();
+  it("never learns a call on this computer, and says a folder's command grant is for every command", () => {
+    const run = ask({ allow_session: true, allow_in_folder: "~/dev/acme-web", facts });
     for (let i = 0; i < 3; i++) {
-      render(<PromptCard prompt={run("rm -rf dist", "Can't be undone")} onAnswer={onAnswer} />);
+      render(<PromptCard prompt={run} agent="local/desk" onAnswer={() => true} />);
       fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
       cleanup();
     }
-    render(<PromptCard prompt={run("rm -rf dist", "Can't be undone")} onAnswer={onAnswer} />);
-    expect(screen.queryByText(/You’ve allowed this/)).toBeNull();
-    expect(screen.getAllByRole("button").some((b) => b.className.includes("btn-approve"))).toBe(false);
+    render(<PromptCard prompt={run} agent="local/desk" onAnswer={() => true} />);
+    expect(screen.queryByText(/You’ve allowed/)).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Allow once", "Allow for this session", "Allow every command in acme-web", "Deny"]);
   });
 
   it("makes no answer primary for what can't be undone, and offers deleting in its folder", () => {

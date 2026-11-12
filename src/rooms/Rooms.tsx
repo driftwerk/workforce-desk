@@ -388,7 +388,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             {/* Desk's own agent says the setup in its DM while it's open. */}
             <SetupInDm agent={agent} />
             {convo.prompts.map((p) => (
-              <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
+              <PromptCard key={p.requestId} prompt={p} agent={activeAgent} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
             ))}
             {convo.working && !answering && <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />}
             <div ref={end} />

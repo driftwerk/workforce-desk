@@ -1,21 +1,55 @@
 import type { Prompt } from "./conversation";
 import type { PermissionChoice } from "./types";
 
-/** How many times the same call is allowed once before its card offers to
- *  allow it always, first. */
+/** How many times the same call is allowed once before its card mentions
+ *  that it could be allowed always. */
 export const LEARN_AFTER = 2;
 
 const KEY = "desk.approvals.allowed";
 /** Calls remembered at most; the oldest go first. */
 const MOST = 200;
 
-/** What a card's answer is remembered by: the tool, and on this computer
- *  what it would do there (its command, or its folder), so allowing
- *  `npm test` says nothing of `rm -rf`. */
-export const callKey = (p: Prompt): string => {
+/** A short digest of `text` (FNV-1a, 64 bits as hex): what a call is
+ *  remembered by, so no command, path or argument (which may hold a
+ *  secret) is ever kept. */
+export const digest = (text: string): string => {
+  let h = 0xcbf29ce484222325n;
+  for (const b of new TextEncoder().encode(text)) {
+    h ^= BigInt(b);
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return h.toString(16).padStart(16, "0");
+};
+
+/** Who a card's answers are counted for: the agent asking (`hub/agent`) and
+ *  the person answering on that hub. */
+export interface Scope {
+  agent: string;
+  person: string;
+}
+
+/** What a card's answer is remembered by: who asks and who answers, the
+ *  tool, and exactly what it would do (the hub's facts, else its words),
+ *  as a digest. Allowing `npm test` says nothing of `npm publish`. */
+export const callKey = (p: Prompt, scope: Scope): string => {
   const f = p.options.facts;
-  if (!f) return `tool:${p.tool}`;
-  return [f.effect, f.command ?? "", f.cwd ?? p.options.allow_in_folder ?? "", f.connector ?? ""].join("|");
+  const what = f ? [f.effect, f.command ?? "", f.cwd ?? "", (f.paths ?? []).join("\n"), f.connector ?? ""].join("|") : p.content;
+  return digest([scope.agent, scope.person, p.tool, what].join("\u0000"));
+};
+
+/** Tools whose call sends something to other people. */
+const SENDS = /(^|[._])(send|post|reply|email|mail|message|publish|share|tweet|invite|comment)/i;
+/** Tools that run anything they are given. */
+const SHELL = /(^|[._])(exec|bash|shell|run|command|terminal)([._]|$)/i;
+
+/** Whether a card may ever mention allowing its call always: never for a
+ *  call that can't say what it does, can't be undone, runs a command,
+ *  writes outside Desk (a connected service), or sends to other people. */
+export const learnable = (p: Prompt): boolean => {
+  const f = p.options.facts;
+  if (f) return false;
+  if (!p.content.trim() || !p.options.allow_always) return false;
+  return !SENDS.test(p.tool) && !SHELL.test(p.tool);
 };
 
 const read = (): Record<string, number> => {
@@ -36,21 +70,21 @@ const write = (all: Record<string, number>): void => {
   }
 };
 
-/** How many times this call was allowed once before. */
-export const allowedBefore = (p: Prompt): number => read()[callKey(p)] ?? 0;
+/** How many times this call was allowed once before, for `scope`. */
+export const allowedBefore = (p: Prompt, scope: Scope): number => read()[callKey(p, scope)] ?? 0;
 
-/** Remembers the answer given: allowing once counts toward offering
- *  "always"; denying, or allowing always, forgets the count. */
-export const remember = (p: Prompt, choice: PermissionChoice): void => {
+/** Remembers the answer given: allowing once counts toward the mention;
+ *  denying, or allowing always, forgets the count. Only learnable calls. */
+export const remember = (p: Prompt, scope: Scope, choice: PermissionChoice): void => {
+  if (!learnable(p)) return;
   const all = read();
-  const key = callKey(p);
+  const key = callKey(p, scope);
   const { [key]: was = 0, ...rest } = all;
-  if (choice === "allow_once" || choice === "allow_session") write({ ...rest, [key]: was + 1 });
+  if (choice === "allow_once") write({ ...rest, [key]: was + 1 });
   else write(rest);
 };
 
-/** A tool's id as a person reads it: `github.issue_create` → "GitHub:
- *  issue create". */
+/** Services and kinds of tool, as a person reads them. */
 const SERVICE: Record<string, string> = {
   github: "GitHub",
   gitlab: "GitLab",
@@ -62,7 +96,6 @@ const SERVICE: Record<string, string> = {
   datadog: "Datadog",
   metabase: "Metabase",
   hubspot: "HubSpot",
-  exec: "Run a command",
   filesystem: "Files",
   fs: "Files",
   web: "The web",
@@ -74,12 +107,16 @@ const SERVICE: Record<string, string> = {
   email: "Email",
 };
 
-export const toolTitle = (tool: string): string => {
+/** A tool's id as what the agent wants to do: "use GitHub: issue create",
+ *  "run a command"; and, for an MCP server's tool, the server as it named
+ *  itself, so a server calling itself "github" is seen for what it is. */
+export const toolWants = (tool: string): { wants: string; server: string | null } => {
   const t = tool.trim();
-  if (!t) return "a tool";
-  const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(t);
+  if (!t) return { wants: "use a tool", server: null };
+  if (SHELL.test(t) && !t.includes("__")) return { wants: "run a command", server: null };
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(t);
   const [service, action] = mcp ? [mcp[1]!, mcp[2]!] : t.includes(".") ? [t.slice(0, t.indexOf(".")), t.slice(t.indexOf(".") + 1)] : ["", t];
   const words = (s: string) => s.replace(/[._-]+/g, " ").trim();
   const name = SERVICE[service.toLowerCase()] ?? (service ? words(service).replace(/^\w/, (c) => c.toUpperCase()) : "");
-  return name ? `${name}: ${words(action)}` : words(action);
+  return { wants: `use ${name ? `${name}: ${words(action)}` : words(action)}`, server: mcp ? mcp[1]! : null };
 };
