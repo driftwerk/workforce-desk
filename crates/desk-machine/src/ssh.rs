@@ -483,6 +483,31 @@ impl Settings {
     }
 }
 
+/// The OpenSSH version `ssh -V` says (`OpenSSH_9.6p1, …` gives `(9, 6)`);
+/// none when it says something else.
+pub fn openssh_version(said: &str) -> Option<(u32, u32)> {
+    let v = said.trim().strip_prefix("OpenSSH_")?;
+    let mut parts = v.split(|c: char| !c.is_ascii_digit());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+impl SshExe {
+    /// This ssh's OpenSSH version (`ssh -V`, which connects nowhere); none
+    /// when it can't say.
+    pub fn version(&self) -> Option<(u32, u32)> {
+        let out = Command::new(&self.program)
+            .arg("-V")
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        let said = String::from_utf8_lossy(&out.stderr).into_owned()
+            + &String::from_utf8_lossy(&out.stdout);
+        openssh_version(&said)
+    }
+}
+
 /// Reads [`Settings`] for `machine` (`ssh -G`, which connects nowhere).
 pub fn settings(ssh: &SshExe, machine: &Machine) -> Result<Settings, String> {
     let out = ssh
@@ -586,6 +611,20 @@ mod tests {
             after.starts_with("Desk couldn't reach devbox. devbox said: “the box says no”"),
             "{after}"
         );
+    }
+
+    #[test]
+    fn openssh_s_version_is_read() {
+        assert_eq!(
+            openssh_version("OpenSSH_9.6p1 Ubuntu-3ubuntu13.5, OpenSSL 3.0.13\n"),
+            Some((9, 6))
+        );
+        assert_eq!(
+            openssh_version("OpenSSH_10.0p2, LibreSSL 3.3.6"),
+            Some((10, 0))
+        );
+        assert_eq!(openssh_version("OpenSSH_8.3p1"), Some((8, 3)));
+        assert_eq!(openssh_version("Dropbear"), None);
     }
 
     #[test]

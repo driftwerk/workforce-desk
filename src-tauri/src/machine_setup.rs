@@ -11,7 +11,7 @@ use std::sync::Arc;
 use desk_core::machine_backend::{self, Arch, Backend, Source};
 use desk_machine::fleet::{Edited, Fleet, Host, Listed, LogLine, RemoveEvent, SetupEvent};
 use desk_machine::hostkey::{
-    ForgetQuestion, SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion,
+    ForgetQuestion, LingerQuestion, SwitchQuestion, TrustConfirm, TrustQuestion, UninstallQuestion,
 };
 use desk_machine::setup::Person;
 use tauri::{Emitter, Manager};
@@ -208,6 +208,13 @@ impl<R: tauri::Runtime> TrustConfirm for crate::pair_gate::NativeConfirm<R> {
             "Forget a machine's old key",
             question.text(),
             "Forget Old Key",
+        )
+    }
+    fn linger(&self, question: &LingerQuestion) -> bool {
+        self.ask(
+            "Keep Desk running on a machine",
+            question.text(),
+            "Continue",
         )
     }
 }

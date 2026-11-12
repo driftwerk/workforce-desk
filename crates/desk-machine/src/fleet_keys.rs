@@ -133,6 +133,19 @@ impl Fleet {
         if hostkey::trouble(&self.ssh, &machine)?.is_some() {
             return Err(format!("Trust {name}'s host key first."));
         }
+        // Before 8.4, ssh shows a keyboard-interactive prompt without the
+        // `(user@host)` it came from, so a jump host could ask for this
+        // machine's password in its words: no password through one then.
+        if settings.via.is_some() {
+            let new_enough = self.ssh.version().is_some_and(|v| v >= (8, 4));
+            if !new_enough {
+                return Err(format!(
+                    "{name} is reached through a jump host, and {}'s ssh is older than OpenSSH 8.4, which can't tell the jump host's password prompt from {name}'s. Update OpenSSH, or put {}'s key on {name} yourself.",
+                    crate::this_computer(),
+                    crate::this_computer()
+                ));
+            }
+        }
         let askpass = self.askpass_program()?;
         let file = self
             .ssh
@@ -293,6 +306,19 @@ impl Fleet {
             .rows()
             .get(id)
             .and_then(|r| r.now.details.as_ref().and_then(|d| d.user.clone()));
+        // Only for an address the person said yes to a moment ago, or once
+        // they say yes natively now: never a password field the page
+        // conjures for any machine.
+        if !self.admitted.has(machine.target.as_str()) {
+            let ask = hostkey::LingerQuestion {
+                name: machine.name.clone(),
+                target: machine.target.to_string(),
+            };
+            let confirm = &self.trust;
+            if !self.trust_gate.ask(|| confirm.linger(&ask))? {
+                return Ok(Unlocked::Cancelled);
+            }
+        }
         let question = SecretQuestion {
             kind: SecretKind::Linger,
             name: machine.name.clone(),
@@ -329,17 +355,23 @@ impl Fleet {
         let Ok(line) = std::fs::read_to_string(own_key::public_file(file)) else {
             return;
         };
-        let part: String = line
-            .split_whitespace()
-            .take(2)
-            .collect::<Vec<_>>()
-            .join(" ");
+        // Only ever exactly Desk's key: a line that doesn't read as one
+        // removes nothing.
+        let Some((kind, b64, _)) = own_key::key_fields(&line) else {
+            self.note(
+                id,
+                LogKind::Warn,
+                "Desk's own key can't be read, so it was left in authorized_keys there",
+            );
+            return;
+        };
         let words = [
             "sh".to_string(),
             "-c".to_string(),
-            own_key::REMOVE_SCRIPT.to_string(),
+            own_key::remove_script(),
             "desk-key".to_string(),
-            part,
+            kind,
+            b64,
         ];
         let done = self
             .step_uncancellable()

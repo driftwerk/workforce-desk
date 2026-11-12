@@ -7,7 +7,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { deskReady, invoke } from "../platform";
-import { useTheme } from "../theme/store";
+import { applyTheme, resolveTheme } from "../theme/store";
 import "../styles/settings.css";
 
 /** The window's label: its capability names it. */
@@ -57,17 +57,19 @@ export function SecretWindow() {
   const [sending, setSending] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const id = useId();
-  const { bg } = useTheme().colors;
-  const first = useRef(bg);
+  // A built-in theme (Day or Night, as the system is), never the saved
+  // one or a custom theme's tokens.
+  const theme = useRef(resolveTheme("system", [], typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches));
 
   useEffect(() => {
+    applyTheme(theme.current);
     invoke<Question>("machine_secret_request")
       .then((q) => {
         setQuestion(q);
         setProblem(q.problem ?? null);
       })
       .catch(() => setProblem("Nothing is asked for now. You can close this window."))
-      .finally(() => void deskReady(first.current).catch(() => undefined));
+      .finally(() => void deskReady(theme.current.colors.bg).catch(() => undefined));
   }, []);
 
   const send = () => {

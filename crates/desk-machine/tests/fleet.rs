@@ -450,6 +450,10 @@ impl TrustConfirm for Yes {
         self.0.fetch_add(1, Ordering::SeqCst);
         self.1
     }
+    fn linger(&self, _: &desk_machine::hostkey::LingerQuestion) -> bool {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        self.1
+    }
 }
 
 fn timing() -> Timing {
@@ -1018,6 +1022,21 @@ fn a_jump_hosts_prompt_gets_nothing_and_a_machine_that_takes_no_password_is_said
     // The fake exits 99 had the jump host been given it.
     let done = r.fleet.install_key("devbox").unwrap();
     assert_eq!(serde_json::to_value(&done).unwrap()["kind"], "done");
+    // An ssh before 8.4 can't tell the jump host's prompt from the
+    // machine's: no password through a jump host then.
+    let scenario = b.dir.path().join("scenario.json");
+    let mut said: Value =
+        serde_json::from_str(&std::fs::read_to_string(&scenario).unwrap()).unwrap();
+    said["version"] = json!("OpenSSH_8.2p1 Ubuntu-4ubuntu0.11, OpenSSL 1.1.1f");
+    std::fs::write(&scenario, said.to_string()).unwrap();
+    let asked = r.said.typed.asked.lock().unwrap().len();
+    let old = r.fleet.install_key("devbox").unwrap_err();
+    assert!(old.contains("older than OpenSSH 8.4"), "{old}");
+    assert_eq!(
+        r.said.typed.asked.lock().unwrap().len(),
+        asked,
+        "never asked"
+    );
 
     let b = Box_::new();
     b.say_full(
@@ -1119,7 +1138,9 @@ fn linger_is_turned_on_with_the_machines_password_once_and_desk_moves_to_its_ser
         step(&r, "install", StepState::Blocked).is_some()
     });
     until("ready", || r.fleet.state(&id) == Some(State::Ready));
-    // A wrong one: said, with the line an administrator runs.
+    // A wrong one: said, with the line an administrator runs. Asked
+    // natively first: the yes to adding it was used up.
+    let asked_before = r.asked.0.load(Ordering::SeqCst);
     r.said
         .typed
         .answers
@@ -1127,6 +1148,11 @@ fn linger_is_turned_on_with_the_machines_password_once_and_desk_moves_to_its_ser
         .unwrap()
         .push_back("nope".into());
     let no = r.fleet.linger_with_password(&id).unwrap_err();
+    assert_eq!(
+        r.asked.0.load(Ordering::SeqCst),
+        asked_before + 1,
+        "a native yes first"
+    );
     assert!(no.contains("sudo loginctl enable-linger"), "{no}");
     r.said
         .typed

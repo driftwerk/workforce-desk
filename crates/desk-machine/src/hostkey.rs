@@ -237,6 +237,30 @@ pub trait TrustConfirm: Send + Sync + 'static {
         let _ = question;
         false
     }
+    /// The person's yes to Desk asking for a machine's password to turn
+    /// linger on there with sudo. No unless asked.
+    fn linger(&self, question: &LingerQuestion) -> bool {
+        let _ = question;
+        false
+    }
+}
+
+/// Asking for a machine's password to keep Desk running there (linger,
+/// with sudo): its name and exact address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LingerQuestion {
+    pub name: String,
+    pub target: String,
+}
+
+impl LingerQuestion {
+    pub fn text(&self) -> String {
+        format!(
+            "Use {name}'s password to keep Desk running there?\n\n{target}\n\nDesk asks for the account's password next, in its own window, and runs sudo loginctl enable-linger there once with it, so Desk starts when {name} boots. It doesn't keep the password.",
+            name = self.name,
+            target = self.target
+        )
+    }
 }
 
 /// Forgetting a machine's old host key and trusting the one it shows now:
@@ -471,6 +495,14 @@ pub fn trust(
             ));
         }
         Some(KeyTrouble::Unknown) => {}
+    }
+    // Without its own question, only for a name nothing is known under
+    // yet: any key kept for it, whatever ssh said, needs the person.
+    if confirm.is_none() && !known_fingerprints(files).is_empty() {
+        return Err(format!(
+            "{} already knows a key for {name}. Desk won't trust another without asking you.",
+            crate::ssh::capital(crate::this_computer())
+        ));
     }
     let (key, _) = capture(ssh, machine)?;
     if key.fingerprint != seen {

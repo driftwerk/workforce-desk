@@ -67,16 +67,14 @@ const grid = detachedGrid();
 // What this computer is (its platform, where the backend runs) is read then
 // too, so every screen words itself for it from the start.
 // The theme too: the window first shows in the one chosen.
+// Desk's own password field paints a built-in theme of its own, never the
+// saved one: nothing the page can write changes how it looks.
 if (secret)
-  void paintSavedTheme()
-    .catch(() => undefined)
-    .then(() =>
-      createRoot(document.getElementById("root")!).render(
-        <StrictMode>
-          <SecretWindow />
-        </StrictMode>,
-      ),
-    );
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <SecretWindow />
+    </StrictMode>,
+  );
 else void Promise.all([
   restoreBeforeRender(grid ? [] : [mainUi, roomOrder, boardOrder, machineSessions]),
   loadHost().catch(() => undefined),

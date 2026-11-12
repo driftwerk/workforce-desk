@@ -54,6 +54,8 @@ use serde::Deserialize;
 struct Scenario {
     log: std::path::PathBuf,
     hosts: Vec<Host>,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -113,6 +115,14 @@ fn main() {
     let line = format!("{}\n", serde_json::to_string(&args).expect("the call"));
     log.write_all(line.as_bytes()).expect("logging");
     drop(log);
+    // `ssh -V`, as OpenSSH says it (`version` in the scenario, else 9.6).
+    if args.iter().any(|a| a == "-V") {
+        eprintln!(
+            "{}",
+            scenario.version.as_deref().unwrap_or("OpenSSH_9.6p1, fake")
+        );
+        std::process::exit(0);
+    }
     let dash = args
         .iter()
         .position(|a| a == "--")
@@ -219,12 +229,21 @@ fn sign_in(options: &[String], target: &str, host: &Host, password: &str) {
     let keys = home
         .and_then(|h| std::fs::read_to_string(h.join(".ssh/authorized_keys")).ok())
         .unwrap_or_default();
-    let part = |l: &str| l.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
+    // As sshd reads a line: options first, perhaps, then the key's type and
+    // base64; a comment line is none.
+    let holds = |line: &str, public: &str| {
+        let mut p = public.split_whitespace();
+        let (Some(t), Some(k)) = (p.next(), p.next()) else {
+            return false;
+        };
+        let w: Vec<&str> = line.split_whitespace().collect();
+        !line.trim_start().starts_with('#') && w.windows(2).any(|f| f[0] == t && f[1] == k)
+    };
     let offered = options
         .windows(2)
         .filter(|w| w[0] == "-i")
         .filter_map(|w| std::fs::read_to_string(format!("{}.pub", w[1])).ok())
-        .any(|p| keys.lines().any(|k| part(k) == part(&p)));
+        .any(|p| keys.lines().any(|k| holds(k, &p)));
     if !offered {
         fail(
             &format!("{user}@{hostname}: Permission denied (publickey,password)."),

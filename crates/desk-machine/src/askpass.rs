@@ -72,7 +72,16 @@ impl Expect {
                 prompt
                     .strip_prefix("Enter passphrase for ")
                     .and_then(|rest| rest.strip_prefix(key.as_ref()))
-                    .is_some_and(|rest| rest.trim_end().ends_with(':'))
+                    .is_some_and(|rest| {
+                        // Just the colon, or ssh-add's own note in brackets
+                        // before it: nothing else may follow the key's path.
+                        let rest = rest.trim_end();
+                        rest == ":"
+                            || rest
+                                .strip_prefix(" (")
+                                .and_then(|r| r.strip_suffix("):"))
+                                .is_some_and(|note| !note.contains(['(', ')', ':']))
+                    })
             }
         }
     }
@@ -329,6 +338,14 @@ mod tests {
             key.answers("Enter passphrase for /Users/me/.ssh/id_ed25519 (will confirm each use): ")
         );
         assert!(!key.answers("Enter passphrase for /Users/me/.ssh/other: "));
+        // Nothing else after the key's path.
+        assert!(!key.answers("Enter passphrase for /Users/me/.ssh/id_ed25519.evil: "));
+        assert!(
+            !key.answers(
+                "Enter passphrase for /Users/me/.ssh/id_ed25519 or dev@bastion's password: "
+            )
+        );
+        assert!(!key.answers("Enter passphrase for /Users/me/.ssh/id_ed25519 (x): (y):"));
         assert!(!key.answers("dev@devbox's password: "));
     }
 

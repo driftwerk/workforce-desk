@@ -93,56 +93,104 @@ fn computer_name() -> String {
         .unwrap_or_else(|| "this computer".into())
 }
 
-/// The `type base64` part of a public key line.
-fn key_part(line: &str) -> String {
-    line.split_whitespace()
-        .take(2)
-        .collect::<Vec<_>>()
-        .join(" ")
+/// Desk's own key line split into what the scripts take: its type, its
+/// base64 and its comment; none for anything but one public key line.
+pub fn key_fields(line: &str) -> Option<(String, String, String)> {
+    let line = crate::probe::public_key_line(line)?;
+    let mut w = line.split_whitespace();
+    let (kind, b64) = (w.next()?.to_string(), w.next()?.to_string());
+    let comment = w.collect::<Vec<_>>().join(" ");
+    // As the scripts check them again: a type ssh names, base64 alone.
+    let kind_ok = kind
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-@.".contains(c));
+    let b64_ok = b64.len() >= 16
+        && b64
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c));
+    (kind_ok && b64_ok).then_some((kind, b64, comment))
 }
 
-/// Puts the key (`$1`, one public key line) in the account's
-/// `authorized_keys` unless it is there, then turns linger on as the
-/// account, else with `sudo -S` once (its password on the input), and says
-/// both.
-pub const INSTALL_SCRIPT: &str = "set -e\n\
-     umask 077\n\
-     key=\"$1\"\n\
-     part=\"$2\"\n\
-     mkdir -p \"$HOME/.ssh\"\n\
-     chmod 700 \"$HOME/.ssh\"\n\
-     f=\"$HOME/.ssh/authorized_keys\"\n\
-     [ -f \"$f\" ] || : > \"$f\"\n\
-     chmod 600 \"$f\"\n\
-     grep -qF -- \"$part\" \"$f\" || printf '%s\\n' \"$key\" >> \"$f\"\n\
-     echo key=ok\n\
-     set +e\n\
-     user=$(id -un)\n\
-     if command -v loginctl >/dev/null 2>&1; then\n\
-       if [ \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\" != yes ]; then\n\
-         loginctl enable-linger \"$user\" </dev/null >/dev/null 2>&1 \\\n\
-           || { command -v sudo >/dev/null 2>&1 && sudo -S -k -p '' loginctl enable-linger \"$user\" >/dev/null 2>&1; }\n\
-       fi\n\
-       printf 'linger=%s\\n' \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\"\n\
-     fi\n\
-     exit 0\n";
+/// What Desk's line in `authorized_keys` allows besides signing in: no
+/// agent or X11 forwarding (Desk forwards a port, so not `restrict`).
+pub const KEY_OPTIONS: &str = "no-agent-forwarding,no-X11-forwarding";
 
-/// Turns linger on with `sudo -S` once, its password on the input; says it.
-pub const LINGER_SCRIPT: &str = "user=$(id -un)\n\
-     command -v loginctl >/dev/null 2>&1 || exit 0\n\
-     if [ \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\" != yes ]; then\n\
-       command -v sudo >/dev/null 2>&1 && sudo -S -k -p '' loginctl enable-linger \"$user\" >/dev/null 2>&1\n\
-     fi\n\
-     printf 'linger=%s\\n' \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\"\n";
+/// Checks the key (`$1` its type, `$2` its base64) and finds it in
+/// `authorized_keys`: an uncommented line with exactly those two fields one
+/// after the other, whatever options come before them. Defines `f`, `has`.
+const FIND: &str = r#"type="$1"; b64="$2"
+case "$type" in ''|*[!A-Za-z0-9@.-]*) echo "bad key" >&2; exit 3 ;; esac
+case "$b64" in ''|*[!A-Za-z0-9+/=]*) echo "bad key" >&2; exit 3 ;; esac
+[ "${#b64}" -ge 16 ] || { echo "bad key" >&2; exit 3; }
+f="$HOME/.ssh/authorized_keys"
+has() { awk -v t="$type" -v k="$b64" '$0 !~ /^[[:space:]]*#/ { for (i = 1; i < NF; i++) if ($i == t && $(i+1) == k) found = 1 } END { exit !found }' "$f"; }
+"#;
 
-/// Takes Desk's own key (`$1`, its `type base64`) out of the account's
-/// `authorized_keys`, leaving every other line as it was.
-pub const REMOVE_SCRIPT: &str = "f=\"$HOME/.ssh/authorized_keys\"\n\
-     [ -f \"$f\" ] || exit 0\n\
-     grep -qF -- \"$1\" \"$f\" || exit 0\n\
-     t=$(mktemp \"$f.XXXXXX\") || exit 1\n\
-     grep -vF -- \"$1\" \"$f\" > \"$t\"\n\
-     chmod 600 \"$t\" && mv \"$t\" \"$f\"\n";
+/// Puts Desk's key (`$1` type, `$2` base64, `$3` comment) in the account's
+/// `authorized_keys` unless it is there (see [`FIND`]): on a line of its
+/// own, a line end added first to a file that lacks one, written through a
+/// link rather than replacing it. Then turns linger on as the account, else
+/// with `sudo -S` once, its password asked for (`desk-sudo-asks`) and given
+/// only then; and says both.
+pub fn install_script() -> String {
+    format!(
+        "set -e\numask 077\n{FIND}mkdir -p \"$HOME/.ssh\"\nchmod 700 \"$HOME/.ssh\"\n\
+         [ -e \"$f\" ] || : > \"$f\"\n\
+         if ! has; then\n\
+           if [ -s \"$f\" ] && [ -n \"$(tail -c 1 \"$f\")\" ]; then printf '\\n' >> \"$f\"; fi\n\
+           printf '%s %s %s %s\\n' '{KEY_OPTIONS}' \"$type\" \"$b64\" \"$3\" >> \"$f\"\n\
+         fi\n\
+         chmod 600 \"$f\"\n\
+         has && echo key=ok\n\
+         set +e\n\
+         user=$(id -un)\n\
+         if command -v loginctl >/dev/null 2>&1; then\n\
+           if [ \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\" != yes ]; then\n\
+             if ! loginctl enable-linger \"$user\" </dev/null >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then\n\
+               echo {SUDO_ASKS}\n\
+               sudo -S -k -p '' loginctl enable-linger \"$user\" >/dev/null 2>&1\n\
+             fi\n\
+           fi\n\
+           printf 'linger=%s\\n' \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\"\n\
+         fi\n\
+         exit 0\n"
+    )
+}
+
+/// What the scripts say, on a line of its own, just before `sudo -S` reads
+/// the password: it is written to their input then, and only then.
+pub const SUDO_ASKS: &str = "desk-sudo-asks";
+
+/// Turns linger on with `sudo -S` once, the password asked for as
+/// [`install_script`] asks; says it.
+pub fn linger_script() -> String {
+    format!(
+        "user=$(id -un)\n\
+         command -v loginctl >/dev/null 2>&1 || exit 0\n\
+         if [ \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\" != yes ] && command -v sudo >/dev/null 2>&1; then\n\
+           echo {SUDO_ASKS}\n\
+           sudo -S -k -p '' loginctl enable-linger \"$user\" >/dev/null 2>&1\n\
+         fi\n\
+         printf 'linger=%s\\n' \"$(loginctl show-user \"$user\" -p Linger --value 2>/dev/null)\"\n"
+    )
+}
+
+/// Takes Desk's key (`$1` type, `$2` base64) out of the account's
+/// `authorized_keys`: only uncommented lines with exactly those fields
+/// (see [`FIND`]); every other line, comments included, as it was. A copy
+/// of the file as it was is kept beside it (`authorized_keys.desk-bak`),
+/// and the file is written in place, through a link.
+pub fn remove_script() -> String {
+    format!(
+        "set -e\numask 077\n{FIND}[ -f \"$f\" ] || exit 0\n\
+         has || exit 0\n\
+         cp \"$f\" \"$f.desk-bak\"\n\
+         t=$(mktemp \"$HOME/.ssh/.desk-keys.XXXXXX\")\n\
+         awk -v t=\"$type\" -v k=\"$b64\" '{{ if ($0 !~ /^[[:space:]]*#/) {{ for (i = 1; i < NF; i++) if ($i == t && $(i+1) == k) next }} print }}' \"$f\" > \"$t\"\n\
+         cat \"$t\" > \"$f\"\n\
+         rm -f \"$t\"\n"
+    )
+}
 
 /// What putting the key there did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,13 +249,16 @@ pub fn install(
     password: Secret,
     askpass: &Path,
 ) -> Result<Installed, Problem> {
+    let (kind, b64, comment) = key_fields(public)
+        .ok_or_else(|| Problem::Other("Desk's own SSH key can't be read.".into()))?;
     let words = [
         "sh".to_string(),
         "-c".to_string(),
-        INSTALL_SCRIPT.to_string(),
+        install_script(),
         "desk-key".to_string(),
-        public.to_string(),
-        key_part(public),
+        kind,
+        b64,
+        comment,
     ];
     let (said, asked) = with_password(
         ssh,
@@ -217,7 +268,7 @@ pub fn install(
         askpass,
     )?;
     let out = said.map_err(|e| Problem::Other(ssh::io_problem(&e)))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() && stdout.lines().any(|l| l.trim() == "key=ok") {
         return Ok(Installed {
             linger: linger_of(&stdout),
@@ -234,35 +285,81 @@ pub fn linger_with(
     machine: &Machine,
     password: Secret,
 ) -> Result<Option<bool>, String> {
-    let words = [
-        "sh".to_string(),
-        "-c".to_string(),
-        LINGER_SCRIPT.to_string(),
-    ];
-    let mut child = ssh
+    let words = ["sh".to_string(), "-c".to_string(), linger_script()];
+    let child = ssh
         .command(&machine.command(&words))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| ssh::io_problem(&e))?;
-    feed(&mut child, &password);
+    let out = run_feeding(child, &password).map_err(|e| ssh::io_problem(&e))?;
     drop(password);
-    let out = ssh::wait(child).map_err(|e| ssh::io_problem(&e))?;
     if !out.status.success() {
         return Err(ssh::problem(machine, &out.stderr));
     }
     Ok(linger_of(&String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Writes `password` and a line end on `child`'s input, for `sudo -S`
-/// there, then closes it.
-fn feed(child: &mut std::process::Child, password: &Secret) {
-    if let Some(mut input) = child.stdin.take() {
-        let mut line = zeroize::Zeroizing::new(password.expose().as_bytes().to_vec());
-        line.push(b'\n');
-        let _ = input.write_all(&line);
-    }
+/// Waits for `child` (all three of its pipes Desk's) as [`ssh::wait`]
+/// does, writing `password` and a line end on its input only when it says
+/// [`SUDO_ASKS`] (for `sudo -S` there), and closing its input once it has
+/// said all it will. What it said comes back with the password's text
+/// taken out of it, wherever the machine echoed it.
+fn run_feeding(
+    mut child: std::process::Child,
+    password: &Secret,
+) -> std::io::Result<std::process::Output> {
+    use std::io::BufRead as _;
+    let input = child.stdin.take();
+    let stdout = child.stdout.take();
+    let secret = zeroize::Zeroizing::new(password.expose().as_bytes().to_vec());
+    let out = std::thread::scope(|scope| {
+        let reading = scope.spawn(|| {
+            let mut input = input;
+            let mut said = Vec::new();
+            if let Some(out) = stdout {
+                let mut lines = std::io::BufReader::new(out);
+                let mut line = Vec::new();
+                while lines.read_until(b'\n', &mut line).unwrap_or(0) > 0 {
+                    if line.trim_ascii() == SUDO_ASKS.as_bytes() {
+                        if let Some(mut i) = input.take() {
+                            let mut answer = zeroize::Zeroizing::new(secret.to_vec());
+                            answer.push(b'\n');
+                            let _ = i.write_all(&answer);
+                        }
+                    } else {
+                        said.extend_from_slice(&line);
+                    }
+                    line.clear();
+                }
+            }
+            drop(input);
+            said
+        });
+        let waited = ssh::wait(child);
+        let said = reading.join().unwrap_or_default();
+        waited.map(|mut o| {
+            o.stdout = said;
+            o
+        })
+    })?;
+    Ok(scrubbed(out, &secret))
+}
+
+/// `out` with `secret`'s text taken out of what it said.
+fn scrubbed(mut out: std::process::Output, secret: &[u8]) -> std::process::Output {
+    let scrub = |said: &mut Vec<u8>| {
+        if secret.is_empty() {
+            return;
+        }
+        while let Some(at) = said.windows(secret.len()).position(|w| w == secret) {
+            said.splice(at..at + secret.len(), b"\xe2\x80\xa6".iter().copied());
+        }
+    };
+    scrub(&mut out.stdout);
+    scrub(&mut out.stderr);
+    out
 }
 
 /// Runs `invocation` with `password` given by Desk's askpass (to its own
@@ -295,10 +392,12 @@ fn with_password(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let said = command.spawn().and_then(|mut child| {
-        feed(&mut child, &for_sudo);
-        ssh::wait(child)
-    });
+    // The askpass token is in ssh's environment, and so in its children's
+    // (a ProxyCommand's, a jump host's ssh): a token for one answer, to one
+    // prompt, over a socket only the person can reach; never the password.
+    let said = command
+        .spawn()
+        .and_then(|child| run_feeding(child, &for_sudo));
     drop(for_sudo);
     Ok((said, serving.finish()))
 }
@@ -377,46 +476,196 @@ pub fn add_to_agent(key: &Path, passphrase: Secret, askpass: &Path) -> Result<()
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_install_script_adds_the_key_once_and_keeps_the_rest() {
-        let home = tempfile::tempdir().unwrap();
-        let ssh = home.path().join(".ssh");
-        std::fs::create_dir_all(&ssh).unwrap();
-        let other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOTHERxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx someone";
-        std::fs::write(ssh.join("authorized_keys"), format!("{other}\n")).unwrap();
-        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDESKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Desk on mac";
-        let run = |script: &str, args: &[&str]| {
+    const DESK: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINVryCC2LMDehVH2s0X1phBfYDkIBfEp4uRw/+7lxe8F Desk on mac";
+    const OTHER: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOZhZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleWY= someone";
+
+    /// A home with `authorized_keys` holding `keys`, and the scripts run in it.
+    struct Home(tempfile::TempDir);
+
+    impl Home {
+        fn with(keys: &str) -> Home {
+            let home = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(home.path().join(".ssh")).unwrap();
+            std::fs::write(home.path().join(".ssh/authorized_keys"), keys).unwrap();
+            Home(home)
+        }
+        fn file(&self) -> PathBuf {
+            self.0.path().join(".ssh/authorized_keys")
+        }
+        fn keys(&self) -> String {
+            std::fs::read_to_string(self.file()).unwrap()
+        }
+        fn run(&self, script: &str, args: &[&str]) -> std::process::Output {
             std::process::Command::new("sh")
                 .arg("-c")
                 .arg(script)
                 .arg("desk-key")
                 .args(args)
-                .env("HOME", home.path())
+                .env_clear()
+                .env("HOME", self.0.path())
                 .env("PATH", "/usr/bin:/bin")
                 .stdin(Stdio::null())
                 .output()
                 .unwrap()
-        };
+        }
+        fn install(&self) -> std::process::Output {
+            let (t, k, c) = key_fields(DESK).unwrap();
+            self.run(&install_script(), &[&t, &k, &c])
+        }
+        fn remove(&self, t: &str, k: &str) -> std::process::Output {
+            self.run(&remove_script(), &[t, k])
+        }
+    }
+
+    fn desk_line() -> String {
+        format!("{KEY_OPTIONS} {DESK}")
+    }
+
+    #[test]
+    fn the_key_is_added_once_on_a_line_of_its_own_and_taken_away_exactly() {
+        let h = Home::with(&format!("{OTHER}\n"));
         for _ in 0..2 {
-            let out = run(INSTALL_SCRIPT, &[key, &key_part(key)]);
+            let out = h.install();
             assert!(out.status.success(), "{out:?}");
             assert!(String::from_utf8_lossy(&out.stdout).contains("key=ok"));
         }
-        let kept = std::fs::read_to_string(ssh.join("authorized_keys")).unwrap();
-        assert_eq!(kept, format!("{other}\n{key}\n"), "added once");
-        use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::metadata(ssh.join("authorized_keys"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
-
-        let out = run(REMOVE_SCRIPT, &[&key_part(key)]);
-        assert!(out.status.success(), "{out:?}");
         assert_eq!(
-            std::fs::read_to_string(ssh.join("authorized_keys")).unwrap(),
-            format!("{other}\n")
+            h.keys(),
+            format!("{OTHER}\n{}\n", desk_line()),
+            "added once"
         );
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(h.file()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let (t, k, _) = key_fields(DESK).unwrap();
+        let out = h.remove(&t, &k);
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(h.keys(), format!("{OTHER}\n"), "every other key as it was");
+        // The file as it was is kept beside it.
+        let kept =
+            std::fs::read_to_string(h.0.path().join(".ssh/authorized_keys.desk-bak")).unwrap();
+        assert_eq!(kept, format!("{OTHER}\n{}\n", desk_line()));
+    }
+
+    #[test]
+    fn a_file_with_no_last_line_end_keeps_its_last_key_whole() {
+        let h = Home::with(OTHER);
+        assert!(h.install().status.success());
+        assert_eq!(h.keys(), format!("{OTHER}\n{}\n", desk_line()));
+        let (t, k, _) = key_fields(DESK).unwrap();
+        assert!(h.remove(&t, &k).status.success());
+        assert_eq!(h.keys(), format!("{OTHER}\n"), "someone's key survives");
+    }
+
+    #[test]
+    fn an_empty_or_partial_key_is_refused_and_removes_nothing() {
+        let all = format!("{OTHER}\n{}\n", desk_line());
+        let h = Home::with(&all);
+        for (t, k) in [
+            ("", ""),
+            ("ssh-ed25519", ""),
+            ("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5"),
+            ("ssh-ed25519", "AAAA*"),
+            (
+                "ssh-ed25519; rm -rf ~",
+                "AAAAC3NzaC1lZDI1NTE5AAAAINVryCC2LMDehVH2",
+            ),
+        ] {
+            let out = h.remove(t, k);
+            assert!(
+                out.status.code() == Some(3) || out.status.success(),
+                "{t} {k}: {out:?}"
+            );
+            assert_eq!(h.keys(), all, "{t} {k}: nothing removed");
+        }
+        // A prefix of every ed25519 key's base64 matches no line exactly.
+        let out = h.remove("ssh-ed25519", "AAAAC3NzaC1lZDI1NTE5AAAAI");
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(h.keys(), all);
+        assert!(key_fields("").is_none());
+        assert!(key_fields("ssh-ed25519").is_none());
+        assert!(key_fields("ssh-ed25519 AAAA").is_none());
+    }
+
+    #[test]
+    fn a_commented_copy_doesnt_count_and_stays_and_one_with_options_is_found() {
+        let commented = format!("# {DESK}");
+        let h = Home::with(&format!("{commented}\n{OTHER}\n"));
+        assert!(h.install().status.success());
+        assert_eq!(
+            h.keys(),
+            format!("{commented}\n{OTHER}\n{}\n", desk_line()),
+            "added: a comment isn't a key"
+        );
+        let (t, k, _) = key_fields(DESK).unwrap();
+        assert!(h.remove(&t, &k).status.success());
+        assert_eq!(
+            h.keys(),
+            format!("{commented}\n{OTHER}\n"),
+            "the comment stays"
+        );
+
+        // A copy someone restricted is Desk's key all the same.
+        let restricted = format!("restrict,from=\"10.0.0.0/8\" {DESK}");
+        let h = Home::with(&format!("{restricted}\n{OTHER}\n"));
+        let out = h.install();
+        assert!(String::from_utf8_lossy(&out.stdout).contains("key=ok"));
+        assert_eq!(
+            h.keys(),
+            format!("{restricted}\n{OTHER}\n"),
+            "not added twice"
+        );
+        assert!(h.remove(&t, &k).status.success());
+        assert_eq!(h.keys(), format!("{OTHER}\n"));
+    }
+
+    #[test]
+    fn a_linked_authorized_keys_is_written_through_not_replaced() {
+        let h = Home::with("");
+        std::fs::remove_file(h.file()).unwrap();
+        let real = h.0.path().join("real_keys");
+        std::fs::write(&real, format!("{OTHER}\n")).unwrap();
+        std::os::unix::fs::symlink(&real, h.file()).unwrap();
+        assert!(h.install().status.success());
+        let (t, k, _) = key_fields(DESK).unwrap();
+        assert!(h.remove(&t, &k).status.success());
+        assert!(
+            std::fs::symlink_metadata(h.file())
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "still a link"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            format!("{OTHER}\n")
+        );
+    }
+
+    #[test]
+    fn sudo_is_given_the_password_only_when_it_asks_and_it_is_never_said_back() {
+        let password = Secret::new(zeroize::Zeroizing::new("hunter2".into())).unwrap();
+        let run = |script: &str| {
+            let child = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(script)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            run_feeding(child, &password).unwrap()
+        };
+        // Not asked: it runs to its end, nothing written for it.
+        let out = run("echo done");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "done\n");
+        // Asked: given, and echoed back only as “…”.
+        let out = run(&format!(
+            "echo {SUDO_ASKS}; read pw; echo \"got $pw\" >&2; echo ok"
+        ));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "ok\n");
+        assert_eq!(String::from_utf8_lossy(&out.stderr), "got …\n");
     }
 
     #[test]
@@ -429,10 +678,6 @@ mod tests {
                 .contains("only lets keys sign in")
         );
         assert!(Problem::JumpHost.said("devbox").contains("jump host"));
-        assert_eq!(
-            key_part("ssh-ed25519 AAAA comment here"),
-            "ssh-ed25519 AAAA"
-        );
     }
 
     #[test]

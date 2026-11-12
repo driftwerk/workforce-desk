@@ -220,7 +220,9 @@ describe("each window's capabilities", () => {
     // need, it is granted.
     const used = invokesIn("./machines/SecretWindow.tsx").map((i) => i.cmd);
     expect(used.filter((c) => !secret.has(c))).toEqual([]);
-    for (const c of ["desk_ready", "settings_load", "themes_list"]) expect(secret.has(c), c).toBe(true);
+    expect(secret.has("desk_ready")).toBe(true);
+    // A built-in theme: nothing of the saved settings or themes is read.
+    for (const c of ["settings_load", "themes_list", "settings_save"]) expect(secret.has(c), c).toBe(false);
   });
 
   it("let no window reach the updater itself: Desk's native side checks, downloads and installs, and refuses a development build", () => {
