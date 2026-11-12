@@ -36,21 +36,26 @@ pub fn user_name(windows: &str) -> String {
 /// existing system account (uid below 1000, or a shell that can't log in);
 /// lets it use sudo without a password (a file of its own in
 /// `/etc/sudoers.d`, checked with visudo where there is one), since it has
-/// none; and makes it the distro's default in `/etc/wsl.conf`, keeping the
+/// none: never an existing account that has a password of its own; and makes it the distro's default in `/etc/wsl.conf`, keeping the
 /// rest of that file (and the link, when it is one). WSL starts the distro
 /// as that user after a restart.
 pub const CREATE_USER_SCRIPT: &str = r#"set -eu
 u="$1"
+nopw=1
 if id -u "$u" >/dev/null 2>&1; then
   uid=$(id -u "$u")
   sh_=$(getent passwd "$u" | cut -d: -f7)
   case "$sh_" in */nologin|*/false|"") echo "system-account" >&2; exit 3 ;; esac
   [ "$uid" -ge 1000 ] || { echo "system-account" >&2; exit 3; }
+  # An account that has a password of its own keeps asking for it: sudo
+  # without one is only for an account with none to type.
+  pw=$(awk -F: -v u="$u" '$1 == u { print $2 }' /etc/shadow 2>/dev/null || true)
+  case "$pw" in ""|"!"*|"*"*) ;; *) nopw=0 ;; esac
 else
   if command -v useradd >/dev/null 2>&1; then useradd -m -s /bin/bash "$u"
   else adduser -D -s /bin/sh "$u"; fi
 fi
-if [ -d /etc/sudoers.d ]; then
+if [ "$nopw" = 1 ] && [ -d /etc/sudoers.d ]; then
   s="/etc/sudoers.d/desk-$u"
   printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$u" > "$s.desk"
   chmod 0440 "$s.desk"
@@ -79,6 +84,7 @@ rm -f "$t.desk"
 /// Makes a normal user `user` in `distro` and its default, then stops the
 /// distro so it starts as that user next time.
 pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<(), String> {
+    named(distro)?;
     let out = wsl
         // --exec: run as given, never through the distro's shell (which
         // would read the script and the name itself).
@@ -148,8 +154,21 @@ pub fn install_alongside(wsl: &WslExe) -> Result<(), String> {
     Ok(())
 }
 
+/// `distro` is a distro's name, never something `wsl.exe` would read as an
+/// option of its own (the name comes from the page).
+fn named(distro: &str) -> Result<(), String> {
+    if distro.is_empty()
+        || distro.starts_with('-')
+        || distro.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("That isn't the name of a Linux in WSL. Look again.".into());
+    }
+    Ok(())
+}
+
 /// Moves `distro` to WSL 2 (a few minutes; its files stay).
 pub fn convert(wsl: &WslExe, distro: &str) -> Result<(), String> {
+    named(distro)?;
     let out = wsl.run(&["--set-version", distro, "2"]).map_err(|e| {
         tracing::warn!(error = %format!("{e:#}"), "couldn't run wsl.exe to convert");
         format!("Desk couldn't move {distro} to WSL 2. Try again.")
@@ -247,6 +266,51 @@ mod tests {
                 .unwrap()
                 .contains("default=kings")
         );
+    }
+
+    /// The user part, run for real here: sudo without a password only for
+    /// an account with none of its own.
+    #[cfg(unix)]
+    #[test]
+    fn sudo_without_a_password_is_never_given_to_an_account_that_has_one() {
+        // Everything before the sudoers part, then what it decides.
+        let part = CREATE_USER_SCRIPT
+            .split("if [ \"$nopw\" = 1 ]")
+            .next()
+            .unwrap();
+        assert!(part.contains("/etc/shadow"));
+        assert!(part.contains("nopw=0"));
+        // The shadow lookup, as the script does it, on made-up files.
+        let dir = tempfile::tempdir().unwrap();
+        let shadow = dir.path().join("shadow");
+        std::fs::write(
+            &shadow,
+            "kings:$6$abc$def:19000:0:99999:7:::\nnew:!:19000:0:99999:7:::\n",
+        )
+        .unwrap();
+        let pw = |u: &str| {
+            let out = std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    r#"awk -F: -v u="$1" '$1 == u { print $2 }' "$2""#,
+                    "t",
+                    u,
+                    shadow.to_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert!(pw("kings").starts_with("$6$"));
+        assert_eq!(pw("new"), "!");
+    }
+
+    #[test]
+    fn a_name_wsl_would_read_as_an_option_is_no_distro() {
+        assert!(named("Ubuntu-24.04").is_ok());
+        for bad in ["", "--shutdown", "-d", "a b", "x\ny"] {
+            assert!(named(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
