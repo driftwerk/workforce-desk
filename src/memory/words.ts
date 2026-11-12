@@ -39,14 +39,14 @@ export const providerName = (p: string | null | undefined): string | null => {
 
 /** Said wherever the person agrees to the model reading, when the hub may
  *  write on another provider. */
-export const fallbackText = "If that can't answer, the hub may send it to another provider it's set up with instead.";
+export const fallbackText = "If that can't answer, Desk may send it to another provider it's set up with instead.";
 
 /** What the "noted by Desk" mark explains. */
 export const notedByDeskText = (notes: Pick<MemoryNotes, "provider" | "fallbackProviders">): string => {
   const who = providerName(notes.provider);
   return [
     "Desk's model wrote these from what the session said, so they may be wrong: confirm the ones that are right, correct or drop the rest.",
-    who ? `To write them, what the session said is sent to ${who}, under the hub's own account.` : "To write them, what the session said is sent to the model the hub notes with.",
+    who ? `To write them, what the session said is sent to ${who}, under Desk's own account.` : "To write them, what the session said is sent to the model Desk notes with.",
     notes.fallbackProviders ? fallbackText : null,
   ]
     .filter(Boolean)

@@ -30,6 +30,9 @@ interface DeskState {
   hub: DeskHub | null;
   /** This computer's engine's events socket is open. */
   connected: boolean;
+  /** It has been open at least once since Desk started: until then Desk is
+   *  still getting ready, not stopped. */
+  answered: boolean;
   /** Every engine, by machine id; `local` is this computer. */
   engines: Record<MachineId, EngineConn>;
   /** Every engine's sessions, by key (see `keyOf`): this computer's by their own
@@ -118,6 +121,9 @@ export interface RoomDraft {
    *  stopped it. */
   state: "queued" | "connecting" | "busy" | "live" | "stalled" | "stopped" | "interrupted" | "failed";
   error?: string;
+  /** Why it failed, as a code a fix is chosen by: `workspace_gone`, its
+   *  member's workspace isn't connected to Desk any more. */
+  reason?: "workspace_gone";
   /** What its answer is posted under, once the hub has said its id. */
   source?: string;
 }
@@ -321,6 +327,7 @@ const patched = (engines: Record<MachineId, EngineConn>, machine: MachineId, pat
 export const useDesk = create<DeskState>((set, get) => ({
   hub: null,
   connected: false,
+  answered: false,
   engines: {},
   sessions: {},
   restore: [],
@@ -389,7 +396,11 @@ export const useDesk = create<DeskState>((set, get) => ({
         announce(e);
       },
       (connected) => {
-        set((s) => ({ connected, engines: s.engines[LOCAL]?.hub === hub ? patched(s.engines, LOCAL, { connected }) : s.engines }));
+        set((s) => ({
+          connected,
+          answered: s.answered || connected,
+          engines: s.engines[LOCAL]?.hub === hub ? patched(s.engines, LOCAL, { connected }) : s.engines,
+        }));
         // Back after a hub restart (or first connected after a restore):
         // the open room shows what was said meanwhile.
         const room = get().activeRoom;

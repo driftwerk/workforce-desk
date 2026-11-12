@@ -141,7 +141,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
       mono: true,
     };
   }
-  if (content.kind !== "terminal") return { name: "Session", meta: "no longer on the hub", state: "closed", tracked: null, asking: null, cwd: null, mono: true };
+  if (content.kind !== "terminal") return { name: "Session", meta: "no longer running", state: "closed", tracked: null, asking: null, cwd: null, mono: true };
   const t = describeTerminal(info, programs);
   const cwd = info?.cwd ?? content.cwd ?? null;
   return {
@@ -210,7 +210,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
           ? {
               title: "Close this pane?",
               says: !shown
-                ? "The session is no longer on the hub; nothing else changes."
+                ? "The session is no longer running; nothing else changes."
                 : shown.live
                   ? "The session keeps running."
                   : "The session stays as it is.",

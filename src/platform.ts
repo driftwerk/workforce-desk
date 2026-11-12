@@ -54,6 +54,19 @@ export interface CustomVoice {
   description?: string;
 }
 
+/** Where the first-run setup stands (see `setup/`). */
+export interface SetupProgress {
+  /** Offered once: it isn't opened by itself again. */
+  started: boolean;
+  /** Closed by the person: shown again only when reopened. */
+  closed: boolean;
+  /** Steps skipped, by id. */
+  skipped: string[];
+  /** When it last changed (ISO): of two windows' writes, the later one's
+   *  setup is kept. */
+  at?: string;
+}
+
 export interface Settings {
   theme: string;
   /** The sidebar chooser's theme, kept while Auto, Night or Day is on;
@@ -95,6 +108,8 @@ export interface Settings {
   /** Sites (host names, lowercased) whose pictures in agent markdown show
    *  without a click; older files have none. */
   imageSites?: string[];
+  /** The first-run setup's progress; older files have none. */
+  setup?: SetupProgress;
 }
 
 export interface ThemeFile {
@@ -363,6 +378,12 @@ export const startHelper = (): Promise<HelperStatus> => invoke("helper_start");
 /** What `desk-hubd.log` last said about the helper stopping; null if it says
  *  nothing or can't be read. */
 export const helperLastReason = (): Promise<string | null> => invoke("helper_last_reason");
+/** How far Desk Helper has got since it last started, from its log. */
+export type HelperStage = "starting" | "database" | "services" | "connecting";
+export const helperProgress = (): Promise<HelperStage | null> => invoke("helper_progress");
+/** Copies Desk into the Applications folder, quits, and opens the copy
+ *  (macOS). Resolves only if it couldn't: it rejects with why. */
+export const moveToApplications = (): Promise<void> => invoke("helper_move_to_applications");
 
 export type InstallProgress =
   | { state: "running"; line: string }

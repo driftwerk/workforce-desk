@@ -187,7 +187,7 @@ export interface ComputerActivityPage {
 export type DiskAccess = "granted" | "missing" | "unknown";
 
 /** What a hub without a route is taken to have said. */
-const NO_ROUTE = "This part of Desk doesn’t have that yet.";
+const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
 
 /** One key of Desk's state on a hub. */
 export interface StateRow {
@@ -213,7 +213,7 @@ export const stateRows = (body: unknown): StateRow[] => {
   if (!Array.isArray(list)) throw new HubError(404, NO_ROUTE);
   const rows = list.flatMap((x) => stateRow(x) ?? []);
   if (rows.length < list.length) {
-    throw new HubError(502, `The hub's Desk state listing has ${list.length - rows.length} rows Desk can't read.`);
+    throw new HubError(502, `Desk's saved state has ${list.length - rows.length} rows Desk can't read.`);
   }
   return rows;
 };
@@ -273,7 +273,7 @@ export const refusal = async (res: Response): Promise<HubError> => {
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "The hub refused that.", code, hubs);
+  return new HubError(res.status, message || res.statusText || "Desk couldn’t do that.", code, hubs);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,
@@ -438,7 +438,7 @@ export class DeskHub {
   /** Signs account `id` in again, its sign-in gone: a pasted token is kept
    *  for it, else its sign-in begins (as adding one does). */
   signInAgain = (id: string, a: { token?: string; remote?: boolean } = {}): Promise<AccountAdded> =>
-    this.call("POST", `/api/desk/accounts/${id}/sign-in`, a);
+    this.call("POST", `/api/desk/accounts/${encodeURIComponent(id)}/sign-in`, a);
 
   updateAccount = (id: string, patch: { name?: string; isDefault?: boolean }): Promise<EngineAccount> =>
     this.call("PATCH", `/api/desk/accounts/${id}`, patch);

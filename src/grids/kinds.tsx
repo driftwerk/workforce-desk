@@ -97,12 +97,12 @@ export function useViewLabel(content: PaneContent | null): ViewLabel | null {
   const groups = useLayout().groups;
   const settled = useLayoutSettled();
   if (content?.kind === "room") {
-    if (!room) return { kind: "room", name: "Room", meta: roomsLoaded ? "no longer on the hub" : "", gone: roomsLoaded };
+    if (!room) return { kind: "room", name: "Room", meta: roomsLoaded ? "no longer here" : "", gone: roomsLoaded };
     const members = room.members.map((m) => author(memberKey(m)).name);
     return { kind: "room", name: room.name, meta: `Room · ${[...members, "you"].join(", ")}`, gone: false };
   }
   if (content?.kind === "board") {
-    if (!board) return { kind: "board", name: "Board", meta: boardsRead ? "no longer on the hub" : "", gone: boardsRead };
+    if (!board) return { kind: "board", name: "Board", meta: boardsRead ? "no longer here" : "", gone: boardsRead };
     const sync = board.sync ? syncLine(board, hubNameOf(board.sync.via, kept, paired)) : null;
     return {
       kind: "board",
@@ -230,7 +230,7 @@ export function RoomPaneBody({ room: id }: { room: string }) {
   if (!room) {
     return (
       <div className="pane-note">
-        <p className="muted small">{loaded ? "This room is no longer on this computer's hub." : "Reading the room…"}</p>
+        <p className="muted small">{loaded ? "This room is no longer on this computer." : "Reading the room…"}</p>
       </div>
     );
   }

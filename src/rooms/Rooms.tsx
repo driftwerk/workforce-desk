@@ -1,4 +1,5 @@
 import { toShow } from "../chat/conversation";
+import { SetupInDm } from "../setup/slot";
 import { formAnswer } from "../chat/forms";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -383,6 +384,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                 onRemove={discard}
               />
             ))}
+            {/* Desk's own agent says the setup in its DM while it's open. */}
+            <SetupInDm agent={agent} />
             {convo.prompts.map((p) => (
               <PromptCard key={p.requestId} prompt={p} onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)} />
             ))}

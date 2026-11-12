@@ -1781,7 +1781,7 @@ button.thread-bar:hover {
   background: var(--raised);
   border: 1px solid var(--border);
 }
-/* The hub-down banner floats at the top: below the notice while one shows,
+/* The Desk-ready banner floats at the top: below the notice while one shows,
    however many lines it takes (measured into --update-band-bottom). */
 .app:has(.update-notice) .hub-down {
   top: calc(var(--update-band-bottom, 82px) + 12px);
@@ -2994,6 +2994,46 @@ button.urow-open {
 }
 .hub-down-reason {
   overflow-wrap: anywhere;
+}
+.hub-down-reason summary {
+  cursor: pointer;
+  width: fit-content;
+}
+/* How far Desk has got starting its helper. */
+.ready-bar {
+  position: relative;
+  display: block;
+  height: 4px;
+  margin: 6px 0 2px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ready-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--signal);
+  transition: width 0.4s ease;
+}
+.ready-bar-unknown > span {
+  width: 30%;
+  animation: ready-sweep 1.4s ease-in-out infinite;
+}
+@keyframes ready-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ready-bar-unknown > span {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
 }
 /* What is shown while the hub is down is from before: kept, and dimmed. */
 .app[data-hub-down] .sidebar,

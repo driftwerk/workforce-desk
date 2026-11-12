@@ -83,7 +83,7 @@ useDesk.subscribe((s, before) => {
   }));
 });
 
-const NO_ROUTE = "This hub doesn’t have that yet.";
+const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
 
 const setProblem = (pane: string, problem: string | null) =>
   useTerminals.setState((s) => {
@@ -96,7 +96,7 @@ const remember = (machine: MachineId, info: TerminalInfo) =>
 
 const problemOf = (e: unknown): string =>
   e instanceof HubError && e.status === 404 && e.message === NO_ROUTE
-    ? "This hub can’t host terminals yet. It needs an update."
+    ? "This version of Desk can’t host terminals yet. Update Desk to use them."
     : e instanceof Error
       ? e.message
       : String(e);

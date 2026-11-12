@@ -167,7 +167,7 @@ export const Message = memo(function Message({
           {badge && <span className="chip msg-delivery">{badge}</span>}{" "}
           {command && (
             <>
-              <span className="chip msg-command-chip" title="The hub answered this itself. It isn’t kept in the conversation, so it shows only here.">
+              <span className="chip msg-command-chip" title="Desk answered this itself. It isn’t kept in the conversation, so it shows only here.">
                 {you ? "Command" : "Only here"}
               </span>{" "}
             </>
