@@ -164,9 +164,9 @@ function FieldsConnect({
         </label>
       ))}
       {problem && (
-        <p className="small state-blocked" role="alert">
-          {problem}
-        </p>
+        <div role="alert">
+          <ProblemNote problem={{ plain: problem, what: `connecting ${provider.name}` }} />
+        </div>
       )}
       <div className="connect-actions">
         {onCancel && (

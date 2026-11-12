@@ -105,7 +105,7 @@ it("checks the keys before Connected, and gives the provider's reason in place w
   await act(async () =>
     refuse(new Error("AWS didn't accept those keys. Check the access key ID and the secret access key were both copied whole.")),
   );
-  expect(screen.getByRole("alert").textContent).toMatch(/^AWS didn't accept those keys/);
+  expect(screen.getByRole("alert").querySelector(".problem-plain")!.textContent).toMatch(/^AWS didn't accept those keys/);
   expect(connected).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
-import { plainError } from "../ui/plainError";
+import { explain, type Problem } from "../ui/problem";
+import { ProblemNote } from "../ui/ProblemNote";
 import { AddVoiceById } from "./AddVoiceById";
 import { addCustomVoice, removeCustomVoice, useSettings } from "./store";
 import {
@@ -22,10 +22,6 @@ const LIVE = new Set(["gpt-live", "gemini-live"]);
 /** Where the Gemini key agents think with also talks: Gemini Live uses it
  *  when Voices has none of its own. */
 const GEMINI_KEY = "speech/gemini/api_key";
-
-/** Why a key wasn't kept, as the person reads it: the provider's reason the
- *  hub put in words, never a status code. */
-const keyRefusal = (e: unknown): string => (e instanceof HubError && e.status === 400 ? e.message : plainError(e));
 
 /** Every voice provider: its key, recommended models and voices to try and
  *  use. Agents use the default voice unless they have their own. */
@@ -111,7 +107,7 @@ function ProviderDetail({
   const [model, setModel] = useState(provider.models[0]?.id);
   const [key, setKey] = useState("");
   const [checking, setChecking] = useState(false);
-  const [keyProblem, setKeyProblem] = useState<string | null>(null);
+  const [keyProblem, setKeyProblem] = useState<Problem | null>(null);
   const [trying, setTrying] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -134,7 +130,8 @@ function ProviderDetail({
       setKey("");
       onKeySaved();
     } catch (e) {
-      setKeyProblem(keyRefusal(e));
+      // The provider's reason and its fix, as the hub put them.
+      setKeyProblem(explain(e, { what: `saving the ${provider.name} key` }));
     } finally {
       setChecking(false);
     }
@@ -175,9 +172,9 @@ function ProviderDetail({
             </button>
           </span>
           {keyProblem && (
-            <span className="small state-blocked" role="alert">
-              {keyProblem}
-            </span>
+            <div role="alert">
+              <ProblemNote problem={keyProblem} />
+            </div>
           )}
         </div>
       )}

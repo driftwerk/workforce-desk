@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { HubError, type DeskHub } from "../hub/client";
+import { HubError, KEY_REFUSED, type DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { VOICE_ENGINES } from "../voice/engines";
 import { Voices } from "./Voices";
@@ -54,11 +54,11 @@ it("says Connected only once the provider took the key, through the route that t
 
 it("gives the provider's reason in place when it refused the key, and keeps what was typed", async () => {
   saveVoiceKey.mockRejectedValue(
-    new HubError(400, "ElevenLabs didn't accept that key. Check it was copied whole, or make a new one: create a key at elevenlabs.io."),
+    new HubError(400, "ElevenLabs didn't accept that key. Check it was copied whole, or make a new one: create a key at elevenlabs.io.", KEY_REFUSED),
   );
   await open("ElevenLabs");
   await paste("ElevenLabs", "el-wrong");
-  expect(screen.getByRole("alert").textContent).toMatch(/^ElevenLabs didn't accept that key/);
+  expect(screen.getByRole("alert").querySelector(".problem-plain")!.textContent).toMatch(/^ElevenLabs didn't accept that key/);
   expect(screen.queryByText("· connected")).toBeNull();
   expect((screen.getByLabelText("ElevenLabs API key") as HTMLInputElement).value).toBe("el-wrong");
   expect(useDesk.getState().error).toBeNull();

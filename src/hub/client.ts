@@ -247,6 +247,9 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** A key the provider refused when the hub tried it: its error is written
+ *  for the person, the fix included. */
+export const KEY_REFUSED = "key_refused";
 
 /** Whether `e` is the hub refusing a change only a move may make. */
 export const crossesBoss = (e: unknown): boolean => e instanceof HubError && e.status === 409 && e.code === CROSSES_BOSS;
