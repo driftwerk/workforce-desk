@@ -65,16 +65,24 @@ export const resolveBrain = (choice: BrainChoice, provider: Provider | undefined
   return withRunsOn(fast ? { ...brain, fast } : brain, provider);
 };
 
-/** Where new agents start: the saved default, else the first connected
- *  plan (Claude first), else any connected provider, else the Claude plan. */
+/** Where new agents start: one that can answer. The saved default while
+ *  it's connected, else the first connected plan (Claude first), else any
+ *  connected provider; with none connected (or none listed yet), the saved
+ *  default, else the Claude plan, which `brainReady` then says can't. */
 export const newAgentBrain = (saved: BrainChoice | null, providers: readonly Provider[]): Brain => {
+  const listed = providers.length > 0;
+  const savedWorks = !!saved && (!listed || !!byId(providers, saved.provider)?.connected);
   const pick =
-    saved?.provider ??
+    (savedWorks ? saved?.provider : undefined) ??
     providers.find((p) => p.group === "plan" && p.connected)?.id ??
     providers.find((p) => p.connected)?.id ??
+    saved?.provider ??
     "claude-code";
-  return resolveBrain(saved ?? { provider: pick }, byId(providers, pick));
+  return resolveBrain(saved?.provider === pick ? saved : { provider: pick }, byId(providers, pick));
 };
+
+/** Whether `brain`'s provider is connected, so an agent on it can answer. */
+export const brainReady = (brain: Pick<Brain, "provider">, providers: readonly Provider[]): boolean => !!byId(providers, brain.provider)?.connected;
 
 /** The brain an agent's config is on, as it would run: a tier name or no
  *  model is its provider's default model, no effort the model's default

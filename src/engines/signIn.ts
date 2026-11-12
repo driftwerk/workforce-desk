@@ -50,7 +50,8 @@ export type ClaudeRun =
   /** The page is open: approve it in the browser (10 minutes), or paste the
    *  code it shows (`codeAsked`). */
   | { at: "waiting"; name: string; id: string; page: Page | null; codeAsked: boolean; checking: boolean; why: string | null }
-  | { at: "done"; name: string }
+  /** `account`: the account it went to, when the hub said. */
+  | { at: "done"; name: string; account?: string }
   /** `kind`: the page never opened, nobody approved it in time, or another
    *  failure, said in `why`. */
   | { at: "failed"; name: string; why: string; kind: "open" | "wait" | "other" };
@@ -81,6 +82,8 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
   const gen = useRef(0);
   /** "New sessions start on it", as the last begin asked: Try again keeps it. */
   const lastDefault = useRef(false);
+  /** The account the last begin signed in again, if it did. */
+  const lastAgain = useRef<string | undefined>(undefined);
   /** The sign-in followed now, and what's been done for it. */
   const seen = useRef<{ id: string; forwarding: boolean; wantCode: boolean; opened: string | null; latest: AccountSignIn } | null>(null);
 
@@ -137,7 +140,7 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
       if (s.state === "done") {
         stopForward(s.id);
         seen.current = null;
-        setRun((now) => ({ at: "done", name: now.at === "idle" ? s.name : "name" in now ? now.name : s.name }));
+        setRun((now) => ({ at: "done", name: now.at === "idle" ? s.name : "name" in now ? now.name : s.name, account: s.account }));
         done.current?.(s.name);
         return;
       }
@@ -266,10 +269,11 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
     setRun(r);
   };
 
-  const begin = async (name: string, makeDefault: boolean) => {
+  const begin = async (name: string, makeDefault: boolean, againId?: string) => {
     if (!hub) return;
     const mine = ++gen.current;
     lastDefault.current = makeDefault;
+    lastAgain.current = againId;
     stop(run.at === "opening" || run.at === "waiting" ? run.id : null);
     put({ at: "opening", name, id: null, checking: false });
     // Cancelled (or begun again) while a read was out: nothing more is
@@ -283,7 +287,13 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
         put({ at: "opening", name, id: pending.id, checking: false });
         return follow(pending);
       }
-      const added = await hub.addAccount({ engine: "claude", name, makeDefault, ...(remote ? { remote: true } : {}) });
+      const added = againId
+        ? await hub.signInAgain(againId, remote ? { remote: true } : {}).catch((e: unknown) => {
+            // A Desk there from before signing in again.
+            if (e instanceof HubError && e.status === 404) throw new Error(`Desk on ${where} is too old to sign ${name} in again: update it there, or remove the account and add it again.`);
+            throw e;
+          })
+        : await hub.addAccount({ engine: "claude", name, makeDefault, ...(remote ? { remote: true } : {}) });
       if (stale()) {
         // Its sign-in started after the person cancelled: stopped on its
         // hub at once, and nothing of it is opened.
@@ -291,7 +301,7 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
         return;
       }
       if (added.kind === "account") {
-        setRun({ at: "done", name });
+        setRun({ at: "done", name, account: added.account.id });
         done.current?.(name);
         return;
       }
@@ -306,7 +316,7 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
   /** "Try again": the same name, and the same choice of default. */
   const again = () => {
     const now = runNow.current;
-    if (now.at === "failed") void begin(now.name, lastDefault.current);
+    if (now.at === "failed") void begin(now.name, lastDefault.current, lastAgain.current);
   };
 
   const cancel = () => {

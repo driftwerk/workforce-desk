@@ -15,13 +15,14 @@ import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { AccountSignIn, AccountsInfo, EngineAccount, EngineSignIn } from "../hub/types";
 import { fakeNative, noEngines, withEngine } from "../machines/testing";
-import { openUrl } from "../platform";
+import { installCli, openUrl } from "../platform";
 import { useMachines } from "../hub/engines";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import { EngineBlocks } from "./EngineBlocks";
 import { Engines } from "./Engines";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
+const installHeard = vi.hoisted(() => [] as ((plan: string, p: unknown) => void)[]);
 
 vi.mock("../platform", () => ({
   machinesList: vi.fn(async () => []),
@@ -29,6 +30,17 @@ vi.mock("../platform", () => ({
   machinePluginDir: vi.fn(async () => null),
   inApp: false,
   openUrl: vi.fn(),
+  startLogin: vi.fn(async () => {}),
+  cliInstalled: vi.fn(async () => true),
+  installCli: vi.fn(async () => {}),
+  cancelLogin: vi.fn(async () => {}),
+  sendLoginCode: vi.fn(async () => {}),
+  onLoginProgress: vi.fn(async () => () => {}),
+  onInstallProgress: vi.fn(async (f: (plan: string, p: unknown) => void) => {
+    installHeard.push(f);
+    return () => {};
+  }),
+  subscribe: (p: Promise<() => void>) => () => void p.then((f) => f()),
 }));
 
 const reset = { accounts: [], store: null, signIns: {}, supported: null, needs: [], problems: [], autoSwitch: false, leftInTerminals: [] };
@@ -60,6 +72,7 @@ function fakeHub(over: Record<string, unknown> = {}) {
   const hub = {
     accounts: vi.fn(async () => state.accounts),
     engines: vi.fn(async () => engineInfo()),
+    enginesNow: vi.fn(async () => engineInfo()),
     addAccount: vi.fn(async (): Promise<unknown> => ({ kind: "signIn", signIn: { id: "si-1", engine: "claude", name: "Claude", state: "starting" } })),
     signInCode: vi.fn(async (): Promise<AccountSignIn> => state.accounts.signIns[0]!),
     cancelSignIn: vi.fn(async (id: string) => {
@@ -121,9 +134,11 @@ it("signs Claude in on a machine at once, under StrictMode: its page opens here,
   await tick();
   expect(e.hub.signInCode).not.toHaveBeenCalled();
   expect(n.fake.signInForwardStop).toHaveBeenCalledWith("devbox", "si-1");
-  expect(screen.getByText("Claude is added.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  // Signed in as "Claude": named now, or kept.
+  expect(screen.getByText("Signed in.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Keep “Claude”" }));
   expect(screen.queryByText("Signing in to Claude")).toBeNull();
+  expect(screen.queryByText("Signed in.")).toBeNull();
 });
 
 it("stops a sign-in whose page never opened within 30 s, says why, and tries again", async () => {
@@ -203,26 +218,22 @@ it("cancels a sign-in on its hub and ends its forward", async () => {
   expect(screen.queryByText("Signing in to Claude")).toBeNull();
 });
 
-it("signs a named account in on this Mac the same way: its own CLI opens the page, and its code page opens here", async () => {
+it("signs an account in on this Mac through Desk's own sign-in, which can serve the crew too", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = fakeHub();
   e.state.accounts = { ...e.state.accounts, store: "the keychain" };
-  e.hub.addAccount.mockResolvedValueOnce({ kind: "signIn", signIn: { id: "si-1", engine: "claude", name: "Work", state: "starting" } });
   useDesk.setState({ hub: e.hub as unknown as DeskHub, fail: vi.fn() });
   const n = fakeNative();
   render(<EngineBlocks native={n.native} />);
   await act(async () => {});
-  // This Mac's sessions run on its own sign-in until an account is added.
-  expect(within(claudeBlock()).queryByRole("button", { name: "Sign in…" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Add account…" }));
-  fireEvent.change(screen.getByPlaceholderText("Work"), { target: { value: "Work" } });
+  // This Mac's sessions run on its own sign-in until an account is added:
+  // signing in comes first, with no name to give.
   await act(async () => fireEvent.click(within(claudeBlock()).getByRole("button", { name: "Sign in…" })));
-  expect(e.hub.addAccount).toHaveBeenCalledWith({ engine: "claude", name: "Work", makeDefault: true });
-  e.run({ name: "Work", state: "code", url: MANUAL });
-  await tick();
-  expect(screen.getByText("Finish signing in in your browser.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Open the sign-in page again" }));
-  expect(openUrl).toHaveBeenCalledWith(MANUAL);
+  expect(screen.queryByPlaceholderText("Work")).toBeNull();
+  expect(within(claudeBlock()).getByRole("group", { name: "Sign in to Claude" })).toBeTruthy();
+  expect(within(claudeBlock()).getByRole("button", { name: "Sign in with Claude" })).toBeTruthy();
+  // Not through the hub's sign-in: Desk's own, here.
+  expect(e.hub.addAccount).not.toHaveBeenCalled();
   expect(n.fake.signInForward).not.toHaveBeenCalled();
 });
 
@@ -244,15 +255,22 @@ it("signs ChatGPT in by Codex's device page on a machine, with the code to copy"
   expect(screen.getByText("ChatGPT is signed in.")).toBeTruthy();
 });
 
-it("leaves this Mac's Codex as it was: no sign-in of Desk's for it", async () => {
+it("signs this Mac's own Codex in to ChatGPT from Engines too, then reads it again at once", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = fakeHub();
   useDesk.setState({ hub: e.hub as unknown as DeskHub, fail: vi.fn() });
   render(<EngineBlocks native={fakeNative().native} />);
   await act(async () => {});
   const codex = screen.getByRole("listitem", { name: "Codex" });
   expect(within(codex).getByText("Not signed in")).toBeTruthy();
-  expect(within(codex).queryByRole("button", { name: "Sign in…" })).toBeNull();
-  expect(e.hub.startEngineSignIn).not.toHaveBeenCalled();
+  expect(within(codex).getByText(/optional, for Codex sessions/)).toBeTruthy();
+  await act(async () => fireEvent.click(within(codex).getByRole("button", { name: "Sign in…" })));
+  expect(e.hub.startEngineSignIn).toHaveBeenCalledWith("codex");
+  e.state.codex = { id: "cx-1", engine: "codex", state: "done" };
+  e.hub.enginesNow.mockResolvedValue(engineInfo("in"));
+  await tick();
+  expect(e.hub.enginesNow).toHaveBeenCalled();
+  expect(within(screen.getByRole("listitem", { name: "Codex" })).getByText("Signed in")).toBeTruthy();
 });
 
 it("stops a Codex sign-in cancelled before its id was known, and never opens its page", async () => {
@@ -421,5 +439,58 @@ it("keeps a sign-in under way, and the machine chosen, through a brief reconnect
   });
   e.signedIn();
   await tick();
-  expect(screen.getByText("Claude is added.")).toBeTruthy();
+  expect(screen.getByText("Signed in.")).toBeTruthy();
+});
+
+const notInstalled = () => [
+  { engine: "claude", title: "Claude Code", installed: false, version: null, views: ["terminal"], caps: { terminal: { accounts: "token", notes: [] } }, signIn: { state: "unknown" } },
+  { engine: "codex", title: "Codex", installed: false, version: null, views: ["terminal"], caps: { terminal: { accounts: "none", notes: [] } }, signIn: { state: "unknown" } },
+];
+
+it("installs an engine that isn't on this Mac from its row, then reads it again at once", async () => {
+  installHeard.length = 0;
+  const e = fakeHub();
+  e.hub.engines.mockResolvedValue(notInstalled() as never);
+  useDesk.setState({ hub: e.hub as unknown as DeskHub, fail: vi.fn() });
+  render(<EngineBlocks native={fakeNative().native} />);
+  await act(async () => {});
+  expect(within(claudeBlock()).getByText("Not installed")).toBeTruthy();
+  await act(async () => fireEvent.click(within(claudeBlock()).getByRole("button", { name: "Install Claude Code" })));
+  expect(installCli).toHaveBeenCalledWith("claude");
+  await act(async () => installHeard.forEach((f) => f("claude", { state: "running", line: "Downloading…" })));
+  expect(within(claudeBlock()).getByRole("status").textContent).toContain("Installing Claude Code… Downloading…");
+  e.hub.enginesNow.mockResolvedValue(engineInfo());
+  await act(async () => installHeard.forEach((f) => f("claude", { state: "done" })));
+  expect(e.hub.enginesNow).toHaveBeenCalled();
+  expect(within(claudeBlock()).getByText("Version 2.1.318")).toBeTruthy();
+});
+
+it("says why an install stopped, with the command to run by hand, and tries again", async () => {
+  installHeard.length = 0;
+  const e = fakeHub();
+  e.hub.engines.mockResolvedValue(notInstalled() as never);
+  useDesk.setState({ hub: e.hub as unknown as DeskHub, fail: vi.fn() });
+  render(<EngineBlocks native={fakeNative().native} />);
+  await act(async () => {});
+  const codex = () => screen.getByRole("listitem", { name: "Codex" });
+  await act(async () => fireEvent.click(within(codex()).getByRole("button", { name: "Install Codex" })));
+  expect(installCli).toHaveBeenCalledWith("chatgpt");
+  await act(async () => installHeard.forEach((f) => f("chatgpt", { state: "failed", message: "Codex's installer couldn't download.", command: "curl … | sh" })));
+  expect(within(codex()).getByRole("alert").textContent).toContain("Codex's installer couldn't download.");
+  expect(within(codex()).getByRole("button", { name: "Copy command" })).toBeTruthy();
+  expect(within(codex()).getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+it("installs a machine's engines over its connection, as adding it did, then reads them again", async () => {
+  const e = fakeHub();
+  e.hub.engines.mockResolvedValue(notInstalled() as never);
+  const { n } = await onDevbox(e);
+  await act(async () => fireEvent.click(within(claudeBlock()).getByRole("button", { name: "Install Claude Code" })));
+  expect(n.fake.retryEngines).toHaveBeenCalledWith("devbox");
+  await act(async () => n.emit({ machine: "devbox", step: "engines", state: "running" }));
+  expect(within(claudeBlock()).getByRole("status").textContent).toContain("Installing Claude Code and Codex on devbox…");
+  e.hub.enginesNow.mockResolvedValue(engineInfo());
+  await act(async () => n.emit({ machine: "devbox", step: "engines", state: "done", detail: "Claude Code 2.1.318 and Codex 0.166.0 installed" }));
+  expect(e.hub.enginesNow).toHaveBeenCalled();
+  expect(within(claudeBlock()).getByText("Version 2.1.318")).toBeTruthy();
 });

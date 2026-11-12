@@ -55,6 +55,6 @@ it("finds a plan card's account by the key its readings have", () => {
 
 it("says each sign-in problem with where the sign-ins are kept", () => {
   const p = (problem: "gone" | "unreadable" | "notRemoved") => problemText({ account: "a", name: "Work", problem }, "the keychain");
-  expect(p("gone")).toBe("Work’s sign-in is no longer in the keychain: add the account again. Nothing is switched to it.");
+  expect(p("gone")).toBe("Work’s sign-in is no longer in the keychain: sign it in again from its row. Nothing is switched to it.");
   expect(p("notRemoved")).toContain("couldn’t delete its sign-in from the keychain");
 });

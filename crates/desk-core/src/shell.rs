@@ -138,25 +138,58 @@ pub fn local_bin(env: &BTreeMap<String, String>) -> Option<std::path::PathBuf> {
     Some(std::path::Path::new(env.get("HOME")?).join(".local/bin"))
 }
 
-/// `env` with `~/.local/bin` at the end of PATH when it isn't there, so a
-/// CLI installed while Desk runs is found without a restart.
+/// Where the installers people use put Claude Code and Codex, besides
+/// `~/.local/bin` (their own installers'): Claude Code's own npm folder
+/// (`~/.claude/local`), npm's global folder (`$NPM_CONFIG_PREFIX/bin`, or
+/// the usual `~/.npm-global/bin`), Volta's and Homebrew's. A login shell
+/// may not have one on PATH until a new terminal opens, or ever.
+pub fn install_dirs(env: &BTreeMap<String, String>) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = env.get("HOME").map(std::path::Path::new) {
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".claude/local"));
+        dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".volta/bin"));
+    }
+    if let Some(prefix) = env
+        .get("NPM_CONFIG_PREFIX")
+        .or_else(|| env.get("npm_config_prefix"))
+    {
+        dirs.push(std::path::Path::new(prefix).join("bin"));
+    }
+    dirs.push("/opt/homebrew/bin".into());
+    dirs.push("/usr/local/bin".into());
+    dirs
+}
+
+/// `env` with each of [`install_dirs`] at the end of PATH when it isn't
+/// there (`~/.local/bin` first), so a CLI installed while Desk runs, or by
+/// npm or Homebrew outside the login shell's PATH, is found without a
+/// restart.
 pub fn with_local_bin(mut env: BTreeMap<String, String>) -> BTreeMap<String, String> {
-    if let Some(dir) = local_bin(&env) {
+    let mut path: Vec<String> = env
+        .get("PATH")
+        .map(|p| {
+            p.split(':')
+                .filter(|d| !d.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let before = path.len();
+    for dir in install_dirs(&env) {
         let dir = dir.to_string_lossy().into_owned();
-        let path = env.get("PATH").cloned().unwrap_or_default();
-        if !path.split(':').any(|d| d == dir) {
-            let joined = if path.is_empty() {
-                dir
-            } else {
-                format!("{path}:{dir}")
-            };
-            env.insert("PATH".into(), joined);
+        if !path.contains(&dir) {
+            path.push(dir);
         }
+    }
+    if path.len() != before {
+        env.insert("PATH".into(), path.join(":"));
     }
     env
 }
 
-/// A program on `env`'s PATH or in `~/.local/bin`.
+/// A program on `env`'s PATH or in one of [`install_dirs`].
 pub fn find_program(program: &str, env: &BTreeMap<String, String>) -> Option<std::path::PathBuf> {
     which(program, &with_local_bin(env.clone()))
 }
@@ -233,7 +266,10 @@ mod tests {
         ]);
         assert_eq!(find_program("codex", &env), Some(bin.join("codex")));
         let path = with_local_bin(env)["PATH"].clone();
-        assert_eq!(path, format!("/usr/bin:{}", bin.display()));
+        assert!(
+            path.starts_with(&format!("/usr/bin:{}:", bin.display())),
+            "{path}"
+        );
         let again = with_local_bin(BTreeMap::from([
             ("PATH".to_string(), path.clone()),
             (
@@ -242,5 +278,35 @@ mod tests {
             ),
         ]));
         assert_eq!(again["PATH"], path);
+    }
+
+    #[test]
+    fn a_cli_is_found_where_its_installers_put_it_after_the_login_path() {
+        let env = BTreeMap::from([
+            ("HOME".to_string(), "/Users/k".to_string()),
+            (
+                "PATH".to_string(),
+                "/usr/bin:/bin:/usr/local/bin".to_string(),
+            ),
+            ("NPM_CONFIG_PREFIX".to_string(), "/Users/k/.npm".to_string()),
+        ]);
+        let path = with_local_bin(env.clone())["PATH"].clone();
+        assert_eq!(
+            path,
+            "/usr/bin:/bin:/usr/local/bin:/Users/k/.local/bin:/Users/k/.claude/local:/Users/k/.npm-global/bin:/Users/k/.volta/bin:/Users/k/.npm/bin:/opt/homebrew/bin"
+        );
+        // Once is enough.
+        assert_eq!(with_local_bin(with_local_bin(env))["PATH"], path);
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().display().to_string();
+        let npm = dir.path().join(".npm-global/bin");
+        std::fs::create_dir_all(&npm).unwrap();
+        std::fs::write(npm.join("codex"), "#!/bin/sh\n").unwrap();
+        let env = BTreeMap::from([
+            ("HOME".to_string(), home),
+            ("PATH".to_string(), "/usr/bin".to_string()),
+        ]);
+        assert_eq!(find_program("codex", &env), Some(npm.join("codex")));
     }
 }

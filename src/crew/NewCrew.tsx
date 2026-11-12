@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { VoiceSpec } from "../platform";
@@ -8,7 +8,12 @@ import { useSettings } from "../settings/store";
 import { Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { BrainCard } from "./BrainCard";
-import { newAgentBrain, type Brain } from "./brain";
+import { brainReady, newAgentBrain, type Brain } from "./brain";
+import { PLAN_OF, type Provider } from "../hub/providers";
+import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
+import { accountsOf, freeName, useAccounts } from "../engines/accounts";
+import { useProviders } from "../providers/store";
+import { useUi } from "../shell/ui";
 import { createLocalAgent, setAgentVoice } from "./local";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 import { NEW_CREW_LINE } from "../shell/newLines";
@@ -30,6 +35,9 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
   const who = name.trim();
   const brain = chosenBrain ?? (loaded ? newAgentBrain(newAgent, providers) : null);
   const provider = brain ? providers.find((p) => p.id === brain.provider) : undefined;
+  // Checked before they're made: on a provider that isn't connected, their
+  // first message would fail.
+  const ready = !loaded || !brain || brainReady(brain, providers);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +94,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
             <div className="field-stack">
               <span className="field-label">How they think</span>
               <BrainCard brain={brain} provider={provider} onChange={() => setEditing("brain")} />
+              {!ready && provider && <ConnectFirst provider={provider} who={who || "your new crew member"} />}
             </div>
             <div className="field-stack">
               <span className="field-label">How they sound</span>
@@ -101,7 +110,7 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-signal" disabled={busy || !who || !purpose.trim()}>
+            <button type="submit" className="btn btn-signal" disabled={busy || !who || !purpose.trim() || !ready} title={ready ? undefined : `Connect ${provider?.name ?? "their provider"} first`}>
               {busy ? "Creating…" : who ? `Create ${who}` : "Create"}
             </button>
           </footer>
@@ -127,5 +136,44 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
         />
       )}
     </>
+  );
+}
+
+/** The provider a new crew member would think with isn't connected: a plan
+ *  signs in here (one Claude sign-in serving coding sessions too, while
+ *  there's no account yet); anything else is connected in Providers. */
+function ConnectFirst({ provider, who }: { provider: Provider; who: string }) {
+  const hub = useDesk((s) => s.hub);
+  const plan = provider.connect.kind === "login" ? PLAN_OF[provider.id] : undefined;
+  const claudeAccounts = accountsOf(useAccounts((s) => s.accounts), "claude");
+  const keepsAccounts = useAccounts((s) => s.supported !== false && s.store !== null);
+  useEffect(() => {
+    if (hub && plan === "claude") void useAccounts.getState().load();
+  }, [hub, plan]);
+  const login = usePlanLogin(
+    plan,
+    (account) => {
+      if (hub) void useProviders.getState().load(hub);
+      if (account) void useAccounts.getState().load();
+    },
+    () => ({ agents: true, account: keepsAccounts && claudeAccounts.length === 0 ? { name: freeName(claudeAccounts), makeDefault: true } : null }),
+  );
+  return (
+    <div className="new-fix" role="group" aria-label={`${provider.name} isn’t connected`}>
+      <p className="small state-blocked">
+        {login.status ?? `${provider.name} isn’t connected, so ${who} couldn’t answer yet.`}
+        {plan && <ReopenLink login={login} />}
+        {plan && <CopyInstall login={login} />}
+      </p>
+      <span>
+        {plan ? (
+          <PlanLoginAction login={login} label={`Sign in to ${provider.name.replace(/ plan$/, "")}`} />
+        ) : (
+          <button type="button" className="btn btn-sm" onClick={() => useUi.getState().openSettings("providers")}>
+            Connect it in Providers
+          </button>
+        )}
+      </span>
+    </div>
   );
 }
