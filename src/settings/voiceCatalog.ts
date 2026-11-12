@@ -34,7 +34,7 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
     name: "Fish Audio",
     blurb: "Natural cloud voices at a fraction of ElevenLabs’ price.",
     keyPath: "speech/fish_audio/api_key",
-    customIds: "The id in a voice’s address on fish.audio — yours, or any public voice.",
+    customIds: "Paste a voice’s link from fish.audio — yours, or any public voice.",
     // Fish Audio bills per model, not per voice (docs.fish.audio pricing): every
     // public voice below speaks on the free model, and the others cost money.
     models: [
@@ -58,7 +58,7 @@ export const VOICE_PROVIDERS: VoiceProvider[] = [
     name: "ElevenLabs",
     blurb: "Premium cloud voices.",
     keyPath: "speech/elevenlabs/api_key",
-    customIds: "The Voice ID from My Voices on elevenlabs.io — a clone of yours, or one added from the Voice Library.",
+    customIds: "Paste a voice’s link from elevenlabs.io (My Voices or the Voice Library), or its Voice ID.",
     models: [
       { id: "eleven_multilingual_v2", name: "Multilingual v2", note: "Best quality" },
       { id: "eleven_flash_v2_5", name: "Flash v2.5", note: "Fastest, cheapest" },

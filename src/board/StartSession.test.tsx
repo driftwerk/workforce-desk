@@ -24,9 +24,21 @@ afterEach(cleanup);
 
 const start = () => {
   render(<StartSession ticket={t} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w/repo" } });
+  fireEvent.change(screen.getByPlaceholderText("Choose a folder, or type its path"), { target: { value: "/w/repo" } });
 };
 const chosen = () => screen.getAllByRole("radio", { name: /./ }).find((r) => r.getAttribute("aria-checked") === "true" && ["Acme", "Side", "Ungrouped"].includes(r.textContent ?? ""))?.textContent;
+
+describe("Start a session on a ticket: folders", () => {
+  it("offers the folders sessions worked in, newest first and each once, and picking one fills the field", () => {
+    const s = (id: string, cwd: string, updatedAt: string) => ({ id, cwd, updatedAt, name: id, engine: "claude" }) as never;
+    useDesk.setState({ sessions: { a: s("a", "/w/api", "2026-11-12T08:00:00Z"), b: s("b", "/w/web/", "2026-11-12T09:00:00Z"), c: s("c", "/w/api", "2026-11-11T09:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    const chips = screen.getAllByRole("radio").filter((r) => r.closest("[aria-label='Recent folders']"));
+    expect(chips.map((c) => c.textContent)).toEqual(["web", "api"]);
+    fireEvent.click(chips[1]!);
+    expect((screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value).toBe("/w/api");
+  });
+});
 
 describe("Start a session on a ticket", () => {
   it("offers New session's group picker, set to the board's group", () => {
