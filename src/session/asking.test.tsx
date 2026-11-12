@@ -165,18 +165,20 @@ describe("a session that stopped to ask", () => {
 });
 
 describe("answering a tracked session's approvals in Desk", () => {
-  it("is a switch on its card, off by default", () => {
+  it("is a switch in its card's menu, off by default", () => {
     const s = shown(session({ state: "working", terminalId: "t1" }));
     render(<SessionCard session={s} />);
-    const toggle = screen.getByRole("checkbox", { name: /Answer approvals in Desk/ });
-    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    const toggle = screen.getByRole("menuitemcheckbox", { name: /Answer approvals in Desk/ });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
     expect(hub.update).toHaveBeenCalledWith("s1", { approvals: "desk" });
   });
 
   it("is only for a session started by hand in a Desk terminal", () => {
     render(<SessionCard session={shown(session({ state: "working" }))} />);
-    expect(screen.queryByRole("checkbox", { name: /Answer approvals in Desk/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Answer approvals in Desk/ })).toBeNull();
   });
 });
 

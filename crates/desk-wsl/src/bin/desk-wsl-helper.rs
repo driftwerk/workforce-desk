@@ -13,6 +13,25 @@ fn main() -> std::process::ExitCode {
     use desk_core::host::Host;
     use desk_wsl::{WslExe, launcher, startup};
 
+    // Chrome starting Desk Helper as its native messaging host for Desk's
+    // extension: a relay to the local hub inside WSL (see desk-chrome-host).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if desk_chrome_host::is_chrome_launch(&args) {
+        let code = desk_chrome_host::run(&args, || {
+            let paths = desk_core::Paths::new()?;
+            let Some(Host::Wsl(w)) = read_host(&paths)? else {
+                return Ok(None);
+            };
+            let backend = desk_core::backend::Backend::wsl(w);
+            Ok(backend.connection()?.and_then(|c| {
+                c.device_token.map(|token| desk_chrome_host::Hub {
+                    gateway_url: c.gateway_url,
+                    token,
+                })
+            }))
+        });
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
     let Ok(paths) = desk_core::Paths::new() else {
         return ExitCode::FAILURE;
     };

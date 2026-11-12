@@ -442,7 +442,10 @@ function AddAccount({
   start?: string;
 }) {
   const hub = useHubOf(machine);
-  const [name, setName] = useState("");
+  const taken = accountsOn(machine)((s) => s.accounts);
+  // Named like a sign-in is ("Claude", "Claude 2"), changed here if the
+  // person wants: never a blank that holds the button back.
+  const [name, setName] = useState(() => start ?? freeName(taken));
   // Signing in through the browser starts at once (`start`); this form is
   // for pasting a token, or signing in under a name of one's own.
   const [how, setHow] = useState<"browser" | "paste">(start ? "browser" : "paste");
@@ -505,6 +508,7 @@ function AddAccount({
       <div className="field">
         <label htmlFor={nameId}>Name</label>
         <input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Work" maxLength={40} required autoFocus />
+        {!name.trim() && <span className="faint small">Give it a name, say Work or Personal.</span>}
       </div>
       <div className="seg" role="radiogroup" aria-label="Sign in">
         <button type="button" role="radio" aria-checked={how === "browser"} onClick={() => setHow("browser")}>
@@ -518,8 +522,9 @@ function AddAccount({
         <p className="faint small">Desk opens Claude’s sign-in page. Sign in there with the account you want; Desk keeps the sign-in without showing it.</p>
       ) : (
         <div className="field">
-          <label htmlFor={tokenId}>Token from claude setup-token</label>
+          <label htmlFor={tokenId}>Sign-in token</label>
           <input id={tokenId} type="password" className="mono" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" spellCheck={false} required />
+          <span className="faint small">If Claude’s sign-in page won’t open here: run “claude setup-token” in a terminal and paste the token it prints.</span>
         </div>
       )}
       <p className="faint small">An account’s sessions can’t use claude.ai connectors or Remote Control: its sign-in only makes model requests.</p>

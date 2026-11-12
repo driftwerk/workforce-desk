@@ -18,6 +18,18 @@ const DOING: Record<string, string> = {
   connector: "Wants to change something in a connected service",
 };
 
+/** The site a browser call is kept under (`browser:https://shop.example`),
+ *  as the person reads it: `shop.example`. */
+const siteOf = (connector: string | undefined): string | null => {
+  const origin = connector?.replace(/^(browser|chrome|chrome-visit):/, "");
+  if (!origin || origin === connector) return null;
+  try {
+    return new URL(origin).host || null;
+  } catch {
+    return origin;
+  }
+};
+
 /** The folder's own name, as "Always allow in acme-web" says it. */
 const folderName = (folder: string) => folder.replace(/\/+$/, "").split("/").pop() || folder;
 
@@ -91,6 +103,8 @@ export function PromptCard({
   const facts = options.facts ?? null;
   const folder = options.allow_in_folder ?? null;
   const connector = facts?.effect === "connector";
+  // "Sign in for me": the card is the wait while the person signs in.
+  if (facts?.effect === "sign_in") return <SignInCard site={siteOf(facts.connector)} why={facts.why} answer={answer} problem={problem} />;
   // What can't be undone isn't the easy answer: no answer is primary.
   const irreversible = facts?.why === "Can't be undone" || facts?.why === "Can't tell what this command runs";
   // Allowed once often enough before, with these exact words: the card
@@ -173,6 +187,43 @@ export function PromptCard({
             Deny
           </button>
         )}
+      </span>
+    </div>
+  );
+}
+
+/** "Sign in for me": Desk opened the site in its own browser on the
+ *  person's screen, and the agent waits while they sign in there. */
+function SignInCard({
+  site,
+  why,
+  answer,
+  problem,
+}: {
+  site: string | null;
+  why: string;
+  answer: (choice: PermissionChoice) => void;
+  problem: string | null;
+}) {
+  return (
+    <div className="dm-action dm-approval computer-ask" role="group" aria-label="Sign in for me" onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}>
+      <span className="dm-action-text">
+        <b>Sign in to {site ?? "the site"}</b>
+        <span className="small">It’s open in Desk’s window in your Chrome. Sign in there, then press I’m signed in, and the agent carries on.</span>
+        <span className="small muted">{why}</span>
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
+          </span>
+        )}
+      </span>
+      <span className="dm-action-buttons">
+        <button type="button" className="btn btn-approve" onClick={() => answer("allow_once")}>
+          I’m signed in
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => answer("deny_once")}>
+          Cancel
+        </button>
       </span>
     </div>
   );
