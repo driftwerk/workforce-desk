@@ -28,7 +28,25 @@ export const FIRST_WAIT_MS = 90_000;
 /** How long after starting its helper Desk waits before saying it didn't
  *  come back. */
 export const START_WAIT_MS = 45_000;
+/** At most this many restarts Desk makes by itself in `AUTO_WINDOW_MS`;
+ *  then it says the helper is stuck and leaves Try again to the person. */
+export const AUTO_RESTARTS = 3;
+export const AUTO_WINDOW_MS = 10 * 60_000;
 const PROGRESS_EVERY_MS = 1_000;
+
+/** When Desk last started its helper by itself, this run. Kept outside
+ *  the hook so a remount doesn't reset the count. */
+const autoStarts: number[] = [];
+/** Forgets them (tests). */
+export const forgetAutoStarts = (): void => void autoStarts.splice(0);
+/** Whether Desk may start its helper by itself once more `now`, and if so
+ *  counts it. */
+export const mayAutoStart = (now: number, starts: number[] = autoStarts): boolean => {
+  while (starts.length && now - starts[0]! >= AUTO_WINDOW_MS) starts.shift();
+  if (starts.length >= AUTO_RESTARTS) return false;
+  starts.push(now);
+  return true;
+};
 const STATUS_EVERY_MS = 3_000;
 
 /** Where Desk stands with its own helper, as the page shows it. */
@@ -110,7 +128,7 @@ function blockedWords(s: HelperStatus, platform: Platform): ReadyWords {
     case "development":
       return {
         title: "This build doesn’t start Desk’s helper",
-        detail: "Start desk-hubd by hand, as you did before.",
+        detail: "Start Desk’s helper by hand, as you did before.",
         action: { kind: "retry", label: "Try again" },
       };
     case "no-wsl":
@@ -173,20 +191,37 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
     const waitFrom = (at: HelperStage | null) =>
       later(START_WAIT_MS, () => {
         if (reached.current !== at) return waitFrom(reached.current);
-        void helperLastReason()
-          .catch(() => null)
-          .then((reason) => live && setStuck({ reason }));
+        stuckNow();
       });
+    // Desk's own restarts, capped: past the cap it says so and stops.
+    const autoStart = () => (mayAutoStart(Date.now()) ? start() : stuckNow());
+    const stuckNow = () =>
+      void helperLastReason()
+        .catch(() => null)
+        .then((reason) => live && setStuck({ reason }));
     const start = () => {
       setStuck(null);
+      // A new start: how far the last one got no longer counts.
+      reached.current = null;
+      setStage(null);
       startHelper()
         .then((s) => {
           if (!live) return;
           settle(s);
-          if (!blocks(s)) waitFrom(reached.current);
+          if (blocks(s)) return;
+          // The wait counts from where this start has got to now.
+          void helperProgress()
+            .catch(() => null)
+            .then((at) => {
+              if (!live) return;
+              reached.current = at;
+              setStage(at);
+              waitFrom(at);
+            });
         })
         .catch((e: unknown) => live && settle({ state: "failed", message: messageOf(e) }));
     };
+    let looks: ReturnType<typeof setInterval> | undefined;
     const readProgress = () =>
       void helperProgress()
         .then((s) => {
@@ -196,22 +231,26 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
         })
         .catch(() => undefined);
     // Turned on in Login Items (seen when Desk comes forward, or on the next
-    // look): started now, no reopening.
+    // look): started now, no reopening. The regular look stops once the
+    // helper isn't waiting on the person; coming forward still looks.
     const readStatus = () =>
       void helperStatus()
         .then((s) => {
           if (!live) return;
           const was = last.current;
           settle(s);
+          if (!blocks(s)) {
+            clearInterval(looks);
+            looks = undefined;
+          } else if (!looks) looks = setInterval(readStatus, STATUS_EVERY_MS);
           if (was?.state === "needs-approval" && !blocks(s)) start();
         })
         .catch(() => undefined);
     later(answered ? GRACE_MS : SHOW_AFTER_MS, () => setShown(true));
-    later(tries > 0 ? 0 : answered ? RESTART_AFTER_MS : FIRST_WAIT_MS, start);
+    later(tries > 0 ? 0 : answered ? RESTART_AFTER_MS : FIRST_WAIT_MS, tries > 0 ? start : autoStart);
     readProgress();
     readStatus();
-    const progress = setInterval(readProgress, PROGRESS_EVERY_MS);
-    const looks = setInterval(readStatus, STATUS_EVERY_MS);
+    looks = setInterval(readStatus, STATUS_EVERY_MS);
     const onFocus = () => readStatus();
     const onVisible = () => document.visibilityState === "visible" && readStatus();
     window.addEventListener("focus", onFocus);
@@ -219,12 +258,29 @@ export function useDeskReady(): { readiness: Readiness; retry: () => void } {
     return () => {
       live = false;
       timers.forEach(clearTimeout);
-      clearInterval(progress);
       clearInterval(looks);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [connected, answered, noLocal, tries]);
+
+  // Settled (stuck, or waiting on the person): how far a start got no
+  // longer moves, so it isn't asked.
+  const settled = stuck !== null || (status !== null && blocks(status));
+  useEffect(() => {
+    if (connected || noLocal || settled) return;
+    const every = setInterval(
+      () =>
+        void helperProgress()
+          .then((s) => {
+            reached.current = s;
+            setStage(s);
+          })
+          .catch(() => undefined),
+      PROGRESS_EVERY_MS,
+    );
+    return () => clearInterval(every);
+  }, [connected, noLocal, settled]);
 
   const readiness: Readiness =
     connected || noLocal || !shown

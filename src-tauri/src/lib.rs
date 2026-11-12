@@ -347,9 +347,20 @@ fn helper_progress(app: State<'_, App>) -> Option<helper::Stage> {
 /// (macOS, when it runs from its disk image or Downloads). Answers only
 /// when it couldn't, with why.
 #[tauri::command]
-async fn helper_move_to_applications(handle: tauri::AppHandle) -> CommandResult<()> {
+async fn helper_move_to_applications(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+) -> CommandResult<()> {
     #[cfg(target_os = "macos")]
     {
+        // Only a Desk that can't keep running where it is moves itself.
+        let backend = app.backend()?;
+        let status = tauri::async_runtime::spawn_blocking(move || helper::login(&backend).status())
+            .await
+            .map_err(text)?;
+        if status != helper::Status::MoveToApplications {
+            return Err("Desk is already where it can keep running, so it moves nothing.".into());
+        }
         let exe = std::env::current_exe().map_err(text)?;
         let moved = tauri::async_runtime::spawn_blocking(move || {
             helper::moving::copy_to_applications(&exe)
@@ -364,7 +375,7 @@ async fn helper_move_to_applications(handle: tauri::AppHandle) -> CommandResult<
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = handle;
+        let _ = (handle, app);
         Err("Only Desk on a Mac is moved to the Applications folder.".into())
     }
 }

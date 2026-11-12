@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import type { HelperStatus } from "../platform";
 import {
+  AUTO_RESTARTS,
+  AUTO_WINDOW_MS,
   DeskReadyBanner,
+  forgetAutoStarts,
+  mayAutoStart,
   FIRST_WAIT_MS,
   GRACE_MS,
   readyWords,
@@ -49,6 +53,7 @@ beforeEach(() => {
   platform.moveToApplications.mockReset().mockResolvedValue(undefined);
   useHost.setState(DEFAULT_HOST);
   useDesk.setState({ connected: false, answered: false });
+  forgetAutoStarts();
 });
 afterEach(() => {
   cleanup();
@@ -158,6 +163,64 @@ describe("Desk's helper stops", () => {
     await tick(RESTART_AFTER_MS + 100);
     expect(banner()).toBeNull();
     expect(platform.startHelper).not.toHaveBeenCalled();
+  });
+});
+
+describe("Desk's own restarts", () => {
+  it("are capped at three in ten minutes, then it says the helper is stuck", () => {
+    const starts: number[] = [];
+    for (let i = 0; i < AUTO_RESTARTS; i++) expect(mayAutoStart(i * 1000, starts)).toBe(true);
+    expect(mayAutoStart(5_000, starts)).toBe(false);
+    expect(mayAutoStart(AUTO_WINDOW_MS + 1, starts)).toBe(true);
+  });
+
+  it("show stuck rather than start again once the cap is reached", async () => {
+    useDesk.setState({ connected: true, answered: true });
+    const { unmount } = render(<Wired />);
+    for (let i = 0; i < AUTO_RESTARTS; i++) {
+      act(() => useDesk.setState({ connected: false }));
+      await tick(RESTART_AFTER_MS + 100);
+      act(() => useDesk.setState({ connected: true }));
+      await flush();
+    }
+    expect(platform.startHelper).toHaveBeenCalledTimes(AUTO_RESTARTS);
+    act(() => useDesk.setState({ connected: false }));
+    await tick(RESTART_AFTER_MS + 100);
+    expect(platform.startHelper).toHaveBeenCalledTimes(AUTO_RESTARTS);
+    expect(screen.getByText("Desk’s helper stopped and didn’t start again")).toBeTruthy();
+    unmount();
+  });
+
+  it("forget how far the last start got when a new one begins", async () => {
+    useDesk.setState({ connected: true, answered: true });
+    platform.helperProgress.mockResolvedValue("connecting");
+    render(<Wired />);
+    act(() => useDesk.setState({ connected: false }));
+    await tick(GRACE_MS + 100);
+    expect(screen.getByText(/Connecting · step 4 of 4/)).toBeTruthy();
+    platform.helperProgress.mockResolvedValue(null);
+    await tick(RESTART_AFTER_MS - GRACE_MS + 50);
+    expect(screen.getByText("Starting Desk’s helper")).toBeTruthy();
+  });
+});
+
+describe("looking again", () => {
+  it("stops asking about Login Items once the helper isn't waiting on the person", async () => {
+    render(<Wired />);
+    await tick(10_000);
+    // One look at first; none after, since it's running.
+    expect(platform.helperStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops asking how far it got once it's stuck", async () => {
+    useDesk.setState({ connected: true, answered: true });
+    render(<Wired />);
+    act(() => useDesk.setState({ connected: false }));
+    await tick(RESTART_AFTER_MS + START_WAIT_MS + 200);
+    expect(screen.getByText("Desk’s helper stopped and didn’t start again")).toBeTruthy();
+    const asked = platform.helperProgress.mock.calls.length;
+    await tick(10_000);
+    expect(platform.helperProgress.mock.calls.length).toBe(asked);
   });
 });
 

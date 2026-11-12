@@ -65,6 +65,13 @@ pub fn reopen_script(pid: u32, app: &Path) -> String {
     format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open '{app}'")
 }
 
+/// Whether the app already at the destination may go to the Trash: only
+/// a Desk, the same app as the one running (by its bundle identifier).
+/// Anything else, or one whose identifier can't be read, is left alone.
+pub fn may_replace(there: Option<&str>, ours: Option<&str>) -> bool {
+    matches!((there, ours), (Some(a), Some(b)) if a == b)
+}
+
 /// Whether Desk may make files in `dir`.
 pub fn writable(dir: &Path) -> bool {
     let probe = dir.join(format!(".desk-move-{}", std::process::id()));
@@ -82,9 +89,17 @@ mod mac {
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
-    use eyre::{Result, bail};
+    use eyre::{Result, bail, eyre};
 
-    use super::{bundle_of, destination, trashed_as, writable};
+    use super::{bundle_of, destination, may_replace, trashed_as, writable};
+
+    /// An app's bundle identifier, from its `Contents/Info.plist`.
+    fn bundle_id(app: &Path) -> Option<String> {
+        let info: plist::Dictionary = plist::from_file(app.join("Contents/Info.plist")).ok()?;
+        info.get("CFBundleIdentifier")?
+            .as_string()
+            .map(str::to_string)
+    }
 
     /// Copies the running Desk into Applications and answers where it went.
     /// The copy is complete before anything that was there is touched.
@@ -92,7 +107,12 @@ mod mac {
         let Some(bundle) = bundle_of(exe) else {
             bail!("Desk isn't running from its app, so there's nothing to move");
         };
-        let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let home = std::env::var_os("HOME")
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                eyre!("Desk can't tell where your home folder is, so it moves nothing")
+            })?;
         let user_apps = home.join("Applications");
         let name = bundle.file_name().unwrap_or_default().to_owned();
         let dest = destination(&name, Path::new("/Applications"), &user_apps, writable);
@@ -120,12 +140,27 @@ mod mac {
         }
         // The copy keeps the download mark, and macOS would run it from a
         // randomised copy again.
-        let _ = Command::new("/usr/bin/xattr")
+        let cleared = Command::new("/usr/bin/xattr")
             .args(["-dr", "com.apple.quarantine"])
             .arg(&staged)
             .stdin(Stdio::null())
             .output();
+        if !cleared.as_ref().is_ok_and(|o| o.status.success()) {
+            let _ = std::fs::remove_dir_all(&staged);
+            tracing::warn!(?cleared, "could not clear the download mark on Desk's copy");
+            bail!("Desk couldn't finish its copy in your Applications folder");
+        }
+        let mut trashed = None;
         if dest.exists() {
+            let folder = dest.parent().unwrap_or(&dest).display().to_string();
+            if !may_replace(bundle_id(&dest).as_deref(), bundle_id(&bundle).as_deref()) {
+                let _ = std::fs::remove_dir_all(&staged);
+                bail!(
+                    "{folder} already has a {} that isn't this Desk, so Desk leaves it. Rename or \
+                     move it, then try again",
+                    name.to_string_lossy()
+                );
+            }
             let trash = home.join(".Trash");
             let to = trashed_as(&trash, &name, |p| p.exists());
             if let Err(e) = std::fs::rename(&dest, &to) {
@@ -136,8 +171,17 @@ mod mac {
                      it, put it in the Trash, then try again"
                 );
             }
+            trashed = Some(to);
         }
-        std::fs::rename(&staged, &dest)?;
+        if let Err(e) = std::fs::rename(&staged, &dest) {
+            // Put back what was there, and leave no half-made copy.
+            if let Some(to) = &trashed {
+                let _ = std::fs::rename(to, &dest);
+            }
+            let _ = std::fs::remove_dir_all(&staged);
+            tracing::warn!(error = %e, "could not put Desk's copy in Applications");
+            bail!("Desk couldn't put its copy in your Applications folder; nothing was changed");
+        }
         Ok(dest)
     }
 
@@ -210,6 +254,15 @@ mod tests {
             script.ends_with(r"exec /usr/bin/open '/Users/o'\''neil/Applications/Desk.app'"),
             "{script}"
         );
+    }
+
+    #[test]
+    fn only_this_same_desk_is_ever_put_in_the_trash() {
+        let ours = Some("xyz.driftwerk.desk");
+        assert!(may_replace(Some("xyz.driftwerk.desk"), ours));
+        assert!(!may_replace(Some("com.example.other"), ours));
+        assert!(!may_replace(None, ours), "unreadable: left alone");
+        assert!(!may_replace(Some("xyz.driftwerk.desk"), None));
     }
 
     #[test]

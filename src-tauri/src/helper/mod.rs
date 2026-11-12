@@ -149,9 +149,10 @@ pub fn last_reason(log: &str) -> Option<String> {
     None
 }
 
-/// The reason from the log file at `path`, reading only its end.
+/// The reason from the log file at `path`, reading only its end, with any
+/// secret in it taken out (it is shown on screen).
 pub fn last_reason_in(path: &std::path::Path) -> Option<String> {
-    last_reason(&log_tail(path)?)
+    last_reason(&log_tail(path)?).map(|r| desk_core::redact::redact(&r, &[]))
 }
 
 /// How far Desk Helper has got since it last started, as its log says.
@@ -261,6 +262,20 @@ mod tests {
                 .unwrap()
                 .contains("open Desk again")
         );
+    }
+
+    #[test]
+    fn the_reason_shown_has_its_secrets_taken_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("desk-hubd.log");
+        std::fs::write(
+            &log,
+            "t ERROR desk_hubd::supervise: exiting: Postgres failed: postgres://desk:s3cretpassw0rd@127.0.0.1:5433/desk refused\n",
+        )
+        .unwrap();
+        let said = last_reason_in(&log).unwrap();
+        assert!(said.starts_with("Postgres failed"), "{said}");
+        assert!(!said.contains("s3cretpassw0rd"), "{said}");
     }
 
     #[test]
