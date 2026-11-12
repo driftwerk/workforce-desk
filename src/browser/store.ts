@@ -2,14 +2,12 @@ import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { browserOf, type BrowserOf } from "../hub/browser";
-import { HubError, type BrowserBackend, type BrowserLive } from "../hub/client";
+import { HubError, type BrowserLive } from "../hub/client";
 import { plainError } from "../ui/plainError";
 
 /** How often Desk asks the hub which browsers are open. */
 export const POLL_MS = 3000;
 
-/** What a person calls each browser. */
-export const backendLabel = (b: BrowserBackend): string => (b === "chrome" ? "My Chrome" : "Desk’s own browser");
 
 interface BrowserState {
   /** The browsers open now, most recently used first. */

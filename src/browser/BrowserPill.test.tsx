@@ -33,7 +33,6 @@ const live = (l: Partial<BrowserLive> = {}): BrowserLive => ({
   session: "s1",
   url: "https://shop.example/cart",
   host: "shop.example",
-  backend: "desk",
   idle_secs: 2,
   ...l,
 });
@@ -56,11 +55,10 @@ it("shows nothing while no browser is open", () => {
 });
 
 it("says Desk is using the browser, where and in which, and Stop stops it", async () => {
-  useBrowser.setState({ live: [live({ backend: "chrome" })] });
+  useBrowser.setState({ live: [live()] });
   render(<BrowserPill place="titlebar" />);
   const pill = screen.getByRole("status", { name: "Desk is using the browser" });
   expect(pill.textContent).toContain("shop.example");
-  expect(pill.textContent).toContain("My Chrome");
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop" })));
   expect(stops()).toEqual([{ hub: "local", method: "POST", path: "/api/desk/browser/stop", body: {} }]);
   expect(useBrowser.getState().live).toEqual([]);

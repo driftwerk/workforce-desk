@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { helperLine } from "./Help";
+import { helperLine, updateLine } from "./Help";
 
 describe("Help", () => {
   it("says where Desk Helper stands in plain words", () => {
@@ -15,5 +15,11 @@ describe("Help", () => {
     expect(helperLine({ state: "needs-approval" }, "macos")).toMatch(/Login Items/);
     expect(helperLine({ state: "needs-approval" }, "windows")).toMatch(/Startup apps/);
     expect(helperLine({ state: "needs-approval" }, "linux")).toMatch(/autostart/);
+  });
+
+  it("says whether a version ready installs by itself, or was put off", () => {
+    const ready = { phase: "ready", version: "0.2.1" } as const;
+    expect(updateLine(ready, true, null, null)).toContain("installs by itself once your sessions finish");
+    expect(updateLine(ready, false, null, null)).toBe("Desk 0.2.1 is ready, put off for now. Check for updates to have it install by itself again.");
   });
 });

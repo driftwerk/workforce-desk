@@ -9,6 +9,7 @@ description = "Keeps Desk's local workforce hub running: Postgres, config, secre
 # Only on macOS and Linux: on Windows Desk runs the Linux build inside WSL,
 # and this crate is a stub that says so.
 [target.'cfg(unix)'.dependencies]
+desk-chrome-host = { workspace = true }
 desk-core = { workspace = true }
 eyre = { workspace = true }
 libc = { workspace = true }

@@ -8,6 +8,7 @@ import { Voices } from "./Voices";
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
   invoke: vi.fn(() => Promise.resolve([])),
+  onTupleStatus: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 let paths: string[] = [];
@@ -84,4 +85,17 @@ it("uses the Gemini key from Providers for Gemini Live instead of asking again",
 
 it("points the live engines at sections that exist", () => {
   for (const e of VOICE_ENGINES) expect(e.privacy).not.toMatch(/under Plans/);
+});
+
+it("is one screen: talking to agents first, then how they sound, provider by provider", async () => {
+  render(<Voices />);
+  await act(async () => {});
+  expect(screen.getByRole("heading", { name: "Talking to agents" })).toBeTruthy();
+  expect(screen.getByText(/Talk to agents by name/)).toBeTruthy();
+  expect(screen.getByText("How agents sound")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^ElevenLabs/ }));
+  await act(async () => {});
+  expect(screen.getByRole("heading", { name: "ElevenLabs" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Talking to agents" }));
+  expect(screen.getByRole("heading", { name: "Talking to agents" })).toBeTruthy();
 });
