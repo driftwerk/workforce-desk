@@ -32,6 +32,7 @@ import "./styles/panels.css";
 import "./styles/attachments.css";
 import "./styles/board.css";
 import "./styles/memory.css";
+import "./styles/session-chrome.css";
 
 /** Shows the window once the restored shell has been committed in its
  *  theme, on that theme's background. (Not on an animation frame: a hidden

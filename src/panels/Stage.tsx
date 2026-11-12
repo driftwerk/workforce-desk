@@ -299,52 +299,65 @@ export function SidePanel({
   actions,
   onClose,
   className = "",
+  chrome,
   children,
 }: {
   /** What the column is called, to assistive tech. */
   label: string;
   /** How its buttons name it: "the thread", "this session". */
   noun: string;
-  title: ReactNode;
+  title?: ReactNode;
   actions?: ReactNode;
   onClose: () => void;
   className?: string;
+  /** A header of the column's own in place of title and actions, given the
+   *  panel's own buttons (focus, close) to place in it. */
+  chrome?: (own: { focus: ReactNode; close: ReactNode }) => ReactNode;
   children: ReactNode;
 }) {
   const slot = useContext(SlotContext);
   const ui = useUi.getState;
+  const focus =
+    slot &&
+      (slot.focused ? (
+        <button type="button" className="icon-btn-sm rpanel-btn" aria-label="Back to a side panel" title="Back to a side panel (Esc)" onClick={() => ui().unfocusPanel()}>
+          <UnfocusIcon />
+        </button>
+      ) : (
+        <button type="button" className="icon-btn-sm rpanel-btn" aria-label={`Focus ${noun}`} title="Focus (fill the main space)" onClick={() => ui().focusPanel(slot.kind)}>
+          <FocusIcon />
+        </button>
+      ));
+  const close = (
+    <button
+      type="button"
+      className="icon-btn-sm rpanel-btn"
+      aria-label={`Close ${noun}`}
+      title="Close"
+      onClick={() => {
+        if (slot) ui().panelClosed(slot.kind);
+        onClose();
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+        <path d="M3 3l8 8M11 3l-8 8" />
+      </svg>
+    </button>
+  );
   return (
     <aside className={`rpanel ${className}`} aria-label={label}>
-      <header className="rpanel-head">
-        {title}
-        <span className="rpanel-actions">
-          {actions}
-          {slot &&
-            (slot.focused ? (
-              <button type="button" className="icon-btn-sm rpanel-btn" aria-label="Back to a side panel" title="Back to a side panel (Esc)" onClick={() => ui().unfocusPanel()}>
-                <UnfocusIcon />
-              </button>
-            ) : (
-              <button type="button" className="icon-btn-sm rpanel-btn" aria-label={`Focus ${noun}`} title="Focus (fill the main space)" onClick={() => ui().focusPanel(slot.kind)}>
-                <FocusIcon />
-              </button>
-            ))}
-          <button
-            type="button"
-            className="icon-btn-sm rpanel-btn"
-            aria-label={`Close ${noun}`}
-            title="Close"
-            onClick={() => {
-              if (slot) ui().panelClosed(slot.kind);
-              onClose();
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-              <path d="M3 3l8 8M11 3l-8 8" />
-            </svg>
-          </button>
-        </span>
-      </header>
+      {chrome ? (
+        chrome({ focus, close })
+      ) : (
+        <header className="rpanel-head">
+          {title}
+          <span className="rpanel-actions">
+            {actions}
+            {focus}
+            {close}
+          </span>
+        </header>
+      )}
       {children}
     </aside>
   );

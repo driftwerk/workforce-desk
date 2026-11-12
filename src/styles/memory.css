@@ -1,12 +1,8 @@
 /* Desk Memory: the session card's Memory tab, its Forget dialog, a group's
    memory switches and Settings → Memory. Every colour is a theme token. */
 
-.session-tabs {
-  flex: none;
-  margin: 8px 16px 0;
-}
 /* The session's own view: its children lay out as the card's own, and it
-   stays mounted, hidden, while Memory shows. */
+   stays mounted, hidden, while Memory or History shows. */
 .session-view {
   display: contents;
 }

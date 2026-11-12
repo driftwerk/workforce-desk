@@ -301,7 +301,8 @@ describe("a session Sarah runs", () => {
     // What waits to go in is a slim bar under its terminal; its line is
     // read from Messages with Desk….
     expect(await within(card).findByText("1 message waiting to go in")).toBeTruthy();
-    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Messages with Desk…" })));
+    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Session options" })));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Messages with Desk…" })));
     expect(await within(card).findByText(/Waiting for it to finish its turn/)).toBeTruthy();
     await act(async () => fireEvent.click(within(strip).getByRole("button", { name: "Release" })));
     expect(hub.requests).toContain("DELETE /api/desk/sessions/s1/charge");

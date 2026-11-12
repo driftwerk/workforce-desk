@@ -11,7 +11,7 @@ import { keyOf, LOCAL, machineOf, sessionKey, splitKey } from "../hub/machines";
 import { askMove, canMove, sessionSubject } from "../groups/move";
 import { canHandOff } from "../handoff/LineageChips";
 import { askHandoff } from "../handoff/store";
-import type { Session, SessionState } from "../hub/types";
+import type { Session } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
 import { approvalsSwitchable, lifecycleActions, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
@@ -53,19 +53,11 @@ import { baseName, homeShort } from "../ui/paths";
 import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, ownSignInWorks, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 
+import { STATE_LABEL } from "../session/words";
+
 const ENGINE = ENGINE_TITLE;
 
-export const STATE_LABEL: Record<SessionState, string> = {
-  starting: "starting",
-  working: "working",
-  blocked: "needs you",
-  asking: "needs you · asked",
-  done: "done",
-  idle: "idle",
-  interrupted: "interrupted",
-  stopped: "stopped",
-  closed: "closed",
-};
+export { STATE_LABEL };
 
 /** Where a pane sits: its share of the grid, with half the gap around it. */
 export const boxStyle = (rect: Rect | null): CSSProperties =>
