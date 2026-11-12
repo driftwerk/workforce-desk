@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { searchDm, termsOf, type Match } from "../chat/search";
 import type { HubAccount } from "../chat/types";
 import { clock, dayName } from "../floor/time";
@@ -31,10 +24,7 @@ export interface DmSearchState {
 }
 
 /** What a DM's search has found for what's typed. */
-export function useDmSearch(
-  hub: HubAccount | undefined,
-  agentId: string,
-): DmSearchState & { setCurrent: (i: number) => void } {
+export function useDmSearch(hub: HubAccount | undefined, agentId: string): DmSearchState & { setCurrent: (i: number) => void } {
   const [q, setQ] = useState("");
   const [matches, setMatches] = useState<Match[]>([]);
   const [more, setMore] = useState(false);
@@ -82,54 +72,26 @@ export function useDmSearch(
     searchDm(hub, agentId, q.trim(), last.id).then(
       (r) => {
         if (n !== asked.current) return;
-        setMatches((was) => [
-          ...was,
-          ...r.matches.filter((m) => !was.some((w) => w.id === m.id)),
-        ]);
+        setMatches((was) => [...was, ...r.matches.filter((m) => !was.some((w) => w.id === m.id))]);
         setMore(r.more);
         setLoading(false);
       },
       () => n === asked.current && setLoading(false),
     );
   }, [hub, agentId, q, matches, more, loading]);
-  return {
-    q,
-    setQ,
-    matches,
-    more,
-    current,
-    setCurrent,
-    loading,
-    problem,
-    older,
-  };
+  return { q, setQ, matches, more, current, setCurrent, loading, problem, older };
 }
 
 /** `text` with the words of `terms` marked. */
 export const marked = (text: string, terms: string[]): ReactNode[] => {
   if (!terms.length) return [text];
-  const re = new RegExp(
-    `(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-    "gi",
-  );
-  return text
-    .split(re)
-    .map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
 };
 
 /** The bar over the chat: what's searched for, where you are in the
  *  matches, the steps and Done. */
-export function SearchBar({
-  s,
-  name,
-  onStep,
-  onClose,
-}: {
-  s: DmSearchState;
-  name: string;
-  onStep: (by: 1 | -1) => void;
-  onClose: () => void;
-}) {
+export function SearchBar({ s, name, onStep, onClose }: { s: DmSearchState; name: string; onStep: (by: 1 | -1) => void; onClose: () => void }) {
   const n = s.matches.length;
   return (
     <div
@@ -156,10 +118,7 @@ export function SearchBar({
             if (e.key === "ArrowDown" || (e.key === "Enter" && !e.shiftKey)) {
               e.preventDefault();
               onStep(1);
-            } else if (
-              e.key === "ArrowUp" ||
-              (e.key === "Enter" && e.shiftKey)
-            ) {
+            } else if (e.key === "ArrowUp" || (e.key === "Enter" && e.shiftKey)) {
               e.preventDefault();
               onStep(-1);
             }
@@ -167,30 +126,12 @@ export function SearchBar({
         />
       </label>
       <span className="dm-search-count" aria-live="polite">
-        {!s.q.trim()
-          ? ""
-          : s.loading && !n
-            ? "Searching…"
-            : n
-              ? `${s.current >= 0 ? s.current + 1 : 0} of ${n}${s.more ? "+" : ""}`
-              : "No matches"}
+        {!s.q.trim() ? "" : s.loading && !n ? "Searching…" : n ? `${s.current >= 0 ? s.current + 1 : 0} of ${n}${s.more ? "+" : ""}` : "No matches"}
       </span>
-      <button
-        type="button"
-        className="icon-btn-sm"
-        aria-label="Newer match"
-        disabled={!n}
-        onClick={() => onStep(-1)}
-      >
+      <button type="button" className="icon-btn-sm" aria-label="Newer match" disabled={!n} onClick={() => onStep(-1)}>
         ↑
       </button>
-      <button
-        type="button"
-        className="icon-btn-sm"
-        aria-label="Older match"
-        disabled={!n}
-        onClick={() => onStep(1)}
-      >
+      <button type="button" className="icon-btn-sm" aria-label="Older match" disabled={!n} onClick={() => onStep(1)}>
         ↓
       </button>
       <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -201,30 +142,16 @@ export function SearchBar({
 }
 
 /** The matches, beside the chat, newest first. */
-export function SearchResults({
-  s,
-  name,
-  onPick,
-}: {
-  s: DmSearchState;
-  name: string;
-  onPick: (i: number) => void;
-}) {
+export function SearchResults({ s, name, onPick }: { s: DmSearchState; name: string; onPick: (i: number) => void }) {
   const terms = termsOf(s.q);
   const list = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    list.current
-      ?.querySelector<HTMLElement>("[aria-current='true']")
-      ?.scrollIntoView?.({ block: "nearest" });
+    list.current?.querySelector<HTMLElement>("[aria-current='true']")?.scrollIntoView?.({ block: "nearest" });
   }, [s.current]);
   return (
     <aside className="dm-results" aria-label="Matches">
       <header className="dm-results-head">
-        <span className="dm-results-title">
-          {s.matches.length
-            ? `${s.matches.length}${s.more ? "+" : ""} matches`
-            : "Matches"}
-        </span>
+        <span className="dm-results-title">{s.matches.length ? `${s.matches.length}${s.more ? "+" : ""} matches` : "Matches"}</span>
         <span className="faint small">whole history</span>
       </header>
       <div ref={list} className="dm-results-list">
@@ -244,12 +171,7 @@ export function SearchResults({
           </button>
         ))}
         {s.more && (
-          <button
-            type="button"
-            className="link small dm-results-more"
-            disabled={s.loading}
-            onClick={s.older}
-          >
+          <button type="button" className="link small dm-results-more" disabled={s.loading} onClick={s.older}>
             {s.loading ? "Loading…" : "Older matches"}
           </button>
         )}
@@ -263,19 +185,13 @@ const HIGHLIGHTS = "CSS" in globalThis && "highlights" in CSS;
 /** Marks the words of `terms` in `pane`'s messages, and those in message
  *  `current` as the one chosen, with the CSS Custom Highlight API (an
  *  engine without it marks nothing). Cleared when the search closes. */
-export function useSearchMarks(
-  pane: HTMLElement | null,
-  terms: string[],
-  current: string | null,
-  version: unknown,
-): void {
+export function useSearchMarks(pane: HTMLElement | null, terms: string[], current: string | null, version: unknown): void {
   const key = terms.join("\u0000");
   // Edits, deletes, a reply growing and markdown rendered late all change the
   // text under the marks, which `version` alone doesn't see.
   const [changed, setChanged] = useState(0);
   useEffect(() => {
-    if (!pane || !terms.length || typeof MutationObserver === "undefined")
-      return;
+    if (!pane || !terms.length || typeof MutationObserver === "undefined") return;
     let frame = 0;
     const seen = new MutationObserver(() => {
       cancelAnimationFrame(frame);
@@ -293,19 +209,13 @@ export function useSearchMarks(
     const all: Range[] = [];
     const cur: Range[] = [];
     if (terms.length) {
-      for (const row of pane.querySelectorAll<HTMLElement>(
-        "[data-message-id]",
-      )) {
+      for (const row of pane.querySelectorAll<HTMLElement>("[data-message-id]")) {
         const body = row.querySelector(".msg-body") ?? row;
         const walk = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
         for (let node = walk.nextNode(); node; node = walk.nextNode()) {
           const text = node.textContent?.toLowerCase() ?? "";
           for (const t of terms) {
-            for (
-              let at = text.indexOf(t);
-              at >= 0;
-              at = text.indexOf(t, at + t.length)
-            ) {
+            for (let at = text.indexOf(t); at >= 0; at = text.indexOf(t, at + t.length)) {
               const r = document.createRange();
               r.setStart(node, at);
               r.setEnd(node, at + t.length);
@@ -315,10 +225,8 @@ export function useSearchMarks(
         }
       }
     }
-    const reg = (CSS as unknown as { highlights: Map<string, unknown> })
-      .highlights;
-    const H = (globalThis as unknown as { Highlight: new () => unknown })
-      .Highlight;
+    const reg = (CSS as unknown as { highlights: Map<string, unknown> }).highlights;
+    const H = (globalThis as unknown as { Highlight: new () => unknown }).Highlight;
     if (!terms.length) return;
     const add = (all: Range[]) => {
       const h = new H();

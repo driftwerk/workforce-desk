@@ -1,25 +1,9 @@
 import { toShow } from "../chat/conversation";
 import { SetupInDm } from "../setup/slot";
 import { formAnswer } from "../chat/forms";
-import {
-  Fragment,
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useShallow } from "zustand/react/shallow";
-import {
-  AttachButton,
-  DropOverlay,
-  PendingFiles,
-  useFileDrop,
-  usePendingFiles,
-} from "../attachments/Compose";
+import { AttachButton, DropOverlay, PendingFiles, useFileDrop, usePendingFiles } from "../attachments/Compose";
 import { uploadAll } from "../attachments/upload";
 import { PromptCard } from "../chat/Approvals";
 import { AgentAccess } from "../computer/AgentAccess";
@@ -48,12 +32,7 @@ import { QueuedMessages } from "./QueuedMessages";
 import { relayedOf } from "../chat/relayed";
 import { memoriesFrom, type SavedMemory } from "../chat/remove";
 import { termsOf } from "../chat/search";
-import {
-  SearchBar,
-  SearchResults,
-  useDmSearch,
-  useSearchMarks,
-} from "./DmSearch";
+import { SearchBar, SearchResults, useDmSearch, useSearchMarks } from "./DmSearch";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -68,51 +47,31 @@ import { useFocusRequest } from "../shell/focus";
 import { useOutOfSight } from "../panels/Stage";
 import { useOnScreen } from "../unread/seen";
 import { useUnread } from "../unread/summary";
-import {
-  DmVoiceBar,
-  DmVoiceControls,
-  useDmVoiceEntries,
-} from "../voice/DmVoice";
+import { DmVoiceBar, DmVoiceControls, useDmVoiceEntries } from "../voice/DmVoice";
 import { ComposerMore } from "./ComposerMore";
 import { useDmPresence } from "../voice/dms";
 import { after } from "./time";
 import type { ReadPoint } from "../hub/types";
 
-const LEVEL: Record<OversightLevel, string> = {
-  watch: "Watch",
-  suggest: "Suggest",
-  act: "Act",
-  full: "Act fully",
-};
+const LEVEL: Record<OversightLevel, string> = { watch: "Watch", suggest: "Suggest", act: "Act", full: "Act fully" };
 
 /** Who said a message and what, as one key. */
-const saidKey = (m: ChatMessage): string =>
-  `${m.role}\u0000${m.content.trim()}`;
+const saidKey = (m: ChatMessage): string => `${m.role}\u0000${m.content.trim()}`;
 
 /** A message's time in ms; 0 when it has none. */
 const ms = (iso: string): number => Date.parse(iso) || 0;
 
-const count = (n: number, one: string, many: string) =>
-  `${n} ${n === 1 ? one : many}`;
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** "Overseeing 3 crew and 4 sessions · Suggest" */
-const overseeingLine = (
-  roster: Agent[],
-  manager: Agent,
-  tracked: number,
-  level: OversightLevel,
-): string => {
-  const crew = roster.filter(
-    (a) => a.hubId === manager.hubId && a.id !== manager.id,
-  ).length;
+const overseeingLine = (roster: Agent[], manager: Agent, tracked: number, level: OversightLevel): string => {
+  const crew = roster.filter((a) => a.hubId === manager.hubId && a.id !== manager.id).length;
   return `Overseeing ${crew} crew and ${count(tracked, "session", "sessions")} · ${LEVEL[level]}`;
 };
 
 export function Rooms() {
   const activeRoom = useDesk((s) => s.activeRoom);
-  const room = useDesk((s) =>
-    s.activeRoom ? s.rooms[s.activeRoom] : undefined,
-  );
+  const room = useDesk((s) => (s.activeRoom ? s.rooms[s.activeRoom] : undefined));
   const loaded = useDesk((s) => s.loaded);
   const activeAgent = useChat((s) => s.activeAgent);
   const inbox = useDesk((s) => s.inbox);
@@ -127,9 +86,7 @@ export function Rooms() {
 /** In place of a room or DM that's open but not loaded yet: not the empty
  *  Rooms, which would read as everything having closed. */
 function Waiting() {
-  return (
-    <main className="room room-empty" aria-label="Rooms" aria-busy="true" />
-  );
+  return <main className="room room-empty" aria-label="Rooms" aria-busy="true" />;
 }
 
 type Tab = AgentTab;
@@ -152,15 +109,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const roster = useChat((s) => s.roster);
   const hubs = useChat((s) => s.hubs);
   const agent = roster.find((a) => agentKey(a) === activeAgent);
-  const person = useChat((s) =>
-    agent ? (s.me[agent.hubId]?.name ?? null) : null,
-  );
-  const convo = useChat((s) =>
-    activeAgent ? s.conversations[activeAgent] : undefined,
-  );
-  const history = useChat((s) =>
-    activeAgent ? s.histories[activeAgent] : undefined,
-  );
+  const person = useChat((s) => (agent ? (s.me[agent.hubId]?.name ?? null) : null));
+  const convo = useChat((s) => (activeAgent ? s.conversations[activeAgent] : undefined));
+  const history = useChat((s) => (activeAgent ? s.histories[activeAgent] : undefined));
   const { send, loadHistory, loadEarlier, watchDm, answerPrompt } = useChat(
     useShallow((s) => ({
       send: s.send,
@@ -178,17 +129,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const fallback = useProviders((s) => s.fallback);
   const manager = useOverview((s) => s.manager);
   // The sessions overseen, counted: what each is doing isn't shown here.
-  const trackedOverview = useOverview((s) =>
-    s.overview
-      ? s.overview.items.filter((i) => i.kind === "session").length
-      : null,
-  );
-  const trackedSessions = useDesk(
-    (s) =>
-      Object.values(localSessions(s.sessions)).filter(
-        (x) => x.state !== "closed",
-      ).length,
-  );
+  const trackedOverview = useOverview((s) => (s.overview ? s.overview.items.filter((i) => i.kind === "session").length : null));
+  const trackedSessions = useDesk((s) => Object.values(localSessions(s.sessions)).filter((x) => x.state !== "closed").length);
   // Each agent's tab, kept while you visit others (and across launches).
   const tabs = useUi((u) => u.agentTabs);
   const setAgentTab = useUi((u) => u.setAgentTab);
@@ -204,12 +146,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // Where "talk here" finds this DM, and lets its microphone go when it goes.
   useDmPresence(agent ? (activeAgent ?? null) : null, root);
   const scroller = useRef<HTMLDivElement | null>(null);
-  const settled =
-    !history || history.state === "ready" || history.state === "absent";
-  const read =
-    history?.state === "ready" ||
-    history?.state === "absent" ||
-    history?.state === "failed";
+  const settled = !history || history.state === "ready" || history.state === "absent";
+  const read = history?.state === "ready" || history?.state === "absent" || history?.state === "failed";
   // Where you're reading stays put; at the newest message, it follows.
   const stay = useStayPut(activeAgent ? `dm:${activeAgent}` : null, read);
   // How far the DM was read when it opened, once that's known (null: not
@@ -217,8 +155,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // conversation is read (null: none).
   const readsLoaded = useReads((s) => s.loaded);
   const readAtOpen = useRef<ReadPoint | null | undefined>(undefined);
-  if (readAtOpen.current === undefined && readsLoaded && activeAgent)
-    readAtOpen.current = useReads.getState().dms[activeAgent] ?? null;
+  if (readAtOpen.current === undefined && readsLoaded && activeAgent) readAtOpen.current = useReads.getState().dms[activeAgent] ?? null;
   const newLine = useRef<string | null | undefined>(undefined);
   const openedAtLine = useRef(false);
   // The newest message's time when you last were at the end: Jump to
@@ -226,21 +163,15 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const leftAt = useRef(0);
   // What an edit set aside, hidden at once; your latest message being
   // edited, and why it can't be when it can't.
-  const aside = useChat((s) =>
-    activeAgent ? s.setAside[activeAgent] : undefined,
-  );
-  const queuedCount = useChat((s) =>
-    activeAgent ? (s.queues[activeAgent]?.items.length ?? 0) : 0,
-  );
+  const aside = useChat((s) => (activeAgent ? s.setAside[activeAgent] : undefined));
+  const queuedCount = useChat((s) => (activeAgent ? (s.queues[activeAgent]?.items.length ?? 0) : 0));
   const editLast = useChat((s) => s.editLast);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [editNote, setEditNote] = useState<string | null>(null);
   // Your message whose Delete is being confirmed, in place; the answers to
   // ones you deleted, until the hub says so itself.
   const [deleting, setDeleting] = useState<string | null>(null);
-  const orphans = useChat((s) =>
-    activeAgent ? s.orphans[activeAgent] : undefined,
-  );
+  const orphans = useChat((s) => (activeAgent ? s.orphans[activeAgent] : undefined));
   useEffect(() => {
     if (!editNote) return;
     const t = setTimeout(() => setEditNote(null), NOTE_MS);
@@ -251,9 +182,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // loaded, and the match to show once it's rendered.
   const [searching, setSearching] = useState(false);
   const search = useDmSearch(hub, agent?.id ?? "");
-  const around = useChat((s) =>
-    activeAgent ? s.around[activeAgent] : undefined,
-  );
+  const around = useChat((s) => (activeAgent ? s.around[activeAgent] : undefined));
   const showAround = useChat((s) => s.showAround);
   const leaveAround = useChat((s) => s.leaveAround);
   const toShowAt = useRef<string | null>(null);
@@ -266,45 +195,28 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     },
     [stay.pane],
   );
-  const chosen =
-    search.current >= 0 ? (search.matches[search.current]?.id ?? null) : null;
-  useSearchMarks(
-    paneEl,
-    searching ? termsOf(search.q) : [],
-    chosen,
-    `${history?.messages.length}:${convo?.messages.length}:${around?.around}`,
-  );
+  const chosen = search.current >= 0 ? (search.matches[search.current]?.id ?? null) : null;
+  useSearchMarks(paneEl, searching ? termsOf(search.q) : [], chosen, `${history?.messages.length}:${convo?.messages.length}:${around?.around}`);
   /** The newest message, leaving a stretch shown around a match. */
   const latest = useCallback(() => {
     if (activeAgent) leaveAround(activeAgent);
     stay.toLatest();
   }, [activeAgent, leaveAround, stay.toLatest]);
-  const tab: Tab = inPane
-    ? "chat"
-    : (activeAgent && tabs[activeAgent]) || "chat";
+  const tab: Tab = inPane ? "chat" : (activeAgent && tabs[activeAgent]) || "chat";
   // The conversation is read while it's on screen, wherever this shows:
   // through the newest of the hub's copies of what the agent said, or the
   // newest its hub counts unread, whichever is later.
   const outOfSight = useOutOfSight();
-  const counted = useUnread((s) =>
-    activeAgent ? s.dms[activeAgent]?.last : undefined,
-  );
+  const counted = useUnread((s) => (activeAgent ? s.dms[activeAgent]?.last : undefined));
   const newest = useMemo(() => {
     const said = (history?.messages ?? []).findLast((m) => m.role !== "user");
     const mine = said ? { at: said.at, message: said.id } : null;
     if (!counted) return mine;
-    return mine && !after({ createdAt: counted.at }, mine.at)
-      ? mine
-      : { at: counted.at, message: counted.message_id };
+    return mine && !after({ createdAt: counted.at }, mine.at) ? mine : { at: counted.at, message: counted.message_id };
   }, [history?.messages, counted]);
-  useOnScreen(
-    agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null,
-    scroller,
-    newest,
-    {
-      enabled: tab === "chat" && !outOfSight,
-    },
-  );
+  useOnScreen(agent ? { kind: "dm", hub: agent.hubId, agent: agent.id } : null, scroller, newest, {
+    enabled: tab === "chat" && !outOfSight,
+  });
   const known = roster.some((a) => agentKey(a) === inPane);
   useEffect(() => {
     if (inPane && known) watchDm(inPane);
@@ -314,10 +226,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // A DM opened with something unread opens at its New line.
   useLayoutEffect(() => {
     const match = toShowAt.current;
-    if (
-      match &&
-      paneEl?.querySelector(`[data-message-id="${CSS.escape(match)}"]`)
-    ) {
+    if (match && paneEl?.querySelector(`[data-message-id="${CSS.escape(match)}"]`)) {
       toShowAt.current = null;
       stay.showAt(match, Math.round((paneEl.clientHeight ?? 0) / 3));
     } else if (typeof newLine.current === "string" && !openedAtLine.current) {
@@ -338,63 +247,41 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   );
   const retrySend = useChat((s) => s.retry);
   const discardSend = useChat((s) => s.discard);
-  const retry = useCallback(
-    (id: string) => void (activeAgent && retrySend(activeAgent, id)),
-    [activeAgent, retrySend],
-  );
-  const discard = useCallback(
-    (id: string) => activeAgent && discardSend(activeAgent, id),
-    [activeAgent, discardSend],
-  );
+  const retry = useCallback((id: string) => void (activeAgent && retrySend(activeAgent, id)), [activeAgent, retrySend]);
+  const discard = useCallback((id: string) => activeAgent && discardSend(activeAgent, id), [activeAgent, discardSend]);
 
   // What every message is shown with, kept the same while it is, so a
   // message renders again only when it changes.
   const hubId = agent?.hubId ?? null;
   const agentId = agent?.id ?? null;
-  const origin = useMemo(
-    () => (hubId && agentId ? { hub: hubId, agent: agentId } : undefined),
-    [hubId, agentId],
-  );
+  const origin = useMemo(() => (hubId && agentId ? { hub: hubId, agent: agentId } : undefined), [hubId, agentId]);
   // Who sent a message on is the hub's to say; where it doesn't, its
   // wording tells, on this computer, where the overseer is (under the name it
   // had then).
   const overseerId = local ? (manager?.agentId ?? null) : null;
   const sentOn = useMemo(() => {
-    const crew = local
-      ? roster.filter((a) => a.hubId === hubId).flatMap((a) => [a.name, a.id])
-      : [];
-    const overseer = overseerId
-      ? (roster.find((a) => a.hubId === hubId && a.id === overseerId)?.name ??
-        null)
-      : null;
+    const crew = local ? roster.filter((a) => a.hubId === hubId).flatMap((a) => [a.name, a.id]) : [];
+    const overseer = overseerId ? (roster.find((a) => a.hubId === hubId && a.id === overseerId)?.name ?? null) : null;
     return { local, crew, overseer, person };
   }, [local, roster, hubId, overseerId, person]);
 
   if (inPane && (!agent || !convo)) {
     return (
       <div className="pane-note">
-        <p className="muted small">
-          {agent
-            ? "Connecting…"
-            : "This agent isn’t on any hub Desk is paired with right now."}
-        </p>
+        <p className="muted small">{agent ? "Connecting…" : "This agent isn’t on any hub Desk is paired with right now."}</p>
       </div>
     );
   }
   if (!agent || !activeAgent || !convo) {
     // The DM put back on launch, until its hub's roster is read.
     const hubId = activeAgent?.split("/")[0] ?? "";
-    if (
-      activeAgent &&
-      (!rosterRead || hubId in rosterErrors || (agent && !convo))
-    )
-      return <Waiting />;
+    if (activeAgent && (!rosterRead || hubId in rosterErrors || (agent && !convo))) return <Waiting />;
     return (
       <main className="room room-empty" aria-label="Rooms">
         <h1 className="display-lg">Rooms</h1>
         <p className="muted">
-          Pick a room, or someone from Crew to talk to them directly. Local
-          agents and agents on every paired hub are listed there.
+          Pick a room, or someone from Crew to talk to them directly. Local agents and agents on every paired hub are listed
+          there.
         </p>
       </main>
     );
@@ -402,84 +289,42 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
   const unsaved = dirtyFiles(drafts, activeAgent);
   const go = (next: Tab) => setAgentTab(activeAgent, next);
-  const choose = (next: Tab) =>
-    tab === "files" && next !== "files" && unsaved.length > 0
-      ? setLeaving(next)
-      : go(next);
-  const shownTabs = local
-    ? TABS
-    : TABS.filter(
-        (t) => t.id !== "files" && t.id !== "access" && t.id !== "connectors",
-      );
+  const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
+  const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files" && t.id !== "access" && t.id !== "connectors");
   // What the hub reports stands in until the providers list says more.
   const brainSubtitle =
     local && brain && provider && !fallback
       ? [hub?.label ?? "This computer", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
-  const overseeing =
-    local && manager?.agentId === agent.id && manager.level
-      ? manager.level
-      : null;
+  const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
   const subtitle =
-    overseeing && tab === "chat"
-      ? overseeingLine(
-          roster,
-          agent,
-          trackedOverview ?? trackedSessions,
-          overseeing,
-        )
-      : brainSubtitle;
+    overseeing && tab === "chat" ? overseeingLine(roster, agent, trackedOverview ?? trackedSessions, overseeing) : brainSubtitle;
   const Root = inPane ? "div" : "main";
   // Working, or a streamed turn not yet said to have ended (for a grace).
   const busy = isRunning(convo);
   const last = convo.messages.at(-1);
   // Until any answer text arrives, the reply is the working row (with the
   // tools it has run), not an empty message.
-  const pending =
-    last?.role === "assistant" && last.status === "streaming" && !last.content
-      ? last
-      : undefined;
-  const answering =
-    last?.role === "assistant" && last.status === "streaming" && !!last.content;
-  const liveShown = toShow(
-    pending ? convo.messages.slice(0, -1) : convo.messages,
-  );
+  const pending = last?.role === "assistant" && last.status === "streaming" && !last.content ? last : undefined;
+  const answering = last?.role === "assistant" && last.status === "streaming" && !!last.content;
+  const liveShown = toShow(pending ? convo.messages.slice(0, -1) : convo.messages);
   // A hub with client ids says which kept row each live message became;
   // an older hub's are matched by words and times.
   const all = around
     ? around.messages
     : convo.features?.has(FEATURES.clientIds)
-      ? shownWith(history?.messages ?? [], liveShown)
-      : onceEach(
-          withHistory(
-            history?.messages ?? [],
-            liveShown,
-            history?.loadedAt ?? null,
-          ),
-        );
+    ? shownWith(history?.messages ?? [], liveShown)
+    : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
   const asideSet = new Set(aside ?? []);
-  const shown = aside?.length
-    ? all.filter(
-        (m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId)),
-      )
-    : all;
+  const shown = aside?.length ? all.filter((m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId))) : all;
   // Your latest message, what ↑ and Edit replace: one you typed, not one
   // the overseer sent on, a command, or one that never got there.
-  const mineAt = shown.findLastIndex(
-    (m) =>
-      m.role === "user" &&
-      !m.undelivered &&
-      !m.command &&
-      !relayedOf(m, sentOn),
-  );
+  const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
   const mine = mineAt >= 0 ? shown[mineAt] : undefined;
   // Around a search match, the chat is a stretch of its past: nothing is
   // edited or deleted from there. And only where the hub says which kept
   // row each live message became: what's set aside is then known by id.
-  const editable =
-    !around &&
-    !!convo.features?.has(FEATURES.edit) &&
-    !!convo.features?.has(FEATURES.clientIds);
+  const editable = !around && !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
   const whyNot = !mine
     ? null
     : busy
@@ -493,22 +338,12 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             : null;
   const deletable = !around && !!convo.features?.has(FEATURES.delete);
   const yours = (m: ChatMessage) =>
-    m.role === "user" &&
-    (!m.author || m.author.kind === "you") &&
-    !m.undelivered &&
-    !m.command &&
-    !relayedOf(m, sentOn);
+    m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
   const keptIds = new Set((history?.messages ?? []).map((k) => k.id));
   const startDelete = (m: ChatMessage) => {
     // Its turn may still be reading it; and the hub knows it only once kept.
-    if (busy)
-      return setEditNote(
-        `You can delete a message once ${agent.name} has finished replying.`,
-      );
-    if (!keptIds.has(m.id))
-      return setEditNote(
-        `You can delete it once ${agent.name}’s hub has saved it.`,
-      );
+    if (busy) return setEditNote(`You can delete a message once ${agent.name} has finished replying.`);
+    if (!keptIds.has(m.id)) return setEditNote(`You can delete it once ${agent.name}’s hub has saved it.`);
     setEditing(null);
     setDeleting(m.id);
   };
@@ -548,16 +383,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       did: after.slice(1).flatMap((m) => m.steps ?? []),
     });
   };
-  if (
-    newLine.current === undefined &&
-    read &&
-    readAtOpen.current !== undefined
-  ) {
+  if (newLine.current === undefined && read && readAtOpen.current !== undefined) {
     const r = readAtOpen.current;
-    newLine.current = r
-      ? (shown.find((m) => m.role === "assistant" && ms(m.at) > ms(r.at))?.id ??
-        null)
-      : null;
+    newLine.current = r ? (shown.find((m) => m.role === "assistant" && ms(m.at) > ms(r.at))?.id ?? null) : null;
   }
   if (!stay.away) {
     leftAt.current = shown.reduce((t, m) => Math.max(t, ms(m.at)), 0);
@@ -567,19 +395,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   }
   // Only what the agent said counts: not what you sent, nor your queue
   // going as a message.
-  const arrived = stay.away
-    ? shown.filter(
-        (m) =>
-          m.role === "assistant" &&
-          !seenThen.current.has(m.id) &&
-          !seenThen.current.has(saidKey(m)) &&
-          ms(m.at) >= leftAt.current,
-      ).length
-    : 0;
+  const arrived = stay.away ? shown.filter((m) => m.role === "assistant" && !seenThen.current.has(m.id) && !seenThen.current.has(saidKey(m)) && ms(m.at) >= leftAt.current).length : 0;
 
-  const chat =
-    tab !== "settings" &&
-    !((tab === "files" || tab === "access" || tab === "connectors") && local);
+  const chat = tab !== "settings" && !((tab === "files" || tab === "access" || tab === "connectors") && local);
   return (
     <Root
       ref={(el: HTMLElement | null) => {
@@ -595,43 +413,17 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           return;
         }
         // ⌘F searches the chat's whole history, on a hub that can.
-        if (
-          tab === "chat" &&
-          (e.metaKey || e.ctrlKey) &&
-          !e.altKey &&
-          e.key.toLowerCase() === "f" &&
-          convo.features?.has(FEATURES.search)
-        ) {
+        if (tab === "chat" && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && convo.features?.has(FEATURES.search)) {
           e.preventDefault();
           setSearching(true);
           return;
         }
         // End goes to the newest message: not from a field (where it moves
         // the caret), but from the composer when nothing's typed in it.
-        if (
-          tab !== "chat" ||
-          e.key !== "End" ||
-          e.metaKey ||
-          e.ctrlKey ||
-          e.altKey ||
-          e.shiftKey
-        )
-          return;
+        if (tab !== "chat" || e.key !== "End" || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
         const t = e.target;
-        const field =
-          t instanceof Element &&
-          t.closest(
-            "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
-          );
-        if (
-          field &&
-          !(
-            t instanceof HTMLTextAreaElement &&
-            t.closest("[data-composer]") &&
-            t.value === ""
-          )
-        )
-          return;
+        const field = t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
+        if (field && !(t instanceof HTMLTextAreaElement && t.closest("[data-composer]") && t.value === "")) return;
         e.preventDefault();
         latest();
       }}
@@ -649,11 +441,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               {convo.connected ? "" : " · reconnecting…"}
             </span>
           </span>
-          <div
-            className="tabs agent-tabs"
-            role="tablist"
-            aria-label={agent.name}
-          >
+          <div className="tabs agent-tabs" role="tablist" aria-label={agent.name}>
             {shownTabs.map((t) => (
               <button
                 key={t.id}
@@ -671,247 +459,153 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         </header>
       )}
       {tab === "settings" ? (
-        <div
-          className="agent-panel"
-          role="tabpanel"
-          id="agent-tab-panel"
-          aria-labelledby="agent-tab-settings"
-        >
-          <AgentSettings
-            agent={agent}
-            hub={hub}
-            onOpenFiles={() => go("files")}
-          />
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-settings">
+          <AgentSettings agent={agent} hub={hub} onOpenFiles={() => go("files")} />
         </div>
       ) : tab === "access" && local ? (
-        <div
-          className="agent-panel"
-          role="tabpanel"
-          id="agent-tab-panel"
-          aria-labelledby="agent-tab-access"
-        >
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-access">
           <AgentAccess agent={agent} />
         </div>
       ) : tab === "connectors" && local ? (
-        <div
-          className="agent-panel"
-          role="tabpanel"
-          id="agent-tab-panel"
-          aria-labelledby="agent-tab-connectors"
-        >
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-connectors">
           <AgentConnectors agent={agent} />
         </div>
       ) : tab === "files" && local ? (
-        <div
-          className="agent-panel"
-          role="tabpanel"
-          id="agent-tab-panel"
-          aria-labelledby="agent-tab-files"
-        >
+        <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-files">
           <AgentFiles agent={agent} />
         </div>
       ) : (
         <>
-          {searching && (
-            <SearchBar
-              s={search}
-              name={agent.name}
-              onStep={step}
-              onClose={closeSearch}
-            />
-          )}
+          {searching && <SearchBar s={search} name={agent.name} onStep={step} onClose={closeSearch} />}
           <div className={searching ? "dm-body dm-body-searching" : "dm-body"}>
-            <div className="timeline">
-              <div
-                ref={scrollerRef}
-                className="room-scroll dm-scroll"
-                role={inPane ? undefined : "tabpanel"}
-                id={inPane ? undefined : "agent-tab-panel"}
-                aria-labelledby={inPane ? undefined : "agent-tab-chat"}
-                onScroll={(e) => {
-                  if (
-                    e.currentTarget.scrollTop < 80 &&
-                    history?.earlier === "idle"
-                  )
-                    earlier();
-                }}
-              >
-                <div ref={stay.list} className="dm-list">
-                  {history?.more && (
-                    <div className="history-note">
-                      {history.earlier === "failed" ? (
-                        <span className="faint small">
-                          Couldn’t load earlier messages.{" "}
-                          <button
-                            type="button"
-                            className="link small"
-                            onClick={earlier}
-                          >
-                            Try again
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="link small"
-                          disabled={history.earlier === "loading"}
-                          onClick={earlier}
-                        >
-                          {history.earlier === "loading"
-                            ? "Loading earlier messages…"
-                            : "Load earlier messages"}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {history?.state === "failed" && (
-                    <div className="history-note">
+          <div className="timeline">
+            <div
+              ref={scrollerRef}
+              className="room-scroll dm-scroll"
+              role={inPane ? undefined : "tabpanel"}
+              id={inPane ? undefined : "agent-tab-panel"}
+              aria-labelledby={inPane ? undefined : "agent-tab-chat"}
+              onScroll={(e) => {
+                if (e.currentTarget.scrollTop < 80 && history?.earlier === "idle") earlier();
+              }}
+            >
+              <div ref={stay.list} className="dm-list">
+                {history?.more && (
+                  <div className="history-note">
+                    {history.earlier === "failed" ? (
                       <span className="faint small">
-                        Couldn’t load your earlier conversation.{" "}
-                        <button
-                          type="button"
-                          className="link small"
-                          onClick={() => void loadHistory(activeAgent)}
-                        >
+                        Couldn’t load earlier messages.{" "}
+                        <button type="button" className="link small" onClick={earlier}>
                           Try again
                         </button>
                       </span>
-                    </div>
-                  )}
-                  {history?.state === "loading" && shown.length === 0 && (
-                    <div className="history-note">
-                      <span className="faint small">
-                        Loading your conversation…
-                      </span>
-                    </div>
-                  )}
-                  {settled && shown.length === 0 && !convo.working && (
-                    <div className="history-note">
-                      <span className="faint small">
-                        This is the start of your conversation with {agent.name}
-                        .
-                      </span>
-                    </div>
-                  )}
-                  {shown.map((m) => (
-                    <Fragment key={m.id}>
-                      {m.id === newLine.current && (
-                        <div
-                          className="new-divider"
-                          role="separator"
-                          aria-label="New messages"
-                        >
-                          <span>New</span>
-                        </div>
-                      )}
-                      <div
-                        className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}`}
-                      >
-                        <DmMessage
-                          message={m}
-                          author={agent.name}
-                          authorKey={agentKey(agent)}
-                          youOn={agent.hubId}
-                          home={hub?.label}
-                          sentOn={sentOn}
-                          origin={origin}
-                          onSubmitForm={submitForm}
-                          onRetry={retry}
-                          onRemove={discard}
-                          orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
-                        />
-                        {!editing &&
-                          deleting !== m.id &&
-                          ((editable && m === mine) ||
-                            (deletable && yours(m))) && (
-                            <span
-                              className="msg-actions"
-                              role="toolbar"
-                              aria-label="Message actions"
-                            >
-                              {editable && m === mine && (
-                                <button
-                                  type="button"
-                                  className="msg-action"
-                                  title={whyNot ?? "Edit (↑)"}
-                                  onClick={startEdit}
-                                >
-                                  Edit
-                                </button>
-                              )}
-                              {deletable && yours(m) && (
-                                <button
-                                  type="button"
-                                  className="msg-action msg-action-danger"
-                                  onClick={() => startDelete(m)}
-                                >
-                                  Delete
-                                </button>
-                              )}
-                            </span>
-                          )}
-                        {deleting === m.id && hub && (
-                          <DeleteConfirm
-                            hub={hub}
-                            agentKey={activeAgent}
-                            agentId={agent.id}
-                            name={agent.name}
-                            message={m}
-                            replies={repliesTo(shown, m)}
-                            onClose={() => setDeleting(null)}
-                          />
-                        )}
+                    ) : (
+                      <button type="button" className="link small" disabled={history.earlier === "loading"} onClick={earlier}>
+                        {history.earlier === "loading" ? "Loading earlier messages…" : "Load earlier messages"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {history?.state === "failed" && (
+                  <div className="history-note">
+                    <span className="faint small">
+                      Couldn’t load your earlier conversation.{" "}
+                      <button type="button" className="link small" onClick={() => void loadHistory(activeAgent)}>
+                        Try again
+                      </button>
+                    </span>
+                  </div>
+                )}
+                {history?.state === "loading" && shown.length === 0 && (
+                  <div className="history-note">
+                    <span className="faint small">Loading your conversation…</span>
+                  </div>
+                )}
+                {settled && shown.length === 0 && !convo.working && (
+                  <div className="history-note">
+                    <span className="faint small">This is the start of your conversation with {agent.name}.</span>
+                  </div>
+                )}
+                {shown.map((m) => (
+                  <Fragment key={m.id}>
+                    {m.id === newLine.current && (
+                      <div className="new-divider" role="separator" aria-label="New messages">
+                        <span>New</span>
                       </div>
-                    </Fragment>
-                  ))}
-                  {/* Desk's own agent says the setup in its DM while it's open. */}
-                  <SetupInDm agent={agent} />
-                  {convo.prompts.map((p) => (
-                    <PromptCard
-                      key={p.requestId}
-                      prompt={p}
-                      agent={activeAgent}
-                      onAnswer={(choice) =>
-                        answerPrompt(activeAgent, p.requestId, choice)
-                      }
-                    />
-                  ))}
-                  {convo.working && !answering && (
-                    <WorkingRow
-                      agent={agentKey(agent)}
-                      name={agent.name}
-                      working={convo.working}
-                      tools={pending?.tools}
-                    />
-                  )}
-                </div>
+                    )}
+                    <div className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}`}>
+                      <DmMessage
+                        message={m}
+                        author={agent.name}
+                        authorKey={agentKey(agent)}
+                        youOn={agent.hubId}
+                        home={hub?.label}
+                        sentOn={sentOn}
+                        origin={origin}
+                        onSubmitForm={submitForm}
+                        onRetry={retry}
+                        onRemove={discard}
+                        orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
+                      />
+                      {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m))) && (
+                        <span className="msg-actions" role="toolbar" aria-label="Message actions">
+                          {editable && m === mine && (
+                            <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
+                              Edit
+                            </button>
+                          )}
+                          {deletable && yours(m) && (
+                            <button type="button" className="msg-action msg-action-danger" onClick={() => startDelete(m)}>
+                              Delete
+                            </button>
+                          )}
+                        </span>
+                      )}
+                      {deleting === m.id && hub && (
+                        <DeleteConfirm
+                          hub={hub}
+                          agentKey={activeAgent}
+                          agentId={agent.id}
+                          name={agent.name}
+                          message={m}
+                          replies={repliesTo(shown, m)}
+                          onClose={() => setDeleting(null)}
+                        />
+                      )}
+                    </div>
+                  </Fragment>
+                ))}
+                {/* Desk's own agent says the setup in its DM while it's open. */}
+                <SetupInDm agent={agent} />
+                {convo.prompts.map((p) => (
+                  <PromptCard
+                    key={p.requestId}
+                    prompt={p}
+                    agent={activeAgent}
+                    onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)}
+                  />
+                ))}
+                {convo.working && !answering && (
+                  <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />
+                )}
               </div>
-              {around && (
-                <div className="history-note timeline-older" role="status">
-                  <span className="faint small">Viewing older messages · </span>
-                  <button type="button" className="link small" onClick={latest}>
-                    Jump to latest
-                  </button>
-                </div>
-              )}
-              {(stay.away || around) && (
-                <button
-                  type="button"
-                  className="jump-pill"
-                  title="Jump to latest (End)"
-                  aria-live="polite"
-                  onClick={latest}
-                >
-                  <span aria-hidden="true">↓</span> Jump to latest
-                  {arrived > 0 && (
-                    <small className="jump-pill-count">{arrived} new</small>
-                  )}
-                </button>
-              )}
             </div>
-            {searching && (
-              <SearchResults s={search} name={agent.name} onPick={pick} />
+            {around && (
+              <div className="history-note timeline-older" role="status">
+                <span className="faint small">Viewing older messages · </span>
+                <button type="button" className="link small" onClick={latest}>
+                  Jump to latest
+                </button>
+              </div>
             )}
+            {(stay.away || around) && (
+              <button type="button" className="jump-pill" title="Jump to latest (End)" aria-live="polite" onClick={latest}>
+                <span aria-hidden="true">↓</span> Jump to latest
+                {arrived > 0 && <small className="jump-pill-count">{arrived} new</small>}
+              </button>
+            )}
+          </div>
+          {searching && <SearchResults s={search} name={agent.name} onPick={pick} />}
           </div>
           {editNote && (
             <p className="composer-note small" role="status">
@@ -924,12 +618,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               editing={editing}
               onCancel={() => setEditing(null)}
               onSave={(text) => {
-                const why = editLast(
-                  activeAgent,
-                  editing.id,
-                  editing.aside,
-                  text,
-                );
+                const why = editLast(activeAgent, editing.id, editing.aside, text);
                 if (why)
                   return setEditNote(
                     why === "busy"
@@ -943,25 +632,23 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               }}
             />
           ) : (
-            <DmComposer
-              onEditLast={startEdit}
-              onEditBack={(why, restored) =>
-                setEditNote(
-                  `${agent.name}’s hub didn’t take your edit${why ? ` (${why})` : ""}.${restored ? " Your words are back in the box." : ""}`,
-                )
-              }
-              to={activeAgent}
-              agent={agent}
-              hub={hub}
-              busy={busy}
-              connected={convo.connected}
-              overseeing={!!overseeing}
-              inPane={!!inPane}
-              files={files}
-              sending={sending}
-              onSent={latest}
-              away={stay.away}
-            />
+          <DmComposer
+            onEditLast={startEdit}
+            onEditBack={(why, restored) =>
+              setEditNote(`${agent.name}’s hub didn’t take your edit${why ? ` (${why})` : ""}.${restored ? " Your words are back in the box." : ""}`)
+            }
+            to={activeAgent}
+            agent={agent}
+            hub={hub}
+            busy={busy}
+            connected={convo.connected}
+            overseeing={!!overseeing}
+            inPane={!!inPane}
+            files={files}
+            sending={sending}
+            onSent={latest}
+            away={stay.away}
+          />
           )}
           {drop.dragging && <DropOverlay to={agent.name} />}
         </>
@@ -1001,32 +688,14 @@ const DmMessage = memo(function DmMessage({
   orphan?: boolean;
 }) {
   const relayed = useMemo(() => relayedOf(message, sentOn), [message, sentOn]);
-  const chips = useMemo(
-    () =>
-      orphan ? (
-        <span className="faint small msg-note msg-orphan">
-          Answered a deleted message
-        </span>
-      ) : undefined,
-    [orphan],
-  );
-  return (
-    <Message
-      message={message}
-      relayed={relayed}
-      steps={message.steps}
-      chips={chips}
-      {...shown}
-    />
-  );
+  const chips = useMemo(() => (orphan ? <span className="faint small msg-note msg-orphan">Answered a deleted message</span> : undefined), [orphan]);
+  return <Message message={message} relayed={relayed} steps={message.steps} chips={chips} {...shown} />;
 });
 
 /** The answers to your message `m` in `shown`: those its turn said, by its
  *  client id, else what follows it until your next message. */
 const repliesTo = (shown: readonly ChatMessage[], m: ChatMessage): string[] => {
-  const said = m.clientId
-    ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId)
-    : [];
+  const said = m.clientId ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId) : [];
   if (said.length) return said.map((x) => x.id);
   // Not said: what the agent said after it, until your next message, that
   // answers nothing else. The hub's next read says for sure.
@@ -1082,16 +751,8 @@ function DeleteConfirm({
   const remove = () => {
     setBusy(true);
     setProblem(null);
-    const ids = message.clientId
-      ? [message.id, message.clientId]
-      : [message.id];
-    deleteMine(
-      key,
-      message.id,
-      ids,
-      replies,
-      forget && memories ? memories.map((m) => m.id) : [],
-    ).then(onClose, (e: unknown) => {
+    const ids = message.clientId ? [message.id, message.clientId] : [message.id];
+    deleteMine(key, message.id, ids, replies, forget && memories ? memories.map((m) => m.id) : []).then(onClose, (e: unknown) => {
       setProblem(e instanceof Error ? e.message : String(e));
       setBusy(false);
     });
@@ -1110,24 +771,16 @@ function DeleteConfirm({
       }}
     >
       <div>
-        <b>Delete this message?</b>{" "}
-        <span className="faint small">
-          It leaves this chat and everything {name} sees from now on.
-        </span>
+        <b>Delete this message?</b> <span className="faint small">It leaves this chat and everything {name} sees from now on.</span>
       </div>
       {memories === null ? (
         <span className="faint small">Checking what {name} saved from it…</span>
       ) : (
         n > 0 && (
           <label className="msg-confirm-forget">
-            <input
-              type="checkbox"
-              checked={forget}
-              onChange={(e) => setForget(e.target.checked)}
-            />
+            <input type="checkbox" checked={forget} onChange={(e) => setForget(e.target.checked)} />
             <span>
-              Also forget what {name} saved from it. {name} saved{" "}
-              {n === 1 ? "1 memory" : `${n} memories`} from this message:{" "}
+              Also forget what {name} saved from it. {name} saved {n === 1 ? "1 memory" : `${n} memories`} from this message:{" "}
               {memories.map((m, i) => (
                 <Fragment key={m.id}>
                   {i > 0 && "; "}
@@ -1141,26 +794,15 @@ function DeleteConfirm({
       )}
       {unchecked && (
         <span className="faint small">
-          Couldn’t check what {name} saved from it, so nothing {name} saved will
-          be forgotten.
+          Couldn’t check what {name} saved from it, so nothing {name} saved will be forgotten.
         </span>
       )}
       {problem && <span className="small state-blocked">{problem}</span>}
       <div className="msg-confirm-row">
-        <button
-          type="button"
-          className="btn btn-ghost"
-          autoFocus
-          onClick={onClose}
-        >
+        <button type="button" className="btn btn-ghost" autoFocus onClick={onClose}>
           Cancel
         </button>
-        <button
-          type="button"
-          className="btn btn-danger"
-          disabled={busy || memories === null}
-          onClick={remove}
-        >
+        <button type="button" className="btn btn-danger" disabled={busy || memories === null} onClick={remove}>
           {busy ? "Deleting…" : "Delete"}
         </button>
       </div>
@@ -1183,17 +825,7 @@ interface Editing {
 
 /** The composer while you edit your latest message: the new version, what
  *  the reply to the old one already did, and Save and ask again. */
-function EditLast({
-  name,
-  editing,
-  onCancel,
-  onSave,
-}: {
-  name: string;
-  editing: Editing;
-  onCancel: () => void;
-  onSave: (text: string) => void;
-}) {
+function EditLast({ name, editing, onCancel, onSave }: { name: string; editing: Editing; onCancel: () => void; onSave: (text: string) => void }) {
   const [text, setText] = useState(editing.text);
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -1240,8 +872,7 @@ function EditLast({
       {n > 0 && (
         <div className="composer-edit-did" role="note">
           <b>
-            {name}’s reply to it already did{" "}
-            {n === 1 ? "1 thing" : `${n} things`}:
+            {name}’s reply to it already did {n === 1 ? "1 thing" : `${n} things`}:
           </b>
           <ul>
             {editing.did.map((d, i) => (
@@ -1252,9 +883,8 @@ function EditLast({
             ))}
           </ul>
           <span>
-            Editing won’t undo {n === 1 ? "it" : "them"}. {name} answers the new
-            version knowing {n === 1 ? "it" : "they"} happened, so it can put{" "}
-            {n === 1 ? "it" : "them"} right itself.
+            Editing won’t undo {n === 1 ? "it" : "them"}. {name} answers the new version knowing {n === 1 ? "it" : "they"} happened, so it
+            can put {n === 1 ? "it" : "them"} right itself.
           </span>
         </div>
       )}
@@ -1265,11 +895,7 @@ function EditLast({
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button
-          type="submit"
-          className="btn btn-signal"
-          disabled={!text.trim()}
-        >
+        <button type="submit" className="btn btn-signal" disabled={!text.trim()}>
           Save and ask again
         </button>
       </div>
@@ -1323,9 +949,7 @@ function DmComposer({
   const enqueue = useChat((s) => s.enqueue);
   // A queue that's waiting to go keeps what you send behind it, and Stop
   // beside it, whatever the agent is doing.
-  const waiting = useChat(
-    (s) => !!s.queues[to]?.items.length && !s.queues[to]!.paused,
-  );
+  const waiting = useChat((s) => !!s.queues[to]?.items.length && !s.queues[to]!.paused);
   const holding = busy || waiting;
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
@@ -1382,34 +1006,20 @@ function DmComposer({
         // Still working once the files are up: they wait with the rest.
         const s = useChat.getState();
         const q = s.queues[to];
-        if (isRunning(s.conversations[to]) || (!!q?.items.length && !q.paused))
-          enqueue(to, text, attachments);
-        else if (!send(to, text, { attachments }))
-          throw new Error(
-            `Couldn’t reach ${agent.name}. Try again in a moment.`,
-          );
+        if (isRunning(s.conversations[to]) || (!!q?.items.length && !q.paused)) enqueue(to, text, attachments);
+        else if (!send(to, text, { attachments })) throw new Error(`Couldn’t reach ${agent.name}. Try again in a moment.`);
         else onSent();
         setDraft("");
         files.sent(picked);
       })
-      .catch((err: unknown) =>
-        files.setProblem(err instanceof Error ? err.message : String(err)),
-      )
+      .catch((err: unknown) => files.setProblem(err instanceof Error ? err.message : String(err)))
       .finally(() => setSending(false));
   };
   return (
     <>
       <DmVoiceBar agent={to} name={agent.name} />
-      <form
-        className="composer composer-files"
-        onSubmit={submit}
-        data-composer=""
-      >
-        <PendingFiles
-          pending={files.pending}
-          problem={files.problem}
-          onRemove={files.remove}
-        />
+      <form className="composer composer-files" onSubmit={submit} data-composer="">
+        <PendingFiles pending={files.pending} problem={files.problem} onRemove={files.remove} />
         {commands.menu}
         {emoji.menu}
         <AttachButton onFiles={files.add} disabled={sending} />
@@ -1417,19 +1027,9 @@ function DmComposer({
           ref={composer}
           rows={1}
           value={draft}
-          placeholder={
-            overseeing && !inPane
-              ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”`
-              : `Message ${agent.name}`
-          }
+          placeholder={overseeing && !inPane ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
           {...(listing
-            ? {
-                role: "combobox",
-                "aria-autocomplete": "list",
-                "aria-expanded": true,
-                "aria-controls": listing.listId,
-                "aria-activedescendant": listing.activeId,
-              }
+            ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": listing.listId, "aria-activedescendant": listing.activeId }
             : {})}
           onChange={(e) => {
             setDraft(e.target.value);
@@ -1446,20 +1046,9 @@ function DmComposer({
             // ↑ in an empty composer edits your last message: the last one
             // still waiting in the queue (not yet sent, so nothing is asked
             // again), else the last one sent.
-            else if (
-              e.key === "ArrowUp" &&
-              !draft &&
-              !files.pending.length &&
-              !e.shiftKey &&
-              !e.altKey &&
-              !e.metaKey &&
-              !e.ctrlKey
-            ) {
+            else if (e.key === "ArrowUp" && !draft && !files.pending.length && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
               e.preventDefault();
-              const last = useChat
-                .getState()
-                .queues[to]?.items.filter((i) => !i.sending)
-                .at(-1);
+              const last = useChat.getState().queues[to]?.items.filter((i) => !i.sending).at(-1);
               if (last) useChat.getState().editingQueued(to, last.id);
               else onEditLast();
             }
@@ -1474,24 +1063,14 @@ function DmComposer({
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
-        <ComposerMore
-          label={`More for ${agent.name}`}
-          onEmoji={emoji.insert}
-          more={voiceEntries}
-          disabled={sending}
-        />
+        <ComposerMore label={`More for ${agent.name}`} onEmoji={emoji.insert} more={voiceEntries} disabled={sending} />
         {away && !draft && (
           <span className="composer-hint" aria-hidden="true">
             <kbd>End</kbd> jumps to latest
           </span>
         )}
         {holding && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            title={`Stop ${agent.name} (Esc)`}
-            onClick={() => cancel(to)}
-          >
+          <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop
           </button>
         )}
@@ -1499,11 +1078,7 @@ function DmComposer({
           type="submit"
           className="btn btn-signal"
           title={holding ? `Sends when ${agent.name}’s done` : undefined}
-          disabled={
-            sending ||
-            (!draft.trim() && !files.pending.length) ||
-            (!holding && !connected)
-          }
+          disabled={sending || (!draft.trim() && !files.pending.length) || (!holding && !connected)}
         >
           {sending ? "Sending…" : holding ? "Queue" : "Send"}
         </button>
@@ -1527,10 +1102,7 @@ function LeaveFiles({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const list =
-    files.length === 1
-      ? files[0]
-      : `${files.slice(0, -1).join(", ")} and ${files.at(-1)}`;
+  const list = files.length === 1 ? files[0] : `${files.slice(0, -1).join(", ")} and ${files.at(-1)}`;
   return (
     <Dialog
       onClose={onKeep}
@@ -1541,8 +1113,7 @@ function LeaveFiles({
               Save your changes?
             </h1>
             <p>
-              {list} {files.length === 1 ? "has" : "have"} changes you haven’t
-              saved.
+              {list} {files.length === 1 ? "has" : "have"} changes you haven’t saved.
             </p>
           </span>
           <CloseButton onClose={onKeep} />
@@ -1551,12 +1122,7 @@ function LeaveFiles({
     >
       <footer className="dialog-foot">
         <span className="dialog-foot-note state-blocked">{problem}</span>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          data-autofocus
-          onClick={onKeep}
-        >
+        <button type="button" className="btn btn-ghost" data-autofocus onClick={onKeep}>
           Keep editing
         </button>
         <button type="button" className="btn btn-danger" onClick={onDiscard}>
