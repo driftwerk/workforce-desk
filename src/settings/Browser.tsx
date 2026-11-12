@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserPill } from "../browser/BrowserPill";
-import { CONNECT_POLL_MS, GET_CHROME, openChrome, TURN_ON } from "../browser/chrome";
-import { backendLabel, useLocalBrowser } from "../browser/store";
+import { useLocalBrowser } from "../browser/store";
 import type { BrowserOf } from "../hub/browser";
 import { useChat } from "../chat/store";
 import { outcomeOf, whenText } from "../computer/access";
-import { HubError, type BrowserSettings, type BrowserSettingsView, type BrowserUses, type ComputerActivityRow } from "../hub/client";
+import { HubError, type BrowserSettings, type BrowserSettingsView, type ChromeProfile, type ComputerActivityRow } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
@@ -16,21 +15,17 @@ import "../styles/browser.css";
 export interface BrowserApi {
   settings: () => Promise<BrowserSettingsView>;
   save: (s: BrowserSettings) => Promise<BrowserSettingsView>;
+  /** The person confirms a Chrome profile is theirs, chooses the one Desk
+   *  uses, or forgets one. */
+  confirm: (id: string) => Promise<BrowserSettingsView>;
+  choose: (id: string) => Promise<BrowserSettingsView>;
+  forget: (id: string) => Promise<BrowserSettingsView>;
   activity: () => Promise<ComputerActivityRow[]>;
   shot: (file: string) => Promise<Blob>;
-  /** Opens the person's Chrome, or brings it forward. */
-  openChrome?: () => Promise<void>;
-  /** Puts `text` on the clipboard. */
-  copy?: (text: string) => Promise<void>;
 }
 
-/** Which browsers Desk uses, as the setting offers them. */
-export const USES: { id: BrowserUses; label: string }[] = [
-  { id: "off", label: "Off" },
-  { id: "desk", label: "Desk’s own browser" },
-  { id: "chrome", label: "My Chrome" },
-  { id: "both", label: "Both" },
-];
+/** How often the page asks whether Desk's extension has connected. */
+export const WATCH_MS = 2000;
 
 /** A site list as the person writes it: hosts, by commas, spaces or lines. */
 export const sitesOf = (text: string): string[] =>
@@ -39,13 +34,14 @@ export const sitesOf = (text: string): string[] =>
     .map((s) => s.trim().toLowerCase())
     .filter((s, i, all) => s !== "" && all.indexOf(s) === i);
 
-/** How the person's Chrome stands, in a line. */
-export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; tone: "done" | "" } =>
-  c.connected
-    ? { text: "Connected. Desk is working in a window of its own in your Chrome.", tone: "done" }
-    : c.available
-      ? { text: "Ready. Desk connects when it needs your Chrome, and Chrome asks you to Allow it first.", tone: "done" }
-      : { text: `Desk can work in the Chrome you’re signed in to (Chrome ${c.min_version} or later). Connect it once and Chrome remembers.`, tone: "" };
+/** How Desk's extension stands, in a line. */
+export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; tone: "done" | "blocked" | "" } => {
+  const pending = c.profiles.some((p) => p.state === "pending" && p.connected);
+  if (pending) return { text: "A Chrome is asking to connect. Check its code below, then confirm it.", tone: "blocked" };
+  if (c.connected) return { text: "Connected. Desk works in a window of its own in your Chrome, signed in as you.", tone: "done" };
+  if (c.profiles.some((p) => p.state === "confirmed")) return { text: "Not connected now: open Chrome and Desk connects by itself.", tone: "" };
+  return { text: "Add Desk to Chrome, and Desk can work in your own Chrome, where you’re already signed in.", tone: "" };
+};
 
 /** The browser's settings and screenshots are the person's: asked of this
  *  computer's hub as them. Its activity is the computer's list. */
@@ -55,14 +51,17 @@ const hubApi = (browser: BrowserOf | null): BrowserApi | null => {
   return {
     settings: browser.settings,
     save: browser.save,
+    confirm: browser.confirm,
+    choose: browser.choose,
+    forget: browser.forget,
     activity: async () => (await hub.computerActivity({ kind: "browser" })).rows,
     shot: browser.shot,
   };
 };
 
-/** Settings → Browser: which browsers Desk uses, whether its own shows, the
- *  sites your Chrome may go to, and what Desk did in a browser, with the
- *  page as it looked after. */
+/** Settings → Browser: whether Desk uses your Chrome, Desk's extension and
+ *  the Chrome profiles it connects from, the sites it may go to, and what
+ *  it did there, with the page as it looked after. */
 export function Browser({ api: given }: { api?: BrowserApi }) {
   const hubReady = useDesk((s) => s.hub !== null);
   const browser = useLocalBrowser();
@@ -75,70 +74,46 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   const [block, setBlock] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  /** The guide to Chrome's switch is open, and what opening Chrome said. */
-  const [connecting, setConnecting] = useState(false);
-  const [noChrome, setNoChrome] = useState<string | null>(null);
-  /** Whether the address is on the clipboard: said only when it is. */
-  const [copied, setCopied] = useState(false);
 
-  const shown = (v: BrowserSettingsView) => {
+  /** Takes a view; the site lists only when the person isn't editing them. */
+  const shown = useCallback((v: BrowserSettingsView, sites = true) => {
     setView(v);
-    setAllow(v.settings.sites.allow.join(", "));
-    setBlock(v.settings.sites.block.join(", "));
-  };
+    if (sites) {
+      setAllow(v.settings.sites.allow.join(", "));
+      setBlock(v.settings.sites.block.join(", "));
+    }
+  }, []);
   const reload = useCallback(() => {
     if (!api) return;
     api
       .settings()
-      .then(shown)
+      .then((v) => shown(v))
       .catch((e: unknown) => setView(e instanceof HubError && e.status === 404 ? "old" : "failed"));
     api
       .activity()
       .then(setRows)
       .catch(() => setRows("failed"));
-  }, [api]);
+  }, [api, shown]);
   useEffect(reload, [reload]);
 
-  // While the guide is open, Desk watches for Chrome's switch and says so.
+  // Desk watches for its extension connecting, and for a profile asking to
+  // be confirmed; only Chrome's standing is taken from what it reads.
   useEffect(() => {
-    if (!connecting || !api) return;
+    if (!api) return;
     const t = setInterval(() => {
       api
         .settings()
-        .then((v) => {
-          if (!v.chrome.available) return;
-          shown(v);
-          setConnecting(false);
-        })
+        .then((v) => setView((now) => (now && typeof now === "object" ? { ...now, chrome: v.chrome } : v)))
         .catch(() => undefined);
-    }, CONNECT_POLL_MS);
+    }, WATCH_MS);
     return () => clearInterval(t);
-  }, [connecting, api]);
+  }, [api]);
 
-  const copy = (text: string): Promise<void> =>
-    Promise.resolve()
-      .then(() => (api?.copy ?? ((t: string) => navigator.clipboard.writeText(t)))(text))
-      .then(
-        () => setCopied(true),
-        () => setCopied(false),
-      );
-  const connect = async () => {
-    setNoChrome(null);
-    await copy(TURN_ON);
-    try {
-      await (api?.openChrome ?? openChrome)();
-      setConnecting(true);
-    } catch (e) {
-      setNoChrome(plainError(e));
-    }
-  };
-
-  const save = async (next: BrowserSettings) => {
-    if (!api) return;
+  const act = async (f: () => Promise<BrowserSettingsView>, sites = false) => {
     setBusy(true);
     setProblem(null);
     try {
-      shown(await api.save(next));
+      shown(await f(), sites);
     } catch (e) {
       setProblem(plainError(e));
     }
@@ -155,111 +130,97 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   }
   const s = view && typeof view === "object" ? view.settings : null;
   const chrome = view && typeof view === "object" ? view.chrome : null;
-  const usesChrome = s?.use === "chrome" || s?.use === "both";
-  const usesOwn = s?.use === "desk" || s?.use === "both";
   const sitesChanged = s !== null && (sitesOf(allow).join() !== s.sites.allow.join() || sitesOf(block).join() !== s.sites.block.join());
+  const pending = chrome?.profiles.filter((p) => p.state === "pending" && p.connected) ?? [];
+  const confirmed = chrome?.profiles.filter((p) => p.state === "confirmed") ?? [];
+  const line = chrome ? chromeLine(chrome) : null;
 
   return (
     <section className="settings-pane" aria-label="Browser">
       <h1 className="display-lg">Browser</h1>
       <p className="muted small">
-        Desk can use a web browser for you: its own, where it asks you to sign in when a site needs it, or your own Chrome, where you’re already
-        signed in. Unless you let it act fully, it asks you before it clicks or types on a page.
+        Desk works in your own Chrome, where you’re already signed in, through Desk’s Chrome extension: in a window of its own, never in your other
+        tabs. Unless you let it act fully, it asks you before it clicks or types on a page.
       </p>
       <BrowserPill place="band" />
       {view === "old" ? (
         <p className="faint small">This version of Desk doesn’t have the browser yet. Update Desk to use it.</p>
       ) : view === "failed" ? (
         <p className="state-blocked small">Couldn’t read the browser settings just now.</p>
-      ) : !s || view === null ? (
+      ) : !s || !chrome || view === null ? (
         <p className="faint small">Reading…</p>
       ) : (
         <>
-          <h2 className="field-label">Desk uses</h2>
-          <div className="effort-seg" role="radiogroup" aria-label="Desk uses">
-            {USES.map((u) => (
-              <button key={u.id} type="button" role="radio" aria-checked={s.use === u.id} disabled={busy} onClick={() => void save({ ...s, use: u.id })}>
-                {u.label}
-              </button>
-            ))}
-          </div>
-          {s.use === "off" && <p className="small muted">Off, no agent uses a browser, and one open now closes.</p>}
-
           <div className="toggle-row">
-            <input
-              id="browser-show"
-              type="checkbox"
-              checked={s.show !== false}
-              disabled={busy || !usesOwn}
-              onChange={(e) => void save({ ...s, show: e.target.checked })}
-            />
+            <input id="browser-on" type="checkbox" checked={s.on} disabled={busy} onChange={(e) => void act(() => api.save({ ...s, on: e.target.checked }))} />
             <span>
-              <label htmlFor="browser-show">Show Desk’s browser</label>
-              <span className="small muted">
-                {usesOwn ? "On screen, so you can watch it. It shows from the next time it opens." : "Choose Desk’s own browser first."}
-              </span>
+              <label htmlFor="browser-on">Desk uses your Chrome</label>
+              <span className="small muted">{s.on ? "Agents can open pages, read them and, as you allow, act on them." : "Off: no agent uses a browser, and Desk’s window closes."}</span>
             </span>
           </div>
 
-          {usesChrome && chrome && (
-            <>
-              <h2 className="field-label">My Chrome</h2>
-              <p className={`small ${chromeLine(chrome).tone === "done" ? "state-done" : "muted"}`}>{chromeLine(chrome).text}</p>
-              {!chrome.available && !connecting && (
-                <div className="browser-chrome-on">
-                  <button type="button" className="btn btn-sm btn-signal" onClick={() => void connect()}>
-                    Connect my Chrome
-                  </button>
-                </div>
-              )}
-              {noChrome && (
-                <p className="small state-blocked" role="alert">
-                  {noChrome}{" "}
-                  <button type="button" className="link small" onClick={() => openUrl(GET_CHROME)}>
-                    Get Chrome
-                  </button>
-                </p>
-              )}
-              {!chrome.available && connecting && (
-                <div className="browser-connect" role="group" aria-label="Connect my Chrome">
-                  <p className="small">Chrome is open. Two steps there, once:</p>
-                  <ol className="browser-connect-steps small">
-                    <li>
-                      Click Chrome’s address bar, paste this address and press Return{copied ? " (Desk copied it)" : ""}:{" "}
-                      <span className="chip">{TURN_ON}</span>{" "}
-                      <button type="button" className="link small" onClick={() => void copy(TURN_ON)}>
-                        {copied ? "Copy again" : "Copy"}
-                      </button>
-                    </li>
-                    <li>Tick “Allow remote debugging for this browser instance”.</li>
-                  </ol>
-                  <p className="small muted">
-                    <span className="dot dot-working" aria-hidden="true" /> Waiting for Chrome… Chrome remembers this, and asks you to Allow
-                    Desk the first time it connects.
-                  </p>
-                  <button type="button" className="btn btn-sm" onClick={() => setConnecting(false)}>
-                    Cancel
-                  </button>
-                </div>
-              )}
-              <label className="field browser-sites">
-                <span>Only these sites (leave empty for any)</span>
-                <input value={allow} placeholder="example.com, docs.example.com" onChange={(e) => setAllow(e.target.value)} />
-              </label>
-              <label className="field browser-sites">
-                <span>Never these sites</span>
-                <input value={block} placeholder="bank.example" onChange={(e) => setBlock(e.target.value)} />
-              </label>
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={busy || !sitesChanged}
-                onClick={() => void save({ ...s, sites: { allow: sitesOf(allow), block: sitesOf(block) } })}
-              >
-                Save sites
-              </button>
-            </>
+          <h2 className="field-label">Desk in Chrome</h2>
+          {line && <p className={`small ${line.tone === "done" ? "state-done" : line.tone === "blocked" ? "state-blocked" : "muted"}`}>{line.text}</p>}
+          {pending.length > 1 && (
+            <p className="small state-blocked" role="alert">
+              More than one Chrome is asking at once. Unless you just added Desk’s extension in each of them, choose Not mine for every one: something
+              else on this computer may be asking.
+            </p>
           )}
+          {pending.map((p) => (
+            <ConfirmProfile
+              key={p.id}
+              profile={p}
+              using={confirmed.find((c) => c.chosen) ?? null}
+              busy={busy}
+              onConfirm={() => void act(() => api.confirm(p.id))}
+              onRefuse={() => void act(() => api.forget(p.id))}
+            />
+          ))}
+          {confirmed.length === 0 && pending.length === 0 && <AddToChrome storeUrl={chrome.store_url} />}
+          {confirmed.length > 0 && (
+            <ul className="browser-profiles" aria-label="Chrome profiles">
+              {confirmed.map((p) => (
+                <li key={p.id} className="browser-profile">
+                  <span className={`dot ${p.connected ? "dot-done" : "dot-idle"}`} aria-hidden="true" />
+                  <span className="browser-profile-text">
+                    <span className="small">
+                      Chrome <code className="mono">{p.label}</code>
+                      {p.chosen && confirmed.length > 1 ? " · Desk uses this one" : ""}
+                    </span>
+                    <span className="small faint">
+                      {p.connected ? "Connected" : "Not connected now"} · extension {p.version}
+                    </span>
+                  </span>
+                  {!p.chosen && (
+                    <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void act(() => api.choose(p.id))}>
+                      Use this one
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void act(() => api.forget(p.id))}>
+                    Forget
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <label className="field browser-sites">
+            <span>Only these sites (leave empty for any)</span>
+            <input value={allow} placeholder="example.com, docs.example.com" onChange={(e) => setAllow(e.target.value)} />
+          </label>
+          <label className="field browser-sites">
+            <span>Never these sites</span>
+            <input value={block} placeholder="bank.example" onChange={(e) => setBlock(e.target.value)} />
+          </label>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy || !sitesChanged}
+            onClick={() => void act(() => api.save({ ...s, sites: { allow: sitesOf(allow), block: sitesOf(block) } }), true)}
+          >
+            Save sites
+          </button>
           {problem && (
             <p className="small state-blocked" role="alert">
               {problem}
@@ -286,6 +247,76 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   );
 }
 
+/** A Chrome profile asking to connect: the person checks its code matches
+ *  the one Desk's extension shows in that Chrome, then confirms it. Until
+ *  then it reaches nothing. */
+function ConfirmProfile({
+  profile,
+  using,
+  busy,
+  onConfirm,
+  onRefuse,
+}: {
+  profile: ChromeProfile;
+  /** The Chrome Desk uses now, which stays the one it uses. */
+  using: ChromeProfile | null;
+  busy: boolean;
+  onConfirm: () => void;
+  onRefuse: () => void;
+}) {
+  return (
+    <div className="browser-connect" role="group" aria-label="A Chrome asks to connect">
+      <p className="small">
+        <b>A Chrome asks to connect to Desk</b>
+      </p>
+      <p className="small">
+        Its code is <code className="mono browser-code">{profile.label}</code>. Click Desk’s icon in that Chrome’s toolbar: confirm only if it shows
+        the same code.
+      </p>
+      <p className="small faint">
+        It says it’s extension {profile.version}: only the code shows it’s Desk’s. Once confirmed, Desk can open pages in that Chrome, signed in as
+        you.
+      </p>
+      {using && (
+        <p className="small muted">
+          Desk keeps using Chrome <code className="mono">{using.label}</code>. To switch to this one once it’s confirmed, choose Use this one.
+        </p>
+      )}
+      <div className="browser-connect-actions">
+        <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={onConfirm}>
+          It’s my Chrome
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={onRefuse}>
+          Not mine
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Getting Desk's extension: from the Chrome Web Store; in a development
+ *  build, loaded unpacked. */
+function AddToChrome({ storeUrl }: { storeUrl: string | null }) {
+  return (
+    <div className="browser-add">
+      {storeUrl ? (
+        <button type="button" className="btn btn-sm btn-signal" onClick={() => openUrl(storeUrl)}>
+          Add Desk to Chrome
+        </button>
+      ) : (
+        <p className="small muted">Desk’s extension isn’t in the Chrome Web Store yet.</p>
+      )}
+      {import.meta.env.DEV && (
+        <p className="small faint">
+          Development build: in Chrome open <code className="mono">chrome://extensions</code>, turn on Developer mode, press Load unpacked and choose
+          this repository’s <code className="mono">extension/dist</code> (built with <code className="mono">npm run extension</code>).
+        </p>
+      )}
+      <p className="small faint">Desk finds it by itself once it’s added: nothing to set up here.</p>
+    </div>
+  );
+}
+
 /** One thing a browser did, with a thumbnail of the page after. */
 function BrowserRow({ row, name, shot }: { row: ComputerActivityRow; name: string; shot: BrowserApi["shot"] }) {
   const file = row.arguments?.screenshot ?? null;
@@ -307,7 +338,6 @@ function BrowserRow({ row, name, shot }: { row: ComputerActivityRow; name: strin
     };
   }, [file, shot]);
   const o = outcomeOf(row);
-  const backend = row.arguments?.backend;
   return (
     <li className="computer-row">
       {file &&
@@ -321,7 +351,6 @@ function BrowserRow({ row, name, shot }: { row: ComputerActivityRow; name: strin
       <span className="computer-row-text">
         <span className="small faint">
           {whenText(row.at)} · {name}
-          {backend ? ` · ${backendLabel(backend)}` : ""}
         </span>
         <span className="mono small" title={row.arguments?.url ?? row.doing}>
           {row.doing}

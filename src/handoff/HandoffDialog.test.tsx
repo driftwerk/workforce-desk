@@ -6,6 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HubError, type DeskHub } from "../hub/client";
+import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import type { HandoffPreview, Session } from "../hub/types";
 import { sessionOf } from "../memory/testing";
@@ -13,7 +14,9 @@ import { clock } from "../floor/time";
 import { HandoffDialog } from "./HandoffDialog";
 import { LineageChips } from "./LineageChips";
 import { useHandoff } from "./store";
+import { useUpdates } from "../updates/store";
 import { ENGINES, continuedLineage, handedLineage, previewOf } from "./testing";
+import { backLine, defaultsLine } from "./words";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -57,6 +60,8 @@ const openDialog = async (ask: { id: string; back?: boolean } = { id: "s1" }) =>
 
 const dialog = () => screen.getByRole("dialog");
 const button = (name: string | RegExp) => within(dialog()).getByRole("button", { name }) as HTMLButtonElement;
+/** Shows the choices folded behind the line saying the defaults. */
+const change = () => fireEvent.click(button("Change where it goes"));
 
 beforeEach(() => {
   opened.length = 0;
@@ -84,6 +89,7 @@ describe("continuing a session in another engine", () => {
     fireEvent.click(button("Preview brief"));
     expect(within(dialog()).getByLabelText("The brief").textContent).toContain("# Handoff brief");
     // An idle source stops now, by default; a group that doesn't ask has no checkbox.
+    change();
     expect((within(dialog()).getByRole("radio", { name: /Stop it now/ }) as HTMLInputElement).checked).toBe(true);
     expect(within(dialog()).queryByRole("checkbox")).toBeNull();
 
@@ -116,6 +122,7 @@ describe("continuing a session in another engine", () => {
     await openDialog();
     fireEvent.click(await within(dialog()).findByRole("checkbox", { name: /Send this brief to OpenAI/ }));
     expect(button("Continue in Codex").disabled).toBe(false);
+    change();
     fireEvent.click(within(dialog()).getByRole("radio", { name: "Claude Code" }));
     const yes = (await within(dialog()).findByRole("checkbox", { name: /Send this brief to Anthropic/ })) as HTMLInputElement;
     expect(yes.checked).toBe(false);
@@ -177,23 +184,208 @@ describe("continuing a session in another engine", () => {
   it("keeps one running in another terminal, which Desk can't stop, and stops one in a turn after it", async () => {
     use(fakeHub(), [{ ...SOURCE, live: false, origin: "external", state: "working" }]);
     await openDialog();
+    change();
     const elsewhere = within(within(dialog()).getByRole("radiogroup", { name: "This one" })).getAllByRole("radio");
     expect(elsewhere.map((r) => r.closest("label")!.textContent)).toEqual(["Keep it runningit runs in another terminal: end it there when you’re done"]);
     cleanup();
     use(fakeHub(), [{ ...SOURCE, state: "working" }]);
     await openDialog();
+    change();
     expect((within(dialog()).getByRole("radio", { name: /Stop it after this turn/ }) as HTMLInputElement).checked).toBe(true);
   });
 
   it("offers only Keep for a session in a Desk terminal, which the person ends", async () => {
     use(fakeHub(), [{ ...SOURCE, terminalId: "t1" }]);
     await openDialog();
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("this one keeps running"));
+    change();
     const options = within(within(dialog()).getByRole("radiogroup", { name: "This one" })).getAllByRole("radio");
     expect(options).toHaveLength(1);
     expect((options[0] as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(button("Continue in Codex").disabled).toBe(false));
     await act(async () => fireEvent.click(button("Continue in Codex")));
     expect(hub.handoff).toHaveBeenCalledWith("s1", expect.objectContaining({ source: "keep" }));
+  });
+});
+
+describe("a handoff with a default", () => {
+  it("says the defaults in plain words", () => {
+    expect(defaultsLine({ engine: "Codex", account: "Work", place: "same_folder", source: "after_turn", running: true })).toBe(
+      "Continues in Codex on Work, in this folder; this one stops after its turn.",
+    );
+    expect(defaultsLine({ engine: "Claude Code", place: "new_worktree", source: "stop", running: false })).toBe(
+      "Continues in Claude Code, in a new worktree; this one stays stopped.",
+    );
+    expect(backLine({ to: "acme-api", source: "stop", running: true })).toBe("Hands the work back to acme-api; this one stops now.");
+    expect(defaultsLine({ engine: "Codex", place: "same_folder", source: "stop", running: true, goalOnly: true })).toBe(
+      "Starts Codex with the goal, in this folder; this one stops now.",
+    );
+  });
+
+  it("says in one line how it goes, and continues so with no choice made", async () => {
+    use(fakeHub());
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("Continues in Codex, in this folder; this one stops now."));
+    // The choices are folded until asked for.
+    expect(within(dialog()).queryByRole("radiogroup", { name: "Engine" })).toBeNull();
+    expect(within(dialog()).queryByRole("radiogroup", { name: "Where" })).toBeNull();
+    expect(within(dialog()).queryByRole("radiogroup", { name: "This one" })).toBeNull();
+    await waitFor(() => expect(button("Continue in Codex").disabled).toBe(false));
+    await act(async () => fireEvent.click(button("Continue in Codex")));
+    expect(hub.handoff).toHaveBeenCalledWith("s1", { engine: "codex", place: "same_folder", source: "stop" });
+  });
+
+  it("shows the choices on Change, and the line follows what is chosen", async () => {
+    use(fakeHub());
+    await openDialog();
+    change();
+    const toggle = button("Hide the choices");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)?.hidden).toBe(false);
+    fireEvent.click(within(dialog()).getByRole("radio", { name: /New worktree from its branch/ }));
+    fireEvent.click(within(dialog()).getByRole("radio", { name: /Keep it running/ }));
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("Continues in Codex, in a new worktree; this one keeps running."));
+  });
+
+  it("offers to install an engine where this computer has none, and previews nothing until one is", async () => {
+    const h = fakeHub();
+    const none = ENGINES.map((e) => ({ ...e, installed: false }));
+    h.engines.mockResolvedValue(none);
+    use(h);
+    render(<HandoffDialog />);
+    act(() => useHandoff.getState().open({ id: "s1" }));
+    const fix = await within(dialog()).findByRole("group", { name: "Nothing to start a session with" });
+    expect(fix.textContent).toContain("Neither Claude Code nor Codex is installed");
+    expect(within(fix).getAllByRole("button").length).toBeGreaterThan(0);
+    expect(hub.handoffPreview).not.toHaveBeenCalled();
+    expect(button("Continue in another engine").disabled).toBe(true);
+  });
+
+  it("can't make a worktree of a folder that isn't in a git repository, and says why", async () => {
+    // Asked of this computer's hub, as New session asks.
+    useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://local.test", local: true, revision: "" }] as never });
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = new URL(url);
+        if (u.pathname !== "/api/desk/folders") return Response.json({}, { status: 404 });
+        asked.push(u.searchParams.get("path") ?? "");
+        return Response.json({ git: false });
+      }),
+    );
+    try {
+      use(fakeHub());
+      await openDialog();
+      change();
+      const worktree = (await within(dialog()).findByRole("radio", { name: /New worktree from its branch/ })) as HTMLInputElement;
+      await waitFor(() => expect(worktree.disabled).toBe(true));
+      expect(worktree.closest("label")!.textContent).toContain("isn’t in a git repository");
+      expect(asked).toEqual(["/dev/acme-api"]);
+    } finally {
+      vi.unstubAllGlobals();
+      useChat.setState({ hubs: [] });
+    }
+  });
+
+  it("offers Update Desk where this Desk is too old to hand over", async () => {
+    use(fakeHub(async () => Promise.reject(new HubError(404, "not found"))));
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByRole("alert").textContent).toContain("Update Desk to use it."));
+    const check = vi.fn(async () => {});
+    useUpdates.setState({ check });
+    fireEvent.click(button("Update Desk"));
+    // Closed before Help opens over it, and a check for the update asked.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(check).toHaveBeenCalledWith({ asked: true });
+    // A 404 in the hub's own words is its refusal, not a missing route.
+    cleanup();
+    use(fakeHub(async () => Promise.reject(new HubError(404, "There's no session s1 here any more."))));
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByRole("alert").textContent).not.toContain("Update Desk"));
+    expect(within(dialog()).queryByRole("button", { name: "Update Desk" })).toBeNull();
+  });
+
+  it("follows the session as it is until the person picks: a turn starting while open stops it after that turn", async () => {
+    use(fakeHub());
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("this one stops now"));
+    act(() => useDesk.setState({ sessions: { s1: { ...SOURCE, state: "working" } } }));
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("this one stops after its turn"));
+    await waitFor(() => expect(button("Continue in Codex").disabled).toBe(false));
+    await act(async () => fireEvent.click(button("Continue in Codex")));
+    expect(hub.handoff).toHaveBeenCalledWith("s1", expect.objectContaining({ source: "after_turn" }));
+  });
+
+  it("takes back a worktree picked before the folder was known not to be in git", async () => {
+    useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://local.test", local: true, revision: "" }] as never });
+    let answer: (git: boolean) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        new URL(url).pathname === "/api/desk/folders"
+          ? new Promise<Response>((done) => (answer = (git) => done(Response.json({ git }))))
+          : Response.json({}, { status: 404 }),
+      ),
+    );
+    try {
+      use(fakeHub());
+      await openDialog();
+      change();
+      fireEvent.click(within(dialog()).getByRole("radio", { name: /New worktree from its branch/ }));
+      await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("in a new worktree"));
+      await act(async () => answer(false));
+      await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("in this folder"));
+      expect((within(dialog()).getByRole("radio", { name: /Same folder/ }) as HTMLInputElement).checked).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      useChat.setState({ hubs: [] });
+    }
+  });
+
+  it("says and sends this computer's own sign-in where that's the default, and an account once picked", async () => {
+    const h = fakeHub();
+    h.engines.mockResolvedValue(ENGINES.map((e) => (e.engine === "codex" ? { ...e, caps: { terminal: { accounts: "token" } } } : e) as never));
+    h.accounts.mockResolvedValue({
+      accounts: [{ id: "a1", engine: "codex", name: "Work", isDefault: false, signedIn: true, sessions: [], createdAt: "" }],
+      store: "the keychain",
+      signIns: [],
+    });
+    use(h);
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("Continues in Codex on this computer’s sign-in, in this folder"));
+    change();
+    const own = within(dialog()).getByRole("radio", { name: "This computer’s sign-in" });
+    expect(own.getAttribute("aria-checked")).toBe("true");
+    expect(own.tabIndex).toBe(0);
+    const work = within(dialog()).getByRole("radio", { name: "Work" });
+    expect(work.tabIndex).toBe(-1);
+    fireEvent.click(work);
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("Continues in Codex on Work"));
+    await waitFor(() => expect(button("Continue in Codex").disabled).toBe(false));
+    await act(async () => fireEvent.click(button("Continue in Codex")));
+    expect(hub.handoff).toHaveBeenCalledWith("s1", expect.objectContaining({ account: "a1" }));
+  });
+
+  it("leaves a stopped session in a Desk terminal stopped, rather than keeping what isn't running", async () => {
+    use(fakeHub(), [{ ...SOURCE, live: false, state: "stopped", terminalId: "t1" }]);
+    await openDialog();
+    await waitFor(() => expect(within(dialog()).getByLabelText("As it goes").textContent).toContain("this one stays stopped"));
+    change();
+    const options = within(within(dialog()).getByRole("radiogroup", { name: "This one" })).getAllByRole("radio");
+    expect(options.map((r) => r.closest("label")!.textContent)).toEqual(["Leave it stoppedit isn’t running"]);
+    await waitFor(() => expect(button("Continue in Codex").disabled).toBe(false));
+    await act(async () => fireEvent.click(button("Continue in Codex")));
+    expect(hub.handoff).toHaveBeenCalledWith("s1", expect.objectContaining({ source: "stop" }));
+  });
+
+  it("says beside Continue what it waits on, where the group asks first", async () => {
+    use(fakeHub(async () => previewOf({ ask: true })));
+    await openDialog();
+    const yes = await within(dialog()).findByRole("checkbox", { name: /Send this brief to OpenAI/ });
+    expect(dialog().querySelector(".dialog-foot-note")!.textContent).toBe("Tick “Send this brief to OpenAI” above to go on.");
+    fireEvent.click(yes);
+    expect(dialog().querySelector(".dialog-foot-note")!.textContent).toBe("");
   });
 });
 

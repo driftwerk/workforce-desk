@@ -164,13 +164,19 @@ describe("filling the grid", () => {
   });
 });
 
+/** Put in grid, from the card's ⋯ menu. */
+const putInGrid = () => {
+  fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Put in grid" }));
+};
+
 describe("Put in grid", () => {
   it("lists the grids and New grid, and puts the session there, shown in the grid", () => {
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, sess("s0"));
     useDesk.setState({ openId: "s1" });
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);
-    fireEvent.click(screen.getByRole("button", { name: "Put this session in a grid" }));
+    putInGrid();
     const menu = screen.getByRole("menu", { name: "Put in grid" });
     expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Main", "New grid"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Main" }));
@@ -183,7 +189,7 @@ describe("Put in grid", () => {
   it("makes a new grid for it", () => {
     useDesk.setState({ openId: "s2" });
     render(<SessionCard session={useDesk.getState().sessions.s2!} />);
-    fireEvent.click(screen.getByRole("button", { name: "Put this session in a grid" }));
+    putInGrid();
     fireEvent.click(screen.getByRole("menuitem", { name: "New grid" }));
     const s = useGrids.getState();
     expect(s.order).toHaveLength(2);
@@ -201,7 +207,7 @@ describe("Put in grid", () => {
     void other;
     useDesk.setState({ sessions: { ...useDesk.getState().sessions, s9: session("s9", "task-9") }, openId: "s9" });
     render(<SessionCard session={useDesk.getState().sessions.s9!} />);
-    fireEvent.click(screen.getByRole("button", { name: "Put this session in a grid" }));
+    putInGrid();
     fireEvent.click(screen.getByRole("menuitem", { name: "Main" }));
     expect(filledPane(useGrids.getState(), MAIN_GRID)).toBeNull();
   });

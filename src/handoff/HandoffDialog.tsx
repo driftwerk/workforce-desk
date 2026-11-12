@@ -2,31 +2,43 @@
 // account it continues on, where, what becomes of this one, what the brief
 // holds and leaves out (previewed by the hub, folded until asked), who
 // receives it, and the person's yes where the group asks each time. A hand
-// back resumes the session the work came from with only what is new.
+// back resumes the session the work came from with only what is new. Each
+// choice has a default, said in one line: Continue goes as it says, and
+// Change shows the choices.
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, defaultChoice, hasAccounts, ownSignInWorks, useAccounts } from "../engines/accounts";
 import { ENGINE_TITLE, defaultCaps, startable } from "../engines/engines";
 import { useSessionName } from "../groups/names";
-import { HubError } from "../hub/client";
+import { HubError, noRoute } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { Engine, EngineInfo, HandoffPlace, HandoffPreview, HandoffSource, Session } from "../hub/types";
-import { CloseButton, Dialog } from "../ui/Dialog";
+import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
+import { openSettingsAt } from "../ui/problem";
+import { LOCAL } from "../machines/engines";
+import { native } from "../machines/native";
+import { thisComputerLower } from "../machines/words";
+import { folderInfo } from "../machines/folders";
+import { pairedHub } from "../hub/net";
+import { useChat } from "../chat/store";
+import { NothingToStart } from "../session/NewSession";
+import { useHost } from "../shell/host";
+import { useUpdates } from "../updates/store";
 import { useHandoff, type HandoffAsk } from "./store";
 import { runs, runsElsewhere } from "../session/actions";
-import { busyNow, defaultSource, enginesFor, tokensLine } from "./words";
+import { backLine, busyNow, defaultSource, defaultsLine, enginesFor, tokensLine } from "./words";
 
 /** How long a change of choice settles before it is previewed again. */
 export const PREVIEW_AFTER_MS = 250;
 
 const NOT_CONNECTED = "Desk isn’t ready just now; try again in a moment.";
 
-/** A refusal as the hub says it: its own words, whole. */
-const said = (e: unknown): string => {
-  if (e instanceof HubError && (e.status === 404 || e.status === 405)) return "This version of Desk can’t continue sessions in another engine yet. Update Desk to use it.";
-  return plainError(e);
-};
+const TOO_OLD = "This version of Desk can’t continue sessions in another engine yet. Update Desk to use it.";
+
+/** A refusal as the hub says it: its own words, whole. Only a hub without
+ *  the route at all is too old; any other refusal is its own. */
+const said = (e: unknown): string => (noRoute(e) ? TOO_OLD : plainError(e));
 
 /** The dialog, while a handoff is asked for. */
 export function HandoffDialog() {
@@ -43,13 +55,17 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const open = useDesk((s) => s.open);
   const name = useSessionName(session.id, session.name);
   const allAccounts = useAccounts((s) => s.accounts);
+  const platform = useHost((h) => h.platform);
+  const localHub = useChat((s) => s.hubs.find((h) => h.local) ?? null);
 
   const [engines, setEngines] = useState<EngineInfo[] | null | undefined>(undefined);
   const [engine, setEngine] = useState<Engine | null>(ask.engine ?? null);
   const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
   const [place, setPlace] = useState<HandoffPlace>("same_folder");
-  // Desk can't stop one running in another terminal: it is kept.
-  const [source, setSource] = useState<HandoffSource>(runsElsewhere(session) ? "keep" : defaultSource(session));
+  /** The person's own choice of what becomes of this one; until they make
+   *  one, it follows the session as it is now (a turn starting while the
+   *  dialog is open stops it after that turn, never mid-turn). */
+  const [sourcePicked, setSourcePicked] = useState<HandoffSource | null>(null);
   const [back, setBack] = useState(!!ask.back);
   const [goalOnly, setGoalOnly] = useState(false);
   const [preview, setPreview] = useState<HandoffPreview | null>(null);
@@ -63,26 +79,55 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const [mustConfirm, setMustConfirm] = useState(false);
   const [sendProblem, setSendProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The choices shown: folded behind the line saying the defaults. */
+  const [choosing, setChoosing] = useState(false);
+  /** Whether the folder is a git project; undefined while unknown. */
+  const [git, setGit] = useState<boolean | undefined>(undefined);
+  /** The accounts were read (or couldn't be): until then the line waits. */
+  const [accountsRead, setAccountsRead] = useState(false);
+  /** When the engines were read again, after one was installed here. */
+  const [readAt, setReadAt] = useState(0);
 
-  // The engines this computer starts, read once as the dialog opens.
+  // The engines this computer starts, read as the dialog opens and again
+  // once one is installed from it.
   useEffect(() => {
     let live = true;
-    void useAccounts.getState().load();
+    void useAccounts
+      .getState()
+      .load()
+      .finally(() => live && setAccountsRead(true));
     if (!hub) return setEngines(null);
-    hub
-      .engines()
+    (readAt ? hub.enginesNow() : hub.engines())
       .then((e) => live && setEngines(e))
       .catch(() => live && setEngines(null));
     return () => {
       live = false;
     };
-  }, [hub]);
+  }, [hub, readAt]);
+
+  // A new worktree branches from a git project: one that isn't has none.
+  // Asked as New session asks, of this computer's hub.
+  useEffect(() => {
+    if (!localHub) return;
+    let live = true;
+    void folderInfo((path) => pairedHub(localHub).fetch("GET", path), session.cwd).then((i) => live && setGit(i.git));
+    return () => {
+      live = false;
+    };
+  }, [localHub, session.cwd]);
+  const noWorktree = git === false;
+  // Picked before the folder was known not to be a git project: it can't be.
+  useEffect(() => {
+    if (noWorktree) setPlace((p) => (p === "new_worktree" ? "same_folder" : p));
+  }, [noWorktree]);
   const offered = engines === undefined ? [] : enginesFor(startable(engines), session.engine);
   const target: Engine | null = engine ?? offered[0] ?? null;
   const info = engines?.find((e) => e.engine === target);
   const accounts = target && hasAccounts(defaultCaps(info)) ? accountsOf(allAccounts, target) : [];
   const ownWorks = ownSignInWorks(info?.signIn);
   const account = target ? (picked[target] ?? defaultChoice(allAccounts, target, ownWorks)) : OWN_SIGN_IN;
+  /** The accounts to choose from, this computer's own sign-in last where it works. */
+  const accountChoices = [...accounts.map((a) => ({ id: a.id, name: a.name })), ...(ownWorks ? [{ id: OWN_SIGN_IN, name: OWN_SIGN_IN_LABEL }] : [])];
   /** The account as the hub takes it: absent, the engine's default. */
   const accountAsked = !back && accounts.length > 0 ? accountOfChoice(account) : undefined;
 
@@ -138,13 +183,15 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
     // needs none).
     if (engines === undefined && !back) return;
     clearTimeout(timer.current);
+    // Nothing to continue on: there's nothing to preview until one is installed.
+    if (!back && offered.length === 0) return setLoading(false);
     if (!derived.current) return void request(asked);
     seq.current++;
     setLoading(true);
     timer.current = setTimeout(() => void request(asked), PREVIEW_AFTER_MS);
     // Only when what is asked changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [askedKey, back || engines !== undefined]);
+  }, [askedKey, back || engines !== undefined, offered.length]);
 
   // The person's yes is for one vendor through one engine, as previewed: any
   // change of what is asked, or of who the preview says receives it, asks
@@ -155,6 +202,8 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   // ── Continuing ─────────────────────────────────────────────────────────
   const asks = !!preview?.ask || mustConfirm;
   const canGo = !!preview && !loading && !busy && (!asks || confirmed);
+  /** Why Continue waits on the person, said beside it. */
+  const waitsOn = preview && !loading && !busy && asks && !confirmed ? `Tick “Send this brief to ${preview.vendor ?? ENGINE_TITLE[preview.engine]}” above to go on.` : null;
   const go = async () => {
     if (!canGo || !hub || !preview) return;
     setBusy(true);
@@ -186,7 +235,11 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
   const offeredBack = preview?.back ?? null;
   const backName = offeredBack?.name ?? "the session it came from";
   const working = busyNow(session);
-  const inTerminal = !!session.terminalId;
+  const accountName =
+    accounts.length === 0 ? null : account === OWN_SIGN_IN ? OWN_SIGN_IN_LABEL.replace(/^\w/, (c) => c.toLowerCase()) : (accounts.find((a) => a.id === account)?.name ?? null);
+  const noEngine = !back && engines !== undefined && offered.length === 0;
+  // A Desk terminal's session is the person's to end, while it runs.
+  const inTerminal = !!session.terminalId && runs(session);
   const sources: { value: HandoffSource; label: string; sub: string }[] = inTerminal
     ? [{ value: "keep", label: "Keep it running", sub: "it runs in a Desk terminal: end it there when you’re done" }]
     : runsElsewhere(session)
@@ -199,6 +252,11 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
               : [{ value: "stop" as const, label: "Stop it now", sub: "it’s idle" }]),
             { value: "keep", label: "Keep it running", sub: "two engines will then edit one folder" },
           ];
+  // Desk can't stop one running in another terminal: it is kept.
+  const followed: HandoffSource = runsElsewhere(session) ? "keep" : defaultSource(session);
+  // A choice the session's state has since taken away (Stop it now, once
+  // it's in a turn) gives way to what it now is.
+  const source: HandoffSource = sourcePicked && sources.some((o) => o.value === sourcePicked) ? sourcePicked : followed;
 
   return (
     <Dialog
@@ -242,134 +300,195 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
           </fieldset>
         )}
 
-        {!back && (
-          <fieldset className="move-field">
-            <legend>Engine</legend>
-            {engines === undefined ? (
-              <p className="faint small">Looking at the engines…</p>
-            ) : offered.length === 0 ? (
-              <p className="small state-blocked">This computer has no engine Desk can start.</p>
-            ) : (
-              <div className="seg handoff-seg" role="radiogroup" aria-label="Engine">
-                {offered.map((e) => (
-                  <button key={e} type="button" role="radio" aria-checked={target === e} disabled={busy} onClick={() => setEngine(e)}>
-                    {ENGINE_TITLE[e]}
+        {noEngine ? (
+          <NothingToStart engines={engines ?? []} machine={LOCAL} where={thisComputerLower(platform)} native={native} onFixed={() => setReadAt(Date.now())} />
+        ) : (
+          <p className="handoff-defaults small" aria-label="As it goes">
+            <span>
+              {back
+                ? backLine({ to: backName, source, running: runs(session) })
+                : engines === undefined || !accountsRead
+                  ? "Looking at the engines…"
+                  : defaultsLine({ engine: targetTitle, account: accountName, place, source, running: runs(session), goalOnly })}
+            </span>
+            <button
+              type="button"
+              className="link small"
+              aria-expanded={choosing}
+              aria-controls={`${ids}-choices`}
+              disabled={busy}
+              onClick={() => setChoosing((c) => !c)}
+            >
+              {choosing ? "Hide the choices" : back ? "Change what becomes of this one" : "Change where it goes"}
+            </button>
+          </p>
+        )}
+
+        <div id={`${ids}-choices`} className="handoff-choices" hidden={!choosing}>
+          {!back && !noEngine && (
+            <fieldset className="move-field">
+              <legend>Engine</legend>
+              {engines === undefined ? (
+                <p className="faint small">Looking at the engines…</p>
+              ) : (
+                <div className="seg handoff-seg" role="radiogroup" aria-label="Engine">
+                  {offered.map((e, i) => (
+                    <button
+                      key={e}
+                      type="button"
+                      role="radio"
+                      aria-checked={target === e}
+                      tabIndex={target === e ? 0 : -1}
+                      disabled={busy}
+                      onClick={() => setEngine(e)}
+                      onKeyDown={(k) => radioKeys(k, offered, i, setEngine)}
+                    >
+                      {ENGINE_TITLE[e]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </fieldset>
+          )}
+
+          {!back && accounts.length > 0 && target && (
+            <fieldset className="move-field">
+              <legend>Account</legend>
+              <div className="seg handoff-seg" role="radiogroup" aria-label="Account">
+                {accountChoices.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={account === c.id}
+                    tabIndex={account === c.id ? 0 : -1}
+                    disabled={busy}
+                    onClick={() => setPicked((p) => ({ ...p, [target]: c.id }))}
+                    onKeyDown={(k) => radioKeys(k, accountChoices, i, (next) => setPicked((p) => ({ ...p, [target]: next.id })))}
+                  >
+                    {c.name}
                   </button>
                 ))}
               </div>
-            )}
-          </fieldset>
-        )}
+            </fieldset>
+          )}
 
-        {!back && accounts.length > 0 && target && (
-          <fieldset className="move-field">
-            <legend>Account</legend>
-            <div className="seg handoff-seg" role="radiogroup" aria-label="Account">
-              {accounts.map((a) => (
-                <button key={a.id} type="button" role="radio" aria-checked={account === a.id} disabled={busy} onClick={() => setPicked((p) => ({ ...p, [target]: a.id }))}>
-                  {a.name}
-                </button>
-              ))}
-              {ownWorks && (
-                <button type="button" role="radio" aria-checked={account === OWN_SIGN_IN} disabled={busy} onClick={() => setPicked((p) => ({ ...p, [target]: OWN_SIGN_IN }))}>
-                  {OWN_SIGN_IN_LABEL}
-                </button>
-              )}
-            </div>
-          </fieldset>
-        )}
-
-        {!back && (
-          <fieldset className="move-field">
-            <legend>Where</legend>
-            <div className="move-opts" role="radiogroup" aria-label="Where">
-              <label className="move-opt">
-                <input type="radio" name={`${ids}-place`} checked={place === "same_folder"} disabled={busy} onChange={() => setPlace("same_folder")} />
-                <span className="move-opt-main">
-                  <span>Same folder</span>
-                  <span className="move-opt-sub mono">{session.cwd}</span>
-                </span>
-              </label>
-              <label className="move-opt">
-                <input type="radio" name={`${ids}-place`} checked={place === "new_worktree"} disabled={busy} onChange={() => setPlace("new_worktree")} />
-                <span className="move-opt-main">
-                  <span>New worktree from its branch</span>
-                  <span className="move-opt-sub">{session.branch ? `a new branch from ${session.branch}` : "a new branch from where it is now"}</span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
-        )}
-
-        <fieldset className="move-field">
-          <legend>This one</legend>
-          <div className="move-opts" role="radiogroup" aria-label="This one">
-            {sources.map((o) => (
-              <label key={o.value} className="move-opt">
-                <input type="radio" name={`${ids}-source`} checked={source === o.value} disabled={busy} onChange={() => setSource(o.value)} />
-                <span className="move-opt-main">
-                  <span>{o.label}</span>
-                  <span className="move-opt-sub">{o.sub}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <section className="move-field" aria-label="What it gets">
-          <h2 className="move-legend">{back ? `What ${backName} gets` : `What ${targetTitle} gets`}</h2>
-          {loading && !preview ? (
-            <p className="faint small" role="status">
-              Desk is reading what this session did so far; this can take up to a minute…
-            </p>
-          ) : problem ? (
-            <>
-              <p className="move-callout move-refused" role="alert">
-                {problem}
-              </p>
-              {goalOnlyOffered && !goalOnly && (
-                <button type="button" className="btn handoff-goal-only" onClick={() => setGoalOnly(true)}>
-                  Start {targetTitle} here with only the goal
-                </button>
-              )}
-            </>
-          ) : preview ? (
-            <>
-              <p className="handoff-gets">
-                {preview.gets}
-                {preview.leavesOut && <span className="muted"> It leaves out {preview.leavesOut}.</span>}
-                {preview.search ? <span className="muted"> It can search the rest of this work.</span> : preview.onlyBrief && <span className="muted"> {preview.onlyBrief}</span>}
-              </p>
-              <div className="handoff-meta small">
-                <span className="faint">{tokensLine(preview)}</span>
-                {preview.notesPending && <span className="faint">Desk’s notes of it weren’t ready in time: the brief is built from its exchanges.</span>}
-              </div>
-              <p className="handoff-egress small">
-                <span>{preview.egress}</span>
-                <button type="button" className="link small" aria-expanded={showBrief} onClick={() => setShowBrief((b) => !b)}>
-                  {showBrief ? "Hide the brief" : "Preview brief"}
-                </button>
-              </p>
-              {showBrief && (
-                <pre className="handoff-brief" tabIndex={0} aria-label="The brief">
-                  {preview.brief}
-                </pre>
-              )}
-              {asks && (
-                <label className="handoff-confirm small">
-                  <input type="checkbox" checked={confirmed} disabled={busy} onChange={(e) => setConfirmed(e.target.checked)} />
-                  <span>
-                    Send this brief to {preview.vendor ?? targetTitle}. <span className="muted">This group asks before each handoff.</span>
+          {!back && !noEngine && (
+            <fieldset className="move-field">
+              <legend>Where</legend>
+              <div className="move-opts" role="radiogroup" aria-label="Where">
+                <label className="move-opt">
+                  <input type="radio" name={`${ids}-place`} checked={place === "same_folder"} disabled={busy} onChange={() => setPlace("same_folder")} />
+                  <span className="move-opt-main">
+                    <span>Same folder</span>
+                    <span className="move-opt-sub mono">{session.cwd}</span>
                   </span>
                 </label>
-              )}
-            </>
-          ) : null}
-        </section>
+                <label className="move-opt">
+                  <input type="radio" name={`${ids}-place`} checked={place === "new_worktree"} disabled={busy || noWorktree} onChange={() => setPlace("new_worktree")} />
+                  <span className="move-opt-main">
+                    <span>New worktree from its branch</span>
+                    <span className="move-opt-sub">
+                      {noWorktree
+                        ? "this folder isn’t in a git repository, so there’s no branch to start from"
+                        : session.branch
+                          ? `a new branch from ${session.branch}`
+                          : "a new branch from where it is now"}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+          )}
+
+          {!noEngine && (
+            <fieldset className="move-field">
+              <legend>This one</legend>
+              <div className="move-opts" role="radiogroup" aria-label="This one">
+                {sources.map((o) => (
+                  <label key={o.value} className="move-opt">
+                    <input type="radio" name={`${ids}-source`} checked={source === o.value} disabled={busy} onChange={() => setSourcePicked(o.value)} />
+                    <span className="move-opt-main">
+                      <span>{o.label}</span>
+                      <span className="move-opt-sub">{o.sub}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+        </div>
+
+        {!noEngine && (
+          <section className="move-field" aria-label="What it gets">
+            <h2 className="move-legend">{back ? `What ${backName} gets` : `What ${targetTitle} gets`}</h2>
+            {loading && !preview ? (
+              <p className="faint small" role="status">
+                Desk is reading what this session did so far; this can take up to a minute…
+              </p>
+            ) : problem ? (
+              <>
+                <p className="move-callout move-refused" role="alert">
+                  {problem}
+                </p>
+                {problem === TOO_OLD && (
+                  <button
+                    type="button"
+                    className="btn handoff-goal-only"
+                    onClick={() => {
+                      // Help, over the dialog it would sit behind: closed first.
+                      onClose();
+                      void useUpdates.getState().check({ asked: true });
+                      openSettingsAt("help");
+                    }}
+                  >
+                    Update Desk
+                  </button>
+                )}
+                {goalOnlyOffered && !goalOnly && (
+                  <button type="button" className="btn handoff-goal-only" onClick={() => setGoalOnly(true)}>
+                    Start {targetTitle} here with only the goal
+                  </button>
+                )}
+              </>
+            ) : preview ? (
+              <>
+                <p className="handoff-gets">
+                  {preview.gets}
+                  {preview.leavesOut && <span className="muted"> It leaves out {preview.leavesOut}.</span>}
+                  {preview.search ? <span className="muted"> It can search the rest of this work.</span> : preview.onlyBrief && <span className="muted"> {preview.onlyBrief}</span>}
+                </p>
+                <div className="handoff-meta small">
+                  <span className="faint">{tokensLine(preview)}</span>
+                  {preview.notesPending && <span className="faint">Desk’s notes of it weren’t ready in time: the brief is built from its exchanges.</span>}
+                </div>
+                <p className="handoff-egress small">
+                  <span>{preview.egress}</span>
+                  <button type="button" className="link small" aria-expanded={showBrief} onClick={() => setShowBrief((b) => !b)}>
+                    {showBrief ? "Hide the brief" : "Preview brief"}
+                  </button>
+                </p>
+                {showBrief && (
+                  <pre className="handoff-brief" tabIndex={0} aria-label="The brief">
+                    {preview.brief}
+                  </pre>
+                )}
+                {asks && (
+                  <label className="handoff-confirm small">
+                    <input type="checkbox" checked={confirmed} disabled={busy} onChange={(e) => setConfirmed(e.target.checked)} />
+                    <span>
+                      Send this brief to {preview.vendor ?? targetTitle}. <span className="muted">This group asks before each handoff.</span>
+                    </span>
+                  </label>
+                )}
+              </>
+            ) : null}
+          </section>
+        )}
       </div>
       <footer className="dialog-foot move-foot">
-        <span className="dialog-foot-note state-blocked" role={sendProblem ? "alert" : undefined}>
-          {sendProblem}
+        <span className={`dialog-foot-note ${sendProblem ? "state-blocked" : "faint"}`} role={sendProblem ? "alert" : undefined}>
+          {sendProblem ?? waitsOn}
         </span>
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel

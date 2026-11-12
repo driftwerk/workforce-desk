@@ -11,7 +11,7 @@ export function GoalText({ goal, onEdit }: { goal: string; onEdit: () => void })
   useLayoutEffect(() => {
     const el = text.current;
     if (!el || open) return;
-    const measure = () => setLong(el.scrollHeight > el.clientHeight + 1);
+    const measure = () => setLong(el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1);
     measure();
     // Again as the panel's width changes it.
     if (typeof ResizeObserver === "undefined") return;
