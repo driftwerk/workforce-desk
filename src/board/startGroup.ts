@@ -26,3 +26,28 @@ const exists = (layout: Layout, id: string | null | undefined): id is string => 
  *  board's group, else the last one chosen from a board, else Ungrouped. */
 export const boardStartGroup = (layout: Layout, boardGroup: string | null | undefined, last: string | null): string =>
   exists(layout, boardGroup) ? boardGroup : exists(layout, last) ? last : UNGROUPED;
+
+// What a board's last Start a session used, kept per board in this window's
+// storage (not remembered if it is blocked).
+export interface StartDefault {
+  cwd: string;
+  engine: string;
+}
+const startKey = (board: string) => `desk.board.start.${board}`;
+
+export const lastBoardStart = (board: string): StartDefault | null => {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(startKey(board)) ?? "null") as Partial<StartDefault> | null;
+    return v && typeof v.cwd === "string" && typeof v.engine === "string" ? { cwd: v.cwd, engine: v.engine } : null;
+  } catch {
+    return null;
+  }
+};
+
+export const rememberBoardStart = (board: string, d: StartDefault): void => {
+  try {
+    window.localStorage.setItem(startKey(board), JSON.stringify(d));
+  } catch {
+    /* not remembered */
+  }
+};

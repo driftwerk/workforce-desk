@@ -40,6 +40,26 @@ describe("Start a session on a ticket: folders", () => {
   });
 });
 
+describe("Start a session on a ticket: what it goes by", () => {
+  const sess = (id: string, cwd: string, engine: string, updatedAt: string) => ({ id, cwd, engine, updatedAt, name: id }) as never;
+  const folder = () => (screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value;
+  it("takes the folder and engine of the board's newest session when the ticket has none", () => {
+    const other = ticket(8, { assignee: { kind: "session", id: "old", name: "old", engine: "codex" } });
+    useBoard.setState({ tickets: { [t.id]: t, [other.id]: other } });
+    useDesk.setState({ sessions: { old: sess("old", "/w/api", "codex", "2026-11-12T09:00:00Z"), z: sess("z", "/w/elsewhere", "claude", "2026-11-12T10:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect(folder()).toBe("/w/api");
+  });
+  it("falls back to what the board's last start used, then asks nothing it can know", async () => {
+    useDesk.setState({ sessions: {} });
+    localStorage.setItem(`desk.board.start.${t.board}`, JSON.stringify({ cwd: "/w/saved", engine: "claude" }));
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect(folder()).toBe("/w/saved");
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(`desk.board.start.${t.board}`)!)).toEqual({ cwd: "/w/saved", engine: "claude" }));
+  });
+});
+
 describe("Start a session on a ticket", () => {
   it("offers New session's group picker, set to the board's group", () => {
     start();
