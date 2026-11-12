@@ -71,10 +71,14 @@ const type = (text: string) => {
 const up = () => fireEvent.keyDown(box(), { key: "ArrowUp" });
 const queued = () => [...document.querySelectorAll(".queued-text")].map((e) => e.textContent);
 
+/** What the hub's read returns; a test may change it. */
+let read: object[] = history;
+
 const open = async (features = FEATURES) => {
+  read = history;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify({ messages: history, more: false }), { headers: { "content-type": "application/json" } })),
+    vi.fn(async () => new Response(JSON.stringify({ messages: read, more: false }), { headers: { "content-type": "application/json" } })),
   );
   render(<Rooms />);
   act(() => useChat.getState().openDm(KEY));
@@ -197,6 +201,67 @@ describe("↑ with nothing queued", () => {
     await vi.waitFor(() => expect(screen.getByText("Filed ATL-571 and assigned it to Sam Lee.")).toBeTruthy());
     expect(screen.getByText("yes file it and assign to Sam")).toBeTruthy();
     expect(useChat.getState().setAside[KEY]).toEqual([]);
+    // The version that didn't take goes, and its words come back to you.
+    expect(document.querySelector(".msg-edited")).toBeNull();
+    expect(box().value).toBe("yes file it and assign to me");
+    expect(screen.getByRole("status").textContent).toBe(
+      "Allan’s hub didn’t take your edit (only your latest message can be edited). Your words are back in the box.",
+    );
+  });
+
+  it("brings back what was set aside when the connection drops before the hub has the edit", async () => {
+    const s = await open();
+    act(() => up());
+    fireEvent.change(screen.getByRole("textbox", { name: "Your last message" }), { target: { value: "yes file it and assign to me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and ask again" }));
+    expect(screen.queryByText("yes file it and assign to Sam")).toBeNull();
+    await act(async () => {
+      s.drop();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await vi.waitFor(() => expect(screen.getByText("yes file it and assign to Sam")).toBeTruthy());
+    expect(screen.getByText("Filed ATL-571 and assigned it to Sam Lee.")).toBeTruthy();
+    expect(box().value).toBe("yes file it and assign to me");
+  });
+
+  it("keeps the old pair gone once the hub's read leaves them out, live copies included", async () => {
+    const s = await open();
+    // Asked and answered live: shown from the live copies until the hub's
+    // kept ones take their place.
+    act(() => type("and close the old one"));
+    const asked = s.chats.at(-1)!;
+    const ref = asked.turn_ref as string;
+    const cid = (asked.desk as { message: string }).message;
+    await act(async () => {
+      s.receive({ type: "stream_start", session_id: "s-allan", turn_ref: ref, id: "r9" });
+      s.receive({ type: "stream_delta", session_id: "s-allan", turn_ref: ref, id: "r9", content: "Closed ATL-560." });
+      s.receive({ type: "stream_end", session_id: "s-allan", turn_ref: ref, id: "r9" });
+      read = [
+        ...history,
+        { id: "k3", from: "user", text: "and close the old one", at: at(3), client_id: cid },
+        { id: "k4", from: "assistant", text: "Closed ATL-560.", at: at(4), mark: { in_reply_to: cid } },
+      ];
+      s.receive({ type: "turn_end", session_id: "s-allan", turn_ref: ref, id: "k4" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await useChat.getState().refreshHistory(KEY);
+    });
+    act(() => up());
+    fireEvent.change(screen.getByRole("textbox", { name: "Your last message" }), { target: { value: "and close both old ones" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and ask again" }));
+    const edit = s.chats.at(-1)!;
+    expect(edit).toMatchObject({ desk: { edit: { replaces: "k3" } } });
+    const eid = (edit.desk as { message: string }).message;
+    // The hub took it: its read no longer has the old pair.
+    read = [...history, { id: "k5", from: "user", text: "and close both old ones", at: at(5), client_id: eid, mark: { edited: true } }];
+    await act(async () => {
+      s.receive({ type: "turn_end", session_id: "s-allan", turn_ref: edit.turn_ref as string });
+      await useChat.getState().refreshHistory(KEY);
+    });
+    expect(screen.queryByText("and close the old one")).toBeNull();
+    expect(screen.queryByText("Closed ATL-560.")).toBeNull();
+    expect(screen.getByText("and close both old ones")).toBeTruthy();
   });
 
   it("cancels with Esc, and an unchanged save asks nothing", async () => {

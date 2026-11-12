@@ -291,7 +291,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // the overseer sent on, a command, or one that never got there.
   const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
   const mine = mineAt >= 0 ? shown[mineAt] : undefined;
-  const editable = !!convo.features?.has(FEATURES.edit);
+  // Only where the hub says which kept row each live message became: what's
+  // set aside is then known by id, not guessed from words.
+  const editable = !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
   const whyNot = !mine
     ? null
     : busy
@@ -300,7 +302,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         ? "You can edit your last message once your queued messages have gone."
         : !(history?.messages ?? []).some((k) => k.id === mine.id)
           ? `You can edit your last message once ${agent.name}’s hub has saved it.`
-          : null;
+          : mine.attachments?.length
+            ? "A message with files can’t be edited. Send a new one instead."
+            : null;
   const startEdit = () => {
     if (!mine || !editable) return;
     if (whyNot) return setEditNote(whyNot);
@@ -505,7 +509,15 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               editing={editing}
               onCancel={() => setEditing(null)}
               onSave={(text) => {
-                if (!editLast(activeAgent, editing.id, editing.aside, text)) return setEditNote(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+                const why = editLast(activeAgent, editing.id, editing.aside, text);
+                if (why)
+                  return setEditNote(
+                    why === "busy"
+                      ? `You can edit your last message once ${agent.name} has finished replying.`
+                      : why === "queued"
+                        ? "You can edit your last message once your queued messages have gone."
+                        : `Couldn’t reach ${agent.name}. Try again in a moment.`,
+                  );
                 setEditing(null);
                 stay.toLatest();
               }}
@@ -513,6 +525,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           ) : (
           <DmComposer
             onEditLast={startEdit}
+            onEditBack={(why, restored) =>
+              setEditNote(`${agent.name}’s hub didn’t take your edit${why ? ` (${why})` : ""}.${restored ? " Your words are back in the box." : ""}`)
+            }
             to={activeAgent}
             agent={agent}
             hub={hub}
@@ -675,6 +690,7 @@ function DmComposer({
   onSent,
   away,
   onEditLast,
+  onEditBack,
 }: {
   /** The agent's key. */
   to: string;
@@ -694,6 +710,9 @@ function DmComposer({
   /** ↑ with nothing queued to edit: edits your latest sent message, or
    *  says why it can't be. */
   onEditLast: () => void;
+  /** An edit the hub didn't take: why, and whether its words went back
+   *  into the box. */
+  onEditBack: (why: string, restored: boolean) => void;
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
@@ -704,6 +723,18 @@ function DmComposer({
   const cancel = useChat((s) => s.cancel);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
+  // An edit the hub didn't take: its words come back here, if the box is
+  // empty, and you're told.
+  const editBack = useChat((s) => s.editBack[to]);
+  useEffect(() => {
+    if (!editBack) return;
+    const restored = !draft.trim();
+    if (restored) setDraft(editBack.text);
+    useChat.getState().tookEditBack(to);
+    onEditBack(editBack.why, restored);
+    // Once per edit given back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editBack]);
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
   const emoji = useEmojiInput({
