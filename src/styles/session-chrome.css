@@ -167,19 +167,18 @@
 
 /* Where else it shows ("In grid Main · Go to it"), as chips in row 2. */
 .sc .session-where {
-  flex: 0 0 auto;
-  max-width: 45%;
+  flex: none;
   min-width: 0;
   flex-direction: row;
   gap: 6px;
   padding: 0;
   background: none;
   border: 0;
-  overflow: hidden;
 }
 .sc .session-where li {
   flex: 0 1 auto;
-  min-width: 0;
+  /* Never narrower than its way there. */
+  min-width: auto;
   align-items: center;
   gap: 6px;
   padding: 1px 8px;
@@ -187,6 +186,26 @@
   border: 1px solid var(--border);
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+/* Its way there stays whole; where it is gives way. */
+.sc .session-where li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc .session-where .link {
+  flex: none;
+}
+/* Under 570: where it is says only its way there (its name says where). */
+.sc[data-band="compact"] .session-where li > span:first-child,
+.sc[data-band="narrow"] .session-where li > span:first-child {
+  display: none;
+}
+.sc-r2 > .sc-tabs,
+.sc-r2 > .sc-driver,
+.sc-r2 > .sc-cost {
+  flex-shrink: 0;
 }
 
 /* Session · Memory · History: the .tabs pill, small. */
@@ -363,8 +382,12 @@
   flex: 0 100 auto;
   min-width: 9px;
 }
+/* The name keeps its width while anything else can give way; past half
+   the row it is cut in the middle. */
 .sc-name {
-  min-width: min(9em, 40%);
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 50%;
 }
 /* Under 660: the engine's line goes (it's in the name's tooltip and the
    header's description); the chips say their short words. */
@@ -450,4 +473,9 @@
 .sc-driven-you[data-band="tiny"] .mark::after {
   background: var(--surface);
   box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+/* In one row the name gives way before the buttons do. */
+.sc[data-band="tiny"] .sc-name {
+  flex-shrink: 1;
+  max-width: none;
 }
