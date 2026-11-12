@@ -1144,7 +1144,8 @@ fn linger_is_turned_on_with_the_machines_password_once_and_desk_moves_to_its_ser
         serde_json::to_value(asked[0].kind).unwrap(),
         json!("linger")
     );
-    assert_eq!(asked[0].user.as_deref(), Some("dev"));
+    // The account the machine said it is (here, whoever runs the test).
+    assert!(asked[0].user.as_deref().is_some_and(|u| !u.is_empty()));
     until("the service", || {
         step(&r, "install", StepState::Done).is_some()
     });
