@@ -120,6 +120,7 @@ pub const COMMANDS: &[&str] = &[
     "voice_status",
     "wsl_detect",
     "wsl_install",
+    "wsl_forget_resume",
     "wsl_convert",
     "wsl_setup",
     "wsl_fix_forwarding",
