@@ -1079,7 +1079,7 @@ function ItemRow({
       onRemove={onRemove}
       onHover={onHover}
     >
-      {local && <SessionTicketChip session={session.id} still className="gi-ticket" />}
+      {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
       <ChargeBadge charge={charge} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />

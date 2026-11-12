@@ -2118,7 +2118,11 @@ button.thread-bar:hover {
   row-gap: 2px;
 }
 .gi-name {
-  flex: 1 1 9ch;
+  /* Its own length decides whether the badges fit beside it: a name that
+     would be cut takes the whole first line and they wrap under it. */
+  flex: 1 1 auto;
+  /* Never wider than what is left after the grip and dot, so they stay on its line. */
+  max-width: calc(100% - 44px);
   min-width: 9ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3426,6 +3430,7 @@ body.line-resizing * {
 /* Badges that wrapped under the name sit at the row's right edge. */
 .gi > .gi-ticket,
 .gi > .gi-charge,
+.gi > .gi-meta,
 .gi > .gi-machine {
   margin-left: auto;
 }
