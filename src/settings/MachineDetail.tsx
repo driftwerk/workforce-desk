@@ -9,7 +9,8 @@ import { clock, clockSeconds, dotOf, forgetKeyLine, freeText, inTime, keyChanged
 import { useHost } from "../shell/host";
 import { plainError } from "../ui/plainError";
 import { UpdateSteps } from "../machines/UpdateSteps";
-import { CopyButton, EngineBlocks } from "./EngineBlocks";
+import { EngineBlocks } from "./EngineBlocks";
+import { ForgetOldKey, LingerWithPassword } from "../machines/KeyActions";
 import { EditReach, shortPrint } from "./EditReach";
 import { CheckForUpdates, useNow } from "./Machines";
 
@@ -192,13 +193,8 @@ function Status({ machine, native, here, sessions, onLog }: { machine: Machine; 
                 </>
               )}
             </dl>
-            <span className="small">
-              If {machine.name} was reinstalled, remove its old key on {here}, then Reconnect:
-            </span>
-            <span className="machine-line">
-              <code className="mono small">{forgetKeyLine(machine)}</code>
-              <CopyButton text={forgetKeyLine(machine)} />
-            </span>
+            <span className="small">If {machine.name} was reinstalled, forget its old key: Desk shows you both before it changes anything.</span>
+            <ForgetOldKey machine={machine} native={native} line={forgetKeyLine(machine)} />
           </>
         )}
         <span className="small faint">
@@ -410,17 +406,12 @@ export function MachineDetail({
               {d.service && d.linger
                 ? `Its own user service, kept on with linger, so sessions carry on while ${here} sleeps.`
                 : d.systemd
-                  ? `Desk starts itself there each time it connects. To start it when ${machine.name} boots, run this there once:`
+                  ? `Desk starts itself there each time it connects. To start it when ${machine.name} boots, turning on linger there needs an administrator’s password once:`
                   : `${machine.name} has no systemd for its users, so Desk starts itself there each time it connects.`}
             </Row>
           )}
         </div>
-        {d && !(d.service && d.linger) && d.systemd && d.lingerLine && (
-          <span className="machine-line">
-            <code className="mono small">{d.lingerLine}</code>
-            <CopyButton text={d.lingerLine} />
-          </span>
-        )}
+        {d && !(d.service && d.linger) && d.systemd && d.lingerLine && <LingerWithPassword machine={machine} native={native} line={d.lingerLine} />}
       </Section>
 
       {/* Kept through a reconnect: a sign-in under way there carries on. */}

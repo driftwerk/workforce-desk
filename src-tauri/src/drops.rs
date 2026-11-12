@@ -183,6 +183,53 @@ pub struct DroppedFile {
     pub folder: bool,
 }
 
+/// Why `path` couldn't be read, in the person's words. The system keeping
+/// Desk out of it says which permission lets it in, as the page knows it
+/// (`src/ui/privacy.ts`).
+fn unreadable(path: &Path, e: &std::io::Error) -> String {
+    let name = name_of(path);
+    if crate::privacy::kept_by_privacy(e) {
+        // The name only: where it is stays out of the log.
+        tracing::info!(file = %name, error = %e, "a dropped file is kept from Desk by a privacy setting");
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        return match pane_for(path, home.as_deref(), std::env::consts::OS) {
+            Some(crate::privacy::Pane::FilesAndFolders) => {
+                format!("Desk isn’t allowed to read {name}. Allow it in Files and Folders.")
+            }
+            _ => format!("Desk isn’t allowed to read {name}. Allow it in Full Disk Access."),
+        };
+    }
+    if crate::privacy::not_permitted(e) {
+        tracing::info!(file = %name, error = %e, "a dropped file can't be read by this user");
+        return format!("You don’t have permission to read {name}, so Desk can’t either.");
+    }
+    format!("Desk couldn't read {name}: {e}")
+}
+
+/// Which permission lets Desk read `path` on `os`: on macOS, Files and
+/// Folders for the Desktop, Documents, Downloads, iCloud Drive and other
+/// disks; Full Disk Access for the rest (Mail's, Messages' and other apps'
+/// files). Windows keeps a file by its own permissions, which no setting
+/// of Desk's changes.
+fn pane_for(path: &Path, home: Option<&Path>, os: &str) -> Option<crate::privacy::Pane> {
+    use crate::privacy::Pane;
+    if os != "macos" {
+        return None;
+    }
+    let folders = [
+        "Desktop",
+        "Documents",
+        "Downloads",
+        "Library/Mobile Documents",
+    ];
+    let in_folder = home.is_some_and(|h| folders.iter().any(|f| path.starts_with(h.join(f))));
+    Some(if in_folder || path.starts_with("/Volumes") {
+        Pane::FilesAndFolders
+    } else {
+        Pane::FullDiskAccess
+    })
+}
+
 fn name_of(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -200,8 +247,7 @@ pub fn dropped_files(
         .check(webview.label(), &paths)?
         .into_iter()
         .map(|path| {
-            let meta = std::fs::metadata(&path)
-                .map_err(|e| format!("Desk couldn't read {}: {e}", name_of(&path)))?;
+            let meta = std::fs::metadata(&path).map_err(|e| unreadable(&path, &e))?;
             Ok(DroppedFile {
                 name: name_of(&path),
                 path: path.to_string_lossy().into_owned(),
@@ -219,12 +265,12 @@ pub async fn dropped_file_read(
     drops: tauri::State<'_, Drops>,
     path: String,
 ) -> CommandResult<tauri::ipc::Response> {
-    let path = drops
-        .take(webview.label(), std::slice::from_ref(&path))?
-        .remove(0);
-    tauri::async_runtime::spawn_blocking(move || {
-        let meta = std::fs::metadata(&path)
-            .map_err(|e| format!("Desk couldn't read {}: {e}", name_of(&path)))?;
+    let asked = std::slice::from_ref(&path);
+    // Let go once it's read: one the system kept from Desk is read again
+    // once the person allowed it (`src/ui/privacy.ts`), without a new drop.
+    let path = drops.check(webview.label(), asked)?.remove(0);
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        let meta = std::fs::metadata(&path).map_err(|e| unreadable(&path, &e))?;
         if !meta.is_file() {
             return Err(format!("{} is a folder, not a file.", name_of(&path)));
         }
@@ -237,10 +283,12 @@ pub async fn dropped_file_read(
         }
         std::fs::read(&path)
             .map(tauri::ipc::Response::new)
-            .map_err(|e| format!("Desk couldn't read {}: {e}", name_of(&path)))
+            .map_err(|e| unreadable(&path, &e))
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    drops.take(webview.label(), asked)?;
+    Ok(read)
 }
 
 /// How far a copy to a machine has got, all its files together.
@@ -539,6 +587,54 @@ pub async fn terminal_paste_image(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_file_the_system_keeps_from_desk_names_the_permission_that_lets_it_in() {
+        use crate::privacy::Pane;
+        let home = Path::new("/Users/k");
+        let on_mac = |p: &str| pane_for(Path::new(p), Some(home), "macos");
+        assert_eq!(
+            on_mac("/Users/k/Desktop/a.png"),
+            Some(Pane::FilesAndFolders)
+        );
+        assert_eq!(
+            on_mac("/Users/k/Downloads/x/b.pdf"),
+            Some(Pane::FilesAndFolders)
+        );
+        assert_eq!(
+            on_mac("/Users/k/Library/Mobile Documents/c.txt"),
+            Some(Pane::FilesAndFolders)
+        );
+        assert_eq!(on_mac("/Volumes/Stick/d.mov"), Some(Pane::FilesAndFolders));
+        assert_eq!(
+            on_mac("/Users/k/Library/Mail/e.emlx"),
+            Some(Pane::FullDiskAccess)
+        );
+        assert_eq!(on_mac("/Users/k/DesktopNot/f"), Some(Pane::FullDiskAccess));
+        assert_eq!(pane_for(Path::new("C:/x"), None, "windows"), None);
+
+        // A file's own mode (EACCES, or Windows' access list): no setting
+        // of Desk's changes it, so none is offered.
+        let mode = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let said = unreadable(Path::new("/nowhere/secret.txt"), &mode);
+        assert_eq!(
+            said,
+            "You don’t have permission to read secret.txt, so Desk can’t either."
+        );
+        // macOS's privacy protection (EPERM): the setting that lets it in.
+        #[cfg(target_os = "macos")]
+        {
+            let eperm = std::io::Error::from_raw_os_error(1);
+            let said = unreadable(Path::new("/nowhere/secret.txt"), &eperm);
+            assert!(
+                said.starts_with("Desk isn’t allowed to read secret.txt."),
+                "{said}"
+            );
+            assert!(!said.contains("os error"), "{said}");
+        }
+        let gone = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(unreadable(Path::new("/nowhere/a"), &gone).starts_with("Desk couldn't read a: "));
+    }
     use super::*;
     use desk_core::host::{DEFAULT_AUTOMOUNT, Wsl};
 

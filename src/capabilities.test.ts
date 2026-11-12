@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import commandsRs from "../src-tauri/src/commands.rs?raw";
 import gridCap from "../src-tauri/capabilities/grid.json";
 import mainCap from "../src-tauri/capabilities/main.json";
+import secretCap from "../src-tauri/capabilities/machine-secret.json";
 import tauriConf from "../src-tauri/tauri.conf.json";
 import pkg from "../package.json";
 
@@ -128,7 +129,11 @@ const pluginPermissions = (reach: Set<string>): Set<string> => {
 const identifiers = (cap: Capability): Set<string> => new Set(cap.permissions.map((p) => (typeof p === "string" ? p : p.identifier)));
 
 type Capability = { windows: string[]; permissions: (string | { identifier: string })[] };
-const capability = (name: "main" | "grid"): Capability => (name === "main" ? mainCap : gridCap) as Capability;
+const capability = (name: "main" | "grid" | "secret"): Capability => (name === "main" ? mainCap : name === "grid" ? gridCap : secretCap) as Capability;
+
+/** Desk's own field for a password (the `machine-secret` window): what it
+ *  is asked, and what is typed into it. No other window may call these. */
+const SECRET_COMMANDS = ["machine_secret_request", "machine_secret_submit", "machine_secret_cancel"];
 
 const commandsOf = (cap: ReturnType<typeof capability>): Set<string> =>
   new Set(
@@ -200,8 +205,24 @@ describe("each window's capabilities", () => {
   it("grant the main window every command, and name none that isn't one", () => {
     const all = declared();
     expect(all.length).toBeGreaterThan(50);
-    expect([...commandsOf(capability("main"))].sort()).toEqual([...all].sort());
+    expect([...commandsOf(capability("main"))].sort()).toEqual(all.filter((c) => !SECRET_COMMANDS.includes(c)).sort());
     for (const c of commandsOf(capability("grid"))) expect(all).toContain(c);
+  });
+
+  it("let only Desk's own password field ask for and answer a password", () => {
+    expect(capability("secret").windows).toEqual(["machine-secret"]);
+    for (const name of ["main", "grid"] as const) for (const c of SECRET_COMMANDS) expect(commandsOf(capability(name)).has(c), `${name}: ${c}`).toBe(false);
+    const secret = commandsOf(capability("secret"));
+    for (const c of SECRET_COMMANDS) expect(secret.has(c), c).toBe(true);
+    // Nothing of machines, pairing or the hub besides.
+    expect([...secret].filter((c) => /^(machine|pair|hub|socket|local_hub)/.test(c) && !SECRET_COMMANDS.includes(c))).toEqual([]);
+    // What its page invokes, and what painting its theme and showing it
+    // need, it is granted.
+    const used = invokesIn("./machines/SecretWindow.tsx").map((i) => i.cmd);
+    expect(used.filter((c) => !secret.has(c))).toEqual([]);
+    expect(secret.has("desk_ready")).toBe(true);
+    // A built-in theme: nothing of the saved settings or themes is read.
+    for (const c of ["settings_load", "themes_list", "settings_save"]) expect(secret.has(c), c).toBe(false);
   });
 
   it("let no window reach the updater itself: Desk's native side checks, downloads and installs, and refuses a development build", () => {

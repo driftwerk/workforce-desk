@@ -21,6 +21,11 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/features"
+  },
+  {
+    "kind": "http",
     "method": "POST",
     "path": "/api/desk/engines/read"
   },
@@ -298,6 +303,11 @@
     "kind": "http",
     "method": "POST",
     "path": "/api/vault/speech/openai/api_key"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/voice/keys/elevenlabs"
   },
   {
     "kind": "http",

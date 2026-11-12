@@ -231,6 +231,66 @@ pub trait TrustConfirm: Send + Sync + 'static {
         let _ = question;
         false
     }
+    /// The person's yes to forgetting a machine's old host key for the one
+    /// it shows now. No unless asked.
+    fn forget_key(&self, question: &ForgetQuestion) -> bool {
+        let _ = question;
+        false
+    }
+    /// The person's yes to Desk asking for a machine's password to turn
+    /// linger on there with sudo. No unless asked.
+    fn linger(&self, question: &LingerQuestion) -> bool {
+        let _ = question;
+        false
+    }
+}
+
+/// Asking for a machine's password to keep Desk running there (linger,
+/// with sudo): its name and exact address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LingerQuestion {
+    pub name: String,
+    pub target: String,
+}
+
+impl LingerQuestion {
+    pub fn text(&self) -> String {
+        format!(
+            "Use {name}'s password to keep Desk running there?\n\n{target}\n\nDesk asks for the account's password next, in its own window, and runs sudo loginctl enable-linger there once with it, so Desk starts when {name} boots. It doesn't keep the password.",
+            name = self.name,
+            target = self.target
+        )
+    }
+}
+
+/// Forgetting a machine's old host key and trusting the one it shows now:
+/// both fingerprints, and the exact address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForgetQuestion {
+    pub name: String,
+    pub target: String,
+    /// The fingerprints known for it here now.
+    pub old: Vec<String>,
+    /// `ED25519`.
+    pub kind: String,
+    pub fingerprint: String,
+}
+
+impl ForgetQuestion {
+    pub fn text(&self) -> String {
+        let old = if self.old.is_empty() {
+            "a key Desk can't read".to_string()
+        } else {
+            self.old.join(", ")
+        };
+        format!(
+            "Forget {name}'s old host key and trust its new one?\n\n{target}\n\nOld: {old}\nNew: {kind} {fp}\n\nA machine's key changes when it is reinstalled or replaced. If you don't know why it changed, Cancel: someone may be pretending to be {name}.",
+            name = self.name,
+            target = self.target,
+            kind = self.kind,
+            fp = self.fingerprint
+        )
+    }
 }
 
 /// Uninstalling Desk from a machine: its name and the exact address.
@@ -304,6 +364,8 @@ const MAX_QUIET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 pub struct TrustGate {
     quiet: std::time::Duration,
     asking: std::sync::Mutex<Asking>,
+    /// What it asks about, as its refusals say it ("Trusting a machine").
+    what: &'static str,
 }
 
 #[derive(Default)]
@@ -324,6 +386,16 @@ impl TrustGate {
         Self {
             quiet,
             asking: Default::default(),
+            what: "Trusting a machine",
+        }
+    }
+
+    /// The same gate for another kind of question, `what` naming it
+    /// ("Asking for a machine's password").
+    pub fn named(what: &'static str) -> Self {
+        Self {
+            what,
+            ..Self::default()
         }
     }
 
@@ -337,7 +409,10 @@ impl TrustGate {
         {
             let mut a = self.lock();
             if a.open {
-                return Err("Desk is already asking about trusting a machine.".into());
+                return Err(format!(
+                    "Desk is already asking you something about a machine: {} waits until you answer it.",
+                    self.what.to_lowercase()
+                ));
             }
             if let Some(left) = a
                 .quiet_until
@@ -345,7 +420,8 @@ impl TrustGate {
                 .filter(|l| !l.is_zero())
             {
                 return Err(format!(
-                    "Trusting a machine was cancelled. Try again in {} seconds.",
+                    "{} was cancelled. Try again in {} seconds.",
+                    self.what,
                     left.as_secs().max(1)
                 ));
             }
@@ -395,12 +471,16 @@ impl Gated<'_> {
 /// once it is the one whose fingerprint they saw (`seen`) and they said yes;
 /// refused when the key they know for it is another (a changed key is never
 /// trusted from Desk). Blocking.
+///
+/// `confirm`: asked natively before it is written; none when the person's
+/// native yes to adding this exact address already stands (adding a
+/// machine asks one question, not two).
 pub fn trust(
     ssh: &SshExe,
     machine: &Machine,
     files: &Files,
     seen: &str,
-    confirm: &Gated<'_>,
+    confirm: Option<&Gated<'_>>,
 ) -> Result<Option<HostKey>, String> {
     let name = &machine.name;
     let known_hosts = files.known_hosts.clone().ok_or_else(|| {
@@ -410,10 +490,19 @@ pub fn trust(
         None => return Ok(None),
         Some(KeyTrouble::Changed) => {
             return Err(format!(
-                "{name}'s host key isn't the one your Mac knows. Desk won't trust another key for it."
+                "{name} shows a different host key from the one {here} knows. Forget the old key first, if it was reinstalled.",
+                here = crate::this_computer()
             ));
         }
         Some(KeyTrouble::Unknown) => {}
+    }
+    // Without its own question, only for a name nothing is known under
+    // yet: any key kept for it, whatever ssh said, needs the person.
+    if confirm.is_none() && !known_fingerprints(files).is_empty() {
+        return Err(format!(
+            "{} already knows a key for {name}. Desk won't trust another without asking you.",
+            crate::ssh::capital(crate::this_computer())
+        ));
     }
     let (key, _) = capture(ssh, machine)?;
     if key.fingerprint != seen {
@@ -422,12 +511,14 @@ pub fn trust(
             key.fingerprint
         ));
     }
-    if !confirm.ask(&TrustQuestion {
-        name: name.clone(),
-        target: machine.target.to_string(),
-        kind: key.kind(),
-        fingerprint: key.fingerprint.clone(),
-    })? {
+    if let Some(confirm) = confirm
+        && !confirm.ask(&TrustQuestion {
+            name: name.clone(),
+            target: machine.target.to_string(),
+            kind: key.kind(),
+            fingerprint: key.fingerprint.clone(),
+        })?
+    {
         return Err("Trusting the machine was cancelled.".into());
     }
     // Read again after the yes: the line written is a key with the
@@ -446,6 +537,84 @@ pub fn trust(
     append(&known_hosts, &line)?;
     match trouble(ssh, machine)? {
         None => Ok(Some(now)),
+        Some(_) => Err(format!(
+            "Desk added {name}'s key, but ssh still doesn't take it."
+        )),
+    }
+}
+
+/// Takes the machine's old key out of the person's own known hosts files
+/// (`ssh-keygen -R` by the name ssh looks it up by), then trusts the one it
+/// shows now, once it is the one whose fingerprint they were shown
+/// (`seen`). A key in a known hosts file of the system's (not under
+/// `home`) stays: an administrator removes it. Blocking; only after the
+/// person's native yes ([`ForgetQuestion`]).
+pub fn forget_and_trust(
+    ssh: &SshExe,
+    machine: &Machine,
+    files: &Files,
+    home: &Path,
+    seen: &str,
+) -> Result<HostKey, String> {
+    let name = &machine.name;
+    let known_as = files
+        .known_as
+        .as_deref()
+        .ok_or_else(|| format!("Desk can't tell which name {name}'s key is kept under."))?;
+    for file in files
+        .all_known
+        .iter()
+        .filter(|f| f.starts_with(home) && f.is_file())
+    {
+        let out = std::process::Command::new(KEYGEN)
+            .arg("-R")
+            .arg(known_as)
+            .arg("-f")
+            .arg(file)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Desk couldn't run ssh-keygen: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "Desk couldn't take {name}'s old key out of {}.",
+                file.display()
+            ));
+        }
+        // ssh-keygen keeps the file as it was beside it.
+        let mut old = file.as_os_str().to_owned();
+        old.push(".old");
+        let _ = std::fs::remove_file(PathBuf::from(old));
+    }
+    match trouble(ssh, machine)? {
+        Some(KeyTrouble::Changed) => {
+            return Err(format!(
+                "{name}'s old key is also in a known hosts file of this computer's own, which Desk doesn't change. An administrator removes it there."
+            ));
+        }
+        None => {
+            return Err(format!(
+                "{name} now shows the key {} knows.",
+                crate::this_computer()
+            ));
+        }
+        Some(KeyTrouble::Unknown) => {}
+    }
+    let known_hosts = files.known_hosts.clone().ok_or_else(|| {
+        format!("Your SSH settings for {name} keep no known hosts file Desk can add to.")
+    })?;
+    let (now, mut line) = capture(ssh, machine)?;
+    if now.fingerprint != seen {
+        return Err(format!(
+            "{name} showed another key ({}) while you were asked. Desk didn't trust it.",
+            now.fingerprint
+        ));
+    }
+    if files.hash {
+        line = hashed(&line)?;
+    }
+    append(&known_hosts, &line)?;
+    match trouble(ssh, machine)? {
+        None => Ok(now),
         Some(_) => Err(format!(
             "Desk added {name}'s key, but ssh still doesn't take it."
         )),

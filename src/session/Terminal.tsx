@@ -17,6 +17,7 @@ import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/ke
 import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
 import { minimumContrast, xtermTheme } from "../theme/xterm";
+import { linkClicks } from "./linkClicks";
 import { Viewer } from "./viewer";
 
 /** What a link a program prints in a terminal does when clicked (Claude
@@ -24,11 +25,8 @@ import { Viewer } from "./viewer";
  *  decides and asks (`open_terminal_link`), never the page. Without it,
  *  xterm asks with the page's `confirm()` and opens with `window.open()`,
  *  which the app refuses both: the click did nothing. */
-export const terminalLinks = {
-  activate: (_e: MouseEvent, uri: string): void => {
-    void openTerminalLink(uri).catch(() => false);
-  },
-  allowNonHttpProtocols: false,
+export const openFromTerminal = (uri: string): void => {
+  void openTerminalLink(uri).catch(() => false);
 };
 
 /** The hub closes a terminal's socket with a close frame when the terminal
@@ -100,10 +98,13 @@ export function Terminal({
       cursorBlink: true,
       allowProposedApi: false,
       scrollback: 10_000,
-      linkHandler: terminalLinks,
       theme: xtermTheme(theme),
       minimumContrastRatio: minimumContrast(theme.colors),
     });
+    // A link opens once, through Desk: never also by the program, should it
+    // read the mouse (see linkClicks).
+    const links = linkClicks(host.current, x, openFromTerminal);
+    x.options.linkHandler = links.handler;
     const fit = new FitAddon();
     x.loadAddon(fit);
     x.open(host.current);
@@ -257,6 +258,7 @@ export function Terminal({
       el.removeEventListener("paste", onPaste, true);
       unzone();
       input.dispose();
+      links.dispose();
       ws?.close();
       x.dispose();
       term.current = null;

@@ -82,6 +82,50 @@ const COMMAND: &[&str] = &[
     "SessionType=default",
 ];
 
+/// The options of the one `ssh` that signs in with a password: the
+/// person's, typed into Desk's own field and given by Desk's askpass,
+/// to put Desk's own key there. As [`ALWAYS`] in all else (the machine's
+/// host key must already be known and unchanged; nothing forwarded; its
+/// own connection), but a prompt is allowed, only for a password, only
+/// once, and no key is tried (a key it would take means no password is
+/// needed). A jump host's own connection is made by the person's config,
+/// as always.
+const PASSWORD: &[&str] = &[
+    "-T",
+    "-x",
+    "-a",
+    "-o",
+    "BatchMode=no",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "UpdateHostKeys=no",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    "-o",
+    "ForkAfterAuthentication=no",
+    "-o",
+    "LogLevel=ERROR",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "Tunnel=no",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "PubkeyAuthentication=no",
+    "-o",
+    "GSSAPIAuthentication=no",
+    "-o",
+    "HostbasedAuthentication=no",
+    "-o",
+    "PreferredAuthentications=keyboard-interactive,password",
+    "-o",
+    "NumberOfPasswordPrompts=1",
+];
+
 /// The forwards a person's SSH config can set for a host, as `ssh -G`
 /// prints them. Desk's forward runs all the time, so it won't carry any.
 pub const CONFIG_FORWARDS: &[&str] = &["localforward", "remoteforward", "dynamicforward"];
@@ -266,6 +310,13 @@ impl Machine {
     pub fn command(&self, words: &[String]) -> Invocation {
         let line = words.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" ");
         self.ssh(&[ALWAYS, COMMAND], Some(line))
+    }
+
+    /// `words` run on the machine after signing in with the person's
+    /// password once ([`PASSWORD`]): only to put Desk's own key there.
+    pub fn password_command(&self, words: &[String]) -> Invocation {
+        let line = words.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" ");
+        self.ssh(&[PASSWORD, COMMAND], Some(line))
     }
 
     /// Whether the person's own `ssh` reaches the machine as it is: its
@@ -654,6 +705,31 @@ mod tests {
         let c = m.reachable();
         assert!(c.args.contains(&"ClearAllForwardings=yes".to_string()));
         assert!(!c.args.contains(&"-L".to_string()));
+    }
+
+    #[test]
+    fn a_password_sign_in_asks_once_tries_no_key_and_trusts_no_new_host() {
+        let i = devbox().password_command(&["true".to_string()]);
+        let pairs: Vec<(&str, &str)> = i
+            .args
+            .windows(2)
+            .filter(|w| w[0] == "-o")
+            .map(|w| (w[0].as_str(), w[1].as_str()))
+            .collect();
+        for want in [
+            "StrictHostKeyChecking=yes",
+            "PubkeyAuthentication=no",
+            "NumberOfPasswordPrompts=1",
+            "ClearAllForwardings=yes",
+            "ControlMaster=no",
+            "BatchMode=no",
+        ] {
+            assert!(pairs.contains(&("-o", want)), "{want}: {i:?}");
+        }
+        assert!(!i.args.iter().any(|a| a == "BatchMode=yes"));
+        let dash = i.args.iter().position(|a| a == "--").unwrap();
+        assert_eq!(i.args[dash + 1], "dev@devbox");
+        assert_eq!(i.args.last().unwrap(), "true");
     }
 
     #[test]

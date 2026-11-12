@@ -71,27 +71,64 @@ pub async fn wsl_detect() -> CommandResult<Detection> {
 }
 
 /// Installs WSL with Ubuntu, as an administrator (Windows asks); Windows
-/// then needs a restart.
+/// then needs a restart, after which Windows opens Desk once by itself and
+/// the setup carries on.
 #[tauri::command]
 pub async fn wsl_install() -> CommandResult<()> {
     tauri::async_runtime::spawn_blocking(|| {
+        resume_after_restart();
         let elevated = Invocation {
             program: "powershell.exe".into(),
             args: vec![
                 "-NoProfile".into(),
                 "-Command".into(),
-                "Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','Ubuntu' -Verb RunAs -Wait".into(),
+                INSTALL_ELEVATED.into(),
             ],
         };
-        let status = elevated.command().status().map_err(text)?;
+        let status = elevated.command().status().map_err(|e| {
+            forget_resume();
+            text(e)
+        })?;
         if !status.success() {
-            return Err("WSL didn't install. Run “wsl --install -d Ubuntu” in PowerShell as an administrator.".into());
+            forget_resume();
+            return Err(install_refusal(status.code()));
         }
         Ok(())
     })
     .await
     .map_err(text)?
 }
+
+/// Runs `wsl --install -d Ubuntu` as an administrator and exits with its
+/// code, or with [`DECLINED`] when the person didn't give Windows the OK.
+const INSTALL_ELEVATED: &str = "try { $p = Start-Process -FilePath wsl.exe -ArgumentList '--install','-d','Ubuntu' -Verb RunAs -Wait -PassThru -ErrorAction Stop } catch { exit 1223 }; exit $p.ExitCode";
+/// Windows' ERROR_CANCELLED: the administrator prompt was declined.
+const DECLINED: i32 = 1223;
+
+/// What the person reads when WSL didn't install: whichever happened.
+fn install_refusal(code: Option<i32>) -> String {
+    match code {
+        Some(DECLINED) => "WSL wasn't installed: Windows didn't get an administrator's OK. Try again, and choose Yes when Windows asks.".into(),
+        Some(code) => format!(
+            "Windows couldn't install WSL (it stopped with code {code}). Try again; if it keeps stopping, run “wsl --install -d Ubuntu” in PowerShell as an administrator."
+        ),
+        None => "Windows couldn't install WSL: the install was stopped before it finished. Try again.".into(),
+    }
+}
+
+/// Forgets opening Desk after a restart: nothing is coming that needs it.
+#[tauri::command]
+pub fn wsl_forget_resume() {
+    forget_resume();
+}
+
+#[cfg(windows)]
+fn forget_resume() {
+    desk_wsl::startup::forget_resume();
+}
+
+#[cfg(not(windows))]
+fn forget_resume() {}
 
 /// Moves `distro` to WSL 2, which takes a few minutes and keeps its files.
 #[tauri::command]
@@ -197,6 +234,23 @@ fn start_at_signin() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Opens Desk once at the next sign-in. Best effort: without it, the person
+/// opens Desk after the restart and the setup carries on just the same.
+#[cfg(windows)]
+fn resume_after_restart() {
+    match std::env::current_exe() {
+        Ok(desk) => {
+            if let Err(e) = desk_wsl::startup::resume_after_restart(&desk) {
+                tracing::warn!(error = %format!("{e:#}"), "Desk won't open by itself after the restart");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "Desk won't open by itself after the restart"),
+    }
+}
+
+#[cfg(not(windows))]
+fn resume_after_restart() {}
+
 #[cfg(not(windows))]
 fn start_at_signin() -> eyre::Result<()> {
     eyre::bail!("Desk runs its backend in WSL on Windows only")
@@ -211,7 +265,7 @@ fn bundled(app: &AppHandle) -> eyre::Result<PathBuf> {
 /// and starts it at every sign-in. The app's next launch uses it.
 #[tauri::command]
 pub async fn wsl_setup(app: AppHandle, distro: String) -> CommandResult<()> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let set_up = tauri::async_runtime::spawn_blocking(move || {
         let wsl = WslExe::system();
         let found = detect(&wsl)
             .distros
@@ -246,7 +300,11 @@ pub async fn wsl_setup(app: AppHandle, distro: String) -> CommandResult<()> {
         Ok(())
     })
     .await
-    .map_err(text)?
+    .map_err(text)
+    .and_then(|r| r);
+    // Set up, or given up on: either way Desk needn't open after a restart.
+    forget_resume();
+    set_up
 }
 
 /// Turns on WSL's localhost forwarding in `%UserProfile%\.wslconfig`, then
@@ -297,6 +355,19 @@ pub async fn wsl_installed(app: tauri::State<'_, crate::App>) -> CommandResult<O
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_declined_prompt_and_a_failed_install_are_said_apart() {
+        assert!(install_refusal(Some(DECLINED)).contains("didn't get an administrator's OK"));
+        let failed = install_refusal(Some(1));
+        assert!(
+            failed.starts_with("Windows couldn't install WSL (it stopped with code 1)"),
+            "{failed}"
+        );
+        assert!(!failed.contains("administrator's OK"));
+        assert!(install_refusal(None).starts_with("Windows couldn't install WSL"));
+        assert!(INSTALL_ELEVATED.contains("exit 1223") && INSTALL_ELEVATED.contains("-PassThru"));
+    }
 
     #[test]
     fn the_check_is_said_as_the_setup_shows_it() {

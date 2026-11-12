@@ -8,6 +8,9 @@ import { agentKey } from "../chat/types";
 import { stopSpeaking } from "./api";
 import { owner, useMic } from "./mic";
 import { useVoiceStore } from "./store";
+import { retryVoice } from "./useVoice";
+import { ProblemNote } from "../ui/ProblemNote";
+import { permissionProblem, useRecheckOnFocus } from "../ui/privacy";
 import { pillView, STEPS } from "./view";
 import "../styles/voice.css";
 
@@ -26,6 +29,10 @@ export function VoicePill() {
   const { status, thinking, heardBy, transcript, error } = useVoiceStore();
   const on = useSettings((s) => s.voice);
   const setSettings = useSettings((s) => s.set);
+  // The system keeping the microphone from Desk: said with the setting that
+  // allows it, and voice starts again once Desk is back in front with it.
+  const micProblem = error ? permissionProblem(error, "starting voice") : null;
+  useRecheckOnFocus("microphone", micProblem !== null, retryVoice);
   const holdKeys = useSettings((s) => s.keys.pushToTalk);
   const holdTaken = useShortcuts((s) => s.status.pushToTalk.state === "taken");
   // A DM with the microphone, by its agent's name.
@@ -48,7 +55,7 @@ export function VoicePill() {
         </span>
         <span className="voice-text">
           <span className="voice-title">{view.title}</span>
-          <span className={error ? "voice-detail voice-error" : "voice-detail"}>{error ?? view.detail}</span>
+          <span className={error && !micProblem ? "voice-detail voice-error" : "voice-detail"}>{micProblem ? view.detail : (error ?? view.detail)}</span>
         </span>
         {status.state === "speaking" && (
           <button type="button" className="voice-btn" onClick={() => void stopSpeaking()} aria-label="Stop speaking">
@@ -67,6 +74,7 @@ export function VoicePill() {
           <MicIcon />
         </button>
       </div>
+      {micProblem && <ProblemNote problem={micProblem} className="voice-problem" />}
       {current >= 0 && (
         <ol className="voice-steps" aria-label="Turn progress">
           {STEPS.map((s, i) => (

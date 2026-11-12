@@ -15,11 +15,13 @@ mod hubs;
 mod links;
 mod logins;
 mod machine_accounts;
+mod machine_secret;
 mod machine_setup;
 mod machines;
 mod navigation;
 mod pair_gate;
 mod paired;
+mod privacy;
 mod remote_images;
 mod repos;
 mod reread;
@@ -1022,10 +1024,15 @@ pub fn run() {
             let sockets = Arc::new(broker::socket::Sockets::default());
             // The person's own machines, reached over SSH (none until one
             // is added).
+            // One ssh for every machine, which knows Desk's own key and
+            // the machines it was put on.
+            let ssh = desk_machine::SshExe::system()
+                .with_own_key(paths.root.join("machines").join("ssh").join("id_ed25519"));
             let machines = Arc::new(desk_machine::Machines::new(
-                desk_machine::SshExe::system(),
+                ssh.clone(),
                 &paths.root.join("machines"),
             ));
+            app.manage(Arc::new(machine_secret::SecretField::default()));
             let paired = Arc::new(paired::Paired::new(
                 paths.clone(),
                 backend.clone(),
@@ -1041,7 +1048,7 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_default();
             let fleet = desk_machine::fleet::Fleet::new(
-                desk_machine::SshExe::system(),
+                ssh,
                 machines,
                 paths.root.join("machines.json"),
                 home.clone(),
@@ -1122,6 +1129,13 @@ pub fn run() {
             machine_setup::machines_list,
             machine_setup::machine_probe,
             machine_setup::machine_trust,
+            machine_setup::machine_install_key,
+            machine_setup::machine_unlock_key,
+            machine_setup::machine_forget_key,
+            machine_setup::machine_linger_with_password,
+            machine_secret::machine_secret_request,
+            machine_secret::machine_secret_submit,
+            machine_secret::machine_secret_cancel,
             machine_setup::machine_public_key,
             machine_setup::machine_add,
             machine_setup::machine_reconnect,
@@ -1206,6 +1220,8 @@ pub fn run() {
             attachments::attachment_save,
             attachments::attachment_upload,
             drops::dropped_files,
+            privacy::privacy_open,
+            privacy::privacy_check,
             drops::dropped_file_read,
             drops::terminal_drop,
             drops::terminal_drop_cancel,
@@ -1226,6 +1242,7 @@ pub fn run() {
             voice::voice_status,
             wsl::wsl_detect,
             wsl::wsl_install,
+            wsl::wsl_forget_resume,
             wsl::wsl_convert,
             wsl::wsl_setup,
             wsl::wsl_fix_forwarding,
@@ -1368,6 +1385,35 @@ mod tests {
         // And a window that is neither gets nothing.
         let other = ask("elsewhere", "hub_fetch");
         assert!(other.contains("not allowed"), "{other}");
+        // Desk's own password field alone asks for and answers a password;
+        // it can do nothing with machines, pairing or the hub.
+        for cmd in [
+            "machine_secret_request",
+            "machine_secret_submit",
+            "machine_secret_cancel",
+        ] {
+            for label in ["main", "grid-c"] {
+                let refused = ask(label, cmd);
+                assert!(
+                    refused.contains("not allowed"),
+                    "{cmd} in {label}: {refused}"
+                );
+            }
+            let own = ask(machine_secret::LABEL, cmd);
+            assert!(!own.contains("not allowed"), "{cmd} in its window: {own}");
+        }
+        for cmd in [
+            "machine_install_key",
+            "machine_add",
+            "hub_fetch",
+            "pair_request",
+        ] {
+            let refused = ask(machine_secret::LABEL, cmd);
+            assert!(
+                refused.contains("not allowed"),
+                "{cmd} in the field: {refused}"
+            );
+        }
     }
 
     /// What `hub_connection` hands the page, serialized as the IPC sends it.
