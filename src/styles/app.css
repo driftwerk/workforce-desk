@@ -1649,6 +1649,100 @@ body.side-resizing * {
   justify-content: flex-end;
   gap: 8px;
 }
+/* New session: one field, the folder with its recent ones, the copy toggle,
+   the rest folded under Options, and why Start waits. Its height and
+   scrolling are every sheet's, below. */
+.ns-remote {
+  padding-left: 2px;
+}
+.ns-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+.ns-recent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ns-recent-row:hover,
+.ns-recent-row:focus-visible {
+  border-color: var(--border);
+  background: var(--sunken);
+}
+.ns-recent-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.ns-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.ns-copy input {
+  margin-top: 3px;
+  accent-color: var(--signal);
+}
+.ns-copy-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ns-copy-off {
+  cursor: default;
+  color: var(--muted);
+}
+.ns-options {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.ns-options > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.ns-options > summary::-webkit-details-marker {
+  display: none;
+}
+.ns-options > summary::before {
+  content: "›";
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.ns-options[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ns-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 12px;
+}
+.ns-foot {
+  align-items: center;
+}
+.ns-why {
+  flex: 1;
+  color: var(--blocked);
+}
+
 /* A sheet is never taller than the window: what it asks scrolls inside it,
    and its buttons stay at its foot, always reachable. */
 .sheet {

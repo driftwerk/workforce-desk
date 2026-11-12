@@ -129,6 +129,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/breakers/continue"),
     route("POST", "/api/desk/breakers/keep"),
     route("GET", "/api/desk/engines"),
+    route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
@@ -216,6 +217,8 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),
     route("DELETE", "/api/desk/providers/{}"),
+    // A voice key, tried before it is kept.
+    route("POST", "/api/desk/voice/keys/{}"),
     // The crew.
     route("GET", "/api/desk/overview"),
     with_query("GET", "/api/desk/activity", &["limit", "filter", "before"]),

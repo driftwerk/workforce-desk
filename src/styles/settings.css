@@ -1658,3 +1658,33 @@ legend.set-label {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* Desk's own field for a machine's password (its own window). */
+.secret-window {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 36px 24px 20px;
+  background: var(--surface);
+  color: var(--text);
+}
+.secret-window h1 {
+  margin: 0;
+}
+.secret-window p {
+  margin: 0;
+  line-height: 1.45;
+}
+.secret-window .sheet-foot {
+  margin-top: auto;
+}
+.secret-target {
+  overflow-wrap: anywhere;
+}
+.secret-drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 28px;
+}
