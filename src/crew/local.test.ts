@@ -4,6 +4,7 @@ import { HubError, type DeskHub } from "../hub/client";
 import {
   agentId,
   instructions,
+  nameTaken,
   purposeOf,
   RENAME_UNAVAILABLE,
   renameLocalAgent,
@@ -236,5 +237,21 @@ describe("waiting for an agent to serve again", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a name that's taken", () => {
+  const roster = [
+    { hubId: "local", id: "scout", name: "Scout" },
+    { hubId: "acme", id: "atlas", name: "Atlas" },
+  ];
+  it("is another agent's on the same hub, its case and spaces aside", () => {
+    expect(nameTaken("  scout ", roster, "local")).toBe(true);
+    expect(nameTaken("Atlas", roster, "local")).toBe(false);
+    expect(nameTaken("Ranger", roster, "local")).toBe(false);
+    expect(nameTaken("   ", roster, "local")).toBe(false);
+  });
+  it("isn't the agent's own, in another case", () => {
+    expect(nameTaken("SCOUT", roster, "local", "scout")).toBe(false);
   });
 });

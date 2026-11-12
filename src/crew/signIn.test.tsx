@@ -100,3 +100,23 @@ it("signs the Claude plan in once for the crew and coding sessions, unless the p
   const chatgpt = screen.getByText("ChatGPT plan").closest(".prov-row") as HTMLElement;
   expect(within(chatgpt).queryByRole("checkbox")).toBeNull();
 });
+
+it("won't make a second crew member of a name already on this computer, its case aside", async () => {
+  const { useChat } = await import("../chat/store");
+  providers = [plan("claude-code", "Claude plan", true)];
+  useChat.setState({ roster: [{ hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false }] });
+  try {
+    render(<NewCrew onClose={() => {}} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: " scout " } });
+    fireEvent.change(screen.getByRole("textbox", { name: /What they’re for/ }), { target: { value: "Watch CI" } });
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+    expect(screen.getByPlaceholderText("Scout").getAttribute("aria-invalid")).toBe("true");
+    expect((screen.getByRole("button", { name: "Create scout" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Ranger" } });
+    expect(screen.queryByText("That name is taken.")).toBeNull();
+    expect((screen.getByRole("button", { name: "Create Ranger" }) as HTMLButtonElement).disabled).toBe(false);
+  } finally {
+    useChat.setState({ roster: [] });
+  }
+});
