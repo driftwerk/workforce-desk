@@ -51,6 +51,11 @@ export function NewCrew({ onClose }: { onClose: () => void }) {
         .getState()
         .roster.filter((a) => a.hubId === "local")
         .map((a) => a.id);
+      // A name taken since the roster was last read is taken all the same.
+      if (nameTaken(who, useChat.getState().roster, "local")) {
+        setBusy(false);
+        return;
+      }
       // All of them in one go, or none of them: see `createLocalAgent`.
       id = await createLocalAgent(hub, who, purpose, brain ?? newAgentBrain(newAgent, []), taken, voice ?? defaultVoice);
       if (voice) set({ agentVoices: { ...agentVoices, [`local/${id}`]: voice } });

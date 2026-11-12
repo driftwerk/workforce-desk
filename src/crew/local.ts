@@ -20,12 +20,15 @@ export const agentId = (name: string, taken: readonly string[]): string => {
 /** Said when another agent on the same hub has the name. */
 export const NAME_TAKEN = "That name is taken.";
 
+/** A name as it reads: its case, spaces and Unicode spelling aside. */
+const asRead = (name: string) => name.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+
 /** Whether another agent on hub `hubId` (not `self`, when given) has
  *  `name`, its case and spaces aside: two agents of one name couldn't be
  *  told apart, in a room's @-mentions or anywhere else. */
-export const nameTaken = (name: string, roster: readonly { hubId: string; id: string; name: string }[], hubId: string, self?: string): boolean => {
-  const said = name.trim().toLocaleLowerCase();
-  return !!said && roster.some((a) => a.hubId === hubId && a.id !== self && a.name.trim().toLocaleLowerCase() === said);
+export const nameTaken = (name: string, roster: readonly { hubId: string; id: string; name?: string }[], hubId: string, self?: string): boolean => {
+  const said = asRead(name);
+  return !!said && roster.some((a) => a.hubId === hubId && a.id !== self && asRead(a.name ?? "") === said);
 };
 
 /** The instructions an agent starts with: its name and the person's own

@@ -121,6 +121,26 @@ it("won't make a second crew member of a name already on this computer, its case
   }
 });
 
+it("won't make a crew member of a name taken since the roster was last read", async () => {
+  providers = [plan("claude-code", "Claude plan", true)];
+  const { useChat } = await import("../chat/store");
+  const hub = { providers: vi.fn(async () => providers), accounts: vi.fn(async () => ({ accounts: [], store: "the keychain", signIns: [] })), createAgent: vi.fn(async () => {}) };
+  useDesk.setState({ hub: hub as unknown as DeskHub });
+  const refreshRoster = vi.fn(async () => useChat.setState({ roster: [{ id: "scout", hubId: "local", name: "Scout" }] as never }));
+  useChat.setState({ roster: [], refreshRoster });
+  try {
+    render(<NewCrew onClose={() => {}} />);
+    await act(async () => {});
+    fireEvent.change(screen.getByPlaceholderText("Scout"), { target: { value: "Scout" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /What they’re for/ }), { target: { value: "Watch CI" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create Scout" })));
+    expect(hub.createAgent).not.toHaveBeenCalled();
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+  } finally {
+    useChat.setState({ roster: [] });
+  }
+});
+
 it("closes once the crew member is made whole: their chat failing to open never offers to make them again", async () => {
   providers = [plan("claude-code", "Claude plan", true), plan("chatgpt", "ChatGPT plan", false)];
   const { useChat } = await import("../chat/store");
