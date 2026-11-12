@@ -67,6 +67,7 @@ import type {
   MemoryIndexStatus,
   MemoryNote,
   MemorySearch,
+  MemoryChoice,
   MemorySettings,
   NoteChange,
   SessionMemory,
@@ -147,35 +148,43 @@ export interface ComputerActivityRow {
   arguments?: { url?: string; target?: string | null; backend?: BrowserBackend; screenshot?: string | null };
 }
 
-/** Which browser: Desk's own, or the person's Chrome. */
+/** Which browser a row was made in: older rows say Desk's own or Chrome. */
 export type BrowserBackend = "desk" | "chrome";
-
-/** Which browsers Desk uses. */
-export type BrowserUses = "off" | "desk" | "chrome" | "both";
 
 /** Desk's browser settings, as the person set them. */
 export interface BrowserSettings {
-  use: BrowserUses;
-  /** Show Desk's own browser on screen; unset, as the hub is set up. */
-  show?: boolean;
-  /** The sites the person's Chrome may (`allow`) and may never (`block`) go to. */
+  /** Whether Desk uses the person's Chrome at all. */
+  on: boolean;
+  /** The sites Desk may (`allow`) and may never (`block`) go to. */
   sites: { allow: string[]; block: string[] };
 }
 
-/** The settings and how the person's Chrome stands. */
-export interface BrowserSettingsView {
-  settings: BrowserSettings;
-  chrome: { available: boolean; connected: boolean; min_version: number; turn_on: string };
+/** A Chrome profile Desk's extension connects from. */
+export interface ChromeProfile {
+  id: string;
+  /** The code Desk's extension shows in that Chrome. */
+  label: string;
+  version: string;
+  /** Pending until the person confirms it is theirs. */
+  state: "confirmed" | "pending";
+  connected: boolean;
+  /** The one Desk uses. */
+  chosen: boolean;
 }
 
-/** A browser open now. */
+/** The settings and how Desk's extension stands. */
+export interface BrowserSettingsView {
+  settings: BrowserSettings;
+  chrome: { connected: boolean; profiles: ChromeProfile[]; store_url: string | null };
+}
+
+/** A browser tab Desk has open now. */
 export interface BrowserLive {
   agent: string;
   user: string;
   session: string | null;
   url: string;
   host: string | null;
-  backend: BrowserBackend;
   idle_secs: number;
 }
 
@@ -940,6 +949,13 @@ export class DeskHub {
   };
   /** Pauses or resumes remembering every session. */
   pauseMemory = (paused: boolean): Promise<MemorySettings> => this.call("PATCH", "/api/desk/memory/settings", { paused });
+  /** Changes what Desk remembers, over the install's settings: remembering
+   *  at all, noting decisions, how long conversations are kept and how much
+   *  room Desk Memory may take. */
+  chooseMemory = (change: MemoryChoice): Promise<MemorySettings> => this.call("PATCH", "/api/desk/memory/settings", change);
+  /** What keeping conversations `days` would remove at the next tidy-up. */
+  memoryRetainPreview = (days: number): Promise<{ days: number; exchanges: number; sessions: number }> =>
+    this.call("GET", `/api/desk/memory/retain-preview?days=${encodeURIComponent(String(days))}`);
   /** Changes a group's memory switches: what `change` names, the rest kept. */
   changeGroupMemory = (id: string, change: Partial<Omit<GroupMemory, "deriveDecided">>): Promise<GroupMemory & { notice?: string }> =>
     this.call("PATCH", `/api/desk/memory/groups/${encodeURIComponent(id)}`, change);

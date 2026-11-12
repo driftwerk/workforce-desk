@@ -17,6 +17,7 @@ import {
   type Names,
 } from "../spend/budgets";
 import { useBudgets } from "../spend/budgetStore";
+import { hearBudget, type Known } from "../spend/sentence";
 
 /** What the form's "For" menu offers: a total, a default, or one item. */
 type ScopeChoice = "desk" | "each_session" | "each_agent" | `session:${string}` | `agent:${string}`;
@@ -58,6 +59,7 @@ export function Budgets() {
   const load = useBudgets((s) => s.load);
   const names = useNames();
   const [problem, setProblem] = useState<string | null>(null);
+  const [byField, setByField] = useState(false);
   useEffect(() => {
     if (hub) void load();
   }, [hub, load]);
@@ -87,7 +89,7 @@ export function Budgets() {
         </p>
       )}
       {supported === false ? (
-        <p className="faint small">This workspace's hub doesn't keep budgets yet.</p>
+        <p className="faint small">This version of Desk doesn't keep budgets yet. Update Desk to set them.</p>
       ) : !view ? (
         <p className="faint small">{failed ? "Couldn’t read the budgets just now." : "Loading…"}</p>
       ) : (
@@ -118,9 +120,13 @@ export function Budgets() {
             )}
           </section>
 
-          <section className="prov-section" aria-label="Add a budget">
+          <section className="prov-section budget-add" aria-label="Add a budget">
             <h2 className="field-label">Add a budget</h2>
-            <AddBudget names={names} onAdd={(b) => run(hub!.putBudget(b))} />
+            <SayBudget names={names} onAdd={(b) => run(hub!.putBudget(b))} />
+            <button type="button" className="link small budget-more" aria-expanded={byField} onClick={() => setByField(!byField)}>
+              {byField ? "Fewer options" : "Set it up field by field"}
+            </button>
+            {byField && <AddBudget names={names} onAdd={(b) => run(hub!.putBudget(b))} />}
           </section>
 
           <section className="prov-section" aria-label="Loops and failures">
@@ -242,7 +248,7 @@ function EditBudget({
       <WhenOver value={over} onChange={setOver} />
       {refused && (
         <span className="small state-blocked budget-refused" role="alert">
-          Not saved: see why above.
+          Not saved. Desk said why at the top of Budgets.
         </span>
       )}
       <span className="budget-actions">
@@ -252,6 +258,69 @@ function EditBudget({
         <button type="button" className="btn" onClick={onCancel}>
           Cancel
         </button>
+      </span>
+    </form>
+  );
+}
+
+/** What Desk can name in a sentence: this computer's agents, its open
+ *  sessions and the sidebar's groups. */
+const useKnown = (names: Names): Known => {
+  const sessions = useDesk((s) => localSessions(s.sessions));
+  const roster = useChat((s) => s.roster);
+  const local = useChat((s) => s.hubs.find((h) => h.local)?.id);
+  const layout = useLayout();
+  return useMemo(
+    () => ({
+      agents: roster.filter((a) => a.hubId === local).map((a) => ({ id: a.id, name: a.name })),
+      sessions: Object.values(sessions)
+        .filter((s) => s.state !== "closed")
+        .map((s) => ({ id: s.id, name: names.session(s.id) ?? s.name })),
+      groups: layout.groups.map((g) => ({ id: g.id, name: g.name })),
+    }),
+    [roster, local, sessions, layout, names],
+  );
+};
+
+/** A budget in the person's own words: "keep me under $20 a day". Desk
+ *  says back what it heard before it's added. */
+function SayBudget({ names, onAdd }: { names: Names; onAdd: (b: NewBudget) => Promise<boolean> }) {
+  const known = useKnown(names);
+  const [said, setSaid] = useState("");
+  const [busy, setBusy] = useState(false);
+  const heard = said.trim() ? hearBudget(said, known) : null;
+  const budget = heard && "budget" in heard ? heard.budget : null;
+  return (
+    <form
+      className="budget-say"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!budget || busy) return;
+        setBusy(true);
+        void onAdd(budget)
+          .then((done) => done && setSaid(""))
+          .finally(() => setBusy(false));
+      }}
+    >
+      <span className="field-row">
+        <input
+          value={said}
+          aria-label="Budget, in your words"
+          placeholder="Keep me under $20 a day"
+          onChange={(e) => setSaid(e.target.value)}
+        />
+        <button type="submit" className="btn btn-signal" disabled={!budget || busy}>
+          {busy ? "Adding…" : "Add budget"}
+        </button>
+      </span>
+      <span className="small faint" role="status">
+        {!heard
+          ? "Say who, how much and how often: “each session under 500k tokens a week”, “Scout under $5 a day, just warn”."
+          : budget
+            ? `${scopeLabel(budget.scope, budget.group, names)}: ${budgetLine({ ...budget, period: budget.period, warnAt: budget.warnAt ?? 0.8, onExceed: budget.onExceed ?? "pause" })}.`
+            : "missing" in heard
+              ? heard.missing
+              : null}
       </span>
     </form>
   );

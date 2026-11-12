@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { deskListeners, useDesk } from "../hub/store";
-import type { DeskEvent, MemoryIndexStatus, MemorySettings } from "../hub/types";
+import type { DeskEvent, MemoryChoice, MemoryIndexStatus, MemorySettings } from "../hub/types";
 import { clock, count, providerName, thousands } from "../memory/words";
 import { plainError } from "../ui/plainError";
 
@@ -56,6 +56,33 @@ export function Memory() {
       const now = await hub!.pauseMemory(paused);
       setSettings(now);
       setProblem(now.notice ?? null);
+    } catch (e) {
+      setProblem(plainError(e));
+    }
+  };
+  const [saving, setSaving] = useState<keyof MemoryChoice | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  const choose = async (change: MemoryChoice) => {
+    setSaving(Object.keys(change)[0] as keyof MemoryChoice);
+    try {
+      const now = await hub!.chooseMemory(change);
+      setSettings(now);
+      setSaid(now.notice ?? null);
+      setProblem(null);
+    } catch (e) {
+      setProblem(plainError(e));
+    } finally {
+      setSaving(null);
+    }
+  };
+  // Keeping conversations for less: how many go, confirmed first.
+  const [shrink, setShrink] = useState<{ days: number; exchanges: number } | null>(null);
+  const chooseDays = async (days: number) => {
+    if (!settings || days >= settings.limits.retainDays) return choose({ retainDays: days });
+    try {
+      const p = await hub!.memoryRetainPreview(days);
+      if (p.exchanges === 0) return choose({ retainDays: days });
+      setShrink({ days, exchanges: p.exchanges });
     } catch (e) {
       setProblem(plainError(e));
     }
@@ -167,23 +194,192 @@ export function Memory() {
       )}
 
       {limits && (
-        <section className="prov-section" aria-label="Limits">
-          <h2 className="field-label">Limits</h2>
-          <p className="faint small">These limits are set in Desk’s memory settings file. Ask Desk to change them.</p>
-          <ul className="memory-limits small">
-            {!limits.enabled && <li>Remembering conversations is turned off for this Desk.</li>}
-            <li>Conversations are kept {count(limits.retainDays, "day")} after they end; notes stay until you forget them.</li>
+        <section className="prov-section" aria-label="What Desk remembers">
+          <h2 className="field-label">What Desk remembers</h2>
+          <Switch
+            label="Remember conversations"
+            sub={
+              limits.enabled
+                ? "Desk keeps what your sessions say and do, to search and to pick up later."
+                : "Off: Desk keeps nothing new from any session until it's on again."
+            }
+            on={limits.enabled}
+            saving={saving === "enabled"}
+            onChange={(enabled) => void choose({ enabled })}
+          />
+          <Switch
+            label="Note decisions, facts and to-dos"
+            sub={
+              !limits.enabled
+                ? "Comes on with remembering conversations."
+                : limits.derive
+                  ? `Desk's model reads what sessions say and notes them, at most ${count(limits.deriveCallsPerDay, "time")} a day (${thousands(limits.deriveCallsToday)} so far today)${limits.provider ? `, on ${providerName(limits.provider)}` : ""}.`
+                  : "Off: nothing a session says is sent to a model to note."
+            }
+            on={limits.enabled && limits.derive}
+            disabled={!limits.enabled}
+            saving={saving === "derive"}
+            onChange={(derive) => void choose({ derive })}
+          />
+          <NumberChoice
+            label="Keep conversations for"
+            unit="days"
+            value={limits.retainDays}
+            min={1}
+            max={3650}
+            note="After they end; notes stay until you forget them."
+            saving={saving === "retainDays"}
+            onChange={(retainDays) => void chooseDays(retainDays)}
+          />
+          {shrink && (
+            <div className="memory-confirm" role="alertdialog" aria-label="Keep conversations for less">
+              <span className="small">
+                This deletes conversations older than {count(shrink.days, "day")} (about {count(shrink.exchanges, "exchange")}) the next time Desk tidies up.
+              </span>
+              <span className="field-row">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-blocked"
+                  onClick={() => {
+                    const days = shrink.days;
+                    setShrink(null);
+                    void choose({ retainDays: days });
+                  }}
+                >
+                  Delete them
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => setShrink(null)}>
+                  Keep them
+                </button>
+              </span>
+            </div>
+          )}
+          <NumberChoice
+            label="Room for Desk Memory"
+            unit="MB"
+            value={limits.maxDiskMb}
+            min={100}
+            max={1_000_000}
+            note="When it's full, Desk stops remembering until there's room."
+            saving={saving === "maxDiskMb"}
+            onChange={(maxDiskMb) => void choose({ maxDiskMb })}
+          />
+          {said && (
+            <p className="small muted" role="status">
+              {said}
+            </p>
+          )}
+          <ul className="memory-limits small faint">
             <li>On its first read, Desk goes back {count(limits.backfillDays, "day")}.</li>
-            <li>Desk Memory may use up to {thousands(limits.maxDiskMb)} MB; when it's full, it stops remembering until there's room.</li>
             <li>Search takes in up to {thousands(limits.indexPerMinute)} passages a minute.</li>
-            <li>
-              {limits.derive
-                ? `Desk's model notes decisions at most ${count(limits.deriveCallsPerDay, "time")} a day (${thousands(limits.deriveCallsToday)} so far today)${limits.provider ? `, on ${providerName(limits.provider)}` : ""}.`
-                : "Noting decisions, facts and to-dos is turned off for this Desk."}
-            </li>
           </ul>
         </section>
       )}
     </section>
+  );
+}
+
+/** One of memory's switches, as the pause is drawn. */
+function Switch({
+  label,
+  sub,
+  on,
+  disabled,
+  saving,
+  onChange,
+}: {
+  label: string;
+  sub: string;
+  on: boolean;
+  disabled?: boolean;
+  saving?: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="ability-row">
+      <span className="ability-text">
+        <b id={id}>{label}</b>
+        <span className="ability-sub">{sub}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        className="switch"
+        aria-checked={on}
+        aria-labelledby={id}
+        aria-busy={saving || undefined}
+        disabled={disabled || saving}
+        onClick={() => onChange(!on)}
+      >
+        <span className="switch-knob" />
+      </button>
+    </div>
+  );
+}
+
+/** A number the person sets, kept once they leave the field or press
+ *  Enter, and only when it's one Desk can work with. */
+function NumberChoice({
+  label,
+  unit,
+  value,
+  min,
+  max,
+  note,
+  saving,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  value: number;
+  min: number;
+  max: number;
+  note: string;
+  saving?: boolean;
+  onChange: (n: number) => void;
+}) {
+  const id = useId();
+  const [typed, setTyped] = useState(String(value));
+  useEffect(() => setTyped(String(value)), [value]);
+  const n = Number(typed);
+  const fits = Number.isInteger(n) && n >= min && n <= max;
+  // Enter, then leaving the field, asks once.
+  const asked = useRef<number | null>(null);
+  useEffect(() => {
+    asked.current = null;
+  }, [value]);
+  const keep = () => {
+    if (!fits) return setTyped(String(value));
+    if (n === value || n === asked.current) return;
+    asked.current = n;
+    onChange(n);
+  };
+  return (
+    <div className="ability-row">
+      <label className="ability-text" htmlFor={id}>
+        <b>{label}</b>
+        <span className="ability-sub">
+          {fits ? note : `Between ${thousands(min)} and ${thousands(max)} ${unit}.`}
+        </span>
+      </label>
+      <span className="field-row memory-number">
+        <input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          min={min}
+          max={max}
+          value={typed}
+          aria-invalid={!fits}
+          disabled={saving}
+          onWheel={(e) => e.currentTarget.blur()}
+          onChange={(e) => setTyped(e.target.value)}
+          onBlur={keep}
+          onKeyDown={(e) => e.key === "Enter" && keep()}
+        />
+        <span className="small muted">{unit}</span>
+      </span>
+    </div>
   );
 }
