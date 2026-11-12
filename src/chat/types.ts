@@ -134,6 +134,8 @@ export interface ChatMessage {
   /** Changed after it was sent: a newer version replaced it, and the turn
    *  that answered the old one was set aside. */
   edited?: boolean;
+  /** An answer to a message you deleted since. */
+  answeredDeleted?: boolean;
   /** Where a kept message is in the hub's archive: higher was kept later. */
   seq?: number;
   /** The client id of the message whose turn said this: an answer, the
@@ -188,6 +190,9 @@ export const FEATURES = {
    *  old one and everything after it aside, and tells the agent what the
    *  set-aside reply did. */
   edit: "desk.edit",
+  /** Your own DM messages can be deleted, with the memories saved from
+   *  them (./remove.ts); the replies to one are marked `answered_deleted`. */
+  delete: "desk.delete",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */
@@ -265,6 +270,8 @@ export interface DeskMark {
   failed?: boolean;
   /** A newer version of the message, which replaced it. */
   edited?: boolean;
+  /** An answer to a message the person deleted since. */
+  answered_deleted?: boolean;
 }
 
 /** What a live turn is doing, as a snapshot says. */
