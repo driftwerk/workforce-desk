@@ -401,8 +401,9 @@ export const moveToApplications = (): Promise<void> => invoke("helper_move_to_ap
 export type InstallProgress =
   | { state: "running"; line: string }
   | { state: "done" }
-  /** `command` is what to run in a terminal by hand; `hint` says where. */
-  | { state: "failed"; message: string; command?: string; hint?: string };
+  /** `command` is what to run in a terminal by hand; `hint` says where;
+   *  `details` is what the installer last printed. */
+  | { state: "failed"; message: string; command?: string; hint?: string; details?: string };
 
 /** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
 export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
