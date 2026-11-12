@@ -4,15 +4,20 @@
 //! whose `path` is the installed Desk Helper and whose `allowed_origins` is
 //! Desk's extension alone. Chrome only, this person only.
 
+#[cfg(not(windows))]
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
+use std::path::Path;
+use std::path::PathBuf;
 
 use desk_chrome_host::manifest;
 use desk_core::Paths;
+#[cfg(not(windows))]
 use desk_core::install::Install;
 
-/// The program Chrome starts as Desk's host, for this install; none for a
-/// development run that wasn't given an extension to serve.
+/// The program Chrome starts as Desk's host, for this install, on macOS
+/// and Linux (on Windows it is always `Desk Helper.exe`).
+#[cfg(not(windows))]
 pub fn host_program(install: &Install, exe: &Path) -> Option<PathBuf> {
     match install {
         // The helper beside the app, which Desk's login item runs too.
@@ -35,13 +40,14 @@ pub fn host_program(install: &Install, exe: &Path) -> Option<PathBuf> {
 /// Writes (or, with no extension to serve, removes) Desk's host for
 /// Chrome. What it wrote, for the log.
 pub fn install(paths: &Paths) -> eyre::Result<Option<PathBuf>> {
-    let exe = std::env::current_exe()?;
-    let env: BTreeMap<String, String> = std::env::vars().collect();
-    let install = Install::of(&exe, &env, paths);
     #[cfg(windows)]
     let program = Some(crate::helper::launcher()?);
     #[cfg(not(windows))]
-    let program = host_program(&install, &exe);
+    let program = {
+        let exe = std::env::current_exe()?;
+        let env: BTreeMap<String, String> = std::env::vars().collect();
+        host_program(&Install::of(&exe, &env, paths), &exe)
+    };
     let Some(program) = program else {
         return Ok(None);
     };
@@ -79,7 +85,7 @@ pub fn native_hub() -> eyre::Result<Option<desk_chrome_host::Hub>> {
     }))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 
