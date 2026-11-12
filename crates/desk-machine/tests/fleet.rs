@@ -2245,8 +2245,17 @@ fn removing_with_uninstall_stops_desk_there_removes_everything_then_forgets_it()
     let unit = b.home().join(".config/systemd/user/desk-helper.service");
     assert!(unit.is_file() && b.home().join(".local/share/Desk").is_dir());
 
+    // Codex signed in there, by the person.
+    let codex = b.home().join(".codex");
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::write(codex.join("auth.json"), "{}").unwrap();
+
     let asked = r.asked.0.load(Ordering::SeqCst);
     assert!(r.fleet.uninstall(&id).unwrap());
+    assert!(
+        !codex.join("auth.json").exists(),
+        "Codex is signed out there"
+    );
     assert_eq!(
         r.asked.0.load(Ordering::SeqCst),
         asked + 1,
@@ -2257,6 +2266,8 @@ fn removing_with_uninstall_stops_desk_there_removes_everything_then_forgets_it()
         [
             "stop running",
             "stop done",
+            "sign_out running",
+            "sign_out done",
             "remove running",
             "remove done",
             "linger running",
@@ -2301,6 +2312,8 @@ fn an_uninstall_that_fails_says_why_and_forgets_nothing_until_it_works() {
         [
             "stop running",
             "stop done",
+            "sign_out running",
+            "sign_out done",
             "remove running",
             "remove failed"
         ]

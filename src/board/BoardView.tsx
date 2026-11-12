@@ -17,6 +17,7 @@ import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
+import { TicketOpener } from "./opener";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
 
@@ -64,13 +65,34 @@ const useNarrow = (el: HTMLElement | null): boolean => {
   return narrow;
 };
 
+/** Shift+wheel scrolls a pane's columns (which don't snap) sideways where
+ *  the system left it vertical (`deltaX` 0, as on Windows); where it already turned it
+ *  sideways (macOS), and for a trackpad's own sideways swipe, the browser
+ *  scrolls them and this does nothing. */
+export const useShiftWheel = (el: HTMLElement | null): void => {
+  useEffect(() => {
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.shiftKey || e.ctrlKey || e.metaKey || e.deltaX !== 0 || e.deltaY === 0) return;
+      if (el.scrollWidth <= el.clientWidth) return;
+      // Columns that snap (the Board view's) are left to the browser, whose
+      // steps snap column by column: a step of ours would be pulled back.
+      const snap = getComputedStyle(el).scrollSnapType;
+      if (snap && snap !== "none") return;
+      // Lines and pages as pixels, roughly as a browser counts them.
+      const by = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * el.clientWidth : e.deltaY;
+      e.preventDefault();
+      el.scrollBy({ left: by });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [el]);
+};
+
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
 /** The plan each ticket is in, by its goal, for the board's cards. */
 const Plans = createContext<ReadonlyMap<string, string>>(new Map());
-/** Where a card opens its ticket: the panel beside the main window's view,
- *  unless the board is somewhere that has none (a grid's own window). */
-const TicketOpener = createContext<(id: string) => void>((id) => useBoard.getState().openTicket(id));
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
@@ -292,13 +314,15 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   if (pane)
     return (
-      <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
-        {board.sync && <PaneSync board={board} now={now} />}
-        <LeftFilterShelf board={board} tickets={left} />
-        {columnsShown}
-        <BoardShort counts={counts} waiting={waitingCount} />
-        {live}
-      </div>
+      <TicketOpener.Provider value={pane.openTicket}>
+        <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
+          {board.sync && <PaneSync board={board} now={now} />}
+          <LeftFilterShelf key={board.id} board={board} tickets={left} />
+          {columnsShown}
+          <BoardShort counts={counts} waiting={waitingCount} />
+          {live}
+        </div>
+      </TicketOpener.Provider>
     );
 
   return (
@@ -358,7 +382,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
         </button>
       </header>
       {board.sync && <SyncBar key={board.id} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
-      <LeftFilterShelf board={board} tickets={left} />
+      <LeftFilterShelf key={board.id} board={board} tickets={left} />
       {columnsShown}
       {live}
       {menu && (
@@ -420,6 +444,8 @@ function Columns({
   const has = (state: TicketState) => every.some((c) => c.state === state && c.cards.length > 0);
   const on = picked ?? (has("doing") ? "doing" : has("todo") ? "todo" : (every.find((c) => c.cards.length)?.state ?? every[0]?.state ?? null));
   const dragged = useRef(false);
+  const [colsEl, setColsEl] = useState<HTMLDivElement | null>(null);
+  useShiftWheel(colsEl);
   // A column of hundreds draws its first cards, and the rest a page at a
   // time: drops land among what is drawn.
   const [limits, setLimits] = useState<Partial<Record<TicketState, number>>>({});
@@ -470,7 +496,7 @@ function Columns({
           ))}
         </div>
       )}
-      <div className="board-cols">
+      <div ref={setColsEl} className="board-cols">
         {cols.map((c, i) => (
           <ColumnView
             key={c.state}

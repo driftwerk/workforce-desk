@@ -12,7 +12,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { deskCall, HubError, refusal } from "./client";
 import { jsonBody, pairedHub, type HubRef } from "./net";
-import type { Board, BoardSync, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
+import type { Board, BoardSync, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncMember, SyncOffers, SyncPaused, SyncSystem, SyncVia, Ticket } from "./types";
+
+/** Where a person chooses who they are: the service, the hub it's reached
+ *  through, and the board's agent there (tried first). */
+export type MeWhere = { system: SyncSystem; via: SyncVia; agent?: string };
 
 /** What a check of a link answered with: what it found, or why the hub
  *  can't (its words, and the pause it would be), or a refusal. */
@@ -52,6 +56,14 @@ export const boardSyncOf = (hub: HubRef) => ({
   /** Asks the hub again who the person is on the board's Jira or Linear,
    *  and keeps its answer: the board as it now is. */
   recheckMe: (board: string): Promise<Board> => deskCall(hub, "POST", `/api/desk/boards/${encodeURIComponent(board)}/me`),
+  /** The members there whose name contains `name` (two letters at least):
+   *  id, name and avatar, never an email. */
+  membersNamed: async (where: MeWhere, name: string): Promise<SyncMember[]> =>
+    (await deskCall<{ members: SyncMember[] }>(hub, "POST", "/api/desk/boards/link/members", { ...where, name })).members ?? [],
+  /** Keeps whom the person chose to be there (theirs only, on the hub that
+   *  holds the key), or clears it: then their verified email goes again. */
+  chooseMe: (where: MeWhere, me: SyncMember | null): Promise<unknown> =>
+    deskCall(hub, "POST", "/api/desk/boards/link/me", me ? { ...where, id: me.id, name: me.name } : { ...where, clear: true }),
   /** Asks for a pass at once; the hub answers 202 and runs it. */
   syncNow: async (board: string): Promise<void> => {
     const res = await pairedHub(hub).fetch("POST", `/api/desk/boards/${encodeURIComponent(board)}/sync`);
@@ -134,7 +146,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
  *  (this computer's own keys); `ask`: an agent on the hub is asked to switch
  *  the service on; `unlink`: unlink, keeping the tickets; `retry`:
  *  resume and sync again). A pause you chose has Resume already. */
-export type SyncFix = { kind: "token" | "connections" | "ask" | "unlink" | "retry"; label: string };
+export type SyncFix = { kind: "token" | "connections" | "setup" | "ask" | "unlink" | "retry"; label: string };
 
 export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
   const system = SYSTEM_TITLE[s.system];
@@ -150,8 +162,8 @@ export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
         return s.via.kind === "hub" ? { kind: "token", label: "New token…" } : { kind: "connections", label: "Open connections" };
       case "missing":
         // On a hub, someone there switches it on: an agent is asked to. On
-        // this computer, its own keys are in Connections.
-        return s.via.kind === "hub" ? { kind: "ask", label: `Ask an agent on ${hub} to switch ${system} on` } : { kind: "connections", label: "Open connections" };
+        // this computer, Desk turns it on itself (with the person's key).
+        return s.via.kind === "hub" ? { kind: "ask", label: `Ask an agent on ${hub} to switch ${system} on` } : { kind: "setup", label: `Turn ${system} on here` };
       case "refused":
         return { kind: "retry", label: "Try again" };
       case "leftGroup":
@@ -197,7 +209,11 @@ const systemOfTools = (tools: readonly string[]): string => (tools[0]?.startsWit
 
 /** Whether the hub stood behind who the person is: by their own key, or by
  *  the one user there with their verified email. */
-export const vouched = (source: string | undefined): boolean => source === "vouched" || source === "vouchedByEmail";
+export const vouched = (source: string | undefined): boolean => source === "vouched" || source === "vouchedByEmail" || source === "vouchedBySlack" || source === "chosen";
+
+/** How a shared key's match was made, as the board says it. */
+export const matchedBy = (source: string | undefined): string | null =>
+  source === "vouchedByEmail" ? "by your verified email" : source === "vouchedBySlack" ? "by your Slack email" : source === "chosen" ? "you chose this" : null;
 
 /** Whether a ticket can be taken there: the hub vouches for who the
  *  person is, it is synced, no one has its issue, and it isn't finished. */

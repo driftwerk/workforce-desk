@@ -237,6 +237,12 @@ pub trait TrustConfirm: Send + Sync + 'static {
         let _ = question;
         false
     }
+    /// The person's yes to Desk adding an entry of its own to their SSH
+    /// config. No unless asked.
+    fn desk_entry(&self, question: &EntryQuestion) -> bool {
+        let _ = question;
+        false
+    }
     /// The person's yes to Desk asking for a machine's password to turn
     /// linger on there with sudo. No unless asked.
     fn linger(&self, question: &LingerQuestion) -> bool {
@@ -293,19 +299,46 @@ impl ForgetQuestion {
     }
 }
 
+/// Adding Desk's own entry for a machine to the SSH config: the exact
+/// lines, and where they go.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryQuestion {
+    pub name: String,
+    pub file: String,
+    pub block: String,
+}
+
+impl EntryQuestion {
+    pub fn text(&self) -> String {
+        format!(
+            "Give Desk its own SSH entry for {name}?\n\nDesk keeps these lines in its own file ({file}) and reaches {name} by them: the same machine, without its port forwards. Your ~/.ssh/config isn't changed.\n\n{block}",
+            name = self.name,
+            file = self.file,
+            block = self.block.trim_end()
+        )
+    }
+}
+
 /// Uninstalling Desk from a machine: its name and the exact address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UninstallQuestion {
     pub name: String,
     pub target: String,
+    /// Codex is signed out there too.
+    pub sign_out_codex: bool,
 }
 
 impl UninstallQuestion {
     pub fn text(&self) -> String {
         format!(
-            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with the sign-ins and memory Desk keeps there; its sessions end. Your files, repos, Claude Code and Codex stay, and so does Codex's own sign-in (~/.codex).",
+            "Uninstall Desk from {name}?\n\n{target}\n\nDesk stops its service there and removes ~/.local/share/Desk, with its memory and the Claude sign-ins Desk copied there (that doesn't revoke them: do that at claude.ai if you no longer trust {name}); its sessions end.{codex} Your files, repos, Claude Code and Codex stay.",
             name = self.name,
-            target = self.target
+            target = self.target,
+            codex = if self.sign_out_codex {
+                " Codex is signed out there too."
+            } else {
+                ""
+            },
         )
     }
 }

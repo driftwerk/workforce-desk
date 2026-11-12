@@ -122,7 +122,7 @@ export type Checked =
 /** A step of removing a machine with Desk uninstalled from it. */
 export interface RemoveEvent {
   machine: MachineId;
-  step: "stop" | "remove" | "linger" | "forget";
+  step: "stop" | "sign_out" | "remove" | "linger" | "forget";
   state: "running" | "done" | "failed" | "blocked";
   message?: string;
   /** What to run there by hand, when Desk couldn't. */
@@ -189,6 +189,11 @@ export interface MachineNative {
   remoteLog(id: MachineId): Promise<string>;
   /** The `Host` entries in the person's SSH config, read as text. */
   sshHosts(): Promise<HostEntry[]>;
+  /** "Give Desk its own entry": for `target`, whose SSH config forwards
+   *  ports, Desk adds an entry of its own without them (after the person's
+   *  yes to its exact lines natively). The name to reach it by; null when
+   *  the person said no. */
+  deskEntry(target: string): Promise<string | null>;
   /** A new name, a new address (only once the person says yes natively
    *  and it shows the machine's own host key), or both. */
   edit(id: MachineId, change: { target?: string; name?: string }): Promise<Edited>;
@@ -209,7 +214,7 @@ export interface MachineNative {
   /** Removes it after uninstalling Desk from it (its service, everything
    *  Desk keeps there, linger), saying each step on `removing`; nothing is
    *  forgotten when a step fails. */
-  uninstall(id: MachineId): Promise<boolean>;
+  uninstall(id: MachineId, opts?: { signOutCodex?: boolean }): Promise<boolean>;
   /** Stops an uninstall before it removes anything. */
   cancelUninstall(id: MachineId): Promise<void>;
   removing(f: (e: RemoveEvent) => void): () => void;
@@ -238,13 +243,14 @@ export const native: MachineNative = {
   log: (id) => invoke<LogLine[]>("machine_log", { id }),
   remoteLog: (id) => invoke<string>("machine_remote_log", { id }),
   sshHosts: () => invoke<HostEntry[]>("machine_ssh_hosts"),
+  deskEntry: (target) => invoke<string | null>("machine_desk_entry", { target }),
   edit: (id, change) => invoke<Edited>("machine_edit", { id, target: change.target ?? null, name: change.name ?? null }),
   checkReach: (id, target) => invoke<Checked>("machine_check_reach", { id, target }),
   revealLog: () => invoke<void>("machine_reveal_log"),
   cancelAdd: (id) => invoke<void>("machine_cancel_add", { id }),
   retryEngines: (id) => invoke<void>("machine_retry_engines", { id }),
   cancelUpdate: (id) => invoke<void>("machine_cancel_update", { id }),
-  uninstall: (id) => invoke<boolean>("machine_uninstall", { id }),
+  uninstall: (id, opts) => invoke<boolean>("machine_uninstall", { id, signOutCodex: opts?.signOutCodex ?? true }),
   cancelUninstall: (id) => invoke<void>("machine_cancel_uninstall", { id }),
   removing: (f) => subscribe(listen<RemoveEvent>("machine-remove", (e) => f(e.payload))),
 };

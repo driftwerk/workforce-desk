@@ -22,7 +22,8 @@ use desk_core::machine_backend::{Arch, Backend};
 use serde::{Deserialize, Serialize};
 
 use crate::admit::{self, Confirm, Gate, Question};
-use crate::hostkey::{self, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
+use crate::entry;
+use crate::hostkey::{self, EntryQuestion, Files, SwitchQuestion, TrustConfirm, UninstallQuestion};
 use crate::link::{Link, Machines};
 use crate::probe::{self, Access, Missed, Probe, ProbeKey, System};
 use crate::setup::{self, Person};
@@ -373,6 +374,9 @@ pub trait Host: Send + Sync + 'static {
 pub enum RemoveStep {
     /// Desk's service stopped there, and its unit taken away.
     Stop,
+    /// Codex signed out there (its own sign-in, `~/.codex`); Desk's copies
+    /// of the Claude accounts' sign-ins go with its folder, next.
+    SignOut,
     /// Everything Desk keeps there removed.
     Remove,
     /// Linger turned off for the account.
@@ -2332,6 +2336,117 @@ impl Fleet {
         suggest::hosts(&self.home)
     }
 
+    /// "Give Desk its own entry" (`machine_desk_entry`): for `target`, whose
+    /// SSH config forwards ports, an entry in Desk's own file (never the
+    /// person's config) with every setting their config gives the machine
+    /// but the forwards, after the person's yes to its exact lines. Its
+    /// name (`desk-m-…`), to add or reach the machine by; `target` itself
+    /// when it forwards nothing; none when the person said no. One made
+    /// before for `target` is used again while it still reaches the same
+    /// place. Checked with ssh before it is kept: refused when the forwards
+    /// would reach it too (set under `Host *`). Blocking.
+    pub fn desk_entry(&self, target: &str) -> Result<Option<String>, String> {
+        let machine = Self::looked_at(target)?;
+        if entry::is_desks(machine.target.as_str()) {
+            return Err("That's already Desk's own SSH entry, and it still forwards ports: the forwards come from your SSH config's Host * (or a pattern). Move them under the hosts that use them, then try again.".into());
+        }
+        let file = self
+            .ssh
+            .desk_config()
+            .ok_or("Desk can't keep SSH entries of its own here.")?
+            .to_path_buf();
+        let user_config = self.home.join(".ssh").join("config");
+        // Reading the config can run what it says (`Match exec`).
+        self.ask(&machine)?;
+        let said = self.settings_said(&machine)?;
+        let theirs = ssh::Settings::parse(&said);
+        if theirs.forwards.is_empty() {
+            return Ok(Some(machine.target.to_string()));
+        }
+        let read = |config: &std::path::Path, host: &str| -> Result<String, String> {
+            let out = self
+                .ssh
+                .settings_with(config, host)
+                .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+            if !out.status.success() {
+                return Err(ssh::problem(&machine, &out.stderr));
+            }
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        };
+        let same_place = |s: &ssh::Settings| {
+            s.hostname == theirs.hostname && s.port == theirs.port && s.user == theirs.user
+        };
+        let mut entries = entry::read(&file);
+        let mut stale: Option<String> = None;
+        // One made before for this target: used again while it still goes
+        // to the same address, as the same account, forwarding nothing
+        // (connecting checks it's the same host key).
+        if let Some(e) = entries.iter().find(|e| e.target == machine.target.as_str()) {
+            let now = ssh::Settings::parse(&read(&file, &e.alias)?);
+            if now.forwards.is_empty() && same_place(&now) {
+                return Ok(Some(e.alias.clone()));
+            }
+            stale = Some(e.alias.clone());
+            entries.retain(|x| Some(&x.alias) != stale.as_ref());
+        }
+        let alias = loop {
+            let nonce = format!("{:06x}", rand::random::<u32>() & 0xff_ffff);
+            let alias = entry::alias_for(&machine.name, &nonce);
+            if !entries.iter().any(|e| e.alias == alias) {
+                break alias;
+            }
+        };
+        // What the person's config gives a name it has no entry for: what
+        // the machine's own settings are told apart from.
+        let fresh = {
+            let out = self
+                .ssh
+                .settings_with(&user_config, &alias)
+                .map_err(|e| format!("Desk couldn't run ssh: {e}"))?;
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let lines = entry::lines(&said, &fresh);
+        let text = entry::block(&alias, machine.target.as_str(), &lines);
+        let made = entry::Entry {
+            alias: alias.clone(),
+            target: machine.target.to_string(),
+            text: text.clone(),
+        };
+        let mut with = entries.clone();
+        with.push(made.clone());
+        // What ssh would make of it, before it is kept.
+        let dir = file
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| self.home.clone());
+        let _ = std::fs::create_dir_all(&dir);
+        let trial = dir.join(format!(".config.check-{}", std::process::id()));
+        std::fs::write(&trial, entry::file_text(&with, &user_config))
+            .map_err(|_| "Desk couldn't check its SSH entry with ssh.".to_string())?;
+        let checked = read(&trial, &alias);
+        let _ = std::fs::remove_file(&trial);
+        let checked = ssh::Settings::parse(&checked?);
+        if !checked.forwards.is_empty() {
+            return Err("Your SSH config forwards ports for every host it reaches (under Host * or a pattern), so an entry of Desk's would carry them too. Move those forwards under the hosts that use them, then try again.".into());
+        }
+        if !same_place(&checked) {
+            return Err("Desk's entry wouldn't reach the same place as yours. Give Desk an address instead.".into());
+        }
+        let question = EntryQuestion {
+            name: machine.name.clone(),
+            file: entry_shown(&file, &self.home),
+            block: text,
+        };
+        let confirm = &self.trust;
+        if !self.trust_gate.ask(|| confirm.desk_entry(&question))? {
+            return Ok(None);
+        }
+        // The file as it is now: another change may have come in meanwhile.
+        entry::add(&file, made, stale.as_deref(), &user_config)?;
+        tracing::info!(machine = %machine.name, entry = %alias, "kept Desk's own SSH entry");
+        Ok(Some(alias))
+    }
+
     /// The last `lines` of Desk's own log on machine `id` (its service's,
     /// from `journalctl --user`), read over SSH with Desk's fixed options;
     /// each line cleaned to plain text. Gives up after `within`. Blocking.
@@ -2598,6 +2713,18 @@ impl Fleet {
                 }
             }
             self.update_kept(id, |k| k.machine.target = t.clone());
+            // Desk's own SSH entry for the address it leaves goes with it.
+            if entry::is_desks(machine.target.as_str())
+                && machine.target.as_str() != t.as_str()
+                && let Some(file) = self.ssh.desk_config()
+                && let Err(e) = entry::remove(
+                    file,
+                    machine.target.as_str(),
+                    &self.home.join(".ssh").join("config"),
+                )
+            {
+                tracing::warn!(machine = id, error = %e, "couldn't take Desk's SSH entry for an address left away");
+            }
             // Desk's own key goes with it: the same machine takes it.
             if self.rows().get(id).is_some_and(|r| r.kept.own_key) {
                 self.ssh.uses_own_key(t.as_str(), true);
@@ -2638,6 +2765,14 @@ impl Fleet {
         if row.saved {
             self.save();
         }
+        // Desk's own SSH entry for it goes with it.
+        let target = row.kept.machine.target.as_str();
+        if entry::is_desks(target)
+            && let Some(file) = self.ssh.desk_config()
+            && let Err(e) = entry::remove(file, target, &self.home.join(".ssh").join("config"))
+        {
+            tracing::warn!(machine = id, error = %e, "couldn't take Desk's SSH entry for a removed machine away");
+        }
         self.drop_link(id);
         self.host.changed();
         Ok(())
@@ -2651,6 +2786,12 @@ impl Fleet {
     /// says why and nothing is forgotten: Try again, or remove it without
     /// uninstalling. Only a machine's own install is ever touched. Blocking.
     pub fn uninstall(&self, id: &str) -> Result<bool, String> {
+        self.uninstall_with(id, true)
+    }
+
+    /// As [`Fleet::uninstall`], signing Codex out there only when
+    /// `sign_out_codex` (the person may use Codex there outside Desk).
+    pub fn uninstall_with(&self, id: &str, sign_out_codex: bool) -> Result<bool, String> {
         let machine = self
             .machine(id)
             .ok_or("That machine isn't in Desk any more.")?;
@@ -2668,6 +2809,7 @@ impl Fleet {
         let question = UninstallQuestion {
             name: name.clone(),
             target: machine.target.to_string(),
+            sign_out_codex,
         };
         let confirm = &self.trust;
         if !self.trust_gate.ask(|| confirm.uninstall(&question))? {
@@ -2759,6 +2901,31 @@ impl Fleet {
             drop(held);
             self.kick(id);
             return Ok(false);
+        }
+        // Codex's own sign-in there, which removing Desk's folder leaves:
+        // signed out as the person would (`codex logout`), else the line to
+        // run. Never a reason to stop: Desk there is already stopped.
+        if sign_out_codex {
+            say(RemoveStep::SignOut, StepState::Running, None, None);
+            match self.step_uncancellable().run(|| {
+                setup::run(
+                    &self.ssh,
+                    &machine,
+                    setup::UNINSTALL_SIGN_OUT_SCRIPT,
+                    "sign-out",
+                )
+            }) {
+                Ok(_) => say(RemoveStep::SignOut, StepState::Done, None, None),
+                Err(m) => {
+                    self.note(id, LogKind::Error, m);
+                    say(
+                        RemoveStep::SignOut,
+                        StepState::Blocked,
+                        Some(format!("Codex may still be signed in on {name}.")),
+                        Some("codex logout".into()),
+                    );
+                }
+            }
         }
         let removed = run(
             RemoveStep::Remove,
@@ -2886,6 +3053,20 @@ impl Fleet {
     pub fn home(&self) -> &Path {
         &self.home
     }
+}
+
+/// `file` as the person names it: `~/…` under their home.
+fn entry_shown(file: &Path, home: &Path) -> String {
+    file.strip_prefix(home).map_or_else(
+        |_| file.display().to_string(),
+        |rest| {
+            let parts: Vec<String> = rest
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            format!("~/{}", parts.join("/"))
+        },
+    )
 }
 
 #[cfg(test)]

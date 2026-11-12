@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { openTarget } from "../shell/navigate";
@@ -11,8 +11,14 @@ import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, T
 import { openUrl } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { STATE_TITLE } from "./board";
+import { ChooseMe } from "./ChooseMe";
 import { useBoard } from "./store";
 import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
+import { connectionsOf, type Listing } from "../hub/connections";
+import { useDesk } from "../hub/store";
+import { Connect } from "../settings/Connections";
+import { useAgentConfigs } from "../crew/agentBrain";
+import { bindingOf, choose, setAgentConnectors, throughOf, todayOf } from "../crew/connectors";
 
 /** What a hub (or this computer) said when asked whether it offers the
  *  system's tools. */
@@ -76,7 +82,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const [me, setMe] = useState("");
   /** Who the hub says the person is on the target's system (null: it
    *  can't say), by the system, hub and target it was asked for. */
-  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; byEmail?: boolean } | null>(null);
+  const [heardMe, setHeardMe] = useState<{ key: string; me: SyncAssignee | null; why?: string; by?: "email" | "slack" | "chosen" } | null>(null);
+  /** Choosing who they are on a shared key. */
+  const [choosing, setChoosing] = useState(false);
   /** The person said the hub's answer isn't them: it isn't kept. */
   const [notMe, setNotMe] = useState(false);
   /** Bumped to ask the hub again. */
@@ -93,6 +101,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
   // ── Which hubs offer the system ─────────────────────────────────────────
   const probeRun = useRef(0);
+  /** Bumped once this computer has the system turned on: asked again. */
+  const [reprobe, setReprobe] = useState(0);
   const keptKey = (kept ?? []).map((h) => `${h.id}:${h.hasToken}`).join(",");
   useEffect(() => {
     if (!system) return;
@@ -118,7 +128,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     for (const c of choices) if (c.kept?.hasToken) void ask(c.id, { kind: "hub", hub: c.id });
     void ask(THIS, { kind: "thisHub" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [system, keptKey, choices.length]);
+  }, [system, keptKey, choices.length, reprobe]);
 
   const choice = choices.find((c) => c.id === viaKey) ?? null;
   const via: SyncVia | null = viaKey === THIS ? { kind: "thisHub" } : choice ? { kind: "hub", hub: choice.id } : null;
@@ -179,7 +189,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // hub that wants the id says so as a refusal.
   useEffect(() => {
     if (!now || !targetKey) return;
-    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, byEmail: now.check.meBy === "email" });
+    if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, by: now.check.meBy });
     else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
@@ -332,6 +342,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
               const p = probes[c.id];
               return p?.state === "no" && p.noAgent ? <NoAgent key={c.id} choice={c} system={system} words={p.error} /> : null;
             })}
+            {probes[THIS]?.state === "no" && !hubOffers && !choices.some((c) => probes[c.id]?.state === "checking") && (
+              <ThisComputerSetup key={system} system={system} disabled={busy} onReady={() => setReprobe((n) => n + 1)} />
+            )}
             {choices.length === 0 && <span className="move-opt-sub">No workspace is connected to Desk: link one in Settings → Workspaces to sync through its {SYSTEM_TITLE[system]}.</span>}
             {choice && (probe?.state === "needsToken" || (probe?.state === "no" && probe.noToken)) && (
               <TokenPanel key={choice.id} choice={choice} again={probe.state === "no"} />
@@ -437,17 +450,21 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             <MatchLine ready={filterReady} now={now} whole={filterKind === "all"} />
             {knownMe && (
               <span className="move-opt-sub sync-me">
-                {heard?.byEmail ? (
+                {heard?.by === "chosen" ? (
                   <>
-                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there by your verified email: Mine and Take it go by that.
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and you chose <b>{knownMe.name}</b> there: Mine and Take it go by that.
+                  </>
+                ) : heard?.by ? (
+                  <>
+                    {viaName} uses a shared {SYSTEM_TITLE[system]} key, and matched you to <b>{knownMe.name}</b> there {heard.by === "slack" ? "by your Slack email" : "by your verified email"}: Mine and Take it go by that.
                   </>
                 ) : (
                   <>
                     {viaName} knows you as <b>{knownMe.name}</b> on {SYSTEM_TITLE[system]}: Mine and Take it go by that.
                   </>
                 )}{" "}
-                <button type="button" className="link" onClick={() => setNotMe(true)}>
-                  That’s not me
+                <button type="button" className="link" onClick={() => (heard?.by ? setChoosing(true) : setNotMe(true))}>
+                  {heard?.by === "chosen" ? "Change" : "That’s not me"}
                 </button>
               </span>
             )}
@@ -458,6 +475,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
                 {!notMe && heard?.why && /shared/.test(heard.why) && (
                   <>
+                    <button type="button" className="link" onClick={() => setChoosing(true)}>
+                      Choose who you are
+                    </button>
+                    {" · "}
                     <button type="button" className="link" onClick={() => openSettingsAt("connections")}>
                       Set up your own {SYSTEM_TITLE[system]} key
                     </button>
@@ -475,6 +496,19 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   Check again
                 </button>
               </span>
+            )}
+            {choosing && system && via && (
+              <ChooseMe
+                where={{ system, via, ...(found?.agent?.id ? { agent: found.agent.id } : {}) }}
+                hub={viaName}
+                chosen={heard?.by === "chosen"}
+                onCancel={() => setChoosing(false)}
+                onDone={() => {
+                  setChoosing(false);
+                  setNotMe(false);
+                  setAsked((n) => n + 1);
+                }}
+              />
             )}
           </fieldset>
         )}
@@ -657,6 +691,100 @@ function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick
         <span className="move-opt-sub">{sub}</span>
       </span>
     </label>
+  );
+}
+
+/** This computer hasn't the system's tools for the person, and no hub
+ *  offers them: Desk turns them on itself. A board here syncs through this
+ *  computer's default agent's tools with the person's own connection, so
+ *  Desk turns the connector on for that agent; the one thing it can't make
+ *  up is the person's key, so with no connection yet it asks for one in
+ *  place first. Then the dialog asks this computer again. */
+export function ThisComputerSetup({ system, disabled, onReady, fallback = null }: { system: SyncSystem; disabled: boolean; onReady: () => void; fallback?: ReactNode }) {
+  const title = SYSTEM_TITLE[system];
+  const desk = useDesk((s) => s.hub);
+  const local = localHubRef();
+  const agent = useChat((s) => (local ? s.roster.find((a) => a.hubId === local.id && a.isDefault) : undefined));
+  const key = agent ? agentKey(agent) : "";
+  const config = useAgentConfigs((s) => s.configs[key]);
+  const [api] = useState(() => (local ? connectionsOf(local) : null));
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    api.list().then(setListing, () => setListing(null));
+  }, [api]);
+  // Read fresh each time: it may have changed since it was last read.
+  useEffect(() => {
+    if (desk && agent) void useAgentConfigs.getState().load(desk, agent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desk, agent?.id]);
+
+  const connector = listing?.connectors.find((c) => c.id === system);
+  // Where Desk can't help, what the caller offers instead; nothing while
+  // the connections and the agent's config are still being read.
+  if (!api || !desk || !agent) return <>{fallback}</>;
+  if (!connector || config === undefined) return null;
+  // The person's own connection, for all their agents: a board here syncs
+  // with their keys, never one kept just for an agent.
+  const connected = connector.connections.some((x) => x.status === "connected" && x.level === "all");
+  const on = throughOf(bindingOf(config), system) !== "off";
+  // Connected and on, yet not offered: nothing here Desk can change; the
+  // row says why.
+  if (connected && on) return <>{fallback}</>;
+
+  const turnOn = async () => {
+    setWorking(true);
+    setProblem(null);
+    try {
+      if (!on) {
+        const fresh = await api.list();
+        const toml = await setAgentConnectors(desk, agent.id, (b) =>
+          throughOf(b, system) === "off" ? choose(b, system, "mine", todayOf(fresh, agent.id)) : b,
+        );
+        useAgentConfigs.getState().put(key, toml);
+      }
+      // A connection just made shows as made, should this computer still
+      // not offer it.
+      api.list().then(setListing, () => {});
+      onReady();
+    } catch (e) {
+      setProblem(saidOf(e));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="move-callout sync-this-computer">
+      {connected ? (
+        <ProblemNote
+          problem={{
+            plain: `${title} is connected on this computer, but it’s off for ${agent.name}, whose tools a board here syncs through.`,
+            ...(working || disabled ? {} : { fix: { label: `Turn ${title} on for ${agent.name}`, run: () => void turnOn() } }),
+          }}
+        />
+      ) : (
+        <>
+          <p className="move-opt-sub">
+            Connect {title} to sync through this computer{on ? "" : `; Desk turns it on for ${agent.name}`}.
+          </p>
+          <Connect api={api} connector={connector} at={{ level: "all" }} label={`Connect ${title}`} onDone={turnOn} />
+        </>
+      )}
+      {working && (
+        <p className="move-opt-sub" role="status">
+          Turning {title} on…
+        </p>
+      )}
+      {problem && (
+        <p className="small state-blocked" role="alert">
+          {problem}
+        </p>
+      )}
+    </div>
   );
 }
 
