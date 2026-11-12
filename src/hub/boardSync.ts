@@ -41,7 +41,7 @@ export const boardSyncOf = (hub: HubRef) => ({
     } catch {
       /* not the hub's JSON */
     }
-    return { ok: false, error: res.status === 404 || res.status === 405 ? "This computer's hub can't sync boards yet. Update Desk." : text.trim() || res.statusText || "The hub refused that.", paused: null, status: res.status };
+    return { ok: false, error: res.status === 404 || res.status === 405 ? "This version of Desk can't sync boards yet. Update Desk." : text.trim() || res.statusText || "Desk couldn’t do that.", paused: null, status: res.status };
   },
   link: (board: string, l: LinkBoard): Promise<Board> => deskCall(hub, "PUT", `/api/desk/boards/${encodeURIComponent(board)}/link`, l),
   unlink: (board: string): Promise<Board> => deskCall(hub, "DELETE", `/api/desk/boards/${encodeURIComponent(board)}/link`),
@@ -121,7 +121,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "noToken":
       return `Paused: ${hub} needs a new token.`;
     case "missing":
-      return `Paused: ${hub} no longer offers ${p.tools.join(", ")}.`;
+      return `Paused: no agent on ${hub} you can reach has ${systemOfTools(p.tools)} switched on any more.`;
     case "refused":
       return `Paused: ${hub} refused: ${p.reason}`;
     case "leftGroup":
@@ -142,8 +142,26 @@ export const syncStatus = (b: Board, hub: string): SyncStatus | null => {
 };
 
 /** "Jira ACME via Atlas": what a synced board is linked to. */
-export const linkedTo = (b: Board, hub: string): string | null =>
-  b.sync ? `${SYSTEM_TITLE[b.sync.system]} ${b.sync.target}${b.sync.via.kind === "hub" ? ` via ${hub}` : " with this computer's keys"}` : null;
+/** An agent's id as a person reads it: `lattice` is Lattice. */
+export const agentTitle = (id: string): string =>
+  id
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase() + w.slice(1))
+    .join(" ");
+
+/** "Jira ACME via Atlas", or "Jira ACME through Lattice on Atlas" when it
+ *  syncs through one of the hub's agents: what a synced board is linked to. */
+export const linkedTo = (b: Board, hub: string): string | null => {
+  const s = b.sync;
+  if (!s) return null;
+  const head = `${SYSTEM_TITLE[s.system]} ${s.target}`;
+  if (s.via.kind !== "hub") return `${head} with this computer's keys`;
+  return s.agent ? `${head} through ${agentTitle(s.agent)} on ${hub}` : `${head} via ${hub}`;
+};
+
+/** Whether a set of sync tools is Linear's (else Jira's). */
+const systemOfTools = (tools: readonly string[]): string => (tools[0]?.startsWith("linear") ? "Linear" : "Jira");
 
 /** Whether a ticket can be taken there: the hub vouches for who the
  *  person is, it is synced, no one has its issue, and it isn't finished. */

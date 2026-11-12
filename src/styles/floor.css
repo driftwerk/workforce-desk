@@ -85,10 +85,14 @@
 .floor-item-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   min-width: 0;
 }
+/* The name keeps its room; the state and time wrap under it when they would squeeze it. */
 .floor-item-head b {
+  min-width: min(14ch, calc(100% - 20px));
+  max-width: calc(100% - 20px);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -497,4 +501,77 @@
 .overseer-foot {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ── First-run setup, said by Desk's agent ──────────────────────────────── */
+
+.setup-guide .setup-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.setup-step {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.setup-step-mark {
+  width: 18px;
+  flex: none;
+  text-align: center;
+  color: var(--muted);
+}
+.setup-done .setup-step-mark {
+  color: var(--signal);
+}
+.setup-done,
+.setup-skipped {
+  opacity: 0.75;
+}
+.setup-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.setup-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+/* The overseer's own card sits in its step without a second frame. */
+.setup-step-actions .overseer-card {
+  flex-basis: 100%;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+.setup-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.setup-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--signal-soft);
+  flex: none;
+}
+.setup-guide .msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }

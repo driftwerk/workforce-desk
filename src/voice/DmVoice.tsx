@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
-import { Menu } from "../ui/Menu";
+import { Menu, type MenuEntry } from "../ui/Menu";
 import { stopSpeaking } from "./api";
 import { useMic } from "./mic";
 import { useVoiceStore } from "./store";
@@ -115,6 +115,32 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
       )}
     </span>
   );
+}
+
+/** A DM's voice controls as a menu's entries, for a composer too narrow for
+ *  the buttons: talking on or off, and how the agent answers. Holding to
+ *  talk needs a button held down, so the menu names its keys instead. None
+ *  where voice doesn't run. */
+export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
+  const talking = useMic((m) => m.talk === agent);
+  const written = useSettings((s) => s.writtenReplies.includes(agent));
+  const holdKeys = useSettings((s) => s.keys.holdToTalkHere);
+  const talkKeys = useSettings((s) => s.keys.talkHere);
+  const here = useVoiceHere();
+  if (!here) return [];
+  return [
+    { kind: "separator" },
+    {
+      kind: "item",
+      label: talking ? `End the conversation with ${name}` : `Talk with ${name}`,
+      kbd: shortcutLabel(talkKeys),
+      onSelect: () => talkOrEnd(agent),
+    },
+    { kind: "item", label: "Hold to talk", hint: "hold the keys", kbd: shortcutLabel(holdKeys), disabled: true },
+    { kind: "separator" },
+    { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
+    { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+  ];
 }
 
 /** What voice is doing in a DM, above its composer: who's listening,

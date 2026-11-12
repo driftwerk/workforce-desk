@@ -4,6 +4,7 @@ import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn
 import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
 import { pluginEnv } from "../grids/terminals";
 import { useChat } from "../chat/store";
+import { GroupChoice } from "./GroupChoice";
 import { groupOf, sessionItem, UNGROUPED, type ItemKey, type Layout } from "../groups/model";
 import { moveItem, useLayout } from "../groups/store";
 import { useDesk } from "../hub/store";
@@ -13,10 +14,13 @@ import { native as machineNative, type MachineNative } from "../machines/native"
 import { RunOn } from "../machines/RunOn";
 import { FolderPicker } from "../machines/FolderPicker";
 import { homeWithin, onMachine } from "../machines/folders";
-import { nameOfMachine } from "../machines/words";
+import { nameOfMachine, thisComputerLower } from "../machines/words";
 import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
 import { NEW_SESSION_LINE } from "../shell/newLines";
+import { CodexSigningIn, InstallEngine } from "../settings/EngineBlocks";
+import { SignInClaude } from "../settings/Accounts";
+import { useCodexSignIn } from "../engines/signIn";
 
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
 
@@ -76,6 +80,8 @@ export function NewSession({
   const machines = useMachines((s) => s.machines);
   const platform = useHost((h) => h.platform);
   const where = nameOfMachine(runOn, machines, platform);
+  // Mid-sentence: this computer, or the machine by name.
+  const whereSaid = runOn === LOCAL ? thisComputerLower(platform) : where;
   const [engine, setEngine] = useState<Engine>("claude");
   const [cwd, setCwd] = useState("");
   /** The folder typed is one the machine says isn't there. */
@@ -92,16 +98,21 @@ export function NewSession({
   const allAccounts = accountStore((s) => s.accounts);
   // The person's pick, by engine; until they pick, the engine's default.
   const [picked, setPicked] = useState<Partial<Record<Engine, string>>>({});
+  // Read as it is now: Desk may just have installed or signed one in.
+  const [readAt, setReadAt] = useState(0);
   useEffect(() => {
     let live = true;
-    hub
-      ?.engines()
-      .then((e) => live && setEngines(e))
+    (readAt ? hub?.enginesNow() : hub?.engines())
+      ?.then((e) => live && setEngines(e))
       .catch(() => live && setEngines(null));
     return () => {
       live = false;
     };
-  }, [hub]);
+  }, [hub, readAt]);
+  const readAgain = () => {
+    setReadAt(Date.now());
+    void accountStore.getState().load();
+  };
   const offered = startable(engines);
   // An engine the chosen computer doesn't have gives way to one it has.
   useEffect(() => {
@@ -119,6 +130,12 @@ export function NewSession({
   const ownWorks = ownSignInWorks(engines?.find((e) => e.engine === engine)?.signIn);
   const account = picked[engine] ?? defaultChoice(allAccounts, engine, ownWorks);
   const cantSignIn = accounts.length > 0 && !ownWorks && !accounts.some((a) => a.signedIn);
+  // Nothing to start on: no engine there, or the one chosen never signed in
+  // (and no account of its). Said, with the fix in place, and Start waits.
+  const info = engines?.find((e) => e.engine === engine);
+  const noEngine = engines !== null && offered.length === 0;
+  const signedOut = !noEngine && info?.installed === true && info.signIn.state === "out" && accounts.length === 0;
+  const blocked = noEngine || signedOut || cantSignIn;
   useEffect(() => {
     void accountStore.getState().load();
   }, [hub, accountStore]);
@@ -214,11 +231,13 @@ export function NewSession({
             ))}
           </div>
         )}
-        {remote && missing.length > 0 && (
+        {remote && missing.length > 0 && !noEngine && (
           <p className="muted small">
             {missing.join(" and ")} {missing.length === 1 ? "isn’t" : "aren’t"} installed on {where}.
           </p>
         )}
+        {noEngine && engines && <NothingToStart engines={engines} machine={runOn} where={whereSaid} native={native} onFixed={readAgain} />}
+        {signedOut && info && <NotSignedIn engine={info} machine={runOn} where={whereSaid} native={native} onFixed={readAgain} />}
         {remote ? (
           <FolderPicker key={runOn} machine={runOn} name={where} native={native} value={cwd} onChange={setCwd} always onMissing={setNoFolder} />
         ) : (
@@ -248,21 +267,7 @@ export function NewSession({
         {layout.groups.length > 0 && (
           <div className="field">
             <span className="ov-label muted">Group</span>
-            <div className="chip-row" role="radiogroup" aria-label="Group">
-              {[...layout.groups, { id: UNGROUPED, name: "Ungrouped" }].map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  role="radio"
-                  className="chip-btn"
-                  aria-checked={group === g.id}
-                  aria-pressed={group === g.id}
-                  onClick={() => setGroup(g.id)}
-                >
-                  {g.name}
-                </button>
-              ))}
-            </div>
+            <GroupChoice group={group} onPick={setGroup} groups={layout.groups} />
             <span className="muted small">
               {groupSays(group, startedIn, layout.groups.find((g) => g.id === group)?.name ?? "Ungrouped", remote ? where : null)}
             </span>
@@ -299,7 +304,7 @@ export function NewSession({
         )}
         {cantSignIn && (
           <p className="small state-blocked" role="alert">
-            {ENGINE_TITLE[engine]} isn’t signed in on {where}, and none of its accounts there can sign in. Add an account again in Settings → Engines, then start the session.
+            {ENGINE_TITLE[engine]} isn’t signed in on {where}, and none of its accounts there can sign in. Sign one in again in Settings → Engines, then start the session.
           </p>
         )}
         {caps?.notes.map((n) => (
@@ -354,11 +359,64 @@ export function NewSession({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder) || cantSignIn}>
+          <button type="submit" className="btn btn-signal" disabled={busy || (!cwd && !remote) || !hub || (remote && noFolder) || blocked}>
             {remote ? `Start in ${cwd.trim().replace(/\/+$/, "") || "~"}` : "Start"}
           </button>
         </footer>
       </form>
+    </div>
+  );
+}
+
+/** No engine to start a session with there: what isn't installed, each
+ *  with Install. */
+function NothingToStart({ engines, machine, where, native, onFixed }: { engines: EngineInfo[]; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
+  const absent = engines.filter((e) => e.installed === false && (e.engine === "claude" || e.engine === "codex"));
+  return (
+    <div className="new-fix" role="group" aria-label="Nothing to start a session with">
+      <p className="small state-blocked">
+        {absent.length
+          ? `Neither Claude Code nor Codex is installed on ${where}, so there’s nothing to start a session with yet.`
+          : `Nothing on ${where} can start a session yet.`}
+      </p>
+      <span>
+        {/* A machine's installs both at once. */}
+        {(machine === LOCAL ? absent : absent.slice(0, 1)).map((e) => (
+          <InstallEngine key={e.engine} engine={e} machine={machine} where={where} native={native} onInstalled={onFixed} />
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** The engine chosen is installed but never signed in, and has no account:
+ *  sign it in here (Claude to an account, Codex to ChatGPT). */
+function NotSignedIn({ engine, machine, where, native, onFixed }: { engine: EngineInfo; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
+  const [signing, setSigning] = useState(false);
+  const codex = useCodexSignIn(machine, where, native, onFixed);
+  if (engine.engine === "claude" && signing)
+    return (
+      <SignInClaude
+        machine={machine}
+        where={where}
+        native={native}
+        onDone={() => {
+          setSigning(false);
+          onFixed();
+        }}
+      />
+    );
+  if (engine.engine === "codex" && codex.run.at !== "idle") return <CodexSigningIn codex={codex} machine={machine} where={where} />;
+  return (
+    <div className="new-fix" role="group" aria-label={`${engine.title} isn’t signed in`}>
+      <p className="small state-blocked">
+        {engine.title} isn’t signed in on {where}, so a session would stop at its sign-in.
+      </p>
+      <span>
+        <button type="button" className="btn btn-sm btn-signal" onClick={() => (engine.engine === "codex" ? void codex.begin() : setSigning(true))}>
+          {engine.engine === "codex" ? "Sign in to ChatGPT…" : "Sign in to Claude…"}
+        </button>
+      </span>
     </div>
   );
 }

@@ -117,10 +117,10 @@ export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: strin
 
 /** What a sign-in problem says. */
 export const problemText = (p: SignInProblem, store: string | null): string => {
-  const where = store ?? "the hub's store";
+  const where = store ?? "Desk's store";
   switch (p.problem) {
     case "gone":
-      return `${p.name}’s sign-in is no longer in ${where}: add the account again. Nothing is switched to it.`;
+      return `${p.name}’s sign-in is no longer in ${where}: sign it in again from its row. Nothing is switched to it.`;
     case "unreadable":
       return `Desk couldn’t read ${p.name}’s sign-in from ${where} just now, so nothing was switched. Unlock the keychain, then try again.`;
     case "notRemoved":

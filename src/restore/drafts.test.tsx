@@ -22,6 +22,8 @@ vi.mock("../platform", () => ({
   onNativeState: vi.fn(() => Promise.resolve(() => {})),
   subscribe: vi.fn(() => () => {}),
   openUrl: vi.fn(),
+  machinesList: vi.fn(async () => []),
+  onMachinesChanged: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 const { deskState } = await import("./boot");

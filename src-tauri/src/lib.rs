@@ -110,11 +110,9 @@ async fn hub_connection(app: State<'_, App>) -> CommandResult<HubConnection> {
             if let Some(why) = helper::login(&backend).status().blocked() {
                 return Err(why);
             }
+            // The page shows how far it has got meanwhile, and asks again.
             if Instant::now() > deadline {
-                return Err(
-                    "Desk Helper hasn’t started. Settings → Help says why, and can save a report."
-                        .into(),
-                );
+                return Err("Desk isn’t ready yet.".into());
             }
             std::thread::sleep(Duration::from_millis(500));
         }
@@ -259,10 +257,15 @@ fn tuple_available() -> bool {
 }
 
 #[tauri::command]
-async fn login_start(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+async fn login_start(
+    app: tauri::AppHandle,
+    plan: logins::Plan,
+    to: Option<logins::ClaudeUse>,
+) -> CommandResult<()> {
     let backend = app.state::<App>().backend()?;
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<logins::Logins>().start(&app, backend, plan)
+        app.state::<logins::Logins>()
+            .start(&app, backend, plan, to.unwrap_or_default())
     })
     .await
     .map_err(text)?
@@ -330,6 +333,51 @@ async fn helper_start(app: State<'_, App>) -> CommandResult<helper::Status> {
 fn helper_last_reason(app: State<'_, App>) -> Option<String> {
     let paths = app.backend.as_ref().map_or(&app.paths, |b| &b.paths);
     helper::last_reason_in(&paths.logs().join("desk-hubd.log"))
+}
+
+/// How far Desk Helper has got since it last started, from its log; none
+/// when it hasn't logged a start.
+#[tauri::command]
+fn helper_progress(app: State<'_, App>) -> Option<helper::Stage> {
+    let paths = app.backend.as_ref().map_or(&app.paths, |b| &b.paths);
+    helper::stage_in(&paths.logs().join("desk-hubd.log"))
+}
+
+/// Copies Desk into the Applications folder, then quits and opens the copy
+/// (macOS, when it runs from its disk image or Downloads). Answers only
+/// when it couldn't, with why.
+#[tauri::command]
+async fn helper_move_to_applications(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+) -> CommandResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        // Only a Desk that can't keep running where it is moves itself.
+        let backend = app.backend()?;
+        let status = tauri::async_runtime::spawn_blocking(move || helper::login(&backend).status())
+            .await
+            .map_err(text)?;
+        if status != helper::Status::MoveToApplications {
+            return Err("Desk is already where it can keep running, so it moves nothing.".into());
+        }
+        let exe = std::env::current_exe().map_err(text)?;
+        let moved = tauri::async_runtime::spawn_blocking(move || {
+            helper::moving::copy_to_applications(&exe)
+        })
+        .await
+        .map_err(text)?
+        .map_err(text)?;
+        tracing::info!(to = %moved.display(), "Desk copied itself to Applications; reopening there");
+        helper::moving::reopen_after_exit(&moved).map_err(text)?;
+        handle.exit(0);
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (handle, app);
+        Err("Only Desk on a Mac is moved to the Applications folder.".into())
+    }
 }
 
 #[tauri::command]
@@ -1121,6 +1169,8 @@ pub fn run() {
             helper_open_login_items,
             helper_start,
             helper_last_reason,
+            helper_progress,
+            helper_move_to_applications,
             cli_installed,
             cli_install,
             report_save,

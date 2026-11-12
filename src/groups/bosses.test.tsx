@@ -90,8 +90,8 @@ describe("who oversees a group", () => {
   });
 
   it("says plainly when Desk isn't connected, rather than doing nothing", async () => {
-    await expect(overseeGroup(null, "mia", "globex", null)).rejects.toThrow(/isn’t connected/);
-    await expect(stopOverseeing(null, "mia", null)).rejects.toThrow(/isn’t connected/);
+    await expect(overseeGroup(null, "mia", "globex", null)).rejects.toThrow(/isn’t ready just now/);
+    await expect(stopOverseeing(null, "mia", null)).rejects.toThrow(/isn’t ready just now/);
   });
 });
 

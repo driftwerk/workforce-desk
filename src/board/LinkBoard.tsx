@@ -1,5 +1,9 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
+import { agentKey } from "../chat/types";
+import { openTarget } from "../shell/navigate";
+import { ProblemNote } from "../ui/ProblemNote";
+import type { Problem } from "../ui/problem";
 import { HubError } from "../hub/client";
 import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
 import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
@@ -11,7 +15,11 @@ import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } fro
 
 /** What a hub (or this computer) said when asked whether it offers the
  *  system's tools. */
-type Probe = { state: "checking" } | { state: "offered"; teams: Team[] } | { state: "no"; error: string; noToken: boolean } | { state: "needsToken" };
+type Probe =
+  | { state: "checking" }
+  | { state: "offered"; teams: Team[]; agent: string | null }
+  | { state: "no"; error: string; noToken: boolean; noAgent: boolean }
+  | { state: "needsToken" };
 type Team = { id: string; key: string; name: string };
 
 type FilterKind = SyncFilter["kind"];
@@ -43,7 +51,7 @@ const linearId = (s: string): boolean => /^[0-9a-fA-F-]{1,64}$/.test(s);
 
 /** A refusal in the hub's words, or why it couldn't be asked. */
 const saidOf = (e: unknown): string =>
-  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk can't reach this computer's hub right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
+  e instanceof HubError ? e.message : e instanceof TypeError ? "Desk isn't ready right now. Try again in a moment." : e instanceof Error ? e.message : String(e);
 
 /** The link dialog, from a board's menu: the system, then a hub that offers
  *  it (or this computer), then the project or team, the import filter with
@@ -93,8 +101,13 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (!sync) return;
       const said: Probe = await sync
         .check({ system, via })
-        .then((r): Probe => (r.ok ? { state: "offered", teams: r.check.teams ?? [] } : { state: "no", error: r.error, noToken: r.paused?.kind === "noToken" }))
-        .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false }));
+        .then(
+          (r): Probe =>
+            r.ok
+              ? { state: "offered", teams: r.check.teams ?? [], agent: r.check.agent?.name ?? null }
+              : { state: "no", error: r.error, noToken: r.paused?.kind === "noToken", noAgent: r.paused?.kind === "missing" },
+        )
+        .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }));
       if (probeRun.current === run) setProbes((p) => ({ ...p, [key]: said }));
     };
     const next: Record<string, Probe> = {};
@@ -185,7 +198,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     if (busy) return null;
     if (hasTickets) return { words: `Linking needs an empty board: ${board.name} has tickets.`, failed: true };
     if (!system) return { words: "Pick Jira or Linear.", failed: false };
-    if (!localSync()) return { words: "This computer’s hub isn’t running, so nothing can be checked or linked yet.", failed: true };
+    if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
     if (!offered) {
       if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
@@ -287,6 +300,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
               ))}
               <ThisComputer name={`${ids}-via`} system={system} probe={probes[THIS]} hubOffers={hubOffers?.name ?? null} picked={viaKey === THIS} disabled={busy} onPick={() => pick(THIS)} />
             </div>
+            {choices.map((c) => {
+              const p = probes[c.id];
+              return p?.state === "no" && p.noAgent ? <NoAgent key={c.id} choice={c} system={system} words={p.error} /> : null;
+            })}
             {choices.length === 0 && <span className="move-opt-sub">No workspace is connected to Desk: link one in Settings → Workspaces to sync through its {SYSTEM_TITLE[system]}.</span>}
             {choice && (probe?.state === "needsToken" || (probe?.state === "no" && probe.noToken)) && (
               <TokenPanel key={choice.id} choice={choice} again={probe.state === "no"} />
@@ -509,12 +526,16 @@ function HubRow({ name, choice, system, probe, picked, disabled, onPick }: { nam
     !probe || probe.state === "checking"
       ? `Asking whether it offers ${title}…`
       : probe.state === "offered"
-        ? `Offers its ${title} tools to you`
+        ? probe.agent
+          ? `Offers ${title} through ${probe.agent}`
+          : `Offers its ${title} tools to you`
         : probe.state === "needsToken"
           ? "Needs a token for your board sync, made there once"
           : probe.noToken
             ? "Its token was refused: it needs a new one"
-            : probe.error;
+            : probe.noAgent
+              ? `No agent there you can reach has ${title} switched on`
+              : probe.error;
   return (
     <label className="move-opt">
       <input type="radio" name={name} checked={picked} disabled={disabled || no || probe?.state === "checking"} onChange={onPick} />
@@ -523,6 +544,51 @@ function HubRow({ name, choice, system, probe, picked, disabled, onPick }: { nam
         <span className={no ? "move-opt-sub state-blocked" : "move-opt-sub"}>{sub}</span>
       </span>
     </label>
+  );
+}
+
+/** What to say to an agent there so someone switches the system on. */
+export const switchOnText = (system: SyncSystem, hub: string): string =>
+  `Could you switch ${SYSTEM_TITLE[system]} on for an agent I can use on ${hub}? Desk needs it to sync one of my boards with ${SYSTEM_TITLE[system]}. If you can't, please tell me who can.`;
+
+/** No agent on a hub has the system switched on: said in the one shape
+ *  errors take, with asking an agent there to switch it on (in a DM, as the
+ *  person), or whom to ask when there's no agent there to ask. */
+function NoAgent({ choice, system, words }: { choice: SyncChoice; system: SyncSystem; words: string }) {
+  const title = SYSTEM_TITLE[system];
+  const roster = useChat((s) => s.roster);
+  const there = roster.filter((a) => a.hubId === choice.paired).sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const agent = there[0];
+  const [asked, setAsked] = useState(false);
+  const problem: Problem = {
+    plain: words,
+    ...(agent
+      ? {
+          fix: {
+            label: `Ask ${agent.name} to switch ${title} on`,
+            run: () => {
+              const key = agentKey(agent);
+              openTarget({ kind: "agent", key }, { beside: true });
+              void useChat
+                .getState()
+                .sendTo(key, switchOnText(system, choice.name))
+                .then((sent) => setAsked(sent));
+            },
+          },
+        }
+      : {}),
+  };
+  if (asked)
+    return (
+      <p className="move-callout" role="status">
+        Asked {agent?.name} on {choice.name} to switch {title} on. Link again once it’s on.
+      </p>
+    );
+  return (
+    <div className="move-callout sync-no-agent">
+      <ProblemNote problem={problem} />
+      {!agent && <p className="move-opt-sub">Ask whoever runs {choice.name} to switch {title} on for an agent you can use.</p>}
+    </div>
   );
 }
 
@@ -633,7 +699,7 @@ export function TokenPanel({ choice, again, onKept }: { choice: SyncChoice; agai
         {refused
           ? `${choice.name} doesn’t let Desk make this token itself yet — its admin can turn that on, or make a token on ${choice.name} and paste it here.`
           : `Paste a token made on ${choice.name}.`}{" "}
-        <span className="muted">Desk sends it to this computer’s hub once, and never shows it again.</span>
+        <span className="muted">Desk keeps it on this computer, and never shows it again.</span>
       </p>
       <label className="field sync-token-field">
         <span>{choice.name}’s token for you</span>

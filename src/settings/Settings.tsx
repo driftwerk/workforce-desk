@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Sessions } from "./Sessions";
 import "../styles/settings.css";
 import { Appearance } from "./Appearance";
@@ -19,10 +19,14 @@ import { Shortcuts } from "./Shortcuts";
 import { Voices } from "./Voices";
 import { dragWindow } from "../ui/drag";
 import { SETTINGS_SECTIONS as SECTIONS, useUi, type SettingsSection as Section } from "../shell/ui";
+import { startSetup } from "../setup/SetupLauncher";
+import { searchSections } from "./search";
 
 export function Settings({ onClose }: { onClose: () => void }) {
   const section = useUi((u) => u.settings) ?? "appearance";
   const setSection = useUi((u) => u.openSettings);
+  const [query, setQuery] = useState("");
+  const found = searchSections(query);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // A sheet open on Settings (adding a machine) keeps Esc for itself,
@@ -40,7 +44,24 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <span className="settings-title" onMouseDown={dragWindow}>
           Settings
         </span>
-        {(Object.keys(SECTIONS) as Section[]).map((k) => (
+        <input
+          type="search"
+          className="settings-search"
+          placeholder="Search settings"
+          aria-label="Search settings"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && found[0]) setSection(found[0]);
+            if (e.key === "Escape" && query) {
+              // Clears the search first; Esc again goes back to Desk.
+              e.preventDefault();
+              setQuery("");
+            }
+          }}
+        />
+        {found.length === 0 && <span className="faint small settings-none">Nothing matches “{query.trim()}”.</span>}
+        {found.map((k: Section) => (
           <button
             key={k}
             type="button"
@@ -51,6 +72,16 @@ export function Settings({ onClose }: { onClose: () => void }) {
             {SECTIONS[k]}
           </button>
         ))}
+        <button
+          type="button"
+          className="btn btn-sm settings-setup"
+          onClick={() => {
+            onClose();
+            startSetup();
+          }}
+        >
+          Set up with an agent
+        </button>
         <button type="button" className="link small settings-done" onClick={onClose}>
           Back to desk <kbd>esc</kbd>
         </button>

@@ -42,11 +42,59 @@ impl Plan {
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Progress {
     Starting,
-    Browser { url: String },
+    Browser {
+        url: String,
+    },
     NeedsCode,
     Saving,
-    Done,
-    Failed { message: String },
+    /// `account`: the Desk account the sign-in went to, when it went to one.
+    Done {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+/// Where one Claude sign-in goes: one sign-in serves both places it's
+/// asked for. To the crew's agents (the plan they run on, in the vault),
+/// to a Desk account coding sessions run on, or both.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeUse {
+    #[serde(default = "yes")]
+    pub agents: bool,
+    #[serde(default)]
+    pub account: Option<AccountUse>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for ClaudeUse {
+    /// As it always was: for the agents alone.
+    fn default() -> Self {
+        Self {
+            agents: true,
+            account: None,
+        }
+    }
+}
+
+/// The Desk account a Claude sign-in goes to: a new one, named `name`
+/// (made the default with `make_default`), or account `again`, whose
+/// sign-in it replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUse {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub make_default: bool,
+    #[serde(default)]
+    pub again: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -147,25 +195,107 @@ fn opener(app: &AppHandle) -> Open {
     })
 }
 
-/// Saves a login where the agents on this computer read it.
-fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
+/// Posts `body` to `path` on the hub on this computer, as Desk: what it
+/// answered.
+fn post(
+    backend: &Backend,
+    path: &str,
+    body: &serde_json::Value,
+) -> eyre::Result<(reqwest::StatusCode, serde_json::Value)> {
     let hub = backend
         .connection()?
         .ok_or_else(|| eyre::eyre!("Desk is still starting"))?;
     // The admin token goes to the hub on this computer and nowhere else:
     // its address checked, never through a proxy, never after a redirect.
     let base = desk_core::net::loopback_url(&hub.gateway_url).map_err(|e| eyre::eyre!(e))?;
-    let url = desk_core::net::at(&base, &format!("/api/vault/{}", plan.vault_path()), None)
-        .map_err(|e| eyre::eyre!(e))?;
+    let url = desk_core::net::at(&base, path, None).map_err(|e| eyre::eyre!(e))?;
     let res = desk_core::net::loopback_blocking()
         .post(url)
         .bearer_auth(hub.admin_token)
-        .json(&serde_json::json!({ "value": value }))
+        .json(body)
         .send()?;
-    if !res.status().is_success() {
-        eyre::bail!("saving the login failed ({})", res.status());
+    let status = res.status();
+    let said = res
+        .json::<serde_json::Value>()
+        .unwrap_or(serde_json::Value::Null);
+    Ok((status, said))
+}
+
+/// Saves a login where the agents on this computer read it.
+fn save(backend: &Backend, plan: Plan, value: &str) -> eyre::Result<()> {
+    let (status, _) = post(
+        backend,
+        &format!("/api/vault/{}", plan.vault_path()),
+        &serde_json::json!({ "value": value }),
+    )?;
+    if !status.is_success() {
+        eyre::bail!("saving the login failed ({status})");
     }
     Ok(())
+}
+
+/// What a hub refusal says, in its words.
+fn refusal(status: reqwest::StatusCode, said: &serde_json::Value) -> String {
+    said.get("error")
+        .and_then(|e| e.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("the hub said {status}"))
+}
+
+/// An account's id as the hub makes them: a UUID, in its one written form
+/// (lowercase, hyphenated). Anything else is none: it never reaches a path.
+fn account_id(raw: &str) -> Option<String> {
+    let id = raw.trim().to_ascii_lowercase();
+    let groups: Vec<&str> = id.split('-').collect();
+    let shaped = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups
+            .iter()
+            .all(|g| g.chars().all(|c| c.is_ascii_hexdigit()));
+    shaped.then_some(id)
+}
+
+/// What keeping a Claude token as a Desk account sends: a new account, or
+/// the one signed in again. An account to sign in again whose id isn't one
+/// is refused before anything is sent.
+fn account_request(account: &AccountUse, token: &str) -> eyre::Result<(String, serde_json::Value)> {
+    Ok(match &account.again {
+        Some(raw) => {
+            let id =
+                account_id(raw).ok_or_else(|| eyre::eyre!("that isn't one of your accounts"))?;
+            (
+                format!("/api/desk/accounts/{id}/sign-in"),
+                serde_json::json!({ "token": token }),
+            )
+        }
+        None => (
+            "/api/desk/accounts".to_string(),
+            serde_json::json!({
+                "engine": "claude",
+                "name": account
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or("Claude"),
+                "token": token,
+                "makeDefault": account.make_default,
+            }),
+        ),
+    })
+}
+
+/// Keeps a Claude token as a Desk account on this computer's hub (which
+/// checks Claude Code signs in by it first). Its id.
+fn keep_account(backend: &Backend, account: &AccountUse, token: &str) -> eyre::Result<String> {
+    let (path, body) = account_request(account, token)?;
+    let (status, said) = post(backend, &path, &body)?;
+    if !status.is_success() {
+        eyre::bail!(refusal(status, &said));
+    }
+    said.pointer("/account/id")
+        .and_then(|v| v.as_str())
+        .and_then(account_id)
+        .ok_or_else(|| eyre::eyre!("the hub didn't say which account it kept"))
 }
 
 /// The screen up to the code prompt: what follows it may echo the code the
@@ -224,17 +354,43 @@ fn follow_claude(
     Err(text)
 }
 
+/// Where a Claude token goes, as `use_` asks: the agents' plan, a Desk
+/// account, or both. What that did.
+fn keep_claude(backend: &Backend, use_: &ClaudeUse, token: &str) -> Progress {
+    if use_.agents
+        && let Err(e) = save(backend, Plan::Claude, token)
+    {
+        return Progress::Failed {
+            message: e.to_string(),
+        };
+    }
+    let Some(account) = &use_.account else {
+        return Progress::Done { account: None };
+    };
+    match keep_account(backend, account, token) {
+        Ok(id) => Progress::Done { account: Some(id) },
+        Err(e) if use_.agents => Progress::Failed {
+            message: format!(
+                "Your crew is signed in, but Desk couldn't keep it for coding sessions: {e}"
+            ),
+        },
+        Err(e) => Progress::Failed {
+            message: format!("Desk couldn't keep the sign-in: {e}"),
+        },
+    }
+}
+
 /// Saves the token and says how that went, or why the sign-in failed.
-fn conclude_claude(backend: &Backend, report: &Report, read: Result<String, String>) {
+fn conclude_claude(
+    backend: &Backend,
+    report: &Report,
+    read: Result<String, String>,
+    use_: &ClaudeUse,
+) {
     match read {
         Ok(token) => {
             report(Progress::Saving);
-            report(match save(backend, Plan::Claude, &token) {
-                Ok(()) => Progress::Done,
-                Err(e) => Progress::Failed {
-                    message: e.to_string(),
-                },
-            });
+            report(keep_claude(backend, use_, &token));
         }
         Err(text) => report(Progress::Failed {
             message: format!(
@@ -249,7 +405,13 @@ impl Logins {
     /// Starts a plan's sign-in, ending any earlier attempt at it first (on
     /// Windows, also one a Desk closed before left running inside WSL), so
     /// only one is ever waiting for the browser.
-    pub fn start(&self, app: &AppHandle, backend: Backend, plan: Plan) -> Result<(), String> {
+    pub fn start(
+        &self,
+        app: &AppHandle,
+        backend: Backend,
+        plan: Plan,
+        use_: ClaudeUse,
+    ) -> Result<(), String> {
         self.cancel(plan, Some(&backend));
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         self.running
@@ -260,9 +422,9 @@ impl Logins {
         report(Progress::Starting);
         let started = match plan {
             Plan::Claude if matches!(backend.host, Host::Wsl(_)) => {
-                self.start_claude_wsl(backend, report, opener(app), id)
+                self.start_claude_wsl(backend, report, opener(app), id, use_)
             }
-            Plan::Claude => self.start_claude(backend, report, id),
+            Plan::Claude => self.start_claude(backend, report, id, use_),
             Plan::Chatgpt => self.start_chatgpt(backend, report, id),
         };
         let running = match started {
@@ -284,7 +446,13 @@ impl Logins {
         Ok(())
     }
 
-    fn start_claude(&self, backend: Backend, report: Report, id: u64) -> eyre::Result<Running> {
+    fn start_claude(
+        &self,
+        backend: Backend,
+        report: Report,
+        id: u64,
+        use_: ClaudeUse,
+    ) -> eyre::Result<Running> {
         let cli = cli::cli(&backend, Plan::Claude.program(), &["setup-token"], &[])
             .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         // Wide, so the token is never wrapped across lines.
@@ -317,7 +485,7 @@ impl Logins {
             }
             let _ = child.wait();
             if finish(&slots, Plan::Claude, id) {
-                conclude_claude(&backend, &report, read);
+                conclude_claude(&backend, &report, read, &use_);
             }
         });
         Ok(Running::Pty { writer, killer })
@@ -331,6 +499,7 @@ impl Logins {
         report: Report,
         open: Open,
         id: u64,
+        use_: ClaudeUse,
     ) -> eyre::Result<Running> {
         let attempt = format!("{}-{id}", std::process::id());
         let cli = cli::wsl_sign_in(&backend, Plan::Claude.program(), &["setup-token"], &attempt)
@@ -382,7 +551,7 @@ impl Logins {
                 _ => text,
             });
             if finish(&slots, Plan::Claude, id) {
-                conclude_claude(&b, &report, read);
+                conclude_claude(&b, &report, read, &use_);
             }
         });
         Ok(Running::Wsl {
@@ -458,7 +627,7 @@ impl Logins {
                 (true, Ok(auth)) => {
                     report(Progress::Saving);
                     match save(&backend, Plan::Chatgpt, &auth) {
-                        Ok(()) => Progress::Done,
+                        Ok(()) => Progress::Done { account: None },
                         Err(e) => Progress::Failed {
                             message: e.to_string(),
                         },
@@ -509,6 +678,63 @@ impl Logins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claude_sign_in_goes_where_it_was_asked() {
+        // As it always was, with nothing said: to the agents alone.
+        let none: ClaudeUse = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(none, ClaudeUse::default());
+        let to: ClaudeUse = serde_json::from_value(serde_json::json!({
+            "agents": false,
+            "account": { "name": " ", "makeDefault": true }
+        }))
+        .unwrap();
+        let account = to.account.unwrap();
+        let (path, body) = account_request(&account, "sk-ant-oat01-x").unwrap();
+        assert_eq!(path, "/api/desk/accounts");
+        assert_eq!(
+            body,
+            serde_json::json!({ "engine": "claude", "name": "Claude", "token": "sk-ant-oat01-x", "makeDefault": true })
+        );
+        let again = AccountUse {
+            name: None,
+            make_default: false,
+            again: Some(" 7B1E0D2C-3F4A-4B5C-8D6E-0F1A2B3C4D5E ".into()),
+        };
+        let (path, body) = account_request(&again, "sk-ant-oat01-y").unwrap();
+        assert_eq!(
+            path,
+            "/api/desk/accounts/7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/sign-in"
+        );
+        assert_eq!(body, serde_json::json!({ "token": "sk-ant-oat01-y" }));
+        // An id that isn't an account's never reaches a path.
+        for bad in [
+            "7b1e",
+            "../../vault/x",
+            "7b1e0d2c-3f4a-4b5c-8d6e-0f1a2b3c4d5e/../x",
+            "7b1e0d2c3f4a4b5c8d6e0f1a2b3c4d5e",
+            "g7b1e0d2-3f4a-4b5c-8d6e-0f1a2b3c4d5e",
+        ] {
+            let bad = AccountUse {
+                name: None,
+                make_default: false,
+                again: Some(bad.into()),
+            };
+            assert!(account_request(&bad, "sk-ant-oat01-y").is_err());
+        }
+        // Done says which account it went to, only when it went to one.
+        assert_eq!(
+            serde_json::to_value(Progress::Done { account: None }).unwrap(),
+            serde_json::json!({ "state": "done" })
+        );
+        assert_eq!(
+            serde_json::to_value(Progress::Done {
+                account: Some("7b1e".into())
+            })
+            .unwrap(),
+            serde_json::json!({ "state": "done", "account": "7b1e" })
+        );
+    }
 
     #[test]
     fn a_failure_never_repeats_what_followed_the_code_prompt() {
