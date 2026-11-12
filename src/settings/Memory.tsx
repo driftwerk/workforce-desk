@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { deskListeners, useDesk } from "../hub/store";
-import type { DeskEvent, MemoryIndexStatus, MemorySettings } from "../hub/types";
+import type { DeskEvent, MemoryChoice, MemoryIndexStatus, MemorySettings } from "../hub/types";
 import { clock, count, providerName, thousands } from "../memory/words";
 import { plainError } from "../ui/plainError";
 
@@ -56,6 +56,14 @@ export function Memory() {
       const now = await hub!.pauseMemory(paused);
       setSettings(now);
       setProblem(now.notice ?? null);
+    } catch (e) {
+      setProblem(plainError(e));
+    }
+  };
+  const choose = async (change: MemoryChoice) => {
+    try {
+      setSettings(await hub!.chooseMemory(change));
+      setProblem(null);
     } catch (e) {
       setProblem(plainError(e));
     }
@@ -167,23 +175,126 @@ export function Memory() {
       )}
 
       {limits && (
-        <section className="prov-section" aria-label="Limits">
-          <h2 className="field-label">Limits</h2>
-          <p className="faint small">These limits are set in Desk’s memory settings file. Ask Desk to change them.</p>
-          <ul className="memory-limits small">
-            {!limits.enabled && <li>Remembering conversations is turned off for this Desk.</li>}
-            <li>Conversations are kept {count(limits.retainDays, "day")} after they end; notes stay until you forget them.</li>
+        <section className="prov-section" aria-label="What Desk remembers">
+          <h2 className="field-label">What Desk remembers</h2>
+          <Switch
+            label="Remember conversations"
+            sub={
+              limits.enabled
+                ? "Desk keeps what your sessions say and do, to search and to pick up later."
+                : "Off: Desk keeps nothing new from any session until it's on again."
+            }
+            on={limits.enabled}
+            onChange={(enabled) => void choose({ enabled })}
+          />
+          <Switch
+            label="Note decisions, facts and to-dos"
+            sub={
+              !limits.enabled
+                ? "Comes on with remembering conversations."
+                : limits.derive
+                  ? `Desk's model reads what sessions say and notes them, at most ${count(limits.deriveCallsPerDay, "time")} a day (${thousands(limits.deriveCallsToday)} so far today)${limits.provider ? `, on ${providerName(limits.provider)}` : ""}.`
+                  : "Off: nothing a session says is sent to a model to note."
+            }
+            on={limits.enabled && limits.derive}
+            disabled={!limits.enabled}
+            onChange={(derive) => void choose({ derive })}
+          />
+          <NumberChoice
+            label="Keep conversations for"
+            unit="days"
+            value={limits.retainDays}
+            min={1}
+            max={3650}
+            note="after they end; notes stay until you forget them."
+            onChange={(retainDays) => void choose({ retainDays })}
+          />
+          <NumberChoice
+            label="Room for Desk Memory"
+            unit="MB"
+            value={limits.maxDiskMb}
+            min={100}
+            max={1_000_000}
+            note="when it's full, Desk stops remembering until there's room."
+            onChange={(maxDiskMb) => void choose({ maxDiskMb })}
+          />
+          <ul className="memory-limits small faint">
             <li>On its first read, Desk goes back {count(limits.backfillDays, "day")}.</li>
-            <li>Desk Memory may use up to {thousands(limits.maxDiskMb)} MB; when it's full, it stops remembering until there's room.</li>
             <li>Search takes in up to {thousands(limits.indexPerMinute)} passages a minute.</li>
-            <li>
-              {limits.derive
-                ? `Desk's model notes decisions at most ${count(limits.deriveCallsPerDay, "time")} a day (${thousands(limits.deriveCallsToday)} so far today)${limits.provider ? `, on ${providerName(limits.provider)}` : ""}.`
-                : "Noting decisions, facts and to-dos is turned off for this Desk."}
-            </li>
           </ul>
         </section>
       )}
     </section>
+  );
+}
+
+/** One of memory's switches, as the pause is drawn. */
+function Switch({ label, sub, on, disabled, onChange }: { label: string; sub: string; on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+  const id = useId();
+  return (
+    <div className="ability-row">
+      <span className="ability-text">
+        <b id={id}>{label}</b>
+        <span className="ability-sub">{sub}</span>
+      </span>
+      <button type="button" role="switch" className="switch" aria-checked={on} aria-labelledby={id} disabled={disabled} onClick={() => onChange(!on)}>
+        <span className="switch-knob" />
+      </button>
+    </div>
+  );
+}
+
+/** A number the person sets, kept once they leave the field or press
+ *  Enter, and only when it's one Desk can work with. */
+function NumberChoice({
+  label,
+  unit,
+  value,
+  min,
+  max,
+  note,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  value: number;
+  min: number;
+  max: number;
+  note: string;
+  onChange: (n: number) => void;
+}) {
+  const id = useId();
+  const [typed, setTyped] = useState(String(value));
+  useEffect(() => setTyped(String(value)), [value]);
+  const n = Number(typed);
+  const fits = Number.isInteger(n) && n >= min && n <= max;
+  const keep = () => {
+    if (fits && n !== value) onChange(n);
+    else if (!fits) setTyped(String(value));
+  };
+  return (
+    <div className="ability-row">
+      <label className="ability-text" htmlFor={id}>
+        <b>{label}</b>
+        <span className="ability-sub">
+          {fits ? note : `Between ${thousands(min)} and ${thousands(max)} ${unit}.`}
+        </span>
+      </label>
+      <span className="field-row memory-number">
+        <input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          min={min}
+          max={max}
+          value={typed}
+          aria-invalid={!fits}
+          onChange={(e) => setTyped(e.target.value)}
+          onBlur={keep}
+          onKeyDown={(e) => e.key === "Enter" && keep()}
+        />
+        <span className="small muted">{unit}</span>
+      </span>
+    </div>
   );
 }

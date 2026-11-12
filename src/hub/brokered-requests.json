@@ -792,6 +792,11 @@
   {
     "kind": "http",
     "method": "PATCH",
+    "path": "/api/desk/memory/settings"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
     "path": "/api/desk/memory/groups/g"
   },
   {

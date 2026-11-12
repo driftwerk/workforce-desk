@@ -70,15 +70,50 @@ describe("Settings → Memory", () => {
     expect(screen.queryByRole("button", { name: "Rebuild search" })).toBeNull();
   });
 
-  it("lists the install's limits, read only", async () => {
+  it("has switches and numbers for what Desk remembers, never a config file", async () => {
     await show(fakeHub(settingsOf()));
-    const limits = screen.getByRole("region", { name: "Limits" });
-    expect(limits.textContent).toContain("kept 180 days after they end");
-    expect(limits.textContent).toContain("goes back 30 days");
-    expect(limits.textContent).toContain("up to 4 096 MB");
-    expect(limits.textContent).toContain("600 passages a minute");
-    expect(limits.textContent).toContain("at most 200 times a day (12 so far today), on Anthropic");
-    expect(limits.querySelector("input, button")).toBeNull();
+    const part = screen.getByRole("region", { name: "What Desk remembers" });
+    expect(part.textContent).not.toMatch(/config|\[desk\.memory\]|settings file/i);
+    expect(screen.getByRole("switch", { name: "Remember conversations" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "Note decisions, facts and to-dos" }).getAttribute("aria-checked")).toBe("true");
+    expect(part.textContent).toContain("at most 200 times a day (12 so far today), on Anthropic");
+    expect((screen.getByLabelText(/Keep conversations for/) as HTMLInputElement).value).toBe("180");
+    expect((screen.getByLabelText(/Room for Desk Memory/) as HTMLInputElement).value).toBe("4096");
+    expect(part.textContent).toContain("goes back 30 days");
+    expect(part.textContent).toContain("600 passages a minute");
+  });
+
+  it("turns remembering and noting off and on, kept by the hub", async () => {
+    const hub = fakeHub(settingsOf());
+    hub.chooseMemory = vi.fn(async (c: object) => {
+      const s = settingsOf();
+      return { ...s, limits: { ...s.limits, ...c } };
+    });
+    await show(hub);
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Note decisions, facts and to-dos" })));
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ derive: false });
+    expect(screen.getByRole("switch", { name: "Note decisions, facts and to-dos" }).getAttribute("aria-checked")).toBe("false");
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: "Remember conversations" })));
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ enabled: false });
+    expect((screen.getByRole("switch", { name: "Note decisions, facts and to-dos" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a number once the person leaves the field, and only one that can work", async () => {
+    const hub = fakeHub(settingsOf());
+    hub.chooseMemory = vi.fn(async (c: object) => {
+      const s = settingsOf();
+      return { ...s, limits: { ...s.limits, ...c } };
+    });
+    await show(hub);
+    const days = screen.getByLabelText(/Keep conversations for/) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "0" } });
+    expect(screen.getByText("Between 1 and 3 650 days.")).toBeTruthy();
+    fireEvent.blur(days);
+    expect(hub.chooseMemory).not.toHaveBeenCalled();
+    expect(days.value).toBe("180");
+    fireEvent.change(days, { target: { value: "30" } });
+    await act(async () => fireEvent.keyDown(days, { key: "Enter" }));
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ retainDays: 30 });
   });
 
   it("shows what loaded when another part fails, and says why", async () => {
@@ -121,11 +156,19 @@ describe("a group's memory", () => {
     await waitFor(() => expect(dialog.textContent).toContain("another provider it's set up with"));
   });
 
-  it("can't let the model note when noting is off for this Desk", async () => {
-    const hub = fakeHub(settingsOf({ limits: { ...settingsOf().limits, derive: false } }));
+  it("turns noting on for the Desk and the group from there, when it's off", async () => {
+    const off = settingsOf({ limits: { ...settingsOf().limits, derive: false } });
+    const hub = fakeHub(off);
+    hub.chooseMemory = vi.fn(async () => settingsOf());
     render(<GroupMemoryDialog group={{ id: "g-acme", name: "Acme" }} hub={hub as unknown as DeskHub} onClose={() => {}} />);
     await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
     expect((screen.getByRole("switch", { name: "Let Desk's model note decisions" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Noting is turned off for this Desk.")).toBeTruthy();
+    expect(screen.getByText(/Noting is turned off for this Desk\./)).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Turn it on" })));
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ enabled: true, derive: true });
+    expect(hub.changeGroupMemory).toHaveBeenCalledWith("g-acme", { derive: true });
+    const derive = screen.getByRole("switch", { name: "Let Desk's model note decisions" }) as HTMLButtonElement;
+    expect(derive.disabled).toBe(false);
+    expect(derive.getAttribute("aria-checked")).toBe("true");
   });
 });

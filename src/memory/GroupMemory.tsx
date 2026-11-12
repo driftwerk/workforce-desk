@@ -28,6 +28,22 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
     return () => void deskListeners.delete(heard);
   }, [hub]);
   const switches = settings?.groups.find((g) => g.id === group.id);
+  const noting = !!settings && settings.limits.enabled && settings.limits.derive;
+  // Turned on for the whole Desk here, then on for this group too.
+  const turnNotingOn = async () => {
+    if (!hub) return;
+    try {
+      const now = await hub.chooseMemory({ enabled: true, derive: true });
+      setSettings(now);
+      setProblem(null);
+      const changed = await hub.changeGroupMemory(group.id, { derive: true });
+      const { notice, ...on } = changed;
+      setSettings({ ...now, groups: now.groups.map((g) => (g.id === group.id ? { ...g, ...on } : g)) });
+      setProblem(notice ?? null);
+    } catch (e) {
+      setProblem(plainError(e));
+    }
+  };
   const change = async (patch: Partial<Omit<Switches, "deriveDecided">>) => {
     if (!hub || !settings) return;
     try {
@@ -70,10 +86,17 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
               name="Let Desk's model note decisions"
               sub={`Desk's model reads what they say to note decisions, facts and to-dos, so it's sent to ${providerName(settings.limits.provider) ?? "the model Desk notes with"}.${settings.limits.fallbackProviders ? ` ${fallbackText}` : ""}`}
               on={switches.derive}
-              disabled={!settings.limits.derive}
+              disabled={!noting}
               onChange={(derive) => void change({ derive })}
             >
-              {!settings.limits.derive && <span className="ability-sub">Noting is turned off for this Desk.</span>}
+              {!noting && (
+                <span className="ability-sub memory-off">
+                  Noting is turned off for this Desk.
+                  <button type="button" className="btn btn-sm" onClick={() => void turnNotingOn()}>
+                    Turn it on
+                  </button>
+                </span>
+              )}
             </Row>
           </>
         )}
