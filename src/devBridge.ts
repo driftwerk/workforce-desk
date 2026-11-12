@@ -173,6 +173,29 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
           ? { ...DEFAULT_HOST, platform: "windows", host: null, keys: "Credential Manager" }
           : { ...DEFAULT_HOST, platform: params.platform ?? DEFAULT_HOST.platform },
       );
+    case "privacy_open": {
+      // No System Settings in a browser: say which pane would open.
+      console.info(`[preview] opens the ${String(args?.pane)} settings`);
+      return answer(undefined);
+    }
+    case "privacy_check": {
+      // `desk.dev.access` = {"microphone":"granted",…} stands in for the system.
+      let access: Record<string, string> = {};
+      try {
+        access = JSON.parse(localStorage.getItem("desk.dev.access") ?? "{}") as Record<string, string>;
+      } catch {
+        access = {};
+      }
+      return answer(access[String(args?.pane)] ?? "unknown");
+    }
+    case "dropped_files": {
+      // `desk.dev.keptFiles` = "1": the system keeps dropped files from Desk.
+      const paths = (args?.paths as string[] | undefined) ?? [];
+      const name = (p: string) => p.split("/").pop() ?? p;
+      if (localStorage.getItem("desk.dev.keptFiles") === "1")
+        throw new Error(`Desk isn’t allowed to read ${name(paths[0] ?? "")}. Allow it in Files and Folders.`);
+      return answer(paths.map((path) => ({ path, name: name(path), size: 4, folder: false })));
+    }
     case "wsl_detect":
       return answer(WSL_FIXTURE);
     case "hubs_list":

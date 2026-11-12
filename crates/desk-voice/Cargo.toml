@@ -31,5 +31,8 @@ objc2-foundation = "0.3.2"
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 cpal = "0.18.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Registry"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }

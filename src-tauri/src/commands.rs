@@ -98,6 +98,8 @@ pub const COMMANDS: &[&str] = &[
     "attachment_save",
     "attachment_upload",
     "dropped_files",
+    "privacy_open",
+    "privacy_check",
     "dropped_file_read",
     "terminal_drop",
     "terminal_drop_cancel",

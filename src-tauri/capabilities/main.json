@@ -128,6 +128,8 @@
     "allow-attachment-save",
     "allow-attachment-upload",
     "allow-dropped-files",
+    "allow-privacy-open",
+    "allow-privacy-check",
     "allow-dropped-file-read",
     "allow-terminal-drop",
     "allow-terminal-drop-cancel",
