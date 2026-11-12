@@ -30,6 +30,7 @@ import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
 import { QueuedMessages } from "./QueuedMessages";
 import { relayedOf } from "../chat/relayed";
+import { memoriesFrom, type SavedMemory } from "../chat/remove";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -165,6 +166,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const editLast = useChat((s) => s.editLast);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [editNote, setEditNote] = useState<string | null>(null);
+  // Your message whose Delete is being confirmed, in place; the answers to
+  // ones you deleted, until the hub says so itself.
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const orphans = useChat((s) => (activeAgent ? s.orphans[activeAgent] : undefined));
   useEffect(() => {
     if (!editNote) return;
     const t = setTimeout(() => setEditNote(null), NOTE_MS);
@@ -305,9 +310,22 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           : mine.attachments?.length
             ? "A message with files can’t be edited. Send a new one instead."
             : null;
+  const deletable = !!convo.features?.has(FEATURES.delete);
+  const yours = (m: ChatMessage) =>
+    m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
+  const keptIds = new Set((history?.messages ?? []).map((k) => k.id));
+  const startDelete = (m: ChatMessage) => {
+    // Its turn may still be reading it; and the hub knows it only once kept.
+    if (busy) return setEditNote(`You can delete a message once ${agent.name} has finished replying.`);
+    if (!keptIds.has(m.id)) return setEditNote(`You can delete it once ${agent.name}’s hub has saved it.`);
+    setEditing(null);
+    setDeleting(m.id);
+  };
+  const orphanSet = new Set(orphans ?? []);
   const startEdit = () => {
     if (!mine || !editable) return;
     if (whyNot) return setEditNote(whyNot);
+    setDeleting(null);
     const after = shown.slice(mineAt);
     setEditing({
       id: mine.id,
@@ -465,13 +483,32 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         onSubmitForm={submitForm}
                         onRetry={retry}
                         onRemove={discard}
+                        orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
                       />
-                      {editable && m === mine && !editing && (
+                      {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m))) && (
                         <span className="msg-actions" role="toolbar" aria-label="Message actions">
-                          <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
-                            Edit
-                          </button>
+                          {editable && m === mine && (
+                            <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
+                              Edit
+                            </button>
+                          )}
+                          {deletable && yours(m) && (
+                            <button type="button" className="msg-action msg-action-danger" onClick={() => startDelete(m)}>
+                              Delete
+                            </button>
+                          )}
                         </span>
+                      )}
+                      {deleting === m.id && hub && (
+                        <DeleteConfirm
+                          hub={hub}
+                          agentKey={activeAgent}
+                          agentId={agent.id}
+                          name={agent.name}
+                          message={m}
+                          replies={repliesTo(shown, m)}
+                          onClose={() => setDeleting(null)}
+                        />
                       )}
                     </div>
                   </Fragment>
@@ -570,14 +607,136 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 const DmMessage = memo(function DmMessage({
   message,
   sentOn,
+  orphan,
   ...shown
-}: Omit<ComponentProps<typeof Message>, "relayed"> & {
+}: Omit<ComponentProps<typeof Message>, "relayed" | "chips"> & {
   message: ChatMessage;
   sentOn: Parameters<typeof relayedOf>[1];
+  /** It answered a message you deleted since. */
+  orphan?: boolean;
 }) {
   const relayed = useMemo(() => relayedOf(message, sentOn), [message, sentOn]);
-  return <Message message={message} relayed={relayed} steps={message.steps} {...shown} />;
+  const chips = useMemo(() => (orphan ? <span className="faint small msg-note msg-orphan">Answered a deleted message</span> : undefined), [orphan]);
+  return <Message message={message} relayed={relayed} steps={message.steps} chips={chips} {...shown} />;
 });
+
+/** The answers to your message `m` in `shown`: those its turn said, by its
+ *  client id, else what follows it until your next message. */
+const repliesTo = (shown: readonly ChatMessage[], m: ChatMessage): string[] => {
+  const said = m.clientId ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId) : [];
+  if (said.length) return said.map((x) => x.id);
+  // Not said: what the agent said after it, until your next message, that
+  // answers nothing else. The hub's next read says for sure.
+  const from = shown.indexOf(m) + 1;
+  const next = shown.findIndex((x, i) => i >= from && x.role === "user");
+  return shown
+    .slice(from, next < 0 ? undefined : next)
+    .filter((x) => x.role === "assistant" && !x.replyTo)
+    .map((x) => x.id);
+};
+
+/** Deleting your message, confirmed in place: what the agent saved from it,
+ *  to forget too (ticked), and Delete. */
+function DeleteConfirm({
+  hub,
+  agentKey: key,
+  agentId,
+  name,
+  message,
+  replies,
+  onClose,
+}: {
+  hub: HubAccount;
+  agentKey: string;
+  agentId: string;
+  name: string;
+  message: ChatMessage;
+  replies: string[];
+  onClose: () => void;
+}) {
+  const deleteMine = useChat((s) => s.deleteMine);
+  const [memories, setMemories] = useState<SavedMemory[] | null>(null);
+  const [unchecked, setUnchecked] = useState(false);
+  const [forget, setForget] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    memoriesFrom(hub, agentId, message.id).then(
+      (m) => live && setMemories(m),
+      // Not known: nothing to offer forgetting, said so, and the message
+      // may still go.
+      () => {
+        if (!live) return;
+        setMemories([]);
+        setUnchecked(true);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [hub, agentId, message.id]);
+  const remove = () => {
+    setBusy(true);
+    setProblem(null);
+    const ids = message.clientId ? [message.id, message.clientId] : [message.id];
+    deleteMine(key, message.id, ids, replies, forget && memories ? memories.map((m) => m.id) : []).then(onClose, (e: unknown) => {
+      setProblem(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    });
+  };
+  const n = memories?.length ?? 0;
+  return (
+    <div
+      className="msg-confirm"
+      role="group"
+      aria-label="Delete this message?"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || busy) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div>
+        <b>Delete this message?</b> <span className="faint small">It leaves this chat and everything {name} sees from now on.</span>
+      </div>
+      {memories === null ? (
+        <span className="faint small">Checking what {name} saved from it…</span>
+      ) : (
+        n > 0 && (
+          <label className="msg-confirm-forget">
+            <input type="checkbox" checked={forget} onChange={(e) => setForget(e.target.checked)} />
+            <span>
+              Also forget what {name} saved from it. {name} saved {n === 1 ? "1 memory" : `${n} memories`} from this message:{" "}
+              {memories.map((m, i) => (
+                <Fragment key={m.id}>
+                  {i > 0 && "; "}
+                  <i>“{m.text}”</i>
+                </Fragment>
+              ))}
+              .
+            </span>
+          </label>
+        )
+      )}
+      {unchecked && (
+        <span className="faint small">
+          Couldn’t check what {name} saved from it, so nothing {name} saved will be forgotten.
+        </span>
+      )}
+      {problem && <span className="small state-blocked">{problem}</span>}
+      <div className="msg-confirm-row">
+        <button type="button" className="btn btn-ghost" autoFocus onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger" disabled={busy || memories === null} onClick={remove}>
+          {busy ? "Deleting…" : "Delete"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** How long a note on why you can't edit stays. */
 const NOTE_MS = 6000;

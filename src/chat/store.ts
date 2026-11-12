@@ -17,6 +17,7 @@ import {
 } from "./types";
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
+import { deleteMessage } from "./remove";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
 import { draftKey } from "../restore/drafts";
@@ -132,6 +133,13 @@ interface ChatStore {
   editBack: Record<string, { text: string; why: string }>;
   /** Clears `editBack` for `key`, once the composer has taken it. */
   tookEditBack: (key: string) => void;
+  /** In each DM, by agent key: the answers to messages you deleted, until
+   *  the hub's next read marks them so. */
+  orphans: Record<string, string[]>;
+  /** Deletes your message `id` (its kept id; `ids` all it's known by) from
+   *  the DM, forgetting the memories `forget`; `replies` are marked as
+   *  answering a deleted message. Throws what the hub refused with. */
+  deleteMine: (key: string, id: string, ids: string[], replies: string[], forget: string[]) => Promise<void>;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -692,6 +700,24 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   queues: {},
   setAside: {},
+  orphans: {},
+  deleteMine: async (key, id, ids, replies, forget) => {
+    const target = whereIs(get(), key);
+    if (!target) throw new Error("This agent isn’t on a hub Desk is paired with right now.");
+    await deleteMessage(target.hub, target.agent.id, id, forget);
+    set((s) => ({
+      setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...ids] },
+      orphans: { ...s.orphans, [key]: [...(s.orphans[key] ?? []), ...replies] },
+    }));
+    // Once the hub's read is in, it says which replies answered it: what
+    // was guessed here goes.
+    void get()
+      .refreshHistory(key)
+      .then(() => {
+        const kept = new Set((get().histories[key]?.messages ?? []).map((m) => m.id));
+        set((s) => ({ orphans: { ...s.orphans, [key]: (s.orphans[key] ?? []).filter((id) => !kept.has(id)) } }));
+      });
+  },
   editLast: (key, replaces, aside, text) => {
     // Checked again as it goes: the editor may have been open a while.
     if (isRunning(get().conversations[key])) return "busy";
@@ -772,12 +798,14 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _kept, ...histories } = s.histories;
       const { [key]: _queued, ...queues } = s.queues;
       const { [key]: _aside, ...setAside } = s.setAside;
+      const { [key]: _orphans, ...orphans } = s.orphans;
       const { [key]: _back, ...editBack } = s.editBack;
       return {
         conversations,
         histories,
         queues,
         setAside,
+        orphans,
         editBack,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,
