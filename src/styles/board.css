@@ -361,6 +361,29 @@ button.ticket-chip:hover {
 
 /* ── The ticket's panel ─────────────────────────────────────────────────── */
 
+/* A ticket over a grid: the panel's header and body in a dialog, centred
+   over the dimmed grid, its body scrolling inside. */
+.dialog.ticket-popup {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(90vh, calc(100vh - 32px));
+}
+.ticket-popup .rpanel {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.ticket-popup .rpanel-head {
+  padding: 14px 14px 14px 22px;
+}
+.ticket-popup .ticket-body {
+  padding: 20px 26px 24px;
+}
+.ticket-popup-note {
+  padding: 28px;
+  background: var(--surface);
+}
 .ticket-body {
   flex: 1;
   min-height: 0;
