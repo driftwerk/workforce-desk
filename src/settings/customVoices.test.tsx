@@ -5,7 +5,7 @@ import { VoiceDialog } from "../crew/VoiceDialog";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { invoke, loadSettings, saveSettings, type Settings } from "../platform";
-import { AddVoiceById } from "./AddVoiceById";
+import { AddVoiceById, voiceIdFrom } from "./AddVoiceById";
 import { addCustomVoice, removeCustomVoice, repairVoice, useSettings } from "./store";
 import { providerById, withCustom, type VoiceLookup } from "./voiceCatalog";
 
@@ -26,7 +26,7 @@ const providerSays = (said: VoiceLookup) =>
   vi.mocked(invoke).mockImplementation((cmd: string) => Promise.resolve(cmd === "voice_lookup" ? said : undefined) as never);
 
 const lookUp = (id: string) => {
-  fireEvent.change(screen.getByLabelText("Voice ID"), { target: { value: id } });
+  fireEvent.change(screen.getByLabelText("The voice’s link, or its ID"), { target: { value: id } });
   fireEvent.click(screen.getByRole("button", { name: "Look it up" }));
 };
 
@@ -185,5 +185,24 @@ describe("voices added by id", () => {
       model: "s1",
       voice: "0123456789abcdef0123456789abcdef",
     });
+  });
+});
+
+describe("a voice's link or its ID", () => {
+  it("reads the ID out of a link from the provider's site, or takes the ID as it is", () => {
+    expect(voiceIdFrom("https://fish.audio/m/802e3bc2b27e49c2995d23ef70e6ac89/", "fish_audio")).toBe("802e3bc2b27e49c2995d23ef70e6ac89");
+    expect(voiceIdFrom(" 802e3bc2b27e49c2995d23ef70e6ac89 ", "fish_audio")).toBe("802e3bc2b27e49c2995d23ef70e6ac89");
+    expect(voiceIdFrom(`https://elevenlabs.io/app/voice-library?voiceId=${CLONE}`, "elevenlabs")).toBe(CLONE);
+    expect(voiceIdFrom(`https://elevenlabs.io/app/voice-lab/share/abc/${CLONE}`, "elevenlabs")).toBe(CLONE);
+    expect(voiceIdFrom("https://fish.audio/discovery", "fish_audio")).toBeNull();
+    expect(voiceIdFrom("not a voice", "elevenlabs")).toBeNull();
+  });
+
+  it("looks a pasted link up by the ID in it", async () => {
+    providerSays({ state: "found", name: "My clone" });
+    render(<AddVoiceById provider={elevenlabs} model={undefined} onAdd={() => {}} onCancel={() => {}} />);
+    lookUp(`https://elevenlabs.io/app/voice-library?voiceId=${CLONE}`);
+    expect(await screen.findByText("My clone")).toBeTruthy();
+    expect(invoke).toHaveBeenCalledWith("voice_lookup", { provider: "elevenlabs", voice: CLONE });
   });
 });

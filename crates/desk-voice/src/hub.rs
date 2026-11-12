@@ -147,7 +147,11 @@ pub fn speech_error(status: u16, body: &str) -> SpeechError {
         503 => SpeechError::NoKey(message),
         400 => SpeechError::Rejected(message),
         502 => SpeechError::Provider(message),
-        _ => SpeechError::Hub(format!("Desk couldn't speak ({status}): {message}")),
+        _ => {
+            // The status is for the log; the person reads what went wrong.
+            tracing::warn!(status, %message, "the hub's speech endpoint refused");
+            SpeechError::Hub(format!("Desk couldn't speak just now: {message}"))
+        }
     }
 }
 
@@ -357,7 +361,7 @@ mod tests {
         );
         let (hub, _) = fake(500, "text/plain", "boom".into());
         assert!(
-            matches!(hub.speak(&fish(), "hi"), Err(SpeechError::Hub(m)) if m.contains("500") && m.contains("boom"))
+            matches!(hub.speak(&fish(), "hi"), Err(SpeechError::Hub(m)) if m == "Desk couldn't speak just now: boom")
         );
         let (hub, _) = fake(200, "audio/mpeg", "not audio".into());
         assert!(matches!(

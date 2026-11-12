@@ -1662,3 +1662,6 @@ legend.set-label {
   inset: 0 0 auto 0;
   height: 28px;
 }
+.voices-nav-label {
+  padding: 14px 10px 4px;
+}

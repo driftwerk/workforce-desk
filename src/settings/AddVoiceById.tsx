@@ -2,6 +2,32 @@ import { useState } from "react";
 import type { CustomVoice } from "../platform";
 import { lookupProblem, lookupVoice, sampleLine, tryVoice, type VoiceLookup, type VoiceProvider } from "./voiceCatalog";
 
+/** How each provider writes a voice's ID. */
+const ID_SHAPE: Record<string, RegExp> = {
+  fish_audio: /^[0-9a-f]{32}$/i,
+  elevenlabs: /^[A-Za-z0-9]{20}$/,
+};
+
+/** The voice ID in what was pasted: the ID itself, or a link to the voice
+ *  on its provider's site (Fish Audio's `/m/<id>`, an ElevenLabs link with
+ *  `voiceId=<id>` or the ID in its path). Null when there's none. */
+export const voiceIdFrom = (pasted: string, provider: string): string | null => {
+  const t = pasted.trim();
+  const shape = ID_SHAPE[provider];
+  if (!t) return null;
+  if (shape?.test(t)) return t;
+  let url: URL;
+  try {
+    url = new URL(t);
+  } catch {
+    return null;
+  }
+  const query = url.searchParams.get("voiceId") ?? url.searchParams.get("voice_id");
+  if (query && (!shape || shape.test(query))) return query;
+  const parts = url.pathname.split("/").filter(Boolean);
+  return parts.reverse().find((p) => (shape ? shape.test(p) : false)) ?? null;
+};
+
 /** "Use a voice ID": a voice from `provider` by its id (a cloned or
  *  community one), looked up with the provider so it's named as it is
  *  there, playable first, then added (`onAdd`). */
@@ -25,7 +51,8 @@ export function AddVoiceById({
   const [playing, setPlaying] = useState(false);
   const [playProblem, setPlayProblem] = useState<string | null>(null);
 
-  const trimmed = id.trim();
+  // A link to the voice, or its ID, as pasted.
+  const trimmed = voiceIdFrom(id, provider.id) ?? id.trim();
   const said = result && result.id === trimmed ? result.lookup : null;
   const found = said?.state === "found" ? said : null;
   const problem = said ? lookupProblem(said, provider) : null;
@@ -59,13 +86,12 @@ export function AddVoiceById({
       <span className="field-label">Use a voice ID</span>
       {provider.customIds && <p className="small muted">{provider.customIds}</p>}
       <label className="field-stack">
-        <span className="small">Voice ID</span>
+        <span className="small">The voice’s link, or its ID</span>
         <input
-          className="mono"
           value={id}
           autoComplete="off"
           spellCheck={false}
-          placeholder={provider.id === "fish_audio" ? "802e3bc2b27e49c2995d23ef70e6ac89" : "21m00Tcm4TlvDq8ikWAM"}
+          placeholder={provider.id === "fish_audio" ? "https://fish.audio/m/…" : "https://elevenlabs.io/app/voice-library?voiceId=…"}
           onChange={(e) => setId(e.target.value)}
           autoFocus
         />
