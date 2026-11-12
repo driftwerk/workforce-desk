@@ -16,7 +16,10 @@ vi.mock("../platform", () => ({
   programsUnder: vi.fn(async () => []),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 it("starts a session with Desk's plugin folder, so Claude Code reports its plan's usage", async () => {
   const start = vi.fn(() => Promise.resolve({ id: "s-1" }));
@@ -26,7 +29,7 @@ it("starts a session with Desk's plugin folder, so Claude Code reports its plan'
   });
   const onClose = vi.fn();
   render(<NewSession onClose={onClose} />);
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), {
+  fireEvent.change(screen.getByLabelText("Folder"), {
     target: { value: "/work/atlas" },
   });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
@@ -100,7 +103,7 @@ it("offers the engines the hub starts, and approvals in Desk only where the engi
   fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
   expect(screen.queryByRole("radiogroup", { name: "Approvals" })).toBeNull();
   expect(screen.getByText("Codex asks its approvals in its own terminal.")).toBeTruthy();
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), {
+  fireEvent.change(screen.getByLabelText("Folder"), {
     target: { value: "/work/atlas" },
   });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
@@ -122,7 +125,7 @@ it("starts Codex with Approve for me only when asked, and only where the hub off
   expect(screen.getByRole("radio", { name: "Ask me" }).getAttribute("aria-checked")).toBe("true");
   fireEvent.click(screen.getByRole("radio", { name: "Approve for me" }));
   expect(screen.getByText(/Codex’s own reviewer answers what it asks/)).toBeTruthy();
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", approveForMe: true }));
 });
@@ -143,7 +146,7 @@ it("starts Codex in Fast mode only when asked, saying it uses the plan sooner, a
   expect(screen.queryByText(/uses up your plan’s limits sooner/)).toBeNull();
   fireEvent.click(screen.getByRole("radio", { name: "Fast" }));
   expect(screen.getByText(/uses up your plan’s limits sooner/)).toBeTruthy();
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: true }));
 });
@@ -155,7 +158,7 @@ it("starts Codex at the usual speed unless Fast is chosen", async () => {
   useDesk.setState({ hub: { start, engines } as unknown as DeskHub, openId: null });
   render(<NewSession onClose={vi.fn()} />);
   await act(async () => {});
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: undefined }));
 });
@@ -184,7 +187,7 @@ it("starts Claude Code on the default account, another the person picks, or this
   const picker = screen.getByRole("radiogroup", { name: "Account" });
   expect([...picker.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Work", "Personal", "This computer’s sign-in"]);
   expect(screen.getByRole("radio", { name: "Work" }).getAttribute("aria-checked")).toBe("true");
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/work/atlas" } });
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
   expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ engine: "claude", account: "a-w" }));
   fireEvent.click(screen.getByRole("radio", { name: "This computer’s sign-in" }));
