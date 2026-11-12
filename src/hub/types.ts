@@ -1252,6 +1252,24 @@ export interface BossView {
   /** True only while it is unbound in force: false once its budget is
    *  spent; absent from older hubs. */
   unbound?: boolean;
+  /** Act fully's daily budget and the real money spent against it today,
+   *  while it chose Act fully with a budget; absent otherwise and from
+   *  older hubs. */
+  actFully?: FullBudget | null;
+}
+
+/** Act fully's daily budget as the hub counts it: real money only (calls
+ *  an API key, Bedrock or Vertex paid for), never your Claude or ChatGPT
+ *  plans. */
+export interface FullBudget {
+  /** Real money spent today in its scope; null until the hub has read it. */
+  spentUsd: number | null;
+  budgetUsd: number;
+  /** Spent: Act fully is held, and it acts as Act, until tomorrow, a
+   *  higher budget, or you clear today's count. */
+  spent: boolean;
+  /** When you last cleared today's count: it counts from then. */
+  clearedAt?: string | null;
 }
 
 export type PlanState = "proposed" | "running" | "paused" | "done" | "dropped";
@@ -1401,7 +1419,7 @@ export interface BoardSync {
   meName?: string;
   /** Where `me` came from: the hub vouched for it with the person's own
    *  key, or they typed it. Take it needs a vouched one. */
-  meSource?: "vouched" | "typed";
+  meSource?: "vouched" | "vouchedByEmail" | "typed";
   /** Why the hub can't vouch for who the person is. */
   meNote?: string;
   /** The remote state each column moves an issue to. */
@@ -1474,6 +1492,9 @@ export interface LinkCheck {
   /** Why the hub can't say who the person is (a shared key, an older
    *  hub), when it can't. */
   meWhy?: string;
+  /** How the hub knows who the person is, when not by their own key: the
+   *  one user there with the email their sign-in verified. */
+  meBy?: "email";
 }
 
 /** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */

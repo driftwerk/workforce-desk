@@ -30,6 +30,7 @@ import {
   parseWorkflow,
   readable,
   setAgentOversight,
+  usd,
   type Oversight,
   type TakeOn,
 } from "./oversight";
@@ -220,6 +221,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     return "problem" in r ? r.problem : { ...o, wake: { ...o.wake, holdMinutes: r.value } };
   };
   const setBudget = (o: Oversight, text: string) => {
+    // Blank is no budget: only the check-in ceilings and Stop bound it.
+    if (text.trim() === "") return { ...o, full: { ...o.full, budgetUsdPerDay: null } };
     const r = parseBudget(text);
     return "problem" in r ? r.problem : { ...o, full: { ...o.full, budgetUsdPerDay: r.value } };
   };
@@ -260,6 +263,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   // What the hub says of it now: undefined while no boss view is at hand.
   const live = useFloor((s) => s.hubs[agent.hubId]?.floor?.bosses?.find((b) => b.agent === agent.id));
   const inForce = live ? live.unbound === true : undefined;
+  // Act fully's budget as the hub counts it: real money only.
+  const fullBudget = o?.level === "full" ? (live?.actFully ?? null) : null;
   const acts = o?.level === "act" || o?.level === "full";
   const takeOn = TAKE_ON(name);
   const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
@@ -568,7 +573,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           {o.level === "full" && (
             <div className="oversee-part">
               <h3>Where {name} acts fully</h3>
-              <WhyNotInForce o={o} held={running === "act" || inForce === false} onChange={update} />
+              <WhyNotInForce o={o} held={running === "act" || inForce === false} budget={fullBudget} onChange={update} />
               <div className="oversee-card">
                 <Check
                   label="Anywhere"
@@ -615,8 +620,16 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                     <span className="oversee-check-text">
                       <b>Daily budget</b>
                       <span className="oversee-sub">
-                        {o.full.anywhere ? "Optional (blank: no budget)" : "Required"}. Its sessions’ spend in its scope and its own model use, in a day
+                        Optional (blank: no budget, so only the check-in ceilings and Stop bound it). Real money a day: what API keys and Bedrock are billed for,
+                        in its sessions and its own model use. Your Claude and ChatGPT plans aren’t counted
                       </span>
+                      {fullBudget && (
+                        <span className="oversee-sub mono" role="status">
+                          Real money spent today: {fullBudget.spentUsd === null ? "not read yet" : usd(fullBudget.spentUsd)} of{" "}
+                          {usd(fullBudget.budgetUsd)} (your plans aren’t counted)
+                          {fullBudget.clearedAt ? `, counted since you cleared it at ${new Date(fullBudget.clearedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+                        </span>
+                      )}
                     </span>
                   </span>
                   <Num

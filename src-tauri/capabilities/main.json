@@ -83,6 +83,7 @@
     "allow-themes-reveal",
     "allow-hubs-list",
     "allow-hubs-remove",
+    "allow-hubs-rename",
     "allow-tuple-enable",
     "allow-tuple-disable",
     "allow-tuple-reply",

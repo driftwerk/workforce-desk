@@ -257,6 +257,9 @@ export const openUrl = (url: string): void => {
 export const openTerminalLink = (url: string): Promise<boolean> => invoke<boolean>("open_terminal_link", { url });
 
 export const removeHub = (id: string): Promise<void> => invoke("hubs_remove", { id });
+/** Names a paired workspace `label` (as it names itself): its id, address
+ *  and sign-in stay. */
+export const renameHub = (id: string, label: string): Promise<void> => invoke("hubs_rename", { id, label });
 
 // ── Files in conversations ────────────────────────────────────────────────
 // Their bytes come through Desk's native side, which holds each hub's
