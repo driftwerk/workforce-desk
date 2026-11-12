@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
@@ -6,11 +6,12 @@ import { useHubLayout } from "../groups/hubLayout";
 import { askMove, ticketSubject } from "../groups/move";
 import { deskListeners, sortedSessions, useDesk, localSessions } from "../hub/store";
 import type { ActivityEvent, ActivityParty, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
-import { SidePanel } from "../panels/Stage";
+import { PopupPanel, SidePanel } from "../panels/Stage";
 import { openUrl } from "../platform";
 import { ticketLink } from "../shell/links";
 import { tokensText, usdText } from "../spend/spend";
 import { Confirm } from "../ui/Confirm";
+import { useModal } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { plainError } from "../ui/plainError";
 import { clock, dayClock } from "../floor/time";
@@ -19,6 +20,7 @@ import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
 import { TicketBody } from "./TicketBody";
+import { TicketOpener, TicketPopupContext, useOpenTicket, useTicketPopup, type TicketPopupFrame } from "./opener";
 import { useBoard } from "./store";
 import { Assignee, TakeIt, Upstream } from "./TicketCard";
 import { issueUrl, SYSTEM_TITLE, takeable } from "../hub/boardSync";
@@ -156,6 +158,65 @@ export function OpenTicket() {
   return t ? <TicketDetail key={t.id} ticket={t} /> : null;
 }
 
+/** The ticket open as a popup over a grid, kept current: the grid dimmed
+ *  behind it, modal (Esc or a click outside closes it, focus stays in it
+ *  and goes back to its card after). A ticket opened from it opens there
+ *  too; its side-panel button moves it to the side panel. */
+export function TicketPopup() {
+  const id = useBoard((s) => s.popup);
+  return id ? <TicketPopupDialog id={id} /> : null;
+}
+
+const closePopup = () => useBoard.getState().openPopup(null);
+const openInPopup = (id: string) => useBoard.getState().openPopup(id);
+const POPUP: TicketPopupFrame = {
+  close: closePopup,
+  toSidePanel: () => {
+    const id = useBoard.getState().popup;
+    closePopup();
+    if (id) useBoard.getState().openTicket(id);
+  },
+};
+
+function TicketPopupDialog({ id }: { id: string }) {
+  const t = useBoard((s) => s.tickets[id]);
+  const supported = useBoard((s) => s.supported);
+  const hub = useDesk((s) => s.hub);
+  const ref = useRef<HTMLDivElement>(null);
+  // The card it was opened from, found again if it was redrawn meanwhile
+  // (moved to another column).
+  const from = useRef(id);
+  const onKeyDown = useModal(ref, closePopup, () => document.querySelector<HTMLElement>(`[data-ticket-card="${CSS.escape(from.current)}"]`));
+  // Opened before the board was read: ask for it; gone, it closes.
+  useEffect(() => {
+    if (t || !hub || supported === false) return;
+    useBoard.getState().fetched(id).catch(closePopup);
+  }, [id, t, hub, supported]);
+  return (
+    <div className="sheet-backdrop sheet-backdrop-center ticket-popup-backdrop" onMouseDown={(e) => e.target === e.currentTarget && closePopup()} onKeyDown={onKeyDown}>
+      <div ref={ref} className="dialog ticket-popup" role="dialog" aria-modal="true" aria-label={t ? `Ticket ${t.key ?? t.title}` : "Ticket"} tabIndex={-1}>
+        <TicketPopupContext.Provider value={POPUP}>
+          <TicketOpener.Provider value={openInPopup}>
+            {t ? (
+              <TicketDetail key={t.id} ticket={t} />
+            ) : (
+              <p className="muted small ticket-popup-note">Reading the ticket…</p>
+            )}
+          </TicketOpener.Provider>
+        </TicketPopupContext.Provider>
+      </div>
+    </div>
+  );
+}
+
+/** A ticket's frame: the side panel, or the popup it's open in. */
+function TicketFrame({ label, chrome, ...props }: ComponentProps<typeof SidePanel>) {
+  const popup = useTicketPopup();
+  if (!popup) return <SidePanel label={label} chrome={chrome} {...props} />;
+  // The popup's dialog is what's labelled.
+  return <PopupPanel {...props} onClose={popup.close} onSidePanel={popup.toSidePanel} />;
+}
+
 /** A ticket beside the board: its state and who has it, what to do with
  *  it, what it needs and is needed by, its links, and its history with
  *  what it cost. */
@@ -211,8 +272,9 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     ...(t.snoozedUntil ? [{ kind: "separator" as const }, { kind: "item" as const, label: "Wake it now", onSelect: () => act(store().edit(t.id, { snoozedUntil: null })) }] : []),
   ];
   const agentName = (id: string) => roster.find((a) => a.id === id)?.name;
+  const popup = useTicketPopup();
   return (
-    <SidePanel
+    <TicketFrame
       className="ticket-panel"
       label={`Ticket ${t.key ?? t.title}`}
       noun="this ticket"
@@ -319,7 +381,14 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
         )}
         <div className="ticket-actions">
           {session && (
-            <button type="button" className="btn btn-sm" onClick={() => useDesk.getState().open(session.id)}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                popup?.close();
+                useDesk.getState().open(session.id);
+              }}
+            >
               Go to session
             </button>
           )}
@@ -433,7 +502,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
           <p className="muted">{t.assignee ? `${t.assignee.name} is told it's gone. ` : ""}Its history stays with the sessions that worked on it.</p>
         </Confirm>
       )}
-    </SidePanel>
+    </TicketFrame>
   );
 }
 
@@ -582,9 +651,10 @@ function Needs({ ticket: t, neededBy, onProblem }: { ticket: Ticket; neededBy: T
 }
 
 function NeedRow({ ticket: o, onRemove }: { ticket: Ticket; onRemove?: () => void }) {
+  const openTicket = useOpenTicket();
   return (
     <div className="ticket-need">
-      <button type="button" className="ticket-need-open" onClick={() => useBoard.getState().openTicket(o.id)}>
+      <button type="button" className="ticket-need-open" onClick={() => openTicket(o.id)}>
         <span className="mono board-key">{o.key}</span>
         <span className="ticket-need-title">{o.title}</span>
         <span className={`small ${o.state === "done" ? "state-done" : "faint"}`}>{STATE_TITLE[o.state]}</span>
@@ -617,6 +687,8 @@ function LinkRow({ link: l }: { link: TicketLink }) {
   const sessionName = useSessionName(l.kind === "session" ? l.session : null, "");
   const session = useDesk((s) => (l.kind === "session" ? s.sessions[l.session] : undefined));
   const room = useDesk((s) => (l.kind === "room" ? s.rooms[l.room] : undefined));
+  // Going to a session or a room leaves the popup.
+  const popup = useTicketPopup();
   switch (l.kind) {
     case "pr":
       return (
@@ -633,7 +705,11 @@ function LinkRow({ link: l }: { link: TicketLink }) {
       return (
         <div className="ticket-link">
           <span className="chip">session</span>
-          <button type="button" className="link mono" disabled={!session} onClick={() => useDesk.getState().open(l.session)}>
+          <button type="button" className="link mono" disabled={!session} onClick={() => {
+              popup?.close();
+              useDesk.getState().open(l.session);
+            }}
+          >
             {sessionName || session?.name || "A session since forgotten"}
           </button>
         </div>
@@ -642,7 +718,11 @@ function LinkRow({ link: l }: { link: TicketLink }) {
       return (
         <div className="ticket-link">
           <span className="chip">room</span>
-          <button type="button" className="link" disabled={!room} onClick={() => void useDesk.getState().openRoom(l.room)}>
+          <button type="button" className="link" disabled={!room} onClick={() => {
+              popup?.close();
+              void useDesk.getState().openRoom(l.room);
+            }}
+          >
             {room ? `#${room.slug}` : "A room since deleted"}
             {l.thread ? " ▸ thread" : ""}
           </button>

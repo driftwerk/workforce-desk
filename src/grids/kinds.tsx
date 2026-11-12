@@ -251,7 +251,9 @@ export function BoardPaneBody({ gridId, paneId, board }: { gridId: string; paneI
       board,
       filter,
       onFilter: (f: BoardFilter) => setPaneFilter(gridId, paneId, f),
-      openTicket: (id: string) => openInMain({ kind: "ticket", id }),
+      // A popup over the grid here, which a side panel would squeeze; a
+      // grid's own window has neither, and sends it to the main window.
+      openTicket: (id: string) => (useDesk.getState().detached ? openInMain({ kind: "ticket", id }) : useBoard.getState().openPopup(id)),
     }),
     [board, filter, gridId, paneId],
   );

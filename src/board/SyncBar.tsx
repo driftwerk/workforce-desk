@@ -6,6 +6,7 @@ import { openSettingsAt } from "../ui/problem";
 import type { Board, Ticket } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
+import { useOpenTicket } from "./opener";
 import { useBoard } from "./store";
 import { hubNameOf, localSync, useSyncHubs } from "./syncStore";
 
@@ -134,6 +135,7 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
   const [busy, setBusy] = useState<string | null>(null);
   // Its own, as a grid can show more than one board.
   const titleId = useId();
+  const openTicket = useOpenTicket();
   if (!tickets.length) return null;
   const system = board.sync ? SYSTEM_TITLE[board.sync.system] : "the remote";
   const decide = async (t: Ticket, keep: boolean) => {
@@ -159,7 +161,7 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
       <ul className="board-left-rows">
         {tickets.map((t) => (
           <li key={t.id} className="board-left-row">
-            <button type="button" className="link board-left-open" onClick={() => useBoard.getState().openTicket(t.id)}>
+            <button type="button" className="link board-left-open" onClick={() => openTicket(t.id)}>
               <span className="mono board-key">{t.key}</span>
               <span className="board-left-title">{t.title}</span>
             </button>

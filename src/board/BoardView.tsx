@@ -17,6 +17,7 @@ import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
 import { NewTicket } from "./NewTicket";
+import { TicketOpener } from "./opener";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
 
@@ -88,9 +89,6 @@ export const useShiftWheel = (el: HTMLElement | null): void => {
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
 /** The plan each ticket is in, by its goal, for the board's cards. */
 const Plans = createContext<ReadonlyMap<string, string>>(new Map());
-/** Where a card opens its ticket: the panel beside the main window's view,
- *  unless the board is somewhere that has none (a grid's own window). */
-const TicketOpener = createContext<(id: string) => void>((id) => useBoard.getState().openTicket(id));
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
@@ -312,13 +310,15 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   if (pane)
     return (
-      <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
-        {board.sync && <PaneSync board={board} now={now} />}
-        <LeftFilterShelf board={board} tickets={left} />
-        {columnsShown}
-        <BoardShort counts={counts} waiting={waitingCount} />
-        {live}
-      </div>
+      <TicketOpener.Provider value={pane.openTicket}>
+        <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
+          {board.sync && <PaneSync board={board} now={now} />}
+          <LeftFilterShelf board={board} tickets={left} />
+          {columnsShown}
+          <BoardShort counts={counts} waiting={waitingCount} />
+          {live}
+        </div>
+      </TicketOpener.Provider>
     );
 
   return (
