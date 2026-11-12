@@ -6,9 +6,11 @@
 //! - macOS: the running process's own code signature (`codesign --verify`
 //!   on its pid, which checks the process, not the file on disk) must be
 //!   Google's (team `EQHXZ8M8AV`).
-//! - Windows: the program must be Chrome's under Program Files (writable by
-//!   an administrator only), and its Authenticode signature must verify
-//!   (`WinVerifyTrust`) with Google LLC as the signer.
+//! - Windows: the program must be named `chrome.exe`, wherever it is
+//!   installed (machine-wide under Program Files, or per person under
+//!   AppData, common without admin rights), and its Authenticode signature
+//!   must verify (`WinVerifyTrust`) with Google LLC as the signer: the
+//!   signature is the check, not the path.
 //! - Linux: Chrome's own path under `/opt/google`, which only root writes.
 //! - Everywhere: the parent is read again after the checks, and a parent
 //!   that changed (it exited, and its pid went to another) is refused.
@@ -50,32 +52,11 @@ pub fn is_chrome(os: &str, exe: &Path, development: bool) -> bool {
                 || (development && exe.file_name().is_some_and(|n| n == "chrome"))
         }
         "windows" => {
-            windows_chrome(&s) || (development && last_part(&s).eq_ignore_ascii_case("chrome.exe"))
+            // Any path: Google's signature, checked after, is what counts.
+            last_part(&s).eq_ignore_ascii_case("chrome.exe")
         }
         _ => false,
     }
-}
-
-/// Whether `path` is Chrome's program under Program Files: what an
-/// administrator installed, which the person's own programs can't replace.
-fn windows_chrome(path: &str) -> bool {
-    let p = path.to_ascii_lowercase().replace('/', "\\");
-    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
-    let drive =
-        p.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && p.get(1..2) == Some(":");
-    let Some(rest) = p.get(2..).filter(|_| drive) else {
-        return false;
-    };
-    let programs = [r"\program files\", r"\program files (x86)\"];
-    let chromes = [
-        r"google\chrome\application\chrome.exe",
-        r"google\chrome beta\application\chrome.exe",
-        r"google\chrome dev\application\chrome.exe",
-    ];
-    programs
-        .iter()
-        .filter_map(|pf| rest.strip_prefix(pf))
-        .any(|r| chromes.contains(&r))
 }
 
 /// Whether `exe`, on Windows, is the `cmd.exe` Chrome starts a host
@@ -444,14 +425,14 @@ mod tests {
             r"\\?\C:\Program Files\Google\Chrome Beta\Application\chrome.exe"
         ));
         assert!(!win(r"C:\Users\sarah\evil.exe"));
-        // Chrome's name anywhere but Program Files is anyone's program.
-        assert!(!win(r"C:\Users\sarah\chrome.exe"));
-        assert!(!win(
+        assert!(!win(r"C:\Users\sarah\chrome.exe.bak"));
+        // A per-person install under AppData is Chrome too: on Windows the
+        // path proves nothing, so Google's signature is what decides
+        // (`signed_by_google`), wherever the program is.
+        assert!(win(
             r"C:\Users\sarah\AppData\Local\Google\Chrome\Application\chrome.exe"
         ));
-        assert!(!win(
-            r"C:\Program Files\Google\Chrome\Application\x\chrome.exe"
-        ));
+        assert!(win(r"D:\Apps\Chrome\chrome.exe"));
         assert!(is_chrome(
             "windows",
             Path::new(r"C:\Users\sarah\cft\chrome.exe"),
