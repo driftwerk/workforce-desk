@@ -575,10 +575,10 @@ describe("a ticket opened from a board pane", () => {
     expect(within(dialog()!).getByRole("combobox", { name: "State" })).toBeTruthy();
   });
 
-  it("closes on Esc, and focus goes back to its card", () => {
+  it("closes on Esc, and focus goes back to its card (opened by a click, which focuses nothing in WebKit)", () => {
     withPopup();
     const c = card("ACM-1");
-    c.focus();
+    expect(document.activeElement).toBe(document.body);
     fireEvent.click(c);
     expect(dialog()!.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
@@ -636,6 +636,46 @@ describe("a ticket opened from a board pane", () => {
     expect(useBoard.getState().popup).toBe("t2");
     expect(useBoard.getState().open).toBeNull();
     expect(dialog()!.getAttribute("aria-label")).toBe("Ticket ACM-2");
+  });
+
+  it("Esc in its Snooze menu closes the menu, not the popup", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Snooze" }));
+    const menu = screen.getByRole("menu", { name: "Snooze" });
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0]!, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Snooze" })).toBeNull();
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("Esc in its Delete confirmation closes only that", () => {
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Delete ticket…" }));
+    const confirm = screen.getByRole("dialog", { name: "Delete ACM-1?" });
+    fireEvent.keyDown(document.activeElement ?? confirm, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Delete ACM-1?" })).toBeNull();
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("after a need opened in it, focus is still in it, so Esc still closes it", () => {
+    act(() => useBoard.getState().heard({ ...useBoard.getState().tickets.t1!, needs: ["t2"] }));
+    withPopup();
+    fireEvent.click(card("ACM-1"));
+    const need = dialog()!.querySelector<HTMLElement>(".ticket-need-open")!;
+    need.focus();
+    fireEvent.click(need);
+    expect(dialog()!.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(dialog()).toBeNull();
+  });
+
+  it("a ticket that can't be read closes it rather than reading forever", () => {
+    withPopup();
+    useDesk.setState({ hub: null });
+    act(() => useBoard.getState().openPopup("t-unknown"));
+    expect(dialog()).toBeNull();
+    expect(useBoard.getState().popup).toBeNull();
   });
 
   it("the Board view itself still opens it in the side panel", () => {

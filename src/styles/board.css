@@ -376,7 +376,6 @@ button.ticket-chip:hover {
 }
 .ticket-popup .rpanel-head {
   padding: 14px 14px 14px 22px;
-  border-bottom: 1px solid var(--border);
 }
 .ticket-popup .ticket-body {
   padding: 20px 26px 24px;

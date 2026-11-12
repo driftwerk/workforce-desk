@@ -29,8 +29,9 @@ export function GridsMain() {
   const counts = useGridCounts(grid);
   // Behind a focused side panel, the grid doesn't take keys.
   useFillKeys(grid?.id ?? null, !useMainHidden());
-  // A ticket open over the grid goes with it.
-  useEffect(() => () => useBoard.getState().openPopup(null), []);
+  // A ticket open over the grid goes with it, and when another grid shows.
+  const gridId = grid?.id;
+  useEffect(() => () => useBoard.getState().openPopup(null), [gridId]);
   if (!ready) return <main className="grids" aria-label="Grids" />;
   if (!grid) {
     return (

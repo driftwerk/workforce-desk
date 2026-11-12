@@ -29,7 +29,9 @@ export function useModal(ref: RefObject<HTMLElement | null>, onClose: () => void
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus();
-    return () => (before?.isConnected ? before : (again.current?.() ?? before))?.focus();
+    // A click leaves focus on the page itself in WebKit (a button isn't
+    // focused by it): that's as good as lost.
+    return () => (before && before !== document.body && before.isConnected ? before : (again.current?.() ?? before))?.focus();
   }, [ref]);
   return (e) => {
     if (e.key === "Escape") {

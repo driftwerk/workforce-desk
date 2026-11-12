@@ -187,11 +187,21 @@ function TicketPopupDialog({ id }: { id: string }) {
   // (moved to another column).
   const from = useRef(id);
   const onKeyDown = useModal(ref, closePopup, () => document.querySelector<HTMLElement>(`[data-ticket-card="${CSS.escape(from.current)}"]`));
-  // Opened before the board was read: ask for it; gone, it closes.
+  // Opened before the board was read: ask for it; gone, or with no hub
+  // to ask, it closes.
   useEffect(() => {
-    if (t || !hub || supported === false) return;
+    if (t) return;
+    if (!hub || supported === false) return closePopup();
     useBoard.getState().fetched(id).catch(closePopup);
   }, [id, t, hub, supported]);
+  // Another ticket opened from it: what had focus went with the last one,
+  // so focus is on the popup again (Esc and Tab still work).
+  const shown = useRef(id);
+  useEffect(() => {
+    if (shown.current === id) return;
+    shown.current = id;
+    if (!ref.current?.contains(document.activeElement)) ref.current?.focus();
+  }, [id]);
   return (
     <div className="sheet-backdrop sheet-backdrop-center ticket-popup-backdrop" onMouseDown={(e) => e.target === e.currentTarget && closePopup()} onKeyDown={onKeyDown}>
       <div ref={ref} className="dialog ticket-popup" role="dialog" aria-modal="true" aria-label={t ? `Ticket ${t.key ?? t.title}` : "Ticket"} tabIndex={-1}>
@@ -200,7 +210,9 @@ function TicketPopupDialog({ id }: { id: string }) {
             {t ? (
               <TicketDetail key={t.id} ticket={t} />
             ) : (
-              <p className="muted small ticket-popup-note">Reading the ticket…</p>
+              <p className="muted small ticket-popup-note" role="status">
+                Reading the ticket…
+              </p>
             )}
           </TicketOpener.Provider>
         </TicketPopupContext.Provider>
