@@ -4,7 +4,7 @@
 // scripts or the Web Store.
 
 import type { DeskTabs } from "./desk";
-import { clickOn, fillField, focused, onKeyPage, present, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "./page";
+import { clickOn, fillField, focused, hrefNow, onKeyPage, present, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "./page";
 import { MAX_HTML, MAX_KEY, MAX_TEXT, MAX_UPLOAD_BYTES, type Command } from "./protocol";
 
 /** The parts of Chrome's API calls use, so tests can stand in. */
@@ -14,8 +14,9 @@ export interface Exec {
   /** Loads `url` in `tabId` and waits for it (or `timeoutMs`). */
   navigate(tabId: number, url: string, timeoutMs: number): Promise<void>;
   where(tabId: number): Promise<{ url: string; title: string }>;
-  /** A PNG of `windowId`'s active tab, as a data URL. */
-  capture(windowId: number): Promise<string>;
+  /** A PNG of `windowId`'s active tab, as a data URL, if that tab is
+   *  `tabId` in the moment it is taken; null when it isn't. */
+  capture(windowId: number, tabId: number): Promise<string | null>;
   activate(tabId: number): Promise<void>;
   front(windowId: number, tabId: number): Promise<void>;
   sleep(ms: number): Promise<void>;
@@ -38,6 +39,22 @@ export const workable = (url: string): boolean => {
 const NAVIGATION_MS = 30_000;
 
 export class Fail extends Error {}
+
+/** One picture at a time, across every session: making Desk's tab the
+ *  active one, reading it and picturing it is one step no other picture
+ *  comes between. */
+let pictures: Promise<unknown> = Promise.resolve();
+const onePicture = <T>(f: () => Promise<T>): Promise<T> => {
+  const next = pictures.then(f, f);
+  pictures = next.catch(() => undefined);
+  return next;
+};
+
+const typed = (done: "ok" | "missing" | "moved", missing: string) => {
+  if (done === "moved") throw new Fail("The page moved since this was decided, so nothing was typed.");
+  if (done === "missing") throw new Fail(missing);
+  return true;
+};
 
 /** Does `c`, answering what it returns. */
 export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<unknown> {
@@ -79,18 +96,16 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
     }
     case "fill": {
       await here();
-      if (!(await exec.run(tab, fillField, [c.selector, c.value]))) throw new Fail(`Nothing on the page matches \`${c.selector}\`.`);
-      return true;
+      return typed(await exec.run(tab, fillField, [c.selector, c.value, c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
     }
     case "type": {
       await here();
       if (c.selector && !(await exec.run(tab, focused, [c.selector]))) {
         // Typing goes only where the field has the focus.
-        await exec.run(tab, typeText, [c.selector, ""]);
+        typed(await exec.run(tab, typeText, [c.selector, "", c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
         if (!(await exec.run(tab, focused, [c.selector]))) throw new Fail(`\`${c.selector}\` didn't take the focus, so nothing was typed.`);
       }
-      if (!(await exec.run(tab, typeText, [c.selector, c.text]))) throw new Fail("There's nothing to type into.");
-      return true;
+      return typed(await exec.run(tab, typeText, [c.selector, c.text, c.origin ?? null]), "There's nothing to type into.");
     }
     case "press": {
       await here();
@@ -120,18 +135,24 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       if (!(await exec.run(tab, setFiles, [c.selector, c.files]))) throw new Fail(`\`${c.selector}\` isn't a file field.`);
       return true;
     }
-    case "capture": {
-      await here();
-      // A minimised window is never restored behind the person's back.
-      if (await tabs.minimised()) return { skipped: "minimised" };
-      const windowId = await tabs.windowId();
-      if (windowId === null) throw new Fail("Desk's window isn't open.");
-      await exec.activate(tab);
-      // A key page is never pictured: its address read again right now.
-      if (c.refuse?.length && (await exec.run(tab, onKeyPage, [c.refuse]))) return { skipped: "key page" };
-      const data = await exec.capture(windowId);
-      return { png_base64: data.replace(/^data:image\/png;base64,/, "") };
-    }
+    case "capture":
+      return onePicture(async () => {
+        await here();
+        // A minimised window is never restored behind the person's back.
+        if (await tabs.minimised()) return { skipped: "minimised" };
+        const windowId = await tabs.windowId();
+        if (windowId === null) throw new Fail("Desk's window isn't open.");
+        await exec.activate(tab);
+        // A key page is never pictured: its address read again right now,
+        // with what it shows, for the hub to check the tab it pictured.
+        if (c.refuse?.length && (await exec.run(tab, onKeyPage, [c.refuse]))) return { skipped: "key page" };
+        const seen = await exec.run(tab, readPage, ["all", MAX_TEXT, 0]);
+        const data = await exec.capture(windowId, tab);
+        if (data === null) return { skipped: "not_front" };
+        // The page moved while it was pictured: the picture isn't of it.
+        if ((await exec.run(tab, hrefNow, [])) !== seen.url) return { skipped: "moved" };
+        return { png_base64: data.replace(/^data:image\/png;base64,/, ""), url: seen.url, text: seen.text ?? "" };
+      });
     case "capture_key": {
       await here();
       const read = await exec.run(tab, readKey, [c.selector, c.origin, c.paths, MAX_KEY]);

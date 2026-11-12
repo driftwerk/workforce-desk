@@ -18,6 +18,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// A made-up key for the fixture key page, built so no scanner takes it for one.
+const KEY = ["fx", "abcdefghijkl" + "mnopqrstuvwx"].join("_");
 const fixture = JSON.parse(readFileSync(join(here, "../protocol/v1.json"), "utf8"));
 
 // ── As the host Chrome starts: relay native messages to the test's socket.
@@ -79,6 +81,9 @@ async function main() {
     if (req.url === "/form")
       return res.end(`<!doctype html><title>Form</title><body><form id="f"><input id="name"><button id="send" type="submit">Send</button></form><div id="out"></div>
 <script>document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Thanks, ' + document.getElementById('name').value; document.getElementById('out').appendChild(p); });</script></body>`);
+    if (req.url === "/settings/api")
+      return res.end(`<!doctype html><title>API keys</title><body><p>Your new key</p><input id="key" readonly value="${KEY}" size="40">
+<input id="editable" value="${KEY}"><input id="secret" type="hidden" readonly value="${KEY}"><input id="see-through" readonly style="opacity:0" value="${KEY}"></body>`);
     res.end("<!doctype html><title>Home</title><body><p>Welcome</p></body>");
   });
   await new Promise((r) => site.listen(0, "127.0.0.1", r));
@@ -165,14 +170,37 @@ async function main() {
   expect(!refused.ok, "never opens Chrome's own pages");
   const read = await call("read", { what: "text" });
   expect(read.ok && read.value.title === "Form", "reads the page");
-  expect((await call("fill", { selector: "#name", value: "Allan" })).ok, "fills a field");
+  const elsewhere = await call("fill", { selector: "#name", value: "Allan", origin: "https://elsewhere.example" });
+  expect(!elsewhere.ok && /page moved/.test(elsewhere.error), "types nothing on an origin it wasn't resolved for");
+  expect((await call("fill", { selector: "#name", value: "Allan", origin: base })).ok, "fills a field");
   expect((await call("click", { selector: "#send" })).ok, "clicks a button");
   const waited = await call("wait", { selector: "#done", timeout_ms: 5000 });
   expect(waited.ok, "the page reacted to the click");
   const after = await call("read", { what: "text" });
   expect(after.ok && after.value.text.includes("Thanks, Allan"), "what was typed reached the page");
   const shot = await call("capture");
-  expect(shot.ok && (shot.value.png_base64?.length > 1000 || shot.value.skipped === "minimised"), "takes a picture of Desk's window");
+  expect(
+    shot.ok && ((shot.value.png_base64?.length > 1000 && shot.value.url === `${base}/form` && shot.value.text.includes("Thanks, Allan")) || shot.value.skipped === "minimised"),
+    "takes a picture of Desk's tab, and says what it pictured",
+  );
+  // A key page: its key read for the hub's secret path, only off a field
+  // the person sees and can't edit; never pictured.
+  const keyPage = { origin: base, paths: ["/settings/api"] };
+  expect((await call("navigate", { url: `${base}/settings/api` })).ok, "opens a key page");
+  const kept = await call("capture_key", { selector: "#key", ...keyPage });
+  expect(kept.ok && kept.value.value === KEY && kept.value.path === "/settings/api", "reads a new key off a readonly field it shows");
+  for (const [selector, why] of [
+    ["#editable", "an editable field"],
+    ["#secret", "hidden"],
+    ["#see-through", "hidden"],
+  ]) {
+    const no = await call("capture_key", { selector, ...keyPage });
+    expect(!no.ok && no.error.includes(why), `never reads a key off ${why} (${selector})`);
+  }
+  const prefix = await call("capture_key", { selector: "#key", origin: base, paths: ["/settings/ap"] });
+  expect(!prefix.ok && prefix.error.includes("not a key page"), "holds a key page's path a whole segment at a time");
+  const keyShot = await call("capture", { refuse: [keyPage] });
+  expect(keyShot.ok && (keyShot.value.skipped === "key page" || keyShot.value.skipped === "minimised"), "takes no picture of a key page");
   const missing = await call("click", { selector: "#nope" });
   expect(!missing.ok && missing.error.includes("Nothing on the page matches"), "says plainly what it couldn't do");
   // Something that isn't the hub's is ignored.

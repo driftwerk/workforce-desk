@@ -58,11 +58,12 @@ class FakeChrome implements ChromeTabs {
 
 /** Runs page functions against this test's document, as Chrome would in
  *  Desk's tab. */
-const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]; captured: number } => {
+const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]; captured: number; active: number | null } => {
   const e = {
     navigated: [] as string[],
     captured: 0,
     at: url,
+    active: null as number | null,
     async run<A extends unknown[], R>(_tab: number, func: (...args: A) => R, args: A) {
       return func(...args);
     },
@@ -73,11 +74,16 @@ const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]
     async where() {
       return { url: e.at, title: document.title };
     },
-    async capture() {
+    async capture(_window: number, tab: number) {
+      // As Chrome does: a picture of whichever tab is active now.
+      await new Promise((r) => setTimeout(r, 5));
+      if (e.active !== tab) return null;
       e.captured++;
       return "data:image/png;base64,iVBORw0KGgo=";
     },
-    async activate() {},
+    async activate(tab: number) {
+      e.active = tab;
+    },
     async front() {},
     async sleep() {},
   };
@@ -223,11 +229,15 @@ describe("page functions", () => {
     const seen: string[] = [];
     document.getElementById("name")!.addEventListener("input", () => seen.push("input"));
     document.getElementById("name")!.addEventListener("change", () => seen.push("change"));
-    expect(fillField("#name", "Allan")).toBe(true);
+    expect(fillField("#name", "Allan", location.origin)).toBe("ok");
     expect((document.getElementById("name") as HTMLInputElement).value).toBe("Allan");
     expect(seen).toEqual(["input", "change"]);
-    expect(typeText("#q", "shoes")).toBe(true);
+    expect(typeText("#q", "shoes", location.origin)).toBe("ok");
     expect((document.getElementById("q") as HTMLInputElement).value).toBe("shoes");
+    // Only on the origin the hub resolved it for: a page that moved is left.
+    expect(fillField("#name", "secret", "https://elsewhere.example")).toBe("moved");
+    expect(typeText("#q", "secret", null)).toBe("moved");
+    expect((document.getElementById("name") as HTMLInputElement).value).toBe("Allan");
     expect(selectOption("#size", "Medium")).toBe(true);
     expect((document.getElementById("size") as HTMLSelectElement).value).toBe("m");
     expect(selectOption("#size", "Huge")).toBe(false);
@@ -255,8 +265,10 @@ describe("calls", () => {
     await perform({ cmd: "navigate", session: "s", url: "https://shop.example/" }, tabs, exec);
     expect(exec.navigated).toEqual(["https://shop.example/"]);
     document.body.innerHTML = `<input id="name">`;
-    expect(await perform({ cmd: "fill", session: "s", selector: "#name", value: "x" }, tabs, exec)).toBe(true);
-    await expect(perform({ cmd: "fill", session: "s", selector: "#nope", value: "x" }, tabs, exec)).rejects.toThrow("Nothing on the page matches");
+    const here = location.origin;
+    expect(await perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: here }, tabs, exec)).toBe(true);
+    await expect(perform({ cmd: "fill", session: "s", selector: "#nope", value: "x", origin: here }, tabs, exec)).rejects.toThrow("Nothing on the page matches");
+    await expect(perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: "https://other.example" }, tabs, exec)).rejects.toThrow("The page moved");
     const off = execOn("chrome://settings");
     await expect(perform({ cmd: "read", session: "s", what: "text" }, tabs, off)).rejects.toThrow("doesn't work in");
   });
@@ -265,12 +277,30 @@ describe("calls", () => {
     const c = new FakeChrome();
     const tabs = new DeskTabs(c);
     const exec = execOn();
-    expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toEqual({ png_base64: "iVBORw0KGgo=" });
+    document.body.innerHTML = `<p>Basket</p>`;
+    expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toMatchObject({ png_base64: "iVBORw0KGgo=", url: location.href });
     for (const w of c.windows.values()) w.state = "minimized";
     expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toEqual({ skipped: "minimised" });
     expect(exec.captured).toBe(1);
     const big = "A".repeat(1_000_000);
     await expect(perform({ cmd: "upload", session: "s", selector: "#f", files: [{ name: "x", type: "", base64: big }] }, tabs, exec)).rejects.toThrow("too big");
+  });
+
+  it("picture one tab at a time, and only the tab that is showing", async () => {
+    const tabs = new DeskTabs(new FakeChrome());
+    const exec = execOn();
+    // Two sessions at once: each picture is of its own tab.
+    const [a, b] = await Promise.all([perform({ cmd: "capture", session: "a" }, tabs, exec), perform({ cmd: "capture", session: "b" }, tabs, exec)]);
+    expect(a).toHaveProperty("png_base64");
+    expect(b).toHaveProperty("png_base64");
+    expect(exec.captured).toBe(2);
+    // Another tab came to the front before the picture: none is taken.
+    const moved = execOn();
+    moved.activate = async () => {
+      moved.active = -1;
+    };
+    expect(await perform({ cmd: "capture", session: "a" }, tabs, moved)).toEqual({ skipped: "not_front" });
+    expect(moved.captured).toBe(0);
   });
 
   it("wait for an element until it appears, or say it didn't", async () => {
@@ -344,6 +374,7 @@ describe("reading a new key", () => {
 
   it("reads a readonly field or text on a key page, and nothing on any other page", () => {
     document.body.innerHTML = `<input id="k" readonly value=" lin_api_abcdef0123456789 "><code id="t">sk_live_text</code>`;
+    document.getElementById("k")!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
     expect(readKey("#k", origin, [at], 512)).toEqual({ value: "lin_api_abcdef0123456789", origin, path: at });
     const t = document.getElementById("t")!;
     t.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
@@ -362,6 +393,32 @@ describe("reading a new key", () => {
     expect(readKey("#a", origin, [at], 512)).toEqual({ refused: "a password field" });
     expect(readKey("#f", origin, [at], 512)).toEqual({ refused: "in a form with a password" });
     expect(readKey("#nope", origin, [at], 512)).toEqual({ refused: "missing" });
+  });
+
+  it("reads nothing the person can't see, nor a field named for a password", () => {
+    document.body.innerHTML = `<input id="h" type="hidden" readonly value="k1"><input id="z" readonly value="k2">
+<div style="display:none"><input id="d" readonly value="k3"></div><input id="o" readonly style="opacity:0" value="k4">
+<input id="v" readonly style="visibility:hidden" value="k5"><input id="n" name="user_pass" readonly value="k6"><input id="passkey" readonly value="k7">`;
+    const sized = (id: string) => (document.getElementById(id)!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect);
+    for (const id of ["h", "d", "o", "v", "n", "passkey"]) sized(id);
+    for (const id of ["h", "z", "d", "o", "v"]) expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({ refused: "hidden" });
+    for (const id of ["n", "passkey"]) expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({ refused: "a password field" });
+  });
+
+  it("holds a key page's paths a whole segment at a time", () => {
+    history.replaceState(null, "", "/settings/api/new");
+    try {
+      document.body.innerHTML = `<code id="t">sk_live_text</code>`;
+      document.getElementById("t")!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+      expect(readKey("#t", origin, ["/settings/ap"], 512)).toEqual({ refused: "not a key page" });
+      expect(readKey("#t", origin, ["/settings/api/newer"], 512)).toEqual({ refused: "not a key page" });
+      expect(readKey("#t", origin, ["/settings/api"], 512)).toMatchObject({ value: "sk_live_text" });
+      expect(readKey("#t", origin, ["/settings/api/"], 512)).toMatchObject({ value: "sk_live_text" });
+      expect(onKeyPage([{ origin, paths: ["/settings/ap"] }])).toBe(false);
+      expect(onKeyPage([{ origin, paths: ["/settings"] }])).toBe(true);
+    } finally {
+      history.replaceState(null, "", at);
+    }
   });
 
   it("says whether the page is a key page now", () => {

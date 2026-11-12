@@ -74,10 +74,13 @@ export function clickOn(selector: string): "ok" | "missing" | "hidden" | "covere
 }
 
 /** Puts `value` in the field `selector` names, as a person typing it would
- *  leave it: through the field's own setter, then `input` and `change`. */
-export function fillField(selector: string, value: string): boolean {
+ *  leave it: through the field's own setter, then `input` and `change`.
+ *  Only on `origin`, the one the hub resolved `value` for: a page that
+ *  moved since is left as it is. */
+export function fillField(selector: string, value: string, origin: string | null): "ok" | "missing" | "moved" {
+  if (origin === null || location.origin !== origin) return "moved";
   const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
-  if (!el) return false;
+  if (!el) return "missing";
   el.focus();
   if ((el as HTMLElement).isContentEditable) {
     (el as HTMLElement).textContent = value;
@@ -89,14 +92,16 @@ export function fillField(selector: string, value: string): boolean {
   }
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
-  return true;
+  return "ok";
 }
 
 /** Types `text` at the end of what the field `selector` names (the focused
- *  element without a selector) holds, a character at a time. */
-export function typeText(selector: string | null, text: string): boolean {
+ *  element without a selector) holds, a character at a time; only on
+ *  `origin`, as [`fillField`]. */
+export function typeText(selector: string | null, text: string, origin: string | null): "ok" | "missing" | "moved" {
+  if (origin === null || location.origin !== origin) return "moved";
   const el = (selector ? document.querySelector(selector) : document.activeElement) as HTMLInputElement | HTMLElement | null;
-  if (!el) return false;
+  if (!el) return "missing";
   if (typeof el.focus === "function") el.focus();
   const editable = (el as HTMLElement).isContentEditable;
   const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -115,7 +120,7 @@ export function typeText(selector: string | null, text: string): boolean {
     el.dispatchEvent(new KeyboardEvent("keyup", key));
   }
   el.dispatchEvent(new Event("change", { bubbles: true }));
-  return true;
+  return "ok";
 }
 
 /** Presses `key` (Enter, Tab, Escape, an arrow, or a character) on the
@@ -156,9 +161,11 @@ export function selectOption(selector: string, value: string): boolean {
 /** Reads a new key off a service's key page, for Desk to keep without its
  *  model ever seeing it. In this one call, so the page can't move between
  *  the check and the read: the page must be on `origin` under one of
- *  `paths`; the element must show (a readonly field's value, or text); never
- *  an editable field, a password-like field, or anything in a form with a
- *  password field. */
+ *  `paths` (whole segments: `/settings/api` holds `/settings/api/new`, not
+ *  `/settings/apikeys`); the element must show to the person (laid out,
+ *  visible, not see-through, not a hidden input); never an editable field,
+ *  a password-like field (by type, autocomplete, id or name), or anything
+ *  in a form with a password field. */
 export function readKey(
   selector: string,
   origin: string,
@@ -166,18 +173,29 @@ export function readKey(
   max: number,
 ): { value: string; origin: string; path: string } | { refused: string } {
   const here = { origin: location.origin, path: location.pathname };
-  if (here.origin !== origin || !paths.some((p) => here.path.startsWith(p))) return { refused: "not a key page" };
+  const under = (path: string, prefix: string) => {
+    const p = prefix.replace(/\/+$/, "");
+    return p === "" || path === p || path.startsWith(p + "/");
+  };
+  if (here.origin !== origin || !paths.some((p) => under(here.path, p))) return { refused: "not a key page" };
   const el = document.querySelector(selector) as HTMLElement | null;
   if (!el) return { refused: "missing" };
   const field = el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? (el as HTMLInputElement) : null;
   if (field && !field.readOnly) return { refused: "an editable field" };
   const type = (el.getAttribute("type") || "").toLowerCase();
   const auto = (el.getAttribute("autocomplete") || "").toLowerCase();
-  if (type === "password" || auto.includes("password")) return { refused: "a password field" };
+  const named = `${el.id} ${el.getAttribute("name") || ""}`;
+  if (type === "password" || auto.includes("password") || /pass/i.test(named)) return { refused: "a password field" };
   const form = el.closest("form");
   if (form && form.querySelector('input[type="password" i]')) return { refused: "in a form with a password" };
+  // It shows to the person: nothing hidden is read, field or text.
+  if (type === "hidden") return { refused: "hidden" };
   const r = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
-  if (r && (r.width === 0 || r.height === 0) && !field) return { refused: "hidden" };
+  if (r && (r.width === 0 || r.height === 0)) return { refused: "hidden" };
+  for (let at: Element | null = el; at; at = at.parentElement) {
+    const style = getComputedStyle(at);
+    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number(style.opacity) === 0) return { refused: "hidden" };
+  }
   const value = (field ? field.value : (el.innerText ?? el.textContent ?? "")).trim().slice(0, max);
   if (!value) return { refused: "empty" };
   return { value, origin: here.origin, path: here.path };
@@ -186,7 +204,16 @@ export function readKey(
 /** Whether the page is on one of `pages` now: read with the call that
  *  depends on it. */
 export function onKeyPage(pages: { origin: string; paths: string[] }[]): boolean {
-  return pages.some((k) => location.origin === k.origin && k.paths.some((p) => location.pathname.startsWith(p)));
+  const under = (path: string, prefix: string) => {
+    const p = prefix.replace(/\/+$/, "");
+    return p === "" || path === p || path.startsWith(p + "/");
+  };
+  return pages.some((k) => location.origin === k.origin && k.paths.some((p) => under(location.pathname, p)));
+}
+
+/** The page's address now. */
+export function hrefNow(): string {
+  return location.href;
 }
 
 /** Whether `selector` names an element now. */

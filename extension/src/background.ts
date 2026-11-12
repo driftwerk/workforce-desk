@@ -86,10 +86,13 @@ const exec: Exec = {
     const t = await chrome.tabs.get(tabId);
     return { url: t.url ?? t.pendingUrl ?? "about:blank", title: t.title ?? "" };
   },
-  async capture(windowId) {
+  async capture(windowId, tabId) {
     const wait = lastCapture + 550 - Date.now();
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastCapture = Date.now();
+    // Right before the picture: the window's active tab is Desk's.
+    const [active] = await chrome.tabs.query({ active: true, windowId });
+    if (active?.id !== tabId) return null;
     return chrome.tabs.captureVisibleTab(windowId, { format: "png" });
   },
   activate: async (tabId) => void (await chrome.tabs.update(tabId, { active: true })),

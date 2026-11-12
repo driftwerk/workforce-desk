@@ -72,8 +72,8 @@ export type Command =
   | { cmd: "read"; session: string; what: "text" | "html" | "all" }
   | { cmd: "shown"; session: string; selector: string | null; form: boolean }
   | { cmd: "click"; session: string; selector: string }
-  | { cmd: "fill"; session: string; selector: string; value: string }
-  | { cmd: "type"; session: string; selector: string | null; text: string }
+  | { cmd: "fill"; session: string; selector: string; value: string; origin: string | null }
+  | { cmd: "type"; session: string; selector: string | null; text: string; origin: string | null }
   | { cmd: "press"; session: string; selector: string | null; key: string }
   | { cmd: "select"; session: string; selector: string; value: string }
   | { cmd: "wait"; session: string; selector: string; timeout_ms: number }
