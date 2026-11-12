@@ -278,9 +278,14 @@ jobs:
         run: security delete-keychain build.keychain 2>/dev/null || true
 
   linux-x86_64:
-    needs: version
+    # The helper, hub and memory store inside it are the Linux backend's own
+    # (backend-build.yml): built there against glibc 2.28, with the ONNX
+    # Runtime and Postgres built there too, since ort's and theseus-rs' need
+    # glibc 2.38 and 2.36 and fail to link or run here. This job builds the
+    # app around them.
+    needs: [version, backend]
     # Built on the oldest Ubuntu Desk supports, so what it links (glibc 2.35)
-    # is there on every newer one, and inside WSL.
+    # is there on every newer one.
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     steps:
@@ -289,19 +294,9 @@ jobs:
         with:
           path: desk
 
-      - name: Read the hub and vellev refs
+      - name: Read the hub ref
         id: refs
-        run: |
-          echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
-          echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
-
-      - name: Check out vellev at vellev.ref
-        uses: actions/checkout@v7
-        with:
-          repository: driftwerk/vellev
-          ref: ${{ steps.refs.outputs.vellev }}
-          path: vellev
-          token: ${{ secrets.VELLEV_REPO_TOKEN || github.token }}
+        run: echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the hub at hub.ref
         uses: actions/checkout@v7
@@ -333,11 +328,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            desk -> target
-            workforce-public-desk -> target
-            vellev -> target
-          key: hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
+          workspaces: desk -> target
           cache-on-failure: true
 
       - name: Read the sherpa-onnx version
@@ -361,14 +352,20 @@ jobs:
         working-directory: desk
         run: npm ci
 
-      - name: Build the helper, hub and memory store
+      # The backend job's programs, under the names Tauri bundles them by
+      # (the triple after the name). Artifacts lose the executable bit.
+      - uses: actions/download-artifact@v7
+        with:
+          name: backend-linux-x86_64
+          path: backend
+
+      - name: Sidecars
         working-directory: desk
-        env:
-          HUB_SOURCE: ${{ github.workspace }}/workforce-public-desk
-          VELLEV_SOURCE: ${{ github.workspace }}/vellev
-          MIN_FREE_GB: "12"
-          GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/build-sidecars.sh
+        run: |
+          mkdir -p src-tauri/binaries
+          for name in desk-helper desk-agents desk-memory; do
+            install -m 755 "../backend/$name" "src-tauri/binaries/$name-x86_64-unknown-linux-gnu"
+          done
 
       # The AppImage is the updater's download, signed with the updater key
       # (createUpdaterArtifacts in tauri.linux.conf.json); the .deb is updated
