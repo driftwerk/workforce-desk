@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { HubError, type DeskHub } from "../hub/client";
 import {
   agentId,
+  createLocalAgent,
   instructions,
   nameTaken,
+  NotSetUp,
   purposeOf,
   RENAME_UNAVAILABLE,
   renameLocalAgent,
@@ -253,5 +255,70 @@ describe("a name that's taken", () => {
   });
   it("isn't the agent's own, in another case", () => {
     expect(nameTaken("SCOUT", roster, "local", "scout")).toBe(false);
+  });
+});
+
+describe("making a crew member", () => {
+  const brain = { provider: "claude-code", model: "sonnet" };
+  const fakeHub = (failOn?: string) => {
+    const files: Record<string, string> = { "SOUL.md": "# Soul\n", "AGENTS.md": "# Agents\n\n## Rules\n", "IDENTITY.md": "- **Name:** x\n", "WELCOME.md": "Say hello.\n" };
+    let config = "";
+    const calls: string[] = [];
+    const hub = {
+      createAgent: vi.fn(async () => void calls.push("create")),
+      agentConfig: vi.fn(async () => config),
+      saveAgentConfig: vi.fn(async (_id: string, toml: string) => {
+        calls.push("config");
+        config = toml;
+      }),
+      identityFile: vi.fn(async (_id: string, f: string) => files[f] ?? ""),
+      saveIdentityFile: vi.fn(async (_id: string, f: string, text: string) => {
+        if (f === failOn) throw new HubError(500, "disk full");
+        calls.push(f);
+        files[f] = text;
+      }),
+      deleteAgent: vi.fn(async () => void calls.push("delete")),
+    } as unknown as DeskHub;
+    return { hub, calls, files, config: () => config };
+  };
+
+  it("writes how they think and sound in one go, then their files", async () => {
+    const h = fakeHub();
+    const id = await createLocalAgent(h.hub, "Scout", "Watch CI.", brain, [], { provider: "fish_audio", voice: "v1" });
+    expect(id).toBe("scout");
+    expect(h.calls).toEqual(["create", "config", "SOUL.md", "AGENTS.md", "IDENTITY.md", "WELCOME.md"]);
+    const config = parse(h.config()) as Record<string, unknown>;
+    expect(JSON.stringify(config)).toContain("v1");
+    expect(JSON.stringify(config)).toContain("sonnet");
+    expect(h.files["SOUL.md"]).toContain("Watch CI.");
+  });
+
+  it("leaves nothing half-made: a step that fails removes them again", async () => {
+    const h = fakeHub("AGENTS.md");
+    const made = createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    await expect(made).rejects.toBeInstanceOf(NotSetUp);
+    await expect(made).rejects.toThrow("Desk couldn’t finish setting up Scout, so nothing of them was kept.");
+    expect(h.calls).toEqual(["create", "config", "SOUL.md", "delete"]);
+    // Not made at all: nothing to remove.
+    const g = fakeHub();
+    (g.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "disk full"));
+    await expect(createLocalAgent(g.hub, "Scout", "Watch CI.", brain, [])).rejects.toBeInstanceOf(HubError);
+    expect(g.hub.deleteAgent).not.toHaveBeenCalled();
+  });
+
+  it("takes the next free id when the hub has one the roster didn't know of", async () => {
+    const h = fakeHub();
+    (h.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(409, "agent 'scout' already exists"));
+    const id = await createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    expect(id).toBe("scout-2");
+    expect((h.hub.createAgent as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as { id: string }).id)).toEqual(["scout", "scout-2"]);
+  });
+
+  it("says what was left when it couldn't remove a half-made one, and never that nothing was kept", async () => {
+    const h = fakeHub("SOUL.md");
+    (h.hub.deleteAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "busy"));
+    const made = createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    await expect(made).rejects.toMatchObject({ left: "scout" });
+    await expect(made).rejects.toThrow("nor remove what it had made: “scout” is still on this computer");
   });
 });

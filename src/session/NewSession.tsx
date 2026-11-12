@@ -596,7 +596,7 @@ export function NewSession({
 
 /** No engine to start a session with there: what isn't installed, each
  *  with Install. */
-function NothingToStart({ engines, machine, where, native, onFixed }: { engines: EngineInfo[]; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
+export function NothingToStart({ engines, machine, where, native, onFixed }: { engines: EngineInfo[]; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
   const absent = engines.filter((e) => e.installed === false && (e.engine === "claude" || e.engine === "codex"));
   return (
     <div className="new-fix" role="group" aria-label="Nothing to start a session with">

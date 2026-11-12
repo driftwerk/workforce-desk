@@ -35,7 +35,6 @@ pub const COMMANDS: &[&str] = &[
     "machine_uninstall",
     "machine_cancel_uninstall",
     "machine_reveal_log",
-    "open_chrome",
     "machine_sign_in_forward",
     "machine_sign_in_forward_stop",
     "machine_open_sign_in_page",

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Desk</title>
+    <link rel="stylesheet" href="./src/popup.css" />
+  </head>
+  <body>
+    <main>
+      <header><img src="icons/icon-32.png" alt="" width="20" height="20" /><b>Desk</b></header>
+      <p id="state" role="status">Connecting to Desk…</p>
+      <p id="why" class="muted"></p>
+      <section id="now" hidden>
+        <span class="label">Desk is using Chrome</span>
+        <span id="where"></span>
+        <button id="stop" type="button">Stop</button>
+      </section>
+      <p class="faint small">This Chrome: <code id="label">…</code></p>
+    </main>
+    <script type="module" src="./src/popup.ts"></script>
+  </body>
+</html>

@@ -178,5 +178,5 @@ it("names the machines that follow when Desk is ready to restart, and says their
   vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, sessionsKept: false });
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
-  expect(screen.getByRole("dialog").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
+  expect(screen.getByRole("status").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");
 });

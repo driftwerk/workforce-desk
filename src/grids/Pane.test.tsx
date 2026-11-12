@@ -11,6 +11,8 @@ import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { dropPane } from "./drag";
 import { createGrid, deliver, layOut, replacePane, startGrids, useGrids } from "./store";
+import { useGridDrag } from "./drag";
+import { useSpend } from "../spend/store";
 import { useTerminals } from "./terminals";
 import { servePictures } from "../pictures/testing";
 import { useAccounts } from "../engines/accounts";
@@ -102,12 +104,12 @@ describe("a pane's header", () => {
     deliver(MAIN_GRID, sess("s0"));
     canvas();
     const pane = screen.getByRole("region", { name: "checkout-redirect-loop-7f3a" });
-    const head = pane.querySelector(".gpane-head")!;
-    expect(head.querySelector(".gpane-name-start")!.textContent).toBe("checkout-redirect-l");
-    expect(head.querySelector(".gpane-name-end")!.textContent).toBe("oop-7f3a");
+    const head = pane.querySelector("header")!;
+    expect(head.querySelector(".sc-name-start")!.textContent).toBe("checkout-redirect-l");
+    expect(head.querySelector(".sc-name-end")!.textContent).toBe("oop-7f3a");
     expect(head.getAttribute("title")).toBe("checkout-redirect-loop-7f3a · Claude Code · idle\nDrag to move");
-    const described = pane.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)!.textContent);
-    expect(described).toEqual(["Claude Code · idle"]);
+    const described = head.getAttribute("aria-describedby")!.split(" ").map((id) => document.getElementById(id)!.textContent);
+    expect(described[0]).toMatch(/^Claude Code · /);
   });
 
   it("asks before closing a terminal with something still running", () => {
@@ -270,6 +272,8 @@ describe("closing a pane", () => {
   });
 });
 
+const spent = () => ({ tokens: { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, usd: 4.1, calls: 3, unpricedCalls: 0, unpricedModels: [], billing: ["plan" as const] });
+
 describe("a session's pane", () => {
   const stop = vi.fn(() => Promise.resolve());
   const resume = vi.fn(() => Promise.resolve());
@@ -289,20 +293,20 @@ describe("a session's pane", () => {
     resume.mockClear();
   });
 
-  it("resumes one Desk started that has stopped, from its header or its options", () => {
+  it("resumes one Desk started that has stopped, from its header", () => {
     const pane = shown({ state: "interrupted", cliSessionId: "s0" });
     fireEvent.click(within(pane).getByRole("button", { name: "Resume" }));
-    fromMenu(pane, "Resume");
-    expect(resume).toHaveBeenCalledTimes(2);
+    expect(resume).toHaveBeenCalledTimes(1);
     expect(resume).toHaveBeenCalledWith("s0");
     expect(within(pane).queryByRole("button", { name: "Stop" })).toBeNull();
   });
 
-  it("stops one that is running, from its header or its options", () => {
+  it("stops one that is running from its options only, its header offering Interrupt", () => {
     const pane = shown({ live: true, state: "working" });
-    fireEvent.click(within(pane).getByRole("button", { name: "Stop" }));
+    expect(within(pane).queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(within(pane).getByRole("button", { name: "Interrupt" })).toBeTruthy();
     fromMenu(pane, "Stop");
-    expect(stop).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledTimes(1);
     expect(stop).toHaveBeenCalledWith("s0");
     expect(within(pane).queryByRole("button", { name: "Resume" })).toBeNull();
   });
@@ -320,8 +324,7 @@ describe("a session's pane", () => {
     const pane = screen.getByRole("region", { name: "task-0" });
     expect(within(pane).queryByRole("button", { name: "Stop" })).toBeNull();
     fireEvent.click(within(pane).getByRole("button", { name: "Interrupt" }));
-    fromMenu(pane, "Interrupt");
-    expect(interrupt).toHaveBeenCalledTimes(2);
+    expect(interrupt).toHaveBeenCalledTimes(1);
     expect(interrupt).toHaveBeenCalledWith("s0");
     expect(closeTerminal).not.toHaveBeenCalled();
     fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
@@ -329,6 +332,52 @@ describe("a session's pane", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
     expect(update).toHaveBeenCalledWith("s0", { approvals: "desk" });
+  });
+
+  it("has the session's chrome: its goal, and Session, Memory and History, the session kept mounted behind them", () => {
+    const history = vi.fn(() => Promise.resolve({ events: [], more: false }));
+    const pane = shown({ live: true, state: "idle", goal: "Ship the redirect" });
+    useDesk.setState((s) => ({ hub: { ...(s.hub as object), history } as never }));
+    expect(within(pane).getByRole("button", { name: "Ship the redirect" })).toBeTruthy();
+    const tab = (name: string) => within(pane).getByRole("tab", { name });
+    const view = document.getElementById(tab("Session").getAttribute("aria-controls")!)!;
+    fireEvent.click(tab("History"));
+    expect(within(pane).getByRole("region", { name: "What task-0 did" })).toBeTruthy();
+    expect(view.hidden).toBe(true);
+    fireEvent.click(tab("Session"));
+    expect(view.hidden).toBe(false);
+  });
+
+  it("puts the session's options and the pane's in one menu", () => {
+    const pane = shown({ live: true, state: "idle" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    const items = within(screen.getByRole("menu", { name: "task-0 options" }))
+      .getAllByRole("menuitem")
+      .map((m) => m.textContent?.replace(/[▸›]$/, ""));
+    expect(items).toEqual(expect.arrayContaining(["Add a goal…", "Replace", "Stop", "End session…", "Remove…", "Remove from grid"]));
+    expect(items.at(-1)).toBe("Remove from grid");
+  });
+
+  it("never starts dragging the pane from a press inside its menu or a popover", () => {
+    useSpend.setState({ supported: true, views: { day: { from: "", to: "", by: "session", total: spent(), rows: [{ key: "s0", label: "task-0", session: "s0", engine: "claude", folder: null, totals: spent() }], more: 0 } } });
+    const pane = shown({ live: true, state: "idle" });
+    // Pressed and moved: does it lift the pane?
+    const drags = (el: Element) => {
+      fireEvent.pointerDown(el, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerMove(window, { clientX: 80, clientY: 80 });
+      const lifted = useGridDrag.getState().item !== null;
+      fireEvent.pointerUp(window, { clientX: 80, clientY: 80 });
+      return lifted;
+    };
+    fireEvent.click(within(pane).getByRole("button", { name: /^Spend today/ }));
+    expect(drags(screen.getByRole("dialog", { name: "What it spent" }).querySelector("dl")!)).toBe(false);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    expect(drags(screen.getByRole("menu"))).toBe(false);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    // Its header itself still drags it.
+    expect(drags(pane.querySelector(".sc-name")!)).toBe(true);
+    useSpend.setState({ views: {} });
   });
 
   it("shows what a session asked in its pane", () => {
