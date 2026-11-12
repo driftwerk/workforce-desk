@@ -42,7 +42,8 @@ import { useFocusRequest } from "../shell/focus";
 import { useOutOfSight } from "../panels/Stage";
 import { useOnScreen } from "../unread/seen";
 import { useUnread } from "../unread/summary";
-import { DmVoiceBar, DmVoiceControls } from "../voice/DmVoice";
+import { DmVoiceBar, DmVoiceControls, useDmVoiceEntries } from "../voice/DmVoice";
+import { ComposerMore } from "./ComposerMore";
 import { useDmPresence } from "../voice/dms";
 import { after } from "./time";
 
@@ -399,6 +400,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             busy={busy}
             connected={convo.connected}
             overseeing={!!overseeing}
+            inPane={!!inPane}
             files={files}
             sending={sending}
           />
@@ -449,6 +451,7 @@ function DmComposer({
   busy,
   connected,
   overseeing,
+  inPane,
   files,
   sending: [sending, setSending],
 }: {
@@ -459,6 +462,8 @@ function DmComposer({
   busy: boolean;
   connected: boolean;
   overseeing: boolean;
+  /** In a grid's pane: its placeholder is short, as a room's is there. */
+  inPane: boolean;
   files: Files;
   sending: [boolean, (sending: boolean) => void];
 }) {
@@ -476,6 +481,7 @@ function DmComposer({
   const emoji = useEmojiInput({ field: composer, value: draft, setValue: setDraft });
   const commands = useCommandMenu({ field: composer, value: draft, setValue: setDraft, commands: useHubCommands(hub) });
   const listing = commands.open ? commands : emoji.open ? emoji : null;
+  const voiceEntries = useDmVoiceEntries(to, agent.name);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,7 +524,7 @@ function DmComposer({
           ref={composer}
           rows={1}
           value={draft}
-          placeholder={overseeing ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
+          placeholder={overseeing && !inPane ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
           {...(listing
             ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": listing.listId, "aria-activedescendant": listing.activeId }
             : {})}
@@ -545,6 +551,7 @@ function DmComposer({
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
+        <ComposerMore label={`More for ${agent.name}`} onEmoji={emoji.insert} more={voiceEntries} disabled={sending} />
         {holding && (
           <button type="button" className="btn btn-ghost" title={`Stop ${agent.name} (Esc)`} onClick={() => cancel(to)}>
             Stop

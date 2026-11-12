@@ -5,6 +5,12 @@
 use std::path::Path;
 
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+/// Run once at the next sign-in, then forgotten by Windows: Desk opens by
+/// itself after the restart WSL's install asks for, and carries on.
+pub const RUN_ONCE_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\RunOnce";
+/// The RunOnce entry that opens Desk after WSL's restart.
+pub const RESUME_VALUE: &str = "Desk setup";
+
 /// Where Settings → Apps → Startup keeps whether each Run entry is on.
 pub const APPROVED_KEY: &str =
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
@@ -59,6 +65,23 @@ mod windows {
     /// The Run entry, when there is one.
     pub fn registered() -> Option<String> {
         CURRENT_USER.open(RUN_KEY).ok()?.get_string(VALUE).ok()
+    }
+
+    /// Opens `desk` (the app) once at the next sign-in, so Windows' setup
+    /// carries on by itself after WSL's install restarts the computer.
+    pub fn resume_after_restart(desk: &Path) -> Result<()> {
+        CURRENT_USER
+            .create(super::RUN_ONCE_KEY)
+            .and_then(|k| k.set_string(super::RESUME_VALUE, run_value(desk)))
+            .context("asking Windows to open Desk after the restart")
+    }
+
+    /// Forgets that, once Desk is set up (Windows forgets it by itself once
+    /// it has run).
+    pub fn forget_resume() {
+        if let Ok(k) = CURRENT_USER.create(super::RUN_ONCE_KEY) {
+            let _ = k.remove_value(super::RESUME_VALUE);
+        }
     }
 
     pub fn unregister() -> Result<()> {
@@ -165,6 +188,16 @@ mod tests {
             )),
             r#""C:\Users\Sarah\AppData\Local\Programs\Desk\Desk Helper.exe""#
         );
+    }
+
+    #[test]
+    fn desk_opens_once_after_wsls_restart_from_the_run_once_key() {
+        assert_eq!(
+            RUN_ONCE_KEY,
+            r"Software\Microsoft\Windows\CurrentVersion\RunOnce"
+        );
+        assert!(RUN_ONCE_KEY.starts_with(RUN_KEY));
+        assert_ne!(RESUME_VALUE, VALUE, "never the helper's own entry");
     }
 
     #[test]

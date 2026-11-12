@@ -10,7 +10,7 @@ const MARGIN = 8;
 /** Where the picker opens: over everything (so a grid pane or a side panel
  *  doesn't cut it off), above the button and lined up with its right edge,
  *  never past the window's. */
-const placeBy = (button: HTMLElement): CSSProperties => {
+export const placeBy = (button: HTMLElement): CSSProperties => {
   const r = button.getBoundingClientRect();
   return {
     bottom: Math.max(MARGIN, window.innerHeight - r.top + 6),
@@ -55,26 +55,40 @@ export function EmojiButton({ onPick, disabled = false }: { onPick: (emoji: stri
           <path d="M6 6.4h.01M10 6.4h.01" strokeLinecap="round" strokeWidth="2" />
         </svg>
       </button>
-      {place &&
-        createPortal(
-          <Suspense
-            fallback={
-              <div className="emoji-popover" style={place} role="dialog" aria-label="Emoji" aria-busy="true">
-                <span className="faint small emoji-note">Loading emoji…</span>
-              </div>
-            }
-          >
-            <EmojiPicker
-              style={place}
-              onPick={(emoji) => {
-                close(false);
-                onPick(emoji);
-              }}
-              onClose={close}
-            />
-          </Suspense>,
-          document.body,
-        )}
+      {place && <EmojiPopover place={place} onPick={onPick} onClose={close} />}
     </>
+  );
+}
+
+/** The picker, open over everything at `place` (see `placeBy`): its choice
+ *  goes to `onPick` once it has closed. Opened by the emoji button, or from
+ *  a composer's overflow menu where the button is folded away. */
+export function EmojiPopover({
+  place,
+  onPick,
+  onClose,
+}: {
+  place: CSSProperties;
+  onPick: (emoji: string) => void;
+  onClose: (refocus: boolean) => void;
+}) {
+  return createPortal(
+    <Suspense
+      fallback={
+        <div className="emoji-popover" style={place} role="dialog" aria-label="Emoji" aria-busy="true">
+          <span className="faint small emoji-note">Loading emoji…</span>
+        </div>
+      }
+    >
+      <EmojiPicker
+        style={place}
+        onPick={(emoji) => {
+          onClose(false);
+          onPick(emoji);
+        }}
+        onClose={onClose}
+      />
+    </Suspense>,
+    document.body,
   );
 }

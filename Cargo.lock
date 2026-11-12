@@ -1173,6 +1173,7 @@ dependencies = [
  "tungstenite",
  "unicode-normalization",
  "ureq 3.5.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

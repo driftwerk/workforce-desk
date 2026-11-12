@@ -13,6 +13,7 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
+pub mod moving;
 #[cfg(windows)]
 mod windows;
 
@@ -76,11 +77,14 @@ impl Status {
     pub fn blocked(&self) -> Option<String> {
         match self {
             #[cfg(target_os = "macos")]
-            Status::MoveToApplications => {
-                Some("Move Desk to your Applications folder, then open it from there.".into())
-            }
+            Status::MoveToApplications => Some(
+                "Desk needs to be in your Applications folder to keep running. Desk can move \
+                 itself there."
+                    .into(),
+            ),
+            // Desk looks again when it comes forward: no reopening.
             Status::NeedsApproval => Some(format!(
-                "Desk Helper is turned off. Turn Desk on in {STARTUP_SETTINGS}, then open Desk again."
+                "Desk Helper is turned off. Turn Desk on in {STARTUP_SETTINGS}."
             )),
             #[cfg(windows)]
             Status::NoWsl { problem } => Some(format!(
@@ -145,8 +149,52 @@ pub fn last_reason(log: &str) -> Option<String> {
     None
 }
 
-/// The reason from the log file at `path`, reading only its end.
+/// The reason from the log file at `path`, reading only its end, with any
+/// secret in it taken out (it is shown on screen).
 pub fn last_reason_in(path: &std::path::Path) -> Option<String> {
+    last_reason(&log_tail(path)?).map(|r| desk_core::redact::redact(&r, &[]))
+}
+
+/// How far Desk Helper has got since it last started, as its log says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Stage {
+    /// It has started, and is checking its programs.
+    Starting,
+    /// It is starting its database (on first launch, making it).
+    Database,
+    /// Its services are starting.
+    Services,
+    /// Its services are up, and Desk is being signed in to them.
+    Connecting,
+}
+
+/// The furthest [`Stage`] the last start in `log` reached; none when the
+/// log has no start in it.
+pub fn stage(log: &str) -> Option<Stage> {
+    let since = log.rfind("desk-hubd starting")?;
+    let tail = &log[since..];
+    Some(
+        if tail.contains("Desk is paired with its local hub")
+            || tail.contains("pairing with its local hub is current")
+        {
+            Stage::Connecting
+        } else if tail.contains("local hub starting") {
+            Stage::Services
+        } else if tail.contains("hub binary") {
+            Stage::Database
+        } else {
+            Stage::Starting
+        },
+    )
+}
+
+/// The [`stage`] in the log file at `path`, reading only its end.
+pub fn stage_in(path: &std::path::Path) -> Option<Stage> {
+    stage(&log_tail(path)?)
+}
+
+fn log_tail(path: &std::path::Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -154,7 +202,7 @@ pub fn last_reason_in(path: &std::path::Path) -> Option<String> {
         .ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
-    last_reason(&String::from_utf8_lossy(&bytes))
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// A development run, which manages nothing: `DESK_HOME` set, unless
@@ -207,6 +255,44 @@ mod tests {
                 .to_lowercase()
                 .contains("workforce")
         );
+        // Desk looks again when it comes forward: never "open Desk again".
+        assert!(
+            !Status::NeedsApproval
+                .blocked()
+                .unwrap()
+                .contains("open Desk again")
+        );
+    }
+
+    #[test]
+    fn the_reason_shown_has_its_secrets_taken_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("desk-hubd.log");
+        std::fs::write(
+            &log,
+            "t ERROR desk_hubd::supervise: exiting: Postgres failed: postgres://desk:s3cretpassw0rd@127.0.0.1:5433/desk refused\n",
+        )
+        .unwrap();
+        let said = last_reason_in(&log).unwrap();
+        assert!(said.starts_with("Postgres failed"), "{said}");
+        assert!(!said.contains("s3cretpassw0rd"), "{said}");
+    }
+
+    #[test]
+    fn the_stage_is_the_furthest_the_last_start_reached() {
+        let first = "t INFO desk_hubd::supervise: desk-hubd starting version=\"0.1.0\"\n";
+        assert_eq!(stage(first), Some(Stage::Starting));
+        let db = format!("{first}t INFO desk_hubd::supervise: hub binary hub=/x\n");
+        assert_eq!(stage(&db), Some(Stage::Database));
+        let up = format!("{db}t INFO desk_hubd::supervise: local hub starting gateway=x\n");
+        assert_eq!(stage(&up), Some(Stage::Services));
+        let paired =
+            format!("{up}t INFO desk_hubd::bootstrap: Desk is paired with its local hub\n");
+        assert_eq!(stage(&paired), Some(Stage::Connecting));
+        // Started again since: only the new start counts.
+        let again = format!("{paired}{first}");
+        assert_eq!(stage(&again), Some(Stage::Starting));
+        assert_eq!(stage(""), None);
     }
 
     #[cfg(target_os = "macos")]
@@ -214,6 +300,7 @@ mod tests {
     fn a_mac_app_run_from_its_disk_image_is_told_to_move() {
         let why = Status::MoveToApplications.blocked().unwrap();
         assert!(why.contains("Applications") && !why.to_lowercase().contains("workforce"));
+        assert!(!why.to_lowercase().contains("hub"));
     }
 
     #[cfg(windows)]

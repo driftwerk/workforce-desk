@@ -20,11 +20,11 @@ import { busyNow, defaultSource, enginesFor, tokensLine } from "./words";
 /** How long a change of choice settles before it is previewed again. */
 export const PREVIEW_AFTER_MS = 250;
 
-const NOT_CONNECTED = "Desk isn’t connected to this computer’s hub just now; try again in a moment.";
+const NOT_CONNECTED = "Desk isn’t ready just now; try again in a moment.";
 
 /** A refusal as the hub says it: its own words, whole. */
 const said = (e: unknown): string => {
-  if (e instanceof HubError && (e.status === 404 || e.status === 405)) return "This computer’s hub can’t continue sessions in another engine yet.";
+  if (e instanceof HubError && (e.status === 404 || e.status === 405)) return "This version of Desk can’t continue sessions in another engine yet. Update Desk to use it.";
   return plainError(e);
 };
 

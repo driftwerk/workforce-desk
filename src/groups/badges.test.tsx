@@ -76,6 +76,6 @@ describe("the sidebar's needs badges", () => {
     render(<SidebarGroups />);
     const repo = row("repo", "Ungrouped");
     expect(repo.querySelector(".dot-background")).toBeTruthy();
-    expect(repo.getAttribute("title")).toBe("Claude · Waiting on 2 background tasks · 6m");
+    expect(repo.getAttribute("title")).toBe("repo · Claude · Waiting on 2 background tasks · 6m");
   });
 });

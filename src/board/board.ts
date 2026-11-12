@@ -327,3 +327,17 @@ export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: str
 /** Each ticket's plan, by ticket id, from the plans read in full. */
 export const planOfTickets = (plans: readonly { id: string; tickets: readonly { id: string }[] }[]): Map<string, string> =>
   new Map(plans.flatMap((p) => p.tickets.map((t) => [t.id, p.id] as const)));
+
+/** A short name for a session started on ticket `t`: its key and the first
+ *  few words of its title (`ACM-12 Fix flaky payment`), not the whole title. */
+export const sessionNameFor = (t: Pick<Ticket, "key" | "title">, words = 3, max = 32): string => {
+  const first = t.title.trim().split(/\s+/).filter(Boolean);
+  let name = "";
+  for (const w of first.slice(0, words)) {
+    const next = name ? `${name} ${w}` : w;
+    if (t.key && `${t.key} ${next}`.length > max && name) break;
+    name = next;
+  }
+  const full = [t.key, name].filter(Boolean).join(" ");
+  return full.length > max + 8 ? `${full.slice(0, max + 7)}…` : full;
+};

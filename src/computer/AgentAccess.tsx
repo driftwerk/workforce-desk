@@ -144,7 +144,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
             <h2 id="computer-grants-head">Allowed for {agent.name}</h2>
           </div>
           {grants === "old" ? (
-            <p className="small faint">This hub doesn’t have that yet.</p>
+            <p className="small faint">This version of Desk can’t do that yet. Update Desk to use it.</p>
           ) : grants === "failed" ? (
             <p className="small state-blocked">Couldn’t read what’s allowed just now.</p>
           ) : grants === null ? (

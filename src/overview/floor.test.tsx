@@ -127,7 +127,7 @@ afterEach(cleanup);
 
 describe("the Floor", () => {
   it("stays as it was on a hub without the overview", async () => {
-    const hub = hubWith({ overview: vi.fn(() => Promise.reject(new HubError(404, "This hub doesn’t have that yet."))) });
+    const hub = hubWith({ overview: vi.fn(() => Promise.reject(new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it."))) });
     useDesk.setState({ hub, sessions: { a: session("a", { name: "acme-web" }) } });
     render(<Floor onNewSession={() => {}} />);
     await waitFor(() => expect(useOverview.getState().overviewSupport).toBe("no"));
@@ -143,7 +143,7 @@ describe("the Floor", () => {
     try {
       // A hub that is starting up answers 404 for a moment.
       let up = false;
-      const until = <T,>(v: () => T) => vi.fn(() => (up ? Promise.resolve(v()) : Promise.reject(new HubError(404, "This hub doesn’t have that yet."))));
+      const until = <T,>(v: () => T) => vi.fn(() => (up ? Promise.resolve(v()) : Promise.reject(new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it."))));
       const hub = hubWith({
         overview: until(() => overview()),
         manager: until(() => ({ agentId: "desk", level: "suggest" as const })),
@@ -172,7 +172,7 @@ describe("the Floor", () => {
     try {
       let up = false;
       const hub = hubWith({
-        activity: vi.fn(() => (up ? Promise.resolve(structuredClone(page)) : Promise.reject(new HubError(404, "This hub doesn’t have that yet.")))),
+        activity: vi.fn(() => (up ? Promise.resolve(structuredClone(page)) : Promise.reject(new HubError(404, "This version of Desk can’t do that yet. Update Desk to use it.")))),
       });
       useDesk.setState({ hub, sessions: { a: session("a", { name: "acme-web" }) } });
       render(<Floor onNewSession={() => {}} />);
