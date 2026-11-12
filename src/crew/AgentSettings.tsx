@@ -11,7 +11,7 @@ import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { useUi } from "../shell/ui";
 import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
@@ -124,8 +124,11 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   const key = agentKey(agent);
   const nextName = name.trim();
   const renaming = local && nextName !== "" && nextName !== savedName;
+  const roster = useChat((s) => s.roster);
+  // Its own name in another case is no clash.
+  const clash = renaming && nameTaken(nextName, roster, agent.hubId, agent.id);
   const changed = (saved !== null && purpose.trim() !== saved) || renaming;
-  const valid = !!nextName && (saved === null || !!purpose.trim() || purpose.trim() === saved);
+  const valid = !!nextName && !clash && (saved === null || !!purpose.trim() || purpose.trim() === saved);
 
   const save = async () => {
     if (!desk || !valid) return;
@@ -206,6 +209,8 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
             value={name}
             maxLength={60}
             disabled={state === "saving"}
+            aria-invalid={clash || undefined}
+            aria-describedby={clash ? `${key}-name-taken` : undefined}
             onChange={(e) => {
               setName(e.target.value);
               setState("idle");
@@ -213,6 +218,11 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
           />
         ) : (
           <input value={agent.name} readOnly aria-readonly="true" />
+        )}
+        {clash && (
+          <span id={`${key}-name-taken`} className="small state-blocked" role="status">
+            {NAME_TAKEN}
+          </span>
         )}
       </label>
       {local ? (

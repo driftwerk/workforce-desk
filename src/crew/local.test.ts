@@ -5,6 +5,7 @@ import {
   agentId,
   createLocalAgent,
   instructions,
+  nameTaken,
   NotSetUp,
   purposeOf,
   RENAME_UNAVAILABLE,
@@ -280,6 +281,25 @@ describe("waiting for an agent to serve again", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a name that's taken", () => {
+  const roster = [
+    { hubId: "local", id: "scout", name: "Scout" },
+    { hubId: "acme", id: "atlas", name: "Atlas" },
+  ];
+  it("is another agent's on the same hub, its case and spaces aside", () => {
+    expect(nameTaken("  scout ", roster, "local")).toBe(true);
+    expect(nameTaken("Atlas", roster, "local")).toBe(false);
+    expect(nameTaken("Ranger", roster, "local")).toBe(false);
+    expect(nameTaken("   ", roster, "local")).toBe(false);
+    // Spaces between its words and how its letters are spelt aside too.
+    expect(nameTaken("Big  Al", [{ hubId: "local", id: "al", name: "Big Al" }], "local")).toBe(true);
+    expect(nameTaken("Zoe\u0308", [{ hubId: "local", id: "zoe", name: "Zo\u00eb" }], "local")).toBe(true);
+  });
+  it("isn't the agent's own, in another case", () => {
+    expect(nameTaken("SCOUT", roster, "local", "scout")).toBe(false);
   });
 });
 

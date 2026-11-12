@@ -300,6 +300,20 @@ describe("Renaming in Settings", () => {
     expect(useChat.getState().roster[0]!.name).toBe("Ledger");
   });
 
+  it("says a name another agent here has is taken, and won't save it; its own name in another case is fine", async () => {
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.resolve({})) } as Partial<DeskHub>);
+    renderSettings(hub);
+    useChat.setState({ roster: [agent, { ...agent, id: "atlas", name: "Atlas" }] });
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "atlas" } });
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(name, { target: { value: "LEDGER" } });
+    expect(screen.queryByText("That name is taken.")).toBeNull();
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("keeps showing the agent while its hub builds it again, and reads the roster once it serves", async () => {
     const refreshRoster = vi.fn(() => Promise.resolve());
     const hub = fakeHub({ renameAgent: vi.fn(() => Promise.resolve({})) } as Partial<DeskHub>);
