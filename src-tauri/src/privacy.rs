@@ -109,8 +109,10 @@ fn open(to: &str) -> std::io::Result<()> {
 
 #[cfg(windows)]
 fn open(to: &str) -> std::io::Result<()> {
-    // explorer.exe answers 1 even when it opened the page: started is enough.
-    std::process::Command::new("explorer.exe")
+    // By its full path, never one found on PATH. explorer.exe answers 1 even
+    // when it opened the page: started is enough.
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    std::process::Command::new(std::path::Path::new(&root).join("explorer.exe"))
         .arg(to)
         .spawn()
         .map(|_| ())
@@ -139,8 +141,10 @@ fn check(pane: Pane) -> Access {
             desk_voice::audio::MicAccess::Unknown => Access::Unknown,
         },
         Pane::Accessibility => accessibility(),
-        Pane::FullDiskAccess => full_disk_access(),
-        Pane::FilesAndFolders | Pane::LoginItems => Access::Unknown,
+        // What needs Full Disk Access is Desk's helper, which runs the
+        // agents: the hub reads its access (`/api/desk/computer/disk-access`).
+        // Files and Folders and Login Items say nothing to ask.
+        Pane::FullDiskAccess | Pane::FilesAndFolders | Pane::LoginItems => Access::Unknown,
     }
 }
 
@@ -163,36 +167,22 @@ fn accessibility() -> Access {
     Access::Unknown
 }
 
-/// Full Disk Access, by whether Desk can open the one file macOS keeps from
-/// every app without it.
-#[cfg(target_os = "macos")]
-fn full_disk_access() -> Access {
-    let Some(home) = std::env::var_os("HOME") else {
-        return Access::Unknown;
-    };
-    let tcc = std::path::Path::new(&home).join("Library/Application Support/com.apple.TCC/TCC.db");
-    access_of(std::fs::File::open(tcc).map(|_| ()))
+/// Whether `e` is macOS's privacy protection keeping Desk out: EPERM
+/// ("Operation not permitted"), which a setting of Desk's changes. A file's
+/// own mode or owner says EACCES instead, which no setting changes.
+pub fn kept_by_privacy(e: &std::io::Error) -> bool {
+    cfg!(target_os = "macos") && is_eperm(e)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn full_disk_access() -> Access {
-    Access::Unknown
+fn is_eperm(e: &std::io::Error) -> bool {
+    // EPERM is 1 on every Unix.
+    cfg!(unix) && e.raw_os_error() == Some(1)
 }
 
-/// What reading a protected file says of the permission.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn access_of(read: std::io::Result<()>) -> Access {
-    match read {
-        Ok(()) => Access::Granted,
-        Err(e) if denied(&e) => Access::Denied,
-        Err(_) => Access::Unknown,
-    }
-}
-
-/// Whether `e` is the system keeping Desk out (macOS's privacy protection
-/// says EPERM, "Operation not permitted"; a file's own mode EACCES).
-pub fn denied(e: &std::io::Error) -> bool {
-    e.kind() == std::io::ErrorKind::PermissionDenied
+/// Whether `e` is the file itself not letting Desk read it (its mode, its
+/// owner, Windows' access list), as opposed to a privacy setting.
+pub fn not_permitted(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied && !kept_by_privacy(e)
 }
 
 #[cfg(test)]
@@ -240,19 +230,18 @@ mod tests {
     }
 
     #[test]
-    fn being_kept_out_of_a_protected_file_is_a_denial_and_anything_else_unknown() {
+    fn only_eperm_on_macos_is_a_privacy_setting_and_a_files_own_mode_is_not() {
         use std::io::{Error, ErrorKind};
-        // EPERM, as macOS's privacy protection says it.
+        let not_found = Error::from(ErrorKind::NotFound);
+        assert!(!kept_by_privacy(&not_found) && !not_permitted(&not_found));
         #[cfg(unix)]
-        assert_eq!(access_of(Err(Error::from_raw_os_error(1))), Access::Denied);
-        assert_eq!(
-            access_of(Err(Error::from(ErrorKind::PermissionDenied))),
-            Access::Denied
-        );
-        assert_eq!(
-            access_of(Err(Error::from(ErrorKind::NotFound))),
-            Access::Unknown
-        );
-        assert_eq!(access_of(Ok(())), Access::Granted);
+        {
+            let eperm = Error::from_raw_os_error(1);
+            let eacces = Error::from_raw_os_error(13);
+            assert_eq!(kept_by_privacy(&eperm), cfg!(target_os = "macos"));
+            assert!(!kept_by_privacy(&eacces));
+            assert!(not_permitted(&eacces));
+            assert_eq!(not_permitted(&eperm), !cfg!(target_os = "macos"));
+        }
     }
 }

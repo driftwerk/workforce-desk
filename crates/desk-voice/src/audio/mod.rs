@@ -42,6 +42,17 @@ pub fn mic_access() -> MicAccess {
     platform::mic_access()
 }
 
+/// Windows' microphone consent, from its two switches: for every app, and
+/// for desktop apps (as Desk is). Either off is a denial.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn decide(all: Option<&str>, desktop: Option<&str>) -> MicAccess {
+    match (all, desktop) {
+        (Some("Deny"), _) | (_, Some("Deny")) => MicAccess::Denied,
+        (Some("Allow"), Some("Allow")) | (Some("Allow"), None) => MicAccess::Granted,
+        _ => MicAccess::Unknown,
+    }
+}
+
 /// Opens the microphone, which goes to `input` as mono samples at its own
 /// rate; the returned output plays speech. Refused in plain words
 /// ([`MIC_NOT_ALLOWED`]) when the person hasn't let Desk use it.
@@ -55,4 +66,18 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
 /// Just the speaker side: for playing a sample while voice is off.
 pub fn output() -> Result<SharedAudioOut> {
     platform::output()
+}
+
+#[cfg(test)]
+mod access_tests {
+    use super::{MicAccess, decide};
+
+    #[test]
+    fn windows_denies_the_microphone_when_either_of_its_switches_is_off() {
+        assert_eq!(decide(Some("Allow"), Some("Allow")), MicAccess::Granted);
+        assert_eq!(decide(Some("Allow"), None), MicAccess::Granted);
+        assert_eq!(decide(Some("Deny"), Some("Allow")), MicAccess::Denied);
+        assert_eq!(decide(Some("Allow"), Some("Deny")), MicAccess::Denied);
+        assert_eq!(decide(None, None), MicAccess::Unknown);
+    }
 }

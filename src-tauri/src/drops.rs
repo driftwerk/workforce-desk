@@ -187,22 +187,23 @@ pub struct DroppedFile {
 /// Desk out of it says which permission lets it in, as the page knows it
 /// (`src/ui/privacy.ts`).
 fn unreadable(path: &Path, e: &std::io::Error) -> String {
-    if !crate::privacy::denied(e) {
-        return format!("Desk couldn't read {}: {e}", name_of(path));
+    let name = name_of(path);
+    if crate::privacy::kept_by_privacy(e) {
+        // The name only: where it is stays out of the log.
+        tracing::info!(file = %name, error = %e, "a dropped file is kept from Desk by a privacy setting");
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        return match pane_for(path, home.as_deref(), std::env::consts::OS) {
+            Some(crate::privacy::Pane::FilesAndFolders) => {
+                format!("Desk isn’t allowed to read {name}. Allow it in Files and Folders.")
+            }
+            _ => format!("Desk isn’t allowed to read {name}. Allow it in Full Disk Access."),
+        };
     }
-    tracing::info!(path = %path.display(), error = %e, "a dropped file is kept from Desk");
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    match pane_for(path, home.as_deref(), std::env::consts::OS) {
-        Some(crate::privacy::Pane::FilesAndFolders) => format!(
-            "Desk isn’t allowed to read {}. Allow it in Files and Folders.",
-            name_of(path)
-        ),
-        Some(_) => format!(
-            "Desk isn’t allowed to read {}. Allow it in Full Disk Access.",
-            name_of(path)
-        ),
-        None => format!("Desk isn’t allowed to read {}.", name_of(path)),
+    if crate::privacy::not_permitted(e) {
+        tracing::info!(file = %name, error = %e, "a dropped file can't be read by this user");
+        return format!("You don’t have permission to read {name}, so Desk can’t either.");
     }
+    format!("Desk couldn't read {name}: {e}")
 }
 
 /// Which permission lets Desk read `path` on `os`: on macOS, Files and
@@ -612,13 +613,25 @@ mod tests {
         assert_eq!(on_mac("/Users/k/DesktopNot/f"), Some(Pane::FullDiskAccess));
         assert_eq!(pane_for(Path::new("C:/x"), None, "windows"), None);
 
-        let kept = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        let said = unreadable(Path::new("/nowhere/secret.txt"), &kept);
-        assert!(
-            said.starts_with("Desk isn’t allowed to read secret.txt."),
-            "{said}"
+        // A file's own mode (EACCES, or Windows' access list): no setting
+        // of Desk's changes it, so none is offered.
+        let mode = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let said = unreadable(Path::new("/nowhere/secret.txt"), &mode);
+        assert_eq!(
+            said,
+            "You don’t have permission to read secret.txt, so Desk can’t either."
         );
-        assert!(!said.contains("os error"), "{said}");
+        // macOS's privacy protection (EPERM): the setting that lets it in.
+        #[cfg(target_os = "macos")]
+        {
+            let eperm = std::io::Error::from_raw_os_error(1);
+            let said = unreadable(Path::new("/nowhere/secret.txt"), &eperm);
+            assert!(
+                said.starts_with("Desk isn’t allowed to read secret.txt."),
+                "{said}"
+            );
+            assert!(!said.contains("os error"), "{said}");
+        }
         let gone = std::io::Error::from(std::io::ErrorKind::NotFound);
         assert!(unreadable(Path::new("/nowhere/a"), &gone).starts_with("Desk couldn't read a: "));
     }

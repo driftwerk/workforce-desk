@@ -121,4 +121,53 @@ describe("a composer, with the system's drag and drop", () => {
     expect(screen.queryByText("Allow Desk to read shot.png.")).toBeNull();
     expect(sent).toHaveLength(1);
   });
+
+  it("attaches what it could read of a drop at once, and the rest once allowed", async () => {
+    let allowed = false;
+    invoke.mockImplementation(async (cmd: string, args: { paths?: string[]; path?: string }) => {
+      if (cmd === "dropped_files")
+        return args.paths!.map((path) => {
+          if (path.endsWith("b.png") && !allowed) throw "Desk isn’t allowed to read b.png. Allow it in Files and Folders.";
+          return { path, name: path.split("/").pop()!, size: 4, folder: false };
+        });
+      if (cmd === "dropped_file_read") return new TextEncoder().encode("data").buffer;
+    });
+    const sent: File[][] = [];
+    render(<Box sent={sent} />);
+    const box = screen.getByTestId("box");
+    const r = new DropRouter(() => zoneOf(box));
+    act(() => r.handle({ type: "drop", paths: ["/Users/me/a.png", "/Users/me/Desktop/b.png"], position: { x: 1, y: 1 } }));
+    expect(await screen.findByText("Allow Desk to read b.png.")).toBeTruthy();
+    // a.png didn't wait for b.png.
+    expect(sent.map((f) => f.map((x) => x.name))).toEqual([["a.png"]]);
+    allowed = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(sent.map((f) => f.map((x) => x.name))).toEqual([["a.png"], ["b.png"]]));
+    // Only b.png was asked for again.
+    const asked = invoke.mock.calls.filter(([c]) => c === "dropped_files").map(([, a]) => (a as { paths: string[] }).paths);
+    expect(asked.at(-1)).toEqual(["/Users/me/Desktop/b.png"]);
+    expect(screen.queryByText("Allow Desk to read b.png.")).toBeNull();
+  });
+
+  it("says to drop it again when a kept drop is too old to read, never sticking", async () => {
+    let expired = false;
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "dropped_files") {
+        if (expired) throw "Desk only reads files dropped on it. Drop it again.";
+        throw "Desk isn’t allowed to read c.png. Allow it in Files and Folders.";
+      }
+    });
+    render(<Box sent={[]} />);
+    const box = screen.getByTestId("box");
+    const r = new DropRouter(() => zoneOf(box));
+    act(() => r.handle({ type: "drop", paths: ["/Users/me/Desktop/c.png"], position: { x: 1, y: 1 } }));
+    expect(await screen.findByText("Allow Desk to read c.png.")).toBeTruthy();
+    // Still not allowed: it stays.
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(screen.getByText("Allow Desk to read c.png.")).toBeTruthy();
+    expired = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(await screen.findByText("Desk only reads files dropped on it. Drop it again.")).toBeTruthy();
+    expect(screen.queryByText("Allow Desk to read c.png.")).toBeNull();
+  });
 });

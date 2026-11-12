@@ -58,7 +58,9 @@ export function Computer() {
   // goes once it's on.
   useRecheckOnFocus("fullDiskAccess", disk === "missing" && !!hub, () => undefined, async () => {
     if (!hub) return false;
-    const now = await hub.diskAccess().catch(() => "unknown" as const);
+    // The hub not answering says nothing new: the card stays as it was.
+    const now = await hub.diskAccess().catch(() => null);
+    if (now === null || now === "unknown") return false;
     setDisk(now);
     return now === "granted";
   });

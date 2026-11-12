@@ -151,6 +151,16 @@ describe("Settings → This computer", () => {
     expect(screen.queryByRole("button", { name: "Grant Full Disk Access" })).toBeNull();
   });
 
+  it("keeps the Full Disk Access card when the hub doesn't answer on coming back", async () => {
+    let fails = false;
+    setUp(fakeHub({ diskAccess: vi.fn(() => (fails ? Promise.reject(new Error("down")) : Promise.resolve("missing" as const))) }));
+    render(<Computer />);
+    expect(await screen.findByRole("button", { name: "Grant Full Disk Access" })).toBeTruthy();
+    fails = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    expect(screen.getByRole("button", { name: "Grant Full Disk Access" })).toBeTruthy();
+  });
+
   it("says when there's nothing yet, and when the hub can't be read", async () => {
     setUp(fakeHub({ computerGrants: vi.fn(() => Promise.resolve([])), computerActivity: vi.fn(() => Promise.resolve({ rows: [], next: null })) }));
     render(<Computer />);
