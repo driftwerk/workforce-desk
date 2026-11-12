@@ -416,3 +416,8 @@
   height: 40px;
   padding: 0 10px;
 }
+/* What the agent said about a step: quoted, apart from Desk's own words. */
+.setup-note {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

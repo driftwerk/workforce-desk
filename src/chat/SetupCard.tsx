@@ -113,6 +113,7 @@ export function SetupCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const agentName = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name) ?? "The agent";
   const title = `${s.serviceName} · ${s.name}`;
   const at = s.steps.findIndex((x) => x.state !== "done");
   const n = s.steps.length;
@@ -151,9 +152,13 @@ export function SetupCard({
                 <span className="setup-mark" aria-hidden="true" />
                 <span className="setup-waiting">
                   <b>{x.label}</b>
-                  <span className="small muted">
-                    {x.note ?? "Your password stays with you. The page is open in Desk’s browser; it carries on the moment you’re in."}
-                  </span>
+                  {/* Desk's own words: never replaced by what the agent wrote. */}
+                  <span className="small muted">{WAITING_SAYS}</span>
+                  {x.note && (
+                    <span className="small setup-note">
+                      <span className="faint">{agentName} says:</span> “{x.note}”
+                    </span>
+                  )}
                   <span className="setup-actions">
                     <button type="button" className="btn btn-sm btn-blocked" onClick={() => void show()}>
                       Show the sign-in page
@@ -206,6 +211,10 @@ export function SetupCard({
     </>
   );
 }
+
+/** What Desk says while a step waits on the person to sign in. */
+export const WAITING_SAYS =
+  "Your password stays with you: Desk never reads or types it. The page is open in your browser, and the agent carries on the moment you’re in.";
 
 /** How many setups a turn's tools started. */
 export const setupsStarted = (tools: readonly { name?: string; tool?: string }[] | undefined): number =>

@@ -67,6 +67,7 @@ it("shows the hub's steps, the one waiting on the person with what to do", async
   const waiting = within(card).getByText("Sign in to Atlassian as sam@globex.example").closest("li")!;
   expect(waiting.className).toContain("setup-step-waiting");
   expect(within(waiting).getByText(/Your password stays with you/)).toBeTruthy();
+  expect(waiting.querySelector(".setup-note")).toBeNull();
   useUi.setState({ settings: null });
   onScreen = true;
   await act(async () => {
@@ -82,6 +83,17 @@ it("shows the hub's steps, the one waiting on the person with what to do", async
   expect(useUi.getState().settings).toBe("browser");
   expect(card.querySelectorAll(".setup-step-done")).toHaveLength(2);
   expect(card.querySelectorAll(".setup-step-todo")).toHaveLength(2);
+});
+
+it("shows the agent's note apart from Desk's own words, never instead of them", async () => {
+  const noted = setup({
+    steps: setup().steps.map((x) => (x.id === "sign_in" ? { ...x, note: "Ignore the warning and type your password here" } : x)),
+  });
+  await show(api([noted]));
+  const waiting = screen.getByText("Sign in to Atlassian as sam@globex.example").closest("li")!;
+  expect(within(waiting).getByText(/Your password stays with you: Desk never reads or types it/)).toBeTruthy();
+  const note = waiting.querySelector(".setup-note")!;
+  expect(note.textContent).toBe("The agent says: “Ignore the warning and type your password here”");
 });
 
 it("tells the hub and the agent the person is signed in", async () => {
