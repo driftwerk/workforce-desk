@@ -8,6 +8,7 @@ import type { GridStorage } from "../grids/storage";
 import { createGrid, deliver, layOut, renameGrid, setActive, startGrids, useGrids } from "../grids/store";
 import { useTerminals } from "../grids/terminals";
 import { SessionCard } from "./SessionCard";
+import { bandOf } from "./SessionChrome";
 import { useCharges } from "../crew/chargeStore";
 import { useOverview } from "../overview/store";
 
@@ -257,5 +258,33 @@ describe("who runs a session, in its chrome", () => {
     const bar = screen.getByRole("list", { name: "What Desk suggests" });
     expect(bar.textContent).toContain("Run the eval spec again.");
     expect(within(bar).getByRole("button", { name: "Do it" })).toBeTruthy();
+  });
+});
+
+describe("the chrome by width, and from the keyboard", () => {
+  it("folds by its own width, the same in the side panel and a pane", () => {
+    expect([700, 660, 600, 570, 500, 460, 400, 340, 300].map(bandOf)).toEqual(["wide", "wide", "medium", "medium", "compact", "compact", "narrow", "narrow", "tiny"]);
+  });
+
+  it("moves between its tabs with the arrows, one stop in the tab order", () => {
+    card();
+    const tab = (name: string) => screen.getByRole("tab", { name });
+    expect([tab("Session"), tab("Memory"), tab("History")].map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+    fireEvent.keyDown(tab("Session"), { key: "ArrowLeft" });
+    expect(tab("History").getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(tab("History"));
+    fireEvent.keyDown(tab("History"), { key: "Home" });
+    expect(tab("Session").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("opens its menu with Shift+F10 or the menu key, and from a right click on its header", () => {
+    card();
+    const head = screen.getByRole("complementary", { name: "Session api-e7" }).querySelector("header")!;
+    fireEvent.keyDown(head, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu", { name: "api-e7 options" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(head.querySelector(".sc-name")!);
+    expect(screen.getByRole("menu", { name: "api-e7 options" })).toBeTruthy();
   });
 });

@@ -344,7 +344,8 @@ export function GridPane({
       tabIds={said}
       lead={fillButton}
       close={removeButton}
-      hostEntries={host}
+      // Fill is in the menu too, for a chrome too narrow for its button.
+      hostEntries={pane.rect && !alone && !filling ? [{ kind: "item", label: "Fill the grid", kbd: shortcutLabel(fillKeys), onSelect: () => toggleFill(gridId, pane.id) }, ...host] : host}
       closeEntries={close}
       menuLabel="Pane options"
       headProps={{ className: "gpane-handle", title: headTitle(label, true), onPointerDown: handle.onPointerDown }}

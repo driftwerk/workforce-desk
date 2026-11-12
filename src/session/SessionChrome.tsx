@@ -4,10 +4,13 @@
 // is for, then who runs it, what it spent and its tabs. The rest is in its
 // ⋯ menu.
 
-import { useId, useState, type HTMLAttributes, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { SessionTicketChip } from "../board/TicketChip";
 import { DriverChip } from "../crew/ChargeBadge";
 import { CostChip } from "../spend/SpendStrip";
+import { useCharge } from "../crew/chargeStore";
+import { useSessionSpend } from "../spend/store";
+import { usdText } from "../spend/spend";
 import { switchingText, withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 import { lookOf, statusOf } from "../floor/background";
@@ -51,6 +54,33 @@ export const whereText = (s: Session): string =>
   ]
     .filter(Boolean)
     .join(" · ");
+
+/** How wide the chrome is, which decides what folds (the same for the side
+ *  panel and a pane): everything; the engine's line gone and the chips'
+ *  short words; the status word gone too; the workspace as its dot, the
+ *  tabs as icons and the spend in the menu; one row, the rest in the menu. */
+export type Band = "wide" | "medium" | "compact" | "narrow" | "tiny";
+
+export const bandOf = (width: number): Band => (width >= 660 ? "wide" : width >= 570 ? "medium" : width >= 460 ? "compact" : width >= 340 ? "narrow" : "tiny");
+
+/** The band `el` is in, followed as it's resized. Wide until measured (and
+ *  where nothing measures, as in tests). */
+const useBand = (el: React.RefObject<HTMLElement | null>): Band => {
+  const [band, setBand] = useState<Band>("wide");
+  useLayoutEffect(() => {
+    const node = el.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const w = node.getBoundingClientRect().width;
+      if (w > 0) setBand(bandOf(w));
+    };
+    measure();
+    const seen = new ResizeObserver(measure);
+    seen.observe(node);
+    return () => seen.disconnect();
+  }, [el]);
+  return band;
+};
 
 export function SessionChrome({
   session,
@@ -101,8 +131,39 @@ export function SessionChrome({
       setEditing(true);
     },
   });
-  const entries = sections(own.session, own.driver, hostEntries, own.lifecycle, closeEntries);
+  const head = useRef<HTMLElement>(null);
+  const band = useBand(head);
+  const charge = useCharge(sessionKey(session));
+  const today = useSessionSpend(sessionKey(session), "day");
+  const week = useSessionSpend(sessionKey(session), "week");
+  // What a narrow chrome no longer shows is in its menu: the tabs, once
+  // they're gone, and what it spent, once its chip is.
+  const show: MenuEntry[] = band === "tiny" ? TABS.map((t) => ({ kind: "item", label: t.label, checked: tab === t.id, onSelect: () => onTab(t.id) })) : [];
+  const spent: MenuEntry[] =
+    (band === "narrow" || band === "tiny") && (today || week)
+      ? [
+          {
+            kind: "item",
+            label: [today && `Today ${usdText(today.totals.usd)}`, week && `this week ${usdText(week.totals.usd)}`].filter(Boolean).join(" · "),
+            disabled: true,
+          },
+        ]
+      : [];
+  const entries = sections(show, own.session, own.driver, spent, hostEntries, own.lifecycle, closeEntries);
   const said = useId();
+  const openMenu = (from: HTMLElement, at?: { x: number; y: number }) => {
+    const r = from.getBoundingClientRect();
+    setMenu({ x: at?.x ?? r.left, y: at?.y ?? r.bottom + 2, from });
+  };
+  // Shift+F10 or the menu key, anywhere in the header, opens its menu.
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    headProps?.onKeyDown?.(e);
+    if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+    const more = head.current?.querySelector<HTMLElement>(".sc-more");
+    if (!more) return;
+    e.preventDefault();
+    openMenu(more);
+  };
   const key = sessionKey(session);
   const look = lookOf(session);
   const where = whereText(session);
@@ -115,7 +176,21 @@ export function SessionChrome({
     if (goal !== session.goal) hubFor(session)?.update(session.id, { goal }).catch(fail);
   };
   return (
-    <header {...headProps} className={`sc sc-${size} ${headProps?.className ?? ""}`} aria-describedby={`${said}-where`}>
+    <header
+      {...headProps}
+      ref={head}
+      className={`sc sc-${size} ${charge ? `sc-driven-${charge.wheel === "boss" ? "boss" : "you"}` : ""} ${headProps?.className ?? ""}`}
+      data-band={band}
+      aria-describedby={`${said}-where`}
+      onKeyDown={onKeyDown}
+      onContextMenu={(e) => {
+        // A right click on the header (not in what it holds) opens its menu there.
+        const more = head.current?.querySelector<HTMLElement>(".sc-more");
+        if (!more || (e.target as HTMLElement).closest("input")) return;
+        e.preventDefault();
+        openMenu(more, { x: e.clientX, y: e.clientY });
+      }}
+    >
       <div className="sc-r1">
         <Mark name={name} engine={session.engine} state={look} size={size === "panel" ? "sm" : "xs"} />
         <span className="sc-name mono" title={`${name}\n${where}`}>
@@ -132,6 +207,7 @@ export function SessionChrome({
         <span id={`${said}-where`} className="sc-meta">
           {where}
         </span>
+        <span className="sc-r1-fill" />
         {primary && (
           <button
             type="button"
@@ -151,10 +227,7 @@ export function SessionChrome({
           title={menuLabel}
           aria-haspopup="menu"
           aria-expanded={!!menu}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            setMenu({ x: r.left, y: r.bottom + 2, from: e.currentTarget });
-          }}
+          onClick={(e) => openMenu(e.currentTarget)}
         >
           <MoreIcon />
         </button>
@@ -211,8 +284,18 @@ export function SessionChrome({
 
 /** Session · Memory · History: what shows under the chrome. */
 function SessionTabs({ name, tab, onTab, ids }: { name: string; tab: SessionTab; onTab: (t: SessionTab) => void; ids: string }) {
+  // One stop in the tab order; the arrows, Home and End move between them.
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    const at = TABS.findIndex((t) => t.id === tab);
+    const to =
+      e.key === "ArrowRight" ? (at + 1) % TABS.length : e.key === "ArrowLeft" ? (at + TABS.length - 1) % TABS.length : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    onTab(TABS[to]!.id);
+    document.getElementById(tabId(ids, TABS[to]!.id))?.focus();
+  };
   return (
-    <span className="sc-tabs" role="tablist" aria-label={`${name}: what shows`}>
+    <span className="sc-tabs" role="tablist" aria-label={`${name}: what shows`} onKeyDown={onKeyDown}>
       {TABS.map((t) => (
         <button
           key={t.id}
@@ -221,6 +304,7 @@ function SessionTabs({ name, tab, onTab, ids }: { name: string; tab: SessionTab;
           id={tabId(ids, t.id)}
           aria-selected={tab === t.id}
           aria-controls={panelId(ids, t.id)}
+          tabIndex={tab === t.id ? 0 : -1}
           title={t.label}
           onClick={() => onTab(t.id)}
         >

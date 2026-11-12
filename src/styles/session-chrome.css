@@ -350,3 +350,104 @@
   flex: 1 1 240px;
   font-size: 13px;
 }
+
+/* ── Width bands (data-band, set from the chrome's own width) ─────────────
+   The same in the side panel and a pane: what drops out is in the menu, a
+   tooltip or the header's description. The name gives way last. */
+.sc-status-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc-status {
+  flex: 0 100 auto;
+  min-width: 9px;
+}
+.sc-name {
+  min-width: min(9em, 40%);
+}
+/* Under 660: the engine's line goes (it's in the name's tooltip and the
+   header's description); the chips say their short words. */
+.sc:not([data-band="wide"]) .sc-meta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.sc:not([data-band="wide"]) .sc-long {
+  display: none;
+}
+.sc:not([data-band="wide"]) .sc-short {
+  display: inline;
+}
+/* What pushes row 1's buttons right once the line is gone. */
+.sc-r1-fill {
+  flex: 0 0 0;
+}
+.sc:not([data-band="wide"]) .sc-r1-fill {
+  flex: 1;
+}
+.sc {
+  position: relative;
+}
+/* Under 570: the status word goes; its dot stays, named. */
+.sc[data-band="compact"] .sc-status-word,
+.sc[data-band="narrow"] .sc-status-word,
+.sc[data-band="tiny"] .sc-status-word {
+  display: none;
+}
+/* Under 460: the workspace is its dot, the tabs their icons, the spend
+   and Fill are in the menu. */
+.sc[data-band="narrow"] .chip-group,
+.sc[data-band="tiny"] .chip-group {
+  font-size: 0;
+  gap: 0;
+  padding: 4px;
+  border-color: transparent;
+}
+.sc[data-band="narrow"] .sc-cost,
+.sc[data-band="tiny"] .sc-cost,
+.sc[data-band="narrow"] .sc-fill-btn,
+.sc[data-band="tiny"] .sc-fill-btn {
+  display: none;
+}
+.sc[data-band="narrow"] .sc-tab-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.sc[data-band="narrow"] .sc-tab-icon {
+  display: block;
+}
+.sc[data-band="narrow"] .sc-tabs button {
+  padding: 0 6px;
+}
+/* Under 340: one row. The tabs, the goal and the driver's choices are in
+   the menu; a pip on the mark says who has it. */
+.sc[data-band="tiny"] .sc-r2,
+.sc[data-band="tiny"] .ticket-chip,
+.sc[data-band="tiny"] .chip-group {
+  display: none;
+}
+.sc[data-band="tiny"] .mark {
+  position: relative;
+}
+.sc-driven-boss[data-band="tiny"] .mark::after,
+.sc-driven-you[data-band="tiny"] .mark::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--signal);
+}
+.sc-driven-you[data-band="tiny"] .mark::after {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
