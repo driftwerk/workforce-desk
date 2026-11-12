@@ -57,7 +57,7 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
         {settings === undefined ? (
           <p className="faint small">Loading…</p>
         ) : !settings || !switches ? (
-          <p className="muted small">{settings === null && !problem ? "This computer's hub can't keep memory settings for groups yet." : `Desk doesn't know ${group.name} on this computer's hub yet.`}</p>
+          <p className="muted small">{settings === null && !problem ? "This version of Desk can't keep memory settings for groups yet." : `Desk doesn't know ${group.name} on this computer yet.`}</p>
         ) : (
           <>
             <Row
@@ -68,7 +68,7 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
             />
             <Row
               name="Let Desk's model note decisions"
-              sub={`Desk's model reads what they say to note decisions, facts and to-dos, so it's sent to ${providerName(settings.limits.provider) ?? "the model the hub notes with"}.${settings.limits.fallbackProviders ? ` ${fallbackText}` : ""}`}
+              sub={`Desk's model reads what they say to note decisions, facts and to-dos, so it's sent to ${providerName(settings.limits.provider) ?? "the model Desk notes with"}.${settings.limits.fallbackProviders ? ` ${fallbackText}` : ""}`}
               on={switches.derive}
               disabled={!settings.limits.derive}
               onChange={(derive) => void change({ derive })}

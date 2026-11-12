@@ -90,6 +90,8 @@
     "allow-helper-open-login-items",
     "allow-helper-start",
     "allow-helper-last-reason",
+    "allow-helper-progress",
+    "allow-helper-move-to-applications",
     "allow-cli-installed",
     "allow-cli-install",
     "allow-report-save",

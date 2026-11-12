@@ -55,10 +55,18 @@ impl Cli {
     }
 }
 
-/// A login shell's script inside WSL that finds `~/.local/bin`, where the
-/// official installers put both CLIs.
+/// Where Claude Code and Codex are put inside WSL, joined onto PATH after
+/// what the login shell has, as `desk_core::shell::install_dirs` does on a
+/// Mac or Linux: their own installers' `~/.local/bin`, Claude Code's npm
+/// folder, npm's global folder, Volta's and Homebrew on Linux's; npm's own
+/// prefix only when it is absolute.
+const WSL_INSTALL_PATH: &str = "PATH=\"$PATH:$HOME/.local/bin:$HOME/.claude/local:$HOME/.npm-global/bin:$HOME/.volta/bin:/home/linuxbrew/.linuxbrew/bin\"; \
+     case \"${NPM_CONFIG_PREFIX:-}\" in /*) PATH=\"$PATH:$NPM_CONFIG_PREFIX/bin\" ;; esac; ";
+
+/// A login shell's script inside WSL that finds both CLIs where their
+/// installers put them ([`WSL_INSTALL_PATH`]).
 fn wsl_script(body: &str) -> String {
-    format!("PATH=\"$PATH:$HOME/.local/bin\"; {body}")
+    format!("{WSL_INSTALL_PATH}{body}")
 }
 
 /// `program args…` with `env` added, for the backend's host; an error when
@@ -380,7 +388,7 @@ mod tests {
             unreachable!()
         };
         let script = sign_in_script(&w, "claude", &["setup-token"], "41-7");
-        assert!(script.starts_with("PATH=\"$PATH:$HOME/.local/bin\"; "));
+        assert!(script.starts_with(WSL_INSTALL_PATH));
         assert!(
             script.contains("echo $$ >'/home/sarah/.local/share/Desk/claude-sign-in-41-7.pid'")
         );
@@ -615,7 +623,37 @@ mod tests {
     fn a_cli_inside_wsl_finds_local_bin_and_gets_its_variables_quoted() {
         assert_eq!(
             wsl_script("exec 'codex' 'login'"),
-            "PATH=\"$PATH:$HOME/.local/bin\"; exec 'codex' 'login'"
+            format!("{WSL_INSTALL_PATH}exec 'codex' 'login'")
         );
+    }
+
+    /// Run as WSL's login shell would: each install folder is found, after
+    /// what PATH has, and npm's prefix only when it is absolute.
+    #[cfg(unix)]
+    #[test]
+    fn inside_wsl_a_cli_is_found_wherever_its_installers_put_it() {
+        let home = tempfile::tempdir().unwrap();
+        let run = |prefix: &str| {
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(wsl_script("printf %s \"$PATH\""))
+                .env_clear()
+                .env("HOME", home.path())
+                .env("PATH", "/usr/bin:/bin")
+                .env("NPM_CONFIG_PREFIX", prefix)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let h = home.path().display();
+        let path = run("/opt/npm");
+        assert_eq!(
+            path,
+            format!(
+                "/usr/bin:/bin:{h}/.local/bin:{h}/.claude/local:{h}/.npm-global/bin:{h}/.volta/bin:/home/linuxbrew/.linuxbrew/bin:/opt/npm/bin"
+            )
+        );
+        assert!(!run("npm").contains("npm/bin:") && !run("npm").ends_with(":npm/bin"));
+        assert!(run("").ends_with(":/home/linuxbrew/.linuxbrew/bin"));
     }
 }

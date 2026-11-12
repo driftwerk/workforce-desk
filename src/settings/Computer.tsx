@@ -114,13 +114,13 @@ export function Computer() {
         What your agents may read, change and run on this computer. At Full access an agent asks you only before what can’t be undone, unless you let it do anything.
       </p>
       {!hub ? (
-        <p className="faint small">Not connected to a hub.</p>
+        <p className="faint small">Desk isn’t ready yet.</p>
       ) : stopped === "old" ? (
-        <p className="faint small">This hub doesn’t have that yet.</p>
+        <p className="faint small">This version of Desk can’t do that yet. Update Desk to use it.</p>
       ) : (
         <>
           {stopped === "failed" ? (
-            <p className="state-blocked small">Couldn’t ask the hub about this computer just now.</p>
+            <p className="state-blocked small">Desk couldn’t read this computer’s settings just now.</p>
           ) : stopped === true ? (
             <div className="computer-banner" role="status">
               <span>Stopped. No agent can read, change or run anything here.</span>
