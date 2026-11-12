@@ -1861,6 +1861,14 @@ export interface MemoryTotals {
 }
 
 /** The person's memory settings, the install's limits, and what is kept. */
+/** What the person changes in Settings → Memory; each one left out stays. */
+export interface MemoryChoice {
+  enabled?: boolean;
+  derive?: boolean;
+  retainDays?: number;
+  maxDiskMb?: number;
+}
+
 export interface MemorySettings {
   paused: boolean;
   groups: (GroupMemory & { id: string; name: string })[];

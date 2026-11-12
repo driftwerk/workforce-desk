@@ -3,6 +3,7 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { PLAN_OF, type Provider, type ProviderField } from "../hub/providers";
 import { radioKeys } from "../ui/Dialog";
 import { useDesk } from "../hub/store";
+import { freeName, useAccounts } from "../engines/accounts";
 import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
 import { useProviders } from "./store";
 
@@ -31,13 +32,29 @@ export function ConnectForm({
 function PlanConnect({ provider, onConnected, onCancel }: { provider: Provider; onConnected?: (p: Provider) => void; onCancel?: () => void }) {
   const hub = useDesk((s) => s.hub);
   const load = useProviders((s) => s.load);
-  const login = usePlanLogin(PLAN_OF[provider.id], () => {
-    if (!hub) return;
-    void load(hub).then(() => {
-      const now = useProviders.getState().providers.find((p) => p.id === provider.id);
-      if (now) onConnected?.(now);
-    });
-  });
+  const plan = PLAN_OF[provider.id];
+  // One Claude sign-in serves the crew and coding sessions both: on by
+  // default when there's no Claude account for sessions yet.
+  const accounts = useAccounts((s) => s.accounts);
+  const claudeAccounts = accounts.filter((a) => a.engine === "claude");
+  const keepsAccounts = useAccounts((s) => s.supported !== false && s.store !== null);
+  const [forSessions, setForSessions] = useState<boolean | null>(null);
+  const sessionsToo = plan === "claude" && keepsAccounts && (forSessions ?? claudeAccounts.length === 0);
+  const login = usePlanLogin(
+    plan,
+    (account) => {
+      if (account) void useAccounts.getState().load();
+      if (!hub) return;
+      void load(hub).then(() => {
+        const now = useProviders.getState().providers.find((p) => p.id === provider.id);
+        if (now) onConnected?.(now);
+      });
+    },
+    () =>
+      plan === "claude"
+        ? { agents: true, account: sessionsToo ? { name: freeName(claudeAccounts), makeDefault: claudeAccounts.length === 0 } : null }
+        : undefined,
+  );
   return (
     <div className="connect-form">
       {login.problem && <ProblemNote problem={login.problem} />}
@@ -47,6 +64,12 @@ function PlanConnect({ provider, onConnected, onCancel }: { provider: Provider; 
           <ReopenLink login={login} />
           <CopyInstall login={login} />
         </p>
+      )}
+      {plan === "claude" && keepsAccounts && !login.busy && (
+        <label className="check small">
+          <input type="checkbox" checked={sessionsToo} onChange={(e) => setForSessions(e.target.checked)} />
+          Use this for coding sessions too
+        </label>
       )}
       <div className="connect-actions">
         {onCancel && !login.busy && (
