@@ -1,4 +1,5 @@
 import { emitTo } from "@tauri-apps/api/event";
+import { ShareAsk } from "../rooms/share";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ProblemNote } from "../ui/ProblemNote";
 import { setSettingsOpener } from "../ui/problem";
@@ -206,6 +207,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
         <GridCanvas grid={grid} />
       </ErrorBoundary>
       <LifecycleDialogs />
+      <ShareAsk />
       {layoutMenu && (
         <Menu
           label="Layout"

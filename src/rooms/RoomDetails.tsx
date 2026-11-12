@@ -18,6 +18,9 @@ import { MemberMark } from "./MemberMark";
 import { MemberPicker } from "./MemberPicker";
 import { useAuthor } from "./names";
 import { memberKey } from "./routing";
+import { NotShared, savingShared } from "./share";
+import { plainError } from "../ui/plainError";
+import { nameClash } from "./clash";
 
 const HINTS: Record<string, string> = {
   all: "Every answer and hand-off while Desk isn’t in front",
@@ -50,6 +53,8 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
   const level = useLevel({ kind: "room", room: room.id });
   const [name, setName] = useState(room.name);
   const [problem, setProblem] = useState<string | null>(null);
+  /** Another room already has the name asked for: it can be opened. */
+  const [clash, setClash] = useState<Room | null>(null);
   const [adding, setAdding] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<RoomMemberRef | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -78,11 +83,21 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
   const update = async (patch: { name?: string; members?: RoomMemberRef[]; defaultMember?: string | null }): Promise<boolean> => {
     if (!hub) return false;
     setProblem(null);
+    setClash(null);
     try {
-      kept(await hub.updateRoom(room.id, patch));
+      // Members on a workspace the room hasn't gone to: the person is asked first.
+      kept(await savingShared(room.name, (shareWith) => hub.updateRoom(room.id, { ...patch, ...(shareWith.length ? { shareWith } : {}) })));
       return true;
     } catch (e) {
-      setProblem(e instanceof HubError && e.status === 409 ? `There’s already a room called ${patch.name ?? name}.` : e instanceof Error ? e.message : String(e));
+      if (e instanceof NotShared) return false;
+      const other = patch.name !== undefined ? nameClash(e, patch.name, room.id) : null;
+      if (other) {
+        setClash(other);
+        setProblem(`There’s already a room called ${other.name}.`);
+      } else if (patch.name !== undefined && e instanceof HubError && e.status === 409 && !e.hubs?.length) {
+        // Its name is taken by a room this window doesn't list (yet).
+        setProblem(`There’s already a room called ${patch.name}.`);
+      } else setProblem(plainError(e));
       return false;
     }
   };
@@ -154,6 +169,21 @@ export function RoomDetails({ room, rename, onClose }: { room: Room; rename: boo
         {problem && (
           <p className="move-callout move-refused" role="alert">
             {problem}
+            {clash && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    onClose();
+                    void useDesk.getState().openRoom(clash.id);
+                  }}
+                >
+                  Open {clash.name}
+                </button>
+              </>
+            )}
           </p>
         )}
 

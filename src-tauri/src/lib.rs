@@ -275,10 +275,15 @@ fn tuple_available() -> bool {
 }
 
 #[tauri::command]
-async fn login_start(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+async fn login_start(
+    app: tauri::AppHandle,
+    plan: logins::Plan,
+    to: Option<logins::ClaudeUse>,
+) -> CommandResult<()> {
     let backend = app.state::<App>().backend()?;
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<logins::Logins>().start(&app, backend, plan)
+        app.state::<logins::Logins>()
+            .start(&app, backend, plan, to.unwrap_or_default())
     })
     .await
     .map_err(text)?

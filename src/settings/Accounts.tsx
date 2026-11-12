@@ -8,6 +8,9 @@ import { native as realNative, type MachineNative, type Shared } from "../machin
 import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
+import { ProblemNote } from "../ui/ProblemNote";
+import { useProviders } from "../providers/store";
+import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 
 /** An engine's accounts in Settings → Engines, on this computer or one of
  *  the person's machines (`machine`): several subscription logins (Work,
@@ -40,7 +43,9 @@ export function Accounts({
   const problems = store((s) => s.problems);
   const hub = useHubOf(machine);
   const fail = useDesk((s) => s.fail);
-  const [adding, setAdding] = useState<false | "form" | "quick">(false);
+  // Adding signs in first ("sign"): the name comes after. Pasting a token
+  // ("paste") still asks for one first.
+  const [adding, setAdding] = useState<false | "sign" | "paste">(false);
   const here = hereOf(useHost((h) => h.platform));
   useEffect(() => {
     void store.getState().load();
@@ -67,7 +72,7 @@ export function Accounts({
       {accounts.length > 0 && (
         <ul className="account-list">
           {accounts.map((a) => (
-            <AccountRow key={a.id} account={a} machine={machine} store={store} others={accounts} />
+            <AccountRow key={a.id} account={a} machine={machine} store={store} others={accounts} where={machine === LOCAL ? here : (name ?? machine)} native={native} />
           ))}
         </ul>
       )}
@@ -76,7 +81,10 @@ export function Accounts({
       {machine !== LOCAL && engine.engine === "claude" && where && <UseMine machine={machine} name={name ?? machine} native={native} store={store} onShared={onShared} ownWorks={ownSignInWorks(engine.signIn)} />}
       {where === null && supported ? (
         <span className="faint small">This Desk keeps no accounts yet: update Desk to add them.</span>
-      ) : !canAdd ? null : adding ? (
+      ) : !canAdd ? null : adding === "sign" && machine === LOCAL ? (
+        // This computer: Desk's own sign-in, which can serve the crew too.
+        <SignInHere first={accounts.length === 0} onDone={() => setAdding(false)} onPaste={() => setAdding("paste")} />
+      ) : adding ? (
         <AddAccount
           engine={engine}
           first={accounts.length === 0}
@@ -84,18 +92,12 @@ export function Accounts({
           machine={machine}
           where={machine === LOCAL ? here : (name ?? machine)}
           native={native}
-          start={adding === "quick" ? freeName(all) : undefined}
+          start={adding === "sign" ? freeName(all) : undefined}
         />
       ) : (
         <span className="account-actions-start">
-          {/* A machine with no account yet signs in at once, as "Claude". */}
-          {machine !== LOCAL && accounts.length === 0 && (
-            <button type="button" className="btn btn-sm btn-signal" onClick={() => setAdding("quick")}>
-              Sign in…
-            </button>
-          )}
-          <button type="button" className="btn btn-ghost" onClick={() => setAdding("form")}>
-            Add account…
+          <button type="button" className={`btn btn-sm ${accounts.length === 0 ? "btn-signal" : "btn-ghost"}`} onClick={() => setAdding("sign")}>
+            {accounts.length === 0 ? "Sign in…" : "Add account…"}
           </button>
         </span>
       )}
@@ -315,10 +317,27 @@ function AutoSwitch({ machine, store }: { machine: MachineId; store: AccountsSto
   );
 }
 
-function AccountRow({ account, machine, store, others }: { account: EngineAccount; machine: MachineId; store: AccountsStore; others: EngineAccount[] }) {
+function AccountRow({
+  account,
+  machine,
+  store,
+  others,
+  where,
+  native,
+}: {
+  account: EngineAccount;
+  machine: MachineId;
+  store: AccountsStore;
+  others: EngineAccount[];
+  where: string;
+  native: MachineNative;
+}) {
   const hub = useHubOf(machine);
   const fail = useDesk((s) => s.fail);
   const [removing, setRemoving] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  // Its sign-in gone: signed in again, keeping the account as it is.
+  const [again, setAgain] = useState(false);
   const [switching, setSwitching] = useState(false);
   const makeDefault = async (isDefault: boolean) => {
     try {
@@ -352,9 +371,17 @@ function AccountRow({ account, machine, store, others }: { account: EngineAccoun
         {account.isDefault && <span className="chip chip-default">Default</span>}
       </span>
       <span className={account.signedIn ? "faint small" : "state-blocked small"}>
-        {account.signedIn ? sessionsText(account) : "Its sign-in is gone: remove it and add it again"}
+        {account.signedIn ? sessionsText(account) : "Its sign-in is gone."}
       </span>
       <span className="account-actions">
+        {!account.signedIn && !again && (
+          <button type="button" className="btn btn-sm btn-signal" onClick={() => setAgain(true)}>
+            Sign in again
+          </button>
+        )}
+        <button type="button" className="btn btn-ghost" onClick={() => setRenaming(true)}>
+          Rename
+        </button>
         {account.signedIn && elsewhere.length > 0 && (
           <button type="button" className="btn btn-ghost" disabled={switching} onClick={() => void switchHere()}>
             {switching ? "Switching…" : `Switch to ${account.name}`}
@@ -367,6 +394,13 @@ function AccountRow({ account, machine, store, others }: { account: EngineAccoun
           Remove…
         </button>
       </span>
+      {again &&
+        (machine === LOCAL ? (
+          <SignInHere first={false} again={account} onDone={() => setAgain(false)} />
+        ) : (
+          <SignInAgainThere account={account} machine={machine} where={where} native={native} onDone={() => setAgain(false)} />
+        ))}
+      {renaming && <NameIt machine={machine} account={account.id} name={account.name} onDone={() => setRenaming(false)} />}
       {removing && (
         <Confirm
           title={`Remove “${account.name}”?`}
@@ -404,12 +438,14 @@ function AddAccount({
   machine: MachineId;
   where: string;
   native: MachineNative;
-  /** Signs in at once under this name, as the default (a machine's first). */
+  /** Signs in at once under this name (the default when it's the first). */
   start?: string;
 }) {
   const hub = useHubOf(machine);
   const [name, setName] = useState("");
-  const [how, setHow] = useState<"browser" | "paste">("browser");
+  // Signing in through the browser starts at once (`start`); this form is
+  // for pasting a token, or signing in under a name of one's own.
+  const [how, setHow] = useState<"browser" | "paste">(start ? "browser" : "paste");
   const [token, setToken] = useState("");
   const [makeDefault, setMakeDefault] = useState(first);
   const [busy, setBusy] = useState(false);
@@ -421,7 +457,7 @@ function AddAccount({
   useEffect(() => {
     if (!start || started.current || !hub) return;
     started.current = true;
-    void claude.begin(start, true);
+    void claude.begin(start, first);
   });
 
   const submit = async () => {
@@ -440,6 +476,8 @@ function AddAccount({
     }
   };
 
+  const r = claude.run;
+  if (r.at === "done" && r.account) return <NameIt machine={machine} account={r.account} name={r.name} onDone={onDone} signedIn />;
   if (claude.run.at !== "idle")
     return (
       <SigningIn
@@ -623,4 +661,178 @@ export function SigningIn({ claude, onDone, onPaste }: { claude: ReturnType<type
       </span>
     </div>
   );
+}
+
+/** Naming an account: a Claude Code sign-in doesn't say whose account it
+ *  is, so a new one is "Claude" (or "Claude 2") until the person names it,
+ *  just after signing in or later from its row. */
+export function NameIt({ machine, account, name, onDone, signedIn = false }: { machine: MachineId; account: string; name: string; onDone: () => void; signedIn?: boolean }) {
+  const hub = useHubOf(machine);
+  const [value, setValue] = useState(name);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const id = useId();
+  const save = async () => {
+    const next = value.trim();
+    if (!next || next === name) return onDone();
+    setBusy(true);
+    setProblem(null);
+    try {
+      await hub?.updateAccount(account, { name: next });
+      await accountsOn(machine).getState().load();
+      onDone();
+    } catch (e) {
+      setProblem(plainError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="account-add" role="group" aria-label={signedIn ? "Signed in" : `Rename ${name}`}>
+      {signedIn && (
+        <p className="small">
+          <span className="state-done">Signed in.</span> <span className="faint">Name it so you can tell your accounts apart, say Work or Personal.</span>
+        </p>
+      )}
+      <div className="field">
+        <label htmlFor={id}>Name</label>
+        <input
+          id={id}
+          value={value}
+          maxLength={40}
+          autoFocus
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void save();
+            }
+          }}
+        />
+      </div>
+      {problem && <p className="state-blocked small">{problem}</p>}
+      <span className="account-actions">
+        <button type="button" className="btn btn-ghost" onClick={onDone}>
+          {signedIn ? `Keep “${name}”` : "Cancel"}
+        </button>
+        <button type="button" className="btn btn-signal" disabled={busy || !value.trim()} onClick={() => void save()}>
+          Save
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** Signing in to Claude on this computer, through Desk's own sign-in: one
+ *  sign-in serves coding sessions (as an account here) and, when asked, the
+ *  crew's Claude plan too. A new account is named after it signs in;
+ *  `again` signs that account in again instead. */
+export function SignInHere({ first, again, onDone, onPaste }: { first: boolean; again?: EngineAccount; onDone: () => void; onPaste?: () => void }) {
+  const hub = useDesk((s) => s.hub);
+  const all = useAccounts((s) => s.accounts);
+  const providers = useProviders((s) => s.providers);
+  useEffect(() => {
+    if (hub && useProviders.getState().providers.length === 0) void useProviders.getState().load(hub);
+  }, [hub]);
+  // The crew's Claude plan, when it isn't signed in yet: this sign-in can be it.
+  const planOff = providers.find((p) => p.id === "claude-code")?.connected === false;
+  const [forCrew, setForCrew] = useState(true);
+  const crew = !again && planOff && forCrew;
+  const [added, setAdded] = useState<{ id: string; name: string } | null>(null);
+  const [name] = useState(() => freeName(all));
+  const login = usePlanLogin(
+    "claude",
+    (account) => {
+      void useAccounts.getState().load();
+      if (hub) void useProviders.getState().load(hub);
+      if (account) setAdded({ id: account, name: again?.name ?? name });
+    },
+    () => ({ agents: crew, account: again ? { again: again.id } : { name, makeDefault: first } }),
+  );
+  if (added && !again) return <NameIt machine={LOCAL} account={added.id} name={added.name} onDone={onDone} signedIn />;
+  if (added && again)
+    return (
+      <div className="account-add" role="group" aria-label={`Signing ${again.name} in again`}>
+        <p className="small">
+          <span className="state-done">{again.name} is signed in again.</span>
+        </p>
+        <span className="account-actions">
+          <button type="button" className="btn" onClick={onDone}>
+            Done
+          </button>
+        </span>
+      </div>
+    );
+  return (
+    <div className="account-add" role="group" aria-label={again ? `Signing ${again.name} in again` : "Sign in to Claude"} aria-live="polite">
+      <b className="small">{again ? `Sign ${again.name} in again` : "Sign in to Claude"}</b>
+      {login.problem ? (
+        <ProblemNote problem={login.problem} />
+      ) : (
+        <p className={`small ${login.failed ? "state-blocked" : ""}`}>
+          {login.status ??
+            (login.installed === false
+              ? "Signing in needs Claude Code, which isn’t on this computer yet. Desk installs it first."
+              : again
+                ? "Desk opens Claude’s sign-in page. Sign in there with the same account."
+                : "Desk opens Claude’s sign-in page. Sign in with the account you want; you name it after.")}
+          <ReopenLink login={login} />
+          <CopyInstall login={login} />
+        </p>
+      )}
+      {planOff && !again && !login.busy && (
+        <label className="check small">
+          <input type="checkbox" checked={forCrew} onChange={(e) => setForCrew(e.target.checked)} />
+          Use it for your crew too
+        </label>
+      )}
+      <span className="account-actions">
+        {!login.busy && (
+          <button type="button" className="btn btn-ghost" onClick={onDone}>
+            Cancel
+          </button>
+        )}
+        {onPaste && !login.busy && (
+          <button type="button" className="link small" onClick={onPaste}>
+            Paste a token instead
+          </button>
+        )}
+        <PlanLoginAction login={login} label={again ? "Sign in again" : "Sign in with Claude"} />
+      </span>
+    </div>
+  );
+}
+
+/** A machine's account signed in again, through its hub's own sign-in. */
+function SignInAgainThere({ account, machine, where, native, onDone }: { account: EngineAccount; machine: MachineId; where: string; native: MachineNative; onDone: () => void }) {
+  const claude = useClaudeSignIn(machine, where, native);
+  const began = useRef(false);
+  useEffect(() => {
+    if (began.current) return;
+    began.current = true;
+    void claude.begin(account.name, account.isDefault, account.id);
+  });
+  if (claude.run.at === "done")
+    return (
+      <div className="account-add" role="group" aria-label={`Signing ${account.name} in again`}>
+        <p className="small">
+          <span className="state-done">{account.name} is signed in again.</span>
+        </p>
+        <span className="account-actions">
+          <button type="button" className="btn" onClick={onDone}>
+            Done
+          </button>
+        </span>
+      </div>
+    );
+  return <SigningIn claude={claude} onDone={onDone} onPaste={onDone} />;
+}
+
+/** Signing Claude in where there's nothing to start a session on yet (New
+ *  session's fix in place): this computer through Desk's own sign-in, a
+ *  machine through its hub's, as "Claude" and the default. */
+export function SignInClaude({ machine, where, native = realNative, onDone }: { machine: MachineId; where: string; native?: MachineNative; onDone: () => void }) {
+  const all = accountsOn(machine)((s) => s.accounts);
+  if (machine === LOCAL) return <SignInHere first onDone={onDone} />;
+  return <AddAccount engine={{ engine: "claude" } as EngineInfo} first onDone={onDone} machine={machine} where={where} native={native} start={freeName(all)} />;
 }
