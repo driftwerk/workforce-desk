@@ -16,7 +16,6 @@ import { ChooseMe } from "./ChooseMe";
 import { useBoard } from "./store";
 import { localHubRef, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import { connectionsOf, type Listing } from "../hub/connections";
-import { useDesk } from "../hub/store";
 import { Connect } from "../settings/Connections";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { bindingOf, choose, setAgentConnectors, throughOf, todayOf } from "../crew/connectors";
