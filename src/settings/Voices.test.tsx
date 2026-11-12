@@ -8,6 +8,7 @@ import { Voices } from "./Voices";
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
   invoke: vi.fn(() => Promise.resolve([])),
+  onTupleStatus: vi.fn(() => Promise.resolve(() => {})),
 }));
 
 let paths: string[] = [];
