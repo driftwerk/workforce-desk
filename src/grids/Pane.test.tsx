@@ -11,6 +11,8 @@ import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { dropPane } from "./drag";
 import { createGrid, deliver, layOut, replacePane, startGrids, useGrids } from "./store";
+import { useGridDrag } from "./drag";
+import { useSpend } from "../spend/store";
 import { useTerminals } from "./terminals";
 import { servePictures } from "../pictures/testing";
 import { useAccounts } from "../engines/accounts";
@@ -270,6 +272,8 @@ describe("closing a pane", () => {
   });
 });
 
+const spent = () => ({ tokens: { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, usd: 4.1, calls: 3, unpricedCalls: 0, unpricedModels: [], billing: ["plan" as const] });
+
 describe("a session's pane", () => {
   const stop = vi.fn(() => Promise.resolve());
   const resume = vi.fn(() => Promise.resolve());
@@ -352,6 +356,28 @@ describe("a session's pane", () => {
       .map((m) => m.textContent?.replace(/[▸›]$/, ""));
     expect(items).toEqual(expect.arrayContaining(["Add a goal…", "Replace", "Stop", "End session…", "Remove…", "Remove from grid"]));
     expect(items.at(-1)).toBe("Remove from grid");
+  });
+
+  it("never starts dragging the pane from a press inside its menu or a popover", () => {
+    useSpend.setState({ supported: true, views: { day: { from: "", to: "", by: "session", total: spent(), rows: [{ key: "s0", label: "task-0", session: "s0", engine: "claude", folder: null, totals: spent() }], more: 0 } } });
+    const pane = shown({ live: true, state: "idle" });
+    // Pressed and moved: does it lift the pane?
+    const drags = (el: Element) => {
+      fireEvent.pointerDown(el, { button: 0, clientX: 5, clientY: 5 });
+      fireEvent.pointerMove(window, { clientX: 80, clientY: 80 });
+      const lifted = useGridDrag.getState().item !== null;
+      fireEvent.pointerUp(window, { clientX: 80, clientY: 80 });
+      return lifted;
+    };
+    fireEvent.click(within(pane).getByRole("button", { name: /^Spend today/ }));
+    expect(drags(screen.getByRole("dialog", { name: "What it spent" }).querySelector("dl")!)).toBe(false);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Pane options" }));
+    expect(drags(screen.getByRole("menu"))).toBe(false);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    // Its header itself still drags it.
+    expect(drags(pane.querySelector(".sc-name")!)).toBe(true);
+    useSpend.setState({ views: {} });
   });
 
   it("shows what a session asked in its pane", () => {
