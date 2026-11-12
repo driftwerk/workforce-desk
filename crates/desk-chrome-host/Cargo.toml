@@ -1,0 +1,26 @@
+[package]
+name = "desk-chrome-host"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+description = "Desk Helper as Chrome's native messaging host: relays Desk's Chrome extension to the local hub, and nothing else"
+
+[dependencies]
+desk-core = { workspace = true }
+eyre = { workspace = true }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

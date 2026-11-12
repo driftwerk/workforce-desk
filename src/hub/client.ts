@@ -147,35 +147,43 @@ export interface ComputerActivityRow {
   arguments?: { url?: string; target?: string | null; backend?: BrowserBackend; screenshot?: string | null };
 }
 
-/** Which browser: Desk's own, or the person's Chrome. */
+/** Which browser a row was made in: older rows say Desk's own or Chrome. */
 export type BrowserBackend = "desk" | "chrome";
-
-/** Which browsers Desk uses. */
-export type BrowserUses = "off" | "desk" | "chrome" | "both";
 
 /** Desk's browser settings, as the person set them. */
 export interface BrowserSettings {
-  use: BrowserUses;
-  /** Show Desk's own browser on screen; unset, as the hub is set up. */
-  show?: boolean;
-  /** The sites the person's Chrome may (`allow`) and may never (`block`) go to. */
+  /** Whether Desk uses the person's Chrome at all. */
+  on: boolean;
+  /** The sites Desk may (`allow`) and may never (`block`) go to. */
   sites: { allow: string[]; block: string[] };
 }
 
-/** The settings and how the person's Chrome stands. */
-export interface BrowserSettingsView {
-  settings: BrowserSettings;
-  chrome: { available: boolean; connected: boolean; min_version: number; turn_on: string };
+/** A Chrome profile Desk's extension connects from. */
+export interface ChromeProfile {
+  id: string;
+  /** The code Desk's extension shows in that Chrome. */
+  label: string;
+  version: string;
+  /** Pending until the person confirms it is theirs. */
+  state: "confirmed" | "pending";
+  connected: boolean;
+  /** The one Desk uses. */
+  chosen: boolean;
 }
 
-/** A browser open now. */
+/** The settings and how Desk's extension stands. */
+export interface BrowserSettingsView {
+  settings: BrowserSettings;
+  chrome: { connected: boolean; profiles: ChromeProfile[]; store_url: string | null };
+}
+
+/** A browser tab Desk has open now. */
 export interface BrowserLive {
   agent: string;
   user: string;
   session: string | null;
   url: string;
   host: string | null;
-  backend: BrowserBackend;
   idle_secs: number;
 }
 

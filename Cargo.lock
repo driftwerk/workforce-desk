@@ -1027,6 +1027,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "desk-chrome-host",
  "desk-core",
  "desk-machine",
  "desk-tuple",
@@ -1074,6 +1075,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "desk-chrome-host"
+version = "0.1.0"
+dependencies = [
+ "desk-core",
+ "eyre",
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "windows-registry",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "desk-core"
 version = "0.1.0"
 dependencies = [
@@ -1102,6 +1120,7 @@ dependencies = [
 name = "desk-hubd"
 version = "0.1.0"
 dependencies = [
+ "desk-chrome-host",
  "desk-core",
  "eyre",
  "libc",
@@ -1177,6 +1196,7 @@ dependencies = [
 name = "desk-wsl"
 version = "0.1.0"
 dependencies = [
+ "desk-chrome-host",
  "desk-core",
  "eyre",
  "serde",

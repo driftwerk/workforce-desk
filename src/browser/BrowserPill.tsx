@@ -1,5 +1,5 @@
 import { useUi } from "../shell/ui";
-import { backendLabel, useBrowser, useLocalBrowser } from "./store";
+import { useBrowser, useLocalBrowser } from "./store";
 import "../styles/browser.css";
 
 /** "Desk is using the browser": the page it is on and which browser, with
@@ -25,7 +25,6 @@ export function BrowserPill({ agent, place }: { agent?: string; place: "titlebar
         <span className="dot dot-working" aria-hidden="true" />
         <span>Desk is using the browser</span>
         <span className="faint">· {now.host ?? "a blank page"}</span>
-        <span className="faint">· {backendLabel(now.backend)}</span>
         {more > 0 && <span className="faint">· {more} more</span>}
       </button>
       <button type="button" className="btn btn-sm btn-danger" disabled={stopping} onClick={() => void useBrowser.getState().stop(browser, agent)}>

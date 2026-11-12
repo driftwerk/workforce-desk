@@ -10,6 +10,7 @@ publish = false
 
 [workspace.dependencies]
 base64 = "0.23.1"
+desk-chrome-host = { path = "crates/desk-chrome-host" }
 desk-core = { path = "crates/desk-core" }
 desk-machine = { path = "crates/desk-machine" }
 desk-wsl = { path = "crates/desk-wsl" }
