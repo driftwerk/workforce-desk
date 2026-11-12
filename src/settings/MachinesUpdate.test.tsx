@@ -141,17 +141,47 @@ it("says why an update stopped, held until Update to match, with View log", asyn
   expect(within(status).getByRole("list", { name: "Updating hel-1" }).textContent).toContain("Copy it to hel-1: ~ on hel-1 has 180 MB free");
 });
 
-it("checks for a newer Desk for a machine on one, and says when there's none", async () => {
+it("updates Desk on this Mac for a machine on a newer one, after saying what the restart does", async () => {
+  const platform = await import("../platform");
   render(<Machines native={fakeNative().native} />);
   await act(async () => {});
   const bb = row("buildbox");
-  expect(bb.textContent).toContain("It runs a newer Desk (0.2.2). Update Desk here to drive it; its sessions keep running.");
-  await act(async () => fireEvent.click(within(bb).getByRole("button", { name: "Check for updates" })));
-  expect(bb.textContent).toContain("This Desk is up to date for now.");
+  expect(bb.textContent).toContain("It runs a newer Desk (0.2.2). Update Desk on this Mac to drive it; its sessions keep running.");
+  const button = () => within(bb).getByRole("button", { name: "Update Desk on this Mac" });
+  await act(async () => fireEvent.click(button()));
+  expect(bb.textContent).toContain("No newer Desk is out for this Mac yet.");
+  // One that wouldn't catch up with the machine: said, never restarted into.
+  vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.1");
+  act(() => useUpdates.setState({ state: { phase: "idle" } }));
+  await act(async () => fireEvent.click(button()));
+  expect(bb.textContent).toContain("The newest Desk out for this Mac is 0.2.1, still older than buildbox’s 0.2.2");
+  expect(within(bb).queryByRole("group", { name: "Restart Desk on this Mac" })).toBeNull();
+  // Out and newer: downloaded, what the restart does said, and only on yes.
+  act(() => useUpdates.setState({ state: { phase: "idle" } }));
+  vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.3");
+  await act(async () => fireEvent.click(button()));
+  expect(platform.updateDownload).toHaveBeenCalled();
+  const ask = within(bb).getByRole("group", { name: "Restart Desk on this Mac" });
+  expect(ask.textContent).toContain("Desk 0.2.3 is ready. Desk restarts to update.");
+  fireEvent.click(within(ask).getByRole("button", { name: "Not now" }));
+  expect(useUpdates.getState().waiting).toBe(false);
+  expect(useUpdates.getState().later).toEqual({ version: "0.2.3" });
+  act(() => useUpdates.setState({ state: { phase: "idle" }, later: null }));
+  vi.mocked(platform.updateCheck).mockResolvedValueOnce("0.2.3");
+  await act(async () => fireEvent.click(button()));
+  fireEvent.click(within(within(bb).getByRole("group", { name: "Restart Desk on this Mac" })).getByRole("button", { name: "Restart when nothing’s working" }));
+  expect(useUpdates.getState().waiting).toBe(true);
+  expect(bb.textContent).toContain("Desk on this Mac restarts into 0.2.3 once nothing here is working.");
+  act(() => useUpdates.setState({ state: { phase: "idle" }, waiting: false }));
+  // A build that never updates says so, not that none is out.
+  vi.mocked(platform.updating).mockResolvedValueOnce({ how: "never", neverBecause: "It’s a development build.", download: null, sessionsKept: true });
+  await act(async () => fireEvent.click(button()));
+  expect(bb.textContent).toContain("Desk on this Mac can’t update itself: It’s a development build.");
+  act(() => useUpdates.setState({ never: null }));
   // Its own page has the same way out, on its status card.
   fireEvent.click(within(bb).getByRole("button", { name: "Open buildbox" }));
   const status = within(screen.getByRole("region", { name: "buildbox" })).getByRole("status");
-  expect(within(status).getByRole("button", { name: "Check for updates" })).toBeTruthy();
+  expect(within(status).getByRole("button", { name: "Update Desk on this Mac" })).toBeTruthy();
 });
 
 it("says once that Desk updated and what its machines do about it", async () => {
