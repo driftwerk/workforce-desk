@@ -98,13 +98,17 @@ async function main() {
   );
   const fail = (why) => {
     console.error(`e2e: ${why}`);
-    finish(1);
+    void finish(1);
   };
-  const finish = (code) => {
+  const finish = async (code) => {
+    // Chrome writes to its profile as it closes: wait for it, then remove
+    // the throwaway profile.
+    const exited = new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
     proc.kill();
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
     site.close();
     hub.close();
-    rmSync(work, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     rmSync(join(here, ".e2e-socket"), { force: true });
     process.exit(code);
   };
@@ -178,7 +182,7 @@ async function main() {
   const stopped = await call("stop");
   expect(stopped.ok, "Stop closes Desk's window");
   clearTimeout(timer);
-  finish(0);
+  await finish(0);
 }
 
 /** An unpacked extension's id: from its folder's path. */
