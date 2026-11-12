@@ -198,6 +198,11 @@ export type DiskAccess = "granted" | "missing" | "unknown";
 /** What a hub without a route is taken to have said. */
 const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
 
+/** Whether `e` says the hub has no such route at all (an older hub), not
+ *  that it refused: a 405, or a 404 with no word of its own. */
+export const noRoute = (e: unknown): boolean =>
+  e instanceof HubError && (e.status === 405 || (e.status === 404 && !e.code && (e.message === NO_ROUTE || /^not found$/i.test(e.message.trim()))));
+
 /** One key of Desk's state on a hub. */
 export interface StateRow {
   key: string;
