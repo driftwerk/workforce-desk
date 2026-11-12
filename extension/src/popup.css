@@ -1,0 +1,102 @@
+/* Desk's colours (src/theme/builtin.ts, Day and Night). */
+:root {
+  --bg: #fbfaf7;
+  --raised: #ffffff;
+  --border: #dad6ca;
+  --text: #1b1c18;
+  --muted: #50534a;
+  --faint: #62655b;
+  --signal: #3f5a06;
+  --on-signal: #f7fcdd;
+  --done: #12703a;
+  --blocked: #9a5200;
+  --working: #1d58c0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111210;
+    --raised: #1e1f1b;
+    --border: #2c2e28;
+    --text: #f1f2ec;
+    --muted: #b4b7aa;
+    --faint: #8f9285;
+    --signal: #d4ff3a;
+    --on-signal: #161a05;
+    --done: #6ee7a8;
+    --blocked: #ffb547;
+    --working: #7db8ff;
+  }
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  width: 300px;
+}
+main {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+p {
+  margin: 0;
+}
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+.small {
+  font-size: 12px;
+}
+#state.ready {
+  color: var(--done);
+}
+#state.waiting,
+#state.refused {
+  color: var(--blocked);
+}
+#now {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--raised);
+}
+#now .label::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--working);
+}
+#where {
+  color: var(--muted);
+  word-break: break-all;
+}
+button {
+  align-self: flex-start;
+  font: inherit;
+  padding: 4px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--blocked);
+  background: transparent;
+  color: var(--blocked);
+  cursor: pointer;
+}
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}

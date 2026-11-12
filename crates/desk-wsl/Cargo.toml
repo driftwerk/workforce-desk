@@ -17,6 +17,7 @@ path = "src/bin/fake-wsl.rs"
 test = false
 
 [dependencies]
+desk-chrome-host = { workspace = true }
 desk-core = { workspace = true }
 eyre = { workspace = true }
 serde = { workspace = true }
