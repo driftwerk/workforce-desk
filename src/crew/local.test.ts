@@ -191,6 +191,21 @@ describe("renaming an agent", () => {
     expect(RENAME_UNAVAILABLE).not.toMatch(/hub|api|http|40\d/i);
   });
 
+  it("puts back the files it wrote when a later one can't be written, and doesn't ask the hub", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files);
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    let soulTries = 0;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "SOUL.md" && soulTries++ === 0) throw new HubError(500, "disk full");
+      return save(id, f, t);
+    });
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("disk full");
+    expect(hub.renameAgent).not.toHaveBeenCalled();
+    expect(files).toEqual(before);
+  });
+
   it("puts the files back when the hub refuses the name, and says why", async () => {
     const files = LEDGER();
     const before = { ...files };

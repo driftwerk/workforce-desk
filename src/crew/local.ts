@@ -179,8 +179,9 @@ export async function setAgentPurpose(hub: DeskHub, id: string, name: string, pu
   const who = name.trim();
   const job = purpose.trim();
   const changes = await jobChanges(hub, id, who, job);
-  await write(hub, id, changes);
   try {
+    // Written as one: a file that fails puts back those written before it.
+    await write(hub, id, changes);
     await hub.renameAgent(id, who, instructions(who, job));
   } catch (e) {
     if (e instanceof HubError && (e.status === 404 || e.status === 405)) return;
@@ -206,8 +207,9 @@ export async function renameLocalAgent(hub: DeskHub, id: string, name: string, p
   const job = purpose?.trim() || purposeOf(soul);
   const identity = await hub.identityFile(id, "IDENTITY.md");
   const changes: Change[] = [{ file: "IDENTITY.md", was: identity, now: withName(identity, who) }, ...(job ? await jobChanges(hub, id, who, job, soul) : [])];
-  await write(hub, id, changes);
   try {
+    // Written as one: a file that fails puts back those written before it.
+    await write(hub, id, changes);
     await hub.renameAgent(id, who, job ? instructions(who, job) : undefined);
   } catch (e) {
     await undo(hub, id, changes);
