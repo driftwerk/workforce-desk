@@ -14,6 +14,7 @@ import { choose, defaultShortcuts, resolve, type ShortcutId } from "../shortcuts
 import { DEFAULT_PICK, useThemeStore } from "../theme/store";
 
 interface SettingsStore extends Settings {
+  formerNames: Record<string, string[]>;
   emoticons: boolean;
   imageSites: string[];
   setup: SetupProgress;
@@ -49,6 +50,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     groups: s.groups ?? EMPTY_LAYOUT.groups,
     ungrouped: s.ungrouped ?? EMPTY_LAYOUT.ungrouped,
     sessionNames: s.sessionNames ?? {},
+    formerNames: s.formerNames ?? {},
     layoutOnHub: s.layoutOnHub ?? false,
     emoticons: s.emoticons ?? true,
     imageSites: s.imageSites ?? [],
@@ -76,6 +78,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   groups: EMPTY_LAYOUT.groups,
   ungrouped: EMPTY_LAYOUT.ungrouped,
   sessionNames: {},
+  formerNames: {},
   layoutOnHub: false,
   emoticons: true,
   imageSites: [],
@@ -107,6 +110,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       groups: s.groups,
       ungrouped: s.ungrouped,
       sessionNames: s.sessionNames,
+      formerNames: s.formerNames,
       layoutOnHub: s.layoutOnHub,
       emoticons: s.emoticons,
       imageSites: s.imageSites,
